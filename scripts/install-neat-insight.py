@@ -21,6 +21,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import venv
 from pathlib import Path
@@ -29,11 +30,28 @@ from typing import Any
 
 DEFAULT_BASE_URL = "https://apps.sima-neat.com/insight/download"
 DEFAULT_VENV_DIR = Path.home() / ".simaai" / "neat-insight" / "venv"
+DEFAULT_BRANCH = os.environ.get("NEAT_INSIGHT_DEFAULT_BRANCH", "main")
+
+
+def _request(url: str):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "neat-insight-installer/1.0",
+            "Accept": "*/*",
+        },
+    )
+    return urllib.request.urlopen(req, timeout=30)
 
 
 def _download_text(url: str) -> str:
-    with urllib.request.urlopen(url) as resp:
-        return resp.read().decode("utf-8")
+    try:
+        with _request(url) as resp:
+            return resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} for {url}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Failed to reach {url}: {exc}") from exc
 
 
 def _download_json(url: str) -> dict[str, Any]:
@@ -67,17 +85,19 @@ def _choose_branch(base_url: str, provided: str | None) -> str:
     if provided:
         return provided
 
+    branches_url = f"{base_url}/branches.json"
     try:
-        payload = _download_json(f"{base_url}/branches.json")
+        payload = _download_json(branches_url)
         branches = [str(x).strip() for x in payload.get("branches", []) if str(x).strip()]
-    except Exception:
+    except Exception as exc:
+        print(f"Warning: unable to read {branches_url}: {exc}", file=sys.stderr)
         branches = []
 
     if not branches:
-        return "main"
+        return DEFAULT_BRANCH
 
     if not sys.stdin.isatty():
-        return "main" if "main" in branches else branches[0]
+        return DEFAULT_BRANCH if DEFAULT_BRANCH in branches else branches[0]
 
     print("Available branches:")
     for idx, branch in enumerate(branches, start=1):
@@ -97,9 +117,10 @@ def _choose_branch(base_url: str, provided: str | None) -> str:
 def _resolve_tag(base_url: str, branch_key: str, tag_input: str) -> str:
     if tag_input and tag_input != "latest":
         return tag_input
-    tag = _download_text(f"{base_url}/{branch_key}/latest.tag").strip()
+    latest_url = f"{base_url}/{branch_key}/latest.tag"
+    tag = _download_text(latest_url).strip()
     if not tag:
-        raise RuntimeError(f"latest.tag is empty for branch key '{branch_key}'")
+        raise RuntimeError(f"latest.tag is empty at {latest_url}")
     return tag
 
 
@@ -164,15 +185,12 @@ def main() -> int:
         print(f"URL     : {wheel_url}")
         print(f"Venv    : {venv_dir}")
 
-        with tempfile.NamedTemporaryFile(prefix="neat-insight-wheel.", suffix=".whl", delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-        try:
-            with urllib.request.urlopen(wheel_url) as resp, tmp_path.open("wb") as out:
+        with tempfile.TemporaryDirectory(prefix="neat-insight-wheel-") as tmp_dir:
+            tmp_path = Path(tmp_dir) / wheel_file
+            with _request(wheel_url) as resp, tmp_path.open("wb") as out:
                 out.write(resp.read())
             python_bin = _ensure_venv(venv_dir)
             _pip_install(python_bin, tmp_path)
-        finally:
-            tmp_path.unlink(missing_ok=True)
 
         _print_activation_hint(venv_dir)
         return 0
