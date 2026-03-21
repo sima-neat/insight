@@ -6,7 +6,7 @@
 `neat-insight` is a web app for inspecting NEAT apps and helping to setup test for vision ML apps.
 
 It provides:
-- Multi-channel WebRTC video viewer
+- Multi-channel WebRTC video viewer with MetadataReceiver support
 - RTSP source control and preview
 - System and application metrics dashboard
 
@@ -25,8 +25,7 @@ python -m pip install neat-insight
 
 Linux/macOS:
 ```bash
-curl -fsSL https://apps.sima-neat.com/tools/install-neat-insight.py -o /tmp/install-neat-insight.py
-python3 /tmp/install-neat-insight.py
+curl -fsSL https://apps.sima-neat.com/tools/install-neat-insight.py -o /tmp/install-neat-insight.py && python3 /tmp/install-neat-insight.py
 ```
 
 Optional:
@@ -47,7 +46,7 @@ neat-insight --port 9900
 ```
 
 Then open:
-- `https://127.0.0.1:9900`
+- `https://IP:9900`
 
 Notes:
 - The app serves over HTTPS and generates a local self-signed certificate.
