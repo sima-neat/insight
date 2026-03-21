@@ -5,7 +5,7 @@ const TABS = [
   { id: 'media', label: 'Media Library', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'RTSP Source', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
-  { id: 'visualizer', label: 'Neat Visualizer', icon: '/icons/visualizer.png' },
+  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' },
   { id: 'settings', label: 'Settings', icon: '/icons/settings.png' }
 ]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
@@ -507,8 +507,13 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="masthead">
-        <h1>NEAT Insight</h1>
-        <p className="subhead">Runtime Monitoring & Test Console</p>
+        <div>
+          <div className="masthead-title-row">
+            <img src="/sima-logo.png" alt="Sima.ai" className="masthead-logo" />
+            <h1>NEAT Insight</h1>
+          </div>
+          <p className="subhead">Runtime Monitoring and Test Console</p>
+        </div>
       </header>
 
       <div className="toast-stack" aria-live="polite">
@@ -528,17 +533,21 @@ export default function App() {
             onClick={() => setTab(t.id)}
           >
             <img src={t.icon} alt="" className="tab-icon" />
-            <span className="sr-only">{t.label}</span>
+            <span className="tab-label">{t.label}</span>
           </button>
         ))}
       </nav>
 
       <main className="content">
+        <div key={tab} className="tab-stage">
         {tab === 'media' && (
           <div className="grid two">
             <section className="panel">
               <div className="panel-topbar">
-                <h2>Media File Management</h2>
+                <div>
+                  <h2>Media Library</h2>
+                  <p className="section-note">Browse, preview, and manage local media assets.</p>
+                </div>
                 <label className="upload-icon-btn" title="Upload Media" aria-label="Upload Media">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
@@ -566,6 +575,7 @@ export default function App() {
 
             <section className="panel">
               <h2>Selected Media</h2>
+              {selectedFile && <p className="section-note">{selectedFile}</p>}
 
               <div className="preview">
                 {selectedFile && isVideo && <video controls src={`/media/${selectedFile}`} />}
@@ -600,7 +610,10 @@ export default function App() {
           <div className="grid two">
             <section className="panel">
               <div className="panel-topbar">
-                <h2>RTSP Source Control</h2>
+                <div>
+                  <h2>RTSP Source Control</h2>
+                  <p className="section-note">Assign streams and control source playback.</p>
+                </div>
                 <div className="rtsp-actions">
                   <button className="btn-ghost" onClick={autoAssignAllSources} title="Auto assign unique media files to all sources">
                     Auto Assign
@@ -622,6 +635,9 @@ export default function App() {
                 {sources.map((src) => (
                   <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
                     <span className="src-label">src{src.index}</span>
+                    <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
+                      {src.state === 'playing' ? 'Live' : 'Idle'}
+                    </span>
                     <select value={src.file || ''} onChange={(e) => updateSource(src.index, e.target.value)}>
                       <option value="">Not assigned</option>
                       {videoFiles.map((file) => (
@@ -685,6 +701,7 @@ export default function App() {
         {tab === 'viewer' && (
           <section className="panel viewer-panel">
             <h2>Video Viewer</h2>
+            <p className="section-note">Monitor active channels with low-latency WebRTC playback.</p>
             {viewerUrl ? <iframe title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
           </section>
         )}
@@ -693,7 +710,10 @@ export default function App() {
           <div className="visualizer-layout">
             <section className="panel">
               <div className="panel-topbar">
-                <h2>System Load</h2>
+                <div>
+                  <h2>System Load</h2>
+                  <p className="section-note">Current device utilization snapshot.</p>
+                </div>
               </div>
               <div className="gauge-grid">
                 <GaugeCard
@@ -725,7 +745,10 @@ export default function App() {
 
             <section className="panel">
               <div className="panel-topbar">
-                <h2>NEAT Profiling Timeline</h2>
+                <div>
+                  <h2>NEAT Profiling Timeline</h2>
+                  <p className="section-note">Select metrics to visualize profiling trends.</p>
+                </div>
               </div>
 
               <div className="profile-filter-bar">
@@ -776,10 +799,11 @@ export default function App() {
                 <input type="password" value={remoteCfg.rootPassword} onChange={(e) => setRemoteCfg((p) => ({ ...p, rootPassword: e.target.value }))} />
               </label>
 
-              <button onClick={saveRemoteCfg}>Save</button>
+              <button className="btn-tonal" onClick={saveRemoteCfg}>Save</button>
             </div>
           </section>
         )}
+        </div>
       </main>
 
       {deleteConfirmOpen && (

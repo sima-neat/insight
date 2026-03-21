@@ -222,6 +222,11 @@ build_python_package() {
     echo "🧪 Developer build mode..."
     export PACKAGE_VERSION
 
+    # Clean setuptools wheel staging dirs to avoid rerun collisions like:
+    # "File exists ... neat_insight-<ver>.dist-info"
+    find "$BUILD_DIR" -maxdepth 1 -type d \( -name 'bdist.*' -o -name 'lib.*' \) -exec rm -rf {} +
+    rm -rf neat_insight.egg-info
+
     if ! python3 -m pip show wheel > /dev/null 2>&1; then
         echo "📦 Installing Python wheel module..."
         python3 -m pip install --upgrade wheel

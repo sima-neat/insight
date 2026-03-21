@@ -11,5 +11,7 @@ neat_insight/bin/
 neat_insight/tools/mediadata_sender
 frontend/node_modules/
 frontend/dist/
+front_dist/
+neat_insight/frontend_dist/
 *.pem
 cfg.json
