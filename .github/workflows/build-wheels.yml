@@ -18,6 +18,8 @@ jobs:
   build:
     name: Build ${{ matrix.target_platform }}
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +74,8 @@ jobs:
     name: Smoke Test ${{ matrix.wheel_target }}
     runs-on: ${{ matrix.runner }}
     needs: build
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -189,6 +193,7 @@ jobs:
     needs: [build, smoke-linux]
     if: github.event_name != 'pull_request'
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
@@ -219,8 +224,8 @@ jobs:
 
       - name: Install aws cli tooling
         run: |
-          sudo apt-get update
-          sudo apt-get install -y awscli
+          python3 -m pip install --upgrade pip
+          python3 -m pip install awscli
 
       - name: Upload wheels to Cloudflare R2
         run: |
