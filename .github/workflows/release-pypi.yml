@@ -142,7 +142,7 @@ jobs:
           PY
 
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheel-${{ matrix.target_platform }}
           path: dist/*.whl
@@ -173,7 +173,7 @@ jobs:
           python-version: "3.11"
 
       - name: Download all wheel artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: wheel-*
           path: dist

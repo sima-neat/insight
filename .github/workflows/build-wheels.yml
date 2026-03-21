@@ -64,7 +64,7 @@ jobs:
           ./build.sh --target-platform "${{ matrix.target_platform }}"
 
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheel-${{ matrix.target_platform }}
           path: dist/*.whl
@@ -92,7 +92,7 @@ jobs:
           python-version: "3.11"
 
       - name: Download ${{ matrix.wheel_target }} wheel artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: wheel-${{ matrix.wheel_target }}
           path: dist
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload smoke logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: smoke-${{ matrix.wheel_target }}-logs
           path: |
@@ -207,7 +207,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all wheel artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: wheel-*
           path: dist
