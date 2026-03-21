@@ -1,0 +1,333 @@
+// viewer.go
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"sync/atomic"
+	"time"
+
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v4"
+)
+
+type Channel struct {
+	Port        int
+	Track       atomic.Pointer[webrtc.TrackLocalStaticRTP]
+	DataChannel atomic.Pointer[webrtc.DataChannel]
+}
+
+var channels [80]*Channel
+
+func main() {
+	certPath := flag.String("cert", "", "Path to TLS certificate (PEM)")
+	keyPath := flag.String("key", "", "Path to TLS private key (PEM)")
+	flag.Parse()
+
+	for i := 0; i < 80; i++ {
+		channels[i] = &Channel{Port: 9000 + i}
+		go startUDPListener(channels[i])
+		go startMetadataListener(channels[i], 9100+i)
+	}
+
+	http.HandleFunc("/", serveViewer)
+	http.HandleFunc("/offer", handleOffer)
+	http.HandleFunc("/reverse", serveReverse)
+	http.HandleFunc("/reverse-offer", handleReverseOffer)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	addr := ":8081"
+
+	if *certPath != "" && *keyPath != "" {
+		log.Printf("✅ Serving HTTPS on %s using cert: %s", addr, *certPath)
+		log.Fatal(http.ListenAndServeTLS(addr, *certPath, *keyPath, nil))
+	} else {
+		log.Printf("⚠️ No TLS cert/key provided, serving plain HTTP on %s", addr)
+		log.Fatal(http.ListenAndServe(addr, nil))
+	}
+}
+
+func serveViewer(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "static/viewer.html")
+}
+
+func serveReverse(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "static/reverse.html")
+}
+
+func forwardToUDP(track *webrtc.TrackRemote, udpTarget string) {
+	conn, err := net.Dial("udp", udpTarget)
+	if err != nil {
+		log.Printf("❌ Failed to dial UDP: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	buf := make([]byte, 1400)
+	for {
+		n, _, readErr := track.Read(buf)
+		if readErr != nil {
+			log.Printf("⚠️ Read from track error: %v", readErr)
+			return
+		}
+		if _, writeErr := conn.Write(buf[:n]); writeErr != nil {
+			log.Printf("⚠️ Write to UDP failed: %v", writeErr)
+			return
+		}
+	}
+}
+
+func handleReverseOffer(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	portStr := r.URL.Query().Get("port")
+	if portStr == "" {
+		http.Error(w, "Missing port parameter", http.StatusBadRequest)
+		return
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		http.Error(w, "Invalid port parameter", http.StatusBadRequest)
+		return
+	}
+
+	var offer webrtc.SessionDescription
+	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
+		http.Error(w, "Invalid SDP offer", http.StatusBadRequest)
+		return
+	}
+
+	m := webrtc.MediaEngine{}
+	m.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeH264,
+			ClockRate:   90000,
+			SDPFmtpLine: "packetization-mode=1;profile-level-id=42e01f",
+		},
+		PayloadType: 96,
+	}, webrtc.RTPCodecTypeVideo)
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&m))
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		http.Error(w, "PeerConnection failed", http.StatusInternalServerError)
+		return
+	}
+
+	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		log.Printf("🎥 Incoming track from browser, forwarding to 127.0.0.1:%d", port)
+		go forwardToUDP(track, fmt.Sprintf("127.0.0.1:%d", port))
+	})
+
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		http.Error(w, "SetRemoteDescription failed", http.StatusInternalServerError)
+		return
+	}
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		http.Error(w, "CreateAnswer failed", http.StatusInternalServerError)
+		return
+	}
+	if err = pc.SetLocalDescription(answer); err != nil {
+		http.Error(w, "SetLocalDescription failed", http.StatusInternalServerError)
+		return
+	}
+	<-webrtc.GatheringCompletePromise(pc)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pc.LocalDescription())
+}
+
+func handleOffer(w http.ResponseWriter, r *http.Request) {
+	channelIdxStr := r.URL.Query().Get("channel")
+	idx, err := strconv.Atoi(channelIdxStr)
+	if err != nil || idx < 0 || idx >= len(channels) {
+		http.Error(w, "Invalid channel index", http.StatusBadRequest)
+		return
+	}
+	ch := channels[idx]
+
+	var offer webrtc.SessionDescription
+	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
+		http.Error(w, "Invalid SDP offer", http.StatusBadRequest)
+		return
+	}
+
+	m := webrtc.MediaEngine{}
+	m.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:     webrtc.MimeTypeH264,
+			ClockRate:    90000,
+			SDPFmtpLine:  "packetization-mode=1;profile-level-id=42e01f",
+			RTCPFeedback: nil,
+		},
+		PayloadType: 96,
+	}, webrtc.RTPCodecTypeVideo)
+
+	// === Add NAT and Port Range logic ===
+	s := webrtc.SettingEngine{}
+	s.SetEphemeralUDPPortRange(40000, 40100)
+
+	hostIP := os.Getenv("CONTAINER_HOST_IP")
+
+	if ip := net.ParseIP(hostIP); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+		log.Printf("🌐 Using CONTAINER_HOST_IP override: %s", hostIP)
+		s.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
+	} else if hostIP != "" {
+		log.Printf("⚠️ Ignoring invalid or internal CONTAINER_HOST_IP: %q", hostIP)
+	}
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&m), webrtc.WithSettingEngine(s))
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		http.Error(w, "PeerConnection failed", http.StatusInternalServerError)
+		return
+	}
+
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c != nil {
+			log.Printf("[Channel %d] ICE candidate: %s", idx, c.String())
+		}
+	})
+
+	track := ch.Track.Load()
+	if track == nil {
+		track, err = webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000},
+			"video", "pion",
+		)
+		if err != nil {
+			http.Error(w, "Track creation failed", http.StatusInternalServerError)
+			return
+		}
+		ch.Track.Store(track)
+	}
+	pc.AddTrack(track)
+	go sendRTCP(pc)
+
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		log.Printf("[Channel %d] Incoming DataChannel: %s", idx, dc.Label())
+		if dc.Label() == "metadata" {
+			ch.DataChannel.Store(dc)
+			dc.OnOpen(func() {
+				log.Printf("[Channel %d] DataChannel open", idx)
+			})
+			dc.OnClose(func() {
+				log.Printf("[Channel %d] DataChannel closed", idx)
+				ch.DataChannel.Store(nil)
+			})
+		}
+	})
+
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		http.Error(w, "SetRemoteDescription failed", http.StatusInternalServerError)
+		return
+	}
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		http.Error(w, "CreateAnswer failed", http.StatusInternalServerError)
+		return
+	}
+	if err = pc.SetLocalDescription(answer); err != nil {
+		http.Error(w, "SetLocalDescription failed", http.StatusInternalServerError)
+		return
+	}
+	<-webrtc.GatheringCompletePromise(pc)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pc.LocalDescription())
+}
+
+func sendRTCP(pc *webrtc.PeerConnection) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := pc.WriteRTCP([]rtcp.Packet{
+			&rtcp.PictureLossIndication{MediaSSRC: 1},
+		}); err != nil && err != io.ErrClosedPipe {
+			log.Println("❌ RTCP PLI send error:", err)
+		}
+	}
+}
+
+func startUDPListener(ch *Channel) {
+	addr := net.UDPAddr{IP: net.IPv4zero, Port: ch.Port}
+	conn, err := net.ListenUDP("udp", &addr)
+	if err != nil {
+		log.Fatalf("Failed to bind UDP port %d: %v", ch.Port, err)
+	}
+	defer conn.Close()
+
+	log.Printf("🧠 Listening for RTP on %s:%d", net.IPv4zero, ch.Port)
+	buf := make([]byte, 4096)
+
+	for {
+		n, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			log.Println("RTP read error:", err)
+			continue
+		}
+
+		var pkt rtp.Packet
+		if err := pkt.Unmarshal(buf[:n]); err != nil {
+			log.Println("❌ RTP unmarshal error:", err)
+			continue
+		}
+
+		track := ch.Track.Load()
+		if track == nil {
+			continue
+		}
+		if _, err := track.Write(buf[:n]); err != nil && err != io.ErrClosedPipe {
+			log.Println("❌ Write error:", err)
+		}
+	}
+}
+
+func startMetadataListener(ch *Channel, port int) {
+	addr := net.UDPAddr{IP: net.IPv4zero, Port: port}
+	conn, err := net.ListenUDP("udp", &addr)
+	if err != nil {
+		log.Fatalf("❌ Metadata UDP bind failed on %d: %v", port, err)
+	}
+	defer conn.Close()
+
+	log.Printf("🧠 Listening for metadata on %s:%d", net.IPv4zero, port)
+	buf := make([]byte, 65507)
+
+	for {
+		n, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			log.Println("Metadata read error:", err)
+			continue
+		}
+
+		// Trim trailing 0s (null bytes) from fixed-size padded messages
+		trimmed := bytes.TrimRight(buf[:n], "\x00")
+
+		dc := ch.DataChannel.Load()
+		if dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen {
+			jsonStr := string(trimmed)
+			if err := dc.SendText(jsonStr); err != nil {
+				log.Println("❌ Failed to send metadata via DataChannel:", err)
+			}
+		}
+	}
+}

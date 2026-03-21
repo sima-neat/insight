@@ -1,0 +1,259 @@
+:root {
+  --bg-light: #f2f2f2;
+  --text-light: #121212;
+  --bg-dark: #121212;
+  --text-dark: #f0f0f0;
+  --accent-blue: #00bcd4;
+}
+
+
+[data-theme="light"] .settings-popup-modal {
+  background-color: var(--bg-light);
+  color: var(--text-light);
+}
+
+[data-theme="dark"] .settings-popup-modal {
+  background-color: var(--bg-dark);
+  color: var(--text-dark);
+}
+
+.viewer-settings-menu {
+  position: absolute;
+  top: 0.95rem;
+  right: 0.95rem;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.viewer-settings-menu img {
+  width: 24px;
+  height: 24px;
+  display: block;
+  filter: invert(0);
+  transition: filter 0.3s;
+}
+
+[data-theme="dark"] .viewer-settings-menu img {
+  filter: invert(1);
+}
+
+.settings-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.settings-popup-modal {
+  width: 700px;
+  height: 620px;
+  padding: 20px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 1rem;
+  margin-top: auto;
+}
+
+.settings-popup-title {
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+.settings-tab-header {
+  display: flex;
+  border-bottom: 1px solid #444;
+  margin-top: 10px;
+  font-family: 'Roboto Condensed', sans-serif;
+}
+
+.settings-tab-link {
+  padding: 10px 20px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: #ccc;
+  font-family: 'Roboto Condensed', sans-serif;
+}
+
+[data-theme="light"] .settings-tab-link {
+  color: var(--text-light);
+}
+
+.settings-tab-link.active {
+  border-bottom: 2px solid #00bcd4;
+  color: #fff;
+}
+
+[data-theme="light"] .settings-tab-link.active {
+  color: var(--text-light);
+}
+
+.settings-tab-section {
+  display: none;
+  padding: 15px 0;
+  flex: 1;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tab-section.active {
+  display: flex;
+}
+
+.add-btn {
+  background: #00bcd4;
+  color: #fff;
+  border: none;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.object-list-header {
+  display: flex;
+  justify-content: flex-center;
+  align-items: center;
+  padding: 0 8px;
+  margin-bottom: 0.5rem;
+}
+
+#viewerObjectList {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-center;
+}
+
+.viewer-object-table {
+  align-self: flex-center;
+  width: auto;
+  border-collapse: collapse;
+  font-family: 'Roboto Condensed', sans-serif;
+  text-align: center;
+}
+
+.viewer-object-table thead th {
+  text-align: left;
+  padding-bottom: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.viewer-object-table td {
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+
+.viewer-object-table input[type="text"]::placeholder {
+  color: #aaa;
+  font-style: italic;
+  font-family: 'Roboto Condensed', sans-serif;
+}
+
+.viewer-object-table input[type="text"],
+.viewer-object-table select {
+  font-size: 0.9rem;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid #888;
+  background: transparent;
+  color: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'Roboto Condensed', sans-serif;
+  transition: border-bottom 0.2s ease-in-out;
+}
+.viewer-object-table input[type="color"] {
+  border: 0px;
+  background: transparent;
+  width: 40px;
+  height: 20px;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.viewer-object-table input[type="text"]:focus,
+.viewer-object-table select:focus {
+  outline: none;
+  border-bottom: 2px solid var(--accent-blue);
+  background: transparent;
+  box-shadow: none;
+}
+
+.viewer-object-table .delete-entry {
+  background: transparent;
+  border: none;
+  color: #f87171;
+  font-size: 1.2rem;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.viewer-object-table tr:has(input:focus) .delete-entry {
+  visibility: visible;
+}
+
+.roi-canvas-container {
+  width: 100%;
+  height: 300px;
+  background: #222;
+  margin-top: 10px;
+  border: 1px solid #444;
+}
+
+.settings-popup-overlay.hidden {
+  display: none !important;
+}
+
+.filter-table {
+  margin: 0 auto;
+  border-collapse: collapse;
+  font-family: 'Roboto Condensed', sans-serif;
+}
+
+.filter-table td {
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+
+.settings-slider {
+  width: 160px;
+}
+
+
+.dropdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}

@@ -1,0 +1,88 @@
+#roiDrawingArea {
+  position: relative;
+  display: inline-block; /* shrink-wrap video */
+  background-color: transparent;
+  border: 0px;
+  overflow: hidden;
+  max-height: 300px; /* or any cap you want */
+}
+
+#roiLiveVideo {
+  display: block;
+  height: auto;
+  max-height: 300px; /* or whatever cap you want */
+  width: auto;
+}
+
+#roiOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+
+#roiOverlay polygon.inclusion {
+  fill: green;
+  fill-opacity: 0.2;
+  stroke: green;
+  stroke-width: 2;
+}
+
+#roiOverlay polygon.exclusion {
+  fill: red;
+  fill-opacity: 0.2;
+  stroke: red;
+  stroke-width: 2;
+}
+
+#roiOverlay polygon.selected {
+  stroke: yellow;
+  stroke-width: 3;
+  fill-opacity: 0.3;
+}
+
+polygon.selected {
+  stroke: orange;
+  stroke-width: 2px;
+}
+
+.roi-handle {
+  pointer-events: none;
+}
+
+#roiModeSelector {
+  font-family: 'Roboto Condensed', sans-serif;
+}
+
+#roiInstruction {
+  margin-top: 4px;
+  color: gray;
+}
+
+#roiOverlay.drawing-mode {
+  cursor: crosshair;
+}
+
+.roi-header {
+  display: flex;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.icon-button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.icon-image {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+#roiModeMessage {
+  color: gray;
+}
