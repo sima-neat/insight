@@ -22,7 +22,7 @@ python -m pip install neat-insight
 
 Linux/macOS:
 ```bash
-curl -fsSL https://apps.sima-neat.com/insight/install-neat-insight.py -o /tmp/install-neat-insight.py
+curl -fsSL https://apps.sima-neat.com/tools/install-neat-insight.py -o /tmp/install-neat-insight.py
 python3 /tmp/install-neat-insight.py
 ```
 
@@ -32,7 +32,7 @@ Optional:
 
 Windows (PowerShell):
 ```powershell
-Invoke-WebRequest https://apps.sima-neat.com/insight/install-neat-insight.py -OutFile $env:TEMP\install-neat-insight.py
+Invoke-WebRequest https://apps.sima-neat.com/tools/install-neat-insight.py -OutFile $env:TEMP\install-neat-insight.py
 py $env:TEMP\install-neat-insight.py
 ```
 
