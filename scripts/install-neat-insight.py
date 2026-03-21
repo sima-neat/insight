@@ -3,7 +3,7 @@
 Cross-platform neat-insight installer.
 
 Usage:
-  python install-neat-insight.py [branch] [latest|git-short-hash]
+  python install-neat-insight.py [branch-or-release] [latest|git-short-hash]
 
 Environment:
   NEAT_INSIGHT_BASE_URL   Base URL for metadata/wheels
@@ -89,28 +89,48 @@ def _choose_branch(base_url: str, provided: str | None) -> str:
     try:
         payload = _download_json(branches_url)
         branches = [str(x).strip() for x in payload.get("branches", []) if str(x).strip()]
+        releases = [str(x).strip() for x in payload.get("releases", []) if str(x).strip()]
     except Exception as exc:
         print(f"Warning: unable to read {branches_url}: {exc}", file=sys.stderr)
         branches = []
+        releases = []
 
-    if not branches:
+    choices = []
+    seen = set()
+    branch_set = set(branches)
+    for item in branches + releases:
+        if item and item not in seen:
+            choices.append(item)
+            seen.add(item)
+
+    if not choices:
         return DEFAULT_BRANCH
 
     if not sys.stdin.isatty():
-        return DEFAULT_BRANCH if DEFAULT_BRANCH in branches else branches[0]
+        return DEFAULT_BRANCH if DEFAULT_BRANCH in choices else choices[0]
 
-    print("Available branches:")
-    for idx, branch in enumerate(branches, start=1):
-        print(f"  {idx:2d}) {branch}")
+    print("Available install channels:")
+    idx = 1
+    if branches:
+        print("  Branches:")
+        for branch in branches:
+            print(f"    {idx:2d}) {branch}")
+            idx += 1
+    if releases:
+        print("  Releases:")
+        for rel in releases:
+            if rel not in branch_set:
+                print(f"    {idx:2d}) {rel}")
+                idx += 1
+
+    indexed = {str(i + 1): v for i, v in enumerate(choices)}
 
     while True:
-        choice = input(f"Choose branch [1-{len(branches)}] (default 1): ").strip()
+        choice = input(f"Choose channel [1-{len(choices)}] (default 1): ").strip()
         if not choice:
-            return branches[0]
-        if choice.isdigit():
-            pos = int(choice)
-            if 1 <= pos <= len(branches):
-                return branches[pos - 1]
+            return choices[0]
+        if choice in indexed:
+            return indexed[choice]
         print(f"Invalid selection: {choice}")
 
 
@@ -163,7 +183,7 @@ def _print_activation_hint(venv_dir: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install neat-insight into an isolated virtualenv.")
-    parser.add_argument("branch", nargs="?", default=None, help="Branch name (default: interactive/main)")
+    parser.add_argument("branch", nargs="?", default=None, help="Branch or release tag (default: interactive/main)")
     parser.add_argument("tag", nargs="?", default="latest", help="latest or git short hash")
     args = parser.parse_args()
 
