@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebRTC Camera to UDP Gateway</title>
+</head>
+<body>
+  <h2>WebRTC to UDP Streaming</h2>
+
+  <label>Camera:</label>
+  <select id="videoSource"></select>
+
+  <label>Resolution:</label>
+  <select id="resolution"></select>
+
+  <button onclick="startStreaming()">Start Streaming</button>
+
+  <script>
+    let devices = [];
+    let stream = null;
+    let pc = null;
+
+    async function enumerateDevices() {
+      // First, get permission by requesting a dummy stream
+      try {
+        const dummyStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        dummyStream.getTracks().forEach(t => t.stop()); // Close tracks after permission
+      } catch (err) {
+        alert("❌ Camera permission denied");
+        return;
+      }
+
+      devices = await navigator.mediaDevices.enumerateDevices();
+      const videoSelect = document.getElementById('videoSource');
+      videoSelect.innerHTML = '';
+
+      devices.filter(d => d.kind === 'videoinput').forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.text = device.label || `Camera ${index + 1}`;
+        videoSelect.appendChild(option);
+      });
+
+      updateResolutions(); // Load default device resolution list
+    }
+
+    async function updateResolutions() {
+      const deviceId = document.getElementById('videoSource').value;
+      const constraints = {
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+
+      try {
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        const track = stream.getVideoTracks()[0];
+        const settings = track.getSettings();
+        const resolutionSelect = document.getElementById('resolution');
+        resolutionSelect.innerHTML = '';
+
+        // Add a few commonly supported resolutions
+        const commonResolutions = [
+          [640, 480],
+          [1280, 720],
+          [1920, 1080],
+          [2560, 1440]
+        ];
+
+        for (const [w, h] of commonResolutions) {
+          if (w <= settings.width && h <= settings.height) {
+            const option = document.createElement('option');
+            option.value = `${w}x${h}`;
+            option.textContent = `${w} x ${h}`;
+            resolutionSelect.appendChild(option);
+          }
+        }
+
+        // Stop temp stream
+        stream.getTracks().forEach(t => t.stop());
+      } catch (err) {
+        console.warn("⚠️ Unable to probe resolution capabilities:", err);
+      }
+    }
+
+    async function startStreaming() {
+      const [width, height] = document.getElementById('resolution').value.split('x').map(Number);
+      const deviceId = document.getElementById('videoSource').value;
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: deviceId },
+          width: { exact: width },
+          height: { exact: height }
+        }
+      });
+
+      pc = new RTCPeerConnection();
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const res = await fetch('/reverse-offer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(offer)
+      });
+
+      const answer = await res.json();
+      await pc.setRemoteDescription(answer);
+    }
+
+    document.getElementById('videoSource').addEventListener('change', updateResolutions);
+    enumerateDevices();
+  </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+rtsp: yes
+hls: no
+rtmp: no
+rtspAddress: :8554
+logLevel: info
+
+
+paths:
+  src1:
+    source: udp://127.0.0.1:7001
+
+  src2:
+    source: udp://127.0.0.1:7002
+
+  src3:
+    source: udp://127.0.0.1:7003
+
+  src4:
+    source: udp://127.0.0.1:7004
+
+  src5:
+    source: udp://127.0.0.1:7005
+
+  src6:
+    source: udp://127.0.0.1:7006
+
+  src7:
+    source: udp://127.0.0.1:7007
+
+  src8:
+    source: udp://127.0.0.1:7008
+  

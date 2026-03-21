@@ -1,0 +1,109 @@
+<!-- static/index.html -->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/static/viewer.css">
+  <link rel="stylesheet" href="/static/pagination.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="viewerRoot"></div>
+  <div id="viewerSettingsOverlay" class="settings-popup-overlay hidden">
+    <div class="settings-popup-modal">
+      <div class="settings-popup-header">
+        <span id="viewerSettingsTitle" class="settings-popup-title">Viewer Configuration</span>
+        <button id="viewerSettingsClose" title="Close">&times;</button>
+      </div>
+      <div class="settings-popup-body">
+        <div class="settings-tab-header">
+          <button class="settings-tab-link active" data-tab="viewer-objects">Object Styles</button>
+          <button class="settings-tab-link" data-tab="viewer-roi">ROI</button>
+          <button class="settings-tab-link" data-tab="viewer-drawing">Settings</button>
+        </div>
+        <div class="settings-tab-body">
+          <!-- Objects Tab -->
+          <div id="viewer-objects" class="settings-tab-section active">
+            <div class="object-list-header">
+              <button id="addViewerObject" class="add-btn" title="Add Object">+</button>
+            </div>
+            <div id="viewerObjectList">
+              <table class="viewer-object-table">
+                <tbody id="viewerObjectTableBody">
+                  <!-- Rows dynamically inserted here -->
+                </tbody>
+              </table>
+            </div>            
+          </div>
+  
+          <!-- ROI Tab -->
+          <div id="viewer-roi" class="settings-tab-section">
+            <p id="roiInstruction">Draw one or more polygons on the video below to indicate Region Of Interest.</p>
+
+            <div class="dropdown-row">
+              <label for="roiModeSelector">Drawing Mode:</label>
+              <select id="roiModeSelector">
+                <option value="all">All Types</option>
+                <option value="inclusion">Inclusion Regions</option>
+                <option value="exclusion">Exclusion Regions</option>
+              </select>
+              <label for="toggleRoiVisibility">Display ROI in the view:</label>
+              <input type="checkbox" id="toggleRoiVisibility" checked />              
+            </div>
+
+            <div id="roiDrawingArea" class="roi-canvas-container">
+              <video id="roiLiveVideo" autoplay muted playsinline></video>
+              <svg id="roiOverlay" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="roi-header">
+              <button id="clearROIs" title="Clear all ROIs" class="icon-button">
+                <img src="/static/icons/delete.png" alt="Delete" class="icon-image" />
+              </button>
+              <div id="roiModeMessage"></div>
+            </div>
+          </div>
+
+          <!-- Drawing Config Tab -->
+          <div id="viewer-drawing" class="settings-tab-section">
+            <table class="filter-table">
+              <tr>
+                <td><label for="confidenceSlider">Confidence Threshold</label></td>
+                <td>
+                  <input type="range" id="confidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0.5">
+                  <span id="confidenceDisplay">0.5</span>
+                </td>
+              </tr>
+              <tr>
+                <td><label for="metadataDeleySlider">Metadata Rendering Delay (msec)</label></td>
+                <td>
+                  <input type="range" id="metadataDelaySlider" class="settings-slider"  min="0" max="4000" step="50" value="0">
+                  <span id="metadataDelayDisplay">0</span>
+                </td>
+              </tr>
+              <!-- Future filters can go here -->
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="saveViewerSettings" class="app-button">Save</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Viewer settings menu button -->
+  <button id="viewerSettingsBtn" title="Viewer Settings" class="viewer-settings-menu">
+    <img src="/static/icons/menu.png" alt="Settings Menu">
+  </button>
+  
+  <script src="/static/drawing.js"></script>  
+  <script src="/static/viewer-react.js"></script>
+  <link rel="stylesheet" href="/static/css/settings.css">
+  <link rel="stylesheet" href="/static/css/app-buttons.css">
+  <link rel="stylesheet" href="/static/css/roi.css">
+  <script src="/static/js/roi.js"></script>
+  <script src="/static/settings.js"></script>  
+
+</body>
+</html>

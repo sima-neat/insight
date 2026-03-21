@@ -1,0 +1,366 @@
+name: Build Wheels
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build ${{ matrix.target_platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target_platform:
+          - linux-amd64
+          - linux-aarch64
+          - macos-arm64
+          - windows-amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+      - name: Build wheel
+        run: |
+          chmod +x ./build.sh
+          ./build.sh --target-platform "${{ matrix.target_platform }}"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target_platform }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  smoke-linux:
+    name: Smoke Test ${{ matrix.wheel_target }}
+    runs-on: ${{ matrix.runner }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - wheel_target: linux-amd64
+            runner: ubuntu-latest
+          - wheel_target: linux-aarch64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download ${{ matrix.wheel_target }} wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.wheel_target }}
+          path: dist
+
+      - name: Inspect artifact
+        run: |
+          ls -lah dist
+          python - <<'PY'
+          import glob
+          wheels = glob.glob("dist/*.whl")
+          if not wheels:
+              raise SystemExit("No wheel found in dist/")
+          print("wheel:", wheels[0])
+          PY
+
+      - name: Install wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+
+      - name: Validate package binaries
+        run: |
+          python - <<'PY'
+          import neat_insight
+          from pathlib import Path
+          root = Path(neat_insight.__file__).resolve().parent
+          vf = root / "bin" / "vf"
+          mtx = root / "bin" / "mediamtx"
+          cfg = root / "bin" / "mediamtx.yml"
+          assert vf.exists(), f"missing {vf}"
+          assert mtx.exists(), f"missing {mtx}"
+          assert cfg.exists(), f"missing {cfg}"
+          print("package_root:", root)
+          print("vf:", vf)
+          print("mediamtx:", mtx)
+          print("config:", cfg)
+          PY
+
+      - name: Run service smoke test
+        run: |
+          set -euo pipefail
+          PORT=19900
+          LOG=neat-insight-smoke.log
+          neat-insight --port "${PORT}" > "${LOG}" 2>&1 &
+          APP_PID=$!
+          echo "APP_PID=${APP_PID}"
+
+          cleanup() {
+            if kill -0 "${APP_PID}" 2>/dev/null; then
+              kill "${APP_PID}" || true
+              wait "${APP_PID}" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 45); do
+            if curl -ksf "https://127.0.0.1:${PORT}/api/health" > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          python - <<'PY'
+          import json
+          with open('/tmp/health.json', 'r', encoding='utf-8') as f:
+              payload = json.load(f)
+          assert payload.get("status") == "ok", payload
+          assert payload.get("service") == "neat-insight", payload
+          print("health payload ok")
+          PY
+
+          curl -ksf "https://127.0.0.1:${PORT}/api/metrics" > /tmp/metrics.json
+          python - <<'PY'
+          import json
+          with open('/tmp/metrics.json', 'r', encoding='utf-8') as f:
+              payload = json.load(f)
+          required = ["cpu_load", "memory", "disk", "pipeline_status", "REMOTE"]
+          missing = [k for k in required if k not in payload]
+          assert not missing, f"missing keys: {missing}"
+          print("metrics keys ok")
+          PY
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.wheel_target }}-logs
+          path: |
+            neat-insight-smoke.log
+            /tmp/health.json
+            /tmp/metrics.json
+          if-no-files-found: ignore
+
+  publish-r2:
+    name: Publish Wheels + Metadata to R2
+    runs-on: ubuntu-latest
+    needs: [build, smoke-linux]
+    if: github.event_name != 'pull_request'
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_EC2_METADATA_DISABLED: "true"
+      R2_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
+    steps:
+      - name: Checkout insight repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Validate wheel artifacts
+        run: |
+          ls -lah dist
+          count=$(find dist -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')
+          if [[ "${count}" -lt 4 ]]; then
+            echo "Expected at least 4 wheels, found ${count}" >&2
+            exit 1
+          fi
+
+      - name: Install aws cli tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y awscli
+
+      - name: Upload wheels to Cloudflare R2
+        run: |
+          for wheel in dist/*.whl; do
+            base="$(basename "${wheel}")"
+            aws s3 cp \
+              --endpoint-url "${R2_ENDPOINT_URL}" \
+              "${wheel}" \
+              "s3://neat-artifacts/insight/download/${base}"
+          done
+
+      - name: Generate and upload build metadata
+        run: |
+          BRANCH_RAW="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          BRANCH_KEY="$(echo "${BRANCH_RAW}" | tr '/ ' '--')"
+          SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          mkdir -p _work/index
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          branch = os.environ["GITHUB_HEAD_REF"] or os.environ["GITHUB_REF_NAME"]
+          branch_key = branch.replace("/", "-").replace(" ", "-")
+          short_sha = os.environ["GITHUB_SHA"][:7]
+
+          wheels = []
+          for wheel in sorted(Path("dist").glob("*.whl")):
+              h = hashlib.sha256()
+              with wheel.open("rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
+              platform_tag = wheel.name.rsplit("-", 1)[-1].replace(".whl", "")
+              wheels.append({
+                  "filename": wheel.name,
+                  "size": wheel.stat().st_size,
+                  "sha256": h.hexdigest(),
+                  "platform_tag": platform_tag,
+              })
+
+          payload = {
+              "project": "neat-insight",
+              "branch": branch,
+              "branch_key": branch_key,
+              "short_sha": short_sha,
+              "commit": os.environ["GITHUB_SHA"],
+              "created_at_utc": datetime.now(timezone.utc).isoformat(),
+              "wheels": wheels,
+          }
+
+          out = Path("_work/index") / f"{short_sha}.json"
+          out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          print(out)
+          PY
+
+          aws s3 cp \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            "_work/index/${SHORT_SHA}.json" \
+            "s3://neat-artifacts/insight/download/${BRANCH_KEY}/${SHORT_SHA}.json" \
+            --content-type application/json
+
+      - name: Write latest.tag for branch
+        run: |
+          BRANCH_RAW="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          BRANCH_KEY="$(echo "${BRANCH_RAW}" | tr '/ ' '--')"
+          SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          mkdir -p _work/index
+          printf '%s\n' "${SHORT_SHA}" > _work/index/latest.tag
+          aws s3 cp \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            _work/index/latest.tag \
+            "s3://neat-artifacts/insight/download/${BRANCH_KEY}/latest.tag"
+
+      - name: Refresh insight branches.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p _work/index
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+
+          branches = []
+          page = 1
+          while True:
+              url = f"https://api.github.com/repos/{repo}/branches?per_page=100&page={page}"
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(req) as resp:
+                  batch = json.loads(resp.read().decode("utf-8"))
+              if not batch:
+                  break
+              branches.extend(str(item.get("name", "")).strip() for item in batch)
+              if len(batch) < 100:
+                  break
+              page += 1
+
+          payload = {"branches": sorted({b for b in branches if b})}
+          Path("_work/index/branches.json").write_text(
+              json.dumps(payload, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, indent=2))
+          PY
+
+          aws s3 cp \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            _work/index/branches.json \
+            s3://neat-artifacts/insight/download/branches.json \
+            --content-type application/json
+
+      - name: Upload insight Python installer to R2
+        if: github.ref_name == 'main'
+        run: |
+          mkdir -p _work/tools
+          REMOTE_COPY="_work/tools/install-neat-insight.remote.py"
+          REMOTE_URI="s3://neat-artifacts/insight/install-neat-insight.py"
+
+          if aws s3 cp \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            "${REMOTE_URI}" \
+            "${REMOTE_COPY}" >/dev/null 2>&1; then
+            if cmp -s scripts/install-neat-insight.py "${REMOTE_COPY}"; then
+              echo "install-neat-insight.py is unchanged; skipping upload."
+              exit 0
+            fi
+          fi
+
+          aws s3 cp \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            scripts/install-neat-insight.py \
+            "${REMOTE_URI}" \
+            --content-type text/x-python

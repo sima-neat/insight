@@ -1,0 +1,25 @@
+#pagination {
+    display: flex;
+    gap: 4px;
+    margin-left: 20px;
+  }
+  
+  .page-btn {
+    width: 20px;
+    height: 20px;
+    background: #444;
+    color: white;
+    text-align: center;
+    line-height: 20px;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0.7;
+  }
+  
+  .page-btn.active {
+    background: rgb(12, 108, 234);
+    font-weight: bold;
+    opacity: 1;
+  }
+  
