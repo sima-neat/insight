@@ -1,5 +1,8 @@
 # neat-insight
 
+[![CI/CD](https://github.com/sima-neat/insight/actions/workflows/build-wheels.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/build-wheels.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 `neat-insight` is a web app for inspecting NEAT apps and helping to setup test for vision ML apps.
 
 It provides:
