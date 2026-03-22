@@ -194,22 +194,24 @@ jobs:
     if: github.event_name != 'pull_request'
     with:
       bucket: neat-artifacts
+      environment_name: CloudFlare-R2
       artifact_root: insight/download
       project_name: neat-insight
       artifact_pattern: wheel-*
       artifact_glob: dist/*.whl
       min_artifact_count: 4
       aws_region: auto
-      endpoint_url: https://${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
     secrets:
       aws_access_key_id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
       aws_secret_access_key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      r2_account_id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
 
   publish-installer:
     name: Publish Installer + Purge Cache
     runs-on: ubuntu-latest
     needs: [publish-r2]
     if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'bootstrap')
+    environment: CloudFlare-R2
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}

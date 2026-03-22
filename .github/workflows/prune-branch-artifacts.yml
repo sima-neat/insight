@@ -23,11 +23,12 @@ jobs:
     uses: sima-neat/.github/.github/workflows/reusable-prune-download-artifacts.yml@main
     with:
       bucket: neat-artifacts
+      environment_name: CloudFlare-R2
       artifact_root: insight/download
       keep_hours: 48
       dry_run: ${{ inputs.dry_run || false }}
       aws_region: auto
-      endpoint_url: https://${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
     secrets:
       aws_access_key_id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
       aws_secret_access_key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      r2_account_id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
