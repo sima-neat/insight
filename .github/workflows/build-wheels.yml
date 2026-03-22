@@ -188,10 +188,30 @@ jobs:
           if-no-files-found: ignore
 
   publish-r2:
-    name: Publish Wheels + Metadata to R2
-    runs-on: ubuntu-latest
+    name: Publish Wheels + Metadata
+    uses: sima-neat/.github/.github/workflows/reusable-publish-download-artifacts.yml@main
     needs: [build, smoke-linux]
     if: github.event_name != 'pull_request'
+    with:
+      bucket: neat-artifacts
+      environment_name: CloudFlare-R2
+      artifact_root: insight/download
+      project_name: neat-insight
+      artifact_pattern: wheel-*
+      artifact_glob: dist/*.whl
+      min_artifact_count: 4
+      aws_region: auto
+    secrets:
+      aws_access_key_id: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      aws_secret_access_key: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      r2_account_id: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+
+  publish-installer:
+    name: Publish Installer + Purge Cache
+    runs-on: ubuntu-latest
+    needs: [publish-r2]
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'bootstrap')
+    environment: CloudFlare-R2
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
@@ -199,178 +219,14 @@ jobs:
       AWS_DEFAULT_REGION: auto
       AWS_EC2_METADATA_DISABLED: "true"
       R2_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-
     steps:
       - name: Checkout insight repo
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Download all wheel artifacts
-        uses: actions/download-artifact@v7
-        with:
-          pattern: wheel-*
-          path: dist
-          merge-multiple: true
-
-      - name: Validate wheel artifacts
-        run: |
-          ls -lah dist
-          count=$(find dist -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')
-          if [[ "${count}" -lt 4 ]]; then
-            echo "Expected at least 4 wheels, found ${count}" >&2
-            exit 1
-          fi
 
       - name: Install aws cli tooling
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install awscli
-
-      - name: Upload wheels to Cloudflare R2
-        run: |
-          for wheel in dist/*.whl; do
-            base="$(basename "${wheel}")"
-            aws s3 cp \
-              --endpoint-url "${R2_ENDPOINT_URL}" \
-              "${wheel}" \
-              "s3://neat-artifacts/insight/download/${base}"
-          done
-
-      - name: Generate and upload build metadata
-        run: |
-          BRANCH_RAW="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          BRANCH_KEY="$(echo "${BRANCH_RAW}" | tr '/ ' '--')"
-          SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
-          mkdir -p _work/index
-
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          branch = os.environ["GITHUB_HEAD_REF"] or os.environ["GITHUB_REF_NAME"]
-          branch_key = branch.replace("/", "-").replace(" ", "-")
-          short_sha = os.environ["GITHUB_SHA"][:7]
-
-          wheels = []
-          for wheel in sorted(Path("dist").glob("*.whl")):
-              h = hashlib.sha256()
-              with wheel.open("rb") as f:
-                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                      h.update(chunk)
-              platform_tag = wheel.name.rsplit("-", 1)[-1].replace(".whl", "")
-              wheels.append({
-                  "filename": wheel.name,
-                  "size": wheel.stat().st_size,
-                  "sha256": h.hexdigest(),
-                  "platform_tag": platform_tag,
-              })
-
-          payload = {
-              "project": "neat-insight",
-              "branch": branch,
-              "branch_key": branch_key,
-              "short_sha": short_sha,
-              "commit": os.environ["GITHUB_SHA"],
-              "created_at_utc": datetime.now(timezone.utc).isoformat(),
-              "wheels": wheels,
-          }
-
-          out = Path("_work/index") / f"{short_sha}.json"
-          out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-          print(out)
-          PY
-
-          aws s3 cp \
-            --endpoint-url "${R2_ENDPOINT_URL}" \
-            "_work/index/${SHORT_SHA}.json" \
-            "s3://neat-artifacts/insight/download/${BRANCH_KEY}/${SHORT_SHA}.json" \
-            --content-type application/json
-
-      - name: Write latest.tag for branch
-        run: |
-          BRANCH_RAW="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-          BRANCH_KEY="$(echo "${BRANCH_RAW}" | tr '/ ' '--')"
-          SHORT_SHA="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
-          mkdir -p _work/index
-          printf '%s\n' "${SHORT_SHA}" > _work/index/latest.tag
-          aws s3 cp \
-            --endpoint-url "${R2_ENDPOINT_URL}" \
-            _work/index/latest.tag \
-            "s3://neat-artifacts/insight/download/${BRANCH_KEY}/latest.tag"
-
-      - name: Refresh insight branches.json
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p _work/index
-          python3 - <<'PY'
-          import json
-          import os
-          import urllib.request
-          from pathlib import Path
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          token = os.environ["GH_TOKEN"]
-
-          headers = {
-              "Accept": "application/vnd.github+json",
-              "Authorization": f"Bearer {token}",
-              "X-GitHub-Api-Version": "2022-11-28",
-          }
-
-          branches = []
-          page = 1
-          while True:
-              url = f"https://api.github.com/repos/{repo}/branches?per_page=100&page={page}"
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req) as resp:
-                  batch = json.loads(resp.read().decode("utf-8"))
-              if not batch:
-                  break
-              branches.extend(str(item.get("name", "")).strip() for item in batch)
-              if len(batch) < 100:
-                  break
-              page += 1
-
-          releases = []
-          page = 1
-          while True:
-              url = f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}"
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req) as resp:
-                  batch = json.loads(resp.read().decode("utf-8"))
-              if not batch:
-                  break
-              for rel in batch:
-                  if rel.get("draft"):
-                      continue
-                  tag = str(rel.get("tag_name", "")).strip()
-                  if tag:
-                      releases.append(tag)
-              if len(batch) < 100:
-                  break
-              page += 1
-
-          payload = {
-              "branches": sorted({b for b in branches if b}),
-              "releases": sorted({r for r in releases if r}),
-          }
-          Path("_work/index/branches.json").write_text(
-              json.dumps(payload, indent=2) + "\n",
-              encoding="utf-8",
-          )
-          print(json.dumps(payload, indent=2))
-          PY
-
-          aws s3 cp \
-            --endpoint-url "${R2_ENDPOINT_URL}" \
-            _work/index/branches.json \
-            s3://neat-artifacts/insight/download/branches.json \
-            --content-type application/json
 
       - name: Upload insight Python installer to R2 tools folder
         if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'bootstrap')
@@ -396,7 +252,6 @@ jobs:
             --content-type text/x-python
 
       - name: Purge Cloudflare cache for installer URL
-        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'bootstrap')
         env:
           CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
