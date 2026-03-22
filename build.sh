@@ -157,6 +157,38 @@ install_wheel_into_venv() {
 }
 
 
+resolve_go_archive() {
+    local version="$1"
+    local os_name="$2"
+    local arch_name="$3"
+
+    if [[ "$os_name" == "Linux" ]]; then
+        if [[ "$arch_name" == "x86_64" ]]; then
+            echo "go${version}.linux-amd64.tar.gz"
+            return 0
+        fi
+        if [[ "$arch_name" == "aarch64" || "$arch_name" == "arm64" ]]; then
+            echo "go${version}.linux-arm64.tar.gz"
+            return 0
+        fi
+        echo "❌ Unsupported Linux architecture: $arch_name" >&2
+        return 1
+    fi
+
+    if [[ "$os_name" == "Darwin" ]]; then
+        if [[ "$arch_name" == "arm64" ]]; then
+            echo "go${version}.darwin-arm64.tar.gz"
+            return 0
+        fi
+        echo "❌ Unsupported Darwin architecture: $arch_name" >&2
+        return 1
+    fi
+
+    echo "❌ Auto-install only supported on Linux and macOS for now. Please install Go manually." >&2
+    return 1
+}
+
+
 ensure_go() {
     REQUIRED_VERSION="1.24.5"
     GO_OK=0
@@ -187,30 +219,21 @@ ensure_go() {
 }
 
 install_go() {
-    VERSION=$1
-    echo "📦 Installing Go $VERSION..."
-    OS=$(uname -s)
-    ARCH=$(uname -m)
+    local version="$1"
+    local os_name
+    local arch_name
+    local go_tar
 
-    if [[ "$OS" == "Linux" ]]; then
-        if [[ "$ARCH" == "x86_64" ]]; then
-            GO_TAR="go${VERSION}.linux-amd64.tar.gz"
-        elif [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            GO_TAR="go${VERSION}.linux-arm64.tar.gz"
-        else
-            echo "❌ Unsupported Linux architecture: $ARCH"
-            exit 1
-        fi
-    else
-        echo "❌  Auto-install only supported on Linux for now. Please install Go manually."
-        exit 1
-    fi
+    os_name=$(uname -s)
+    arch_name=$(uname -m)
 
+    go_tar=$(resolve_go_archive "$version" "$os_name" "$arch_name") || exit 1
 
-    curl -LO "https://go.dev/dl/${GO_TAR}"
+    echo "📦 Installing Go $version..."
+    curl -LO "https://go.dev/dl/${go_tar}"
     mkdir -p ~/.local
-    tar -C ~/.local -xzf "$GO_TAR"
-    rm "$GO_TAR"
+    tar -C ~/.local -xzf "$go_tar"
+    rm "$go_tar"
     export PATH="$HOME/.local/go/bin:$PATH"
 
     echo "✅ Go installed to ~/.local/go"
@@ -227,9 +250,9 @@ build_python_package() {
     find "$BUILD_DIR" -maxdepth 1 -type d \( -name 'bdist.*' -o -name 'lib.*' \) -exec rm -rf {} +
     rm -rf neat_insight.egg-info
 
-    if ! python3 -m pip show wheel > /dev/null 2>&1; then
-        echo "📦 Installing Python wheel module..."
-        python3 -m pip install --upgrade wheel
+    if ! python3 -m pip show setuptools > /dev/null 2>&1 || ! python3 -m pip show wheel > /dev/null 2>&1; then
+        echo "📦 Installing Python build tools: setuptools wheel"
+        python3 -m pip install --upgrade setuptools wheel
     fi
 
     if [[ -z "$WHEEL_PLAT_NAME" ]]; then
@@ -279,7 +302,7 @@ PLATFORM=""
 TARGETS_TO_BUILD=()
 
 resolve_target_from_host() {
-    if is_palette; then
+    if command -v is_palette >/dev/null 2>&1 && is_palette; then
         echo "linux-aarch64"
         return
     fi
