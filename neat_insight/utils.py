@@ -29,19 +29,25 @@ import time
 from pathlib import Path
 import shutil
 import platform
+import tempfile
+import ssl
 from collections import Counter
-from pathlib import Path
-from cryptography import x509
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from datetime import datetime, timedelta
 import psutil
 import ipaddress
 import socket
 
-CERT_FILE = 'cert.pem'
-KEY_FILE = 'key.pem'
+CERT_FILE = "cert.pem"
+KEY_FILE = "key.pem"
+CERT_HOST_ENV = "NFS_SERVER_HOST_IP"
+DEFAULT_CERT_HOST = "127.0.0.1"
+DEFAULT_CERT_PORT = 9900
+SDK_CERT_FILE = Path("/sdk-cert/neat-sdk.pem")
+SDK_KEY_FILES = (
+    Path("/sdk-cert/neat-sdk-key.pem"),
+    Path("/sdk-cert/neat-sdk.key"),
+    Path("/sdk-cert/key.pem"),
+    SDK_CERT_FILE,
+)
 EXCLUDED_EXTENSIONS = {'.so', '.lm', '.bin', '.a', '.o', '.elf', '.rpm', '.tar', '.zip', '.gz', '.bz2', '.xz', '.out', '.pyc'}
 EXCLUDED_FOLDERS = {'env', 'bin'}
 
@@ -136,6 +142,7 @@ process_logs = []
 _cleanup_done = False
 
 def _pids_listening_on(port, proto):
+    proto = proto.upper()
     try:
         result = subprocess.run(
             ["lsof", "-nP", f"-ti{proto}:{port}"],
@@ -148,19 +155,45 @@ def _pids_listening_on(port, proto):
             line = line.strip()
             if line.isdigit():
                 pids.append(int(line))
+        if pids:
+            return pids
+    except Exception:
+        pass
+
+    try:
+        kind = "inet"
+        conn_type = socket.SOCK_STREAM if proto == "TCP" else socket.SOCK_DGRAM
+        pids = []
+        for conn in psutil.net_connections(kind=kind):
+            if conn.type != conn_type or not conn.laddr or conn.laddr.port != port:
+                continue
+            if proto == "TCP" and conn.status != psutil.CONN_LISTEN:
+                continue
+            if conn.pid:
+                pids.append(conn.pid)
         return pids
     except Exception:
         return []
 
 
+def _pids_listening_on_ports(port_specs):
+    pids = set()
+    for port, proto in port_specs:
+        pids.update(_pids_listening_on(port, proto))
+    return pids
+
+
 def _terminate_conflicting_ports():
     # mediamtx uses 8554/tcp and a default UDP helper port 8000.
-    # vf uses 8081/tcp.
-    pids = sorted({
-        *(_pids_listening_on(8554, "TCP")),
-        *(_pids_listening_on(8000, "UDP")),
-        *(_pids_listening_on(8081, "TCP")),
-    })
+    # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
+    port_specs = [
+        (8554, "TCP"),
+        (8000, "UDP"),
+        (8081, "TCP"),
+        *[(port, "UDP") for port in range(9000, 9080)],
+        *[(port, "UDP") for port in range(9100, 9180)],
+    ]
+    pids = sorted(_pids_listening_on_ports(port_specs))
 
     for pid in pids:
         try:
@@ -169,6 +202,16 @@ def _terminate_conflicting_ports():
             pass
 
     if pids:
+        time.sleep(1.0)
+
+    remaining_pids = sorted(_pids_listening_on_ports(port_specs))
+    for pid in remaining_pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+
+    if remaining_pids:
         time.sleep(0.2)
 
 
@@ -215,9 +258,9 @@ def start_processes(ssl_context):
 
     time.sleep(0.25)
     if vf_proc.poll() is not None:
-        raise RuntimeError("vf failed to start. Check neat_insight/bin/logs/vf.log")
+        raise RuntimeError(f"vf failed to start. Check {os.path.join(log_dir, 'vf.log')}")
     if mtx_proc.poll() is not None:
-        raise RuntimeError("mediamtx failed to start. Check neat_insight/bin/logs/mediamtx.log")
+        raise RuntimeError(f"mediamtx failed to start. Check {os.path.join(log_dir, 'mediamtx.log')}")
 
 def cleanup_processes(signum=None, frame=None, exit_process=True):
     global _cleanup_done
@@ -251,66 +294,289 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
         sys.exit(0)
 
 
-def _generate_self_signed_cert(cert_file, key_file):
-    # Generate private key
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    print(f"Python system environment: {sys.version_info}")
-    if sys.version_info < (3, 10):
-        from cryptography.hazmat.backends import default_backend
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
-    else:
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+def get_certificate_host():
+    configured_host = os.getenv(CERT_HOST_ENV, "").strip()
+    if not configured_host:
+        return DEFAULT_CERT_HOST
 
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, u'localhost'),
-    ])
+    try:
+        ipaddress.ip_address(configured_host)
+    except ValueError as exc:
+        raise RuntimeError(f"{CERT_HOST_ENV} must be an IP address, got: {configured_host}") from exc
 
-    cert = x509.CertificateBuilder()\
-        .subject_name(subject)\
-        .issuer_name(issuer)\
-        .public_key(key.public_key())\
-        .serial_number(x509.random_serial_number())\
-        .not_valid_before(datetime.utcnow())\
-        .not_valid_after(datetime.utcnow() + timedelta(days=3650))\
-        .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName(u'localhost')]),
-            critical=False,
-        )\
-        .sign(key, hashes.SHA256())
-
-    # Ensure directory exists
-    Path(cert_file).parent.mkdir(parents=True, exist_ok=True)
-
-    # Write key
-    with open(key_file, "wb") as f:
-        f.write(key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
-
-    # Write cert
-    with open(cert_file, "wb") as f:
-        f.write(cert.public_bytes(serialization.Encoding.PEM))
+    return configured_host
 
 
-def check_and_generate_self_signed_cert():
+def get_certificate_access_url(port=DEFAULT_CERT_PORT):
+    cert_host = get_certificate_host()
+    try:
+        if ipaddress.ip_address(cert_host).version == 6:
+            cert_host = f"[{cert_host}]"
+    except ValueError:
+        pass
+    return f"https://{cert_host}:{port}"
+
+
+def _mkcert_subjects(cert_host):
+    subjects = []
+
+    def add_subject(subject):
+        if subject not in subjects:
+            subjects.append(subject)
+
+    add_subject(cert_host)
+    add_subject(DEFAULT_CERT_HOST)
+    add_subject("localhost")
+    return subjects
+
+
+def _run_mkcert(command):
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode == 0:
+        return
+
+    output = "\n".join(part.strip() for part in [result.stdout, result.stderr] if part.strip())
+    raise RuntimeError(f"mkcert failed while running {' '.join(command)}\n{output}")
+
+
+def _mkcert_binary_name():
+    return "mkcert.exe" if os.name == "nt" else "mkcert"
+
+
+def _go_env(name):
+    if not shutil.which("go"):
+        return None
+
+    result = subprocess.run(["go", "env", name], check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+
+    value = result.stdout.strip()
+    return value or None
+
+
+def _go_mkcert_path():
+    gobin = _go_env("GOBIN")
+    if gobin:
+        candidate = Path(gobin) / _mkcert_binary_name()
+        if candidate.exists():
+            return str(candidate)
+
+    gopath = _go_env("GOPATH")
+    if gopath:
+        candidate = Path(gopath) / "bin" / _mkcert_binary_name()
+        if candidate.exists():
+            return str(candidate)
+
+    candidate = Path.home() / "go" / "bin" / _mkcert_binary_name()
+    if candidate.exists():
+        return str(candidate)
+
+    return None
+
+
+def _find_mkcert():
+    return shutil.which("mkcert") or _go_mkcert_path()
+
+
+def _sudo_prefix():
+    if os.name == "nt" or not hasattr(os, "geteuid") or os.geteuid() == 0:
+        return []
+
+    if shutil.which("sudo"):
+        return ["sudo"]
+
+    return None
+
+
+def _mkcert_install_candidates():
+    system = platform.system().lower()
+    candidates = []
+
+    if system == "darwin":
+        if shutil.which("brew"):
+            candidates.append(("Homebrew", [["brew", "install", "mkcert"]]))
+
+    elif system == "linux":
+        sudo = _sudo_prefix()
+        if shutil.which("brew"):
+            candidates.append(("Homebrew", [["brew", "install", "mkcert"]]))
+        if sudo is not None and shutil.which("apt-get"):
+            candidates.append(
+                (
+                    "apt-get",
+                    [
+                        [*sudo, "apt-get", "update"],
+                        [*sudo, "apt-get", "install", "-y", "mkcert", "libnss3-tools"],
+                    ],
+                )
+            )
+        if sudo is not None and shutil.which("dnf"):
+            candidates.append(("dnf", [[*sudo, "dnf", "install", "-y", "mkcert", "nss-tools"]]))
+        if sudo is not None and shutil.which("yum"):
+            candidates.append(("yum", [[*sudo, "yum", "install", "-y", "mkcert", "nss-tools"]]))
+        if sudo is not None and shutil.which("pacman"):
+            candidates.append(("pacman", [[*sudo, "pacman", "-Sy", "--noconfirm", "mkcert", "nss"]]))
+        if sudo is not None and shutil.which("zypper"):
+            candidates.append(
+                (
+                    "zypper",
+                    [[*sudo, "zypper", "--non-interactive", "install", "mkcert", "mozilla-nss-tools"]],
+                )
+            )
+
+    elif system == "windows":
+        if shutil.which("winget"):
+            candidates.append(
+                (
+                    "winget",
+                    [
+                        [
+                            "winget",
+                            "install",
+                            "--id",
+                            "FiloSottile.mkcert",
+                            "--silent",
+                            "--accept-package-agreements",
+                            "--accept-source-agreements",
+                        ]
+                    ],
+                )
+            )
+        if shutil.which("choco"):
+            candidates.append(("Chocolatey", [["choco", "install", "mkcert", "-y"]]))
+        if shutil.which("scoop"):
+            candidates.append(("Scoop", [["scoop", "install", "mkcert"]]))
+
+    if shutil.which("go"):
+        candidates.append(("Go", [["go", "install", "filippo.io/mkcert@latest"]]))
+
+    return candidates
+
+
+def ensure_mkcert_installed():
+    mkcert = _find_mkcert()
+    if mkcert:
+        return mkcert
+
+    candidates = _mkcert_install_candidates()
+    if not candidates:
+        raise RuntimeError(
+            "mkcert is required to generate trusted neat-insight HTTPS certificates, "
+            "but no supported package manager was found. Install mkcert manually, then start neat-insight again."
+        )
+
+    failures = []
+    for name, commands in candidates:
+        print(f"📦 mkcert not found. Attempting installation with {name}...")
+        failed_command = None
+        for command in commands:
+            print(f"🛠 Running: {' '.join(command)}")
+            result = subprocess.run(command, check=False)
+            if result.returncode != 0:
+                failed_command = command
+                break
+
+        mkcert = _find_mkcert()
+        if failed_command is None and mkcert:
+            print("✅ mkcert installed.")
+            return mkcert
+
+        if failed_command is None:
+            failures.append(f"{name}: install completed, but mkcert is not on PATH")
+        else:
+            failures.append(f"{name}: {' '.join(failed_command)} failed")
+
+    raise RuntimeError(
+        "Unable to install mkcert automatically. "
+        "Install mkcert manually, ensure it is on PATH, then start neat-insight again. "
+        f"Tried: {'; '.join(failures)}"
+    )
+
+
+def _generate_mkcert_certificate(cert_file, key_file, subjects):
+    mkcert = ensure_mkcert_installed()
+
+    cert_dir = Path(cert_file).parent
+    cert_dir.mkdir(parents=True, exist_ok=True)
+
+    _run_mkcert([mkcert, "-install"])
+
+    with tempfile.TemporaryDirectory(prefix="mkcert-", dir=str(cert_dir)) as tmp_dir:
+        tmp_cert = Path(tmp_dir) / "cert.pem"
+        tmp_key = Path(tmp_dir) / "key.pem"
+        _run_mkcert(
+            [
+                mkcert,
+                "-cert-file",
+                str(tmp_cert),
+                "-key-file",
+                str(tmp_key),
+                *subjects,
+            ]
+        )
+        os.replace(tmp_cert, cert_file)
+        os.replace(tmp_key, key_file)
+        os.chmod(key_file, 0o600)
+
+
+def _cert_pair_error(cert_file, key_file):
+    try:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=str(cert_file), keyfile=str(key_file))
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
+def _sdk_certificate_context():
+    if not SDK_CERT_FILE.exists():
+        return None
+
+    errors = []
+    for key_file in SDK_KEY_FILES:
+        if not key_file.exists():
+            continue
+
+        error = _cert_pair_error(SDK_CERT_FILE, key_file)
+        if error is None:
+            sdk_cert = str(SDK_CERT_FILE)
+            sdk_key = str(key_file)
+            print(f"🔐 Using SDK-provided trusted certificate: {sdk_cert}")
+            return (sdk_cert, sdk_key)
+
+        errors.append(f"{key_file}: {error}")
+
+    details = "; ".join(errors) if errors else "no SDK private key file found"
+    raise RuntimeError(
+        f"Found {SDK_CERT_FILE}, but it cannot be used as a TLS certificate/key pair ({details})."
+    )
+
+
+def check_and_generate_mkcert_certificate(port=DEFAULT_CERT_PORT):
+    global CERT_FILE, KEY_FILE
+
+    sdk_ssl_context = _sdk_certificate_context()
+    if sdk_ssl_context:
+        CERT_FILE, KEY_FILE = sdk_ssl_context
+        return sdk_ssl_context
+
     env = init_environment()
     insight_root = env["NEAT_INSIGHT_DATA"]
-    print(insight_root)
     cert_file = os.path.join(insight_root, "cert.pem")
     key_file = os.path.join(insight_root, "key.pem")
 
-    global CERT_FILE, KEY_FILE
     CERT_FILE = cert_file
     KEY_FILE = key_file
 
-    if not os.path.exists(cert_file) or not os.path.exists(key_file):
-        print(f"🔐 Generating self-signed certificate in {insight_root}...")
-        _generate_self_signed_cert(cert_file, key_file)
-    
-    ssl_context =  (cert_file, key_file)
+    cert_host = get_certificate_host()
+    subjects = _mkcert_subjects(cert_host)
+    print(f"🔐 Generating trusted local certificate for {get_certificate_access_url(port)} with mkcert...")
+    _generate_mkcert_certificate(cert_file, key_file, subjects)
+
+    ssl_context = (cert_file, key_file)
     return ssl_context
+
 
 def parse_build_info(build_text, remote=False):
     """
