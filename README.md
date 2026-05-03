@@ -40,17 +40,22 @@ py $env:TEMP\install-neat-insight.py
 
 ## Run
 
+`neat-insight` uses `mkcert` to create a locally trusted HTTPS certificate at startup. If `mkcert` is missing, startup attempts to install it with a supported package manager: Homebrew on macOS, common Linux package managers, winget/Chocolatey/Scoop on Windows, or `go install` as a fallback.
+
 ```bash
 source .venv/bin/activate
 neat-insight --port 9900
 ```
 
 Then open:
-- `https://IP:9900`
+- `https://${NFS_SERVER_HOST_IP}:9900` when `NFS_SERVER_HOST_IP` is set
+- `https://127.0.0.1:9900` otherwise
 
 Notes:
-- The app serves over HTTPS and generates a local self-signed certificate.
-- Browser trust warnings on first launch are expected for local development.
+- When `/sdk-cert/neat-sdk.pem` exists, the app validates and uses that SDK-provided certificate before attempting mkcert generation. The private key may be embedded in that PEM or provided as `/sdk-cert/neat-sdk-key.pem`, `/sdk-cert/neat-sdk.key`, or `/sdk-cert/key.pem`.
+- The app runs `mkcert -install` and regenerates `cert.pem`/`key.pem` under the neat-insight data directory on startup.
+- Certificates include the configured host IP, `127.0.0.1`, and `localhost`.
+- If automatic mkcert installation is unavailable, install mkcert manually and restart `neat-insight`.
 
 ## Basic usage
 
@@ -66,6 +71,7 @@ Prerequisites:
 - Python 3.8+
 - Node.js 20+ and npm
 - Go 1.24+
+- mkcert, or a supported package manager for automatic runtime installation
 
 Build and install into your current virtualenv:
 

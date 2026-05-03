@@ -38,9 +38,9 @@ from neat_insight.remote_devkit import (
 from neat_insight.remotefs import read_remote_file
 from neat_insight.utils import (
     board_type,
-    check_and_generate_self_signed_cert,
+    check_and_generate_mkcert_certificate,
     cleanup_processes,
-    get_lan_ip,
+    get_certificate_access_url,
     init_environment,
     is_sima_board,
     parse_build_info,
@@ -841,7 +841,7 @@ def main():
     ensure_sys_metrics_publisher_started()
     reset_sources()
 
-    ssl_context = check_and_generate_self_signed_cert()
+    ssl_context = check_and_generate_mkcert_certificate(args.port)
     start_processes(ssl_context)
 
     def _shutdown(signum=None, frame=None):
@@ -856,10 +856,9 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    local_ip = get_lan_ip()
     print("\n" + "=" * 120)
     print("neat-insight server starting")
-    print(f"Access: https://{local_ip}:{args.port}")
+    print(f"Access: {get_certificate_access_url(args.port)}")
     print("=" * 120 + "\n")
 
     app.run(host="0.0.0.0", port=args.port, ssl_context=ssl_context)
