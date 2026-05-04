@@ -11,7 +11,6 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-import paramiko
 import psutil
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from PIL import Image
@@ -23,17 +22,13 @@ if __name__ == "__main__" and (not globals().get("__package__")):
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neat_insight.app_manager import AppManager
 from neat_insight.mediasrc import start_media_stream, stop_media_stream
-from neat_insight.process_manager import ProcessManager
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_devkit_ip,
     get_remote_metrics,
     is_remote_devkit_configured,
     is_remote_devkit_connected,
-    run_remote_gst_pipeline,
-    stop_remote_process,
 )
 from neat_insight.remotefs import read_remote_file
 from neat_insight.utils import (
@@ -56,8 +51,6 @@ env = init_environment()
 MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
-MPK_APPS_ROOT = env["MPK_SRC_PATH"]
-CFG_PATH = env["NEAT_INSIGHT_DATA"] / "cfg.json"
 
 
 def _resolve_frontend_dist() -> Path:
@@ -86,14 +79,10 @@ def _resolve_frontend_dist() -> Path:
 FRONTEND_DIST = _resolve_frontend_dist()
 
 app = Flask(__name__)
-app_manager = AppManager(MPK_APPS_ROOT)
-process_manager = ProcessManager()
-process_manager.start()
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
 sys_metrics_lock = threading.Lock()
-current_started_app_name = None
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
@@ -131,27 +120,30 @@ def _safe_media_path(rel_path: str) -> Path:
     return abs_path
 
 
+def _with_metrics_compat(metrics_payload):
+    metrics_payload.setdefault("pipeline_status", {})
+    return metrics_payload
+
+
 def collect_system_metrics():
-    global current_started_app_name
     if is_remote_devkit_configured():
         if is_remote_devkit_connected():
-            return get_remote_metrics(current_started_app_name)
-        return {
+            return _with_metrics_compat(get_remote_metrics())
+        return _with_metrics_compat({
             "cpu_load": "",
             "memory": {},
             "mla_allocated_bytes": 0,
             "disk": {},
-            "pipeline_status": {},
             "temperature_celsius_avg": 0,
             "REMOTE": True,
-        }
+        })
 
     cpu_percent_total = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory()
     memory_usage = {"total": mem.total, "used": mem.used, "percent": mem.percent}
 
     try:
-        target_path = Path("/data") if is_sima_board() else Path.home()
+        target_path = env["NEAT_INSIGHT_DATA"] if is_sima_board() else Path.home()
         disk = psutil.disk_usage(str(target_path))
         disk_usage = {
             "mount": str(target_path),
@@ -177,15 +169,14 @@ def collect_system_metrics():
         except Exception:
             avg_temp = None
 
-    return {
+    return _with_metrics_compat({
         "cpu_load": cpu_percent_total,
         "memory": memory_usage,
         "mla_allocated_bytes": 0,
         "disk": disk_usage,
-        "pipeline_status": process_manager.get_status(),
         "temperature_celsius_avg": avg_temp,
         "REMOTE": False,
-    }
+    })
 
 
 def ensure_sys_metrics_publisher_started():
@@ -210,96 +201,6 @@ def ensure_sys_metrics_publisher_started():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "service": "neat-insight", "time": datetime.utcnow().isoformat() + "Z"}
-
-
-@app.get("/api/apps")
-def list_apps():
-    app_manager.refresh_apps()
-    return {"apps": app_manager.get_available_apps()}
-
-
-@app.post("/api/pipeline/start/<app_name>")
-def start_pipeline(app_name):
-    manifest = app_manager.get_app_config(app_name)
-    if not manifest:
-        return _json_error(f"App '{app_name}' not found", 404)
-
-    debug_level = "0"
-    if request.is_json:
-        debug_level = str(request.json.get("gst_debug", "0"))
-    if debug_level not in {"0", "1", "2", "3", "4", "5"}:
-        return _json_error(f"Invalid gst_debug level: {debug_level}")
-
-    app_block = next((a for a in manifest.get("applications", []) if a.get("name") == app_name), None)
-    if not app_block:
-        return _json_error(f"No application block with name '{app_name}'", 400)
-
-    pipeline_def = (app_block.get("pipelines") or [{}])[0]
-    gst_command = pipeline_def.get("gst", "").strip()
-    if not gst_command:
-        return _json_error("No 'gst' command defined in pipeline.", 400)
-
-    config = app_block.get("configuration", {})
-    env_vars = {}
-    for line in config.get("environment", []):
-        if "=" in line:
-            key, value = line.split("=", 1)
-            env_vars[key.strip()] = value.strip().strip('"').strip("'")
-    for opt in config.get("gst", {}).get("options", []):
-        if "--gst-plugin-path" in opt:
-            env_vars["GST_PLUGIN_PATH"] = opt.split("=")[-1].strip('"\'')
-    env_vars["GST_DEBUG"] = debug_level
-
-    if is_remote_devkit_configured():
-        success, error = run_remote_gst_pipeline(app_name, gst_command, env_vars)
-        if not success:
-            return _json_error(error, 500)
-    else:
-        full_env = os.environ.copy()
-        full_env.update(env_vars)
-        process_manager.submit_command(gst_command, full_env)
-
-    global current_started_app_name
-    current_started_app_name = app_name
-    return {"status": "started", "app": app_name, "gst_debug": debug_level}
-
-
-@app.post("/api/pipeline/stop")
-def stop_pipeline():
-    if is_remote_devkit_configured():
-        if not is_remote_devkit_connected():
-            return _json_error("Remote devkit not connected", 503)
-        if not current_started_app_name:
-            return _json_error("No remote app is currently started")
-        result = stop_remote_process(current_started_app_name)
-        if "error" in result:
-            return _json_error(result["error"], 500)
-        return {"status": "remote stopped", "pids": result.get("stopped_pids", [])}
-
-    process_manager.submit_command("STOP", None)
-    return {"status": "local stopped"}
-
-
-@app.get("/api/pipeline/logs")
-def pipeline_logs():
-    app_name = request.args.get("folder", "")
-    log_path = f"/tmp/{app_name}.log"
-
-    if is_remote_devkit_configured():
-        if not is_remote_devkit_connected():
-            return Response("[ERROR] Remote devkit not connected\n", mimetype="text/plain")
-        try:
-            content = read_remote_file(log_path)
-            return Response(content or b"", mimetype="text/plain")
-        except Exception as exc:
-            return Response(f"[ERROR] Failed to read remote log: {exc}\n", mimetype="text/plain")
-
-    @stream_with_context
-    def generate_local():
-        for line in process_manager.stream_logs():
-            yield line
-
-    return Response(generate_local(), mimetype="text/plain")
 
 
 @app.get("/api/logs/<logname>")
@@ -728,61 +629,6 @@ def buildinfo():
         return _json_error("Remote device unreachable", 502)
 
     return {"MACHINE": platform.machine(), "SIMA_BUILD_VERSION": platform.platform()}
-
-
-@app.get("/api/remotedevkit/cfg")
-def get_remote_devkit_config():
-    if not CFG_PATH.exists():
-        return jsonify({"remote-devkit": {"ip": "", "port": 22, "rootPassword": ""}})
-    with open(CFG_PATH, "r", encoding="utf-8") as f:
-        config = json.load(f)
-
-    safe_config = config.copy()
-    if "remote-devkit" in safe_config and "rootPassword" in safe_config["remote-devkit"]:
-        safe_config["remote-devkit"]["rootPassword"] = "••••••••"
-    return jsonify(safe_config)
-
-
-@app.post("/api/remotedevkit/cfg")
-def save_remote_devkit_config():
-    data = request.get_json() or {}
-    ipaddress = (data.get("ip") or "").strip()
-    password = data.get("rootPassword") or ""
-    port = 22
-
-    if ":" in ipaddress:
-        host, port_text = ipaddress.split(":", 1)
-        ipaddress = host
-        port = int(port_text)
-
-    if not ipaddress or (ipaddress != "127.0.0.1" and not password):
-        return _json_error("Missing IP or root password")
-
-    if ipaddress != "127.0.0.1":
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(
-                hostname=ipaddress,
-                port=port,
-                username="root",
-                password=password,
-                timeout=5,
-                banner_timeout=5,
-                auth_timeout=5,
-            )
-            _, stdout, _ = ssh.exec_command("echo connected")
-            result = stdout.read().decode().strip()
-            ssh.close()
-            if result != "connected":
-                return _json_error("SSH login failed or unexpected response.", 502)
-        except Exception as exc:
-            return _json_error(f"SSH connection failed: {exc}", 502)
-
-    config = {"remote-devkit": {"ip": ipaddress, "port": port, "rootPassword": password}}
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-    return {"message": "SSH test succeeded and configuration saved."}
 
 
 @app.get("/api/server-ip")

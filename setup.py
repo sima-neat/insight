@@ -36,14 +36,12 @@ setup(
     zip_safe=False,
     install_requires=[
         "flask",
-        "watchdog",
         "pillow",
         "pymediainfo",
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",
-        "paramiko",
-        "scp"
+        "paramiko"
     ],
     package_data={
         "neat_insight": [
