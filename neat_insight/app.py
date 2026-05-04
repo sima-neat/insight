@@ -120,18 +120,23 @@ def _safe_media_path(rel_path: str) -> Path:
     return abs_path
 
 
+def _with_metrics_compat(metrics_payload):
+    metrics_payload.setdefault("pipeline_status", {})
+    return metrics_payload
+
+
 def collect_system_metrics():
     if is_remote_devkit_configured():
         if is_remote_devkit_connected():
-            return get_remote_metrics()
-        return {
+            return _with_metrics_compat(get_remote_metrics())
+        return _with_metrics_compat({
             "cpu_load": "",
             "memory": {},
             "mla_allocated_bytes": 0,
             "disk": {},
             "temperature_celsius_avg": 0,
             "REMOTE": True,
-        }
+        })
 
     cpu_percent_total = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory()
@@ -164,14 +169,14 @@ def collect_system_metrics():
         except Exception:
             avg_temp = None
 
-    return {
+    return _with_metrics_compat({
         "cpu_load": cpu_percent_total,
         "memory": memory_usage,
         "mla_allocated_bytes": 0,
         "disk": disk_usage,
         "temperature_celsius_avg": avg_temp,
         "REMOTE": False,
-    }
+    })
 
 
 def ensure_sys_metrics_publisher_started():
