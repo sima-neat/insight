@@ -405,8 +405,8 @@ def ensure_webssh_started(ssl_context):
             except Exception:
                 try:
                     webssh_proc.kill()
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Warning: failed to kill webssh process during startup cleanup: {e}")
         raise RuntimeError(f"webssh failed to start. Check {os.path.join(log_dir, 'webssh.log')}")
 
 def cleanup_processes(signum=None, frame=None, exit_process=True):
