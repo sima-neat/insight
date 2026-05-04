@@ -5,14 +5,14 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-BASE_PORT = 7001
+RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
 
 
 @dataclass
 class MediaStream:
     index: int
     file_path: str
-    port: int
+    rtsp_url: str
     process: Optional[subprocess.Popen] = None
 
     def start(self) -> Tuple[bool, Optional[str]]:
@@ -28,6 +28,8 @@ class MediaStream:
             "-hide_banner",
             "-loglevel",
             "error",
+            "-fflags",
+            "+genpts+igndts",
             "-re",
             "-stream_loop",
             "-1",
@@ -45,8 +47,10 @@ class MediaStream:
             "-pix_fmt",
             "yuv420p",
             "-f",
-            "mpegts",
-            f"udp://127.0.0.1:{self.port}?pkt_size=1316",
+            "rtsp",
+            "-rtsp_transport",
+            "tcp",
+            self.rtsp_url,
         ]
 
         try:
@@ -57,11 +61,18 @@ class MediaStream:
                 text=True,
                 preexec_fn=os.setsid,
             )
+            threading.Thread(target=self._drain_stderr, daemon=True).start()
             return True, None
         except FileNotFoundError:
             return False, "ffmpeg is not installed"
         except Exception as exc:
             return False, str(exc)
+
+    def _drain_stderr(self) -> None:
+        if not self.process or not self.process.stderr:
+            return
+        for line in self.process.stderr:
+            logging.warning("media source %s ffmpeg: %s", self.index + 1, line.strip())
 
     def stop(self) -> None:
         if not self.process:
@@ -87,20 +98,20 @@ def start_media_stream(index: int, file_path: str) -> Tuple[bool, Optional[str]]
         return False, "No file assigned"
 
     slot = index - 1
-    port = BASE_PORT + slot
+    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}"
 
     with registry_lock:
         existing = pipeline_registry.get(slot)
         if existing and existing.process and existing.process.poll() is None:
             return False, "Already running"
 
-        stream = MediaStream(index=slot, file_path=file_path, port=port)
+        stream = MediaStream(index=slot, file_path=file_path, rtsp_url=rtsp_url)
         ok, err = stream.start()
         if not ok:
             return False, err
 
         pipeline_registry[slot] = stream
-        logging.info("Started media source %s on udp port %s", index, port)
+        logging.info("Started media source %s publishing to %s", index, rtsp_url)
         return True, None
 
 

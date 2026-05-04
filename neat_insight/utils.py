@@ -31,6 +31,7 @@ import shutil
 import platform
 import tempfile
 import ssl
+from datetime import datetime, timezone
 from collections import Counter
 import psutil
 import ipaddress
@@ -50,6 +51,37 @@ SDK_KEY_FILES = (
 )
 EXCLUDED_EXTENSIONS = {'.so', '.lm', '.bin', '.a', '.o', '.elf', '.rpm', '.tar', '.zip', '.gz', '.bz2', '.xz', '.out', '.pyc'}
 EXCLUDED_FOLDERS = {'env', 'bin'}
+
+
+def _ensure_sima_board_neat_insight_home():
+    user_root = Path.home() / "neat-insight"
+    nvme_root = Path("/media/nvme")
+    nvme_user_root = nvme_root / "neat-insight"
+
+    if nvme_root.exists() and nvme_root.is_dir():
+        nvme_user_root.mkdir(parents=True, exist_ok=True)
+
+        if user_root.is_symlink():
+            current_target = user_root.resolve(strict=False)
+            if current_target != nvme_user_root:
+                user_root.unlink()
+                user_root.symlink_to(nvme_user_root, target_is_directory=True)
+        elif not user_root.exists():
+            user_root.symlink_to(nvme_user_root, target_is_directory=True)
+        elif user_root.is_dir() and not any(user_root.iterdir()):
+            user_root.rmdir()
+            user_root.symlink_to(nvme_user_root, target_is_directory=True)
+        elif not user_root.is_dir():
+            raise RuntimeError(f"{user_root} exists but is not a directory or symlink.")
+
+        return user_root
+
+    if user_root.is_symlink():
+        user_root.unlink()
+
+    user_root.mkdir(parents=True, exist_ok=True)
+    return user_root
+
 
 def tail_lines(filename, num_lines, max_bytes):
     with open(filename, 'rb') as f:
@@ -94,15 +126,13 @@ def board_type():
 
 def init_environment():
     if is_sima_board():
-        media_dir = Path("/data/simaai/neat-insight/media")
-        media_src_file = Path("/data/simaai/neat-insight/media_sources.json")
-        mpk_src_path = Path("/data/simaai/applications")
-        user_root = Path("/data/simaai/neat-insight")
+        user_root = _ensure_sima_board_neat_insight_home()
+        media_dir = user_root / "media"
+        media_src_file = user_root / "media_sources.json"
     else:
         user_root = Path.home() / ".simaai" / "neat-insight"
         media_dir = user_root / "media"
         media_src_file = user_root / "media_sources.json"
-        mpk_src_path = user_root / "applications"
 
         sima_mem_file = Path("/tmp/simaai-mem")
         if not sima_mem_file.exists():
@@ -117,22 +147,12 @@ def init_environment():
         media_src_file.parent.mkdir(parents=True, exist_ok=True)
         media_src_file.write_text("[]")
 
-    # Ensure MPK source path exists
-    try:
-        mpk_src_path.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        print(f"❌ Error: Failed to create MPK_SRC_PATH at {mpk_src_path}: {e}")
-        sys.exit(1)
-
-    upload_root = user_root / "mpk_uploads"
     default_source_count = 16
 
     return {
         "MEDIA_DIR": media_dir,
         "MEDIA_SRC_DATA_FILE": media_src_file,
-        "UPLOAD_ROOT": upload_root,
         "DEFAULT_SOURCE_COUNT": default_source_count,
-        "MPK_SRC_PATH": mpk_src_path,
         "OPTVIEW_DATA": user_root,
         "NEAT_INSIGHT_DATA": user_root,
     }
@@ -529,6 +549,61 @@ def _cert_pair_error(cert_file, key_file):
         return str(exc)
 
 
+def _certificate_subject_error(cert_file, subjects):
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.backends import default_backend
+    except Exception:
+        return None
+
+    try:
+        cert = x509.load_pem_x509_certificate(Path(cert_file).read_bytes(), default_backend())
+        not_valid_after = getattr(cert, "not_valid_after_utc", None)
+        if not_valid_after is None:
+            not_valid_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+        if not_valid_after <= datetime.now(timezone.utc):
+            return "certificate is expired"
+
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        dns_names = set(san.get_values_for_type(x509.DNSName))
+        ip_addresses = {str(ip) for ip in san.get_values_for_type(x509.IPAddress)}
+        missing = []
+        for subject in subjects:
+            try:
+                if str(ipaddress.ip_address(subject)) not in ip_addresses:
+                    missing.append(subject)
+            except ValueError:
+                if subject not in dns_names:
+                    missing.append(subject)
+        if missing:
+            return f"certificate does not cover: {', '.join(missing)}"
+        return None
+    except x509.ExtensionNotFound:
+        return "certificate has no subjectAltName extension"
+    except Exception as exc:
+        return str(exc)
+
+
+def _existing_certificate_context(cert_file, key_file, subjects):
+    cert_path = Path(cert_file)
+    key_path = Path(key_file)
+    if not cert_path.exists() or not key_path.exists():
+        return None
+
+    error = _cert_pair_error(cert_path, key_path)
+    if error is not None:
+        print(f"⚠️ Existing certificate pair is invalid and will be regenerated: {error}")
+        return None
+
+    subject_error = _certificate_subject_error(cert_path, subjects)
+    if subject_error is not None:
+        print(f"⚠️ Existing certificate will be regenerated: {subject_error}")
+        return None
+
+    print(f"🔐 Reusing existing trusted local certificate: {cert_path}")
+    return (str(cert_path), str(key_path))
+
+
 def _sdk_certificate_context():
     if not SDK_CERT_FILE.exists():
         return None
@@ -571,6 +646,10 @@ def check_and_generate_mkcert_certificate(port=DEFAULT_CERT_PORT):
 
     cert_host = get_certificate_host()
     subjects = _mkcert_subjects(cert_host)
+    existing_ssl_context = _existing_certificate_context(cert_file, key_file, subjects)
+    if existing_ssl_context:
+        return existing_ssl_context
+
     print(f"🔐 Generating trusted local certificate for {get_certificate_access_url(port)} with mkcert...")
     _generate_mkcert_certificate(cert_file, key_file, subjects)
 

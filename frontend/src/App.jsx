@@ -5,8 +5,7 @@ const TABS = [
   { id: 'media', label: 'Media Library', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'RTSP Source', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
-  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' },
-  { id: 'settings', label: 'Settings', icon: '/icons/settings.png' }
+  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
 
@@ -162,7 +161,6 @@ export default function App() {
   const [uploadStatus, setUploadStatus] = useState('')
   const [viewerUrl, setViewerUrl] = useState('')
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
-  const [remoteCfg, setRemoteCfg] = useState({ ip: '', rootPassword: '' })
   const [metrics, setMetrics] = useState(null)
   const [metricEvents, setMetricEvents] = useState([])
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
@@ -213,15 +211,6 @@ export default function App() {
     }
   }
 
-  async function loadRemoteConfig() {
-    try {
-      const data = await fetchJson('/api/remotedevkit/cfg')
-      setRemoteCfg({ ip: data?.['remote-devkit']?.ip || '', rootPassword: '' })
-    } catch {
-      setRemoteCfg({ ip: '', rootPassword: '' })
-    }
-  }
-
   async function loadMediaInfo(path) {
     if (!path) {
       setMediaInfo(null)
@@ -249,7 +238,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), loadRemoteConfig(), refreshMetrics()]).catch((e) => setError(e.message))
+    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics()]).catch((e) => setError(e.message))
   }, [])
 
   useEffect(() => {
@@ -444,20 +433,6 @@ export default function App() {
   const sourcePreviewIsVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(sourcePreviewExt)
   const sourcePreviewIsImage = ['jpg', 'jpeg', 'png'].includes(sourcePreviewExt)
 
-  async function saveRemoteCfg() {
-    try {
-      await fetchJson('/api/remotedevkit/cfg', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(remoteCfg)
-      })
-      setUploadStatus('Remote DevKit config saved')
-      await loadRtspBase()
-    } catch (e) {
-      setError(e.message)
-    }
-  }
-
   const previewExt = selectedFile.split('.').pop()?.toLowerCase()
   const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(previewExt)
   const isImage = ['jpg', 'jpeg', 'png'].includes(previewExt)
@@ -501,7 +476,6 @@ export default function App() {
       ? Math.min(100, (mlaBytes / Number(metrics.memory.total)) * 100)
       : null
 
-  const pipelineStatus = metrics?.pipeline_status?.is_running
   const temperatureValue = metrics?.temperature_celsius_avg
 
   return (
@@ -735,9 +709,6 @@ export default function App() {
               </div>
               <div className="metric-summary-row">
                 <span>
-                  Pipeline: <strong>{pipelineStatus === null ? 'unknown' : pipelineStatus ? 'running' : 'stopped'}</strong>
-                </span>
-                <span>
                   Temperature: <strong>{temperatureValue === null || temperatureValue === undefined ? '-' : `${Number(temperatureValue).toFixed(1)}°C`}</strong>
                 </span>
               </div>
@@ -785,24 +756,6 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'settings' && (
-          <section className="panel settings-panel">
-            <h2>Remote DevKit Settings</h2>
-            <div className="cfg-grid">
-              <label>
-                Remote DevKit IP[:port]
-                <input value={remoteCfg.ip} onChange={(e) => setRemoteCfg((p) => ({ ...p, ip: e.target.value }))} placeholder="127.0.0.1" />
-              </label>
-
-              <label>
-                Root Password
-                <input type="password" value={remoteCfg.rootPassword} onChange={(e) => setRemoteCfg((p) => ({ ...p, rootPassword: e.target.value }))} />
-              </label>
-
-              <button className="btn-tonal" onClick={saveRemoteCfg}>Save</button>
-            </div>
-          </section>
-        )}
         </div>
       </main>
 

@@ -6,27 +6,34 @@ logLevel: info
 
 
 paths:
-  src1:
-    source: udp://127.0.0.1:7001
+  src1: {}
 
-  src2:
-    source: udp://127.0.0.1:7002
+  src2: {}
 
-  src3:
-    source: udp://127.0.0.1:7003
+  src3: {}
 
-  src4:
-    source: udp://127.0.0.1:7004
+  src4: {}
 
-  src5:
-    source: udp://127.0.0.1:7005
+  src5: {}
 
-  src6:
-    source: udp://127.0.0.1:7006
+  src6: {}
 
-  src7:
-    source: udp://127.0.0.1:7007
+  src7: {}
 
-  src8:
-    source: udp://127.0.0.1:7008
-  
+  src8: {}
+
+  src9: {}
+
+  src10: {}
+
+  src11: {}
+
+  src12: {}
+
+  src13: {}
+
+  src14: {}
+
+  src15: {}
+
+  src16: {}

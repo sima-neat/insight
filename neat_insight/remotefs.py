@@ -134,7 +134,7 @@ def read_remote_file(remote_path, label="file"):
         with rfs.open(remote_path, "rb") as f:
             return f.read(file_size)
         
-def build_remote_tree(path="/data/simaai/applications"):
+def build_remote_tree(path="/"):
     """
     Recursively builds a hierarchical file tree starting from a given directory
     on a remote device via SFTP. Filters out certain files and directories.

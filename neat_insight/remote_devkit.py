@@ -25,10 +25,6 @@ import json
 import os
 import re
 import logging
-import os
-import posixpath
-from scp import SCPClient
-from shlex import quote
 import socket
 from neat_insight.remotefs import _load_remote_config, RemoteFS, create_ssh_client
 
@@ -121,53 +117,7 @@ def remote_board_type():
     return None
 
 
-def check_remote_process_status(app_name):
-    try:
-        ssh = create_ssh_client()
-        try:
-            pids = []
-
-            # First pattern: gst_app
-            pattern1 = f"/data/simaai/applications/{app_name}/bin/gst_app"
-            cmd1 = f"ps -ef | grep {quote(pattern1)} | grep -v grep"
-            stdin, stdout, stderr = ssh.exec_command(cmd1)
-            output = stdout.read().decode().strip()
-
-            for line in output.splitlines():
-                parts = line.split()
-                if len(parts) >= 2:
-                    pids.append(parts[1])
-
-            # If not found, fallback to launch_peppi_pipeline.sh
-            if not pids:
-                pattern2 = f"/data/simaai/applications/{app_name}/bin/launch_peppi_pipeline.sh"
-                cmd2 = f"ps -ef | grep {quote(pattern2)} | grep -v grep"
-                stdin, stdout, stderr = ssh.exec_command(cmd2)
-                output = stdout.read().decode().strip()
-
-                for line in output.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        pids.append(parts[1])
-
-            return {
-                "is_running": len(pids) > 0,
-                "matching_pids": pids,
-                "log_path": f"/tmp/{app_name}.log"
-            }
-
-        finally:
-            ssh.close()
-    except Exception as e:
-        return {
-            "is_running": False,
-            "error": str(e),
-            "matching_pids": [],
-            "log_path": f"/tmp/{app_name}.log"
-        }
-
-
-def get_remote_metrics(app_name):
+def get_remote_metrics():
     ssh = create_ssh_client()
 
     def run(cmd):
@@ -231,7 +181,6 @@ def get_remote_metrics(app_name):
         "memory": memory_usage,
         "mla_allocated_bytes": mla_allocated_bytes,
         "disk": disk_usage,
-        "pipeline_status": check_remote_process_status(app_name),
         "temperature_celsius_avg": avg_temp,
         "REMOTE": True
     }
@@ -260,205 +209,6 @@ def delete_remote_file(remote_path):
         return {"error": str(e)}
 
 
-def normalize_filename(path):
-    basename = os.path.basename(path)
-    # Replace spaces and special characters with underscores
-    safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', basename)
-    return safe_name
-
-def handle_remote_mpk_upload(mpk_path, approot):
-    """
-    Handles uploading and installing an .mpk file on a remote devkit via SSH.
-
-    Args:
-        mpk_path (str): Path to the local .mpk file
-        approot (str): Root path (e.g., /home/dev/mpk_apps) where RPM installs
-
-    Yields:
-        str: Status messages for streaming to the frontend.
-    """
-    filename = normalize_filename(os.path.basename(mpk_path))
-    remote_temp_dir = f"/tmp/mpk_upload_{filename}"
-
-    ssh = create_ssh_client()
-
-    # Step 1: Create temp dir on remote
-    yield f"📁 Creating temp dir on the remote devkit: {remote_temp_dir}\n"
-    stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {remote_temp_dir}")
-    if stderr.read():
-        raise RuntimeError("Failed to create temp dir on remote.")
-
-    # Step 2: Copy .mpk file to remote
-    yield "📤 Uploading .mpk file to the remote devkit...\n"
-    with SCPClient(ssh.get_transport()) as scp:
-        remote_mpk_path = posixpath.join(remote_temp_dir, os.path.basename(mpk_path))
-        scp.put(mpk_path, remote_mpk_path)
-
-    # Step 3: Unzip the .mpk
-    yield "📦 Extracting .mpk file on the remote devkit...\n"
-    unzip_cmd = f"unzip -o {remote_mpk_path} -d {remote_temp_dir}"
-    stdin, stdout, stderr = ssh.exec_command(unzip_cmd)
-    unzip_err = stderr.read().decode()
-    if "cannot find or open" in unzip_err.lower():
-        raise RuntimeError("Failed to unzip .mpk on remote.")
-
-    # Step 4: Check for manifest and rpm
-    yield "🔍 Locating manifest and installer.rpm...\n"
-    find_cmd = f"find {remote_temp_dir} \\( -name manifest.json -o -name '*.rpm' \\)"
-
-    stdin, stdout, stderr = ssh.exec_command(find_cmd)
-    found_files = stdout.read().decode().splitlines()
-    print(found_files)
-
-    manifest_path = next((f for f in found_files if f.endswith("manifest.json")), None)
-    rpm_path = next((f for f in found_files if f.endswith(".rpm")), None)
-    print(manifest_path, rpm_path)
-    if not manifest_path or not rpm_path:
-        raise RuntimeError(f"Missing manifest.json or installer.rpm in .mpk (searched under {remote_temp_dir})")
-
-    # Step 5: Run rpm -qpl to find install path
-    yield f"📂 Running rpm query... {rpm_path}\n"
-    rpm_query = f"rpm -qpl {rpm_path}"
-    stdin, stdout, stderr = ssh.exec_command(rpm_query)
-    rpm_files = stdout.read().decode().splitlines()
-
-    # Step: identify app subdir directly under approot
-    candidate_dirs = [line.strip() for line in rpm_files if line.startswith(approot)]
-    app_dirs = set()
-
-    # Match full app directories like /data/simaai/applications/<app-name>/bin or /lib/etc/share
-    pattern = re.compile(rf"^{re.escape(approot)}/([^/]+)/")
-    for path in candidate_dirs:
-        match = pattern.search(path)
-        if match:
-            app_name = match.group(1)
-            app_dirs.add(f"{approot}/{app_name}")
-
-    # If nothing matched, fallback to the deepest common directory below approot
-    if not app_dirs:
-        parent_dirs = [os.path.dirname(p) for p in candidate_dirs]
-        common_root = os.path.commonprefix(parent_dirs)
-        app_dirs = [common_root.rstrip("/")]
-
-    if not app_dirs:
-        raise RuntimeError(f"❌ Could not identify install path from RPM.\nRPM contents:\n" + "\n".join(rpm_files))
-
-    pipeline_dir = sorted(app_dirs, key=lambda p: -p.count("/"))[0]
-
-    # Step 6: Copy manifest.json to pipeline directory
-    yield "📄 Copying manifest.json on the remote devkit\n"
-    remote_manifest_target = posixpath.join(pipeline_dir, 'manifest.json')
-    print("remote_manifest_path:", remote_manifest_target)
-
-    mkdir_cmd = f"mkdir -p {pipeline_dir}"
-    ssh.exec_command(mkdir_cmd)
-    
-    copy_cmd = f"cp {manifest_path} {remote_manifest_target}"
-    stdin, stdout, stderr = ssh.exec_command(copy_cmd)
-    if stdout.channel.recv_exit_status() != 0:
-        raise RuntimeError(f"Failed to copy manifest.json to {remote_manifest_target}")
-    
-    # Step 7: Install the RPM
-    yield f"📥 Installing RPM to: {pipeline_dir} on the remote devkit\n"
-    rpm_install = f"rpm -U --replacepkgs {rpm_path}"
-    stdin, stdout, stderr = ssh.exec_command(rpm_install)
-    err = stderr.read().decode()
-    if "error" in err.lower():
-        raise RuntimeError(f"RPM installation failed: {err}")
-
-    yield "🎉 Remote install complete!\n"
-    ssh.close()
-
-
-def run_remote_gst_pipeline(app_name, gst_command, env_vars):
-    """
-    Executes a GStreamer pipeline remotely via SSH using provided environment.
-
-    Args:
-        app_name (str): Name of the application for logging/debugging.
-        gst_command (str): GStreamer pipeline launch command.
-        env_vars (dict): Environment variables to export remotely.
-
-    Returns:
-        (bool, str): (True, None) if success; (False, error_message) if failed.
-    """
-    try:
-        ssh = create_ssh_client()
-        try:
-            # Quote each env var value
-            exports = " ".join(f'{k}={quote(v)}' for k, v in env_vars.items())
-
-            # Quote the full command (pipeline + exports) into a bash -c string
-            full_inner_cmd = f"{exports} {gst_command}".strip()
-            remote_cmd = f"nohup bash -c {quote(full_inner_cmd)} > /tmp/{app_name}.log 2>&1 &"
-
-            logging.info(f"🚀 Starting remote app '{app_name}' with command: {remote_cmd}")
-            stdin, stdout, stderr = ssh.exec_command(remote_cmd)
-
-            err = stderr.read().decode().strip()
-            if err:
-                return False, err
-
-            return True, None
-        finally:
-            ssh.close()
-    except Exception as e:
-        return False, f"SSH error: {str(e)}"
-    
-def stop_remote_process(app_name):
-    """
-    Stops a remote GStreamer process by name.
-
-    Args:
-        app_name (str): The app name used to identify the process (e.g., YoloV7).
-
-    Returns:
-        dict: {
-            "stopped_pids": list of PIDs terminated,
-            "message": optional message if nothing was found,
-            "error": optional error message if failure occurs
-        }
-    """
-    try:
-        ssh = create_ssh_client()
-        try:
-            pids_to_kill = []
-
-            def find_pids_by_pattern(pattern):
-                find_cmd = f"ps -ef | grep {quote(pattern)} | grep -v grep"
-                stdin, stdout, stderr = ssh.exec_command(find_cmd)
-                output = stdout.read().decode().strip()
-                pids = []
-                for line in output.splitlines():
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        pids.append(parts[1])
-                return pids
-
-            # Try gst_app pattern first
-            pattern1 = f"/data/simaai/applications/{app_name}/bin/gst_app"
-            pids_to_kill = find_pids_by_pattern(pattern1)
-
-            # Fallback to launch_peppi_pipeline.sh if nothing found
-            if not pids_to_kill:
-                pattern2 = f"/data/simaai/applications/{app_name}/bin/launch_peppi_pipeline.sh"
-                pids_to_kill = find_pids_by_pattern(pattern2)
-
-            if not pids_to_kill:
-                return {"stopped_pids": [], "message": "No matching processes found."}
-
-            kill_cmd = f"kill {' '.join(pids_to_kill)}"
-            ssh.exec_command(kill_cmd)
-
-            return {"stopped_pids": pids_to_kill}
-
-        finally:
-            ssh.close()
-
-    except Exception as e:
-        return {"stopped_pids": [], "error": str(e)}
-
-    
 def run_remote_gst_inspect(plugin, env_vars):
     """
     Executes gst-inspect-1.0 for a given plugin on the remote devkit via SSH.
@@ -484,4 +234,3 @@ def run_remote_gst_inspect(plugin, env_vars):
             ssh.close()
     except Exception as e:
         return -1, f"[Remote error] {str(e)}"
-
