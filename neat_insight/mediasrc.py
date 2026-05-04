@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
+MAX_GOP_FRAMES = "30"
+KEYFRAME_INTERVAL_SECONDS = "1"
 
 
 @dataclass
@@ -44,6 +46,18 @@ class MediaStream:
             "veryfast",
             "-tune",
             "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-bf",
+            "0",
+            "-g",
+            MAX_GOP_FRAMES,
+            "-sc_threshold",
+            "0",
+            "-force_key_frames",
+            f"expr:gte(t,n_forced*{KEYFRAME_INTERVAL_SECONDS})",
+            "-x264-params",
+            "repeat-headers=1:aud=1",
             "-pix_fmt",
             "yuv420p",
             "-f",
