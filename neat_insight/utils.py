@@ -375,26 +375,31 @@ def ensure_webssh_started(ssl_context):
     webssh_log = open(os.path.join(log_dir, "webssh.log"), "a")
     process_logs.append(webssh_log)
 
-    webssh_proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "webssh.main",
-            "--address=127.0.0.1",
-            "--port=0",
-            "--ssladdress=0.0.0.0",
-            f"--sslport={webssh_port}",
-            f"--certfile={cert_file}",
-            f"--keyfile={key_file}",
-            "--redirect=False",
-            "--fbidhttp=False",
-            "--policy=warning",
-            "--xheaders=False",
-        ],
-        cwd=bin_dir,
-        stdout=webssh_log,
-        stderr=subprocess.STDOUT,
-    )
+    try:
+        webssh_proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "webssh.main",
+                "--address=127.0.0.1",
+                "--port=0",
+                "--ssladdress=0.0.0.0",
+                f"--sslport={webssh_port}",
+                f"--certfile={cert_file}",
+                f"--keyfile={key_file}",
+                "--redirect=False",
+                "--fbidhttp=False",
+                "--policy=warning",
+                "--xheaders=False",
+            ],
+            cwd=bin_dir,
+            stdout=webssh_log,
+            stderr=subprocess.STDOUT,
+        )
+    except Exception:
+        process_logs.remove(webssh_log)
+        webssh_log.close()
+        raise
     processes.append(webssh_proc)
 
     if not _wait_for_tcp_listener(webssh_port):
