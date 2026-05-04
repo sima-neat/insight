@@ -1,5 +1,6 @@
 import argparse
 import atexit
+import base64
 import json
 import logging
 import os
@@ -39,12 +40,17 @@ from neat_insight.utils import (
     board_type,
     check_and_generate_mkcert_certificate,
     cleanup_processes,
+    ensure_webssh_started,
     get_certificate_access_url,
+    get_devkit_sync_devkit_ip,
+    get_webssh_port,
     init_environment,
+    is_webssh_running,
     is_sima_board,
     parse_build_info,
     start_processes,
     tail_lines,
+    webssh_is_available,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -81,12 +87,16 @@ def _resolve_frontend_dist() -> Path:
 
 
 FRONTEND_DIST = _resolve_frontend_dist()
+VIEWER_CHANNEL_COUNT = 80
 
 app = Flask(__name__)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
 sys_metrics_lock = threading.Lock()
+server_ssl_context = None
+DEFAULT_DEVKIT_SSH_USERNAME = "sima"
+DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
@@ -95,6 +105,43 @@ LOG_DIR = "/var/log"
 
 def _json_error(message: str, status: int = 400):
     return jsonify({"error": message}), status
+
+
+def _request_host_name() -> str:
+    host = request.host.split(":", 1)[0]
+    return host or "127.0.0.1"
+
+
+def _build_devkit_shell_payload():
+    devkit_ip = get_devkit_sync_devkit_ip()
+    configured = bool(devkit_ip)
+    webssh_port = get_webssh_port()
+    launch_url = None
+
+    if configured:
+        password_b64 = base64.b64encode(DEFAULT_DEVKIT_SSH_PASSWORD.encode("utf-8")).decode("ascii")
+        params = urllib.parse.urlencode(
+            {
+                "hostname": devkit_ip,
+                "port": 22,
+                "username": DEFAULT_DEVKIT_SSH_USERNAME,
+                "password": password_b64,
+                "title": f"DevKit {devkit_ip}",
+            }
+        )
+        launch_url = f"https://{_request_host_name()}:{webssh_port}/?{params}"
+
+    return {
+        "configured": configured,
+        "devkit_ip": devkit_ip or None,
+        "button_label": f"DevKit: {devkit_ip}" if configured else None,
+        "available": webssh_is_available(),
+        "running": is_webssh_running(),
+        "webssh_port": webssh_port,
+        "default_username": DEFAULT_DEVKIT_SSH_USERNAME,
+        "credentials_prefilled": True,
+        "launch_url": launch_url,
+    }
 
 
 def load_sources():
@@ -684,6 +731,41 @@ def envinfo():
     return {"is_sima_board": is_sima_board(), "is_remote_devkit_configured": is_remote_devkit_configured()}
 
 
+# API: expose DevKit shell discovery and launch metadata for the browser.
+@app.get("/api/devkit-shell")
+def devkit_shell():
+    """Return whether DEVKIT_SYNC_DEVKIT_IP is configured plus the hosted webssh status and launch URL."""
+    try:
+        return _build_devkit_shell_payload()
+    except RuntimeError as exc:
+        return _json_error(str(exc), 500)
+
+
+# API: start the hosted webssh service on demand and return the DevKit shell launch URL.
+@app.post("/api/devkit-shell/start")
+def start_devkit_shell():
+    """Start webssh only when requested, then return the prefilled browser URL for the configured DevKit."""
+    global server_ssl_context
+
+    try:
+        payload = _build_devkit_shell_payload()
+    except RuntimeError as exc:
+        return _json_error(str(exc), 500)
+
+    if not payload["configured"]:
+        return _json_error("DEVKIT_SYNC_DEVKIT_IP is not configured.", 404)
+    if server_ssl_context is None:
+        return _json_error("Insight TLS context is not initialized.", 500)
+
+    try:
+        ensure_webssh_started(server_ssl_context)
+    except RuntimeError as exc:
+        return _json_error(str(exc), 502)
+
+    payload = _build_devkit_shell_payload()
+    return payload
+
+
 # API: retrieve local or remote build information.
 @app.get("/api/buildinfo")
 def buildinfo():
@@ -739,7 +821,7 @@ def server_ip():
 def viewer_url():
     """Accept query args mode and src; return the HTTPS vf viewer URL on port 8081 for the request host."""
     mode = request.args.get("mode", "light")
-    default_src = ",".join(str(i) for i in range(DEFAULT_SOURCE_COUNT))
+    default_src = ",".join(str(i) for i in range(VIEWER_CHANNEL_COUNT))
     src = request.args.get("src", default_src)
     host_ip = request.host.split(":")[0]
     return {"url": f"https://{host_ip}:8081/static/viewer.html?mode={mode}&src={src}"}
@@ -767,7 +849,7 @@ def spa(path):
 
 
 def main():
-    global sys_metrics_publisher
+    global server_ssl_context, sys_metrics_publisher
 
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
@@ -777,6 +859,7 @@ def main():
     reset_sources()
 
     ssl_context = check_and_generate_mkcert_certificate(args.port)
+    server_ssl_context = ssl_context
     start_processes(ssl_context)
 
     def _shutdown(signum=None, frame=None):

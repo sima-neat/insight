@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MAX_CHANNELS = 80;
-const MAX_VIDEOS_PER_PAGE = 16;
+const MAX_VIDEOS_PER_PAGE = 80;
 const DEFAULT_VISIBLE_PER_PAGE = 4;
+const PAGE_SIZE_PRESETS = [1, 4, 9, 16, 40, 80];
 const METADATA_QUEUE_HARD_LIMIT = 300;
 const METADATA_QUEUE_SOFT_LIMIT = 20;
 const RECONNECT_DELAY_MS = 5000;
@@ -517,7 +518,7 @@ export default function ViewerApp() {
       <div id="controls">
         <span className="page-size-label">Videos Per Page:</span>
         <div className="layout-presets">
-          {[1, 2, 4, 9, 16].map((preset) => (
+          {PAGE_SIZE_PRESETS.map((preset) => (
             <button
               key={preset}
               type="button"

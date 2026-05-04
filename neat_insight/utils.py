@@ -26,6 +26,7 @@ import sys
 import subprocess
 import signal
 import time
+import importlib.util
 from pathlib import Path
 import shutil
 import platform
@@ -51,6 +52,9 @@ SDK_KEY_FILES = (
 )
 EXCLUDED_EXTENSIONS = {'.so', '.lm', '.bin', '.a', '.o', '.elf', '.rpm', '.tar', '.zip', '.gz', '.bz2', '.xz', '.out', '.pyc'}
 EXCLUDED_FOLDERS = {'env', 'bin'}
+DEVKIT_SYNC_DEVKIT_IP_ENV = "DEVKIT_SYNC_DEVKIT_IP"
+WEBSSH_PORT_ENV = "NEAT_INSIGHT_WEBSSH_PORT"
+DEFAULT_WEBSSH_PORT = 8022
 
 
 def _ensure_sima_board_neat_insight_home():
@@ -160,6 +164,7 @@ def init_environment():
 processes = []
 process_logs = []
 _cleanup_done = False
+webssh_proc = None
 
 def _pids_listening_on(port, proto):
     proto = proto.upper()
@@ -203,6 +208,31 @@ def _pids_listening_on_ports(port_specs):
     return pids
 
 
+def _terminate_pids(pids):
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+    if pids:
+        time.sleep(1.0)
+
+
+def _terminate_conflicting_port_specs(port_specs):
+    pids = sorted(_pids_listening_on_ports(port_specs))
+    _terminate_pids(pids)
+    remaining_pids = sorted(_pids_listening_on_ports(port_specs))
+    for pid in remaining_pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+
+    if remaining_pids:
+        time.sleep(0.2)
+
+
 def _terminate_conflicting_ports():
     # mediamtx uses 8554/tcp and a default UDP helper port 8000.
     # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
@@ -213,26 +243,11 @@ def _terminate_conflicting_ports():
         *[(port, "UDP") for port in range(9000, 9080)],
         *[(port, "UDP") for port in range(9100, 9180)],
     ]
-    pids = sorted(_pids_listening_on_ports(port_specs))
+    devkit_ip = get_devkit_sync_devkit_ip()
+    if devkit_ip:
+        port_specs.append((get_webssh_port(), "TCP"))
 
-    for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
-
-    if pids:
-        time.sleep(1.0)
-
-    remaining_pids = sorted(_pids_listening_on_ports(port_specs))
-    for pid in remaining_pids:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
-
-    if remaining_pids:
-        time.sleep(0.2)
+    _terminate_conflicting_port_specs(port_specs)
 
 
 def start_processes(ssl_context):
@@ -282,8 +297,120 @@ def start_processes(ssl_context):
     if mtx_proc.poll() is not None:
         raise RuntimeError(f"mediamtx failed to start. Check {os.path.join(log_dir, 'mediamtx.log')}")
 
+
+def get_devkit_sync_devkit_ip():
+    value = os.getenv(DEVKIT_SYNC_DEVKIT_IP_ENV, "").strip()
+    if not value:
+        return ""
+
+    try:
+        ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{DEVKIT_SYNC_DEVKIT_IP_ENV} must be an IP address, got: {value}"
+        ) from exc
+
+    return value
+
+
+def get_webssh_port():
+    configured = os.getenv(WEBSSH_PORT_ENV, "").strip()
+    if not configured:
+        return DEFAULT_WEBSSH_PORT
+
+    try:
+        port = int(configured)
+    except ValueError as exc:
+        raise RuntimeError(f"{WEBSSH_PORT_ENV} must be an integer, got: {configured}") from exc
+
+    if not 1 <= port <= 65535:
+        raise RuntimeError(f"{WEBSSH_PORT_ENV} must be between 1 and 65535, got: {port}")
+
+    return port
+
+
+def webssh_is_available():
+    try:
+        return importlib.util.find_spec("webssh.main") is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def is_webssh_running():
+    return webssh_proc is not None and webssh_proc.poll() is None
+
+
+def _wait_for_tcp_listener(port, host="127.0.0.1", timeout_sec=5.0):
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def ensure_webssh_started(ssl_context):
+    global webssh_proc
+
+    devkit_ip = get_devkit_sync_devkit_ip()
+    if not devkit_ip:
+        raise RuntimeError(f"{DEVKIT_SYNC_DEVKIT_IP_ENV} is not set.")
+    if not webssh_is_available():
+        raise RuntimeError(
+            "webssh is not installed in the current neat-insight environment. "
+            "Install the package dependency and restart Insight."
+        )
+    if is_webssh_running():
+        return
+
+    cert_file, key_file = ssl_context
+    webssh_port = get_webssh_port()
+    _terminate_conflicting_port_specs([(webssh_port, "TCP")])
+
+    bin_dir = os.path.join(os.path.dirname(__file__), "bin")
+    log_dir = os.path.join(bin_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    webssh_log = open(os.path.join(log_dir, "webssh.log"), "a")
+    process_logs.append(webssh_log)
+
+    webssh_proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "webssh.main",
+            "--address=127.0.0.1",
+            "--port=0",
+            "--ssladdress=0.0.0.0",
+            f"--sslport={webssh_port}",
+            f"--certfile={cert_file}",
+            f"--keyfile={key_file}",
+            "--redirect=False",
+            "--fbidhttp=False",
+            "--policy=warning",
+            "--xheaders=False",
+        ],
+        cwd=bin_dir,
+        stdout=webssh_log,
+        stderr=subprocess.STDOUT,
+    )
+    processes.append(webssh_proc)
+
+    if not _wait_for_tcp_listener(webssh_port):
+        if webssh_proc.poll() is None:
+            try:
+                webssh_proc.terminate()
+                webssh_proc.wait(timeout=2)
+            except Exception:
+                try:
+                    webssh_proc.kill()
+                except Exception:
+                    pass
+        raise RuntimeError(f"webssh failed to start. Check {os.path.join(log_dir, 'webssh.log')}")
+
 def cleanup_processes(signum=None, frame=None, exit_process=True):
-    global _cleanup_done
+    global _cleanup_done, webssh_proc
     if _cleanup_done:
         if exit_process:
             sys.exit(0)
@@ -302,6 +429,7 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
             except Exception:
                 pass
     processes.clear()
+    webssh_proc = None
 
     for log_file in list(process_logs):
         try:

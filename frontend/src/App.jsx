@@ -8,6 +8,54 @@ const TABS = [
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
+const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
+const ONBOARDING_STEPS = [
+  {
+    id: 'intro',
+    tab: null,
+    eyebrow: 'Step 1 of 5',
+    title: 'What is Insight?',
+    summary: 'Insight helps developers set up RTSP streams, view inference results, and watch system performance while they test an application.',
+    details:
+      'Use it to load media, turn that media into RTSP sources, watch the live WebRTC viewer post inference with metadata rendering, and confirm whether runtime issues are coming from the stream path or the device itself.'
+  },
+  {
+    id: 'media',
+    tab: 'media',
+    eyebrow: 'Step 2 of 5',
+    title: 'Start in Media Library',
+    summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
+    details:
+      'Use this tab to upload videos or images, filter the library, preview a file, and remove media you no longer need.'
+  },
+  {
+    id: 'rtsp',
+    tab: 'rtsp',
+    eyebrow: 'Step 3 of 5',
+    title: 'Set up RTSP sources',
+    summary: 'This tab turns files from the library into live RTSP source slots such as src1, src2, and src3.',
+    details:
+      'Pick which file each source should play, start one stream or many at once, stop everything, and copy the RTSP URL when another tool needs to consume the stream.'
+  },
+  {
+    id: 'viewer',
+    tab: 'viewer',
+    eyebrow: 'Step 4 of 5',
+    title: 'Live viewer',
+    summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
+    details:
+      'Your application can send video into UDP ports 9000-9079, where each port maps to one viewer channel. It can also send matching metadata into UDP ports 9100-9179 so overlays appear on the same channel. For setup guidance and application examples, see docs.sima-neat.com.'
+  },
+  {
+    id: 'visualizer',
+    tab: 'visualizer',
+    eyebrow: 'Step 5 of 5',
+    title: 'Check system stats',
+    summary: 'The Stats tab helps you understand what the device and pipeline are doing while streams are running.',
+    details:
+      'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
+  }
+]
 
 function flattenFiles(tree, acc = []) {
   for (const node of tree || []) {
@@ -164,6 +212,16 @@ export default function App() {
   const [metrics, setMetrics] = useState(null)
   const [metricEvents, setMetricEvents] = useState([])
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
+  const [devkitShellInfo, setDevkitShellInfo] = useState(null)
+  const [devkitShellBusy, setDevkitShellBusy] = useState(false)
+  const [tourOpen, setTourOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(ONBOARDING_STORAGE_KEY) !== '1'
+    } catch {
+      return true
+    }
+  })
+  const [tourStep, setTourStep] = useState(0)
   const [error, setError] = useState('')
   const metricEs = useRef(null)
 
@@ -196,10 +254,17 @@ export default function App() {
   }
 
   async function loadViewerUrl() {
-    const allSources = Array.from({ length: SOURCE_COUNT }, (_, i) => i).join(',')
-    const params = new URLSearchParams({ src: allSources })
-    const data = await fetchJson(`/api/viewer-url?${params.toString()}`)
+    const data = await fetchJson('/api/viewer-url')
     setViewerUrl(data.url)
+  }
+
+  async function loadDevkitShellInfo() {
+    try {
+      const data = await fetchJson('/api/devkit-shell')
+      setDevkitShellInfo(data)
+    } catch {
+      setDevkitShellInfo(null)
+    }
   }
 
   async function loadRtspBase() {
@@ -238,7 +303,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics()]).catch((e) => setError(e.message))
+    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
   }, [])
 
   useEffect(() => {
@@ -246,6 +311,13 @@ export default function App() {
       window.localStorage.setItem(TAB_STORAGE_KEY, tab)
     } catch {}
   }, [tab])
+
+  useEffect(() => {
+    if (!tourOpen) return
+    const step = ONBOARDING_STEPS[tourStep]
+    if (!step || !step.tab || step.tab === tab) return
+    setTab(step.tab)
+  }, [tab, tourOpen, tourStep])
 
   useEffect(() => {
     if (!uploadStatus) return
@@ -429,6 +501,64 @@ export default function App() {
     setUploadStatus(`Copied: ${text}`)
   }
 
+  function closeTour(markSeen = true) {
+    setTourOpen(false)
+    if (!markSeen) return
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, '1')
+    } catch {}
+  }
+
+  function toggleTour() {
+    if (tourOpen) {
+      closeTour(true)
+      return
+    }
+    setTourStep(0)
+    setTourOpen(true)
+  }
+
+  function nextTourStep() {
+    if (tourStep >= ONBOARDING_STEPS.length - 1) {
+      closeTour(true)
+      return
+    }
+    setTourStep((prev) => prev + 1)
+  }
+
+  function previousTourStep() {
+    setTourStep((prev) => Math.max(0, prev - 1))
+  }
+
+  async function connectDevkitShell() {
+    let shellWindow = null
+    try {
+      if (!devkitShellInfo?.available) {
+        throw new Error('webssh is not installed in this Insight environment.')
+      }
+      setDevkitShellBusy(true)
+      shellWindow = window.open('', '_blank')
+      const data = await fetchJson('/api/devkit-shell/start', { method: 'POST' })
+      setDevkitShellInfo(data)
+      if (!data.launch_url) {
+        throw new Error('DevKit shell launch URL is unavailable.')
+      }
+      if (shellWindow) {
+        shellWindow.location = data.launch_url
+      } else {
+        window.open(data.launch_url, '_blank')
+      }
+    } catch (e) {
+      if (shellWindow && !shellWindow.closed) shellWindow.close()
+      setError(e.message)
+    } finally {
+      setDevkitShellBusy(false)
+    }
+  }
+
+  const activeTourStep = ONBOARDING_STEPS[tourStep]
+  const blurForOverview = tourOpen && tourStep === 0
+
   const sourcePreviewExt = (currentSource.file || '').split('.').pop()?.toLowerCase()
   const sourcePreviewIsVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(sourcePreviewExt)
   const sourcePreviewIsImage = ['jpg', 'jpeg', 'png'].includes(sourcePreviewExt)
@@ -488,35 +618,93 @@ export default function App() {
           </div>
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
+        <div className="masthead-actions">
+          {devkitShellInfo?.configured && (
+            <button
+              type="button"
+              className="devkit-trigger"
+              onClick={connectDevkitShell}
+              disabled={devkitShellBusy || !devkitShellInfo.available}
+              title={
+                devkitShellInfo.available
+                  ? `Open browser shell for ${devkitShellInfo.devkit_ip}`
+                  : 'webssh is not installed in this Insight environment'
+              }
+            >
+              {devkitShellBusy ? 'Opening DevKit...' : devkitShellInfo.button_label}
+            </button>
+          )}
+          <button
+            type="button"
+            className="tour-trigger"
+            onClick={toggleTour}
+            aria-pressed={tourOpen}
+          >
+            {tourOpen ? 'Hide Tour' : 'Quick Tour'}
+          </button>
+        </div>
       </header>
 
-      <div className="toast-stack" aria-live="polite">
-        {error && <div className="toast error">{error}</div>}
-        {uploadStatus && <div className="toast status">{uploadStatus}</div>}
-      </div>
+      {tourOpen && (
+        <section className="onboarding-panel" aria-label="Insight quick tour">
+          <div className="onboarding-copy">
+            <p className="onboarding-eyebrow">{activeTourStep.eyebrow}</p>
+            <h2 className="onboarding-title">{activeTourStep.title}</h2>
+            <p className="onboarding-summary">{activeTourStep.summary}</p>
+            <p className="onboarding-detail">{activeTourStep.details}</p>
+          </div>
+          <div className="onboarding-footer">
+            <div className="onboarding-progress" aria-hidden="true">
+              {ONBOARDING_STEPS.map((step, index) => (
+                <span
+                  key={step.id}
+                  className={index === tourStep ? 'onboarding-dot active' : 'onboarding-dot'}
+                />
+              ))}
+            </div>
+            <div className="modal-actions onboarding-actions">
+              <button type="button" onClick={() => closeTour(true)}>
+                Skip Tour
+              </button>
+              <button type="button" onClick={previousTourStep} disabled={tourStep === 0}>
+                Back
+              </button>
+              <button type="button" className="btn-tonal" onClick={nextTourStep}>
+                {tourStep === ONBOARDING_STEPS.length - 1 ? 'Finish' : 'Next'}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
-      <nav className="tab-toolbar" role="tablist" aria-label="Main sections">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            aria-label={t.label}
-            title={t.label}
-            className={tab === t.id ? 'tab-icon-btn active' : 'tab-icon-btn'}
-            onClick={() => setTab(t.id)}
-          >
-            <img src={t.icon} alt="" className="tab-icon" />
-            <span className="tab-label">{t.label}</span>
-          </button>
-        ))}
-      </nav>
+      <div className={blurForOverview ? 'tour-blur-shell' : ''}>
+        <div className="toast-stack" aria-live="polite">
+          {error && <div className="toast error">{error}</div>}
+          {uploadStatus && <div className="toast status">{uploadStatus}</div>}
+        </div>
 
-      <main className="content">
-        <div key={tab} className="tab-stage">
-        {tab === 'media' && (
-          <div className="grid two">
-            <section className="panel">
+        <nav className="tab-toolbar" role="tablist" aria-label="Main sections">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              aria-label={t.label}
+              title={t.label}
+              className={tab === t.id ? 'tab-icon-btn active' : 'tab-icon-btn'}
+              onClick={() => setTab(t.id)}
+            >
+              <img src={t.icon} alt="" className="tab-icon" />
+              <span className="tab-label">{t.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <main className="content">
+          <div key={tab} className="tab-stage">
+          {tab === 'media' && (
+            <div className="grid two">
+              <section className="panel">
               <div className="panel-topbar">
                 <div>
                   <h2>Media Library</h2>
@@ -756,8 +944,9 @@ export default function App() {
           </div>
         )}
 
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
       {deleteConfirmOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm deletion">
@@ -795,6 +984,7 @@ export default function App() {
           </div>
         </div>
       )}
+
     </div>
   )
 }

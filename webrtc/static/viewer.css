@@ -189,6 +189,7 @@ canvas {
 .layout-presets {
   display: inline-flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .page-size-label {
@@ -205,6 +206,7 @@ canvas {
   padding: 4px 8px;
   cursor: pointer;
   font-size: 12px;
+  min-width: 34px;
 }
 
 .preset-btn.active {

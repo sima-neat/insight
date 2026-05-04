@@ -41,7 +41,8 @@ setup(
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",
-        "paramiko"
+        "paramiko",
+        "webssh>=1.6.3",
     ],
     package_data={
         "neat_insight": [
