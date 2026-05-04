@@ -60,6 +60,7 @@ setup(
     entry_points={
         "console_scripts": [
             "neat-insight = neat_insight.app:main",
+            "neat-insight-metadata-test = neat_insight.tools.metadata_test:main",
         ],
     },
     classifiers=[

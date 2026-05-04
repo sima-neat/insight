@@ -7,7 +7,11 @@ import platform
 import shutil
 import signal
 import socket
+import ssl
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -198,13 +202,17 @@ def ensure_sys_metrics_publisher_started():
         sys_metrics_publisher.start()
 
 
+# API: readiness probe for the neat-insight backend.
 @app.get("/api/health")
 def health():
+    """Return service identity, health status, and a UTC timestamp for smoke tests and readiness checks."""
     return {"status": "ok", "service": "neat-insight", "time": datetime.utcnow().isoformat() + "Z"}
 
 
+# API: retrieve recent board or service log lines by a whitelisted log name.
 @app.get("/api/logs/<logname>")
 def get_log(logname):
+    """Return up to the latest 10,000 lines for EV74 or syslog as text/plain, or 404 for unknown logs."""
     if logname not in ALLOWED_LOGS:
         return _json_error("Log not found", 404)
 
@@ -214,13 +222,17 @@ def get_log(logname):
     return Response(tail_lines(log_path, 10000, 256 * 1024), mimetype="text/plain")
 
 
+# API: snapshot current host/devkit metrics.
 @app.get("/api/metrics")
 def metrics():
+    """Return CPU, memory, disk, temperature, MLA, remote, and pipeline-status compatible metrics."""
     return collect_system_metrics()
 
 
+# API: stream neat metrics events to the browser over server-sent events.
 @app.get("/api/neat-metrics")
 def stream_neat_metrics():
+    """Open a text/event-stream response that emits JSON metrics events from the local metrics broker."""
     ensure_sys_metrics_publisher_started()
 
     def event_stream():
@@ -233,8 +245,45 @@ def stream_neat_metrics():
     return response
 
 
+# API: proxy vf UDP/RTP ingest statistics for active inbound streams.
+@app.get("/api/ingest/stats")
+def ingest_stats():
+    """Return vf ingest stats for RTP (9000+) and metadata JSON over UDP (9100+); all=1 includes inactive channels and verbose=1 adds diagnostics."""
+    return _proxy_vf_stats("/ingest/stats", "vf ingest stats")
+
+
+# API: proxy vf WebRTC egress statistics for browser delivery and render diagnostics.
+@app.get("/api/egress/stats")
+def egress_stats():
+    """Return vf egress stats including RTCP/browser reports plus metadata DataChannel send counters; all=1 includes inactive peers and verbose=1 adds diagnostics."""
+    return _proxy_vf_stats("/egress/stats", "vf egress stats")
+
+
+def _proxy_vf_stats(path: str, label: str):
+    query = urllib.parse.urlencode(
+        {
+            key: request.args[key]
+            for key in ("all", "verbose")
+            if key in request.args
+        }
+    )
+    url = f"https://127.0.0.1:8081{path}"
+    if query:
+        url = f"{url}?{query}"
+
+    try:
+        context = ssl._create_unverified_context()
+        with urllib.request.urlopen(url, timeout=2.0, context=context) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return jsonify(payload)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        return _json_error(f"{label} unavailable: {exc}", 502)
+
+
+# API: enumerate uploaded media as a folder tree for the Media Library UI.
 @app.get("/api/media-files")
 def list_media_files():
+    """Return a recursive tree of files under MEDIA_DIR, excluding hidden files and macOS archive metadata."""
     def build_tree(base_path: Path, rel_path: str = ""):
         result = []
         full_path = base_path / rel_path
@@ -264,13 +313,17 @@ def list_media_files():
     return jsonify(build_tree(MEDIA_DIR))
 
 
+# API: report whether optional media inspection/streaming tools are installed.
 @app.get("/api/system/tools")
 def system_tools():
+    """Return booleans indicating whether ffmpeg and gst-launch-1.0 are available on PATH."""
     return {"ffmpeg": shutil.which("ffmpeg") is not None, "gstreamer": shutil.which("gst-launch-1.0") is not None}
 
 
+# API: upload a media file or archive into the neat-insight media library.
 @app.post("/api/upload/media")
 def upload_media():
+    """Accept multipart form field 'file' and stream plain-text progress while saving or extracting media."""
     def generate():
         uploaded_file = request.files.get("file")
         if not uploaded_file or uploaded_file.filename == "":
@@ -317,8 +370,10 @@ def upload_media():
     return Response(stream_with_context(generate()), mimetype="text/plain")
 
 
+# API: delete one media library file or directory.
 @app.post("/api/delete-media")
 def delete_media():
+    """Accept JSON {'path': str}; safely delete the path under MEDIA_DIR and clear matching media-source assignments."""
     data = request.get_json() or {}
     requested_path = data.get("path")
     if not requested_path:
@@ -353,8 +408,10 @@ def delete_media():
         return _json_error(str(exc), 500)
 
 
+# API: inspect one uploaded media file.
 @app.post("/api/media-info")
 def media_info():
+    """Accept JSON {'path': str}; return file size plus image dimensions or video track metadata."""
     data = request.get_json() or {}
     rel_path = data.get("path")
     if not rel_path:
@@ -403,13 +460,17 @@ def media_info():
     return info
 
 
+# API: serve raw uploaded media content to the browser.
 @app.get("/media/<path:filename>")
 def serve_media(filename):
+    """Return a file from MEDIA_DIR using Flask's safe directory serving for previews and downloads."""
     return send_from_directory(MEDIA_DIR, filename)
 
 
+# API: list media files that can be assigned to RTSP media sources.
 @app.get("/api/mediasrc/videos")
 def list_video_files():
+    """Return sorted relative paths for files whose extension is accepted by the media-source streamer."""
     video_files = _collect_video_files()
     return jsonify(video_files)
 
@@ -425,13 +486,17 @@ def _collect_video_files():
     return sorted(video_files)
 
 
+# API: read current RTSP media-source slot assignments.
 @app.get("/api/mediasrc")
 def get_sources():
+    """Return persisted media-source objects, including index, assigned file path, and playback state."""
     return jsonify(load_sources())
 
 
+# API: assign or clear a media file for one RTSP source slot.
 @app.post("/api/mediasrc/assign")
 def assign_source():
+    """Accept JSON {'index': int, 'file': str}; update a source assignment and restart it if already playing."""
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
@@ -459,8 +524,10 @@ def assign_source():
     return _json_error("Source not found", 404)
 
 
+# API: assign available videos to all source slots in index order.
 @app.post("/api/mediasrc/auto-assign-all")
 def auto_assign_all_sources():
+    """Stop active sources, assign each slot a unique video when available, persist the stopped assignments."""
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
 
@@ -482,8 +549,10 @@ def auto_assign_all_sources():
     }
 
 
+# API: start streaming one assigned media source.
 @app.post("/api/mediasrc/start")
 def start_source():
+    """Accept JSON {'index': int}; start the assigned file for that source and mark its state as playing."""
     data = request.get_json() or {}
     index = data.get("index")
     if index is None:
@@ -505,8 +574,10 @@ def start_source():
     return _json_error("Source not found", 404)
 
 
+# API: start multiple assigned media sources in source-index order.
 @app.post("/api/mediasrc/start-bulk")
 def start_sources_bulk():
+    """Accept JSON {'count': int}; start the first count assigned sources and report starts, skips, and errors."""
     data = request.get_json() or {}
     raw_count = data.get("count")
     if raw_count is None:
@@ -558,8 +629,10 @@ def start_sources_bulk():
     }
 
 
+# API: stop one RTSP media source.
 @app.post("/api/mediasrc/stop")
 def stop_source():
+    """Accept JSON {'index': int}; stop the source process and persist its state as stopped."""
     data = request.get_json() or {}
     index = data.get("index")
     if index is None:
@@ -576,8 +649,10 @@ def stop_source():
     return _json_error("Source not found", 404)
 
 
+# API: stop every RTSP media source.
 @app.post("/api/mediasrc/stop-all")
 def stop_all_sources():
+    """Stop all source processes, persist every source as stopped, and return how many were previously playing."""
     sources = load_sources()
     stopped_count = 0
     for src in sources:
@@ -591,8 +666,10 @@ def stop_all_sources():
     return {"success": True, "stopped_count": stopped_count, "message": f"Stopped {stopped_count} source(s)."}
 
 
+# API: reset media-source assignments to their default empty state.
 @app.post("/api/mediasrc/reset")
 def reset_all_sources():
+    """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     sources = load_sources()
     for src in sources:
         stop_media_stream(src.get("index"))
@@ -600,13 +677,17 @@ def reset_all_sources():
     return {"success": True, "message": "Reset all source assignments."}
 
 
+# API: expose environment flags used by the frontend.
 @app.get("/api/envinfo")
 def envinfo():
+    """Return whether this process runs on a SiMa board and whether remote devkit mode is configured."""
     return {"is_sima_board": is_sima_board(), "is_remote_devkit_configured": is_remote_devkit_configured()}
 
 
+# API: retrieve local or remote build information.
 @app.get("/api/buildinfo")
 def buildinfo():
+    """Return parsed SiMa build metadata from the board/devkit, or host platform details when no devkit is configured."""
     build_paths = ["/etc/build", "/etc/buildinfo"]
     if is_sima_board():
         for path in build_paths:
@@ -631,8 +712,10 @@ def buildinfo():
     return {"MACHINE": platform.machine(), "SIMA_BUILD_VERSION": platform.platform()}
 
 
+# API: identify the backend IP address browser-side viewers should use.
 @app.get("/api/server-ip")
 def server_ip():
+    """Return CONTAINER_HOST_IP when set, otherwise infer the reachable local IP or fall back to 127.0.0.1."""
     container_ip = os.getenv("CONTAINER_HOST_IP")
     if container_ip:
         return {"ip": container_ip}
@@ -651,8 +734,10 @@ def server_ip():
         return {"ip": "127.0.0.1"}
 
 
+# API: build a vf viewer URL for the requested source selection.
 @app.get("/api/viewer-url")
 def viewer_url():
+    """Accept query args mode and src; return the HTTPS vf viewer URL on port 8081 for the request host."""
     mode = request.args.get("mode", "light")
     default_src = ",".join(str(i) for i in range(DEFAULT_SOURCE_COUNT))
     src = request.args.get("src", default_src)
@@ -660,15 +745,19 @@ def viewer_url():
     return {"url": f"https://{host_ip}:8081/static/viewer.html?mode={mode}&src={src}"}
 
 
+# API: serve the built single-page application entrypoint.
 @app.get("/")
 def index():
+    """Return frontend index.html when built, otherwise a 503 with the build command hint."""
     if FRONTEND_DIST.exists():
         return send_from_directory(FRONTEND_DIST, "index.html")
     return "Frontend not built. Run: cd frontend && npm install && npm run build", 503
 
 
+# API: serve frontend static assets or fall back to the SPA entrypoint for client-side routes.
 @app.get("/<path:path>")
 def spa(path):
+    """Return a built frontend asset when it exists; otherwise return index.html for SPA routing."""
     if FRONTEND_DIST.exists():
         file_path = FRONTEND_DIST / path
         if file_path.exists() and file_path.is_file():

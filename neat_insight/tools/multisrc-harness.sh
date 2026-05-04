@@ -36,7 +36,7 @@ Options:
   --count <n>                  Number of channels (default: 16)
   --video-start-port <port>    Starting video RTP port (default: 9000)
   --meta-start-port <port>     Starting metadata UDP port (default: 9100)
-  --meta-types <csv>           Metadata types for metadata-test.py (default: object-detection)
+  --meta-types <csv>           Metadata types for neat-insight-metadata-test (default: object-detection)
   --foreground                 Keep running in foreground until Ctrl+C
 
 Examples:
@@ -175,11 +175,21 @@ start() {
   done
 
   echo "Starting metadata sender to 127.0.0.1:$META_START_PORT..$((META_START_PORT + COUNT - 1))"
-  python3 neat_insight/tools/metadata-test.py \
-    --start-port "$META_START_PORT" \
-    --count "$COUNT" \
-    --types "$META_TYPES" \
-    > "$LOG_DIR/metadata.log" 2>&1 &
+  if command -v neat-insight-metadata-test >/dev/null 2>&1; then
+    neat-insight-metadata-test \
+      --host 127.0.0.1 \
+      --start-port "$META_START_PORT" \
+      --count "$COUNT" \
+      --types "$META_TYPES" \
+      > "$LOG_DIR/metadata.log" 2>&1 &
+  else
+    python3 -m neat_insight.tools.metadata_test \
+      --host 127.0.0.1 \
+      --start-port "$META_START_PORT" \
+      --count "$COUNT" \
+      --types "$META_TYPES" \
+      > "$LOG_DIR/metadata.log" 2>&1 &
+  fi
   echo $! > "$META_PID_FILE"
 
   sleep 1

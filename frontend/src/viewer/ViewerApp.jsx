@@ -260,16 +260,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
             const height = report.frameHeight ?? "?";
 
             const tracker = rtcpRef.current;
-            if (tracker.lastBytes == null) {
-              tracker.lastBytes = report.bytesReceived;
-              tracker.lastTs = report.timestamp;
-              tracker.lastFramesDecoded = report.framesDecoded ?? tracker.lastFramesDecoded;
-              return;
-            }
-
-            const deltaBytes = report.bytesReceived - tracker.lastBytes;
-            const deltaTime = (report.timestamp - tracker.lastTs) / 1000;
-            const bitrate = deltaTime > 0 ? ((deltaBytes * 8) / deltaTime / 1000).toFixed(1) : "0.0";
+            const hasPreviousSample = tracker.lastBytes != null && tracker.lastTs != null;
+            const deltaBytes = hasPreviousSample ? report.bytesReceived - tracker.lastBytes : 0;
+            const deltaTime = hasPreviousSample ? (report.timestamp - tracker.lastTs) / 1000 : 0;
+            const bitrateBps = deltaTime > 0 ? (deltaBytes * 8) / deltaTime : 0;
+            const bitrate = (bitrateBps / 1000).toFixed(1);
             if (
               typeof report.framesDecoded === "number" &&
               (tracker.lastFramesDecoded == null || report.framesDecoded > tracker.lastFramesDecoded)
@@ -292,6 +287,52 @@ function ChannelTile({ index, onActiveChange, debug }) {
               paused: videoRef.current?.paused,
               currentTime: videoRef.current?.currentTime,
             });
+
+            if (metadataChannel?.readyState === "open") {
+              const video = videoRef.current;
+              const lastFrameAgeMs =
+                playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
+              metadataChannel.send(
+                JSON.stringify({
+                  type: "browser_egress_stats",
+                  channel: index,
+                  time: new Date().toISOString(),
+                  connection: {
+                    connection_state: pc.connectionState,
+                    ice_connection_state: pc.iceConnectionState,
+                    ice_gathering_state: pc.iceGatheringState,
+                    signaling_state: pc.signalingState,
+                  },
+                  inbound_rtp: {
+                    bytes_received: report.bytesReceived,
+                    packets_received: report.packetsReceived,
+                    packets_lost: report.packetsLost,
+                    frames_received: report.framesReceived,
+                    frames_decoded: report.framesDecoded,
+                    frames_dropped: report.framesDropped,
+                    frames_per_second: report.framesPerSecond,
+                    frame_width: report.frameWidth,
+                    frame_height: report.frameHeight,
+                    freeze_count: report.freezeCount,
+                    pause_count: report.pauseCount,
+                    bitrate_bps: Number(bitrateBps.toFixed(1)),
+                  },
+                  video: {
+                    ready_state: video?.readyState ?? 0,
+                    paused: video?.paused ?? true,
+                    current_time: video?.currentTime ?? 0,
+                    video_width: video?.videoWidth,
+                    video_height: video?.videoHeight,
+                    last_frame_age_ms: lastFrameAgeMs,
+                    active: activeRef.current,
+                  },
+                  data_channel: {
+                    state: metadataChannel.readyState,
+                    metadata_messages_per_sec: tracker.lastCount,
+                  },
+                })
+              );
+            }
 
             tracker.lastBytes = report.bytesReceived;
             tracker.lastTs = report.timestamp;
