@@ -21,9 +21,12 @@ import (
 )
 
 type Channel struct {
-	Port        int
-	Track       atomic.Pointer[webrtc.TrackLocalStaticRTP]
-	DataChannel atomic.Pointer[webrtc.DataChannel]
+	Port              int
+	Track             atomic.Pointer[webrtc.TrackLocalStaticRTP]
+	DataChannel       atomic.Pointer[webrtc.DataChannel]
+	DataChannelPeerID atomic.Uint64
+	Stats             *IngestStats
+	Egress            *EgressStats
 }
 
 var channels [80]*Channel
@@ -34,13 +37,19 @@ func main() {
 	flag.Parse()
 
 	for i := 0; i < 80; i++ {
-		channels[i] = &Channel{Port: 9000 + i}
+		channels[i] = &Channel{
+			Port:   9000 + i,
+			Stats:  NewIngestStats(i, 9000+i, 9100+i),
+			Egress: NewEgressStats(i),
+		}
 		go startUDPListener(channels[i])
 		go startMetadataListener(channels[i], 9100+i)
 	}
 
 	http.HandleFunc("/", serveViewer)
 	http.HandleFunc("/offer", handleOffer)
+	http.HandleFunc("/ingest/stats", handleIngestStats)
+	http.HandleFunc("/egress/stats", handleEgressStats)
 	http.HandleFunc("/reverse", serveReverse)
 	http.HandleFunc("/reverse-offer", handleReverseOffer)
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
@@ -200,6 +209,25 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "PeerConnection failed", http.StatusInternalServerError)
 		return
 	}
+	ingestPeerID := ch.Stats.RegisterPeer()
+	egressPeerID := ch.Egress.RegisterPeer()
+	ch.Stats.UpdatePeerState(ingestPeerID, pc.ConnectionState().String())
+	ch.Egress.UpdatePeerConnectionState(
+		egressPeerID,
+		pc.ConnectionState().String(),
+		pc.ICEConnectionState().String(),
+		pc.SignalingState().String(),
+	)
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		ch.Stats.UpdatePeerState(ingestPeerID, state.String())
+		ch.Egress.UpdatePeerConnectionState(egressPeerID, state.String(), pc.ICEConnectionState().String(), pc.SignalingState().String())
+	})
+	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		ch.Egress.UpdatePeerConnectionState(egressPeerID, pc.ConnectionState().String(), state.String(), pc.SignalingState().String())
+	})
+	pc.OnSignalingStateChange(func(state webrtc.SignalingState) {
+		ch.Egress.UpdatePeerConnectionState(egressPeerID, pc.ConnectionState().String(), pc.ICEConnectionState().String(), state.String())
+	})
 
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c != nil {
@@ -219,19 +247,32 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		}
 		ch.Track.Store(track)
 	}
-	pc.AddTrack(track)
+	sender, err := pc.AddTrack(track)
+	if err != nil {
+		http.Error(w, "AddTrack failed", http.StatusInternalServerError)
+		return
+	}
+	go readSenderRTCP(sender, ch.Egress, egressPeerID)
 	go sendRTCP(pc)
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[Channel %d] Incoming DataChannel: %s", idx, dc.Label())
 		if dc.Label() == "metadata" {
 			ch.DataChannel.Store(dc)
+			ch.Egress.UpdateDataChannelState(egressPeerID, "connecting")
 			dc.OnOpen(func() {
 				log.Printf("[Channel %d] DataChannel open", idx)
+				ch.DataChannelPeerID.Store(egressPeerID)
+				ch.Egress.UpdateDataChannelState(egressPeerID, "open")
 			})
 			dc.OnClose(func() {
 				log.Printf("[Channel %d] DataChannel closed", idx)
 				ch.DataChannel.Store(nil)
+				ch.DataChannelPeerID.Store(0)
+				ch.Egress.UpdateDataChannelState(egressPeerID, "closed")
+			})
+			dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+				ch.Egress.RecordBrowserReport(egressPeerID, msg.Data)
 			})
 		}
 	})
@@ -267,6 +308,33 @@ func sendRTCP(pc *webrtc.PeerConnection) {
 	}
 }
 
+func handleIngestStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+
+	includeAll := shouldIncludeAll(r)
+	includeVerbose := shouldIncludeVerbose(r)
+	now := time.Now()
+	response := IngestStatsResponse{
+		Time:        now.UTC().Format(time.RFC3339Nano),
+		ActiveTTLMS: ingestActiveTTL.Milliseconds(),
+		Channels:    []ChannelIngestSnapshot{},
+	}
+
+	for _, ch := range channels {
+		if ch == nil || ch.Stats == nil {
+			continue
+		}
+		snapshot := ch.Stats.Snapshot(includeVerbose, ch.Track.Load() != nil, now)
+		if !includeAll && !snapshot.Active {
+			continue
+		}
+		response.Channels = append(response.Channels, snapshot)
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
 func startUDPListener(ch *Channel) {
 	addr := net.UDPAddr{IP: net.IPv4zero, Port: ch.Port}
 	conn, err := net.ListenUDP("udp", &addr)
@@ -279,7 +347,7 @@ func startUDPListener(ch *Channel) {
 	buf := make([]byte, 4096)
 
 	for {
-		n, _, err := conn.ReadFrom(buf)
+		n, remoteAddr, err := conn.ReadFrom(buf)
 		if err != nil {
 			log.Println("RTP read error:", err)
 			continue
@@ -287,17 +355,23 @@ func startUDPListener(ch *Channel) {
 
 		var pkt rtp.Packet
 		if err := pkt.Unmarshal(buf[:n]); err != nil {
+			ch.Stats.RecordMalformedPacket(n, remoteAddr, err)
 			log.Println("❌ RTP unmarshal error:", err)
 			continue
 		}
+		ch.Stats.RecordRTPPacket(&pkt, n, remoteAddr)
 
 		track := ch.Track.Load()
 		if track == nil {
+			ch.Stats.RecordDroppedNoTrack()
 			continue
 		}
 		if _, err := track.Write(buf[:n]); err != nil && err != io.ErrClosedPipe {
+			ch.Stats.RecordWriteError(err)
 			log.Println("❌ Write error:", err)
+			continue
 		}
+		ch.Stats.RecordForwarded(n)
 	}
 }
 
@@ -313,7 +387,7 @@ func startMetadataListener(ch *Channel, port int) {
 	buf := make([]byte, 65507)
 
 	for {
-		n, _, err := conn.ReadFrom(buf)
+		n, remoteAddr, err := conn.ReadFrom(buf)
 		if err != nil {
 			log.Println("Metadata read error:", err)
 			continue
@@ -321,13 +395,22 @@ func startMetadataListener(ch *Channel, port int) {
 
 		// Trim trailing 0s (null bytes) from fixed-size padded messages
 		trimmed := bytes.TrimRight(buf[:n], "\x00")
+		ch.Stats.RecordMetadataMessage(len(trimmed), remoteAddr, trimmed)
 
 		dc := ch.DataChannel.Load()
 		if dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen {
 			jsonStr := string(trimmed)
 			if err := dc.SendText(jsonStr); err != nil {
+				ch.Stats.RecordMetadataSendError(err)
+				ch.Egress.RecordMetadataSendError(ch.DataChannelPeerID.Load(), err)
 				log.Println("❌ Failed to send metadata via DataChannel:", err)
+			} else {
+				ch.Stats.RecordMetadataForwarded(len(trimmed))
+				ch.Egress.RecordMetadataSent(ch.DataChannelPeerID.Load(), len(trimmed))
 			}
+		} else {
+			ch.Stats.RecordMetadataDroppedNoDataChannel()
+			ch.Egress.RecordMetadataDroppedNoDataChannel()
 		}
 	}
 }

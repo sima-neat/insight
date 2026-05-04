@@ -41,7 +41,8 @@ setup(
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",
-        "paramiko"
+        "paramiko",
+        "webssh>=1.6.3",
     ],
     package_data={
         "neat_insight": [
@@ -60,6 +61,7 @@ setup(
     entry_points={
         "console_scripts": [
             "neat-insight = neat_insight.app:main",
+            "neat-insight-metadata-test = neat_insight.tools.metadata_test:main",
         ],
     },
     classifiers=[

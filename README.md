@@ -90,3 +90,20 @@ neat-insight --port 9900
 Useful build options:
 - `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64|windows-amd64>`
 - `--skip-frontend`
+
+## Testing metadata
+
+`neat-insight` now ships a metadata test sender for vf metadata ports (`9100-9179`).
+
+Examples:
+
+```bash
+neat-insight-metadata-test --count 1 --types object-detection
+neat-insight-metadata-test --count 4 --types object-detection,classification,pose-estimation
+neat_insight/tools/multisrc-harness.sh start --count 16
+```
+
+Notes:
+- Default destination is `127.0.0.1`, starting at UDP port `9100`.
+- Supported metadata types are `object-detection`, `classification`, `pose-estimation`, and `segmentation`.
+- `neat_insight/tools/metadata-test.py` remains as a compatibility wrapper, but the packaged CLI is the preferred entry point.

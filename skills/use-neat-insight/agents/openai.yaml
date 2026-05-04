@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Neat Insight"
+  short_description: "Use neat-insight APIs, media sources, and vf stats."
+  default_prompt: "Use neat-insight APIs to inspect service health, manage media files, control RTSP sources, debug vf UDP/RTP ingest and WebRTC egress/browser stats, and build viewer URLs."

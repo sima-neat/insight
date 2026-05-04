@@ -80,6 +80,10 @@ select:focus-visible,
   box-shadow: var(--shadow-sm);
   padding: 18px 22px;
   margin-bottom: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .masthead-title-row {
@@ -107,6 +111,57 @@ select:focus-visible,
   margin: 6px 0 0;
   color: var(--ink-soft);
   font-size: 13px;
+}
+
+.masthead-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.devkit-trigger,
+.tour-trigger {
+  background: var(--surface-soft);
+  border-color: var(--line);
+  color: #365468;
+  white-space: nowrap;
+}
+
+.devkit-trigger {
+  border-color: rgba(14, 90, 184, 0.28);
+  background: var(--accent-soft);
+  color: #184b86;
+}
+
+.tour-blur-shell {
+  filter: blur(6px);
+  opacity: 0.68;
+  pointer-events: none;
+  user-select: none;
+  transition: filter 220ms ease, opacity 220ms ease;
+}
+
+.onboarding-panel {
+  border: 1px solid rgba(14, 90, 184, 0.18);
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 18px 20px;
+  margin-bottom: 14px;
+}
+
+.onboarding-copy {
+  max-width: 760px;
+}
+
+.onboarding-title {
+  margin: 0;
+  font-family: 'Sora', sans-serif;
+  font-size: 22px;
+  line-height: 1.2;
+  color: #1c3448;
 }
 
 .tab-toolbar {
@@ -558,6 +613,7 @@ button:disabled {
 
 .viewer-panel iframe {
   width: 100%;
+  margin-top: 24px;
   min-height: 420px;
   height: 74vh;
   border: 1px solid var(--line);
@@ -764,6 +820,60 @@ button:disabled {
   font-size: 13px;
 }
 
+.onboarding-eyebrow {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #567086;
+}
+
+.onboarding-summary,
+.onboarding-detail {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.onboarding-summary {
+  color: #2f495e;
+}
+
+.onboarding-detail {
+  margin-top: 10px;
+  color: var(--ink-soft);
+}
+
+.onboarding-progress {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.onboarding-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #d2dce7;
+}
+
+.onboarding-dot.active {
+  background: var(--accent);
+}
+
+.onboarding-actions {
+  margin-top: 0;
+}
+
+.onboarding-footer {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .bulk-slider-row {
   margin-top: 12px;
   display: grid;
@@ -818,6 +928,14 @@ button:disabled {
 @media (max-width: 980px) {
   .app-shell {
     padding: 14px;
+  }
+
+  .masthead {
+    flex-direction: column;
+  }
+
+  .onboarding-footer {
+    align-items: flex-start;
   }
 
   .grid.two {

@@ -287,7 +287,7 @@ rm -rf "$GO_TEMP_DIR"
 mkdir -p "$GO_TEMP_DIR"
 
 # ==== Prepare Go build temp module ====
-cp webrtc/viewer.go "$GO_TEMP_DIR/"
+cp webrtc/*.go "$GO_TEMP_DIR/"
 pushd "$GO_TEMP_DIR" > /dev/null
 go mod init viewer
 go mod tidy
@@ -384,7 +384,7 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     echo "🛠 Building target: $target"
     pushd "$GO_TEMP_DIR" > /dev/null
     echo "🧱 Go build target GOOS=$GOOS GOARCH=$GOARCH"
-    GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -o "../$VF_BIN_NAME" viewer.go
+    GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build -o "../$VF_BIN_NAME" .
     popd > /dev/null
 
     # ==== Prepare neat_insight/bin ====
