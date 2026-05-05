@@ -81,6 +81,65 @@ function prettyValue(key, value) {
   return String(value)
 }
 
+function uploadProgressForLine(line, file, position, total) {
+  const cleanLine = line.trim()
+  const scope = total > 1 ? `${position}/${total}` : '1/1'
+  const percentMatch = cleanLine.match(/^Optimizing .*?:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (percentMatch) {
+    return {
+      title: `Preparing media ${scope}`,
+      detail: `${file.name} - ${percentMatch[2]}`,
+      percent: Number.parseInt(percentMatch[1], 10)
+    }
+  }
+
+  if (cleanLine.startsWith('Optimizing ')) {
+    return {
+      title: `Preparing media ${scope}`,
+      detail: file.name,
+      percent: null
+    }
+  }
+
+  if (cleanLine.startsWith('Preparing file ')) {
+    return {
+      title: `Scanning upload ${scope}`,
+      detail: cleanLine.replace(/^Preparing file\s+/, 'File '),
+      percent: null
+    }
+  }
+
+  if (cleanLine.startsWith('Optimized ')) {
+    return {
+      title: `Prepared media ${scope}`,
+      detail: file.name,
+      percent: 100
+    }
+  }
+
+  if (cleanLine.startsWith('Saved archive')) {
+    return {
+      title: `Uploading archive ${scope}`,
+      detail: file.name,
+      percent: null
+    }
+  }
+
+  if (cleanLine === 'Archive extracted.') {
+    return {
+      title: `Archive extracted ${scope}`,
+      detail: file.name,
+      percent: null
+    }
+  }
+
+  return {
+    title: `Uploading media ${scope}`,
+    detail: cleanLine || file.name,
+    percent: null
+  }
+}
+
 async function fetchJson(url, init) {
   const res = await fetch(url, init)
   const body = await res.json().catch(() => ({}))
@@ -208,6 +267,7 @@ export default function App() {
   const [selectedSource, setSelectedSource] = useState(1)
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(null)
   const [viewerUrl, setViewerUrl] = useState('')
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
   const [metrics, setMetrics] = useState(null)
@@ -370,7 +430,7 @@ export default function App() {
       const failureLine = text.split(/\r?\n/).find((line) => /^FFmpeg (conversion failed|is not installed)/.test(line.trim()))
       if (failureLine) throw new Error(`${file.name}: ${failureLine.trim()}`)
       const lastLine = text.trim().split(/\r?\n/).filter(Boolean).pop()
-      if (lastLine) setUploadStatus(`${position}/${total} ${file.name}: ${lastLine}`)
+      if (lastLine) setUploadProgress(uploadProgressForLine(lastLine, file, position, total))
       return text
     }
 
@@ -389,14 +449,14 @@ export default function App() {
         pending = lines.pop() || ''
         const lastLine = lines.map((line) => line.trim()).filter(Boolean).pop()
         if (lastLine) {
-          setUploadStatus(`${position}/${total} ${file.name}: ${lastLine}`)
+          setUploadProgress(uploadProgressForLine(lastLine, file, position, total))
         }
       }
       if (done) break
     }
 
     const finalLine = pending.trim()
-    if (finalLine) setUploadStatus(`${position}/${total} ${file.name}: ${finalLine}`)
+    if (finalLine) setUploadProgress(uploadProgressForLine(finalLine, file, position, total))
     if (!response.ok) throw new Error(text || 'Upload failed')
     const failureLine = text.split(/\r?\n/).find((line) => /^FFmpeg (conversion failed|is not installed)/.test(line.trim()))
     if (failureLine) throw new Error(`${file.name}: ${failureLine.trim()}`)
@@ -408,6 +468,7 @@ export default function App() {
     if (!files.length) return
 
     setUploadBusy(true)
+    setUploadProgress(null)
     try {
       setError('')
       let okCount = 0
@@ -416,6 +477,11 @@ export default function App() {
         const file = files[i]
         const position = i + 1
         setUploadStatus(`${position}/${files.length} Uploading ${file.name}...`)
+        setUploadProgress({
+          title: `Uploading media ${position}/${files.length}`,
+          detail: file.name,
+          percent: null
+        })
         try {
           const fd = new FormData()
           fd.append('file', file)
@@ -429,15 +495,19 @@ export default function App() {
 
       await loadMedia()
       if (!failed.length) {
+        setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
       } else {
+        setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount}/${files.length} file(s).`)
         setError(failed[0])
       }
     } catch (err) {
+      setUploadProgress(null)
       setUploadStatus(err.message)
     } finally {
       setUploadBusy(false)
+      setUploadProgress(null)
       e.target.value = ''
     }
   }
@@ -725,7 +795,25 @@ export default function App() {
       <div className={blurForOverview ? 'tour-blur-shell' : ''}>
         <div className="toast-stack" aria-live="polite">
           {error && <div className="toast error">{error}</div>}
-          {uploadStatus && <div className="toast status">{uploadStatus}</div>}
+          {uploadBusy && uploadProgress ? (
+            <div className="upload-progress-card" role="status" aria-live="polite">
+              <div className="upload-progress-heading">
+                <span>{uploadProgress.title}</span>
+                {Number.isFinite(uploadProgress.percent) && <span>{uploadProgress.percent}%</span>}
+              </div>
+              <div className="upload-progress-detail" title={uploadProgress.detail}>
+                {uploadProgress.detail}
+              </div>
+              <div className="upload-progress-track" aria-hidden="true">
+                <div
+                  className={Number.isFinite(uploadProgress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
+                  style={Number.isFinite(uploadProgress.percent) ? { width: `${uploadProgress.percent}%` } : undefined}
+                />
+              </div>
+            </div>
+          ) : (
+            uploadStatus && <div className="toast status">{uploadStatus}</div>
+          )}
         </div>
 
         <nav className="tab-toolbar" role="tablist" aria-label="Main sections">
