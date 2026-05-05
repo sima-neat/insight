@@ -6,6 +6,8 @@ const DEFAULT_VISIBLE_PER_PAGE = 4;
 const PAGE_SIZE_PRESETS = [1, 4, 9, 16, 40, 80];
 const METADATA_QUEUE_HARD_LIMIT = 300;
 const METADATA_QUEUE_SOFT_LIMIT = 20;
+const METADATA_DRAWABLE_HOLD_MS = 400;
+const METADATA_QUEUE_MAX_AGE_MS = 5000;
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
@@ -43,6 +45,74 @@ function chooseMetadataCandidate(queue, metadataDelayMs) {
   return null;
 }
 
+function getObjectConfidenceThreshold(channelIndex) {
+  try {
+    const scoped = JSON.parse(window.localStorage.getItem(`viewerSettings_channel_${channelIndex}`) || "{}");
+    const global = JSON.parse(window.localStorage.getItem("viewerSettings_global") || "{}");
+    return scoped.confidenceThreshold ?? global.confidenceThreshold ?? 0;
+  } catch (_err) {
+    return 0;
+  }
+}
+
+function hasDrawableMetadata(message, channelIndex) {
+  const data = message?.data;
+  switch (message?.type) {
+    case "object-detection": {
+      const threshold = getObjectConfidenceThreshold(channelIndex);
+      return Array.isArray(data?.objects) && data.objects.some((obj) => (obj.confidence ?? 1) >= threshold);
+    }
+    case "classification":
+      return Array.isArray(data?.top_classes) && data.top_classes.length > 0;
+    case "pose-estimation":
+      return Array.isArray(data?.poses) && data.poses.length > 0;
+    case "segmentation":
+      return Array.isArray(data?.segments) && data.segments.length > 0;
+    default:
+      return Boolean(message?.type);
+  }
+}
+
+function chooseOverlayMetadata(candidate, overlayState, channelIndex, now) {
+  if (candidate) {
+    if (hasDrawableMetadata(candidate.data, channelIndex)) {
+      overlayState.lastDrawable = candidate;
+      overlayState.lastDrawableAt = now;
+      return candidate;
+    }
+  }
+
+  if (
+    overlayState.lastDrawable &&
+    overlayState.lastDrawableAt > 0 &&
+    now - overlayState.lastDrawableAt <= METADATA_DRAWABLE_HOLD_MS
+  ) {
+    return overlayState.lastDrawable;
+  }
+
+  overlayState.lastDrawable = null;
+  overlayState.lastDrawableAt = 0;
+  return null;
+}
+
+function pruneMetadataQueue(queue, selectedCandidate, metadataDelayMs, now) {
+  let removeCount = 0;
+  if (selectedCandidate) {
+    const selectedIndex = queue.indexOf(selectedCandidate);
+    if (selectedIndex >= 0) removeCount = selectedIndex + 1;
+  }
+
+  const maxAgeMs = Math.max(METADATA_QUEUE_MAX_AGE_MS, metadataDelayMs + 1000);
+  while (removeCount < queue.length && now - queue[removeCount].timestamp > maxAgeMs) {
+    removeCount += 1;
+  }
+
+  if (removeCount > 0) queue.splice(0, removeCount);
+  if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
+    queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
+  }
+}
+
 function applyLayout(count) {
   const grid = document.getElementById("videoGrid");
   if (!grid) return;
@@ -65,6 +135,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const metadataQueueRef = useRef([]);
+  const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
@@ -125,6 +196,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = [];
+      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
       rtcpRef.current = {
         lastBytes: null,
         lastTs: null,
@@ -147,7 +219,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         try {
           const parsed = JSON.parse(event.data);
           const queue = metadataQueueRef.current;
-          queue.push({ timestamp: performance.now(), data: parsed, rendered: false });
+          queue.push({ timestamp: performance.now(), data: parsed });
           rtcpRef.current.messageCount += 1;
           if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
             queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
@@ -231,19 +303,21 @@ function ChannelTile({ index, onActiveChange, debug }) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const candidate = chooseMetadataCandidate(queue, metadataDelayMs);
-            if (candidate) {
-              const strategy = window.drawStrategies?.[candidate.data?.type];
+            const nowPerf = performance.now();
+            const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, nowPerf);
+            if (overlayMetadata) {
+              const strategy = window.drawStrategies?.[overlayMetadata.data?.type];
               if (strategy) {
-                strategy(ctx, canvas, candidate.data?.data, video, index);
-                candidate.rendered = true;
+                strategy(ctx, canvas, overlayMetadata.data?.data, video, index);
               }
             }
+            pruneMetadataQueue(queue, candidate, metadataDelayMs, nowPerf);
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
         }
 
-        while (queue.length > 0 && queue[0].rendered) queue.shift();
         animationFrame = requestAnimationFrame(draw);
       };
 

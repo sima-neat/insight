@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/pion/rtp"
 )
 
 func TestLoadEphemeralUDPPortRangeUsesWebRTCContainerRange(t *testing.T) {
@@ -51,5 +54,59 @@ func TestValidateEphemeralUDPPortRangeRejectsInvalidRange(t *testing.T) {
 	}
 	if _, _, err := validateEphemeralUDPPortRange(40000, 65536); err == nil {
 		t.Fatalf("expected port above 65535 to fail")
+	}
+}
+
+func TestRTPTimestampRewriterAdvancesPerFrame(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+
+	first := rewriter.timestampForFrame(start)
+	second := rewriter.timestampForFrame(start.Add(33 * time.Millisecond))
+	third := rewriter.timestampForFrame(start.Add(66 * time.Millisecond))
+
+	if first != initialRTPTimestamp {
+		t.Fatalf("expected first timestamp %d, got %d", initialRTPTimestamp, first)
+	}
+	if second <= first {
+		t.Fatalf("expected second timestamp to advance, got first=%d second=%d", first, second)
+	}
+	if third <= second {
+		t.Fatalf("expected third timestamp to advance, got second=%d third=%d", second, third)
+	}
+}
+
+func TestRewriteRTPPacketTimestamp(t *testing.T) {
+	original := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    96,
+			SequenceNumber: 7,
+			Timestamp:      1234,
+			SSRC:           99,
+			Marker:         true,
+		},
+		Payload: []byte{0x65, 0x88, 0x84},
+	}
+	raw, err := original.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rewritten, err := rewriteRTPPacketTimestamp(raw, 5678)
+	if err != nil {
+		t.Fatalf("expected timestamp rewrite to succeed: %v", err)
+	}
+
+	var got rtp.Packet
+	if err := got.Unmarshal(rewritten); err != nil {
+		t.Fatalf("expected rewritten packet to unmarshal: %v", err)
+	}
+	if got.Timestamp != 5678 {
+		t.Fatalf("expected rewritten timestamp 5678, got %d", got.Timestamp)
+	}
+	if got.SequenceNumber != original.SequenceNumber || got.SSRC != original.SSRC ||
+		got.PayloadType != original.PayloadType || !got.Marker {
+		t.Fatalf("expected non-timestamp RTP header fields to be preserved: %#v", got.Header)
 	}
 }
