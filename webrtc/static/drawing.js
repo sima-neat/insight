@@ -76,8 +76,6 @@ window.drawStrategies = {
     const roiRaw = localStorage.getItem(roiKey);
     const roiPolygons = roiRaw ? JSON.parse(roiRaw) : [];
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     // Draw ROI polygons
       if (showRoi) {
       roiPolygons.forEach(({ points, type }) => {
@@ -179,7 +177,6 @@ window.drawStrategies = {
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.font = font;
     ctx.fillStyle = labelColor;
 
@@ -202,7 +199,6 @@ window.drawStrategies = {
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = strokeColor;
     ctx.fillStyle = fillColor;
     ctx.lineWidth = 2;
@@ -246,7 +242,6 @@ window.drawStrategies = {
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = lineWidth;
     ctx.font = font;

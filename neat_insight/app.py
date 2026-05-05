@@ -9,12 +9,15 @@ import shutil
 import signal
 import socket
 import ssl
+import subprocess
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 import psutil
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -61,6 +64,10 @@ env = init_environment()
 MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
+OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
+OPTIMIZED_VIDEO_BITRATE = "2M"
+OPTIMIZED_VIDEO_FPS = "30"
+OPTIMIZED_VIDEO_GOP = "30"
 
 
 def _resolve_frontend_dist() -> Path:
@@ -367,6 +374,181 @@ def system_tools():
     return {"ffmpeg": shutil.which("ffmpeg") is not None, "gstreamer": shutil.which("gst-launch-1.0") is not None}
 
 
+def _relative_media_label(path: Path) -> str:
+    try:
+        return str(path.relative_to(MEDIA_DIR))
+    except ValueError:
+        return path.name
+
+
+def _video_duration_seconds(path: Path) -> Optional[float]:
+    try:
+        parsed = MediaInfo.parse(str(path))
+        video_track = next((t for t in parsed.tracks if t.track_type == "Video"), None)
+        duration_ms = getattr(video_track, "duration", None)
+        if duration_ms:
+            return float(duration_ms) / 1000.0
+    except Exception as exc:
+        logging.debug("Failed to parse video duration for %s: %s", path, exc)
+    return None
+
+
+def _parse_ffmpeg_progress_seconds(key: str, value: str) -> Optional[float]:
+    if key in {"out_time_us", "out_time_ms"}:
+        try:
+            return max(0.0, float(value) / 1_000_000.0)
+        except ValueError:
+            return None
+    if key != "out_time":
+        return None
+    try:
+        hours, minutes, seconds = value.split(":")
+        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_duration(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "--:--"
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _validate_archive_members(target_dir: Path, members: List[str]) -> None:
+    target_root = target_dir.resolve()
+    for member in members:
+        destination = (target_dir / member).resolve()
+        try:
+            destination.relative_to(target_root)
+        except ValueError:
+            raise ValueError(f"Unsafe archive path: {member}")
+
+
+def _iter_optimizable_videos(root: Path) -> List[Path]:
+    if root.is_file():
+        candidates = [root]
+    else:
+        candidates = [path for path in root.rglob("*") if path.is_file()]
+    return sorted(path for path in candidates if path.suffix.lower() in OPTIMIZABLE_VIDEO_EXTENSIONS)
+
+
+def _optimize_video_file(path: Path):
+    label = _relative_media_label(path)
+    if shutil.which("ffmpeg") is None:
+        yield f"FFmpeg is not installed; keeping original {label}.\n"
+        return
+
+    duration = _video_duration_seconds(path)
+    output_path = path.with_name(f".{path.stem}.optimized{path.suffix}")
+    output_path.unlink(missing_ok=True)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-tune",
+        "zerolatency",
+        "-profile:v",
+        "baseline",
+        "-pix_fmt",
+        "yuv420p",
+        "-x264-params",
+        f"keyint={OPTIMIZED_VIDEO_GOP}:min-keyint={OPTIMIZED_VIDEO_GOP}:no-scenecut=1:repeat-headers=1:aud=1",
+        "-b:v",
+        OPTIMIZED_VIDEO_BITRATE,
+        "-r",
+        OPTIMIZED_VIDEO_FPS,
+        "-g",
+        OPTIMIZED_VIDEO_GOP,
+        "-bf",
+        "0",
+        "-movflags",
+        "+faststart",
+        "-progress",
+        "pipe:1",
+        "-nostats",
+        str(output_path),
+    ]
+
+    yield f"Optimizing {label} for low-latency RTSP playback...\n"
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    diagnostics: List[str] = []
+    last_progress_at = 0.0
+    if process.stdout:
+        for raw_line in process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if "=" not in line:
+                diagnostics.append(line)
+                diagnostics = diagnostics[-8:]
+                continue
+
+            key, value = line.split("=", 1)
+            elapsed = _parse_ffmpeg_progress_seconds(key, value)
+            if elapsed is None:
+                continue
+
+            now = time.monotonic()
+            if now - last_progress_at < 1.0:
+                continue
+            last_progress_at = now
+
+            if duration:
+                percent = min(99, max(0, int((elapsed / duration) * 100)))
+                yield (
+                    f"Optimizing {label}: {percent}% "
+                    f"({_format_duration(elapsed)} / {_format_duration(duration)})\n"
+                )
+            else:
+                yield f"Optimizing {label}: {_format_duration(elapsed)} processed\n"
+
+    return_code = process.wait()
+    if return_code != 0:
+        output_path.unlink(missing_ok=True)
+        details = "\n".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}"
+        yield f"FFmpeg conversion failed for {label}: {details}\n"
+        return
+
+    output_path.replace(path)
+    yield f"Optimized {label}: H.264 baseline, {OPTIMIZED_VIDEO_FPS} fps, GOP {OPTIMIZED_VIDEO_GOP}, B-frames disabled.\n"
+
+
+def _optimize_media_files(root: Path):
+    videos = _iter_optimizable_videos(root)
+    if not videos:
+        yield "No MP4 files found to optimize.\n"
+        return
+
+    for index, video_path in enumerate(videos, start=1):
+        yield f"Preparing file {index}/{len(videos)}: {_relative_media_label(video_path)}\n"
+        yield from _optimize_video_file(video_path)
+
+
 # API: upload a media file or archive into the neat-insight media library.
 @app.post("/api/upload/media")
 def upload_media():
@@ -378,9 +560,10 @@ def upload_media():
             return
 
         filename = secure_filename(uploaded_file.filename)
-        file_ext = filename.lower().rsplit(".", 1)[-1]
+        lower_filename = filename.lower()
+        file_ext = lower_filename.rsplit(".", 1)[-1]
 
-        if file_ext in ["zip", "tar", "gz"] or filename.endswith(".tar.gz"):
+        if file_ext in ["zip", "tar", "gz"] or lower_filename.endswith(".tar.gz"):
             base_name = os.path.splitext(os.path.splitext(filename)[0])[0]
             target_dir = MEDIA_DIR / base_name
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -389,15 +572,17 @@ def upload_media():
             yield f"Saved archive to {temp_path}\n"
 
             try:
-                if filename.endswith(".zip"):
+                if lower_filename.endswith(".zip"):
                     import zipfile
 
                     with zipfile.ZipFile(temp_path, "r") as zip_ref:
+                        _validate_archive_members(target_dir, zip_ref.namelist())
                         zip_ref.extractall(target_dir)
                 else:
                     import tarfile
 
                     with tarfile.open(temp_path, "r:*") as tar:
+                        _validate_archive_members(target_dir, [member.name for member in tar.getmembers()])
                         tar.extractall(path=target_dir)
                 yield "Archive extracted.\n"
             except Exception as exc:
@@ -406,13 +591,15 @@ def upload_media():
             finally:
                 if temp_path.exists():
                     temp_path.unlink(missing_ok=True)
+            yield from _optimize_media_files(target_dir)
             yield "Upload complete.\n"
             return
 
         target_path = MEDIA_DIR / filename
         uploaded_file.save(target_path)
-        # Explicitly keep original file as uploaded. No ffmpeg transcode and no B-frame stripping.
         yield f"Uploaded to {target_path}\n"
+        yield from _optimize_media_files(target_path)
+        yield "Upload complete.\n"
 
     return Response(stream_with_context(generate()), mimetype="text/plain")
 

@@ -81,6 +81,65 @@ function prettyValue(key, value) {
   return String(value)
 }
 
+function uploadProgressForLine(line, file, position, total) {
+  const cleanLine = line.trim()
+  const scope = total > 1 ? `${position}/${total}` : '1/1'
+  const percentMatch = cleanLine.match(/^Optimizing .*?:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (percentMatch) {
+    return {
+      title: `Preparing media ${scope}`,
+      detail: `${file.name} - ${percentMatch[2]}`,
+      percent: Number.parseInt(percentMatch[1], 10)
+    }
+  }
+
+  if (cleanLine.startsWith('Optimizing ')) {
+    return {
+      title: `Preparing media ${scope}`,
+      detail: file.name,
+      percent: null
+    }
+  }
+
+  if (cleanLine.startsWith('Preparing file ')) {
+    return {
+      title: `Scanning upload ${scope}`,
+      detail: cleanLine.replace(/^Preparing file\s+/, 'File '),
+      percent: null
+    }
+  }
+
+  if (cleanLine.startsWith('Optimized ')) {
+    return {
+      title: `Prepared media ${scope}`,
+      detail: file.name,
+      percent: 100
+    }
+  }
+
+  if (cleanLine.startsWith('Saved archive')) {
+    return {
+      title: `Uploading archive ${scope}`,
+      detail: file.name,
+      percent: null
+    }
+  }
+
+  if (cleanLine === 'Archive extracted.') {
+    return {
+      title: `Archive extracted ${scope}`,
+      detail: file.name,
+      percent: null
+    }
+  }
+
+  return {
+    title: `Uploading media ${scope}`,
+    detail: cleanLine || file.name,
+    percent: null
+  }
+}
+
 async function fetchJson(url, init) {
   const res = await fetch(url, init)
   const body = await res.json().catch(() => ({}))
@@ -207,6 +266,8 @@ export default function App() {
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [selectedSource, setSelectedSource] = useState(1)
   const [uploadStatus, setUploadStatus] = useState('')
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(null)
   const [viewerUrl, setViewerUrl] = useState('')
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
   const [metrics, setMetrics] = useState(null)
@@ -321,9 +382,10 @@ export default function App() {
 
   useEffect(() => {
     if (!uploadStatus) return
+    if (uploadBusy) return
     const t = setTimeout(() => setUploadStatus(''), 3200)
     return () => clearTimeout(t)
-  }, [uploadStatus])
+  }, [uploadStatus, uploadBusy])
 
   useEffect(() => {
     if (!error) return
@@ -361,40 +423,93 @@ export default function App() {
     }
   }, [tab])
 
+  async function readUploadProgress(response, file, position, total) {
+    if (!response.body) {
+      const text = await response.text()
+      if (!response.ok) throw new Error(text || 'Upload failed')
+      const failureLine = text.split(/\r?\n/).find((line) => /^FFmpeg (conversion failed|is not installed)/.test(line.trim()))
+      if (failureLine) throw new Error(`${file.name}: ${failureLine.trim()}`)
+      const lastLine = text.trim().split(/\r?\n/).filter(Boolean).pop()
+      if (lastLine) setUploadProgress(uploadProgressForLine(lastLine, file, position, total))
+      return text
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        const lastLine = lines.map((line) => line.trim()).filter(Boolean).pop()
+        if (lastLine) {
+          setUploadProgress(uploadProgressForLine(lastLine, file, position, total))
+        }
+      }
+      if (done) break
+    }
+
+    const finalLine = pending.trim()
+    if (finalLine) setUploadProgress(uploadProgressForLine(finalLine, file, position, total))
+    if (!response.ok) throw new Error(text || 'Upload failed')
+    const failureLine = text.split(/\r?\n/).find((line) => /^FFmpeg (conversion failed|is not installed)/.test(line.trim()))
+    if (failureLine) throw new Error(`${file.name}: ${failureLine.trim()}`)
+    return text
+  }
+
   async function onUpload(e) {
     const files = Array.from(e.target.files || [])
     if (!files.length) return
 
+    setUploadBusy(true)
+    setUploadProgress(null)
     try {
-      setUploadStatus(`Uploading ${files.length} file(s)...`)
-      const results = await Promise.allSettled(
-        files.map(async (file) => {
+      setError('')
+      let okCount = 0
+      const failed = []
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        const position = i + 1
+        setUploadStatus(`${position}/${files.length} Uploading ${file.name}...`)
+        setUploadProgress({
+          title: `Uploading media ${position}/${files.length}`,
+          detail: file.name,
+          percent: null
+        })
+        try {
           const fd = new FormData()
           fd.append('file', file)
           const res = await fetch('/api/upload/media', { method: 'POST', body: fd })
-          const text = await res.text()
-          if (!res.ok) throw new Error(text || 'Upload failed')
-          return text
-        })
-      )
-
-      const okCount = results.filter((r) => r.status === 'fulfilled').length
-      const failed = results
-        .filter((r) => r.status === 'rejected')
-        .map((r) => (r.reason?.message ? String(r.reason.message).trim() : 'Upload failed'))
+          await readUploadProgress(res, file, position, files.length)
+          okCount += 1
+        } catch (err) {
+          failed.push(err?.message ? String(err.message).trim() : `${file.name}: upload failed`)
+        }
+      }
 
       await loadMedia()
       if (!failed.length) {
-        setUploadStatus(`Uploaded ${okCount} file(s).`)
+        setUploadProgress(null)
+        setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
       } else {
-        setUploadStatus(`Uploaded ${okCount}/${files.length} file(s).`)
+        setUploadProgress(null)
+        setUploadStatus(`Uploaded and prepared ${okCount}/${files.length} file(s).`)
         setError(failed[0])
       }
     } catch (err) {
+      setUploadProgress(null)
       setUploadStatus(err.message)
+    } finally {
+      setUploadBusy(false)
+      setUploadProgress(null)
+      e.target.value = ''
     }
-
-    e.target.value = ''
   }
 
   async function onDelete() {
@@ -680,7 +795,25 @@ export default function App() {
       <div className={blurForOverview ? 'tour-blur-shell' : ''}>
         <div className="toast-stack" aria-live="polite">
           {error && <div className="toast error">{error}</div>}
-          {uploadStatus && <div className="toast status">{uploadStatus}</div>}
+          {uploadBusy && uploadProgress ? (
+            <div className="upload-progress-card" role="status" aria-live="polite">
+              <div className="upload-progress-heading">
+                <span>{uploadProgress.title}</span>
+                {Number.isFinite(uploadProgress.percent) && <span>{uploadProgress.percent}%</span>}
+              </div>
+              <div className="upload-progress-detail" title={uploadProgress.detail}>
+                {uploadProgress.detail}
+              </div>
+              <div className="upload-progress-track" aria-hidden="true">
+                <div
+                  className={Number.isFinite(uploadProgress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
+                  style={Number.isFinite(uploadProgress.percent) ? { width: `${uploadProgress.percent}%` } : undefined}
+                />
+              </div>
+            </div>
+          ) : (
+            uploadStatus && <div className="toast status">{uploadStatus}</div>
+          )}
         </div>
 
         <nav className="tab-toolbar" role="tablist" aria-label="Main sections">
@@ -710,12 +843,17 @@ export default function App() {
                   <h2>Media Library</h2>
                   <p className="section-note">Browse, preview, and manage local media assets.</p>
                 </div>
-                <label className="upload-icon-btn" title="Upload Media" aria-label="Upload Media">
+                <label
+                  className={uploadBusy ? 'upload-icon-btn busy' : 'upload-icon-btn'}
+                  title="Upload Media"
+                  aria-label="Upload Media"
+                  aria-busy={uploadBusy ? 'true' : 'false'}
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
                   </svg>
                   <span className="sr-only">Upload Media</span>
-                  <input type="file" multiple onChange={onUpload} />
+                  <input type="file" multiple onChange={onUpload} disabled={uploadBusy} />
                 </label>
               </div>
               <p className="meta-count">{filteredFiles.length} files</p>

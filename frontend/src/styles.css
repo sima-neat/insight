@@ -218,6 +218,7 @@ select:focus-visible,
 }
 
 .toast {
+  width: min(360px, calc(100vw - 36px));
   border-radius: var(--radius-sm);
   border: 1px solid;
   box-shadow: var(--shadow-md);
@@ -234,6 +235,79 @@ select:focus-visible,
 .toast.error {
   border-color: #f3c3cd;
   background: #fff1f4;
+}
+
+.upload-progress-card {
+  width: min(360px, calc(100vw - 36px));
+  min-height: 104px;
+  border: 1px solid #bde4c9;
+  border-radius: var(--radius-sm);
+  background: var(--ok-soft);
+  box-shadow: var(--shadow-md);
+  padding: 12px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  animation: toast-in 220ms ease-out;
+}
+
+.upload-progress-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #173d38;
+}
+
+.upload-progress-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  align-self: center;
+  font-size: 12px;
+  color: #46635f;
+}
+
+.upload-progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 122, 116, 0.15);
+}
+
+.upload-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-strong);
+  transition: width 220ms ease-out;
+}
+
+.upload-progress-bar.indeterminate {
+  width: 45%;
+  animation: upload-progress-slide 1.15s ease-in-out infinite;
+}
+
+@keyframes upload-progress-slide {
+  0% {
+    transform: translateX(-115%);
+  }
+  100% {
+    transform: translateX(255%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .upload-progress-card,
+  .upload-progress-bar.indeterminate {
+    animation: none;
+  }
+
+  .upload-progress-bar {
+    transition: none;
+  }
 }
 
 @keyframes toast-in {
@@ -454,6 +528,11 @@ input {
 .upload-icon-btn {
   border-color: rgba(15, 122, 116, 0.45);
   background: var(--accent-soft);
+}
+
+.upload-icon-btn.busy {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 .upload-icon-btn svg {

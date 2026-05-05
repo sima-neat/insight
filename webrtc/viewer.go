@@ -37,6 +37,7 @@ const (
 	defaultEphemeralUDPPortEnd   = uint16(40200)
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
+	initialRTPTimestamp          = uint32(1110000000)
 )
 
 type neatPortMapConfig struct {
@@ -46,6 +47,12 @@ type neatPortMapConfig struct {
 type udpPortRangeConfig struct {
 	ContainerStart int `json:"containerStart"`
 	ContainerEnd   int `json:"containerEnd"`
+}
+
+type rtpTimestampRewriter struct {
+	nextTimestamp uint32
+	lastFrameAt   time.Time
+	haveFrameTime bool
 }
 
 func main() {
@@ -364,6 +371,32 @@ func validateEphemeralUDPPortRange(portStart, portEnd int) (uint16, uint16, erro
 	return uint16(portStart), uint16(portEnd), nil
 }
 
+func newRTPTimestampRewriter() rtpTimestampRewriter {
+	return rtpTimestampRewriter{nextTimestamp: initialRTPTimestamp}
+}
+
+func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
+	if r.haveFrameTime {
+		step := uint32(float64(h264ClockRate) * now.Sub(r.lastFrameAt).Seconds())
+		if step == 0 {
+			step = 1
+		}
+		r.nextTimestamp += step
+	}
+	r.lastFrameAt = now
+	r.haveFrameTime = true
+	return r.nextTimestamp
+}
+
+func rewriteRTPPacketTimestamp(raw []byte, timestamp uint32) ([]byte, error) {
+	var pkt rtp.Packet
+	if err := pkt.Unmarshal(raw); err != nil {
+		return nil, err
+	}
+	pkt.Timestamp = timestamp
+	return pkt.Marshal()
+}
+
 func sendRTCP(pc *webrtc.PeerConnection) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -413,6 +446,8 @@ func startUDPListener(ch *Channel) {
 
 	log.Printf("🧠 Listening for RTP on %s:%d", net.IPv4zero, ch.Port)
 	buf := make([]byte, 4096)
+	framePackets := make([][]byte, 0, 128)
+	timestampRewriter := newRTPTimestampRewriter()
 
 	for {
 		n, remoteAddr, err := conn.ReadFrom(buf)
@@ -429,17 +464,37 @@ func startUDPListener(ch *Channel) {
 		}
 		ch.Stats.RecordRTPPacket(&pkt, n, remoteAddr)
 
+		raw := append([]byte(nil), buf[:n]...)
+		framePackets = append(framePackets, raw)
+		if !pkt.Marker {
+			continue
+		}
+
+		frameTimestamp := timestampRewriter.timestampForFrame(time.Now())
 		track := ch.Track.Load()
 		if track == nil {
-			ch.Stats.RecordDroppedNoTrack()
+			for range framePackets {
+				ch.Stats.RecordDroppedNoTrack()
+			}
+			framePackets = framePackets[:0]
 			continue
 		}
-		if _, err := track.Write(buf[:n]); err != nil && err != io.ErrClosedPipe {
-			ch.Stats.RecordWriteError(err)
-			log.Println("❌ Write error:", err)
-			continue
+
+		for _, rawPacket := range framePackets {
+			packetToWrite, err := rewriteRTPPacketTimestamp(rawPacket, frameTimestamp)
+			if err != nil {
+				ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
+				log.Println("❌ RTP timestamp rewrite error:", err)
+				continue
+			}
+			if _, err := track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
+				ch.Stats.RecordWriteError(err)
+				log.Println("❌ Write error:", err)
+				continue
+			}
+			ch.Stats.RecordForwarded(len(packetToWrite))
 		}
-		ch.Stats.RecordForwarded(n)
+		framePackets = framePackets[:0]
 	}
 }
 
