@@ -31,6 +31,23 @@ type Channel struct {
 
 var channels [80]*Channel
 
+const (
+	neatPortMapPath              = "/home/docker/.insight-config/neat-port-map.json"
+	defaultEphemeralUDPPortStart = uint16(40000)
+	defaultEphemeralUDPPortEnd   = uint16(40200)
+	minValidEphemeralUDPPort     = 1
+	maxValidEphemeralUDPPort     = 65535
+)
+
+type neatPortMapConfig struct {
+	WebRTC *udpPortRangeConfig `json:"webRTC"`
+}
+
+type udpPortRangeConfig struct {
+	ContainerStart int `json:"containerStart"`
+	ContainerEnd   int `json:"containerEnd"`
+}
+
 func main() {
 	certPath := flag.String("cert", "", "Path to TLS certificate (PEM)")
 	keyPath := flag.String("key", "", "Path to TLS private key (PEM)")
@@ -192,7 +209,12 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	// === Add NAT and Port Range logic ===
 	s := webrtc.SettingEngine{}
-	s.SetEphemeralUDPPortRange(40000, 40100)
+	portStart, portEnd := configuredEphemeralUDPPortRange()
+	if err := s.SetEphemeralUDPPortRange(portStart, portEnd); err != nil {
+		log.Printf("⚠️ Failed to set WebRTC UDP port range %d-%d: %v", portStart, portEnd, err)
+		http.Error(w, "PeerConnection failed", http.StatusInternalServerError)
+		return
+	}
 
 	hostIP := os.Getenv("CONTAINER_HOST_IP")
 
@@ -294,6 +316,52 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pc.LocalDescription())
+}
+
+func configuredEphemeralUDPPortRange() (uint16, uint16) {
+	portStart, portEnd, err := loadEphemeralUDPPortRange(neatPortMapPath)
+	if err == nil {
+		log.Printf("Using WebRTC UDP port range from %s: %d-%d", neatPortMapPath, portStart, portEnd)
+		return portStart, portEnd
+	}
+
+	if os.IsNotExist(err) {
+		log.Printf("Port map config %s not found; using default WebRTC UDP port range %d-%d", neatPortMapPath, defaultEphemeralUDPPortStart, defaultEphemeralUDPPortEnd)
+	} else {
+		log.Printf("Failed to load WebRTC UDP port range from %s: %v; using default %d-%d", neatPortMapPath, err, defaultEphemeralUDPPortStart, defaultEphemeralUDPPortEnd)
+	}
+	return defaultEphemeralUDPPortStart, defaultEphemeralUDPPortEnd
+}
+
+func loadEphemeralUDPPortRange(path string) (uint16, uint16, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var cfg neatPortMapConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return 0, 0, fmt.Errorf("parse port map: %w", err)
+	}
+	if cfg.WebRTC == nil {
+		return 0, 0, fmt.Errorf("missing webRTC section")
+	}
+
+	return validateEphemeralUDPPortRange(cfg.WebRTC.ContainerStart, cfg.WebRTC.ContainerEnd)
+}
+
+func validateEphemeralUDPPortRange(portStart, portEnd int) (uint16, uint16, error) {
+	if portStart < minValidEphemeralUDPPort || portStart > maxValidEphemeralUDPPort {
+		return 0, 0, fmt.Errorf("webRTC containerStart %d is outside valid UDP port range", portStart)
+	}
+	if portEnd < minValidEphemeralUDPPort || portEnd > maxValidEphemeralUDPPort {
+		return 0, 0, fmt.Errorf("webRTC containerEnd %d is outside valid UDP port range", portEnd)
+	}
+	if portEnd < portStart {
+		return 0, 0, fmt.Errorf("webRTC containerEnd %d is lower than containerStart %d", portEnd, portStart)
+	}
+
+	return uint16(portStart), uint16(portEnd), nil
 }
 
 func sendRTCP(pc *webrtc.PeerConnection) {
