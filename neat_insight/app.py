@@ -388,8 +388,8 @@ def _video_duration_seconds(path: Path) -> Optional[float]:
         duration_ms = getattr(video_track, "duration", None)
         if duration_ms:
             return float(duration_ms) / 1000.0
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.debug("Failed to parse video duration for %s: %s", path, exc)
     return None
 
 
