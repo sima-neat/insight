@@ -1,5 +1,5 @@
 ---
-name: use-neat-insight
+name: sima-use-neat-insight
 description: Use when working with the neat-insight Flask API, frontend, media library, RTSP media-source controls, vf viewer URLs, UDP/RTP ingest statistics, WebRTC egress/browser statistics, metrics endpoints, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug inbound vf streams and browser delivery, build viewer links, and understand endpoint request/response contracts.
 ---
 

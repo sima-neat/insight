@@ -51,7 +51,7 @@ const ONBOARDING_STEPS = [
     tab: 'visualizer',
     eyebrow: 'Step 5 of 5',
     title: 'Check system stats',
-    summary: 'The Stats tab helps you understand what the device and pipeline are doing while streams are running.',
+    summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
     details:
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
   }
@@ -673,6 +673,7 @@ export default function App() {
 
   const activeTourStep = ONBOARDING_STEPS[tourStep]
   const blurForOverview = tourOpen && tourStep === 0
+  const focusedTourTab = tourOpen && activeTourStep?.tab ? activeTourStep.tab : null
 
   const sourcePreviewExt = (currentSource.file || '').split('.').pop()?.toLowerCase()
   const sourcePreviewIsVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(sourcePreviewExt)
@@ -729,7 +730,7 @@ export default function App() {
         <div>
           <div className="masthead-title-row">
             <img src="/sima-logo.png" alt="Sima.ai" className="masthead-logo" />
-            <h1>NEAT Insight</h1>
+            <h1>Neat Insight</h1>
           </div>
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
@@ -816,21 +817,36 @@ export default function App() {
           )}
         </div>
 
-        <nav className="tab-toolbar" role="tablist" aria-label="Main sections">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              role="tab"
-              aria-selected={tab === t.id}
-              aria-label={t.label}
-              title={t.label}
-              className={tab === t.id ? 'tab-icon-btn active' : 'tab-icon-btn'}
-              onClick={() => setTab(t.id)}
-            >
-              <img src={t.icon} alt="" className="tab-icon" />
-              <span className="tab-label">{t.label}</span>
-            </button>
-          ))}
+        <nav
+          className={focusedTourTab ? 'tab-toolbar tour-tab-focus' : 'tab-toolbar'}
+          role="tablist"
+          aria-label="Main sections"
+        >
+          {TABS.map((t) => {
+            const mutedByTour = Boolean(focusedTourTab && t.id !== focusedTourTab)
+            const className = [
+              'tab-icon-btn',
+              tab === t.id ? 'active' : '',
+              focusedTourTab === t.id ? 'tour-focused-tab' : '',
+              mutedByTour ? 'tour-muted-tab' : ''
+            ].filter(Boolean).join(' ')
+            return (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                aria-label={t.label}
+                aria-disabled={mutedByTour ? 'true' : undefined}
+                title={mutedByTour ? `${t.label} is disabled during this tour step` : t.label}
+                className={className}
+                disabled={mutedByTour}
+                onClick={() => setTab(t.id)}
+              >
+                <img src={t.icon} alt="" className="tab-icon" />
+                <span className="tab-label">{t.label}</span>
+              </button>
+            )
+          })}
         </nav>
 
         <main className="content">
