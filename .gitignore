@@ -15,3 +15,4 @@ front_dist/
 neat_insight/frontend_dist/
 *.pem
 cfg.json
+.vscode/
