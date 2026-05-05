@@ -456,6 +456,11 @@ input {
   background: var(--accent-soft);
 }
 
+.upload-icon-btn.busy {
+  cursor: progress;
+  opacity: 0.7;
+}
+
 .upload-icon-btn svg {
   width: 18px;
   height: 18px;
