@@ -1,8 +1,9 @@
 // --- drawing.js ---
 // Modular drawing functions based on metadata type, scaled to match canvas display size
 
-const FONT = '14px "Roboto Condensed", sans-serif';
-const FONT_LARGE = '16px "Roboto Condensed", sans-serif';
+const CANVAS_FONT_FAMILY = '"Arial Narrow", "Segoe UI", Arial, sans-serif';
+const FONT = `14px ${CANVAS_FONT_FAMILY}`;
+const FONT_LARGE = `16px ${CANVAS_FONT_FAMILY}`;
 
 const COCO_SKELETON = [
   ['nose', 'left_eye'], ['nose', 'right_eye'],

@@ -52,7 +52,7 @@ polygon.selected {
 }
 
 #roiModeSelector {
-  font-family: 'Roboto Condensed', sans-serif;
+  font-family: var(--viewer-font-sans, "Arial Narrow", "Segoe UI", Arial, sans-serif);
 }
 
 #roiInstruction {
