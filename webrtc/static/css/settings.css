@@ -1,5 +1,5 @@
 :root {
-  --viewer-font-sans: "Arial Narrow", "Segoe UI", Arial, sans-serif;
+  --viewer-font-sans: 'Roboto Condensed', "Arial Narrow", "Segoe UI", Arial, sans-serif;
   --bg-light: #f2f2f2;
   --text-light: #121212;
   --bg-dark: #121212;

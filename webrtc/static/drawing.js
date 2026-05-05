@@ -1,7 +1,7 @@
 // --- drawing.js ---
 // Modular drawing functions based on metadata type, scaled to match canvas display size
 
-const CANVAS_FONT_FAMILY = '"Arial Narrow", "Segoe UI", Arial, sans-serif';
+const CANVAS_FONT_FAMILY = '"Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif';
 const FONT = `14px ${CANVAS_FONT_FAMILY}`;
 const FONT_LARGE = `16px ${CANVAS_FONT_FAMILY}`;
 
