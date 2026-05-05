@@ -450,7 +450,7 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
 def get_certificate_host():
     configured_host = os.getenv(CERT_HOST_ENV, "").strip()
     if not configured_host:
-        return DEFAULT_CERT_HOST
+        return get_lan_ip()
 
     try:
         ipaddress.ip_address(configured_host)
@@ -880,36 +880,147 @@ def ensure_dependencies_installed():
 
 SKIP_IFACE_PREFIXES = (
     "lo",
-    "docker"
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "vmnet",
+    "vboxnet",
+    "vethernet",
+    "utun",
+    "tun",
+    "tap",
+    "ppp",
+    "wg",
+    "zt",
+    "tailscale",
+    "ipsec",
+    "gif",
+    "stf",
+    "awdl",
+    "llw",
+    "bridge",
+    "anpi",
+)
+SKIP_IFACE_KEYWORDS = (
+    "bluetooth",
+    "bridge",
+    "container",
+    "docker",
+    "hyper-v",
+    "tunnel",
+    "virtual",
+    "virtualbox",
+    "vmware",
+    "vpn",
+    "wireguard",
+    "zerotier",
+)
+PHYSICAL_IFACE_PREFIXES = (
+    "en",
+    "eth",
+    "eno",
+    "ens",
+    "enp",
+    "end",
+    "wl",
+    "wlan",
+    "wlp",
+)
+PHYSICAL_IFACE_KEYWORDS = (
+    "ethernet",
+    "wi-fi",
+    "wifi",
+    "wireless",
+    "wlan",
+    "local area connection",
 )
 
-def get_lan_ip():
-    # Explicit override (containers / orchestration)
-    container_ip = os.getenv("CONTAINER_HOST_IP")
-    if container_ip:
-        return container_ip
+
+def _valid_reachable_ipv4(value):
+    if not value:
+        return ""
+
+    try:
+        ip_obj = ipaddress.ip_address(value)
+    except ValueError:
+        return ""
+
+    if (
+        ip_obj.version == 4
+        and not ip_obj.is_loopback
+        and not ip_obj.is_link_local
+        and not ip_obj.is_unspecified
+    ):
+        return value
+
+    return ""
 
 
+def _source_ip_for_target(target_host, target_port=443):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect((target_host, target_port))
+            return _valid_reachable_ipv4(sock.getsockname()[0])
+    except OSError:
+        return ""
+
+
+def _interface_is_skipped(iface):
+    normalized = iface.strip().lower()
+    return normalized.startswith(SKIP_IFACE_PREFIXES) or any(
+        keyword in normalized for keyword in SKIP_IFACE_KEYWORDS
+    )
+
+
+def _interface_is_physical(iface):
+    normalized = iface.strip().lower()
+    if _interface_is_skipped(normalized):
+        return False
+    return normalized.startswith(PHYSICAL_IFACE_PREFIXES) or any(
+        keyword in normalized for keyword in PHYSICAL_IFACE_KEYWORDS
+    )
+
+
+def _physical_interface_ipv4_candidates():
+    candidates = []
     for iface, addrs in psutil.net_if_addrs().items():
-        if iface.startswith(SKIP_IFACE_PREFIXES):
+        if not _interface_is_physical(iface):
             continue
 
-        print(iface, addrs)
         for addr in addrs:
             if addr.family != socket.AF_INET:
                 continue
 
-            ip = addr.address
-            ip_obj = ipaddress.ip_address(ip)
+            ip = _valid_reachable_ipv4(addr.address)
+            if ip:
+                candidates.append(ip)
 
-            if (
-                ip_obj.is_private
-                and not ip_obj.is_loopback
-                and not ip_obj.is_link_local
-            ):
-                return ip
+    return candidates
+
+
+def get_lan_ip():
+    # Explicit override (containers / orchestration)
+    container_ip = os.getenv("CONTAINER_HOST_IP")
+    if _valid_reachable_ipv4(container_ip):
+        return container_ip
+
+    devkit_ip = os.getenv(DEVKIT_SYNC_DEVKIT_IP_ENV, "").strip()
+    physical_ips = _physical_interface_ipv4_candidates()
+    if devkit_ip:
+        local_ip = _source_ip_for_target(devkit_ip, 22)
+        if local_ip and local_ip in physical_ips:
+            return local_ip
+
+    default_route_ip = _source_ip_for_target("8.8.8.8")
+    if default_route_ip and default_route_ip in physical_ips:
+        return default_route_ip
+
+    if physical_ips:
+        return physical_ips[0]
 
     return "127.0.0.1"
+
 
 def extract_pipeline_dir(rpm_files, apps_root):
     """

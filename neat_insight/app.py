@@ -7,7 +7,6 @@ import os
 import platform
 import shutil
 import signal
-import socket
 import ssl
 import subprocess
 import threading
@@ -33,7 +32,6 @@ if __name__ == "__main__" and (not globals().get("__package__")):
 from neat_insight.mediasrc import start_media_stream, stop_media_stream
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
-    get_remote_devkit_ip,
     get_remote_metrics,
     is_remote_devkit_configured,
     is_remote_devkit_connected,
@@ -46,6 +44,7 @@ from neat_insight.utils import (
     ensure_webssh_started,
     get_certificate_access_url,
     get_devkit_sync_devkit_ip,
+    get_lan_ip,
     get_webssh_port,
     init_environment,
     is_webssh_running,
@@ -985,22 +984,7 @@ def buildinfo():
 @app.get("/api/server-ip")
 def server_ip():
     """Return CONTAINER_HOST_IP when set, otherwise infer the reachable local IP or fall back to 127.0.0.1."""
-    container_ip = os.getenv("CONTAINER_HOST_IP")
-    if container_ip:
-        return {"ip": container_ip}
-
-    if not is_remote_devkit_configured():
-        return {"ip": "127.0.0.1"}
-
-    try:
-        remote_ip = get_remote_devkit_ip()
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect((remote_ip, 22))
-        local_ip = s.getsockname()[0]
-        s.close()
-        return {"ip": local_ip}
-    except Exception:
-        return {"ip": "127.0.0.1"}
+    return {"ip": get_lan_ip()}
 
 
 # API: build a vf viewer URL for the requested source selection.
