@@ -16,3 +16,4 @@ neat_insight/frontend_dist/
 *.pem
 cfg.json
 .vscode/
+*_mpk.tar.gz

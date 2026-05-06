@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+
+const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
 const SOURCE_COUNT = 16
 const TABS = [
+  { id: 'workspace', label: 'Workspace', icon: '/icons/workspace.svg' },
   { id: 'media', label: 'Media Library', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'RTSP Source', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
@@ -13,16 +16,25 @@ const ONBOARDING_STEPS = [
   {
     id: 'intro',
     tab: null,
-    eyebrow: 'Step 1 of 5',
+    eyebrow: 'Step 1 of 6',
     title: 'What is Insight?',
-    summary: 'Insight helps developers set up RTSP streams, view inference results, and watch system performance while they test an application.',
+    summary: 'Insight helps developers inspect a workspace, set up RTSP streams, view inference results, and watch system performance while they test an application.',
     details:
-      'Use it to load media, turn that media into RTSP sources, watch the live WebRTC viewer post inference with metadata rendering, and confirm whether runtime issues are coming from the stream path or the device itself.'
+      'Use it to explore the files behind your app, load media, turn that media into RTSP sources, watch the live WebRTC viewer post inference with metadata rendering, and confirm whether runtime issues are coming from the stream path or the device itself.'
+  },
+  {
+    id: 'workspace',
+    tab: 'workspace',
+    eyebrow: 'Step 2 of 6',
+    title: 'Explore the Workspace',
+    summary: 'Workspace is for browsing the shared files a developer works with across the SDK container, host, and paired DevKit.',
+    details:
+      'When /workspace is available, Insight starts there so you can inspect the same project artifacts used by the host tools, SDK environment, and target device. Use it to search the tree, open source files with syntax highlighting, preview Markdown as rendered documentation, and leave room for custom handlers for models, operator metrics, graphs, executables, and other development artifacts.'
   },
   {
     id: 'media',
     tab: 'media',
-    eyebrow: 'Step 2 of 5',
+    eyebrow: 'Step 3 of 6',
     title: 'Start in Media Library',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
@@ -31,7 +43,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'rtsp',
     tab: 'rtsp',
-    eyebrow: 'Step 3 of 5',
+    eyebrow: 'Step 4 of 6',
     title: 'Set up RTSP sources',
     summary: 'This tab turns files from the library into live RTSP source slots such as src1, src2, and src3.',
     details:
@@ -40,7 +52,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'viewer',
     tab: 'viewer',
-    eyebrow: 'Step 4 of 5',
+    eyebrow: 'Step 5 of 6',
     title: 'Live viewer',
     summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
     details:
@@ -49,7 +61,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'visualizer',
     tab: 'visualizer',
-    eyebrow: 'Step 5 of 5',
+    eyebrow: 'Step 6 of 6',
     title: 'Check system stats',
     summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
     details:
@@ -254,7 +266,7 @@ export default function App() {
       const saved = window.localStorage.getItem(TAB_STORAGE_KEY)
       if (saved && TABS.some((t) => t.id === saved)) return saved
     } catch {}
-    return 'media'
+    return TABS[0].id
   })
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
@@ -851,6 +863,12 @@ export default function App() {
 
         <main className="content">
           <div key={tab} className="tab-stage">
+          {tab === 'workspace' && (
+            <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading workspace...</p></section>}>
+              <WorkspaceView onError={setError} onStatus={setUploadStatus} />
+            </Suspense>
+          )}
+
           {tab === 'media' && (
             <div className="grid two">
               <section className="panel">

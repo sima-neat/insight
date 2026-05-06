@@ -54,6 +54,7 @@ from neat_insight.utils import (
     tail_lines,
     webssh_is_available,
 )
+from neat_insight.workspace import workspace_bp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("werkzeug")
@@ -96,6 +97,7 @@ FRONTEND_DIST = _resolve_frontend_dist()
 VIEWER_CHANNEL_COUNT = 80
 
 app = Flask(__name__)
+app.register_blueprint(workspace_bp)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
