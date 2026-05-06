@@ -375,6 +375,35 @@ def system_tools():
     return {"ffmpeg": shutil.which("ffmpeg") is not None, "gstreamer": shutil.which("gst-launch-1.0") is not None}
 
 
+@app.get("/api/sysinfo")
+def sysinfo():
+    """Return the structured system status reported by the neat command-line tool."""
+    try:
+        result = subprocess.run(
+            ["neat", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError:
+        return _json_error("The neat command is not available on PATH.", 404)
+    except subprocess.TimeoutExpired:
+        return _json_error("The neat command timed out while collecting system information.", 504)
+    except OSError as exc:
+        return _json_error(f"Failed to run neat: {exc}", 500)
+
+    output = result.stdout.strip()
+    if result.returncode != 0:
+        detail = result.stderr.strip() or output or f"neat exited with status {result.returncode}"
+        return _json_error(detail, 502)
+
+    try:
+        return jsonify(json.loads(output))
+    except json.JSONDecodeError as exc:
+        return _json_error(f"neat returned invalid JSON: {exc}", 502)
+
+
 def _relative_media_label(path: Path) -> str:
     try:
         return str(path.relative_to(MEDIA_DIR))

@@ -151,7 +151,8 @@ select:focus-visible,
 }
 
 .devkit-trigger,
-.tour-trigger {
+.tour-trigger,
+.sysinfo-trigger {
   background: var(--surface-soft);
   border-color: var(--line);
   color: #365468;
@@ -162,6 +163,35 @@ select:focus-visible,
   border-color: rgba(14, 90, 184, 0.28);
   background: var(--accent-soft);
   color: #184b86;
+}
+
+.sysinfo-trigger {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.sysinfo-trigger span {
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sysinfo-trigger:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
 }
 
 .tour-blur-shell {
@@ -2228,6 +2258,172 @@ button:disabled {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   padding: 14px;
+}
+
+.sysinfo-modal-card {
+  width: min(980px, calc(100vw - 24px));
+  max-height: min(860px, calc(100vh - 24px));
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.sysinfo-header {
+  border-bottom: 1px solid var(--line);
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.sysinfo-header h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.sysinfo-header p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.sysinfo-eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #567086;
+}
+
+.sysinfo-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sysinfo-content {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.sysinfo-section {
+  min-width: 0;
+}
+
+.sysinfo-section h4 {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #274155;
+}
+
+.sysinfo-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #fff;
+  font-size: 12px;
+}
+
+.sysinfo-table th,
+.sysinfo-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.sysinfo-table thead th {
+  background: var(--surface-soft);
+  color: #40596d;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sysinfo-table tbody tr:last-child th,
+.sysinfo-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.sysinfo-table tbody th {
+  width: 24%;
+  color: #213b51;
+  font-weight: 800;
+}
+
+.sysinfo-table td {
+  color: #4a6174;
+  overflow-wrap: anywhere;
+}
+
+.sysinfo-table.key-value tbody th {
+  width: 220px;
+  background: var(--surface-soft);
+}
+
+.sysinfo-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--surface-soft);
+  color: #40596d;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.sysinfo-pill.ok {
+  border-color: #bde4c9;
+  background: var(--ok-soft);
+  color: #19713e;
+}
+
+.sysinfo-pill.warn {
+  border-color: #eed39a;
+  background: #fff8e7;
+  color: #795514;
+}
+
+.sysinfo-error,
+.sysinfo-loading,
+.sysinfo-empty {
+  margin: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.sysinfo-error {
+  border-color: #f3c3cd;
+  background: #fff1f4;
+  color: #8f2f45;
+}
+
+.sysinfo-loading,
+.sysinfo-empty {
+  background: var(--surface-soft);
 }
 
 .modal-card h3 {

@@ -109,6 +109,151 @@ function prettyValue(key, value) {
   return String(value)
 }
 
+function sysInfoValue(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '-'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function sysInfoEntries(obj) {
+  if (!obj || typeof obj !== 'object') return []
+  return Object.entries(obj).filter(([key]) => key !== 'schema')
+}
+
+function versionTag(component) {
+  const bits = [component.version, component.tag && `tag ${component.tag}`, component.channel && `channel ${component.channel}`].filter(Boolean)
+  return bits.join(' / ') || '-'
+}
+
+function portRange(port) {
+  if (port.hostPortStart === null || port.hostPortStart === undefined) return '-'
+  if (port.hostPortEnd === null || port.hostPortEnd === undefined || port.hostPortEnd === port.hostPortStart) return String(port.hostPortStart)
+  return `${port.hostPortStart}-${port.hostPortEnd}`
+}
+
+function StatusPill({ value }) {
+  const text = sysInfoValue(value)
+  const clean = text.toLowerCase()
+  const positive = clean === 'running' || clean === 'ok' || clean === 'yes' || clean === 'false'
+  const warning = clean.includes('available') || clean.includes('offline') || clean.includes('error')
+  return <span className={['sysinfo-pill', positive ? 'ok' : '', warning ? 'warn' : ''].filter(Boolean).join(' ')}>{text}</span>
+}
+
+function SysInfoKeyValueTable({ rows }) {
+  if (!rows.length) return <p className="sysinfo-empty">No details reported.</p>
+  return (
+    <table className="sysinfo-table key-value">
+      <tbody>
+        {rows.map(([key, value]) => (
+          <tr key={key}>
+            <th scope="row">{prettyKey(key)}</th>
+            <td>{typeof value === 'boolean' || key.toLowerCase().includes('status') || key.toLowerCase().includes('state') ? <StatusPill value={value} /> : sysInfoValue(value)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function SysInfoModal({ data, loading, error, onClose, onRefresh }) {
+  const components = data?.components && typeof data.components === 'object' ? Object.entries(data.components) : []
+  const ports = Array.isArray(data?.exposedPorts) ? data.exposedPorts : []
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="System information">
+      <div className="sysinfo-modal-card">
+        <header className="sysinfo-header">
+          <div>
+            <p className="sysinfo-eyebrow">System Information</p>
+            <h3>{data?.environment?.label || 'Neat Environment'}</h3>
+            <p>{data?.insight?.webUiUrl || data?.environment?.mode || 'Collected from neat --json'}</p>
+          </div>
+          <div className="sysinfo-header-actions">
+            <button type="button" onClick={onRefresh} disabled={loading}>
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button type="button" onClick={onClose} aria-label="Close system information">
+              Close
+            </button>
+          </div>
+        </header>
+
+        {error && <div className="sysinfo-error">{error}</div>}
+        {loading && !data && <div className="sysinfo-loading">Loading system information...</div>}
+
+        {data && (
+          <div className="sysinfo-content">
+            <section className="sysinfo-section">
+              <h4>Environment</h4>
+              <SysInfoKeyValueTable rows={sysInfoEntries(data.environment)} />
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Insight</h4>
+              <SysInfoKeyValueTable rows={sysInfoEntries(data.insight)} />
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Components</h4>
+              <table className="sysinfo-table">
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {components.map(([key, component]) => (
+                    <tr key={key}>
+                      <th scope="row">{component.name || prettyKey(key)}</th>
+                      <td>{versionTag(component)}</td>
+                      <td>
+                        <StatusPill value={component.serviceState || (component.updateAvailable ? 'Update available' : 'Current')} />
+                      </td>
+                      <td>{component.latestVersion || component.detail || component.venv || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Exposed Ports</h4>
+              <table className="sysinfo-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Protocol</th>
+                    <th>Host Port</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ports.map((port) => (
+                    <tr key={`${port.name}:${port.protocol}:${port.hostPortStart}`}>
+                      <th scope="row">{port.name}</th>
+                      <td>{String(port.protocol || '').toUpperCase()}</td>
+                      <td>{portRange(port)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Update Check</h4>
+              <SysInfoKeyValueTable rows={sysInfoEntries(data.updateCheck)} />
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function uploadProgressForLine(line, file, position, total) {
   const cleanLine = line.trim()
   const scope = total > 1 ? `${position}/${total}` : '1/1'
@@ -352,6 +497,10 @@ export default function App() {
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
   const [devkitShellBusy, setDevkitShellBusy] = useState(false)
+  const [sysInfoOpen, setSysInfoOpen] = useState(false)
+  const [sysInfo, setSysInfo] = useState(null)
+  const [sysInfoLoading, setSysInfoLoading] = useState(false)
+  const [sysInfoError, setSysInfoError] = useState('')
   const [tourOpen, setTourOpen] = useState(() => {
     try {
       return window.localStorage.getItem(ONBOARDING_STORAGE_KEY) !== '1'
@@ -408,6 +557,19 @@ export default function App() {
       setDevkitShellInfo(data)
     } catch {
       setDevkitShellInfo(null)
+    }
+  }
+
+  async function loadSysInfo() {
+    setSysInfoLoading(true)
+    setSysInfoError('')
+    try {
+      const data = await fetchJson('/api/sysinfo')
+      setSysInfo(data)
+    } catch (e) {
+      setSysInfoError(e.message)
+    } finally {
+      setSysInfoLoading(false)
     }
   }
 
@@ -728,6 +890,11 @@ export default function App() {
     setTourOpen(true)
   }
 
+  function openSysInfo() {
+    setSysInfoOpen(true)
+    loadSysInfo()
+  }
+
   function nextTourStep() {
     if (tourStep >= ONBOARDING_STEPS.length - 1) {
       closeTour(true)
@@ -845,6 +1012,15 @@ export default function App() {
               {devkitShellBusy ? 'Opening DevKit...' : devkitShellInfo.button_label}
             </button>
           )}
+          <button
+            type="button"
+            className="sysinfo-trigger"
+            onClick={openSysInfo}
+            title="System information"
+            aria-label="System information"
+          >
+            <span aria-hidden="true">i</span>
+          </button>
           <button
             type="button"
             className="tour-trigger"
@@ -1243,6 +1419,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {sysInfoOpen && (
+        <SysInfoModal
+          data={sysInfo}
+          loading={sysInfoLoading}
+          error={sysInfoError}
+          onRefresh={loadSysInfo}
+          onClose={() => setSysInfoOpen(false)}
+        />
       )}
 
     </div>
