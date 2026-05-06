@@ -135,10 +135,19 @@ function portRange(port) {
 
 function StatusPill({ value }) {
   const text = sysInfoValue(value)
+  if (text === '-') return <span className="sysinfo-muted">-</span>
   const clean = text.toLowerCase()
   const positive = clean === 'running' || clean === 'ok' || clean === 'yes' || clean === 'false'
   const warning = clean.includes('available') || clean.includes('offline') || clean.includes('error')
   return <span className={['sysinfo-pill', positive ? 'ok' : '', warning ? 'warn' : ''].filter(Boolean).join(' ')}>{text}</span>
+}
+
+function componentStatus(component) {
+  if (component.serviceState) return component.serviceState
+  if (component.installed === false) return '-'
+  if (component.updateAvailable === true) return 'Update available'
+  if (component.updateAvailable === false) return 'Current'
+  return '-'
 }
 
 function SysInfoKeyValueTable({ rows }) {
@@ -213,7 +222,7 @@ function SysInfoModal({ data, loading, error, onClose, onRefresh }) {
                       <th scope="row">{component.name || prettyKey(key)}</th>
                       <td>{versionTag(component)}</td>
                       <td>
-                        <StatusPill value={component.serviceState || (component.updateAvailable ? 'Update available' : 'Current')} />
+                        <StatusPill value={componentStatus(component)} />
                       </td>
                       <td>{component.latestVersion || component.detail || component.venv || '-'}</td>
                     </tr>
