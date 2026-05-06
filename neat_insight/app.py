@@ -378,6 +378,16 @@ def system_tools():
 @app.get("/api/sysinfo")
 def sysinfo():
     """Return the structured system status reported by the neat command-line tool."""
+    def sysinfo_json(payload, status: int = 200):
+        response = jsonify(payload)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response, status
+
+    def sysinfo_error(message: str, status: int = 400):
+        return sysinfo_json({"error": message}, status)
+
     try:
         result = subprocess.run(
             ["neat", "--json"],
@@ -387,21 +397,21 @@ def sysinfo():
             check=False,
         )
     except FileNotFoundError:
-        return _json_error("The neat command is not available on PATH.", 404)
+        return sysinfo_error("The neat command is not available on PATH.", 404)
     except subprocess.TimeoutExpired:
-        return _json_error("The neat command timed out while collecting system information.", 504)
+        return sysinfo_error("The neat command timed out while collecting system information.", 504)
     except OSError as exc:
-        return _json_error(f"Failed to run neat: {exc}", 500)
+        return sysinfo_error(f"Failed to run neat: {exc}", 500)
 
     output = result.stdout.strip()
     if result.returncode != 0:
         detail = result.stderr.strip() or output or f"neat exited with status {result.returncode}"
-        return _json_error(detail, 502)
+        return sysinfo_error(detail, 502)
 
     try:
-        return jsonify(json.loads(output))
+        return sysinfo_json(json.loads(output))
     except json.JSONDecodeError as exc:
-        return _json_error(f"neat returned invalid JSON: {exc}", 502)
+        return sysinfo_error(f"neat returned invalid JSON: {exc}", 502)
 
 
 def _relative_media_label(path: Path) -> str:

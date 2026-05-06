@@ -316,8 +316,14 @@ function uploadProgressForLine(line, file, position, total) {
 
 async function fetchJson(url, init) {
   const res = await fetch(url, init)
-  const body = await res.json().catch(() => ({}))
+  const contentType = res.headers.get('content-type') || ''
+  const isJson = contentType.toLowerCase().includes('application/json')
+  const body = isJson ? await res.json().catch(() => ({})) : {}
+
   if (!res.ok) throw new Error(body.error || body.message || `Request failed: ${res.status}`)
+  if (!isJson) {
+    throw new Error(`Expected JSON from ${url}, received ${contentType || 'an empty content type'}.`)
+  }
   return body
 }
 
@@ -565,9 +571,13 @@ export default function App() {
     setSysInfoLoading(true)
     setSysInfoError('')
     try {
-      const data = await fetchJson('/api/sysinfo')
+      const data = await fetchJson(`/api/sysinfo?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      })
       setSysInfo(data)
     } catch (e) {
+      setSysInfo(null)
       setSysInfoError(e.message)
     } finally {
       setSysInfoLoading(false)
