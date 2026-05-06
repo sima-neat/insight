@@ -153,6 +153,19 @@ function siblingWorkspacePath(basePath = '', siblingPath = '') {
   return [dir, cleanSibling].filter(Boolean).join('/')
 }
 
+function parentWorkspacePath(path = '') {
+  const cleanPath = String(path || '').replace(/^\/+/, '')
+  if (!cleanPath) return ''
+
+  if (cleanPath.includes('::')) {
+    const [archivePath, memberPath = ''] = cleanPath.split('::')
+    const parentMemberPath = memberPath.split('/').slice(0, -1).filter(Boolean).join('/')
+    return parentMemberPath ? `${archivePath}::${parentMemberPath}` : archivePath
+  }
+
+  return cleanPath.split('/').slice(0, -1).filter(Boolean).join('/')
+}
+
 function prefixMatchesText(value = '', query = '') {
   const cleanQuery = query.trim().toLowerCase()
   if (!cleanQuery) return false
@@ -1540,7 +1553,7 @@ function Breadcrumb({ path, onOpen }) {
   )
 }
 
-export default function WorkspaceView({ onError, onStatus }) {
+export default function WorkspaceView({ onError, onStatus, routePath = '', onNavigate }) {
   const layoutRef = useRef(null)
   const [root, setRoot] = useState(null)
   const [folder, setFolder] = useState(() => window.localStorage.getItem(WORKSPACE_FOLDER_KEY) || '')
@@ -1567,6 +1580,41 @@ export default function WorkspaceView({ onError, onStatus }) {
       .then(setRoot)
       .catch((err) => onError(err.message))
   }, [onError])
+
+  useEffect(() => {
+    const cleanRoutePath = String(routePath || '').replace(/^\/+/, '')
+    if (!cleanRoutePath) return undefined
+
+    let cancelled = false
+    fetchWorkspaceJson(`/api/workspace/file-info?path=${encodeURIComponent(cleanRoutePath)}`)
+      .then((node) => {
+        if (cancelled) return
+        setQuery('')
+        if (node.type === 'folder') {
+          setSelectedPath('')
+          setSelectedFile(null)
+          setFolder(node.path || '')
+          onStatus(`Opened ${node.path || 'workspace'}`)
+          return
+        }
+
+        const resolvedPath = node.path || cleanRoutePath
+        setFolder(parentWorkspacePath(resolvedPath))
+        setSelectedPath(resolvedPath)
+        onStatus(`Opened ${resolvedPath}`)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setSelectedPath('')
+        setSelectedFile(null)
+        onError(`Workspace path not found: ${cleanRoutePath}`)
+        if (err?.message) console.warn(`Unable to open workspace route ${cleanRoutePath}: ${err.message}`)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [routePath, onError, onStatus])
 
   useEffect(() => {
     let cancelled = false
@@ -1644,13 +1692,16 @@ export default function WorkspaceView({ onError, onStatus }) {
   }, [selectedPath, onError])
 
   const openFolder = (path) => {
-    setFolder(path || '')
+    const nextPath = path || ''
+    setFolder(nextPath)
     setQuery('')
+    onNavigate?.(nextPath)
   }
 
   const openFile = (node) => {
     setSelectedPath(node.path)
     onStatus(`Opened ${node.path}`)
+    onNavigate?.(node.path)
   }
 
   const setAndStoreSidebarWidth = (value) => {

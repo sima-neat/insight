@@ -11,6 +11,22 @@ const TABS = [
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
+const ROUTE_TO_TAB = {
+  workspace: 'workspace',
+  media: 'media',
+  streaming: 'rtsp',
+  rtsp: 'rtsp',
+  viewer: 'viewer',
+  stats: 'visualizer',
+  visualizer: 'visualizer'
+}
+const TAB_TO_ROUTE = {
+  workspace: '/workspace',
+  media: '/media',
+  rtsp: '/streaming',
+  viewer: '/viewer',
+  visualizer: '/stats'
+}
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
 const ONBOARDING_STEPS = [
   {
@@ -181,6 +197,52 @@ function radialOffset(radius, percent) {
   return circumference - (circumference * pct) / 100
 }
 
+function safeDecodeURIComponent(value = '') {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function routeStateFromLocation() {
+  if (typeof window === 'undefined') return { tab: '', workspacePath: '' }
+  const pathname = window.location.pathname || '/'
+  const cleanPath = pathname.replace(/^\/+/, '')
+  const [section = ''] = cleanPath.split('/')
+  const tab = ROUTE_TO_TAB[section] || ''
+
+  if (!tab) return { tab: '', workspacePath: '' }
+  if (tab !== 'workspace') return { tab, workspacePath: '' }
+
+  const workspacePrefix = '/workspace/'
+  if (!pathname.startsWith(workspacePrefix)) return { tab, workspacePath: '' }
+  return {
+    tab,
+    workspacePath: safeDecodeURIComponent(pathname.slice(workspacePrefix.length).replace(/^\/+/, ''))
+  }
+}
+
+function workspaceRouteForPath(path = '') {
+  const cleanPath = String(path || '').replace(/^\/+/, '')
+  if (!cleanPath) return TAB_TO_ROUTE.workspace
+  return `/workspace/${cleanPath.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function routeForTab(tab, workspacePath = '') {
+  if (tab === 'workspace') return workspaceRouteForPath(workspacePath)
+  return TAB_TO_ROUTE[tab] || '/'
+}
+
+function updateBrowserRoute(path, replace = false) {
+  if (typeof window === 'undefined') return
+  const nextPath = path || '/'
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (currentPath === nextPath) return
+  const method = replace ? 'replaceState' : 'pushState'
+  window.history[method]({}, '', nextPath)
+}
+
 function GaugeCard({ label, percent }) {
   const radius = 28
   const circumference = 2 * Math.PI * radius
@@ -261,13 +323,16 @@ function MiniSeriesCard({ name, samples }) {
 }
 
 export default function App() {
+  const initialRoute = routeStateFromLocation()
   const [tab, setTab] = useState(() => {
+    if (initialRoute.tab) return initialRoute.tab
     try {
       const saved = window.localStorage.getItem(TAB_STORAGE_KEY)
       if (saved && TABS.some((t) => t.id === saved)) return saved
     } catch {}
     return TABS[0].id
   })
+  const [routeWorkspacePath, setRouteWorkspacePath] = useState(() => initialRoute.workspacePath)
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
   const [sources, setSources] = useState([])
@@ -306,6 +371,12 @@ export default function App() {
     return allFiles.filter((f) => f.toLowerCase().includes(q))
   }, [allFiles, mediaFilter])
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+
+  function selectTab(nextTab, workspacePath = '', options = {}) {
+    setTab(nextTab)
+    setRouteWorkspacePath(nextTab === 'workspace' ? workspacePath : '')
+    updateBrowserRoute(routeForTab(nextTab, workspacePath), Boolean(options.replace))
+  }
 
   async function loadMedia(forceSelectFirst = false) {
     const data = await fetchJson('/api/media-files')
@@ -380,6 +451,18 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const syncFromRoute = () => {
+      const route = routeStateFromLocation()
+      if (!route.tab) return
+      setTab(route.tab)
+      setRouteWorkspacePath(route.tab === 'workspace' ? route.workspacePath : '')
+    }
+
+    window.addEventListener('popstate', syncFromRoute)
+    return () => window.removeEventListener('popstate', syncFromRoute)
+  }, [])
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(TAB_STORAGE_KEY, tab)
     } catch {}
@@ -389,7 +472,7 @@ export default function App() {
     if (!tourOpen) return
     const step = ONBOARDING_STEPS[tourStep]
     if (!step || !step.tab || step.tab === tab) return
-    setTab(step.tab)
+    selectTab(step.tab, '', { replace: true })
   }, [tab, tourOpen, tourStep])
 
   useEffect(() => {
@@ -852,7 +935,7 @@ export default function App() {
                 title={mutedByTour ? `${t.label} is disabled during this tour step` : t.label}
                 className={className}
                 disabled={mutedByTour}
-                onClick={() => setTab(t.id)}
+                onClick={() => selectTab(t.id)}
               >
                 <img src={t.icon} alt="" className="tab-icon" />
                 <span className="tab-label">{t.label}</span>
@@ -865,7 +948,12 @@ export default function App() {
           <div key={tab} className="tab-stage">
           {tab === 'workspace' && (
             <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading workspace...</p></section>}>
-              <WorkspaceView onError={setError} onStatus={setUploadStatus} />
+              <WorkspaceView
+                onError={setError}
+                onStatus={setUploadStatus}
+                routePath={routeWorkspacePath}
+                onNavigate={(path) => selectTab('workspace', path)}
+              />
             </Suspense>
           )}
 
