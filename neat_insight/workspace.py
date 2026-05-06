@@ -258,7 +258,8 @@ def _workspace_kind(path: Path) -> str:
         if mode & stat.S_IXUSR:
             return "executable"
     except OSError:
-        pass
+        # If metadata cannot be read (e.g., permissions/race), fall back to binary.
+        return "binary"
 
     return "binary"
 
