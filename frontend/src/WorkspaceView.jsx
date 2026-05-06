@@ -42,6 +42,7 @@ const WORKSPACE_SIDEBAR_WIDTH_KEY = 'neat-insight:workspace:sidebar-width'
 const WORKSPACE_MARKDOWN_MODE_KEY = 'neat-insight:workspace:markdown-mode'
 const WORKSPACE_STATS_MODE_KEY = 'neat-insight:workspace:stats-mode'
 const WORKSPACE_MPK_MODE_KEY = 'neat-insight:workspace:mpk-mode'
+const WORKSPACE_PIPELINE_MODE_KEY = 'neat-insight:workspace:pipeline-mode'
 const TEXT_PREVIEW_LIMIT_LABEL = '2 MB'
 const DEFAULT_SIDEBAR_WIDTH = 320
 const MIN_SIDEBAR_WIDTH = 240
@@ -98,6 +99,11 @@ function isMpkManifestFile(path = '') {
   return /_mpk\.json$/.test(name)
 }
 
+function isPipelineSequenceFile(path = '') {
+  const name = ((path.split('::').pop() || path).split('/').pop() || '').toLowerCase()
+  return name === 'pipeline_sequence.json'
+}
+
 function formatCycles(value) {
   if (!Number.isFinite(value)) return '-'
   return new Intl.NumberFormat('en-US').format(Math.round(value))
@@ -127,6 +133,37 @@ function safeJsonParse(content = '') {
     throw new Error('MPK manifest must be a JSON object.')
   }
   return data
+}
+
+function siblingWorkspacePath(basePath = '', siblingPath = '') {
+  const cleanSibling = String(siblingPath || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((part) => part && part !== '.')
+    .join('/')
+  if (!cleanSibling) return ''
+
+  if (basePath.includes('::')) {
+    const [archivePath, memberPath = ''] = basePath.split('::')
+    const dir = memberPath.split('/').slice(0, -1).filter(Boolean).join('/')
+    return `${archivePath}::${[dir, cleanSibling].filter(Boolean).join('/')}`
+  }
+
+  const dir = basePath.split('/').slice(0, -1).filter(Boolean).join('/')
+  return [dir, cleanSibling].filter(Boolean).join('/')
+}
+
+function parentWorkspacePath(path = '') {
+  const cleanPath = String(path || '').replace(/^\/+/, '')
+  if (!cleanPath) return ''
+
+  if (cleanPath.includes('::')) {
+    const [archivePath, memberPath = ''] = cleanPath.split('::')
+    const parentMemberPath = memberPath.split('/').slice(0, -1).filter(Boolean).join('/')
+    return parentMemberPath ? `${archivePath}::${parentMemberPath}` : archivePath
+  }
+
+  return cleanPath.split('/').slice(0, -1).filter(Boolean).join('/')
 }
 
 function prefixMatchesText(value = '', query = '') {
@@ -329,6 +366,115 @@ function parseMpkManifest(content = '') {
     pluginCount: plugins.length,
     inputCount: inputNodes.length,
     edgeCount: graphEdges.length
+  }
+}
+
+function normalizeStepInputs(input) {
+  if (Array.isArray(input)) return input.map(String).filter(Boolean)
+  if (input == null) return []
+  return [String(input)].filter(Boolean)
+}
+
+function parsePipelineSequence(content = '') {
+  const manifest = safeJsonParse(content)
+  const pipelines = Array.isArray(manifest.pipelines) ? manifest.pipelines : []
+  if (!pipelines.length) {
+    throw new Error('No pipelines[] entries were found in this pipeline sequence.')
+  }
+
+  const nodes = []
+  const edges = []
+  const configPaths = new Set()
+  let stepCount = 0
+
+  pipelines.forEach((pipeline, pipelineIndex) => {
+    const sequence = Array.isArray(pipeline.sequence) ? pipeline.sequence : []
+    const pipelineName = String(pipeline.name || `pipeline_${pipelineIndex + 1}`)
+    const stepIds = new Map()
+    const sourceIds = new Map()
+
+    sequence.forEach((step, stepIndex) => {
+      const name = String(step.name || `step_${stepIndex + 1}`)
+      const id = `pipeline:${pipelineIndex}:step:${name}:${stepIndex}`
+      stepIds.set(name, id)
+      if (step.configPath) configPaths.add(String(step.configPath))
+      stepCount += 1
+
+      nodes.push({
+        id,
+        type: 'pipelineNode',
+        data: {
+          kind: 'pipeline-step',
+          title: compactName(name),
+          fullName: name,
+          pipelineName,
+          pipelineIndex,
+          sequenceId: step.sequence_id ?? stepIndex + 1,
+          pluginId: step.pluginId || '',
+          processor: step.processor || 'Unknown',
+          kernel: step.kernel || '',
+          executable: step.executable || '',
+          configPath: step.configPath || '',
+          inputs: normalizeStepInputs(step.input),
+          raw: { pipelineStep: step },
+          jsonPath: `${pipelineName}.sequence[${stepIndex}]`
+        }
+      })
+    })
+
+    const addSource = (sourceName) => {
+      const name = String(sourceName || 'input')
+      if (sourceIds.has(name)) return sourceIds.get(name)
+      const id = `pipeline:${pipelineIndex}:source:${name}`
+      sourceIds.set(name, id)
+      nodes.push({
+        id,
+        type: 'pipelineNode',
+        data: {
+          kind: 'pipeline-source',
+          title: compactName(name),
+          fullName: name,
+          pipelineName,
+          pipelineIndex,
+          sequenceId: '',
+          pluginId: '',
+          processor: 'Input',
+          kernel: '',
+          executable: '',
+          configPath: '',
+          inputs: [],
+          raw: { input: name, pipeline: pipelineName },
+          jsonPath: `${pipelineName}.input.${name}`
+        }
+      })
+      return id
+    }
+
+    sequence.forEach((step, stepIndex) => {
+      const target = `pipeline:${pipelineIndex}:step:${String(step.name || `step_${stepIndex + 1}`)}:${stepIndex}`
+      normalizeStepInputs(step.input).forEach((inputName, inputIndex) => {
+        const source = stepIds.get(inputName) || addSource(inputName)
+        edges.push({
+          id: `pipeline-edge:${source}->${target}:${inputName || inputIndex}`,
+          source,
+          target,
+          label: inputName,
+          type: 'smoothstep',
+          data: {}
+        })
+      })
+    })
+  })
+
+  return {
+    manifest,
+    pipelines,
+    nodes,
+    edges,
+    configPaths: Array.from(configPaths).sort(),
+    pipelineCount: pipelines.length,
+    stepCount,
+    edgeCount: edges.length
   }
 }
 
@@ -776,7 +922,108 @@ function MpkGraphNode({ data }) {
   )
 }
 
-const mpkNodeTypes = { mpkNode: MpkGraphNode }
+function padSummary(config, padKey) {
+  const pads = config?.caps?.[padKey]
+  if (!Array.isArray(pads) || !pads.length) return []
+  return pads.map((pad, index) => {
+    const format = Array.isArray(pad.params)
+      ? pad.params.find((param) => param?.name === 'format')?.values
+      : ''
+    return {
+      id: `${padKey}:${index}`,
+      mediaType: pad.media_type || 'pad',
+      format: format || ''
+    }
+  })
+}
+
+function compactValue(value) {
+  if (Array.isArray(value)) {
+    if (!value.length) return '[]'
+    if (value.length > 3) return `[${value.slice(0, 3).join(', ')}...]`
+    return `[${value.join(', ')}]`
+  }
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
+function configChips(config) {
+  if (!config || typeof config !== 'object') return []
+  return [
+    ['batch', config.batch_size],
+    ['inputs', config.num_in_tensor],
+    ['cpu', config.cpu],
+    ['next', config.next_cpu],
+    ['dtype', config.data_type],
+    ['format', config.output_format]
+  ]
+    .map(([label, value]) => ({ label, value: compactValue(value) }))
+    .filter((item) => item.value !== '')
+    .slice(0, 5)
+}
+
+function PipelineGraphNode({ data }) {
+  const isStep = data.kind === 'pipeline-step'
+  const sinkPads = padSummary(data.config, 'sink_pads')
+  const srcPads = padSummary(data.config, 'src_pads')
+  const chips = configChips(data.config)
+
+  return (
+    <div className={`workspace-pipeline-node ${data.kind} ${String(data.processor || '').toLowerCase()} ${data.highlighted ? 'highlighted' : ''}`}>
+      {isStep && <Handle type="target" position={Position.Left} />}
+      <div className="workspace-pipeline-node-top">
+        <span>{isStep ? `#${data.sequenceId}` : data.processor}</span>
+        <strong>{data.processor}</strong>
+      </div>
+      <div className="workspace-pipeline-title" title={data.fullName}>{data.title}</div>
+      <div className="workspace-pipeline-subtitle">
+        <span>{data.kernel || data.pluginId || data.pipelineName}</span>
+        {data.configPath && <span title={data.configPath}>{data.configLoaded ? data.configPath : 'config pending'}</span>}
+      </div>
+      {isStep && (
+        <div className="workspace-pipeline-pads">
+          <div>
+            <em>sinkpad</em>
+            <span title={sinkPads.map((pad) => `${pad.mediaType} ${pad.format}`).join(', ')}>
+              {sinkPads.map((pad) => pad.format || pad.mediaType).join(', ') || 'unlisted'}
+            </span>
+          </div>
+          <div>
+            <em>srcpad</em>
+            <span title={srcPads.map((pad) => `${pad.mediaType} ${pad.format}`).join(', ')}>
+              {srcPads.map((pad) => pad.format || pad.mediaType).join(', ') || 'unlisted'}
+            </span>
+          </div>
+        </div>
+      )}
+      {chips.length > 0 && (
+        <div className="workspace-pipeline-chips">
+          {chips.map((chip) => (
+            <span key={chip.label} title={`${chip.label}: ${chip.value}`}>{chip.label}: {chip.value}</span>
+          ))}
+        </div>
+      )}
+      {data.configError && <div className="workspace-pipeline-error" title={data.configError}>config unavailable</div>}
+      {data.executable && <div className="workspace-pipeline-exe" title={data.executable}>{data.executable}</div>}
+      {isStep && <Handle type="source" position={Position.Right} />}
+    </div>
+  )
+}
+
+const workspaceGraphNodeTypes = { mpkNode: MpkGraphNode, pipelineNode: PipelineGraphNode }
+
+function graphNodeSize(node) {
+  if (node.type === 'pipelineNode') {
+    return {
+      width: node.data.kind === 'pipeline-step' ? 312 : 230,
+      height: node.data.kind === 'pipeline-step' ? 206 : 106
+    }
+  }
+  return {
+    width: node.data.kind === 'plugin' ? 286 : 230,
+    height: node.data.kind === 'plugin' ? 150 : 106
+  }
+}
 
 function MpkGraphCanvas({ nodes, edges, showEdgeLabels, fitNonce, onNodeInspect }) {
   const { fitView } = useReactFlow()
@@ -796,11 +1043,7 @@ function MpkGraphCanvas({ nodes, edges, showEdgeLabels, fitNonce, onNodeInspect 
           'elk.layered.spacing.nodeNodeBetweenLayers': '84',
           'elk.spacing.nodeNode': '34'
         },
-        children: nodes.map((node) => ({
-          id: node.id,
-          width: node.data.kind === 'plugin' ? 286 : 230,
-          height: node.data.kind === 'plugin' ? 150 : 106
-        })),
+        children: nodes.map((node) => ({ id: node.id, ...graphNodeSize(node) })),
         edges: edges.map((edge) => ({
           id: edge.id,
           sources: [edge.source],
@@ -850,7 +1093,7 @@ function MpkGraphCanvas({ nodes, edges, showEdgeLabels, fitNonce, onNodeInspect 
     <ReactFlow
       nodes={layoutNodes}
       edges={layoutEdges}
-      nodeTypes={mpkNodeTypes}
+      nodeTypes={workspaceGraphNodeTypes}
       nodesConnectable={false}
       onNodeClick={(_, node) => onNodeInspect?.(node)}
       fitView
@@ -1055,6 +1298,202 @@ function MpkManifestPreview({ file, mode }) {
   )
 }
 
+function PipelineSequencePreview({ file, mode }) {
+  const [pipelineFilter, setPipelineFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  const [showEdgeLabels, setShowEdgeLabels] = useState(true)
+  const [fitNonce, setFitNonce] = useState(0)
+  const [inspectNode, setInspectNode] = useState(null)
+  const [configs, setConfigs] = useState({})
+
+  useEffect(() => {
+    setPipelineFilter('all')
+    setSearch('')
+    setShowEdgeLabels(true)
+    setInspectNode(null)
+    setConfigs({})
+    setFitNonce((value) => value + 1)
+  }, [file.path])
+
+  const parsed = useMemo(() => {
+    try {
+      return { ...parsePipelineSequence(file.content || ''), error: '' }
+    } catch (err) {
+      return { manifest: {}, pipelines: [], nodes: [], edges: [], configPaths: [], pipelineCount: 0, stepCount: 0, edgeCount: 0, error: err.message }
+    }
+  }, [file.content])
+
+  useEffect(() => {
+    if (parsed.error || !parsed.configPaths.length) return undefined
+    let cancelled = false
+
+    const loadConfigs = async () => {
+      const entries = await Promise.all(parsed.configPaths.map(async (configPath) => {
+        const workspacePath = siblingWorkspacePath(file.path, configPath)
+        try {
+          const data = await fetchWorkspaceJson(`/api/workspace/file?path=${encodeURIComponent(workspacePath)}`)
+          return [configPath, { workspacePath, content: safeJsonParse(data.content || '{}'), error: '' }]
+        } catch (err) {
+          return [configPath, { workspacePath, content: null, error: err.message }]
+        }
+      }))
+      if (!cancelled) setConfigs(Object.fromEntries(entries))
+    }
+
+    loadConfigs()
+    return () => {
+      cancelled = true
+    }
+  }, [file.path, parsed.configPaths, parsed.error])
+
+  const graph = useMemo(() => {
+    const cleanSearch = search.trim().toLowerCase()
+    const visiblePipelineIndexes = new Set(parsed.pipelines
+      .map((pipeline, index) => ({ index, name: pipeline.name || `pipeline_${index + 1}` }))
+      .filter((pipeline) => pipelineFilter === 'all' || String(pipeline.index) === pipelineFilter)
+      .map((pipeline) => pipeline.index))
+
+    const visibleBaseIds = new Set(parsed.nodes
+      .filter((node) => visiblePipelineIndexes.has(node.data.pipelineIndex))
+      .map((node) => node.id))
+    const visibleEdges = parsed.edges.filter((edge) => visibleBaseIds.has(edge.source) && visibleBaseIds.has(edge.target))
+
+    const highlightIds = new Set()
+    if (cleanSearch) {
+      parsed.nodes.forEach((node) => {
+        const fields = [
+          node.data.fullName,
+          node.data.processor,
+          node.data.kernel,
+          node.data.pluginId,
+          node.data.configPath,
+          node.data.executable
+        ].filter(Boolean)
+        if (fields.some((field) => prefixMatchesText(field, cleanSearch))) highlightIds.add(node.id)
+      })
+      visibleEdges.forEach((edge) => {
+        if (prefixMatchesText(edge.label || '', cleanSearch)) {
+          highlightIds.add(edge.source)
+          highlightIds.add(edge.target)
+        }
+      })
+    }
+
+    const visibleNodes = parsed.nodes
+      .filter((node) => visibleBaseIds.has(node.id))
+      .map((node) => {
+        const configEntry = node.data.configPath ? configs[node.data.configPath] : null
+        const raw = node.data.kind === 'pipeline-step'
+          ? {
+              pipelineStep: node.data.raw?.pipelineStep,
+              configPath: node.data.configPath,
+              config: configEntry?.content || null,
+              configError: configEntry?.error || ''
+            }
+          : node.data.raw
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            config: configEntry?.content || null,
+            configLoaded: Boolean(configEntry?.content),
+            configError: configEntry?.error || '',
+            raw,
+            highlighted: cleanSearch ? highlightIds.has(node.id) : false
+          }
+        }
+      })
+
+    return { nodes: visibleNodes, edges: visibleEdges }
+  }, [parsed.nodes, parsed.edges, parsed.pipelines, pipelineFilter, search, configs])
+
+  if (mode === 'code') return <CodePreview file={file} />
+
+  if (parsed.error) {
+    return (
+      <div className="workspace-placeholder">
+        <h3>Pipeline preview</h3>
+        <p>{parsed.error}</p>
+      </div>
+    )
+  }
+
+  const configsLoaded = Object.values(configs).filter((item) => item.content).length
+  const completeCount = parsed.pipelines.filter((pipeline) => pipeline.complete).length
+
+  return (
+    <div className="workspace-pipeline-shell">
+      {file.truncated && (
+        <div className="workspace-preview-warning">
+          Preview limited to the first {TEXT_PREVIEW_LIMIT_LABEL}.
+        </div>
+      )}
+
+      <div className="workspace-pipeline-toolbar">
+        <div className="workspace-pipeline-summary">
+          <div className="workspace-stats-metric">
+            <span>Pipelines</span>
+            <strong>{parsed.pipelineCount}</strong>
+          </div>
+          <div className="workspace-stats-metric">
+            <span>Steps</span>
+            <strong>{parsed.stepCount}</strong>
+          </div>
+          <div className="workspace-stats-metric">
+            <span>Configs</span>
+            <strong>{configsLoaded}/{parsed.configPaths.length}</strong>
+          </div>
+          <div className="workspace-stats-metric">
+            <span>Complete</span>
+            <strong>{completeCount}/{parsed.pipelineCount}</strong>
+          </div>
+        </div>
+
+        <div className="workspace-pipeline-controls">
+          <input
+            className="search-input"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Highlight step, kernel, config..."
+          />
+          <select value={pipelineFilter} onChange={(event) => setPipelineFilter(event.target.value)} aria-label="Pipeline filter">
+            <option value="all">All pipelines</option>
+            {parsed.pipelines.map((pipeline, index) => (
+              <option key={`${pipeline.name || index}:${index}`} value={String(index)}>
+                {pipeline.name || `pipeline_${index + 1}`}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="btn-ghost workspace-mpk-fit" onClick={() => setFitNonce((value) => value + 1)}>
+            Fit
+          </button>
+          <label className="workspace-mpk-toggle">
+            <input
+              type="checkbox"
+              checked={showEdgeLabels}
+              onChange={(event) => setShowEdgeLabels(event.target.checked)}
+            />
+            <span>Inputs</span>
+          </label>
+        </div>
+      </div>
+
+      <div className="workspace-pipeline-canvas">
+        <ReactFlowProvider>
+          <MpkGraphCanvas
+            nodes={graph.nodes}
+            edges={graph.edges}
+            showEdgeLabels={showEdgeLabels}
+            fitNonce={fitNonce}
+            onNodeInspect={setInspectNode}
+          />
+        </ReactFlowProvider>
+      </div>
+      <MpkJsonModal node={inspectNode} onClose={() => setInspectNode(null)} />
+    </div>
+  )
+}
+
 function PlaceholderPreview({ file }) {
   const copy = {
     model: 'Model visualization is reserved for the model preview plugin.',
@@ -1070,11 +1509,12 @@ function PlaceholderPreview({ file }) {
   )
 }
 
-function FilePreview({ file, loading, markdownMode, statsMode, mpkMode }) {
+function FilePreview({ file, loading, markdownMode, statsMode, mpkMode, pipelineMode }) {
   if (loading) return <div className="workspace-placeholder">Loading preview...</div>
   if (!file) return <div className="workspace-placeholder">Select a file to preview.</div>
   if (file.kind === 'image') return <ImagePreview file={file} />
   if (file.previewAvailable && (file.kind === 'code' || file.kind === 'text')) {
+    if (isPipelineSequenceFile(file.path)) return <PipelineSequencePreview file={file} mode={pipelineMode} />
     if (isMpkManifestFile(file.path)) return <MpkManifestPreview file={file} mode={mpkMode} />
     if (isMlaStatsFile(file.path)) return <MlaStatsPreview file={file} mode={statsMode} />
     if (extOf(file.path) === 'md') return <MarkdownPreview file={file} mode={markdownMode} />
@@ -1113,7 +1553,7 @@ function Breadcrumb({ path, onOpen }) {
   )
 }
 
-export default function WorkspaceView({ onError, onStatus }) {
+export default function WorkspaceView({ onError, onStatus, routePath = '', onNavigate }) {
   const layoutRef = useRef(null)
   const [root, setRoot] = useState(null)
   const [folder, setFolder] = useState(() => window.localStorage.getItem(WORKSPACE_FOLDER_KEY) || '')
@@ -1128,6 +1568,7 @@ export default function WorkspaceView({ onError, onStatus }) {
   const [markdownMode, setMarkdownMode] = useState(() => window.localStorage.getItem(WORKSPACE_MARKDOWN_MODE_KEY) || 'preview')
   const [statsMode, setStatsMode] = useState(() => window.localStorage.getItem(WORKSPACE_STATS_MODE_KEY) || 'visual')
   const [mpkMode, setMpkMode] = useState(() => window.localStorage.getItem(WORKSPACE_MPK_MODE_KEY) || 'visual')
+  const [pipelineMode, setPipelineMode] = useState(() => window.localStorage.getItem(WORKSPACE_PIPELINE_MODE_KEY) || 'visual')
 
   const sortedChildren = useMemo(
     () => children.slice().sort((a, b) => nodeSortGroup(a) - nodeSortGroup(b) || a.name.localeCompare(b.name)),
@@ -1139,6 +1580,41 @@ export default function WorkspaceView({ onError, onStatus }) {
       .then(setRoot)
       .catch((err) => onError(err.message))
   }, [onError])
+
+  useEffect(() => {
+    const cleanRoutePath = String(routePath || '').replace(/^\/+/, '')
+    if (!cleanRoutePath) return undefined
+
+    let cancelled = false
+    fetchWorkspaceJson(`/api/workspace/file-info?path=${encodeURIComponent(cleanRoutePath)}`)
+      .then((node) => {
+        if (cancelled) return
+        setQuery('')
+        if (node.type === 'folder') {
+          setSelectedPath('')
+          setSelectedFile(null)
+          setFolder(node.path || '')
+          onStatus(`Opened ${node.path || 'workspace'}`)
+          return
+        }
+
+        const resolvedPath = node.path || cleanRoutePath
+        setFolder(parentWorkspacePath(resolvedPath))
+        setSelectedPath(resolvedPath)
+        onStatus(`Opened ${resolvedPath}`)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setSelectedPath('')
+        setSelectedFile(null)
+        onError(`Workspace path not found: ${cleanRoutePath}`)
+        if (err?.message) console.warn(`Unable to open workspace route ${cleanRoutePath}: ${err.message}`)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [routePath, onError, onStatus])
 
   useEffect(() => {
     let cancelled = false
@@ -1216,13 +1692,16 @@ export default function WorkspaceView({ onError, onStatus }) {
   }, [selectedPath, onError])
 
   const openFolder = (path) => {
-    setFolder(path || '')
+    const nextPath = path || ''
+    setFolder(nextPath)
     setQuery('')
+    onNavigate?.(nextPath)
   }
 
   const openFile = (node) => {
     setSelectedPath(node.path)
     onStatus(`Opened ${node.path}`)
+    onNavigate?.(node.path)
   }
 
   const setAndStoreSidebarWidth = (value) => {
@@ -1277,6 +1756,11 @@ export default function WorkspaceView({ onError, onStatus }) {
     window.localStorage.setItem(WORKSPACE_MPK_MODE_KEY, mode)
   }
 
+  const setAndStorePipelineMode = (mode) => {
+    setPipelineMode(mode)
+    window.localStorage.setItem(WORKSPACE_PIPELINE_MODE_KEY, mode)
+  }
+
   const renderNode = (node, context = 'tree') => (
     <button
       key={`${context}:${node.path}`}
@@ -1300,6 +1784,7 @@ export default function WorkspaceView({ onError, onStatus }) {
   const selectedIsMarkdown = selectedFile?.previewAvailable && extOf(selectedFile.path) === 'md'
   const selectedIsMlaStats = selectedFile?.previewAvailable && isMlaStatsFile(selectedFile.path)
   const selectedIsMpkManifest = selectedFile?.previewAvailable && isMpkManifestFile(selectedFile.path)
+  const selectedIsPipelineSequence = selectedFile?.previewAvailable && isPipelineSequenceFile(selectedFile.path)
 
   return (
     <section className="panel workspace-panel">
@@ -1352,7 +1837,25 @@ export default function WorkspaceView({ onError, onStatus }) {
               <p>{selectedFile?.path || 'Choose a source file from the workspace.'}</p>
             </div>
             <div className="workspace-preview-actions">
-              {selectedIsMpkManifest && (
+              {selectedIsPipelineSequence && (
+                <div className="workspace-segmented" aria-label="Pipeline sequence preview mode">
+                  <button
+                    type="button"
+                    className={pipelineMode === 'visual' ? 'active' : ''}
+                    onClick={() => setAndStorePipelineMode('visual')}
+                  >
+                    Visual
+                  </button>
+                  <button
+                    type="button"
+                    className={pipelineMode === 'code' ? 'active' : ''}
+                    onClick={() => setAndStorePipelineMode('code')}
+                  >
+                    Raw
+                  </button>
+                </div>
+              )}
+              {!selectedIsPipelineSequence && selectedIsMpkManifest && (
                 <div className="workspace-segmented" aria-label="MPK manifest preview mode">
                   <button
                     type="button"
@@ -1370,7 +1873,7 @@ export default function WorkspaceView({ onError, onStatus }) {
                   </button>
                 </div>
               )}
-              {!selectedIsMpkManifest && selectedIsMlaStats && (
+              {!selectedIsPipelineSequence && !selectedIsMpkManifest && selectedIsMlaStats && (
                 <div className="workspace-segmented" aria-label="MLA stats preview mode">
                   <button
                     type="button"
@@ -1388,7 +1891,7 @@ export default function WorkspaceView({ onError, onStatus }) {
                   </button>
                 </div>
               )}
-              {!selectedIsMpkManifest && !selectedIsMlaStats && selectedIsMarkdown && (
+              {!selectedIsPipelineSequence && !selectedIsMpkManifest && !selectedIsMlaStats && selectedIsMarkdown && (
                 <div className="workspace-segmented" aria-label="Markdown preview mode">
                   <button
                     type="button"
@@ -1415,6 +1918,7 @@ export default function WorkspaceView({ onError, onStatus }) {
             markdownMode={markdownMode}
             statsMode={statsMode}
             mpkMode={mpkMode}
+            pipelineMode={pipelineMode}
           />
         </div>
       </div>

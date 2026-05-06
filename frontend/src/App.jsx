@@ -11,6 +11,22 @@ const TABS = [
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
+const ROUTE_TO_TAB = {
+  workspace: 'workspace',
+  media: 'media',
+  streaming: 'rtsp',
+  rtsp: 'rtsp',
+  viewer: 'viewer',
+  stats: 'visualizer',
+  visualizer: 'visualizer'
+}
+const TAB_TO_ROUTE = {
+  workspace: '/workspace',
+  media: '/media',
+  rtsp: '/streaming',
+  viewer: '/viewer',
+  visualizer: '/stats'
+}
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
 const ONBOARDING_STEPS = [
   {
@@ -93,6 +109,161 @@ function prettyValue(key, value) {
   return String(value)
 }
 
+function sysInfoValue(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '-'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function sysInfoEntries(obj) {
+  if (!obj || typeof obj !== 'object') return []
+  return Object.entries(obj).filter(([key]) => key !== 'schema')
+}
+
+function versionTag(component) {
+  const bits = [component.version, component.tag && `tag ${component.tag}`, component.channel && `channel ${component.channel}`].filter(Boolean)
+  return bits.join(' / ') || '-'
+}
+
+function portRange(port) {
+  if (port.hostPortStart === null || port.hostPortStart === undefined) return '-'
+  if (port.hostPortEnd === null || port.hostPortEnd === undefined || port.hostPortEnd === port.hostPortStart) return String(port.hostPortStart)
+  return `${port.hostPortStart}-${port.hostPortEnd}`
+}
+
+function StatusPill({ value }) {
+  const text = sysInfoValue(value)
+  if (text === '-') return <span className="sysinfo-muted">-</span>
+  const clean = text.toLowerCase()
+  const positive = clean === 'running' || clean === 'ok' || clean === 'yes' || clean === 'false'
+  const warning = clean.includes('available') || clean.includes('offline') || clean.includes('error')
+  return <span className={['sysinfo-pill', positive ? 'ok' : '', warning ? 'warn' : ''].filter(Boolean).join(' ')}>{text}</span>
+}
+
+function componentStatus(component) {
+  if (component.serviceState) return component.serviceState
+  if (component.installed === false) return '-'
+  if (component.updateAvailable === true) return 'Update available'
+  if (component.updateAvailable === false) return 'Current'
+  return '-'
+}
+
+function SysInfoKeyValueTable({ rows }) {
+  if (!rows.length) return <p className="sysinfo-empty">No details reported.</p>
+  return (
+    <table className="sysinfo-table key-value">
+      <tbody>
+        {rows.map(([key, value]) => (
+          <tr key={key}>
+            <th scope="row">{prettyKey(key)}</th>
+            <td>{typeof value === 'boolean' || key.toLowerCase().includes('status') || key.toLowerCase().includes('state') ? <StatusPill value={value} /> : sysInfoValue(value)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function SysInfoModal({ data, loading, error, onClose, onRefresh }) {
+  const components = data?.components && typeof data.components === 'object' ? Object.entries(data.components) : []
+  const ports = Array.isArray(data?.exposedPorts) ? data.exposedPorts : []
+  const headerDetail = data?.insight?.webUiUrl || data?.environment?.mode || ''
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="System information">
+      <div className="sysinfo-modal-card">
+        <header className="sysinfo-header">
+          <div>
+            <p className="sysinfo-eyebrow">System Information</p>
+            <h3>{data?.environment?.label || 'Neat Environment'}</h3>
+            {headerDetail && <p>{headerDetail}</p>}
+          </div>
+          <div className="sysinfo-header-actions">
+            <button type="button" onClick={onRefresh} disabled={loading}>
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button type="button" onClick={onClose} aria-label="Close system information">
+              Close
+            </button>
+          </div>
+        </header>
+
+        {error && <div className="sysinfo-error">{error}</div>}
+        {loading && !data && <div className="sysinfo-loading">Loading system information...</div>}
+
+        {data && (
+          <div className="sysinfo-content">
+            <section className="sysinfo-section">
+              <h4>Environment</h4>
+              <SysInfoKeyValueTable rows={sysInfoEntries(data.environment)} />
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Insight</h4>
+              <SysInfoKeyValueTable rows={sysInfoEntries(data.insight)} />
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Components</h4>
+              <table className="sysinfo-table">
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {components.map(([key, component]) => (
+                    <tr key={key}>
+                      <th scope="row">{component.name || prettyKey(key)}</th>
+                      <td>{versionTag(component)}</td>
+                      <td>
+                        <StatusPill value={componentStatus(component)} />
+                      </td>
+                      <td>{component.latestVersion || component.detail || component.venv || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Exposed Ports</h4>
+              <table className="sysinfo-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Protocol</th>
+                    <th>Host Port</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ports.map((port) => (
+                    <tr key={`${port.name}:${port.protocol}:${port.hostPortStart}`}>
+                      <th scope="row">{port.name}</th>
+                      <td>{String(port.protocol || '').toUpperCase()}</td>
+                      <td>{portRange(port)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="sysinfo-section">
+              <h4>Update Check</h4>
+              <SysInfoKeyValueTable rows={sysInfoEntries(data.updateCheck)} />
+            </section>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function uploadProgressForLine(line, file, position, total) {
   const cleanLine = line.trim()
   const scope = total > 1 ? `${position}/${total}` : '1/1'
@@ -154,8 +325,14 @@ function uploadProgressForLine(line, file, position, total) {
 
 async function fetchJson(url, init) {
   const res = await fetch(url, init)
-  const body = await res.json().catch(() => ({}))
+  const contentType = res.headers.get('content-type') || ''
+  const isJson = contentType.toLowerCase().includes('application/json')
+  const body = isJson ? await res.json().catch(() => ({})) : {}
+
   if (!res.ok) throw new Error(body.error || body.message || `Request failed: ${res.status}`)
+  if (!isJson) {
+    throw new Error(`Expected JSON from ${url}, received ${contentType || 'an empty content type'}.`)
+  }
   return body
 }
 
@@ -179,6 +356,52 @@ function radialOffset(radius, percent) {
   const pct = Math.max(0, Math.min(100, Number(percent) || 0))
   const circumference = 2 * Math.PI * radius
   return circumference - (circumference * pct) / 100
+}
+
+function safeDecodeURIComponent(value = '') {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function routeStateFromLocation() {
+  if (typeof window === 'undefined') return { tab: '', workspacePath: '' }
+  const pathname = window.location.pathname || '/'
+  const cleanPath = pathname.replace(/^\/+/, '')
+  const [section = ''] = cleanPath.split('/')
+  const tab = ROUTE_TO_TAB[section] || ''
+
+  if (!tab) return { tab: '', workspacePath: '' }
+  if (tab !== 'workspace') return { tab, workspacePath: '' }
+
+  const workspacePrefix = '/workspace/'
+  if (!pathname.startsWith(workspacePrefix)) return { tab, workspacePath: '' }
+  return {
+    tab,
+    workspacePath: safeDecodeURIComponent(pathname.slice(workspacePrefix.length).replace(/^\/+/, ''))
+  }
+}
+
+function workspaceRouteForPath(path = '') {
+  const cleanPath = String(path || '').replace(/^\/+/, '')
+  if (!cleanPath) return TAB_TO_ROUTE.workspace
+  return `/workspace/${cleanPath.split('/').map(encodeURIComponent).join('/')}`
+}
+
+function routeForTab(tab, workspacePath = '') {
+  if (tab === 'workspace') return workspaceRouteForPath(workspacePath)
+  return TAB_TO_ROUTE[tab] || '/'
+}
+
+function updateBrowserRoute(path, replace = false) {
+  if (typeof window === 'undefined') return
+  const nextPath = path || '/'
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (currentPath === nextPath) return
+  const method = replace ? 'replaceState' : 'pushState'
+  window.history[method]({}, '', nextPath)
 }
 
 function GaugeCard({ label, percent }) {
@@ -261,13 +484,16 @@ function MiniSeriesCard({ name, samples }) {
 }
 
 export default function App() {
+  const initialRoute = routeStateFromLocation()
   const [tab, setTab] = useState(() => {
+    if (initialRoute.tab) return initialRoute.tab
     try {
       const saved = window.localStorage.getItem(TAB_STORAGE_KEY)
       if (saved && TABS.some((t) => t.id === saved)) return saved
     } catch {}
     return TABS[0].id
   })
+  const [routeWorkspacePath, setRouteWorkspacePath] = useState(() => initialRoute.workspacePath)
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
   const [sources, setSources] = useState([])
@@ -287,6 +513,10 @@ export default function App() {
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
   const [devkitShellBusy, setDevkitShellBusy] = useState(false)
+  const [sysInfoOpen, setSysInfoOpen] = useState(false)
+  const [sysInfo, setSysInfo] = useState(null)
+  const [sysInfoLoading, setSysInfoLoading] = useState(false)
+  const [sysInfoError, setSysInfoError] = useState('')
   const [tourOpen, setTourOpen] = useState(() => {
     try {
       return window.localStorage.getItem(ONBOARDING_STORAGE_KEY) !== '1'
@@ -306,6 +536,12 @@ export default function App() {
     return allFiles.filter((f) => f.toLowerCase().includes(q))
   }, [allFiles, mediaFilter])
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+
+  function selectTab(nextTab, workspacePath = '', options = {}) {
+    setTab(nextTab)
+    setRouteWorkspacePath(nextTab === 'workspace' ? workspacePath : '')
+    updateBrowserRoute(routeForTab(nextTab, workspacePath), Boolean(options.replace))
+  }
 
   async function loadMedia(forceSelectFirst = false) {
     const data = await fetchJson('/api/media-files')
@@ -337,6 +573,23 @@ export default function App() {
       setDevkitShellInfo(data)
     } catch {
       setDevkitShellInfo(null)
+    }
+  }
+
+  async function loadSysInfo() {
+    setSysInfoLoading(true)
+    setSysInfoError('')
+    try {
+      const data = await fetchJson(`/api/sysinfo?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      })
+      setSysInfo(data)
+    } catch (e) {
+      setSysInfo(null)
+      setSysInfoError(e.message)
+    } finally {
+      setSysInfoLoading(false)
     }
   }
 
@@ -380,6 +633,18 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const syncFromRoute = () => {
+      const route = routeStateFromLocation()
+      if (!route.tab) return
+      setTab(route.tab)
+      setRouteWorkspacePath(route.tab === 'workspace' ? route.workspacePath : '')
+    }
+
+    window.addEventListener('popstate', syncFromRoute)
+    return () => window.removeEventListener('popstate', syncFromRoute)
+  }, [])
+
+  useEffect(() => {
     try {
       window.localStorage.setItem(TAB_STORAGE_KEY, tab)
     } catch {}
@@ -389,7 +654,7 @@ export default function App() {
     if (!tourOpen) return
     const step = ONBOARDING_STEPS[tourStep]
     if (!step || !step.tab || step.tab === tab) return
-    setTab(step.tab)
+    selectTab(step.tab, '', { replace: true })
   }, [tab, tourOpen, tourStep])
 
   useEffect(() => {
@@ -645,6 +910,11 @@ export default function App() {
     setTourOpen(true)
   }
 
+  function openSysInfo() {
+    setSysInfoOpen(true)
+    loadSysInfo()
+  }
+
   function nextTourStep() {
     if (tourStep >= ONBOARDING_STEPS.length - 1) {
       closeTour(true)
@@ -764,6 +1034,15 @@ export default function App() {
           )}
           <button
             type="button"
+            className="sysinfo-trigger"
+            onClick={openSysInfo}
+            title="System information"
+            aria-label="System information"
+          >
+            <span aria-hidden="true">i</span>
+          </button>
+          <button
+            type="button"
             className="tour-trigger"
             onClick={toggleTour}
             aria-pressed={tourOpen}
@@ -852,7 +1131,7 @@ export default function App() {
                 title={mutedByTour ? `${t.label} is disabled during this tour step` : t.label}
                 className={className}
                 disabled={mutedByTour}
-                onClick={() => setTab(t.id)}
+                onClick={() => selectTab(t.id)}
               >
                 <img src={t.icon} alt="" className="tab-icon" />
                 <span className="tab-label">{t.label}</span>
@@ -865,7 +1144,12 @@ export default function App() {
           <div key={tab} className="tab-stage">
           {tab === 'workspace' && (
             <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading workspace...</p></section>}>
-              <WorkspaceView onError={setError} onStatus={setUploadStatus} />
+              <WorkspaceView
+                onError={setError}
+                onStatus={setUploadStatus}
+                routePath={routeWorkspacePath}
+                onNavigate={(path) => selectTab('workspace', path)}
+              />
             </Suspense>
           )}
 
@@ -1155,6 +1439,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {sysInfoOpen && (
+        <SysInfoModal
+          data={sysInfo}
+          loading={sysInfoLoading}
+          error={sysInfoError}
+          onRefresh={loadSysInfo}
+          onClose={() => setSysInfoOpen(false)}
+        />
       )}
 
     </div>
