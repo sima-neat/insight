@@ -1052,6 +1052,13 @@ def index():
 @app.get("/<path:path>")
 def spa(path):
     """Return a built frontend asset when it exists; otherwise return index.html for SPA routing."""
+    if path.startswith("api/"):
+        response = jsonify({"error": f"API endpoint not found: /{path}"})
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response, 404
+
     if FRONTEND_DIST.exists():
         file_path = FRONTEND_DIST / path
         if file_path.exists() and file_path.is_file():
