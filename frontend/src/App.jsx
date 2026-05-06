@@ -160,6 +160,7 @@ function SysInfoKeyValueTable({ rows }) {
 function SysInfoModal({ data, loading, error, onClose, onRefresh }) {
   const components = data?.components && typeof data.components === 'object' ? Object.entries(data.components) : []
   const ports = Array.isArray(data?.exposedPorts) ? data.exposedPorts : []
+  const headerDetail = data?.insight?.webUiUrl || data?.environment?.mode || ''
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="System information">
@@ -168,7 +169,7 @@ function SysInfoModal({ data, loading, error, onClose, onRefresh }) {
           <div>
             <p className="sysinfo-eyebrow">System Information</p>
             <h3>{data?.environment?.label || 'Neat Environment'}</h3>
-            <p>{data?.insight?.webUiUrl || data?.environment?.mode || 'Collected from neat --json'}</p>
+            {headerDetail && <p>{headerDetail}</p>}
           </div>
           <div className="sysinfo-header-actions">
             <button type="button" onClick={onRefresh} disabled={loading}>
