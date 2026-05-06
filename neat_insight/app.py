@@ -375,6 +375,70 @@ def system_tools():
     return {"ffmpeg": shutil.which("ffmpeg") is not None, "gstreamer": shutil.which("gst-launch-1.0") is not None}
 
 
+def _fake_sysinfo_payload():
+    """Return representative sysinfo data for local UI testing when neat is unavailable."""
+    return {
+        "components": {
+            "core": {
+                "channel": "main",
+                "channelAssumed": False,
+                "latestTag": "7c0ff36",
+                "latestVersion": "0.0.0+main-7c0ff36",
+                "metadataUrl": "https://artifacts.sima-neat.com/core/main/7c0ff36/metadata-minimal.json",
+                "name": "Neat core",
+                "tag": "7c0ff36",
+                "updateAvailable": False,
+                "version": "0.0.0+main-7c0ff36",
+            },
+            "gstPlugins": {"name": "neat-gst-plugins", "version": "0.1.0-1"},
+            "insight": {
+                "channel": "main",
+                "channelAssumed": False,
+                "latestTag": "346c6e9",
+                "latestVersion": "0.0.0+main.346c6e9",
+                "metadataUrl": "https://apps.sima-neat.com/insight/download/main/346c6e9.json",
+                "name": "neat-insight",
+                "serviceState": "Running",
+                "tag": "346c6e9",
+                "updateAvailable": False,
+                "venv": "/opt/neat-insight/venv",
+                "version": "0.0.0+main.346c6e9",
+            },
+            "modelSdkExtension": {
+                "detail": "run activate-model-sdk to activate",
+                "installed": True,
+                "name": "Model SDK Extension",
+                "version": "2.0.0.neat+main-1ebbc39",
+            },
+            "pyneat": {"name": "PyNeat", "version": "0.0.0"},
+            "runtime": {"name": "neat-runtime", "version": "0.1.0-1"},
+        },
+        "environment": {
+            "devkitBuildVersion": None,
+            "label": "Neat SDK",
+            "mode": "elxr-sdk",
+            "sdkVersion": "2.0.0_Palette_SDK_neat_feature_devkit-sync_95ba5d8",
+            "sysroot": "/opt/toolchain/aarch64/modalix",
+        },
+        "exposedPorts": [
+            {"hostPortEnd": None, "hostPortStart": 9900, "name": "mainUI", "protocol": "tcp"},
+            {"hostPortEnd": 9179, "hostPortStart": 9100, "name": "metadataUDP", "protocol": "udp"},
+            {"hostPortEnd": None, "hostPortStart": 8554, "name": "rtsp.tcp", "protocol": "tcp"},
+            {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
+            {"hostPortEnd": None, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
+            {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+            {"hostPortEnd": None, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"},
+        ],
+        "insight": {
+            "serviceState": "Running",
+            "venv": "/opt/neat-insight/venv",
+            "webUiUrl": "https://10.0.0.22:9900",
+        },
+        "schema": "sima.neat.status.v1",
+        "updateCheck": {"offline": False, "status": "ok"},
+    }
+
+
 @app.get("/api/sysinfo")
 def sysinfo():
     """Return the structured system status reported by the neat command-line tool."""
@@ -397,7 +461,8 @@ def sysinfo():
             check=False,
         )
     except FileNotFoundError:
-        return sysinfo_error("The neat command is not available on PATH.", 404)
+        logging.warning("The neat command is not available on PATH; returning fake sysinfo data for UI testing.")
+        return sysinfo_json(_fake_sysinfo_payload())
     except subprocess.TimeoutExpired:
         return sysinfo_error("The neat command timed out while collecting system information.", 504)
     except OSError as exc:
