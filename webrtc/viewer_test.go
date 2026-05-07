@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -54,6 +55,22 @@ func TestValidateEphemeralUDPPortRangeRejectsInvalidRange(t *testing.T) {
 	}
 	if _, _, err := validateEphemeralUDPPortRange(40000, 65536); err == nil {
 		t.Fatalf("expected port above 65535 to fail")
+	}
+}
+
+func TestConfiguredNAT1To1HostIPsIncludesLoopback(t *testing.T) {
+	got := configuredNAT1To1HostIPs("10.0.0.22")
+	want := []string{"10.0.0.22", "127.0.0.1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected NAT 1:1 host IPs %v, got %v", want, got)
+	}
+}
+
+func TestConfiguredNAT1To1HostIPsRejectsInternalHosts(t *testing.T) {
+	for _, hostIP := range []string{"", "127.0.0.1", "0.0.0.0", "not-an-ip"} {
+		if got := configuredNAT1To1HostIPs(hostIP); got != nil {
+			t.Fatalf("expected %q to be rejected, got %v", hostIP, got)
+		}
 	}
 }
 

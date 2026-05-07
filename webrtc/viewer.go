@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,7 @@ const (
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
+	loopbackICEHostIP            = "127.0.0.1"
 )
 
 type neatPortMapConfig struct {
@@ -87,6 +89,15 @@ func main() {
 		log.Printf("⚠️ No TLS cert/key provided, serving plain HTTP on %s", addr)
 		log.Fatal(http.ListenAndServe(addr, nil))
 	}
+}
+
+func configuredNAT1To1HostIPs(hostIP string) []string {
+	hostIP = strings.TrimSpace(hostIP)
+	ip := net.ParseIP(hostIP)
+	if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+		return nil
+	}
+	return []string{hostIP, loopbackICEHostIP}
 }
 
 func serveViewer(w http.ResponseWriter, r *http.Request) {
@@ -224,10 +235,11 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hostIP := os.Getenv("CONTAINER_HOST_IP")
+	nat1To1HostIPs := configuredNAT1To1HostIPs(hostIP)
 
-	if ip := net.ParseIP(hostIP); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
-		log.Printf("🌐 Using CONTAINER_HOST_IP override: %s", hostIP)
-		s.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
+	if len(nat1To1HostIPs) > 0 {
+		log.Printf("🌐 Using ICE host IP overrides: %v", nat1To1HostIPs)
+		s.SetNAT1To1IPs(nat1To1HostIPs, webrtc.ICECandidateTypeHost)
 	} else if hostIP != "" {
 		log.Printf("⚠️ Ignoring invalid or internal CONTAINER_HOST_IP: %q", hostIP)
 	}
