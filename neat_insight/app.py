@@ -508,8 +508,8 @@ def _sysinfo_port_map_candidates():
     for parent in (Path("/home"), Path("/Users")):
         try:
             paths.extend(user_dir / ".insight-config" / "neat-port-map.json" for user_dir in parent.iterdir() if user_dir.is_dir())
-        except OSError:
-            pass
+        except OSError as exc:
+            logging.debug("Skipping port map search under %s: %s", parent, exc)
 
     seen = set()
     for path in paths:
