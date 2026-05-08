@@ -546,7 +546,7 @@ def _format_sysinfo_web_ui_url(host, port):
         if ipaddress.ip_address(host).version == 6:
             host = f"[{host}]"
     except ValueError:
-        pass
+        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
     return f"https://{host}:{port}"
 
 
