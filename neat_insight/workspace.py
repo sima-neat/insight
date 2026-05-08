@@ -20,11 +20,18 @@ ARCHIVE_SEPARATOR = "::"
 
 IGNORE_NAMES = {
     ".cache",
+    ".DocumentRevisions-V100",
+    ".DS_Store",
+    ".fseventsd",
     ".git",
     ".hg",
     ".mypy_cache",
     ".pytest_cache",
+    ".Spotlight-V100",
     ".svn",
+    ".TemporaryItems",
+    ".Trash",
+    ".Trashes",
     ".tox",
     ".venv",
     "__pycache__",
@@ -167,8 +174,13 @@ def _is_mpk_archive_name(name: str) -> bool:
     return name.lower().endswith("_mpk.tar.gz")
 
 
-def _is_mpk_archive_path(path: Path) -> bool:
-    return path.is_file() and _is_mpk_archive_name(path.name)
+def _is_mpk_archive_path(path: Path, is_file: bool = None) -> bool:
+    if is_file is None:
+        try:
+            is_file = path.is_file()
+        except OSError:
+            is_file = False
+    return is_file and _is_mpk_archive_name(path.name)
 
 
 def _split_virtual_path(rel_path: str):
@@ -242,19 +254,32 @@ def _workspace_kind_for_name(name: str, is_dir: bool = False, mode=None) -> str:
     return "binary"
 
 
-def _workspace_kind(path: Path) -> str:
-    if _is_mpk_archive_path(path):
+def _workspace_kind(path: Path, st=None, is_dir: bool = None, is_file: bool = None) -> str:
+    if st is not None:
+        is_dir = stat.S_ISDIR(st.st_mode) if is_dir is None else is_dir
+        is_file = stat.S_ISREG(st.st_mode) if is_file is None else is_file
+
+    if _is_mpk_archive_path(path, is_file=is_file):
         return "archive"
 
-    kind = _workspace_kind_for_name(path.name, is_dir=path.is_dir())
+    if is_dir is None:
+        try:
+            is_dir = path.is_dir()
+        except OSError:
+            is_dir = False
+
+    kind = _workspace_kind_for_name(path.name, is_dir=is_dir)
     if kind != "binary":
         return kind
+
+    if is_file is False:
+        return "binary"
 
     if _looks_like_text_file(path):
         return "text"
 
     try:
-        mode = path.stat().st_mode
+        mode = st.st_mode if st is not None else path.stat().st_mode
         if mode & stat.S_IXUSR:
             return "executable"
     except OSError:
@@ -292,13 +317,15 @@ def _node_for(path: Path, root: Path):
     except OSError:
         return None
 
-    node_type = "folder" if path.is_dir() or _is_mpk_archive_path(path) else "file"
+    is_dir = stat.S_ISDIR(st.st_mode)
+    is_file = stat.S_ISREG(st.st_mode)
+    node_type = "folder" if is_dir or _is_mpk_archive_path(path, is_file=is_file) else "file"
     return {
         "name": path.name or root.name,
         "path": _relative_path(path, root),
         "type": node_type,
-        "kind": _workspace_kind(path),
-        "size": 0 if path.is_dir() else st.st_size,
+        "kind": _workspace_kind(path, st=st, is_dir=is_dir, is_file=is_file),
+        "size": 0 if is_dir else st.st_size,
         "mtime": st.st_mtime,
     }
 
@@ -344,7 +371,7 @@ class WorkspaceIndex:
 
     def _scan(self, root: Path):
         items = []
-        for current, dirs, files in os.walk(root):
+        for current, dirs, files in os.walk(root, onerror=lambda _exc: None):
             current_path = Path(current)
             dirs[:] = sorted(
                 [name for name in dirs if not _should_ignore(current_path / name)],
@@ -399,17 +426,16 @@ def workspace_tree():
     root = _workspace_root()
     nodes = []
     try:
-        children = sorted(folder.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        children = [child for child in folder.iterdir() if not _should_ignore(child)]
     except OSError as exc:
         return _json_error(str(exc), 500)
 
     for child in children:
-        if _should_ignore(child):
-            continue
         node = _node_for(child, root)
         if node:
             nodes.append(node)
 
+    nodes.sort(key=lambda node: (_node_sort_group(node), node["name"].lower()))
     return {"path": _relative_path(folder, root), "children": nodes}
 
 
