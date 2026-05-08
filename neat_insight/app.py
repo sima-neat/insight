@@ -1,6 +1,7 @@
 import argparse
 import atexit
 import base64
+import ipaddress
 import json
 import logging
 import os
@@ -439,6 +440,144 @@ def _fake_sysinfo_payload():
     }
 
 
+def _coerce_port_value(value):
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _port_protocol(name_parts, value):
+    protocol = value.get("protocol")
+    if protocol:
+        return str(protocol)
+    if name_parts and str(name_parts[-1]).lower() in {"tcp", "udp"}:
+        return str(name_parts[-1]).lower()
+    return ""
+
+
+def _collect_port_map_rows(name_parts, value, rows):
+    if not isinstance(value, dict):
+        return
+
+    name = ".".join(name_parts)
+    protocol = _port_protocol(name_parts, value)
+    if "host" in value:
+        rows.append(
+            {
+                "hostPortEnd": None,
+                "hostPortStart": _coerce_port_value(value.get("host")),
+                "name": name,
+                "protocol": protocol,
+            }
+        )
+        return
+
+    if "hostStart" in value or "hostEnd" in value:
+        rows.append(
+            {
+                "hostPortEnd": _coerce_port_value(value.get("hostEnd")),
+                "hostPortStart": _coerce_port_value(value.get("hostStart")),
+                "name": name,
+                "protocol": protocol,
+            }
+        )
+        return
+
+    for key, child in value.items():
+        _collect_port_map_rows([*name_parts, str(key)], child, rows)
+
+
+def _sysinfo_port_map_candidates():
+    paths = []
+    configured = os.getenv("NEAT_PORT_MAP_FILE", "").strip()
+    if configured:
+        paths.append(Path(configured))
+
+    paths.extend(
+        [
+            Path.home() / ".insight-config" / "neat-port-map.json",
+            Path("/workspace/.insight-config/neat-port-map.json"),
+            Path("/workspace/insight-config/neat-port-map.json"),
+            Path("/insight-config/neat-port-map.json"),
+        ]
+    )
+
+    for parent in (Path("/home"), Path("/Users")):
+        try:
+            paths.extend(user_dir / ".insight-config" / "neat-port-map.json" for user_dir in parent.iterdir() if user_dir.is_dir())
+        except OSError:
+            pass
+
+    seen = set()
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield path
+
+
+def _read_exposed_ports_from_port_map():
+    for path in _sysinfo_port_map_candidates():
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logging.debug("Failed to read neat port map %s: %s", path, exc)
+            continue
+
+        rows = []
+        if isinstance(data, dict):
+            for key, value in data.items():
+                _collect_port_map_rows([str(key)], value, rows)
+        if rows:
+            return rows
+    return []
+
+
+def _format_sysinfo_web_ui_url(host, port):
+    if not host or not port:
+        return None
+    try:
+        if ipaddress.ip_address(host).version == 6:
+            host = f"[{host}]"
+    except ValueError:
+        pass
+    return f"https://{host}:{port}"
+
+
+def _enrich_sysinfo_payload(payload):
+    if not isinstance(payload, dict):
+        return payload
+
+    ports = payload.get("exposedPorts") if isinstance(payload.get("exposedPorts"), list) else []
+    if not ports:
+        ports = _read_exposed_ports_from_port_map()
+        if ports:
+            payload["exposedPorts"] = ports
+
+    insight = payload.get("insight")
+    if not isinstance(insight, dict):
+        insight = {}
+        payload["insight"] = insight
+
+    if not insight.get("webUiUrl"):
+        main_ui_port = next(
+            (port.get("hostPortStart") for port in ports if isinstance(port, dict) and port.get("name") == "mainUI" and port.get("hostPortStart")),
+            None,
+        )
+        host = os.getenv("CONTAINER_HOST_IP", "").strip() or _request_host_name()
+        web_ui_url = _format_sysinfo_web_ui_url(host, main_ui_port)
+        if web_ui_url:
+            insight["webUiUrl"] = web_ui_url
+
+    return payload
+
+
 @app.get("/api/sysinfo")
 def sysinfo():
     """Return the structured system status reported by the neat command-line tool."""
@@ -474,7 +613,7 @@ def sysinfo():
         return sysinfo_error(detail, 502)
 
     try:
-        return sysinfo_json(json.loads(output))
+        return sysinfo_json(_enrich_sysinfo_payload(json.loads(output)))
     except json.JSONDecodeError as exc:
         return sysinfo_error(f"neat returned invalid JSON: {exc}", 502)
 
