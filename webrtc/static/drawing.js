@@ -90,26 +90,26 @@ function drawTrackLabel(ctx, text, x, y, color) {
   ctx.fillText(text, x + paddingX, labelY - paddingY);
 }
 
+function resolveViewerDrawSettings(index, metadataType) {
+  if (typeof window.resolveTypeSettings === "function") {
+    return window.resolveTypeSettings(index, metadataType);
+  }
+  return { general: { metadataDelay: 0, showRoi: true }, type: {} };
+}
+
 window.drawStrategies = {
- "object-detection": (ctx, canvas, data, video, index) => {
+  "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.objects) return;
 
-    const scope = `channel_${index}`;
-    const scopedSettings = JSON.parse(localStorage.getItem(`viewerSettings_${scope}`) || "{}");
-    const globalSettings = JSON.parse(localStorage.getItem(`viewerSettings_global`) || "{}");
-
-    // Merge scoped and global object styles
+    const settings = drawContext.settings || resolveViewerDrawSettings(index, "object-detection");
     const objectStyles = {};
-    (globalSettings.objects || []).forEach(entry => {
-      objectStyles[entry.label] = entry;
-    });
-    (scopedSettings.objects || []).forEach(entry => {
+    (settings.type.objects || []).forEach(entry => {
       objectStyles[entry.label] = entry;
     });
 
     const defaultStyle = objectStyles["default"];
-    const threshold = scopedSettings.confidenceThreshold ?? globalSettings.confidenceThreshold ?? 0;
-    const showRoi = scopedSettings.showRoi ?? globalSettings.showRoi ?? true;
+    const threshold = settings.type.confidenceThreshold ?? 0;
+    const showRoi = settings.general.showRoi !== false;
 
     // Load ROI polygons from localStorage
     const roiKey = `viewerROI_${index}`;
@@ -117,7 +117,7 @@ window.drawStrategies = {
     const roiPolygons = roiRaw ? JSON.parse(roiRaw) : [];
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
     // Draw ROI polygons
-      if (showRoi) {
+    if (showRoi) {
       roiPolygons.forEach(({ points, type }) => {
         const absPoints = points.map(p => [
           p.x * video.videoWidth * scaleX + offsetX,
@@ -204,16 +204,12 @@ window.drawStrategies = {
   },
 
 
-  "classification": (ctx, canvas, data, video, index) => {
+  "classification": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.top_classes) return;
 
-    const scope = `channel_${index}`;
-    const scopedSettings = JSON.parse(localStorage.getItem(`viewerSettings_${scope}`) || "{}");
-    const globalSettings = JSON.parse(localStorage.getItem(`viewerSettings_global`) || "{}");
-
-    // Fallback order: scoped > global > default
-    const labelColor = scopedSettings.classificationColor || globalSettings.classificationColor || 'yellow';
-    const font = scopedSettings.classificationFont || globalSettings.classificationFont || FONT_LARGE;
+    const settings = drawContext.settings || resolveViewerDrawSettings(index, "classification");
+    const labelColor = settings.type.classificationColor || 'yellow';
+    const font = settings.type.classificationFont || FONT_LARGE;
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
@@ -225,17 +221,13 @@ window.drawStrategies = {
     });
   },
 
-  "pose-estimation": (ctx, canvas, data, video, index) => {
+  "pose-estimation": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.poses) return;
 
-    const scope = `channel_${index}`;
-    const scopedSettings = JSON.parse(localStorage.getItem(`viewerSettings_${scope}`) || "{}");
-    const globalSettings = JSON.parse(localStorage.getItem(`viewerSettings_global`) || "{}");
-
-    // Fallback order: scoped > global > default
-    const strokeColor = scopedSettings.poseStrokeColor || globalSettings.poseStrokeColor || 'aqua';
-    const fillColor = scopedSettings.poseFillColor || globalSettings.poseFillColor || 'aqua';
-    const font = scopedSettings.poseFont || globalSettings.poseFont || FONT;
+    const settings = drawContext.settings || resolveViewerDrawSettings(index, "pose-estimation");
+    const strokeColor = settings.type.poseStrokeColor || 'aqua';
+    const fillColor = settings.type.poseFillColor || 'aqua';
+    const font = settings.type.poseFont || FONT;
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
@@ -268,17 +260,13 @@ window.drawStrategies = {
     });
   },
 
-  "segmentation": (ctx, canvas, data, video, index) => {
+  "segmentation": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.segments) return;
 
-    const scope = `channel_${index}`;
-    const scopedSettings = JSON.parse(localStorage.getItem(`viewerSettings_${scope}`) || "{}");
-    const globalSettings = JSON.parse(localStorage.getItem(`viewerSettings_global`) || "{}");
-
-    // Use per-channel settings with fallbacks
-    const strokeColor = scopedSettings.segmentationStrokeColor || globalSettings.segmentationStrokeColor || 'orange';
-    const lineWidth = scopedSettings.segmentationLineWidth || globalSettings.segmentationLineWidth || 2;
-    const font = scopedSettings.segmentationFont || globalSettings.segmentationFont || FONT;
+    const settings = drawContext.settings || resolveViewerDrawSettings(index, "segmentation");
+    const strokeColor = settings.type.segmentationStrokeColor || 'orange';
+    const lineWidth = settings.type.segmentationLineWidth || 2;
+    const font = settings.type.segmentationFont || FONT;
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
@@ -309,7 +297,8 @@ window.drawStrategies = {
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
     const trackHistory = drawContext.trackHistory;
-    const showTrackHistory = drawContext.showTrackHistory !== false;
+    const settings = drawContext.settings || resolveViewerDrawSettings(index, "tracking");
+    const showTrackHistory = drawContext.showTrackHistory ?? settings.type.showTrackHistory ?? true;
 
     data.tracks.forEach((track) => {
       if (!Array.isArray(track?.bbox) || track.bbox.length < 4) return;
