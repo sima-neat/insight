@@ -52,9 +52,30 @@
             <div id="trackingSettings" class="metadata-type-section">
               <table class="filter-table">
                 <tr>
+                  <td><label for="trackingConfidenceSlider">Confidence Threshold</label></td>
+                  <td>
+                    <input type="range" id="trackingConfidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
+                    <span id="trackingConfidenceDisplay">0</span>
+                  </td>
+                </tr>
+                <tr>
                   <td><label for="toggleTrackHistory">Show Track History</label></td>
                   <td>
                     <input type="checkbox" id="toggleTrackHistory" checked>
+                  </td>
+                </tr>
+                <tr class="track-history-dependent">
+                  <td><label for="trackTrailLengthSlider">Trail Length</label></td>
+                  <td>
+                    <input type="range" id="trackTrailLengthSlider" class="settings-slider" min="1" max="60" step="1" value="10">
+                    <span id="trackTrailLengthDisplay">10 positions</span>
+                  </td>
+                </tr>
+                <tr class="track-history-dependent">
+                  <td><label for="lostTrackTtlSlider">Keep Lost Tracks For</label></td>
+                  <td>
+                    <input type="range" id="lostTrackTtlSlider" class="settings-slider" min="0" max="10000" step="250" value="2000">
+                    <span id="lostTrackTtlDisplay">2.0 s</span>
                   </td>
                 </tr>
               </table>
@@ -75,7 +96,9 @@
                 <option value="inclusion">Inclusion Regions</option>
                 <option value="exclusion">Exclusion Regions</option>
               </select>
-              <label for="toggleRoiVisibility">Display ROI in the view:</label>
+              <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
+              <input type="checkbox" id="toggleRoiFiltering" checked />
+              <label for="toggleRoiVisibility">Show ROI Overlay:</label>
               <input type="checkbox" id="toggleRoiVisibility" checked />
             </div>
 
@@ -95,7 +118,7 @@
           <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td><label for="metadataDelaySlider">Metadata Rendering Delay (msec)</label></td>
+                <td><label for="metadataDelaySlider">Overlay Delay (msec)</label></td>
                 <td>
                   <input type="range" id="metadataDelaySlider" class="settings-slider"  min="0" max="4000" step="50" value="0">
                   <span id="metadataDelayDisplay">0</span>

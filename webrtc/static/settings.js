@@ -7,8 +7,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const saveViewerSettings = document.getElementById("saveViewerSettings");
   const metadataTypeSelector = document.getElementById("metadataTypeSelector");
   const confidenceSlider = document.getElementById("confidenceSlider");
+  const trackingConfidenceSlider = document.getElementById("trackingConfidenceSlider");
+  const trackTrailLengthSlider = document.getElementById("trackTrailLengthSlider");
+  const lostTrackTtlSlider = document.getElementById("lostTrackTtlSlider");
   const metadataDelaySlider = document.getElementById("metadataDelaySlider");
   const confidenceDisplay = document.getElementById("confidenceDisplay");
+  const trackingConfidenceDisplay = document.getElementById("trackingConfidenceDisplay");
+  const trackTrailLengthDisplay = document.getElementById("trackTrailLengthDisplay");
+  const lostTrackTtlDisplay = document.getElementById("lostTrackTtlDisplay");
   const metadataDelayDisplay = document.getElementById("metadataDelayDisplay");
   const tabButtons = document.querySelectorAll(".settings-tab-link");
   const tabSections = document.querySelectorAll(".settings-tab-section");
@@ -20,7 +26,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const trackingSettings = document.getElementById("trackingSettings");
   const metadataNoSettings = document.getElementById("metadataNoSettings");
   const roiToggle = document.getElementById("toggleRoiVisibility");
+  const roiFilteringToggle = document.getElementById("toggleRoiFiltering");
   const trackHistoryToggle = document.getElementById("toggleTrackHistory");
+  const trackHistoryDependentRows = document.querySelectorAll(".track-history-dependent");
   const settingsApi = window.viewerSettingsApi;
 
   if (!settingsApi) {
@@ -60,6 +68,22 @@ document.addEventListener("DOMContentLoaded", () => {
     confidenceDisplay.textContent = confidenceSlider.value;
   });
 
+  trackingConfidenceSlider.addEventListener("input", () => {
+    trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
+  });
+
+  trackTrailLengthSlider.addEventListener("input", () => {
+    updateTrackTrailLengthDisplay();
+  });
+
+  lostTrackTtlSlider.addEventListener("input", () => {
+    updateLostTrackTtlDisplay();
+  });
+
+  trackHistoryToggle.addEventListener("change", () => {
+    updateTrackHistoryControls();
+  });
+
   metadataDelaySlider.addEventListener("input", () => {
     metadataDelayDisplay.textContent = metadataDelaySlider.value;
   });
@@ -73,9 +97,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const settings = settingsApi.readScopeSettings(scope);
     settings.general.metadataDelay = parseFloat(metadataDelaySlider.value);
     settings.general.showRoi = roiToggle.checked;
+    settings.general.applyRoiFiltering = roiFilteringToggle.checked;
     settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceSlider.value);
     settings.types["object-detection"].objects = getObjectEntries();
-    settings.types.tracking.showTrackHistory = trackHistoryToggle.checked;
+    settings.types.tracking.confidenceThreshold = parseFloat(trackingConfidenceSlider.value);
+    settings.types.tracking.history = {
+      enabled: trackHistoryToggle.checked,
+      trailLength: parseInt(trackTrailLengthSlider.value, 10),
+      lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
+    };
 
     settingsApi.writeScopeSettings(scope, settings);
     viewerSettingsOverlay.classList.add("hidden");
@@ -120,6 +150,27 @@ document.addEventListener("DOMContentLoaded", () => {
     trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
     metadataNoSettings.style.display =
       selectedType !== "object-detection" && selectedType !== "tracking" ? "flex" : "none";
+  }
+
+  function updateTrackTrailLengthDisplay() {
+    const value = parseInt(trackTrailLengthSlider.value, 10);
+    trackTrailLengthDisplay.textContent = `${Number.isFinite(value) ? value : 10} positions`;
+  }
+
+  function updateLostTrackTtlDisplay() {
+    const value = parseInt(lostTrackTtlSlider.value, 10);
+    const seconds = Number.isFinite(value) ? (value / 1000).toFixed(1) : "2.0";
+    lostTrackTtlDisplay.textContent = `${seconds} s`;
+  }
+
+  function updateTrackHistoryControls() {
+    const enabled = trackHistoryToggle.checked;
+    trackHistoryDependentRows.forEach((row) => {
+      row.classList.toggle("is-disabled", !enabled);
+      row.querySelectorAll("input, select, button").forEach((control) => {
+        control.disabled = !enabled;
+      });
+    });
   }
 
   function createObjectEntry(label, color, lineStyle, lineWidth) {
@@ -186,13 +237,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const settings = settingsApi.readScopeSettings(scope);
     const objectDetectionTypeSettings = settings.types["object-detection"];
     const trackingTypeSettings = settings.types.tracking;
+    const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
 
     confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
     confidenceDisplay.textContent = confidenceSlider.value;
+    trackingConfidenceSlider.value = trackingTypeSettings.confidenceThreshold ?? 0;
+    trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
+    trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
+    lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
     metadataDelaySlider.value = settings.general.metadataDelay ?? 0;
     metadataDelayDisplay.textContent = metadataDelaySlider.value;
     roiToggle.checked = settings.general.showRoi !== false;
-    trackHistoryToggle.checked = trackingTypeSettings.showTrackHistory !== false;
+    roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
+    trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
+    updateTrackTrailLengthDisplay();
+    updateLostTrackTtlDisplay();
+    updateTrackHistoryControls();
     loadObjectEntries(objectDetectionTypeSettings.objects || settingsApi.defaults.types["object-detection"].objects);
 
     const lastMetadataType = localStorage.getItem("lastViewerMetadataType");

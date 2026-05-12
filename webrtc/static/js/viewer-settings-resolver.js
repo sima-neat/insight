@@ -14,7 +14,12 @@
       objects: DEFAULT_OBJECTS
     },
     tracking: {
-      showTrackHistory: true
+      confidenceThreshold: 0,
+      history: {
+        enabled: true,
+        trailLength: 10,
+        lostTrackTtlMs: 2000
+      }
     },
     "pose-estimation": {},
     segmentation: {},
@@ -22,7 +27,8 @@
   };
   const GENERAL_DEFAULTS = {
     metadataDelay: 0,
-    showRoi: true
+    showRoi: true,
+    applyRoiFiltering: true
   };
 
   function clone(value) {
@@ -36,6 +42,10 @@
   function parseNumber(value, fallback) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function clampNumber(value, min, max, fallback) {
+    return Math.max(min, Math.min(max, parseNumber(value, fallback)));
   }
 
   function normalizeObjectEntry(entry) {
@@ -76,21 +86,54 @@
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "showRoi")) {
       general.showRoi = rawGeneral.showRoi !== false;
     }
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "applyRoiFiltering")) {
+      general.applyRoiFiltering = rawGeneral.applyRoiFiltering !== false;
+    }
     return general;
+  }
+
+  function normalizeTrackingHistory(rawHistory = {}, fillDefaults = true) {
+    const defaults = TYPE_DEFAULTS.tracking.history;
+    const history = fillDefaults ? clone(defaults) : {};
+    if (!rawHistory || typeof rawHistory !== "object") return history;
+
+    if (Object.prototype.hasOwnProperty.call(rawHistory, "enabled")) {
+      history.enabled = rawHistory.enabled !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawHistory, "trailLength")) {
+      history.trailLength = Math.round(clampNumber(rawHistory.trailLength, 1, 120, defaults.trailLength));
+    }
+    if (Object.prototype.hasOwnProperty.call(rawHistory, "lostTrackTtlMs")) {
+      history.lostTrackTtlMs = Math.round(clampNumber(rawHistory.lostTrackTtlMs, 0, 30000, defaults.lostTrackTtlMs));
+    }
+    return history;
   }
 
   function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
     if (metadataType === "object-detection") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
-        type.confidenceThreshold = Math.max(0, Math.min(1, parseNumber(rawType.confidenceThreshold, 0)));
+        type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
       }
       if (Object.prototype.hasOwnProperty.call(rawType, "objects")) {
         type.objects = normalizeObjects(rawType.objects);
       }
     } else if (metadataType === "tracking") {
+      if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
+        type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
+      }
+      const history = normalizeTrackingHistory(rawType.history, fillDefaults);
       if (Object.prototype.hasOwnProperty.call(rawType, "showTrackHistory")) {
-        type.showTrackHistory = rawType.showTrackHistory !== false;
+        history.enabled = rawType.showTrackHistory !== false;
+      }
+      if (Object.prototype.hasOwnProperty.call(rawType, "trailLength")) {
+        history.trailLength = Math.round(clampNumber(rawType.trailLength, 1, 120, TYPE_DEFAULTS.tracking.history.trailLength));
+      }
+      if (Object.prototype.hasOwnProperty.call(rawType, "lostTrackTtlMs")) {
+        history.lostTrackTtlMs = Math.round(clampNumber(rawType.lostTrackTtlMs, 0, 30000, TYPE_DEFAULTS.tracking.history.lostTrackTtlMs));
+      }
+      if (fillDefaults || Object.keys(history).length > 0) {
+        type.history = history;
       }
     } else if (rawType && typeof rawType === "object") {
       Object.assign(type, rawType);
@@ -129,14 +172,18 @@
 
     settings.general = normalizeGeneral({
       metadataDelay: rawSettings.metadataDelay,
-      showRoi: rawSettings.showRoi
+      showRoi: rawSettings.showRoi,
+      applyRoiFiltering: rawSettings.applyRoiFiltering
     });
     settings.types["object-detection"] = normalizeTypeSettings("object-detection", {
       confidenceThreshold: rawSettings.confidenceThreshold,
       objects: rawSettings.objects
     });
     settings.types.tracking = normalizeTypeSettings("tracking", {
-      showTrackHistory: rawSettings.showTrackHistory
+      confidenceThreshold: rawSettings.trackingConfidenceThreshold,
+      showTrackHistory: rawSettings.showTrackHistory,
+      trailLength: rawSettings.trailLength,
+      lostTrackTtlMs: rawSettings.lostTrackTtlMs
     });
     ["classification", "pose-estimation", "segmentation"].forEach((metadataType) => {
       settings.types[metadataType] = normalizeTypeSettings(metadataType, rawSettings);
@@ -166,6 +213,9 @@
     if (Object.prototype.hasOwnProperty.call(rawSettings, "showRoi")) {
       legacyGeneral.showRoi = rawSettings.showRoi;
     }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "applyRoiFiltering")) {
+      legacyGeneral.applyRoiFiltering = rawSettings.applyRoiFiltering;
+    }
     overrides.general = normalizeGeneral(legacyGeneral, false);
 
     const legacyObjectDetection = {};
@@ -182,8 +232,17 @@
     );
 
     const legacyTracking = {};
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "trackingConfidenceThreshold")) {
+      legacyTracking.confidenceThreshold = rawSettings.trackingConfidenceThreshold;
+    }
     if (Object.prototype.hasOwnProperty.call(rawSettings, "showTrackHistory")) {
       legacyTracking.showTrackHistory = rawSettings.showTrackHistory;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "trailLength")) {
+      legacyTracking.trailLength = rawSettings.trailLength;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "lostTrackTtlMs")) {
+      legacyTracking.lostTrackTtlMs = rawSettings.lostTrackTtlMs;
     }
     overrides.types.tracking = normalizeTypeSettings("tracking", legacyTracking, false);
     return overrides;
@@ -210,9 +269,17 @@
         objects: mergeObjectStyles(TYPE_DEFAULTS[type].objects, globalType.objects || [], channelType.objects || [])
       };
     } else if (type === "tracking") {
+      const defaultHistory = TYPE_DEFAULTS[type].history;
+      const globalHistory = globalType.history || {};
+      const channelHistory = channelType.history || {};
       typeSettings = {
-        showTrackHistory:
-          channelType.showTrackHistory ?? globalType.showTrackHistory ?? TYPE_DEFAULTS[type].showTrackHistory
+        confidenceThreshold:
+          channelType.confidenceThreshold ?? globalType.confidenceThreshold ?? TYPE_DEFAULTS[type].confidenceThreshold,
+        history: {
+          enabled: channelHistory.enabled ?? globalHistory.enabled ?? defaultHistory.enabled,
+          trailLength: channelHistory.trailLength ?? globalHistory.trailLength ?? defaultHistory.trailLength,
+          lostTrackTtlMs: channelHistory.lostTrackTtlMs ?? globalHistory.lostTrackTtlMs ?? defaultHistory.lostTrackTtlMs
+        }
       };
     } else {
       typeSettings = {

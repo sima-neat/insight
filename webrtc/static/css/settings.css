@@ -247,6 +247,10 @@
   vertical-align: middle;
 }
 
+.filter-table tr.is-disabled {
+  opacity: 0.45;
+}
+
 .settings-slider {
   width: 160px;
 }
@@ -289,6 +293,7 @@
 .dropdown-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
 }
