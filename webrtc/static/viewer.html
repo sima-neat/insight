@@ -17,22 +17,50 @@
       </div>
       <div class="settings-popup-body">
         <div class="settings-tab-header">
-          <button class="settings-tab-link active" data-tab="viewer-objects">Object Styles</button>
+          <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
           <button class="settings-tab-link" data-tab="viewer-roi">ROI</button>
-          <button class="settings-tab-link" data-tab="viewer-drawing">Settings</button>
+          <button class="settings-tab-link" data-tab="viewer-general">General</button>
         </div>
         <div class="settings-tab-body">
-          <!-- Objects Tab -->
-          <div id="viewer-objects" class="settings-tab-section active">
-            <div class="object-list-header">
-              <button id="addViewerObject" class="add-btn" title="Add Object">+</button>
+          <!-- Metadata Tab -->
+          <div id="viewer-metadata" class="settings-tab-section active">
+            <div class="metadata-type-row">
+              <label for="metadataTypeSelector">Metadata Type</label>
+              <select id="metadataTypeSelector"></select>
             </div>
-            <div id="viewerObjectList">
-              <table class="viewer-object-table">
-                <tbody id="viewerObjectTableBody">
-                  <!-- Rows dynamically inserted here -->
-                </tbody>
+            <div id="objectDetectionSettings" class="metadata-type-section">
+              <table class="filter-table metadata-filter-table">
+                <tr>
+                  <td><label for="confidenceSlider">Confidence Threshold</label></td>
+                  <td>
+                    <input type="range" id="confidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
+                    <span id="confidenceDisplay">0</span>
+                  </td>
+                </tr>
               </table>
+              <div class="object-list-header">
+                <button id="addViewerObject" class="add-btn" title="Add Object">+</button>
+              </div>
+              <div id="viewerObjectList">
+                <table class="viewer-object-table">
+                  <tbody id="viewerObjectTableBody">
+                    <!-- Rows dynamically inserted here -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div id="trackingSettings" class="metadata-type-section">
+              <table class="filter-table">
+                <tr>
+                  <td><label for="toggleTrackHistory">Show Track History</label></td>
+                  <td>
+                    <input type="checkbox" id="toggleTrackHistory" checked>
+                  </td>
+                </tr>
+              </table>
+            </div>
+            <div id="metadataNoSettings" class="metadata-type-section metadata-empty-state">
+              No settings for this metadata type yet.
             </div>
           </div>
 
@@ -63,30 +91,16 @@
             </div>
           </div>
 
-          <!-- Drawing Config Tab -->
-          <div id="viewer-drawing" class="settings-tab-section">
+          <!-- General Config Tab -->
+          <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td><label for="confidenceSlider">Confidence Threshold</label></td>
-                <td>
-                  <input type="range" id="confidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0.5">
-                  <span id="confidenceDisplay">0.5</span>
-                </td>
-              </tr>
-              <tr>
-                <td><label for="metadataDeleySlider">Metadata Rendering Delay (msec)</label></td>
+                <td><label for="metadataDelaySlider">Metadata Rendering Delay (msec)</label></td>
                 <td>
                   <input type="range" id="metadataDelaySlider" class="settings-slider"  min="0" max="4000" step="50" value="0">
                   <span id="metadataDelayDisplay">0</span>
                 </td>
               </tr>
-              <tr>
-                <td><label for="toggleTrackHistory">Show Track History</label></td>
-                <td>
-                  <input type="checkbox" id="toggleTrackHistory" checked>
-                </td>
-              </tr>
-              <!-- Future filters can go here -->
             </table>
           </div>
         </div>
@@ -102,6 +116,7 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
+  <script src="/static/js/viewer-settings-resolver.js"></script>
   <script src="/static/drawing.js"></script>
   <script src="/static/viewer-react.js"></script>
   <link rel="stylesheet" href="/static/css/settings.css">

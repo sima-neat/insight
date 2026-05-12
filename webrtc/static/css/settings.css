@@ -251,6 +251,40 @@
   width: 160px;
 }
 
+.metadata-type-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.metadata-type-row select {
+  min-width: 190px;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid #888;
+  background: transparent;
+  color: inherit;
+  font-family: var(--viewer-font-sans);
+}
+
+.metadata-type-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.metadata-filter-table {
+  margin-bottom: 8px;
+}
+
+.metadata-empty-state {
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: #999;
+  font-family: var(--viewer-font-sans);
+}
 
 .dropdown-row {
   display: flex;
