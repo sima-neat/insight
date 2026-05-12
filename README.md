@@ -63,6 +63,26 @@ Notes:
 2. Open RTSP Control to assign/start/stop input sources.
 3. Open Stats to watch system load and runtime metrics.
 
+## Viewer settings
+
+Open the global viewer menu or a channel tile menu to configure overlays. Global
+settings apply to all channels; channel settings override the global values for
+that channel.
+
+Available metadata settings:
+- Object Detection: confidence threshold and per-label box style.
+- Tracking: confidence threshold, track history visibility, trail length, and how
+  long lost-track trails remain visible.
+- Other metadata types are rendered with defaults until type-specific settings
+  are added.
+
+ROI settings are split into filtering and display:
+- Apply ROI Filtering controls whether ROI polygons filter box-like metadata.
+- Show ROI Overlay controls only whether ROI polygons are drawn over the video.
+
+General settings include Overlay Delay, which delays metadata selection so boxes
+and tracks can be aligned with the displayed WebRTC frame.
+
 ## Build from source
 
 Use this when you need to modify functionality.
@@ -105,5 +125,5 @@ neat_insight/tools/multisrc-harness.sh start --count 16
 
 Notes:
 - Default destination is `127.0.0.1`, starting at UDP port `9100`.
-- Supported metadata types are `object-detection`, `classification`, `pose-estimation`, and `segmentation`.
+- Supported metadata types are `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`.
 - `neat_insight/tools/metadata-test.py` remains as a compatibility wrapper, but the packaged CLI is the preferred entry point.

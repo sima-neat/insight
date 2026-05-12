@@ -10,8 +10,6 @@ const METADATA_DRAWABLE_HOLD_MS = 400;
 const METADATA_QUEUE_MAX_AGE_MS = 5000;
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
-const MAX_TRAIL_POINTS = 10;
-const STALE_TRACK_TIMEOUT_MS = 2000;
 
 function parseIndices(srcParam) {
   if (!srcParam) {
@@ -54,11 +52,6 @@ function getObjectConfidenceThreshold(channelIndex) {
   return settings.type.confidenceThreshold ?? 0;
 }
 
-function getShowTrackHistory(channelIndex) {
-  const settings = getResolvedViewerSettings(channelIndex, "tracking");
-  return settings.type.showTrackHistory ?? true;
-}
-
 function hasDrawableMetadata(message, channelIndex) {
   const data = message?.data;
   switch (message?.type) {
@@ -73,7 +66,7 @@ function hasDrawableMetadata(message, channelIndex) {
     case "segmentation":
       return Array.isArray(data?.segments) && data.segments.length > 0;
     case "tracking":
-      return Array.isArray(data?.tracks) && data.tracks.length > 0;
+      return Array.isArray(data?.tracks);
     default:
       return Boolean(message?.type);
   }
@@ -117,34 +110,6 @@ function pruneMetadataQueue(queue, selectedCandidate, metadataDelayMs, now) {
   if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
     queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
   }
-}
-
-function updateTrackHistory(trackHistory, channelIndex, tracks, now) {
-  if (!Array.isArray(tracks)) return;
-  const currentKeys = new Set();
-
-  tracks.forEach((track) => {
-    if (track?.id == null || !Array.isArray(track.bbox) || track.bbox.length < 4) return;
-    const [x, y, width, height] = track.bbox;
-    if (![x, y, width, height].every(Number.isFinite)) return;
-
-    const key = `${channelIndex}:${track.id}`;
-    currentKeys.add(key);
-    const entry = trackHistory.get(key) || { points: [] };
-    entry.points = [...entry.points, { x: x + width / 2, y: y + height / 2, ts: now }].slice(
-      -MAX_TRAIL_POINTS
-    );
-    entry.lastSeen = now;
-    trackHistory.set(key, entry);
-  });
-
-  trackHistory.forEach((entry, key) => {
-    const [channel] = key.split(":");
-    if (Number(channel) !== channelIndex) return;
-    if (!currentKeys.has(key) && now - (entry.lastSeen ?? 0) > STALE_TRACK_TIMEOUT_MS) {
-      trackHistory.delete(key);
-    }
-  });
 }
 
 function applyLayout(count) {
@@ -357,17 +322,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
                 const resolvedSettings = getResolvedViewerSettings(index, metadataType);
                 const drawContext = {
                   settings: resolvedSettings,
-                  showTrackHistory: resolvedSettings.type.showTrackHistory ?? getShowTrackHistory(index),
                   trackHistory: trackHistoryRef.current,
+                  now: nowPerf,
                 };
-                if (candidate && overlayMetadata === candidate && overlayMetadata.data?.type === "tracking") {
-                  updateTrackHistory(
-                    trackHistoryRef.current,
-                    index,
-                    overlayMetadata.data?.data?.tracks,
-                    nowPerf
-                  );
-                }
                 strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
               }
             }

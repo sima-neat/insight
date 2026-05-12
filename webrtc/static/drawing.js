@@ -97,6 +97,139 @@ function resolveViewerDrawSettings(index, metadataType) {
   return { general: { metadataDelay: 0, showRoi: true }, type: {} };
 }
 
+function loadRoiPolygons(index) {
+  try {
+    const raw = localStorage.getItem(`viewerROI_${index}`);
+    const polygons = raw ? JSON.parse(raw) : [];
+    return Array.isArray(polygons) ? polygons : [];
+  } catch (_err) {
+    return [];
+  }
+}
+
+function scaledRoiPoints(points, video, scale) {
+  if (!Array.isArray(points)) return [];
+  return points.map(p => [
+    p.x * video.videoWidth * scale.scaleX + scale.offsetX,
+    p.y * video.videoHeight * scale.scaleY + scale.offsetY
+  ]);
+}
+
+function drawRoiPolygons(ctx, roiPolygons, video, scale) {
+  roiPolygons.forEach(({ points, type }) => {
+    const absPoints = scaledRoiPoints(points, video, scale);
+    if (absPoints.length < 3) return;
+
+    ctx.beginPath();
+    ctx.moveTo(absPoints[0][0], absPoints[0][1]);
+    for (let i = 1; i < absPoints.length; i += 1) {
+      ctx.lineTo(absPoints[i][0], absPoints[i][1]);
+    }
+    ctx.closePath();
+    ctx.fillStyle = type === "inclusion" ? "rgba(0,255,0,0.1)" : "rgba(255,0,0,0.1)";
+    ctx.strokeStyle = type === "inclusion" ? "green" : "red";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+  });
+}
+
+function pointInsidePolygon(x, y, polygon, video, scale) {
+  const pts = scaledRoiPoints(polygon.points, video, scale);
+  if (pts.length < 3) return false;
+
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i += 1) {
+    const xi = pts[i][0], yi = pts[i][1];
+    const xj = pts[j][0], yj = pts[j][1];
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-6) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function isInsideAnyPolygon(x, y, polygons, video, scale) {
+  return polygons.some(polygon => pointInsidePolygon(x, y, polygon, video, scale));
+}
+
+function boxCenter(box, scale) {
+  const [x, y, w, h] = box;
+  return {
+    x: (x + w / 2) * scale.scaleX + scale.offsetX,
+    y: (y + h / 2) * scale.scaleY + scale.offsetY
+  };
+}
+
+function passesRoiFilter(box, roiPolygons, video, scale, applyRoiFiltering) {
+  if (!applyRoiFiltering) return true;
+  const inclusionPolygons = roiPolygons.filter(p => p.type === "inclusion");
+  const exclusionPolygons = roiPolygons.filter(p => p.type === "exclusion");
+  const center = boxCenter(box, scale);
+  const insideInclusion = inclusionPolygons.length === 0 ||
+    isInsideAnyPolygon(center.x, center.y, inclusionPolygons, video, scale);
+  const insideExclusion = isInsideAnyPolygon(center.x, center.y, exclusionPolygons, video, scale);
+  return insideInclusion && !insideExclusion;
+}
+
+function drawTrackHistoryPath(ctx, points, scale, color, alpha = 0.72) {
+  if (!Array.isArray(points) || points.length < 2) return;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = alpha;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  points.forEach((point, pointIndex) => {
+    const x = point.x * scale.scaleX + scale.offsetX;
+    const y = point.y * scale.scaleY + scale.offsetY;
+    if (pointIndex === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+  ctx.restore();
+}
+
+function updateTrackHistory(trackHistory, channelIndex, tracks, now, historySettings) {
+  if (!trackHistory || !Array.isArray(tracks)) return;
+  if (historySettings?.enabled === false) {
+    trackHistory.forEach((_entry, key) => {
+      if (Number(key.split(":")[0]) === channelIndex) trackHistory.delete(key);
+    });
+    return;
+  }
+
+  const rawTrailLength = Number(historySettings?.trailLength);
+  const rawLostTrackTtlMs = Number(historySettings?.lostTrackTtlMs);
+  const trailLength = Math.max(1, Number.isFinite(rawTrailLength) ? rawTrailLength : 10);
+  const lostTrackTtlMs = Math.max(0, Number.isFinite(rawLostTrackTtlMs) ? rawLostTrackTtlMs : 2000);
+  const currentKeys = new Set();
+
+  tracks.forEach((track) => {
+    if (track?.id == null || !Array.isArray(track.bbox) || track.bbox.length < 4) return;
+    const [x, y, width, height] = track.bbox;
+    if (![x, y, width, height].every(Number.isFinite)) return;
+
+    const key = `${channelIndex}:${track.id}`;
+    currentKeys.add(key);
+    const entry = trackHistory.get(key) || { points: [] };
+    entry.points = [...entry.points, { x: x + width / 2, y: y + height / 2, ts: now }].slice(-trailLength);
+    entry.lastSeen = now;
+    trackHistory.set(key, entry);
+  });
+
+  trackHistory.forEach((entry, key) => {
+    if (Number(key.split(":")[0]) !== channelIndex) return;
+    if (!currentKeys.has(key) && now - (entry.lastSeen ?? 0) > lostTrackTtlMs) {
+      trackHistory.delete(key);
+    }
+  });
+}
+
 window.drawStrategies = {
   "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.objects) return;
@@ -110,83 +243,20 @@ window.drawStrategies = {
     const defaultStyle = objectStyles["default"];
     const threshold = settings.type.confidenceThreshold ?? 0;
     const showRoi = settings.general.showRoi !== false;
+    const applyRoiFiltering = settings.general.applyRoiFiltering !== false;
 
-    // Load ROI polygons from localStorage
-    const roiKey = `viewerROI_${index}`;
-    const roiRaw = localStorage.getItem(roiKey);
-    const roiPolygons = roiRaw ? JSON.parse(roiRaw) : [];
-    const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
-    // Draw ROI polygons
+    const roiPolygons = loadRoiPolygons(index);
+    const scale = computeScaleAndOffset(video, canvas);
+    const { scaleX, scaleY, offsetX, offsetY } = scale;
     if (showRoi) {
-      roiPolygons.forEach(({ points, type }) => {
-        const absPoints = points.map(p => [
-          p.x * video.videoWidth * scaleX + offsetX,
-          p.y * video.videoHeight * scaleY + offsetY
-        ]);
-        if (absPoints.length < 3) return;
-
-        ctx.beginPath();
-        ctx.moveTo(absPoints[0][0], absPoints[0][1]);
-        for (let i = 1; i < absPoints.length; i++) {
-          ctx.lineTo(absPoints[i][0], absPoints[i][1]);
-        }
-        ctx.closePath();
-        ctx.fillStyle = type === "inclusion" ? "rgba(0,255,0,0.1)" : "rgba(255,0,0,0.1)";
-        ctx.strokeStyle = type === "inclusion" ? "green" : "red";
-        ctx.lineWidth = 2;
-        ctx.fill();
-        ctx.stroke();
-      });
+      drawRoiPolygons(ctx, roiPolygons, video, scale);
     }
-
-    function isInsideAnyPolygon(x, y, polygons) {
-      return polygons.some(polygon => {
-        const pts = polygon.points.map(p => [
-          p.x * video.videoWidth * scaleX + offsetX,
-          p.y * video.videoHeight * scaleY + offsetY
-        ]);
-
-        let inside = false;
-        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-          const xi = pts[i][0], yi = pts[i][1];
-          const xj = pts[j][0], yj = pts[j][1];
-          const intersect = ((yi > y) !== (yj > y)) &&
-                            (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-6) + xi);
-          if (intersect) inside = !inside;
-        }
-
-        return inside;
-      });
-    }
-
-    function getObjectCenter(obj, video, scaleX, scaleY, offsetX, offsetY, isNormalized = false) {
-      let [x, y, w, h] = obj.bbox;
-
-      if (isNormalized) {
-        x *= video.videoWidth;
-        y *= video.videoHeight;
-        w *= video.videoWidth;
-        h *= video.videoHeight;
-      }
-
-      const cx = (x + w / 2) * scaleX + offsetX;
-      const cy = (y + h / 2) * scaleY + offsetY;
-      return { cx, cy };
-    }
-
-
-    const inclusionPolygons = roiPolygons.filter(p => p.type === "inclusion");
-    const exclusionPolygons = roiPolygons.filter(p => p.type === "exclusion");
 
     data.objects.forEach(obj => {
       if (obj.confidence < threshold) return;
 
       const [x, y, w, h] = obj.bbox;
-      const { cx, cy } = getObjectCenter(obj, video, scaleX, scaleY, offsetX, offsetY, false);
-      const insideInclusion = inclusionPolygons.length === 0 || isInsideAnyPolygon(cx, cy, inclusionPolygons);
-      const insideExclusion = isInsideAnyPolygon(cx, cy, exclusionPolygons);
-
-      if (!insideInclusion || insideExclusion) return;
+      if (!passesRoiFilter([x, y, w, h], roiPolygons, video, scale, applyRoiFiltering)) return;
 
       const style = objectStyles[obj.label] || defaultStyle;
 
@@ -295,45 +365,51 @@ window.drawStrategies = {
   "tracking": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!Array.isArray(data?.tracks)) return;
 
-    const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+    const scale = computeScaleAndOffset(video, canvas);
+    const { scaleX, scaleY, offsetX, offsetY } = scale;
     const trackHistory = drawContext.trackHistory;
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "tracking");
-    const showTrackHistory = drawContext.showTrackHistory ?? settings.type.showTrackHistory ?? true;
-
-    data.tracks.forEach((track) => {
+    const threshold = settings.type.confidenceThreshold ?? 0;
+    const historySettings = settings.type.history || {};
+    const showTrackHistory = historySettings.enabled !== false;
+    const showRoi = settings.general.showRoi !== false;
+    const applyRoiFiltering = settings.general.applyRoiFiltering !== false;
+    const roiPolygons = loadRoiPolygons(index);
+    const visibleTracks = data.tracks.filter((track) => {
       if (!Array.isArray(track?.bbox) || track.bbox.length < 4) return;
       const [x, y, w, h] = track.bbox;
       if (![x, y, w, h].every(Number.isFinite)) return;
+      if ((track.confidence ?? 1) < threshold) return;
+      return passesRoiFilter([x, y, w, h], roiPolygons, video, scale, applyRoiFiltering);
+    });
 
+    if (showRoi) {
+      drawRoiPolygons(ctx, roiPolygons, video, scale);
+    }
+
+    updateTrackHistory(trackHistory, index, visibleTracks, drawContext.now || performance.now(), historySettings);
+
+    const activeKeys = new Set(
+      visibleTracks
+        .filter(track => track.id !== null && track.id !== undefined)
+        .map(track => `${index}:${track.id}`)
+    );
+
+    if (showTrackHistory && trackHistory) {
+      trackHistory.forEach((entry, key) => {
+        if (Number(key.split(":")[0]) !== index) return;
+        const trackId = key.substring(key.indexOf(":") + 1);
+        drawTrackHistoryPath(ctx, entry.points, scale, colorForTrackId(trackId), activeKeys.has(key) ? 0.72 : 0.35);
+      });
+    }
+
+    visibleTracks.forEach((track) => {
+      const [x, y, w, h] = track.bbox;
       const color = colorForTrackId(track.id);
       const left = x * scaleX + offsetX;
       const top = y * scaleY + offsetY;
       const width = w * scaleX;
       const height = h * scaleY;
-
-      if (showTrackHistory && track.id !== null && track.id !== undefined && trackHistory) {
-        const history = trackHistory.get(`${index}:${track.id}`)?.points || [];
-        if (history.length > 1) {
-          ctx.save();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.72;
-          ctx.setLineDash([]);
-          ctx.beginPath();
-          history.forEach((point, pointIndex) => {
-            const px = point.x * scaleX + offsetX;
-            const py = point.y * scaleY + offsetY;
-            if (pointIndex === 0) {
-              ctx.moveTo(px, py);
-            } else {
-              ctx.lineTo(px, py);
-            }
-          });
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
       ctx.lineWidth = 2;
