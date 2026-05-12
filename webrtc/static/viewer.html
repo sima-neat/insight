@@ -33,9 +33,9 @@
                   <!-- Rows dynamically inserted here -->
                 </tbody>
               </table>
-            </div>            
+            </div>
           </div>
-  
+
           <!-- ROI Tab -->
           <div id="viewer-roi" class="settings-tab-section">
             <p id="roiInstruction">Draw one or more polygons on the video below to indicate Region Of Interest.</p>
@@ -48,7 +48,7 @@
                 <option value="exclusion">Exclusion Regions</option>
               </select>
               <label for="toggleRoiVisibility">Display ROI in the view:</label>
-              <input type="checkbox" id="toggleRoiVisibility" checked />              
+              <input type="checkbox" id="toggleRoiVisibility" checked />
             </div>
 
             <div id="roiDrawingArea" class="roi-canvas-container">
@@ -80,6 +80,12 @@
                   <span id="metadataDelayDisplay">0</span>
                 </td>
               </tr>
+              <tr>
+                <td><label for="toggleTrackHistory">Show Track History</label></td>
+                <td>
+                  <input type="checkbox" id="toggleTrackHistory" checked>
+                </td>
+              </tr>
               <!-- Future filters can go here -->
             </table>
           </div>
@@ -90,19 +96,19 @@
       </div>
     </div>
   </div>
-  
+
   <!-- Viewer settings menu button -->
   <button id="viewerSettingsBtn" title="Viewer Settings" class="viewer-settings-menu">
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
-  
-  <script src="/static/drawing.js"></script>  
+
+  <script src="/static/drawing.js"></script>
   <script src="/static/viewer-react.js"></script>
   <link rel="stylesheet" href="/static/css/settings.css">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script src="/static/js/roi.js"></script>
-  <script src="/static/settings.js"></script>  
+  <script src="/static/settings.js"></script>
 
 </body>
 </html>
