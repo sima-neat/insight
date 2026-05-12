@@ -4,6 +4,19 @@
 const CANVAS_FONT_FAMILY = '"Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif';
 const FONT = `14px ${CANVAS_FONT_FAMILY}`;
 const FONT_LARGE = `16px ${CANVAS_FONT_FAMILY}`;
+const TRACK_COLORS = [
+  "#2563eb",
+  "#dc2626",
+  "#16a34a",
+  "#ca8a04",
+  "#9333ea",
+  "#0891b2",
+  "#ea580c",
+  "#4f46e5",
+  "#be123c",
+  "#0f766e"
+];
+const TRACK_FALLBACK_COLOR = "#f8fafc";
 
 const COCO_SKELETON = [
   ['nose', 'left_eye'], ['nose', 'right_eye'],
@@ -49,6 +62,32 @@ function computeScaleAndOffset(video, canvas) {
   const scaleY = drawHeight / videoHeight;
 
   return { scaleX, scaleY, offsetX, offsetY };
+}
+
+function colorForTrackId(id) {
+  if (id === null || id === undefined || id === "") return TRACK_FALLBACK_COLOR;
+
+  const text = String(id);
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+  return TRACK_COLORS[hash % TRACK_COLORS.length];
+}
+
+function drawTrackLabel(ctx, text, x, y, color) {
+  ctx.font = FONT;
+  const paddingX = 4;
+  const paddingY = 3;
+  const metrics = ctx.measureText(text);
+  const width = metrics.width + paddingX * 2;
+  const height = 18;
+  const labelY = Math.max(height + 2, y);
+
+  ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+  ctx.fillRect(x, labelY - height, width, height);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x + paddingX, labelY - paddingY);
 }
 
 window.drawStrategies = {
@@ -262,6 +301,61 @@ window.drawStrategies = {
       } else if (seg.mask_format === "rle") {
         ctx.fillText(`RLE mask (${seg.label})`, 10 * scaleX + offsetX, (canvas.height - 10) * scaleY + offsetY);
       }
+    });
+  },
+
+  "tracking": (ctx, canvas, data, video, index, drawContext = {}) => {
+    if (!Array.isArray(data?.tracks)) return;
+
+    const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+    const trackHistory = drawContext.trackHistory;
+    const showTrackHistory = drawContext.showTrackHistory !== false;
+
+    data.tracks.forEach((track) => {
+      if (!Array.isArray(track?.bbox) || track.bbox.length < 4) return;
+      const [x, y, w, h] = track.bbox;
+      if (![x, y, w, h].every(Number.isFinite)) return;
+
+      const color = colorForTrackId(track.id);
+      const left = x * scaleX + offsetX;
+      const top = y * scaleY + offsetY;
+      const width = w * scaleX;
+      const height = h * scaleY;
+
+      if (showTrackHistory && track.id !== null && track.id !== undefined && trackHistory) {
+        const history = trackHistory.get(`${index}:${track.id}`)?.points || [];
+        if (history.length > 1) {
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.72;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          history.forEach((point, pointIndex) => {
+            const px = point.x * scaleX + offsetX;
+            const py = point.y * scaleY + offsetY;
+            if (pointIndex === 0) {
+              ctx.moveTo(px, py);
+            } else {
+              ctx.lineTo(px, py);
+            }
+          });
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.strokeRect(left, top, width, height);
+
+      const confidence =
+        typeof track.confidence === "number" ? ` (${Math.round(track.confidence * 100)}%)` : "";
+      const idText = track.id === null || track.id === undefined ? "" : ` #${track.id}`;
+      const label = `${track.label || "track"}${idText}${confidence}`;
+      drawTrackLabel(ctx, label, left, top - 6, color);
     });
   }
 };

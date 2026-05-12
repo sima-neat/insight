@@ -10,6 +10,8 @@ const METADATA_DRAWABLE_HOLD_MS = 400;
 const METADATA_QUEUE_MAX_AGE_MS = 5000;
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
+const MAX_TRAIL_POINTS = 10;
+const STALE_TRACK_TIMEOUT_MS = 2000;
 
 function parseIndices(srcParam) {
   if (!srcParam) {
@@ -55,6 +57,16 @@ function getObjectConfidenceThreshold(channelIndex) {
   }
 }
 
+function getShowTrackHistory(channelIndex) {
+  try {
+    const scoped = JSON.parse(window.localStorage.getItem(`viewerSettings_channel_${channelIndex}`) || "{}");
+    const global = JSON.parse(window.localStorage.getItem("viewerSettings_global") || "{}");
+    return scoped.showTrackHistory ?? global.showTrackHistory ?? true;
+  } catch (_err) {
+    return true;
+  }
+}
+
 function hasDrawableMetadata(message, channelIndex) {
   const data = message?.data;
   switch (message?.type) {
@@ -68,6 +80,8 @@ function hasDrawableMetadata(message, channelIndex) {
       return Array.isArray(data?.poses) && data.poses.length > 0;
     case "segmentation":
       return Array.isArray(data?.segments) && data.segments.length > 0;
+    case "tracking":
+      return Array.isArray(data?.tracks) && data.tracks.length > 0;
     default:
       return Boolean(message?.type);
   }
@@ -113,6 +127,34 @@ function pruneMetadataQueue(queue, selectedCandidate, metadataDelayMs, now) {
   }
 }
 
+function updateTrackHistory(trackHistory, channelIndex, tracks, now) {
+  if (!Array.isArray(tracks)) return;
+  const currentKeys = new Set();
+
+  tracks.forEach((track) => {
+    if (track?.id == null || !Array.isArray(track.bbox) || track.bbox.length < 4) return;
+    const [x, y, width, height] = track.bbox;
+    if (![x, y, width, height].every(Number.isFinite)) return;
+
+    const key = `${channelIndex}:${track.id}`;
+    currentKeys.add(key);
+    const entry = trackHistory.get(key) || { points: [] };
+    entry.points = [...entry.points, { x: x + width / 2, y: y + height / 2, ts: now }].slice(
+      -MAX_TRAIL_POINTS
+    );
+    entry.lastSeen = now;
+    trackHistory.set(key, entry);
+  });
+
+  trackHistory.forEach((entry, key) => {
+    const [channel] = key.split(":");
+    if (Number(channel) !== channelIndex) return;
+    if (!currentKeys.has(key) && now - (entry.lastSeen ?? 0) > STALE_TRACK_TIMEOUT_MS) {
+      trackHistory.delete(key);
+    }
+  });
+}
+
 function applyLayout(count) {
   const grid = document.getElementById("videoGrid");
   if (!grid) return;
@@ -136,6 +178,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const canvasRef = useRef(null);
   const metadataQueueRef = useRef([]);
   const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
+  const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
@@ -197,6 +240,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = [];
       overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
         lastTs: null,
@@ -308,7 +352,19 @@ function ChannelTile({ index, onActiveChange, debug }) {
             if (overlayMetadata) {
               const strategy = window.drawStrategies?.[overlayMetadata.data?.type];
               if (strategy) {
-                strategy(ctx, canvas, overlayMetadata.data?.data, video, index);
+                const drawContext = {
+                  showTrackHistory: getShowTrackHistory(index),
+                  trackHistory: trackHistoryRef.current,
+                };
+                if (candidate && overlayMetadata === candidate && overlayMetadata.data?.type === "tracking") {
+                  updateTrackHistory(
+                    trackHistoryRef.current,
+                    index,
+                    overlayMetadata.data?.data?.tracks,
+                    nowPerf
+                  );
+                }
+                strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
               }
             }
             pruneMetadataQueue(queue, candidate, metadataDelayMs, nowPerf);
@@ -316,6 +372,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+          trackHistoryRef.current.clear();
         }
 
         animationFrame = requestAnimationFrame(draw);

@@ -15,7 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const objectTab = document.getElementById("viewer-objects");
     const addViewerObjectBtn = document.getElementById("addViewerObject");
     const objectTableBody = document.getElementById("viewerObjectTableBody");
-  
+
     viewerSettingsBtn.addEventListener("click", () => {
       openSettingsForScope("global");
     });
@@ -23,18 +23,18 @@ document.addEventListener("DOMContentLoaded", () => {
     viewerSettingsClose.addEventListener("click", () => {
       viewerSettingsOverlay.classList.add("hidden");
     });
-  
+
     tabButtons.forEach(btn => {
       btn.addEventListener("click", () => {
         tabButtons.forEach(b => b.classList.remove("active"));
         tabSections.forEach(section => section.style.display = "none");
-  
+
         btn.classList.add("active");
         const tabId = btn.getAttribute("data-tab");
         document.getElementById(tabId).style.display = "flex";
       });
     });
-  
+
     confidenceSlider.addEventListener("input", () => {
       confidenceDisplay.textContent = confidenceSlider.value;
     });
@@ -55,16 +55,17 @@ document.addEventListener("DOMContentLoaded", () => {
           metadataDelay: parseFloat(metadataDelaySlider.value),
           useGlobal: scope === "global",
           objects: getObjectEntries(),
-          showRoi: document.getElementById("toggleRoiVisibility").checked
+          showRoi: document.getElementById("toggleRoiVisibility").checked,
+          showTrackHistory: document.getElementById("toggleTrackHistory").checked
         };
-      
+
         const storageKey = `viewerSettings_${scope}`;
         localStorage.setItem(storageKey, JSON.stringify(settings));
         viewerSettingsOverlay.classList.add("hidden");
       });
-      
+
     let selectedRow = null;
-    
+
     function scopeToIndex(scope) {
       if (scope === "global") return 0;
       const match = scope.match(/channel_(\d+)/);
@@ -84,8 +85,8 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       observer.observe(roiOverlay);
-    }    
-    
+    }
+
 
     function openSettingsForScope(targetScope) {
       scope = targetScope;
@@ -106,7 +107,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function createObjectEntry(label, color, lineStyle, lineWidth) {
       const row = document.createElement("tr");
-    
+
       row.innerHTML = `<td><input type="text" placeholder="enter new object name" value="${label}" /></td>
         <td><input type="color" value="${color}" /></td>
         <td>
@@ -123,7 +124,7 @@ document.addEventListener("DOMContentLoaded", () => {
           </select>
         </td>
         <td><button class="delete-entry" title="Delete" style="visibility: hidden;">×</button></td>`;
-    
+
       row.addEventListener("click", () => {
         if (selectedRow && selectedRow !== row) {
           selectedRow.querySelector(".delete-entry").style.visibility = "hidden";
@@ -131,17 +132,17 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedRow = row;
         row.querySelector(".delete-entry").style.visibility = "visible";
       });
-    
+
       // Prevent blur-before-click issue
       row.querySelector(".delete-entry").addEventListener("mousedown", (e) => {
         e.stopPropagation(); // prevent row deselection
         row.remove();
         if (selectedRow === row) selectedRow = null;
       });
-    
+
       objectTableBody.appendChild(row);
     }
-      
+
     function getObjectEntries() {
       const entries = [];
       objectTableBody.querySelectorAll("tr").forEach(row => {
@@ -157,7 +158,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       return entries;
     }
-  
+
     function loadObjectEntries() {
       const storageKey = `viewerSettings_${scope}`;
       const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
@@ -179,27 +180,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // 🟢 Load ROI visibility toggle (default = true)
       const roiToggle = document.getElementById("toggleRoiVisibility");
-      roiToggle.checked = saved.showRoi !== false; // default to true      
+      roiToggle.checked = saved.showRoi !== false; // default to true
+      const trackHistoryToggle = document.getElementById("toggleTrackHistory");
+      trackHistoryToggle.checked = saved.showTrackHistory !== false;
     }
-  
+
     addViewerObjectBtn?.addEventListener("click", () => {
       createObjectEntry("", "#ff0000", "solid", 1);
     });
-      
+
     objectTab.style.flexDirection = "column";
     objectList.style.flex = "1";
     objectList.style.overflowY = "auto";
     objectList.style.maxHeight = "280px";
     objectList.style.marginBottom = "1rem";
-  
+
     tabSections.forEach(section => section.style.display = "none");
     const initialTab = document.querySelector(".settings-tab-link.active")?.getAttribute("data-tab");
     if (initialTab) {
       document.getElementById(initialTab).style.display = "flex";
     }
-  
+
     loadObjectEntries();
     window.openSettingsForScope = openSettingsForScope;
     window.loadPolygons = loadPolygons;
   });
-  
+
