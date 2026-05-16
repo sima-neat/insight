@@ -24,14 +24,16 @@ function parseIndices(srcParam) {
   return Array.from(seen).sort((a, b) => a - b);
 }
 
-function getMetadataDelayMs() {
-  try {
-    const settings = JSON.parse(window.localStorage.getItem("viewerSettings_global") || "{}");
-    if (typeof settings.metadataDelay === "number") return settings.metadataDelay;
-  } catch (_err) {
-    // Use default.
+function getResolvedViewerSettings(channelIndex, metadataType = "object-detection") {
+  if (typeof window.resolveTypeSettings === "function") {
+    return window.resolveTypeSettings(channelIndex, metadataType);
   }
-  return 0;
+  return { general: { metadataDelay: 0, showRoi: true }, type: {} };
+}
+
+function getMetadataDelayMs(channelIndex) {
+  const settings = getResolvedViewerSettings(channelIndex);
+  return typeof settings.general.metadataDelay === "number" ? settings.general.metadataDelay : 0;
 }
 
 function chooseMetadataCandidate(queue, metadataDelayMs) {
@@ -46,13 +48,8 @@ function chooseMetadataCandidate(queue, metadataDelayMs) {
 }
 
 function getObjectConfidenceThreshold(channelIndex) {
-  try {
-    const scoped = JSON.parse(window.localStorage.getItem(`viewerSettings_channel_${channelIndex}`) || "{}");
-    const global = JSON.parse(window.localStorage.getItem("viewerSettings_global") || "{}");
-    return scoped.confidenceThreshold ?? global.confidenceThreshold ?? 0;
-  } catch (_err) {
-    return 0;
-  }
+  const settings = getResolvedViewerSettings(channelIndex, "object-detection");
+  return settings.type.confidenceThreshold ?? 0;
 }
 
 function hasDrawableMetadata(message, channelIndex) {
@@ -68,6 +65,8 @@ function hasDrawableMetadata(message, channelIndex) {
       return Array.isArray(data?.poses) && data.poses.length > 0;
     case "segmentation":
       return Array.isArray(data?.segments) && data.segments.length > 0;
+    case "tracking":
+      return Array.isArray(data?.tracks);
     default:
       return Boolean(message?.type);
   }
@@ -136,6 +135,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const canvasRef = useRef(null);
   const metadataQueueRef = useRef([]);
   const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
+  const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
@@ -171,6 +171,15 @@ function ChannelTile({ index, onActiveChange, debug }) {
       debugLog("active", nextActive);
     };
 
+    const onViewerSettingsChanged = (event) => {
+      const changedScope = event.detail?.scope;
+      if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
+      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      if (event.detail?.metadataType === "tracking") {
+        trackHistoryRef.current.clear();
+      }
+    };
+
     const scheduleReconnect = () => {
       if (!mounted || reconnectPending) return;
       reconnectPending = true;
@@ -197,6 +206,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = [];
       overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
         lastTs: null,
@@ -205,8 +215,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         lastFramesDecoded: null,
       };
       playbackRef.current = { lastFrameAt: 0 };
-      const metadataDelayMs = getMetadataDelayMs();
-      debugLog("connect start", { metadataDelayMs });
+      debugLog("connect start", { metadataDelayMs: getMetadataDelayMs(index) });
 
       pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -302,13 +311,21 @@ function ChannelTile({ index, onActiveChange, debug }) {
           if (ctx) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const metadataDelayMs = getMetadataDelayMs(index);
             const candidate = chooseMetadataCandidate(queue, metadataDelayMs);
             const nowPerf = performance.now();
             const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, nowPerf);
             if (overlayMetadata) {
-              const strategy = window.drawStrategies?.[overlayMetadata.data?.type];
+              const metadataType = overlayMetadata.data?.type;
+              const strategy = window.drawStrategies?.[metadataType];
               if (strategy) {
-                strategy(ctx, canvas, overlayMetadata.data?.data, video, index);
+                const resolvedSettings = getResolvedViewerSettings(index, metadataType);
+                const drawContext = {
+                  settings: resolvedSettings,
+                  trackHistory: trackHistoryRef.current,
+                  now: nowPerf,
+                };
+                strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
               }
             }
             pruneMetadataQueue(queue, candidate, metadataDelayMs, nowPerf);
@@ -316,6 +333,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+          trackHistoryRef.current.clear();
         }
 
         animationFrame = requestAnimationFrame(draw);
@@ -440,10 +458,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
       }
     };
 
+    window.addEventListener("viewer-settings-changed", onViewerSettingsChanged);
     connect();
 
     return () => {
       mounted = false;
+      window.removeEventListener("viewer-settings-changed", onViewerSettingsChanged);
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (statsInterval) window.clearInterval(statsInterval);
       if (animationFrame) cancelAnimationFrame(animationFrame);
