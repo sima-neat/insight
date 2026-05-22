@@ -1,205 +1,285 @@
 let scope = "global";
 
 document.addEventListener("DOMContentLoaded", () => {
-    const viewerSettingsBtn = document.getElementById("viewerSettingsBtn");
-    const viewerSettingsOverlay = document.getElementById("viewerSettingsOverlay");
-    const viewerSettingsClose = document.getElementById("viewerSettingsClose");
-    const saveViewerSettings = document.getElementById("saveViewerSettings");
-    const confidenceSlider = document.getElementById("confidenceSlider");
-    const metadataDelaySlider = document.getElementById("metadataDelaySlider");
-    const confidenceDisplay = document.getElementById("confidenceDisplay");
-    const metadataDelayDisplay = document.getElementById("metadataDelayDisplay");
-    const tabButtons = document.querySelectorAll(".settings-tab-link");
-    const tabSections = document.querySelectorAll(".settings-tab-section");
-    const objectList = document.getElementById("viewerObjectList");
-    const objectTab = document.getElementById("viewer-objects");
-    const addViewerObjectBtn = document.getElementById("addViewerObject");
-    const objectTableBody = document.getElementById("viewerObjectTableBody");
-  
-    viewerSettingsBtn.addEventListener("click", () => {
-      openSettingsForScope("global");
-    });
+  const viewerSettingsBtn = document.getElementById("viewerSettingsBtn");
+  const viewerSettingsOverlay = document.getElementById("viewerSettingsOverlay");
+  const viewerSettingsClose = document.getElementById("viewerSettingsClose");
+  const saveViewerSettings = document.getElementById("saveViewerSettings");
+  const metadataTypeSelector = document.getElementById("metadataTypeSelector");
+  const confidenceSlider = document.getElementById("confidenceSlider");
+  const trackingConfidenceSlider = document.getElementById("trackingConfidenceSlider");
+  const trackTrailLengthSlider = document.getElementById("trackTrailLengthSlider");
+  const lostTrackTtlSlider = document.getElementById("lostTrackTtlSlider");
+  const metadataDelaySlider = document.getElementById("metadataDelaySlider");
+  const confidenceDisplay = document.getElementById("confidenceDisplay");
+  const trackingConfidenceDisplay = document.getElementById("trackingConfidenceDisplay");
+  const trackTrailLengthDisplay = document.getElementById("trackTrailLengthDisplay");
+  const lostTrackTtlDisplay = document.getElementById("lostTrackTtlDisplay");
+  const metadataDelayDisplay = document.getElementById("metadataDelayDisplay");
+  const tabButtons = document.querySelectorAll(".settings-tab-link");
+  const tabSections = document.querySelectorAll(".settings-tab-section");
+  const objectList = document.getElementById("viewerObjectList");
+  const metadataTab = document.getElementById("viewer-metadata");
+  const addViewerObjectBtn = document.getElementById("addViewerObject");
+  const objectTableBody = document.getElementById("viewerObjectTableBody");
+  const objectDetectionSettings = document.getElementById("objectDetectionSettings");
+  const trackingSettings = document.getElementById("trackingSettings");
+  const metadataNoSettings = document.getElementById("metadataNoSettings");
+  const roiToggle = document.getElementById("toggleRoiVisibility");
+  const roiFilteringToggle = document.getElementById("toggleRoiFiltering");
+  const trackHistoryToggle = document.getElementById("toggleTrackHistory");
+  const trackHistoryDependentRows = document.querySelectorAll(".track-history-dependent");
+  const settingsApi = window.viewerSettingsApi;
 
-    viewerSettingsClose.addEventListener("click", () => {
-      viewerSettingsOverlay.classList.add("hidden");
-    });
-  
-    tabButtons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        tabButtons.forEach(b => b.classList.remove("active"));
-        tabSections.forEach(section => section.style.display = "none");
-  
-        btn.classList.add("active");
-        const tabId = btn.getAttribute("data-tab");
-        document.getElementById(tabId).style.display = "flex";
-      });
-    });
-  
-    confidenceSlider.addEventListener("input", () => {
-      confidenceDisplay.textContent = confidenceSlider.value;
-    });
+  if (!settingsApi) {
+    console.error("viewerSettingsApi is not available");
+    return;
+  }
 
-    metadataDelaySlider.addEventListener("input", () => {
-      metadataDelayDisplay.textContent = metadataDelaySlider.value;
-    });
-
-
-    const viewerSettingsTitle = document.getElementById("viewerSettingsTitle");
-    if (scope === "global") {
-      viewerSettingsTitle.textContent += " (Global)";
-    }
-
-    saveViewerSettings.addEventListener("click", () => {
-        const settings = {
-          confidenceThreshold: parseFloat(confidenceSlider.value),
-          metadataDelay: parseFloat(metadataDelaySlider.value),
-          useGlobal: scope === "global",
-          objects: getObjectEntries(),
-          showRoi: document.getElementById("toggleRoiVisibility").checked
-        };
-      
-        const storageKey = `viewerSettings_${scope}`;
-        localStorage.setItem(storageKey, JSON.stringify(settings));
-        viewerSettingsOverlay.classList.add("hidden");
-      });
-      
-    let selectedRow = null;
-    
-    function scopeToIndex(scope) {
-      if (scope === "global") return 0;
-      const match = scope.match(/channel_(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    }
-
-    function waitForOverlayVisible(callback) {
-      const observer = new IntersectionObserver((entries) => {
-        const [entry] = entries;
-        if (entry.isIntersecting && entry.target.clientWidth > 0 && entry.target.clientHeight > 0) {
-          observer.disconnect();
-          callback();
-        }
-      }, {
-        root: null,
-        threshold: 0.1
-      });
-
-      observer.observe(roiOverlay);
-    }    
-    
-
-    function openSettingsForScope(targetScope) {
-      scope = targetScope;
-      localStorage.setItem("lastViewerScope", scope);
-      const index = scopeToIndex(scope);
-      connectToStream(index.toString());
-      updateViewerTitle(scope);
-      loadObjectEntries();
-      viewerSettingsOverlay.classList.remove("hidden");
-      loadPolygons(index);
-    }
-
-    function updateViewerTitle(scope) {
-      const viewerSettingsTitle = document.getElementById("viewerSettingsTitle");
-      viewerSettingsTitle.textContent =
-        "Viewer Configuration" + (scope === "global" ? " (Global)" : ` (${scope})`);
-    }
-
-    function createObjectEntry(label, color, lineStyle, lineWidth) {
-      const row = document.createElement("tr");
-    
-      row.innerHTML = `<td><input type="text" placeholder="enter new object name" value="${label}" /></td>
-        <td><input type="color" value="${color}" /></td>
-        <td>
-          <select>
-            <option value="solid" ${lineStyle === "solid" ? "selected" : ""}>Solid</option>
-            <option value="dashed" ${lineStyle === "dashed" ? "selected" : ""}>Dashed</option>
-            <option value="dotted" ${lineStyle === "dotted" ? "selected" : ""}>Dotted</option>
-          </select>
-        </td>
-        <td>
-          <select>
-            <option value="1" ${lineWidth == 1 ? "selected" : ""}>Thin</option>
-            <option value="3" ${lineWidth == 3 ? "selected" : ""}>Thick</option>
-          </select>
-        </td>
-        <td><button class="delete-entry" title="Delete" style="visibility: hidden;">×</button></td>`;
-    
-      row.addEventListener("click", () => {
-        if (selectedRow && selectedRow !== row) {
-          selectedRow.querySelector(".delete-entry").style.visibility = "hidden";
-        }
-        selectedRow = row;
-        row.querySelector(".delete-entry").style.visibility = "visible";
-      });
-    
-      // Prevent blur-before-click issue
-      row.querySelector(".delete-entry").addEventListener("mousedown", (e) => {
-        e.stopPropagation(); // prevent row deselection
-        row.remove();
-        if (selectedRow === row) selectedRow = null;
-      });
-    
-      objectTableBody.appendChild(row);
-    }
-      
-    function getObjectEntries() {
-      const entries = [];
-      objectTableBody.querySelectorAll("tr").forEach(row => {
-        const inputs = row.querySelectorAll("input, select");
-        if (inputs.length >= 4) {
-          entries.push({
-            label: inputs[0].value,
-            color: inputs[1].value,
-            style: inputs[2].value,
-            width: parseInt(inputs[3].value)
-          });
-        }
-      });
-      return entries;
-    }
-  
-    function loadObjectEntries() {
-      const storageKey = `viewerSettings_${scope}`;
-      const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
-
-      // Clear any existing rows
-      objectTableBody.innerHTML = "";
-
-      // Load confidence threshold
-      confidenceSlider.value = saved.confidenceThreshold ?? 0.5;
-      confidenceDisplay.textContent = confidenceSlider.value;
-      metadataDelaySlider.value = saved.metadataDelay ?? 0;
-      metadataDelayDisplay.textContent = metadataDelaySlider.value;
-
-      // Load object entries
-      const objects = saved.objects?.length ? saved.objects : [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
-      objects.forEach(obj => {
-        createObjectEntry(obj.label, obj.color, obj.style, obj.width);
-      });
-
-      // 🟢 Load ROI visibility toggle (default = true)
-      const roiToggle = document.getElementById("toggleRoiVisibility");
-      roiToggle.checked = saved.showRoi !== false; // default to true      
-    }
-  
-    addViewerObjectBtn?.addEventListener("click", () => {
-      createObjectEntry("", "#ff0000", "solid", 1);
-    });
-      
-    objectTab.style.flexDirection = "column";
-    objectList.style.flex = "1";
-    objectList.style.overflowY = "auto";
-    objectList.style.maxHeight = "280px";
-    objectList.style.marginBottom = "1rem";
-  
-    tabSections.forEach(section => section.style.display = "none");
-    const initialTab = document.querySelector(".settings-tab-link.active")?.getAttribute("data-tab");
-    if (initialTab) {
-      document.getElementById(initialTab).style.display = "flex";
-    }
-  
-    loadObjectEntries();
-    window.openSettingsForScope = openSettingsForScope;
-    window.loadPolygons = loadPolygons;
+  settingsApi.metadataTypes.forEach((metadataType) => {
+    const option = document.createElement("option");
+    option.value = metadataType.value;
+    option.textContent = metadataType.label;
+    metadataTypeSelector.appendChild(option);
   });
-  
+
+  viewerSettingsBtn.addEventListener("click", () => {
+    openSettingsForScope("global");
+  });
+
+  viewerSettingsClose.addEventListener("click", () => {
+    viewerSettingsOverlay.classList.add("hidden");
+  });
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tabButtons.forEach((tabButton) => tabButton.classList.remove("active"));
+      tabSections.forEach((section) => {
+        section.style.display = "none";
+      });
+
+      btn.classList.add("active");
+      const tabId = btn.getAttribute("data-tab");
+      document.getElementById(tabId).style.display = "flex";
+    });
+  });
+
+  confidenceSlider.addEventListener("input", () => {
+    confidenceDisplay.textContent = confidenceSlider.value;
+  });
+
+  trackingConfidenceSlider.addEventListener("input", () => {
+    trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
+  });
+
+  trackTrailLengthSlider.addEventListener("input", () => {
+    updateTrackTrailLengthDisplay();
+  });
+
+  lostTrackTtlSlider.addEventListener("input", () => {
+    updateLostTrackTtlDisplay();
+  });
+
+  trackHistoryToggle.addEventListener("change", () => {
+    updateTrackHistoryControls();
+  });
+
+  metadataDelaySlider.addEventListener("input", () => {
+    metadataDelayDisplay.textContent = metadataDelaySlider.value;
+  });
+
+  metadataTypeSelector.addEventListener("change", () => {
+    localStorage.setItem("lastViewerMetadataType", metadataTypeSelector.value);
+    updateMetadataTypeSection();
+  });
+
+  saveViewerSettings.addEventListener("click", () => {
+    const settings = settingsApi.readScopeSettings(scope);
+    settings.general.metadataDelay = parseFloat(metadataDelaySlider.value);
+    settings.general.showRoi = roiToggle.checked;
+    settings.general.applyRoiFiltering = roiFilteringToggle.checked;
+    settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceSlider.value);
+    settings.types["object-detection"].objects = getObjectEntries();
+    settings.types.tracking.confidenceThreshold = parseFloat(trackingConfidenceSlider.value);
+    settings.types.tracking.history = {
+      enabled: trackHistoryToggle.checked,
+      trailLength: parseInt(trackTrailLengthSlider.value, 10),
+      lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
+    };
+
+    settingsApi.writeScopeSettings(scope, settings);
+    viewerSettingsOverlay.classList.add("hidden");
+    window.dispatchEvent(
+      new CustomEvent("viewer-settings-changed", {
+        detail: {
+          scope,
+          metadataType: metadataTypeSelector.value
+        }
+      })
+    );
+  });
+
+  let selectedRow = null;
+
+  function scopeToIndex(value) {
+    if (value === "global") return 0;
+    const match = value.match(/channel_(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  function openSettingsForScope(targetScope) {
+    scope = targetScope;
+    localStorage.setItem("lastViewerScope", scope);
+    const index = scopeToIndex(scope);
+    connectToStream(index.toString());
+    updateViewerTitle(scope);
+    loadSettings();
+    viewerSettingsOverlay.classList.remove("hidden");
+    loadPolygons(index);
+  }
+
+  function updateViewerTitle(value) {
+    const viewerSettingsTitle = document.getElementById("viewerSettingsTitle");
+    viewerSettingsTitle.textContent =
+      "Viewer Configuration" + (value === "global" ? " (Global)" : ` (${value})`);
+  }
+
+  function updateMetadataTypeSection() {
+    const selectedType = metadataTypeSelector.value;
+    objectDetectionSettings.style.display = selectedType === "object-detection" ? "flex" : "none";
+    trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
+    metadataNoSettings.style.display =
+      selectedType !== "object-detection" && selectedType !== "tracking" ? "flex" : "none";
+  }
+
+  function updateTrackTrailLengthDisplay() {
+    const value = parseInt(trackTrailLengthSlider.value, 10);
+    trackTrailLengthDisplay.textContent = `${Number.isFinite(value) ? value : 10} positions`;
+  }
+
+  function updateLostTrackTtlDisplay() {
+    const value = parseInt(lostTrackTtlSlider.value, 10);
+    const seconds = Number.isFinite(value) ? (value / 1000).toFixed(1) : "2.0";
+    lostTrackTtlDisplay.textContent = `${seconds} s`;
+  }
+
+  function updateTrackHistoryControls() {
+    const enabled = trackHistoryToggle.checked;
+    trackHistoryDependentRows.forEach((row) => {
+      row.classList.toggle("is-disabled", !enabled);
+      row.querySelectorAll("input, select, button").forEach((control) => {
+        control.disabled = !enabled;
+      });
+    });
+  }
+
+  function createObjectEntry(label, color, lineStyle, lineWidth) {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `<td><input type="text" placeholder="enter new object name" value="${label}" /></td>
+      <td><input type="color" value="${color}" /></td>
+      <td>
+        <select>
+          <option value="solid" ${lineStyle === "solid" ? "selected" : ""}>Solid</option>
+          <option value="dashed" ${lineStyle === "dashed" ? "selected" : ""}>Dashed</option>
+          <option value="dotted" ${lineStyle === "dotted" ? "selected" : ""}>Dotted</option>
+        </select>
+      </td>
+      <td>
+        <select>
+          <option value="1" ${lineWidth == 1 ? "selected" : ""}>Thin</option>
+          <option value="3" ${lineWidth == 3 ? "selected" : ""}>Thick</option>
+        </select>
+      </td>
+      <td><button class="delete-entry" title="Delete" style="visibility: hidden;">&times;</button></td>`;
+
+    row.addEventListener("click", () => {
+      if (selectedRow && selectedRow !== row) {
+        selectedRow.querySelector(".delete-entry").style.visibility = "hidden";
+      }
+      selectedRow = row;
+      row.querySelector(".delete-entry").style.visibility = "visible";
+    });
+
+    row.querySelector(".delete-entry").addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+      row.remove();
+      if (selectedRow === row) selectedRow = null;
+    });
+
+    objectTableBody.appendChild(row);
+  }
+
+  function getObjectEntries() {
+    const entries = [];
+    objectTableBody.querySelectorAll("tr").forEach((row) => {
+      const inputs = row.querySelectorAll("input, select");
+      if (inputs.length >= 4) {
+        entries.push({
+          label: inputs[0].value,
+          color: inputs[1].value,
+          style: inputs[2].value,
+          width: parseInt(inputs[3].value, 10)
+        });
+      }
+    });
+    return entries;
+  }
+
+  function loadObjectEntries(objects) {
+    objectTableBody.innerHTML = "";
+    objects.forEach((obj) => {
+      createObjectEntry(obj.label, obj.color, obj.style, obj.width);
+    });
+  }
+
+  function loadSettings() {
+    const settings = settingsApi.readScopeSettings(scope);
+    const objectDetectionTypeSettings = settings.types["object-detection"];
+    const trackingTypeSettings = settings.types.tracking;
+    const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
+
+    confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
+    confidenceDisplay.textContent = confidenceSlider.value;
+    trackingConfidenceSlider.value = trackingTypeSettings.confidenceThreshold ?? 0;
+    trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
+    trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
+    lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
+    metadataDelaySlider.value = settings.general.metadataDelay ?? 0;
+    metadataDelayDisplay.textContent = metadataDelaySlider.value;
+    roiToggle.checked = settings.general.showRoi !== false;
+    roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
+    trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
+    updateTrackTrailLengthDisplay();
+    updateLostTrackTtlDisplay();
+    updateTrackHistoryControls();
+    loadObjectEntries(objectDetectionTypeSettings.objects || settingsApi.defaults.types["object-detection"].objects);
+
+    const lastMetadataType = localStorage.getItem("lastViewerMetadataType");
+    const supportedType = settingsApi.metadataTypes.some((metadataType) => metadataType.value === lastMetadataType);
+    metadataTypeSelector.value = supportedType ? lastMetadataType : "object-detection";
+    updateMetadataTypeSection();
+  }
+
+  addViewerObjectBtn?.addEventListener("click", () => {
+    createObjectEntry("", "#ff0000", "solid", 1);
+  });
+
+  metadataTab.style.flexDirection = "column";
+  objectList.style.flex = "1";
+  objectList.style.overflowY = "auto";
+  objectList.style.maxHeight = "280px";
+  objectList.style.marginBottom = "1rem";
+
+  tabSections.forEach((section) => {
+    section.style.display = "none";
+  });
+  const initialTab = document.querySelector(".settings-tab-link.active")?.getAttribute("data-tab");
+  if (initialTab) {
+    document.getElementById(initialTab).style.display = "flex";
+  }
+
+  loadSettings();
+  window.openSettingsForScope = openSettingsForScope;
+  window.loadPolygons = loadPolygons;
+});

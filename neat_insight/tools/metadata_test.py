@@ -7,6 +7,7 @@ import time
 
 _last_shape_update = 0.0
 _cached_segments = []
+_track_positions = {}
 
 DEFAULT_FPS = 30.0
 FRAME_WIDTH = 1280
@@ -140,11 +141,37 @@ def generate_segmentation():
     return {"type": "segmentation", "timestamp": now, "data": {"segments": _cached_segments}}
 
 
+def generate_tracking():
+    now = time.time()
+    tracks = []
+    for track_id, label, start_x, start_y in [
+        ("1", "person", 180, 140),
+        ("2", "person", 760, 420),
+        ("3", "forklift", 980, 180),
+    ]:
+        x, y = _track_positions.get(track_id, (start_x, start_y))
+        dx = random.randint(-18, 18)
+        dy = random.randint(-12, 12)
+        x = min(max(20, x + dx), FRAME_WIDTH - 100)
+        y = min(max(20, y + dy), FRAME_HEIGHT - 140)
+        _track_positions[track_id] = (x, y)
+        tracks.append(
+            {
+                "id": track_id,
+                "label": label,
+                "confidence": round(random.uniform(0.82, 0.99), 2),
+                "bbox": [x, y, 80, 130],
+            }
+        )
+    return {"type": "tracking", "timestamp": now, "data": {"tracks": tracks}}
+
+
 GENERATOR_MAP = {
     "object-detection": generate_object_detection,
     "classification": generate_classification,
     "pose-estimation": generate_pose_estimation,
     "segmentation": generate_segmentation,
+    "tracking": generate_tracking,
 }
 
 
@@ -156,7 +183,7 @@ def parse_args(argv=None):
     parser.add_argument(
         "--types",
         default="object-detection",
-        help="Comma-separated metadata types: object-detection, classification, pose-estimation, segmentation",
+        help="Comma-separated metadata types: object-detection, classification, pose-estimation, segmentation, tracking",
     )
     parser.add_argument("--fps", type=float, default=DEFAULT_FPS, help="Messages per second per channel (default: 30)")
     parser.add_argument("--seed", type=int, default=None, help="Optional RNG seed for repeatable output")
