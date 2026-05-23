@@ -21,22 +21,13 @@ python -m pip install --upgrade pip
 python -m pip install neat-insight
 ```
 
-### Option 2: Install using the hosted build installer
+### Option 2: Install from Neat artifacts
 
-Linux/macOS:
 ```bash
-curl -fsSL https://apps.sima-neat.com/tools/install-neat-insight.py -o /tmp/install-neat-insight.py && python3 /tmp/install-neat-insight.py
+sima-cli install --neat --env dev insight@vulcan-prep
 ```
 
-Optional:
-- `python3 /tmp/install-neat-insight.py <branch> latest`
-- `python3 /tmp/install-neat-insight.py <branch> <git-short-hash>`
-
-Windows (PowerShell):
-```powershell
-Invoke-WebRequest https://apps.sima-neat.com/tools/install-neat-insight.py -OutFile $env:TEMP\install-neat-insight.py
-py $env:TEMP\install-neat-insight.py
-```
+This installs the platform-compatible `neat-insight` wheel into an isolated virtual environment.
 
 ## Run
 

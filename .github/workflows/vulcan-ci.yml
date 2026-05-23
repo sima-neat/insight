@@ -97,6 +97,22 @@ jobs:
     needs: build
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install sima-cli package builder
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          SIMA_CLI_REF="${SIMA_CLI_REF:-main}"
+          python3 -m pip install "sima-cli @ git+https://github.com/sima-neat/sima-cli.git@${SIMA_CLI_REF}"
+          sima-cli packages build --help
+
       - name: Download wheel artifacts
         uses: actions/download-artifact@v7
         with:
@@ -107,134 +123,24 @@ jobs:
       - name: Generate Vulcan package metadata
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          import textwrap
-          from pathlib import Path
+          VERSION="$(scripts/vulcan-prepare-dist.sh dist)"
 
-          dist = Path("dist")
-          wheels = sorted(dist.glob("neat_insight-*.whl"))
-          if len(wheels) != 4:
-              raise SystemExit(f"Expected 4 neat-insight wheels, found {len(wheels)}: {[p.name for p in wheels]}")
+          COMPATIBLE_FLAGS=()
+          if sima-cli packages build --help | grep -q -- "--download-compatible-files-only"; then
+            COMPATIBLE_FLAGS+=(--download-compatible-files-only)
+          else
+            echo "sima-cli packages build does not support --download-compatible-files-only; generating metadata without compatible wheel filtering." >&2
+          fi
 
-          versions = {wheel.name.split("-")[1] for wheel in wheels}
-          if len(versions) != 1:
-              raise SystemExit(f"Expected all wheels to share one version, found {sorted(versions)}")
-          version = sorted(versions)[0]
+          sima-cli packages build dist \
+            --name "gh:sima-neat/insight" \
+            --version "${VERSION}" \
+            --description "SiMa.ai Neat Insight web UI and media tooling" \
+            --install-script "python3 install_neat_insight.py || python install_neat_insight.py" \
+            "${COMPATIBLE_FLAGS[@]}"
 
-          installer = dist / "install_neat_insight_vulcan.py"
-          installer.write_text(textwrap.dedent(r'''
-              #!/usr/bin/env python3
-              """Install the downloaded neat-insight wheel selected for this host."""
-
-              from __future__ import annotations
-
-              import os
-              import platform
-              import subprocess
-              import sys
-              import venv
-              from pathlib import Path
-
-
-              def platform_tag() -> str:
-                  system = platform.system().lower()
-                  machine = platform.machine().lower()
-                  if machine in {"x86_64", "amd64"}:
-                      arch = "x86_64"
-                  elif machine in {"aarch64", "arm64"}:
-                      arch = "aarch64"
-                  else:
-                      raise SystemExit(f"Unsupported machine architecture: {machine}")
-
-                  if system == "linux":
-                      return f"manylinux2014_{arch}"
-                  if system == "darwin" and arch == "aarch64":
-                      return "macosx_11_0_arm64"
-                  if system == "windows" and arch == "x86_64":
-                      return "win_amd64"
-                  raise SystemExit(f"Unsupported platform: system={system} arch={arch}")
-
-
-              def venv_python(root: Path) -> Path:
-                  if platform.system().lower() == "windows":
-                      return root / "Scripts" / "python.exe"
-                  return root / "bin" / "python"
-
-
-              def main() -> int:
-                  root = Path.cwd()
-                  tag = platform_tag()
-                  wheels = sorted(root.glob(f"neat_insight-*-{tag}.whl"))
-                  if not wheels:
-                      available = "\n".join(f"  {p.name}" for p in sorted(root.glob("neat_insight-*.whl")))
-                      raise SystemExit(f"No neat-insight wheel found for platform tag {tag}. Available wheels:\n{available}")
-                  wheel = wheels[-1]
-
-                  venv_dir = Path(os.environ.get("NEAT_INSIGHT_VENV_DIR", "~/.simaai/neat-insight/venv")).expanduser()
-                  venv_dir.parent.mkdir(parents=True, exist_ok=True)
-                  if not venv_python(venv_dir).exists():
-                      venv.EnvBuilder(with_pip=True).create(venv_dir)
-
-                  python = venv_python(venv_dir)
-                  subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
-                  subprocess.run([str(python), "-m", "pip", "install", "--force-reinstall", str(wheel)], check=True)
-
-                  console = venv_dir / ("Scripts/neat-insight.exe" if platform.system().lower() == "windows" else "bin/neat-insight")
-                  print(f"Installed neat-insight from {wheel.name}")
-                  print(f"Virtual environment: {venv_dir}")
-                  print(f"Run: {console}")
-                  return 0
-
-
-              if __name__ == "__main__":
-                  raise SystemExit(main())
-              ''').lstrip(), encoding="utf-8")
-          installer.chmod(0o755)
-
-          resources = [installer.name, *[wheel.name for wheel in wheels]]
-
-          def sha256(path: Path) -> str:
-              h = hashlib.sha256()
-              with path.open("rb") as f:
-                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                      h.update(chunk)
-              return h.hexdigest()
-
-          total_size = sum((dist / resource).stat().st_size for resource in resources)
-          size_kb = max(1, (total_size + 1023) // 1024)
-          metadata = {
-              "name": "gh:sima-neat/insight",
-              "version": version,
-              "release": "",
-              "description": "SiMa.ai Neat Insight web UI and media tooling",
-              "platforms": [],
-              "resources": resources,
-              "resources-checksum": {
-                  resource: sha256(dist / resource)
-                  for resource in resources
-              },
-              "selectable-resources": [],
-              "size": {
-                  "download": f"{size_kb}KB",
-                  "install": f"{size_kb}KB",
-              },
-              "installation": {
-                  "script": "python3 install_neat_insight_vulcan.py || python install_neat_insight_vulcan.py",
-                  "post-message": "[bold]neat-insight installed successfully.[/bold]\nRun with: [green]neat-insight[/green]\n",
-              },
-              "build": {
-                  "commit": os.environ["GITHUB_SHA"],
-                  "ref": os.environ.get("GITHUB_HEAD_REF") or os.environ["GITHUB_REF_NAME"],
-                  "repository": os.environ["GITHUB_REPOSITORY"],
-              },
-          }
-          (dist / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-          print(json.dumps(metadata, indent=2))
-          PY
           python3 -m json.tool dist/metadata.json >/dev/null
+          cat dist/metadata.json
           ls -lh dist
 
       - name: Upload Vulcan dist artifact
@@ -274,7 +180,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          NEAT_INSIGHT_VENV_DIR="${GITHUB_WORKSPACE}/.venv-insight" python3 install_neat_insight_vulcan.py
+          NEAT_INSIGHT_VENV_DIR="${GITHUB_WORKSPACE}/.venv-insight" python3 install_neat_insight.py
 
       - name: Validate package binaries
         run: |
