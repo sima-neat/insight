@@ -30,6 +30,8 @@ python -m pip install neat-insight
 sima-cli neat install insight@main
 ```
 
+This installs the platform-compatible `neat-insight` wheel into an isolated virtual environment.
+
 ## Run
 
 `neat-insight` uses `mkcert` to create a locally trusted HTTPS certificate at startup. If `mkcert` is missing, startup attempts to install it with a supported package manager: Homebrew on macOS, common Linux package managers, winget/Chocolatey/Scoop on Windows, or `go install` as a fallback.
