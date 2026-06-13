@@ -94,7 +94,9 @@ jobs:
   package-vulcan-metadata:
     name: Package Vulcan Metadata
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - build
+      - resolve-vulcan-config
 
     steps:
       - name: Checkout
@@ -121,6 +123,8 @@ jobs:
           merge-multiple: true
 
       - name: Generate Vulcan package metadata
+        env:
+          VULCAN_ARTIFACT_BASE_URL: ${{ needs.resolve-vulcan-config.outputs.artifact_base_url }}
         run: |
           set -euo pipefail
           VERSION="$(scripts/vulcan-prepare-dist.sh dist)"
@@ -137,6 +141,7 @@ jobs:
             --version "${VERSION}" \
             --description "SiMa.ai Neat Insight web UI and media tooling" \
             --install-script "python3 install_neat_insight.py || python install_neat_insight.py" \
+            --exclude ".whl" \
             "${COMPATIBLE_FLAGS[@]}"
 
           python3 -m json.tool dist/metadata.json >/dev/null
@@ -280,7 +285,7 @@ jobs:
       artifact_folder: "."
       artifact_pattern: neat-insight-dist
       artifact_glob: "*"
-      min_artifact_count: 6
+      min_artifact_count: 7
       cleanup_github_artifacts: true
 
   promote-latest-tag:
