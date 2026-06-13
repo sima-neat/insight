@@ -1,6 +1,6 @@
 # neat-insight
 
-[![CI/CD](https://github.com/sima-neat/insight/actions/workflows/build-wheels.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/build-wheels.yml)
+[![Vulcan CI](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 `neat-insight` is a web app for inspecting NEAT apps and helping to setup test for vision ML apps.
@@ -9,6 +9,9 @@ It provides:
 - Multi-channel WebRTC video viewer with MetadataReceiver support
 - RTSP source control and preview
 - System and application metrics dashboard
+
+User documentation for the software docs site is maintained in
+[`docs/index.md`](docs/index.md).
 
 ## Install
 
@@ -24,7 +27,7 @@ python -m pip install neat-insight
 ### Option 2: Install from Neat artifacts
 
 ```bash
-sima-cli install --neat --env dev insight@vulcan-prep
+sima-cli neat install insight@main
 ```
 
 This installs the platform-compatible `neat-insight` wheel into an isolated virtual environment.
@@ -52,7 +55,7 @@ Notes:
 
 1. Open the Viewer tab to monitor active channels.
 2. Open RTSP Control to assign/start/stop input sources.
-3. Open Stats to watch system load and runtime metrics.
+3. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
 
 ## Viewer settings
 
