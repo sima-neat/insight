@@ -1,0 +1,304 @@
+name: Vulcan CI
+
+run-name: ${{ github.event.head_commit.message || github.event.pull_request.title || github.ref_name || 'Vulcan CI' }} (${{ vars.VULCAN_ENV || 'production' }})
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "*"
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+  packages: read
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Build ${{ matrix.target_platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target_platform:
+          - linux-amd64
+          - linux-aarch64
+          - macos-arm64
+          - windows-amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24.5"
+          cache: false
+
+      - name: Install system tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+      - name: Build wheel
+        run: |
+          set -euo pipefail
+          chmod +x ./build.sh
+          ./build.sh --target-platform "${{ matrix.target_platform }}"
+
+      - name: Validate wheel artifact
+        run: |
+          set -euo pipefail
+          mapfile -t WHEELS < <(find dist -maxdepth 1 -type f -name '*.whl' | sort)
+          if [[ "${#WHEELS[@]}" -ne 1 ]]; then
+            echo "Expected exactly one wheel for ${{ matrix.target_platform }}; found ${#WHEELS[@]}." >&2
+            printf '  %s\n' "${WHEELS[@]}" >&2 || true
+            exit 1
+          fi
+          ls -lh "${WHEELS[0]}"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: insight-wheel-${{ matrix.target_platform }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 3
+
+  package-vulcan-metadata:
+    name: Package Vulcan Metadata
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - resolve-vulcan-config
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install sima-cli package builder
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          SIMA_CLI_REF="${SIMA_CLI_REF:-main}"
+          python3 -m pip install "sima-cli @ git+https://github.com/sima-neat/sima-cli.git@${SIMA_CLI_REF}"
+          sima-cli packages build --help
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: insight-wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate Vulcan package metadata
+        env:
+          VULCAN_ARTIFACT_BASE_URL: ${{ needs.resolve-vulcan-config.outputs.artifact_base_url }}
+        run: |
+          set -euo pipefail
+          VERSION="$(scripts/vulcan-prepare-dist.sh dist)"
+
+          COMPATIBLE_FLAGS=()
+          if sima-cli packages build --help | grep -q -- "--download-compatible-files-only"; then
+            COMPATIBLE_FLAGS+=(--download-compatible-files-only)
+          else
+            echo "sima-cli packages build does not support --download-compatible-files-only; generating metadata without compatible wheel filtering." >&2
+          fi
+
+          sima-cli packages build dist \
+            --name "gh:sima-neat/insight" \
+            --version "${VERSION}" \
+            --description "SiMa.ai Neat Insight web UI and media tooling" \
+            --install-script "python3 install_neat_insight.py || python install_neat_insight.py" \
+            --exclude ".whl" \
+            "${COMPATIBLE_FLAGS[@]}"
+
+          python3 -m json.tool dist/metadata.json >/dev/null
+          cat dist/metadata.json
+          ls -lh dist
+
+      - name: Upload Vulcan dist artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: neat-insight-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  smoke-linux:
+    name: Smoke Test ${{ matrix.wheel_target }}
+    runs-on: ${{ matrix.runner }}
+    needs: package-vulcan-metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - wheel_target: linux-amd64
+            runner: ubuntu-latest
+          - wheel_target: linux-aarch64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Download Vulcan dist artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: neat-insight-dist
+          path: dist
+
+      - name: Install from Vulcan package resources
+        run: |
+          set -euo pipefail
+          cd dist
+          NEAT_INSIGHT_VENV_DIR="${GITHUB_WORKSPACE}/.venv-insight" python3 install_neat_insight.py
+
+      - name: Validate package binaries
+        run: |
+          set -euo pipefail
+          .venv-insight/bin/python - <<'PY'
+          import neat_insight
+          from pathlib import Path
+
+          root = Path(neat_insight.__file__).resolve().parent
+          vf = root / "bin" / "vf"
+          mediamtx = root / "bin" / "mediamtx"
+          cfg = root / "bin" / "mediamtx.yml"
+          assert vf.exists(), f"missing {vf}"
+          assert mediamtx.exists(), f"missing {mediamtx}"
+          assert cfg.exists(), f"missing {cfg}"
+          print("package_root:", root)
+          print("vf:", vf)
+          print("mediamtx:", mediamtx)
+          print("config:", cfg)
+          PY
+
+      - name: Run service smoke test
+        run: |
+          set -euo pipefail
+          PORT=19900
+          LOG=neat-insight-smoke.log
+          .venv-insight/bin/neat-insight --port "${PORT}" > "${LOG}" 2>&1 &
+          APP_PID=$!
+          echo "APP_PID=${APP_PID}"
+
+          cleanup() {
+            if kill -0 "${APP_PID}" 2>/dev/null; then
+              kill "${APP_PID}" || true
+              wait "${APP_PID}" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 45); do
+            if curl -ksf "https://127.0.0.1:${PORT}/api/health" > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          .venv-insight/bin/python - <<'PY'
+          import json
+          with open("/tmp/health.json", "r", encoding="utf-8") as f:
+              payload = json.load(f)
+          assert payload.get("status") == "ok", payload
+          assert payload.get("service") == "neat-insight", payload
+          print("health payload ok")
+          PY
+
+          curl -ksf "https://127.0.0.1:${PORT}/api/metrics" > /tmp/metrics.json
+          .venv-insight/bin/python - <<'PY'
+          import json
+          with open("/tmp/metrics.json", "r", encoding="utf-8") as f:
+              payload = json.load(f)
+          required = ["cpu_load", "memory", "disk", "pipeline_status", "REMOTE"]
+          missing = [key for key in required if key not in payload]
+          assert not missing, f"missing keys: {missing}"
+          print("metrics keys ok")
+          PY
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: smoke-${{ matrix.wheel_target }}-logs
+          path: |
+            neat-insight-smoke.log
+            /tmp/health.json
+            /tmp/metrics.json
+          if-no-files-found: ignore
+
+  resolve-vulcan-config:
+    name: Resolve Vulcan Config
+    uses: sima-neat/.github/.github/workflows/vulcan-resolve-config.yml@main
+    with:
+      vulcan_env: ${{ vars.VULCAN_ENV || 'production' }}
+
+  publish-vulcan-artifacts:
+    name: Publish to Vulcan
+    needs:
+      - resolve-vulcan-config
+      - smoke-linux
+    uses: sima-neat/.github/.github/workflows/vulcan-publish-artifacts.yml@main
+    with:
+      aws_region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+      environment_name: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+      bucket: ${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}
+      role_to_assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+      sse_kms_key_id: ${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}
+      cloudfront_distribution_id: ${{ needs.resolve-vulcan-config.outputs.artifact_cloudfront_distribution_id }}
+      artifact_folder: "."
+      artifact_pattern: neat-insight-dist
+      artifact_glob: "*"
+      min_artifact_count: 7
+      cleanup_github_artifacts: true
+
+  promote-latest-tag:
+    name: Promote Vulcan latest tag
+    if: ${{ github.ref_type == 'branch' || github.ref_type == 'tag' }}
+    needs:
+      - resolve-vulcan-config
+      - publish-vulcan-artifacts
+    uses: sima-neat/.github/.github/workflows/vulcan-update-latest-artifacts.yml@main
+    with:
+      aws_region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+      environment_name: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+      bucket: ${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}
+      role_to_assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+      sse_kms_key_id: ${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}
+      artifact_folder: "."

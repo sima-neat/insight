@@ -96,6 +96,7 @@ def _resolve_frontend_dist() -> Path:
 
 FRONTEND_DIST = _resolve_frontend_dist()
 VIEWER_CHANNEL_COUNT = 80
+DEFAULT_VIDEO_UI_PORT = 8081
 
 app = Flask(__name__)
 app.register_blueprint(workspace_bp)
@@ -539,6 +540,44 @@ def _read_exposed_ports_from_port_map():
     return []
 
 
+def _valid_port(value):
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= port <= 65535:
+        return port
+    return None
+
+
+def _find_exposed_port(ports, name, protocol=None):
+    if not isinstance(ports, list):
+        return None
+
+    for port in ports:
+        if not isinstance(port, dict):
+            continue
+
+        row_name = str(port.get("name") or "")
+        if row_name != name and not row_name.startswith(f"{name}."):
+            continue
+
+        if protocol:
+            row_protocol = str(port.get("protocol") or "").lower()
+            if row_protocol and row_protocol != protocol.lower():
+                continue
+
+        resolved = _valid_port(port.get("hostPortStart"))
+        if resolved:
+            return resolved
+
+    return None
+
+
+def _resolve_video_ui_port():
+    return _find_exposed_port(_read_exposed_ports_from_port_map(), "videoUI", "tcp") or DEFAULT_VIDEO_UI_PORT
+
+
 def _format_sysinfo_web_ui_url(host, port):
     if not host or not port:
         return None
@@ -566,10 +605,7 @@ def _enrich_sysinfo_payload(payload):
         payload["insight"] = insight
 
     if not insight.get("webUiUrl"):
-        main_ui_port = next(
-            (port.get("hostPortStart") for port in ports if isinstance(port, dict) and port.get("name") == "mainUI" and port.get("hostPortStart")),
-            None,
-        )
+        main_ui_port = _find_exposed_port(ports, "mainUI", "tcp")
         host = os.getenv("CONTAINER_HOST_IP", "").strip() or _request_host_name()
         web_ui_url = _format_sysinfo_web_ui_url(host, main_ui_port)
         if web_ui_url:
@@ -1235,12 +1271,14 @@ def server_ip():
 # API: build a vf viewer URL for the requested source selection.
 @app.get("/api/viewer-url")
 def viewer_url():
-    """Accept query args mode and src; return the HTTPS vf viewer URL on port 8081 for the request host."""
+    """Accept query args mode and src; return the browser-reachable HTTPS vf viewer URL."""
     mode = request.args.get("mode", "light")
     default_src = ",".join(str(i) for i in range(VIEWER_CHANNEL_COUNT))
     src = request.args.get("src", default_src)
-    host_ip = request.host.split(":")[0]
-    return {"url": f"https://{host_ip}:8081/static/viewer.html?mode={mode}&src={src}"}
+    host_ip = _request_host_name()
+    viewer_port = _resolve_video_ui_port()
+    query = urllib.parse.urlencode({"mode": mode, "src": src})
+    return {"url": f"https://{host_ip}:{viewer_port}/static/viewer.html?{query}"}
 
 
 # API: serve the built single-page application entrypoint.
