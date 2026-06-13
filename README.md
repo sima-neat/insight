@@ -1,6 +1,6 @@
 # neat-insight
 
-[![CI/CD](https://github.com/sima-neat/insight/actions/workflows/build-wheels.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/build-wheels.yml)
+[![Vulcan CI](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 `neat-insight` is a web app for inspecting NEAT apps and helping to setup test for vision ML apps.
@@ -21,21 +21,10 @@ python -m pip install --upgrade pip
 python -m pip install neat-insight
 ```
 
-### Option 2: Install using the hosted build installer
+### Option 2: Install from Neat artifacts
 
-Linux/macOS:
 ```bash
-curl -fsSL https://apps.sima-neat.com/tools/install-neat-insight.py -o /tmp/install-neat-insight.py && python3 /tmp/install-neat-insight.py
-```
-
-Optional:
-- `python3 /tmp/install-neat-insight.py <branch> latest`
-- `python3 /tmp/install-neat-insight.py <branch> <git-short-hash>`
-
-Windows (PowerShell):
-```powershell
-Invoke-WebRequest https://apps.sima-neat.com/tools/install-neat-insight.py -OutFile $env:TEMP\install-neat-insight.py
-py $env:TEMP\install-neat-insight.py
+sima-cli neat install insight@main
 ```
 
 ## Run
