@@ -10,6 +10,9 @@ It provides:
 - RTSP source control and preview
 - System and application metrics dashboard
 
+User documentation for the software docs site is maintained in
+[`docs/index.md`](docs/index.md).
+
 ## Install
 
 ### Option 1: Install from PyPI (official release)
@@ -50,7 +53,7 @@ Notes:
 
 1. Open the Viewer tab to monitor active channels.
 2. Open RTSP Control to assign/start/stop input sources.
-3. Open Stats to watch system load and runtime metrics.
+3. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
 
 ## Viewer settings
 
