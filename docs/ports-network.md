@@ -8,7 +8,7 @@ sidebar_position: 5
 
 Insight uses several ports during normal operation. The default ports are the ports used inside the SDK container or on a directly installed DevKit. In the Neat Development Environment, the SDK publishes those services onto host ports. If a default host port is already in use, `sima-cli` can allocate another available host port.
 
-![Insight port and network paths between the host-side browser, Modalix DevKit, SDK host machine, and SDK container.](images/insight-ports-network.jpg)
+![Insight port and network paths between the browser client, Modalix DevKit, SDK host machine, and SDK container.](images/insight-ports-network.jpg)
 
 | Port-map name | Default port or range | Protocol | Purpose |
 | --- | --- | --- | --- |
@@ -17,7 +17,7 @@ Insight uses several ports during normal operation. The default ports are the po
 | `rtsp.tcp` | `8554` | RTSP/TCP | RTSP media sources created from uploaded media. |
 | `videoUDP` | `9000-9079` | UDP | Video RTP ingest for viewer channels `0-79`. |
 | `metadataUDP` | `9100-9179` | UDP | Metadata JSON ingest for viewer channels `0-79`. |
-| `webRTC` | `40000-40199` | UDP | WebRTC media transport range. |
+| `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
 ## Find the actual SDK port map
