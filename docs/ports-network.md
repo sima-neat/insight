@@ -8,6 +8,8 @@ sidebar_position: 5
 
 Insight uses several ports during normal operation. The default ports are the ports used inside the SDK container or on a directly installed DevKit. In the Neat Development Environment, the SDK publishes those services onto host ports. If a default host port is already in use, `sima-cli` can allocate another available host port.
 
+![Insight port and network paths between the host-side browser, Modalix DevKit, SDK host machine, and SDK container.](images/insight-ports-network.jpg)
+
 | Port-map name | Default port or range | Protocol | Purpose |
 | --- | --- | --- | --- |
 | `mainUI` | `9900` | HTTPS/TCP | Main Insight web UI and HTTP API. |
