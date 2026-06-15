@@ -125,22 +125,21 @@
   <text class="label" x="1012" y="610">Video ingest</text>
   <text class="mono" x="1012" y="636">9000-9079/udp</text>
 
-  <rect class="service udp" x="1258" y="578" width="236" height="86" rx="16"/>
-  <text class="label" x="1290" y="610">Metadata ingest</text>
-  <text class="mono" x="1290" y="636">9100-9179/udp</text>
+  <rect class="service udp" x="1258" y="674" width="236" height="86" rx="16"/>
+  <text class="label" x="1290" y="706">Metadata ingest</text>
+  <text class="mono" x="1290" y="732">9100-9179/udp</text>
 
-  <rect class="service udp" x="1258" y="360" width="236" height="98" rx="16"/>
+  <rect class="service udp" x="1258" y="386" width="236" height="98" rx="16"/>
   <text class="label" x="1290" y="392">WebRTC Media</text>
-  <text class="label" x="1290" y="416">&amp; DataChannel</text>
-  <text class="mono" x="1290" y="442">40000-40199/udp</text>
+  <text class="label" x="1290" y="418">&amp; DataChannel</text>
+  <text class="mono" x="1290" y="446">40000-40199/udp</text>
 
-  <rect class="note" x="980" y="690" width="514" height="54" rx="16"/>
-  <text class="small" x="1012" y="724">For channel N: video uses start + N, metadata uses start + N.</text>
+  <rect class="note" x="930" y="804" width="614" height="50" rx="16"/>
+  <text class="small" x="966" y="836">For channel N: video uses start + N, metadata uses start + N.</text>
 
   <path class="arrow" d="M360 286 L508 286"/>
   <path class="arrow" d="M810 297 L972 297"/>
-  <path class="arrow-soft" d="M1258 297 C1168 244, 926 244, 818 399"/>
-  <path class="arrow-soft" d="M516 399 C430 399, 416 316, 368 316"/>
+  <path class="arrow-soft" d="M1258 297 L1236 297 L1236 232 L404 232 L368 332"/>
 
   <path class="arrow-soft" d="M980 501 L818 501"/>
   <path class="arrow-soft" d="M516 501 L368 501"/>
@@ -148,13 +147,13 @@
   <path class="arrow" d="M360 540 C430 540, 438 607, 508 607"/>
   <path class="arrow" d="M810 607 L972 621"/>
   <path class="arrow" d="M360 570 C430 570, 438 717, 508 717"/>
-  <path class="arrow" d="M810 717 C936 717, 1100 646, 1250 622"/>
-  <path class="arrow" d="M1216 621 C1246 612, 1272 520, 1318 466"/>
-  <path class="arrow" d="M1376 578 L1376 466"/>
-  <path class="arrow" d="M1376 360 L1376 344"/>
+  <path class="arrow" d="M810 717 L1250 717"/>
+  <path class="arrow" d="M1216 621 L1228 621 L1228 520 L1318 492"/>
+  <path class="arrow" d="M1376 674 L1376 492"/>
+  <path class="arrow" d="M1376 386 L1376 344"/>
 
   <text class="small" x="404" y="264">HTTPS</text>
-  <text class="small" x="404" y="382">viewer rendering</text>
+  <text class="small" x="646" y="252">viewer rendering</text>
   <text class="small" x="404" y="474">RTSP source</text>
   <text class="small" x="404" y="588">RTP video</text>
   <text class="small" x="404" y="696">JSON metadata</text>
