@@ -11,6 +11,67 @@ Use the neat-insight HTTP API as the control plane for media management, RTSP me
 
 Default local backend URL is `https://127.0.0.1:9900`. The service uses a local mkcert certificate in normal development, so local API clients may need to trust mkcert or pass an insecure TLS option for diagnostics.
 
+User-facing documentation lives at `https://developer.sima.ai/software/tools/insight/`. Read that documentation when the user asks for conceptual guidance, SDK usage, UI workflows, or installation instructions rather than endpoint-level API details.
+
+Insight is bundled with the Neat Development Environment and can also be installed on a Modalix DevKit with `sima-cli neat install insight@<ref>`. In the SDK, Insight provides RTSP media-source control and WebRTC video rendering from inside the SDK container while exposing host ports that external devices, including a DevKit, can connect to.
+
+## SDK Status And Port Mapping
+
+When running inside the Neat Development Environment, check service state before debugging media paths:
+
+```bash
+insight-admin status
+neat --json
+```
+
+`insight-admin status` checks the supervised Insight service. `neat --json` reports the SDK-visible Insight state and `exposedPorts` map. The port map is the source of truth for clients outside the SDK container.
+
+Default container ports are:
+
+| Name | Default host/container port | Purpose |
+| --- | --- | --- |
+| `mainUI` | TCP `9900` | Main Insight UI and API. |
+| `videoUI` | TCP `8081` | WebRTC Video Viewer UI. |
+| `rtsp.tcp` | TCP `8554` | RTSP media-source server. |
+| `videoUDP` | UDP `9000-9079` | Video RTP ingest for viewer channels `0-79`. |
+| `metadataUDP` | UDP `9100-9179` | Metadata JSON ingest for viewer channels `0-79`. |
+| `webRTC` | UDP `40000-40199` by default | WebRTC media transport range. |
+| `webSSH` | TCP `8022` | Browser shell to a paired DevKit when available. |
+
+If default host ports are already in use, `sima-cli` can allocate non-default host ports. Do not assume `9900`, `8081`, `8554`, `9000`, or `9100` are the browser/device-facing ports. Parse `neat --json` and use `exposedPorts[*].hostPortStart` and `hostPortEnd`.
+
+Example `neat --json` shape:
+
+```json
+{
+  "exposedPorts": [
+    {"hostPortEnd": null, "hostPortStart": 9900, "name": "mainUI", "protocol": "tcp"},
+    {"hostPortEnd": 9179, "hostPortStart": 9100, "name": "metadataUDP", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8554, "name": "rtsp.tcp", "protocol": "tcp"},
+    {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
+    {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
+  ],
+  "insight": {
+    "serviceState": "Running",
+    "venv": "/opt/neat-insight/venv",
+    "webUiUrl": "https://10.0.0.210:9900"
+  }
+}
+```
+
+Endpoint selection rules:
+
+- Browser or external device opening Insight UI: use `insight.webUiUrl` or `mainUI`.
+- Browser opening Video Viewer: prefer `/api/viewer-url`, because it uses the mapped `videoUI` port.
+- Application inside the SDK container consuming RTSP sources: use `rtsp://127.0.0.1:8554/srcN`.
+- Application on a DevKit or another external machine consuming RTSP sources from SDK Insight: use `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/srcN`.
+- Application inside the SDK container sending video or metadata to the viewer: use UDP `9000 + channel` and `9100 + channel`.
+- Application on a DevKit or another external machine sending video or metadata to SDK Insight: use `<sdk-host-ip>:<videoUDP hostPortStart + channel>` and `<sdk-host-ip>:<metadataUDP hostPortStart + channel>`.
+
+Keep video and metadata channel numbers aligned. For channel `N`, video goes to the `videoUDP` start port plus `N`, and metadata goes to the `metadataUDP` start port plus `N`.
+
 ## Operating Rules
 
 - Call `/api/health` first when connecting to a running neat-insight instance.
@@ -23,6 +84,8 @@ Default local backend URL is `https://127.0.0.1:9900`. The service uses a local 
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
 - Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
+- Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
+- For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 
 ## Health And Metrics
 
@@ -120,6 +183,35 @@ curl -k -H "Content-Type: application/json" \
   https://127.0.0.1:9900/api/media-info
 ```
 
+## Standard Test Videos
+
+SiMa provides curated test videos that are useful for repeatable Insight and Neat application validation:
+
+```text
+https://artifacts.sima-neat.com/assets/videos/720p16/video01.mp4
+...
+https://artifacts.sima-neat.com/assets/videos/720p16/video16.mp4
+
+https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
+...
+https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
+```
+
+When the user asks to prepare Insight media and `/api/media-files` returns no usable video files, download one or more standard videos to a temporary location and import them through the media upload API. Do not assume a host filesystem path is visible to Insight; use `/api/upload/media`.
+
+Example:
+
+```bash
+tmpdir="$(mktemp -d)"
+curl -fL "https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4" \
+  -o "${tmpdir}/video01.mp4"
+curl -k -F "file=@${tmpdir}/video01.mp4" \
+  https://127.0.0.1:9900/api/upload/media
+curl -k https://127.0.0.1:9900/api/media-files
+```
+
+For multi-stream testing, import multiple files, then use `/api/mediasrc/auto-assign-all` and `/api/mediasrc/start-bulk`.
+
 ## Media Sources
 
 Media sources are indexed RTSP source slots. Each source object includes an `index`, an assigned relative `file`, and a playback `state`.
@@ -149,6 +241,14 @@ curl -k -H "Content-Type: application/json" \
 curl -k https://127.0.0.1:9900/api/mediasrc
 ```
 
+If the consumer runs outside the SDK container, build RTSP URLs from the SDK port map rather than using the container-local default. For source `src1`, use:
+
+```text
+rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1
+```
+
+Use `/api/mediasrc` to confirm source assignment and playback state after starting streams.
+
 ## Environment And Viewer
 
 | Method | Path | Purpose |
@@ -156,11 +256,11 @@ curl -k https://127.0.0.1:9900/api/mediasrc
 | `GET` | `/api/envinfo` | Return `is_sima_board` and `is_remote_devkit_configured` frontend flags. |
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
-| `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL on port `8081` for the request host. |
+| `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
-Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and port `8081`.
+Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
 
 ## Error Handling
 

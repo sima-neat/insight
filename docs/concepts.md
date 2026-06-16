@@ -8,21 +8,9 @@ sidebar_position: 1
 
 Insight sits beside your application while you build and test. It does not replace the Neat Library or your application runtime. Instead, it gives you a browser view into the artifacts and signals that are normally scattered across the SDK container, the DevKit, log files, media files, and streaming ports.
 
-```text
-Neat Development Environment or DevKit
+In the Neat Development Environment, Insight also acts as a test media service. It can turn uploaded media into RTSP sources and render application output through a WebRTC Video Viewer. When an application runs outside the SDK container, such as on a DevKit, use the SDK port map from `neat --json` to find the host ports that external clients should use.
 
-  Workspace files        Media files           Neat application
-       |                    |                         |
-       v                    v                         v
-  Workspace tab  ->  RTSP Source tab  ->  video UDP 9000-9079
-                                      ->  metadata UDP 9100-9179
-                                                   |
-                                                   v
-                                           Video Viewer tab
-                                                   |
-                                                   v
-                                      Stats placeholder and logs
-```
+![Neat Insight development loop showing workspace inspection, RTSP source setup, application output, WebRTC viewing, and runtime diagnostics.](images/insight-development-loop.jpg)
 
 The typical loop is:
 
@@ -30,8 +18,9 @@ The typical loop is:
 2. Upload or select media files for testing.
 3. Turn media files into RTSP sources such as `rtsp://127.0.0.1:8554/src1`.
 4. Run your application against those sources.
-5. Watch the application output in the Video Viewer.
-6. Use system information and logs to diagnose performance or runtime issues. The Stats view is present as a placeholder in this release and is planned to be completed in the next release.
+5. Send application video and metadata output to the matching Insight viewer channel.
+6. Watch the application output in the Video Viewer.
+7. Use system information and logs to diagnose performance or runtime issues. The Stats view is present as a placeholder in this release and is planned to be completed in the next release.
 
 ## What Insight is for
 
@@ -47,4 +36,4 @@ Use Insight to:
 
 ## What Insight is not
 
-Insight is not the primary application runtime and it is not a replacement for the Neat Library APIs. Your application still runs through the normal Neat runtime path. Insight observes, visualizes, and helps configure the supporting test loop.
+Insight does not replace your IDE. Keep using your normal editor, terminal, source-control workflow, and build tools. Insight complements that workflow by giving you a browser-based view of workspace artifacts, test media, stream routing, video output, metadata overlays, and runtime diagnostics.
