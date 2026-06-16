@@ -10,7 +10,7 @@ Insight sits beside your application while you build and test. It does not repla
 
 In the Neat Development Environment, Insight also acts as a test media service. It can turn uploaded media into RTSP sources and render application output through a WebRTC Video Viewer. When an application runs outside the SDK container, such as on a DevKit, use the SDK port map from `neat --json` to find the host ports that external clients should use.
 
-![Neat Insight development loop showing workspace inspection, RTSP source setup, application output, WebRTC viewing, and runtime diagnostics.](images/insight-development-loop.svg)
+![Neat Insight development loop showing workspace inspection, RTSP source setup, application output, WebRTC viewing, and runtime diagnostics.](images/insight-development-loop.jpg)
 
 The typical loop is:
 
