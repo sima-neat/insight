@@ -35,6 +35,20 @@ Use Media Library before configuring RTSP sources so you know which files are av
 
 The Media Library combines file selection, preview, metadata inspection, upload, and delete actions in one view.
 
+SiMa provides curated videos for repeatable testing. Use these when you need a known media set:
+
+```text
+https://artifacts.sima-neat.com/assets/videos/720p16/video01.mp4
+...
+https://artifacts.sima-neat.com/assets/videos/720p16/video16.mp4
+
+https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
+...
+https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
+```
+
+Download the files you need, then import them with the Media Library upload action.
+
 ## RTSP Source
 
 The RTSP Source view turns uploaded media files into live RTSP streams. Each source slot maps to an RTSP path:
@@ -44,6 +58,8 @@ rtsp://127.0.0.1:8554/src1
 rtsp://127.0.0.1:8554/src2
 rtsp://127.0.0.1:8554/src3
 ```
+
+Those URLs are correct for applications running in the same SDK container as Insight. If the application runs on a DevKit or another external machine, use the SDK host IP address and the mapped `rtsp.tcp` host port from `neat --json`.
 
 You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy RTSP URLs for use by applications or test harnesses.
 
@@ -55,7 +71,7 @@ The RTSP Source view lets you assign media files to source slots, start or stop 
 
 ## Video Viewer
 
-The Video Viewer displays low-latency WebRTC output from the video forwarder. It supports up to 80 channels. Video channels use UDP ports `9000-9079`, and matching metadata channels use UDP ports `9100-9179`.
+The Video Viewer displays low-latency WebRTC output from the video forwarder. It supports up to 80 channels. Inside the SDK container, video channels use UDP ports `9000-9079`, and matching metadata channels use UDP ports `9100-9179`.
 
 For channel `N`:
 
@@ -65,6 +81,8 @@ metadata: UDP 9100 + N
 ```
 
 For example, channel `0` uses video UDP `9000` and metadata UDP `9100`; channel `1` uses video UDP `9001` and metadata UDP `9101`.
+
+If the sender runs on a DevKit or another external machine, use the mapped `videoUDP` and `metadataUDP` host port ranges from `neat --json`. The channel math is the same, but the starting ports may be different.
 
 The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and metadata delay.
 
@@ -89,4 +107,4 @@ This feature is intended to be completed in the next release. Once complete, use
 
 The system information panel summarizes the environment Insight can see. In the Neat Development Environment, it can show SDK and component information, Insight status, update information, and exposed port mappings such as `mainUI` and `videoUI`.
 
-This is the first place to check when a URL does not match the default port. Insight reads the available port map and uses the mapped `videoUI` port when opening the viewer.
+This is the first place to check when a URL does not match the default port. Insight reads the available port map and uses the mapped `videoUI` port when opening the viewer. For command-line workflows, `neat --json` shows the same port-map information.

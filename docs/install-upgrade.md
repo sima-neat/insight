@@ -10,7 +10,13 @@ Insight is bundled with the Neat Development Environment. It can also be install
 
 ## In the Neat Development Environment
 
-When the SDK container starts with Insight enabled, the Insight server starts automatically and listens over HTTPS.
+When the SDK container starts with Insight enabled, Insight is installed, configured, and supervised automatically. The server listens over HTTPS and the SDK publishes a set of host ports for the browser, DevKit, and other external clients.
+
+Check the service state:
+
+```bash
+insight-admin status
+```
 
 Open Insight from a browser:
 
@@ -24,7 +30,13 @@ If you are browsing from another machine on the same network, use the SDK host I
 https://<host-ip>:9900
 ```
 
-The `neat` command reports the actual Insight Web UI URL and exposed port mapping when that information is available.
+The default web UI port is `9900`, but the SDK can allocate a different host port if `9900` is already in use. The `neat` command reports the actual Insight Web UI URL and exposed port mapping:
+
+```bash
+neat --json
+```
+
+Use `insight.webUiUrl` for the main UI. Use the `exposedPorts` array when configuring DevKit applications, RTSP clients, or external media senders.
 
 ## On a DevKit
 
@@ -54,6 +66,8 @@ Then open:
 ```text
 https://<devkit-ip>:9900
 ```
+
+When Insight runs directly on the DevKit, applications on that DevKit can usually use the default local ports. When applications outside the DevKit connect to it, use the DevKit IP address and the ports exposed by that Insight instance.
 
 ## Upgrade Insight
 
