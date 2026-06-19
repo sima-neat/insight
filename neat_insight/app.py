@@ -118,14 +118,36 @@ def _json_error(message: str, status: int = 400):
 
 
 def _request_host_name() -> str:
-    host = request.host.split(":", 1)[0]
+    host = request.host.strip()
+    if host.startswith("["):
+        end = host.find("]")
+        if end > 0:
+            return host[1:end]
+    elif host.count(":") == 1:
+        name, maybe_port = host.rsplit(":", 1)
+        if maybe_port.isdigit():
+            host = name
     return host or "127.0.0.1"
+
+
+def _format_browser_https_url(host, port, path="", query=""):
+    if not host or not port:
+        return None
+    try:
+        if ipaddress.ip_address(host).version == 6:
+            host = f"[{host}]"
+    except ValueError:
+        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
+
+    url = f"https://{host}:{port}{path}"
+    return f"{url}?{query}" if query else url
 
 
 def _build_devkit_shell_payload():
     devkit_ip = get_devkit_sync_devkit_ip()
     configured = bool(devkit_ip)
     webssh_port = get_webssh_port()
+    webssh_host_port = _resolve_webssh_host_port()
     launch_url = None
 
     if configured:
@@ -139,7 +161,7 @@ def _build_devkit_shell_payload():
                 "title": f"DevKit {devkit_ip}",
             }
         )
-        launch_url = f"https://{_request_host_name()}:{webssh_port}/?{params}"
+        launch_url = _format_browser_https_url(_request_host_name(), webssh_host_port, "/", params)
 
     return {
         "configured": configured,
@@ -148,6 +170,7 @@ def _build_devkit_shell_payload():
         "available": webssh_is_available(),
         "running": is_webssh_running(),
         "webssh_port": webssh_port,
+        "webssh_host_port": webssh_host_port,
         "default_username": DEFAULT_DEVKIT_SSH_USERNAME,
         "credentials_prefilled": True,
         "launch_url": launch_url,
@@ -578,15 +601,12 @@ def _resolve_video_ui_port():
     return _find_exposed_port(_read_exposed_ports_from_port_map(), "videoUI", "tcp") or DEFAULT_VIDEO_UI_PORT
 
 
+def _resolve_webssh_host_port():
+    return _find_exposed_port(_read_exposed_ports_from_port_map(), "webSSH", "tcp") or get_webssh_port()
+
+
 def _format_sysinfo_web_ui_url(host, port):
-    if not host or not port:
-        return None
-    try:
-        if ipaddress.ip_address(host).version == 6:
-            host = f"[{host}]"
-    except ValueError:
-        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
-    return f"https://{host}:{port}"
+    return _format_browser_https_url(host, port)
 
 
 def _enrich_sysinfo_payload(payload):
@@ -1278,7 +1298,7 @@ def viewer_url():
     host_ip = _request_host_name()
     viewer_port = _resolve_video_ui_port()
     query = urllib.parse.urlencode({"mode": mode, "src": src})
-    return {"url": f"https://{host_ip}:{viewer_port}/static/viewer.html?{query}"}
+    return {"url": _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query)}
 
 
 # API: serve the built single-page application entrypoint.
