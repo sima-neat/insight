@@ -1,13 +1,13 @@
 ---
 name: sima-use-neat-insight
-description: Use when working with the neat-insight Flask API, frontend, media library, RTSP media-source controls, vf viewer URLs, UDP/RTP ingest statistics, WebRTC egress/browser statistics, metrics endpoints, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug inbound vf streams and browser delivery, build viewer links, and understand endpoint request/response contracts.
+description: Use when working with the neat-insight Flask API, frontend, media sources, streaming source controls, vf viewer URLs, UDP/RTP ingest statistics, WebRTC egress/browser statistics, metrics endpoints, health checks, or coding-agent API documentation for neat-insight. This skill helps agents inspect service state, upload/delete/inspect media, assign and control media-source streams, debug inbound vf streams and browser delivery, build viewer links, and understand endpoint request/response contracts.
 ---
 
 # Use Neat Insight
 
 ## Overview
 
-Use the neat-insight HTTP API as the control plane for media management, RTSP media-source playback, runtime metrics, environment metadata, and frontend serving. Prefer these APIs over editing persisted state files directly unless the user explicitly asks for low-level debugging.
+Use the neat-insight HTTP API as the control plane for media management, streaming source playback, runtime metrics, environment metadata, and frontend serving. Prefer these APIs over editing persisted state files directly unless the user explicitly asks for low-level debugging.
 
 Default local backend URL is `https://127.0.0.1:9900`. The service uses a local mkcert certificate in normal development, so local API clients may need to trust mkcert or pass an insecure TLS option for diagnostics.
 
@@ -76,7 +76,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 
 - Call `/api/health` first when connecting to a running neat-insight instance.
 - Use JSON request bodies for POST endpoints except `/api/upload/media`, which uses multipart form field `file`.
-- Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-library APIs.
+- Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
 - Do not configure DevKit IP through neat-insight UI or API. Remote devkit configuration is environment-driven.
@@ -163,14 +163,15 @@ neat_insight/tools/multisrc-harness.sh start --count 16 --meta-types object-dete
 
 The metadata sender targets UDP `9100+channel` by default and emits JSON compatible with Insight's metadata overlays. It supports `object-detection`, `classification`, `pose-estimation`, and `segmentation`.
 
-## Media Library
+## Media Sources
 
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
 | `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. |
 | `POST` | `/api/upload/media` | Multipart form field `file` | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives. |
 | `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments that point at deleted files. |
-| `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from MediaInfo. |
+| `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from MediaInfo, including detected codec when available. |
+| `GET` | `/api/media-preview/mjpeg?path=<path>` | Query string | Multipart MJPEG preview for MJPEG media files that browsers cannot preview directly. |
 | `GET` | `/media/<path:filename>` | Relative media path | Raw media file content for preview or download. |
 
 Examples:
@@ -214,29 +215,37 @@ For multi-stream testing, import multiple files, then use `/api/mediasrc/auto-as
 
 ## Media Sources
 
-Media sources are indexed RTSP source slots. Each source object includes an `index`, an assigned relative `file`, and a playback `state`.
+Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state`, selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`.
+
+Codec and transport are derived from the assigned media:
+
+- H.264 media uses RTSP/H.264.
+- HEVC/H.265 media uses RTSP/H.265.
+- MJPEG media can use RTSP/MJPEG or HTTP multipart MJPEG.
 
 | Method | Path | Request | Behavior |
 | --- | --- | --- | --- |
-| `GET` | `/api/mediasrc/videos` | None | Return sorted relative video paths accepted by the media-source streamer. |
-| `GET` | `/api/mediasrc` | None | Return persisted source assignments and playback states. |
-| `POST` | `/api/mediasrc/assign` | JSON `{"index": 0, "file": "video.mp4"}` | Assign or clear one source; if it was playing, restart with the new file. |
+| `GET` | `/api/mediasrc/videos` | None | Return sorted relative media paths accepted by the media-source streamer. |
+| `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. |
+| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp"}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. |
 | `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. |
-| `POST` | `/api/mediasrc/start` | JSON `{"index": 0}` | Start one assigned source and mark it `playing`. |
+| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. |
 | `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
-| `POST` | `/api/mediasrc/stop` | JSON `{"index": 0}` | Stop one source and persist `stopped`. |
+| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. |
 | `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
 | `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments. |
+| `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
+| `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
 
 Common workflow:
 
 ```bash
 curl -k https://127.0.0.1:9900/api/mediasrc/videos
 curl -k -H "Content-Type: application/json" \
-  -d '{"index":0,"file":"sample.mp4"}' \
+  -d '{"index":1,"file":"sample.mp4"}' \
   https://127.0.0.1:9900/api/mediasrc/assign
 curl -k -H "Content-Type: application/json" \
-  -d '{"index":0}' \
+  -d '{"index":1}' \
   https://127.0.0.1:9900/api/mediasrc/start
 curl -k https://127.0.0.1:9900/api/mediasrc
 ```

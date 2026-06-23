@@ -30,7 +30,18 @@ if __name__ == "__main__" and (not globals().get("__package__")):
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neat_insight.mediasrc import start_media_stream, stop_media_stream
+from neat_insight.mediasrc import (
+    DEFAULT_CODEC,
+    DEFAULT_TRANSPORT,
+    http_mjpeg_command,
+    http_snapshot_command,
+    media_stream_identity,
+    media_stream_is_running,
+    normalize_codec,
+    normalize_transport,
+    start_media_stream,
+    stop_media_stream,
+)
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_metrics,
@@ -66,6 +77,8 @@ MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
+STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
+PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
 OPTIMIZED_VIDEO_BITRATE = "2M"
 OPTIMIZED_VIDEO_FPS = "30"
 OPTIMIZED_VIDEO_GOP = "30"
@@ -108,7 +121,7 @@ server_ssl_context = None
 DEFAULT_DEVKIT_SSH_USERNAME = "sima"
 DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
 
-ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+ALLOWED_EXTENSIONS = STREAMABLE_MEDIA_EXTENSIONS
 ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
 LOG_DIR = "/var/log"
 
@@ -177,14 +190,57 @@ def _build_devkit_shell_payload():
     }
 
 
+def _default_source(index: int):
+    return {
+        "index": index,
+        "file": "",
+        "state": "stopped",
+        "transport": DEFAULT_TRANSPORT,
+        "codec": DEFAULT_CODEC,
+    }
+
+
+def _normalize_source(src, index: Optional[int] = None):
+    if not isinstance(src, dict):
+        src = {}
+    try:
+        source_index = int(src.get("index") or index or 0)
+    except (TypeError, ValueError):
+        source_index = index or 0
+    if source_index <= 0:
+        source_index = index or 1
+
+    state = src.get("state") if src.get("state") in {"playing", "stopped"} else "stopped"
+    transport = normalize_transport(src.get("transport"))
+    codec = normalize_codec(src.get("codec"))
+    if transport == "http":
+        codec = "mjpeg"
+
+    return {
+        "index": source_index,
+        "file": src.get("file") or "",
+        "state": state,
+        "transport": transport,
+        "codec": codec,
+    }
+
+
 def load_sources():
     if not MEDIA_SRC_DATA_FILE.exists():
         reset_sources()
     try:
         with open(MEDIA_SRC_DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            raw_sources = json.load(f)
     except Exception:
-        return []
+        raw_sources = []
+    if not isinstance(raw_sources, list):
+        raw_sources = []
+
+    by_index = {}
+    for fallback_index, src in enumerate(raw_sources, start=1):
+        normalized = _normalize_source(src, fallback_index)
+        by_index[normalized["index"]] = normalized
+    return [by_index.get(i, _default_source(i)) for i in range(1, DEFAULT_SOURCE_COUNT + 1)]
 
 
 def save_sources(sources):
@@ -193,7 +249,7 @@ def save_sources(sources):
 
 
 def reset_sources():
-    sources = [{"index": i + 1, "file": "", "state": "stopped"} for i in range(DEFAULT_SOURCE_COUNT)]
+    sources = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
     save_sources(sources)
 
 
@@ -360,7 +416,7 @@ def _proxy_vf_stats(path: str, label: str):
         return _json_error(f"{label} unavailable: {exc}", 502)
 
 
-# API: enumerate uploaded media as a folder tree for the Media Library UI.
+# API: enumerate uploaded media as a folder tree for the Media Sources UI.
 @app.get("/api/media-files")
 def list_media_files():
     """Return a recursive tree of files under MEDIA_DIR, excluding hidden files and macOS archive metadata."""
@@ -693,6 +749,49 @@ def _video_duration_seconds(path: Path) -> Optional[float]:
     return None
 
 
+def _normalize_media_codec_name(value: Optional[str]) -> Optional[str]:
+    text = (value or "").strip().lower()
+    if not text:
+        return None
+    compact = text.replace("-", "").replace("_", "").replace(" ", "")
+    if any(marker in compact for marker in ("hevc", "h265", "hev1", "hvc1")):
+        return "h265"
+    if any(marker in compact for marker in ("avc", "h264", "avc1")):
+        return "h264"
+    if any(marker in compact for marker in ("mjpeg", "motionjpeg", "jpeg")):
+        return "mjpeg"
+    return None
+
+
+def _media_video_codec(path: Path) -> Optional[str]:
+    suffix = path.suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".mjpg", ".mjpeg"}:
+        return "mjpeg"
+    try:
+        parsed = MediaInfo.parse(str(path))
+        video_track = next((t for t in parsed.tracks if t.track_type == "Video"), None)
+        if not video_track:
+            return None
+        for attr in ("codec_id", "format", "commercial_name", "format_profile"):
+            codec = _normalize_media_codec_name(getattr(video_track, attr, None))
+            if codec:
+                return codec
+    except Exception as exc:
+        logging.debug("Failed to parse video codec for %s: %s", path, exc)
+    return None
+
+
+def _media_codec_display_name(raw_codec: Optional[str], normalized_codec: Optional[str] = None) -> Optional[str]:
+    codec = normalized_codec or _normalize_media_codec_name(raw_codec)
+    if codec == "mjpeg":
+        return "MJPEG"
+    if codec == "h264":
+        return "H.264"
+    if codec == "h265":
+        return "H.265"
+    return raw_codec
+
+
 def _parse_ffmpeg_progress_seconds(key: str, value: str) -> Optional[float]:
     if key in {"out_time_us", "out_time_ms"}:
         try:
@@ -739,6 +838,11 @@ def _iter_optimizable_videos(root: Path) -> List[Path]:
 
 def _optimize_video_file(path: Path):
     label = _relative_media_label(path)
+    codec = _media_video_codec(path)
+    if codec in PASSTHROUGH_UPLOAD_CODECS:
+        yield f"Keeping {label} as {codec.upper()} for codec-aware streaming.\n"
+        return
+
     if shutil.which("ffmpeg") is None:
         yield f"FFmpeg is not installed; keeping original {label}.\n"
         return
@@ -976,10 +1080,13 @@ def media_info():
             parsed = MediaInfo.parse(str(abs_path))
             video_track = next((t for t in parsed.tracks if t.track_type == "Video"), None)
             if video_track:
+                codec = _media_video_codec(abs_path)
+                raw_codec = video_track.codec_id or video_track.format
                 info.update(
                     {
                         "type": "video",
-                        "codec": video_track.codec_id or video_track.format,
+                        "codec": _media_codec_display_name(raw_codec, codec),
+                        "normalized_codec": codec,
                         "width": video_track.width,
                         "height": video_track.height,
                         "duration_ms": video_track.duration,
@@ -1001,7 +1108,50 @@ def serve_media(filename):
     return send_from_directory(MEDIA_DIR, filename)
 
 
-# API: list media files that can be assigned to RTSP media sources.
+@app.get("/api/media-preview/mjpeg")
+def media_preview_mjpeg():
+    """Return a multipart MJPEG preview stream for a media-library file."""
+    rel_path = request.args.get("path", "")
+    if not rel_path:
+        return _json_error("Missing path")
+    try:
+        media_path = _safe_media_path(rel_path)
+    except ValueError:
+        return _json_error("Invalid path", 403)
+    if not media_path.is_file():
+        return _json_error("Source file not found", 404)
+    source_codec = _media_video_codec(media_path)
+
+    def generate():
+        process = None
+        try:
+            process = subprocess.Popen(
+                http_mjpeg_command(str(media_path), source_codec),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+            while True:
+                chunk = process.stdout.read(64 * 1024) if process.stdout else b""
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except Exception:
+                    process.kill()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+# API: list media files that can be assigned to streaming sources.
 @app.get("/api/mediasrc/videos")
 def list_video_files():
     """Return sorted relative paths for files whose extension is accepted by the media-source streamer."""
@@ -1020,33 +1170,114 @@ def _collect_video_files():
     return sorted(video_files)
 
 
+def _source_media_codec(file_name: str) -> Optional[str]:
+    if not file_name:
+        return None
+    try:
+        return _media_video_codec(_safe_media_path(file_name))
+    except ValueError:
+        return None
+
+
+def _recommended_codec_for_file(file_name: str, fallback: str = DEFAULT_CODEC) -> str:
+    codec = _source_media_codec(file_name)
+    if codec in {"h264", "h265", "mjpeg"}:
+        return codec
+    return normalize_codec(fallback)
+
+
+def _allowed_transports_for_codec(codec: str) -> list[str]:
+    return ["rtsp", "http"] if normalize_codec(codec) == "mjpeg" else ["rtsp"]
+
+
+def _derive_source_stream_settings(file_name: str, requested_transport: Optional[str] = None):
+    codec = _recommended_codec_for_file(file_name, DEFAULT_CODEC)
+    allowed_transports = _allowed_transports_for_codec(codec)
+    transport = normalize_transport(requested_transport)
+    if transport not in allowed_transports:
+        transport = allowed_transports[0]
+    return transport, codec, allowed_transports
+
+
+def _source_url(src, transport: Optional[str] = None):
+    index = int(src.get("index") or 0)
+    selected_transport = normalize_transport(transport or src.get("transport"))
+    host = _request_host_name()
+    if selected_transport == "http":
+        return f"{request.scheme}://{request.host}/stream/http/src{index}.mjpg"
+    return f"rtsp://{host}:8554/src{index}"
+
+
+def _source_with_urls(src):
+    enriched = dict(src)
+    _transport, _codec, allowed_transports = _derive_source_stream_settings(src.get("file") or "", src.get("transport"))
+    enriched["allowed_transports"] = allowed_transports
+    enriched["urls"] = {
+        "rtsp": _source_url(src, "rtsp"),
+        "http_mjpeg": _source_url(src, "http"),
+    }
+    return enriched
+
+
+def _sync_source_runtime_states(sources):
+    changed = False
+    for src in sources:
+        if src.get("state") != "playing":
+            continue
+        index = src.get("index")
+        if index is None or not media_stream_is_running(index):
+            src["state"] = "stopped"
+            changed = True
+    if changed:
+        save_sources(sources)
+    return sources
+
+
+def _find_source(index: int):
+    for src in _sync_source_runtime_states(load_sources()):
+        if src.get("index") == index:
+            return src
+    return None
+
+
 # API: read current RTSP media-source slot assignments.
 @app.get("/api/mediasrc")
 def get_sources():
     """Return persisted media-source objects, including index, assigned file path, and playback state."""
-    return jsonify(load_sources())
+    sources = _sync_source_runtime_states(load_sources())
+    return jsonify([_source_with_urls(src) for src in sources])
 
 
 # API: assign or clear a media file for one RTSP source slot.
 @app.post("/api/mediasrc/assign")
 def assign_source():
-    """Accept JSON {'index': int, 'file': str}; update a source assignment and restart it if already playing."""
+    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str}; update and restart if already playing."""
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
     if index is None:
         return _json_error("Missing index")
+    requested_transport = data.get("transport")
 
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
-            was_playing = src.get("state") == "playing"
+            was_playing = src.get("state") == "playing" and media_stream_is_running(index)
             if was_playing:
                 stop_media_stream(index)
             src["file"] = file_name
+            transport, codec, _allowed_transports = _derive_source_stream_settings(file_name, requested_transport or src.get("transport"))
+            src["transport"] = transport
+            src["codec"] = codec
             if was_playing and file_name:
                 file_path = MEDIA_DIR / file_name
-                ok, err = start_media_stream(index, str(file_path))
+                ok, err = start_media_stream(
+                    index,
+                    str(file_path),
+                    src.get("transport"),
+                    src.get("codec"),
+                    _source_media_codec(file_name),
+                )
                 if not ok:
                     return _json_error(err, 500)
                 src["state"] = "playing"
@@ -1070,6 +1301,7 @@ def auto_assign_all_sources():
         if src.get("state") == "playing":
             stop_media_stream(source_index)
         src["file"] = video_files[idx] if idx < len(video_files) else ""
+        src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
         src["state"] = "stopped"
 
     save_sources(sources)
@@ -1098,7 +1330,13 @@ def start_source():
             filename = src.get("file")
             if not filename:
                 return _json_error("No file assigned to source")
-            ok, err = start_media_stream(index, str(MEDIA_DIR / filename))
+            ok, err = start_media_stream(
+                index,
+                str(MEDIA_DIR / filename),
+                src.get("transport"),
+                src.get("codec"),
+                _source_media_codec(filename),
+            )
             if not ok:
                 return _json_error(err, 500)
             src["state"] = "playing"
@@ -1136,10 +1374,16 @@ def start_sources_bulk():
 
     for src in targets:
         source_index = src["index"]
-        if src.get("state") == "playing":
+        if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
             continue
-        ok, err = start_media_stream(source_index, str(MEDIA_DIR / src["file"]))
+        ok, err = start_media_stream(
+            source_index,
+            str(MEDIA_DIR / src["file"]),
+            src.get("transport"),
+            src.get("codec"),
+            _source_media_codec(src["file"]),
+        )
         if ok:
             src["state"] = "playing"
             started.append(source_index)
@@ -1209,6 +1453,93 @@ def reset_all_sources():
         stop_media_stream(src.get("index"))
     reset_sources()
     return {"success": True, "message": "Reset all source assignments."}
+
+
+def _http_mjpeg_source_or_error(index: int):
+    src = _find_source(index)
+    if not src:
+        return None, _json_error("Source not found", 404)
+    if not src.get("file"):
+        return None, _json_error("No file assigned to source", 404)
+    if normalize_transport(src.get("transport")) != "http" or normalize_codec(src.get("codec")) != "mjpeg":
+        return None, _json_error("Source is not configured for HTTP MJPEG streaming", 400)
+    if src.get("state") != "playing" or not media_stream_is_running(index):
+        return None, _json_error("Source is not running", 409)
+    try:
+        media_path = _safe_media_path(src["file"])
+    except ValueError:
+        return None, _json_error("Invalid source file path", 403)
+    if not media_path.is_file():
+        return None, _json_error("Source file not found", 404)
+    return (src, media_path), None
+
+
+@app.get("/stream/http/src<int:index>.mjpg")
+def stream_http_mjpeg(index):
+    """Return a multipart MJPEG stream for an active HTTP/MJPEG source slot."""
+    resolved, error = _http_mjpeg_source_or_error(index)
+    if error:
+        return error
+    src, media_path = resolved
+    source_codec = _source_media_codec(src["file"])
+    stream_identity = media_stream_identity(index)
+
+    def generate():
+        process = None
+        try:
+            process = subprocess.Popen(
+                http_mjpeg_command(str(media_path), source_codec),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+            while True:
+                if media_stream_identity(index) != stream_identity or not media_stream_is_running(index):
+                    break
+                chunk = process.stdout.read(64 * 1024) if process.stdout else b""
+                if not chunk:
+                    break
+                if media_stream_identity(index) != stream_identity or not media_stream_is_running(index):
+                    break
+                yield chunk
+        finally:
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except Exception:
+                    process.kill()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/stream/http/src<int:index>.jpg")
+def snapshot_http_mjpeg(index):
+    """Return one JPEG frame for an active HTTP/MJPEG source slot."""
+    resolved, error = _http_mjpeg_source_or_error(index)
+    if error:
+        return error
+    src, media_path = resolved
+    source_codec = _source_media_codec(src["file"])
+    try:
+        result = subprocess.run(
+            http_snapshot_command(str(media_path), source_codec),
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return _json_error("ffmpeg is not installed", 500)
+    except subprocess.TimeoutExpired:
+        return _json_error("Timed out while reading source frame", 504)
+    if result.returncode != 0 or not result.stdout:
+        detail = result.stderr.decode("utf-8", errors="replace").strip() or "Failed to read source frame"
+        return _json_error(detail, 500)
+    return Response(result.stdout, mimetype="image/jpeg", headers={"Cache-Control": "no-store, max-age=0"})
 
 
 # API: expose environment flags used by the frontend.

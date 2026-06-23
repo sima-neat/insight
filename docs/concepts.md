@@ -8,15 +8,15 @@ sidebar_position: 1
 
 Insight sits beside your application while you build and test. It does not replace the Neat Library or your application runtime. Instead, it gives you a browser view into the artifacts and signals that are normally scattered across the SDK container, the DevKit, log files, media files, and streaming ports.
 
-In the Neat Development Environment, Insight also acts as a test media service. It can turn uploaded media into RTSP sources and render application output through a WebRTC Video Viewer. When an application runs outside the SDK container, such as on a DevKit, use the SDK port map from `neat --json` to find the host ports that external clients should use.
+In the Neat Development Environment, Insight also acts as a test media service. It can turn uploaded media into streaming sources and render application output through a WebRTC Video Viewer. When an application runs outside the SDK container, such as on a DevKit, use the SDK port map from `neat --json` to find the host ports that external clients should use.
 
-![Neat Insight development loop showing workspace inspection, RTSP source setup, application output, WebRTC viewing, and runtime diagnostics.](images/insight-development-loop.jpg)
+![Neat Insight development loop showing workspace inspection, streaming source setup, application output, WebRTC viewing, and runtime diagnostics.](images/insight-development-loop.jpg)
 
 The typical loop is:
 
 1. Inspect the workspace and application artifacts.
 2. Upload or select media files for testing.
-3. Turn media files into RTSP sources such as `rtsp://127.0.0.1:8554/src1`.
+3. Turn media files into streaming sources such as `rtsp://127.0.0.1:8554/src1` or HTTP MJPEG endpoints for MJPEG camera simulation.
 4. Run your application against those sources.
 5. Send application video and metadata output to the matching Insight viewer channel.
 6. Watch the application output in the Video Viewer.

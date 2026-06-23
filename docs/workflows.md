@@ -20,7 +20,7 @@ https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
 https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
 ```
 
-For manual use, download the files you need and upload them from Media Library.
+For manual use, download the files you need and upload them from Media Sources.
 
 For API-driven setup, check whether Insight already has media files:
 
@@ -43,8 +43,8 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 ## Validate a single-stream vision app
 
 1. Open Insight.
-2. Go to Media Library and upload a short test video.
-3. Go to RTSP Source and assign the video to `src1`.
+2. Go to Media Sources and upload a short test video.
+3. Go to Streaming Sources and assign the video to `src1`.
 4. Start `src1`.
 5. Run your application with the correct RTSP URL:
    - Inside the SDK container: `rtsp://127.0.0.1:8554/src1`
@@ -55,10 +55,10 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 
 ## Validate multiple input streams
 
-1. Upload or prepare multiple videos in Media Library.
-2. Use RTSP Source `Auto Assign` to map videos to source slots.
+1. Upload or prepare multiple videos in Media Sources.
+2. Use Streaming Sources `Auto Assign` to map videos to source slots.
 3. Use `Bulk Start` to start the number of sources your application expects.
-4. Run the application against the corresponding `srcN` RTSP URLs.
+4. Run the application against the corresponding `srcN` stream URLs.
 5. Open Video Viewer with the expected channel set.
 6. Use viewer diagnostics to check for stream bottlenecks. The Stats view is a placeholder in this release and is planned to add runtime bottleneck diagnostics in the next release.
 
@@ -116,7 +116,8 @@ If video is visible but overlays are missing, focus on the metadata path. If ove
 
 ## Tips
 
-- Use short media clips when you are building a new app loop. They make RTSP setup and repeated validation faster.
+- Use short media clips when you are building a new app loop. They make source setup and repeated validation faster.
+- Use HTTP MJPEG sources when you need to simulate a camera that exposes multipart MJPEG over HTTP.
 - Keep channel numbering consistent: if video goes to channel `N`, send metadata to the metadata port for the same `N`.
 - Use the Workspace view to inspect generated model and profiling artifacts before copying files out of the environment.
 - Use the Quick Tour in the top-right corner of the Insight UI when you are introducing a new developer to the tool.

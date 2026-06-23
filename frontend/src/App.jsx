@@ -3,10 +3,19 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
 const SOURCE_COUNT = 16
+const STREAMING_TRANSPORTS = [
+  { value: 'rtsp', label: 'RTSP' },
+  { value: 'http', label: 'HTTP' }
+]
+const STREAMING_CODECS = [
+  { value: 'h264', label: 'H.264' },
+  { value: 'h265', label: 'H.265' },
+  { value: 'mjpeg', label: 'MJPEG' }
+]
 const TABS = [
   { id: 'workspace', label: 'Workspace', icon: '/icons/workspace.svg' },
-  { id: 'media', label: 'Media Library', icon: '/icons/media.png' },
-  { id: 'rtsp', label: 'RTSP Source', icon: '/icons/rtsp.png' },
+  { id: 'media', label: 'Media Sources', icon: '/icons/media.png' },
+  { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
@@ -34,9 +43,9 @@ const ONBOARDING_STEPS = [
     tab: null,
     eyebrow: 'Step 1 of 6',
     title: 'What is Insight?',
-    summary: 'Insight helps developers inspect a workspace, set up RTSP streams, view inference results, and watch system performance while they test an application.',
+    summary: 'Insight helps developers inspect a workspace, set up test streams, view inference results, and watch system performance while they test an application.',
     details:
-      'Use it to explore the files behind your app, load media, turn that media into RTSP sources, watch the live WebRTC viewer post inference with metadata rendering, and confirm whether runtime issues are coming from the stream path or the device itself.'
+      'Use it to explore the files behind your app, load media, turn that media into streaming sources, watch the live WebRTC viewer post inference with metadata rendering, and confirm whether runtime issues are coming from the stream path or the device itself.'
   },
   {
     id: 'workspace',
@@ -51,7 +60,7 @@ const ONBOARDING_STEPS = [
     id: 'media',
     tab: 'media',
     eyebrow: 'Step 3 of 6',
-    title: 'Start in Media Library',
+    title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
       'Use this tab to upload videos or images, filter the library, preview a file, and remove media you no longer need.'
@@ -60,10 +69,10 @@ const ONBOARDING_STEPS = [
     id: 'rtsp',
     tab: 'rtsp',
     eyebrow: 'Step 4 of 6',
-    title: 'Set up RTSP sources',
-    summary: 'This tab turns files from the library into live RTSP source slots such as src1, src2, and src3.',
+    title: 'Set up streaming sources',
+    summary: 'This tab turns files from the library into live source slots such as src1, src2, and src3.',
     details:
-      'Pick which file each source should play, start one stream or many at once, stop everything, and copy the RTSP URL when another tool needs to consume the stream.'
+      'Pick which file each source should play, choose an available transport, start one stream or many at once, stop everything, and copy the URL when another tool needs to consume the stream.'
   },
   {
     id: 'viewer',
@@ -97,8 +106,18 @@ function prettyKey(key) {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
 }
 
+function prettyCodec(value) {
+  const text = String(value || '').trim()
+  const compact = text.toLowerCase().replace(/[-_\s.]/g, '')
+  if (['mjpg', 'mjpeg', 'motionjpeg', 'jpeg'].includes(compact)) return 'MJPEG'
+  if (['h264', 'avc', 'avc1'].includes(compact)) return 'H.264'
+  if (['h265', 'hevc', 'hev1', 'hvc1'].includes(compact)) return 'H.265'
+  return text.toUpperCase()
+}
+
 function prettyValue(key, value) {
   if (value === null || value === undefined || value === '') return '-'
+  if (key === 'codec' || key === 'normalized_codec') return prettyCodec(value)
   if (typeof value === 'number' && key.includes('size')) {
     if (value < 1024) return `${value} B`
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
@@ -529,7 +548,7 @@ export default function App() {
   const metricEs = useRef(null)
 
   const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
-  const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm)$/i.test(p)), [allFiles])
+  const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
   const filteredFiles = useMemo(() => {
     const q = mediaFilter.trim().toLowerCase()
     if (!q) return allFiles
@@ -558,7 +577,7 @@ export default function App() {
 
   async function loadSources() {
     const data = await fetchJson('/api/mediasrc')
-    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped' })
+    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {} })
     setSources(filled)
   }
 
@@ -806,11 +825,18 @@ export default function App() {
     }
   }
 
-  async function updateSource(index, file) {
+  async function updateSource(index, patch) {
+    const src = sources.find((item) => item.index === index) || {}
+    const next = {
+      index,
+      file: src.file || '',
+      transport: src.transport || 'rtsp',
+      ...patch
+    }
     await fetchJson('/api/mediasrc/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index, file })
+      body: JSON.stringify(next)
     })
     await loadSources()
   }
@@ -887,10 +913,20 @@ export default function App() {
     }
   }
 
-  async function copyRtsp(index) {
-    const text = `${rtspBase}/src${index}`
+  async function copyStreamUrl(src) {
+    const text = src?.transport === 'http'
+      ? (src.urls?.http_mjpeg || `/stream/http/src${src.index}.mjpg`)
+      : (src.urls?.rtsp || `${rtspBase}/src${src.index}`)
     await navigator.clipboard.writeText(text)
     setUploadStatus(`Copied: ${text}`)
+  }
+
+  function codecLabel(codec) {
+    return STREAMING_CODECS.find((item) => item.value === codec)?.label || String(codec || 'H.264').toUpperCase()
+  }
+
+  function mediaPreviewUrl(path) {
+    return `/api/media-preview/mjpeg?path=${encodeURIComponent(path)}`
   }
 
   function closeTour(markSeen = true) {
@@ -958,11 +994,13 @@ export default function App() {
   const focusedTourTab = tourOpen && activeTourStep?.tab ? activeTourStep.tab : null
 
   const sourcePreviewExt = (currentSource.file || '').split('.').pop()?.toLowerCase()
-  const sourcePreviewIsVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(sourcePreviewExt)
+  const sourcePreviewIsMjpeg = currentSource.codec === 'mjpeg'
+  const sourcePreviewIsVideo = !sourcePreviewIsMjpeg && ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(sourcePreviewExt)
   const sourcePreviewIsImage = ['jpg', 'jpeg', 'png'].includes(sourcePreviewExt)
 
   const previewExt = selectedFile.split('.').pop()?.toLowerCase()
-  const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(previewExt)
+  const selectedIsMjpeg = mediaInfo?.normalized_codec === 'mjpeg' || ['mjpeg', 'mjpg'].includes(previewExt)
+  const isVideo = !selectedIsMjpeg && ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(previewExt)
   const isImage = ['jpg', 'jpeg', 'png'].includes(previewExt)
 
   const availableProfileKeys = useMemo(() => {
@@ -1158,7 +1196,7 @@ export default function App() {
               <section className="panel">
               <div className="panel-topbar">
                 <div>
-                  <h2>Media Library</h2>
+                  <h2>Media Sources</h2>
                   <p className="section-note">Browse, preview, and manage local media assets.</p>
                 </div>
                 <label
@@ -1196,6 +1234,7 @@ export default function App() {
               {selectedFile && <p className="section-note">{selectedFile}</p>}
 
               <div className="preview">
+                {selectedFile && selectedIsMjpeg && <img src={mediaPreviewUrl(selectedFile)} alt={selectedFile} />}
                 {selectedFile && isVideo && <video controls src={`/media/${selectedFile}`} />}
                 {selectedFile && isImage && <img src={`/media/${selectedFile}`} alt={selectedFile} />}
                 {!selectedFile && <p>Select a file.</p>}
@@ -1229,8 +1268,8 @@ export default function App() {
             <section className="panel">
               <div className="panel-topbar">
                 <div>
-                  <h2>RTSP Source Control</h2>
-                  <p className="section-note">Assign streams and control source playback.</p>
+                  <h2>Streaming Sources</h2>
+                  <p className="section-note">Assign media, choose an available transport, and control source playback.</p>
                 </div>
                 <div className="rtsp-actions">
                   <button className="btn-ghost" onClick={autoAssignAllSources} title="Auto assign unique media files to all sources">
@@ -1247,21 +1286,42 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <p className="hint">Base: <code>{rtspBase}</code></p>
+              <p className="hint">Default RTSP base: <code>{rtspBase}</code></p>
 
               <div className="sources">
                 {sources.map((src) => (
                   <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
+                    {(() => {
+                      const allowedTransports = src.allowed_transports?.length ? src.allowed_transports : ['rtsp']
+                      const isAssigned = Boolean(src.file)
+                      const transportLocked = !isAssigned || allowedTransports.length <= 1
+                      return (
+                        <>
                     <span className="src-label">src{src.index}</span>
                     <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
                       {src.state === 'playing' ? 'Live' : 'Idle'}
                     </span>
-                    <select value={src.file || ''} onChange={(e) => updateSource(src.index, e.target.value)}>
+                    <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
                       <option value="">Not assigned</option>
                       {videoFiles.map((file) => (
                         <option key={file} value={file}>{file}</option>
                       ))}
                     </select>
+                    <select
+                      value={isAssigned ? (src.transport || 'rtsp') : ''}
+                      onChange={(e) => updateSource(src.index, { transport: e.target.value })}
+                      disabled={transportLocked}
+                      aria-label={`Transport for src${src.index}`}
+                      title={!isAssigned ? 'Assign media before choosing a transport' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`)}
+                    >
+                      {!isAssigned && <option value="">-</option>}
+                      {STREAMING_TRANSPORTS.filter((transport) => allowedTransports.includes(transport.value)).map((transport) => (
+                        <option key={transport.value} value={transport.value}>{transport.label}</option>
+                      ))}
+                    </select>
+                    <span className={isAssigned ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? 'Codec is determined by the selected media format' : 'Assign media before selecting a codec'}>
+                      {isAssigned ? codecLabel(src.codec || 'h264') : '-'}
+                    </span>
                     {src.state === 'playing' ? (
                       <button
                         className="icon-action-btn stop"
@@ -1288,16 +1348,19 @@ export default function App() {
                     )}
                     <button
                       className="icon-action-btn copy"
-                      onClick={(e) => { e.stopPropagation(); copyRtsp(src.index) }}
+                      onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
                       disabled={!src.file}
-                      aria-label={`Copy RTSP for src${src.index}`}
-                      title={`Copy RTSP for src${src.index}`}
+                      aria-label={`Copy stream URL for src${src.index}`}
+                      title={`Copy stream URL for src${src.index}`}
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M9 9h10v12H9z" />
                         <path d="M5 3h10v2H7v10H5z" />
                       </svg>
                     </button>
+                        </>
+                      )
+                    })()}
                   </div>
                 ))}
               </div>
@@ -1306,8 +1369,10 @@ export default function App() {
             <section className="panel">
               <h2>Source Preview: src{currentSource.index}</h2>
               <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
+              <p className="hint">Output: {(currentSource.transport || 'rtsp').toUpperCase()} / {(currentSource.codec || 'h264').toUpperCase()}</p>
 
               <div className="preview">
+                {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
                 {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
                 {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
                 {!currentSource.file && <p>Assign a media file to preview.</p>}

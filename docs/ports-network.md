@@ -12,9 +12,9 @@ Insight uses several ports during normal operation. The default ports are the po
 
 | Port-map name | Default port or range | Protocol | Purpose |
 | --- | --- | --- | --- |
-| `mainUI` | `9900` | HTTPS/TCP | Main Insight web UI and HTTP API. |
+| `mainUI` | `9900` | HTTPS/TCP | Main Insight web UI, HTTP API, and HTTP MJPEG streaming sources. |
 | `videoUI` | `8081` | HTTPS/TCP | WebRTC Video Viewer UI. |
-| `rtsp.tcp` | `8554` | RTSP/TCP | RTSP media sources created from uploaded media. |
+| `rtsp.tcp` | `8554` | RTSP/TCP | RTSP streaming sources created from uploaded media. |
 | `videoUDP` | `9000-9079` | UDP | Video RTP ingest for viewer channels `0-79`. |
 | `metadataUDP` | `9100-9179` | UDP | Metadata JSON ingest for viewer channels `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
@@ -86,6 +86,8 @@ Use the application location to decide whether to use default container ports or
 | --- | --- | --- |
 | Inside the SDK container | `rtsp://127.0.0.1:8554/srcN` | `127.0.0.1:9000 + channel` and `127.0.0.1:9100 + channel` |
 | On a DevKit or another external machine | `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/srcN` | `<sdk-host-ip>:<videoUDP hostPortStart + channel>` and `<sdk-host-ip>:<metadataUDP hostPortStart + channel>` |
+
+HTTP MJPEG sources use the main Insight UI/API port. In the SDK, use the `mainUI` host port from `neat --json` for those URLs.
 
 For example, if `neat --json` reports:
 

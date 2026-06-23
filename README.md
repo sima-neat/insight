@@ -7,7 +7,7 @@
 
 It provides:
 - Multi-channel WebRTC video viewer with MetadataReceiver support
-- RTSP source control and preview
+- Codec-aware media source control with RTSP and HTTP MJPEG streaming
 - System and application metrics dashboard
 
 User documentation for the software docs site is maintained in
@@ -54,7 +54,7 @@ Notes:
 ## Basic usage
 
 1. Open the Viewer tab to monitor active channels.
-2. Open RTSP Control to assign/start/stop input sources.
+2. Open Streaming to assign/start/stop input sources.
 3. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
 
 ## Viewer settings
