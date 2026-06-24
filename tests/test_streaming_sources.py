@@ -93,6 +93,40 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(source["codec"], "h265")
         self.assertEqual(source["allowed_transports"], ["rtsp"])
 
+    def test_unknown_codec_does_not_fallback_to_h264(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value=None):
+            assign = self.client.post(
+                "/api/mediasrc/assign",
+                json={"index": 1, "file": "clip.mp4", "transport": "http"},
+            )
+
+        self.assertEqual(assign.status_code, 200)
+        source = self.client.get("/api/mediasrc").get_json()[0]
+        self.assertEqual(source["transport"], "")
+        self.assertEqual(source["codec"], "unknown")
+        self.assertEqual(source["allowed_transports"], [])
+        self.assertEqual(source["urls"], {})
+
+    def test_start_unknown_codec_returns_actionable_error(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        with mock.patch.object(app_module, "_media_video_codec", return_value=None):
+            self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unable to detect the media codec", response.get_json()["error"])
+
+    def test_media_info_reports_missing_ffprobe(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+
+        with mock.patch.object(app_module.shutil, "which", return_value=None):
+            response = self.client.post("/api/media-info", json={"path": "clip.mp4"})
+
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("ffprobe is not installed", response.get_json()["error"])
+
     def test_get_sources_marks_dead_rtsp_process_stopped(self):
         self.sources_file.write_text(
             '[{"index": 1, "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}]',

@@ -922,7 +922,9 @@ export default function App() {
   }
 
   function codecLabel(codec) {
-    return STREAMING_CODECS.find((item) => item.value === codec)?.label || String(codec || 'H.264').toUpperCase()
+    if (!codec) return '-'
+    if (codec === 'unknown') return 'Unknown'
+    return STREAMING_CODECS.find((item) => item.value === codec)?.label || String(codec).toUpperCase()
   }
 
   function mediaPreviewUrl(path) {
@@ -1292,72 +1294,74 @@ export default function App() {
                 {sources.map((src) => (
                   <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
                     {(() => {
-                      const allowedTransports = src.allowed_transports?.length ? src.allowed_transports : ['rtsp']
                       const isAssigned = Boolean(src.file)
+                      const allowedTransports = Array.isArray(src.allowed_transports) ? src.allowed_transports : (isAssigned ? ['rtsp'] : [])
                       const transportLocked = !isAssigned || allowedTransports.length <= 1
+                      const transportValue = isAssigned && allowedTransports.includes(src.transport) ? src.transport : ''
+                      const canStream = isAssigned && allowedTransports.length > 0
                       return (
                         <>
-                    <span className="src-label">src{src.index}</span>
-                    <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
-                      {src.state === 'playing' ? 'Live' : 'Idle'}
-                    </span>
-                    <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
-                      <option value="">Not assigned</option>
-                      {videoFiles.map((file) => (
-                        <option key={file} value={file}>{file}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={isAssigned ? (src.transport || 'rtsp') : ''}
-                      onChange={(e) => updateSource(src.index, { transport: e.target.value })}
-                      disabled={transportLocked}
-                      aria-label={`Transport for src${src.index}`}
-                      title={!isAssigned ? 'Assign media before choosing a transport' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`)}
-                    >
-                      {!isAssigned && <option value="">-</option>}
-                      {STREAMING_TRANSPORTS.filter((transport) => allowedTransports.includes(transport.value)).map((transport) => (
-                        <option key={transport.value} value={transport.value}>{transport.label}</option>
-                      ))}
-                    </select>
-                    <span className={isAssigned ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? 'Codec is determined by the selected media format' : 'Assign media before selecting a codec'}>
-                      {isAssigned ? codecLabel(src.codec || 'h264') : '-'}
-                    </span>
-                    {src.state === 'playing' ? (
-                      <button
-                        className="icon-action-btn stop"
-                        onClick={(e) => { e.stopPropagation(); stopSource(src.index) }}
-                        aria-label={`Stop src${src.index}`}
-                        title={`Stop src${src.index}`}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <rect x="6" y="6" width="12" height="12" rx="1.5" />
-                        </svg>
-                      </button>
-                    ) : (
-                      <button
-                        className="icon-action-btn play"
-                        onClick={(e) => { e.stopPropagation(); startSource(src.index) }}
-                        disabled={!src.file}
-                        aria-label={`Start src${src.index}`}
-                        title={`Start src${src.index}`}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M8 6v12l10-6-10-6z" />
-                        </svg>
-                      </button>
-                    )}
-                    <button
-                      className="icon-action-btn copy"
-                      onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
-                      disabled={!src.file}
-                      aria-label={`Copy stream URL for src${src.index}`}
-                      title={`Copy stream URL for src${src.index}`}
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M9 9h10v12H9z" />
-                        <path d="M5 3h10v2H7v10H5z" />
-                      </svg>
-                    </button>
+                          <span className="src-label">src{src.index}</span>
+                          <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
+                            {src.state === 'playing' ? 'Live' : 'Idle'}
+                          </span>
+                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
+                            <option value="">Not assigned</option>
+                            {videoFiles.map((file) => (
+                              <option key={file} value={file}>{file}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={transportValue}
+                            onChange={(e) => updateSource(src.index, { transport: e.target.value })}
+                            disabled={transportLocked}
+                            aria-label={`Transport for src${src.index}`}
+                            title={!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`))}
+                          >
+                            {(!isAssigned || !canStream) && <option value="">-</option>}
+                            {STREAMING_TRANSPORTS.filter((transport) => allowedTransports.includes(transport.value)).map((transport) => (
+                              <option key={transport.value} value={transport.value}>{transport.label}</option>
+                            ))}
+                          </select>
+                          <span className={isAssigned && canStream ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? (canStream ? 'Codec is determined by the selected media format' : 'Codec could not be detected for this media') : 'Assign media before selecting a codec'}>
+                            {isAssigned ? codecLabel(src.codec) : '-'}
+                          </span>
+                          {src.state === 'playing' ? (
+                            <button
+                              className="icon-action-btn stop"
+                              onClick={(e) => { e.stopPropagation(); stopSource(src.index) }}
+                              aria-label={`Stop src${src.index}`}
+                              title={`Stop src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                              </svg>
+                            </button>
+                          ) : (
+                            <button
+                              className="icon-action-btn play"
+                              onClick={(e) => { e.stopPropagation(); startSource(src.index) }}
+                              disabled={!canStream}
+                              aria-label={`Start src${src.index}`}
+                              title={canStream ? `Start src${src.index}` : 'Codec must be detected before streaming'}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M8 6v12l10-6-10-6z" />
+                              </svg>
+                            </button>
+                          )}
+                          <button
+                            className="icon-action-btn copy"
+                            onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
+                            disabled={!canStream}
+                            aria-label={`Copy stream URL for src${src.index}`}
+                            title={canStream ? `Copy stream URL for src${src.index}` : 'No stream URL is available until codec is detected'}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                              <path d="M9 9h10v12H9z" />
+                              <path d="M5 3h10v2H7v10H5z" />
+                            </svg>
+                          </button>
                         </>
                       )
                     })()}
@@ -1369,7 +1373,7 @@ export default function App() {
             <section className="panel">
               <h2>Source Preview: src{currentSource.index}</h2>
               <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
-              <p className="hint">Output: {(currentSource.transport || 'rtsp').toUpperCase()} / {(currentSource.codec || 'h264').toUpperCase()}</p>
+              <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
 
               <div className="preview">
                 {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}

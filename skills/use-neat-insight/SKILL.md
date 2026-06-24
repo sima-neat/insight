@@ -97,7 +97,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 | `GET` | `/api/ingest/stats` | Return active vf UDP/RTP ingest streams and compact transport, media, forwarding, and WebRTC stats. |
 | `GET` | `/api/egress/stats` | Return active vf WebRTC egress peers with RTCP feedback and browser decode/render stats. |
 | `GET` | `/api/logs/<logname>` | Return recent `EV74` or `syslog` lines as `text/plain`; unknown or missing logs return 404. |
-| `GET` | `/api/system/tools` | Return booleans for `ffmpeg` and `gst-launch-1.0` availability on `PATH`. |
+| `GET` | `/api/system/tools` | Return booleans for `ffmpeg`, `ffprobe`, and `gst-launch-1.0` availability on `PATH`. |
 
 Example:
 
@@ -170,7 +170,7 @@ The metadata sender targets UDP `9100+channel` by default and emits JSON compati
 | `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. |
 | `POST` | `/api/upload/media` | Multipart form field `file` | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives. |
 | `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments that point at deleted files. |
-| `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from MediaInfo, including detected codec when available. |
+| `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from ffprobe, including detected codec when available. |
 | `GET` | `/api/media-preview/mjpeg?path=<path>` | Query string | Multipart MJPEG preview for MJPEG media files that browsers cannot preview directly. |
 | `GET` | `/media/<path:filename>` | Relative media path | Raw media file content for preview or download. |
 

@@ -17,12 +17,11 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import psutil
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from PIL import Image
-from pymediainfo import MediaInfo
 from werkzeug.utils import secure_filename
 
 if __name__ == "__main__" and (not globals().get("__package__")):
@@ -79,6 +78,7 @@ DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
+UNKNOWN_CODEC = "unknown"
 OPTIMIZED_VIDEO_BITRATE = "2M"
 OPTIMIZED_VIDEO_FPS = "30"
 OPTIMIZED_VIDEO_GOP = "30"
@@ -211,14 +211,20 @@ def _normalize_source(src, index: Optional[int] = None):
         source_index = index or 1
 
     state = src.get("state") if src.get("state") in {"playing", "stopped"} else "stopped"
-    transport = normalize_transport(src.get("transport"))
-    codec = normalize_codec(src.get("codec"))
+    file_name = src.get("file") or ""
+    raw_codec = src.get("codec")
+    if file_name and raw_codec == UNKNOWN_CODEC:
+        codec = UNKNOWN_CODEC
+        transport = ""
+    else:
+        transport = normalize_transport(src.get("transport"))
+        codec = normalize_codec(raw_codec)
     if transport == "http":
         codec = "mjpeg"
 
     return {
         "index": source_index,
-        "file": src.get("file") or "",
+        "file": file_name,
         "state": state,
         "transport": transport,
         "codec": codec,
@@ -452,8 +458,12 @@ def list_media_files():
 # API: report whether optional media inspection/streaming tools are installed.
 @app.get("/api/system/tools")
 def system_tools():
-    """Return booleans indicating whether ffmpeg and gst-launch-1.0 are available on PATH."""
-    return {"ffmpeg": shutil.which("ffmpeg") is not None, "gstreamer": shutil.which("gst-launch-1.0") is not None}
+    """Return booleans indicating whether media helper tools are available on PATH."""
+    return {
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffprobe": shutil.which("ffprobe") is not None,
+        "gstreamer": shutil.which("gst-launch-1.0") is not None,
+    }
 
 
 def _fake_sysinfo_payload():
@@ -737,16 +747,69 @@ def _relative_media_label(path: Path) -> str:
         return path.name
 
 
-def _video_duration_seconds(path: Path) -> Optional[float]:
+def _ffprobe_json(path: Path) -> Optional[dict[str, Any]]:
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise RuntimeError("ffprobe is not installed; install FFmpeg and ensure ffprobe is on PATH.")
+
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name,codec_tag_string,width,height,duration,r_frame_rate,avg_frame_rate",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(path),
+    ]
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"ffprobe failed for {_relative_media_label(path)}: {detail or result.returncode}")
+
     try:
-        parsed = MediaInfo.parse(str(path))
-        video_track = next((t for t in parsed.tracks if t.track_type == "Video"), None)
-        duration_ms = getattr(video_track, "duration", None)
-        if duration_ms:
-            return float(duration_ms) / 1000.0
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"ffprobe returned invalid JSON for {_relative_media_label(path)}: {exc}") from exc
+
+    streams = data.get("streams") if isinstance(data, dict) else None
+    if not isinstance(streams, list) or not streams:
+        return None
+    stream = streams[0]
+    if not isinstance(stream, dict):
+        return None
+    return {"stream": stream, "format": data.get("format") if isinstance(data.get("format"), dict) else {}}
+
+
+def _probe_video_info(path: Path) -> Optional[dict[str, Any]]:
+    try:
+        return _ffprobe_json(path)
     except Exception as exc:
-        logging.debug("Failed to parse video duration for %s: %s", path, exc)
+        logging.debug("Failed to probe video info for %s: %s", path, exc)
     return None
+
+
+def _duration_to_seconds(value: Any) -> Optional[float]:
+    if value in (None, "", "N/A"):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _video_duration_seconds(path: Path) -> Optional[float]:
+    info = _probe_video_info(path)
+    if not info:
+        return None
+    stream = info["stream"]
+    container = info["format"]
+    return _duration_to_seconds(stream.get("duration")) or _duration_to_seconds(container.get("duration"))
 
 
 def _normalize_media_codec_name(value: Optional[str]) -> Optional[str]:
@@ -767,17 +830,15 @@ def _media_video_codec(path: Path) -> Optional[str]:
     suffix = path.suffix.lower()
     if suffix in {".jpg", ".jpeg", ".mjpg", ".mjpeg"}:
         return "mjpeg"
-    try:
-        parsed = MediaInfo.parse(str(path))
-        video_track = next((t for t in parsed.tracks if t.track_type == "Video"), None)
-        if not video_track:
-            return None
-        for attr in ("codec_id", "format", "commercial_name", "format_profile"):
-            codec = _normalize_media_codec_name(getattr(video_track, attr, None))
-            if codec:
-                return codec
-    except Exception as exc:
-        logging.debug("Failed to parse video codec for %s: %s", path, exc)
+
+    info = _probe_video_info(path)
+    if not info:
+        return None
+    stream = info["stream"]
+    for attr in ("codec_name", "codec_tag_string"):
+        codec = _normalize_media_codec_name(stream.get(attr))
+        if codec:
+            return codec
     return None
 
 
@@ -838,6 +899,10 @@ def _iter_optimizable_videos(root: Path) -> List[Path]:
 
 def _optimize_video_file(path: Path):
     label = _relative_media_label(path)
+    if shutil.which("ffprobe") is None:
+        yield f"FFprobe is not installed; keeping original {label} because the codec cannot be detected.\n"
+        return
+
     codec = _media_video_codec(path)
     if codec in PASSTHROUGH_UPLOAD_CODECS:
         yield f"Keeping {label} as {codec.upper()} for codec-aware streaming.\n"
@@ -1077,20 +1142,21 @@ def media_info():
                     }
                 )
         else:
-            parsed = MediaInfo.parse(str(abs_path))
-            video_track = next((t for t in parsed.tracks if t.track_type == "Video"), None)
-            if video_track:
+            probe = _ffprobe_json(abs_path)
+            if probe:
+                stream = probe["stream"]
                 codec = _media_video_codec(abs_path)
-                raw_codec = video_track.codec_id or video_track.format
+                raw_codec = stream.get("codec_tag_string") or stream.get("codec_name")
+                duration = _duration_to_seconds(stream.get("duration")) or _duration_to_seconds(probe["format"].get("duration"))
                 info.update(
                     {
                         "type": "video",
                         "codec": _media_codec_display_name(raw_codec, codec),
                         "normalized_codec": codec,
-                        "width": video_track.width,
-                        "height": video_track.height,
-                        "duration_ms": video_track.duration,
-                        "frame_rate": video_track.frame_rate,
+                        "width": stream.get("width"),
+                        "height": stream.get("height"),
+                        "duration_ms": duration * 1000 if duration is not None else None,
+                        "frame_rate": stream.get("avg_frame_rate") or stream.get("r_frame_rate"),
                     }
                 )
             else:
@@ -1180,19 +1246,32 @@ def _source_media_codec(file_name: str) -> Optional[str]:
 
 
 def _recommended_codec_for_file(file_name: str, fallback: str = DEFAULT_CODEC) -> str:
+    if not file_name:
+        return normalize_codec(fallback)
     codec = _source_media_codec(file_name)
     if codec in {"h264", "h265", "mjpeg"}:
         return codec
-    return normalize_codec(fallback)
+    return UNKNOWN_CODEC
 
 
 def _allowed_transports_for_codec(codec: str) -> list[str]:
+    if codec == UNKNOWN_CODEC:
+        return []
     return ["rtsp", "http"] if normalize_codec(codec) == "mjpeg" else ["rtsp"]
+
+
+def _codec_detection_error(file_name: str) -> str:
+    return (
+        f"Unable to detect the media codec for {file_name}. "
+        "Install FFmpeg with ffprobe and use a supported H.264, H.265, or MJPEG source."
+    )
 
 
 def _derive_source_stream_settings(file_name: str, requested_transport: Optional[str] = None):
     codec = _recommended_codec_for_file(file_name, DEFAULT_CODEC)
     allowed_transports = _allowed_transports_for_codec(codec)
+    if not allowed_transports:
+        return "", codec, allowed_transports
     transport = normalize_transport(requested_transport)
     if transport not in allowed_transports:
         transport = allowed_transports[0]
@@ -1210,12 +1289,24 @@ def _source_url(src, transport: Optional[str] = None):
 
 def _source_with_urls(src):
     enriched = dict(src)
-    _transport, _codec, allowed_transports = _derive_source_stream_settings(src.get("file") or "", src.get("transport"))
+    stored_codec = src.get("codec")
+    if stored_codec in {"h264", "h265", "mjpeg", UNKNOWN_CODEC}:
+        codec = stored_codec
+        allowed_transports = _allowed_transports_for_codec(codec)
+        transport = normalize_transport(src.get("transport")) if allowed_transports else ""
+        if transport not in allowed_transports:
+            transport = allowed_transports[0] if allowed_transports else ""
+    else:
+        transport, codec, allowed_transports = _derive_source_stream_settings(src.get("file") or "", src.get("transport"))
+    enriched["transport"] = transport
+    enriched["codec"] = codec
     enriched["allowed_transports"] = allowed_transports
-    enriched["urls"] = {
-        "rtsp": _source_url(src, "rtsp"),
-        "http_mjpeg": _source_url(src, "http"),
-    }
+    urls = {}
+    if "rtsp" in allowed_transports:
+        urls["rtsp"] = _source_url(src, "rtsp")
+    if "http" in allowed_transports:
+        urls["http_mjpeg"] = _source_url(src, "http")
+    enriched["urls"] = urls
     return enriched
 
 
@@ -1270,6 +1361,10 @@ def assign_source():
             src["transport"] = transport
             src["codec"] = codec
             if was_playing and file_name:
+                if not _allowed_transports:
+                    src["state"] = "stopped"
+                    save_sources(sources)
+                    return _json_error(_codec_detection_error(file_name), 400)
                 file_path = MEDIA_DIR / file_name
                 ok, err = start_media_stream(
                     index,
@@ -1330,6 +1425,12 @@ def start_source():
             filename = src.get("file")
             if not filename:
                 return _json_error("No file assigned to source")
+            transport, codec, allowed_transports = _derive_source_stream_settings(filename, src.get("transport"))
+            src["transport"] = transport
+            src["codec"] = codec
+            if not allowed_transports:
+                save_sources(sources)
+                return _json_error(_codec_detection_error(filename), 400)
             ok, err = start_media_stream(
                 index,
                 str(MEDIA_DIR / filename),
@@ -1376,6 +1477,12 @@ def start_sources_bulk():
         source_index = src["index"]
         if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
+            continue
+        transport, codec, allowed_transports = _derive_source_stream_settings(src["file"], src.get("transport"))
+        src["transport"] = transport
+        src["codec"] = codec
+        if not allowed_transports:
+            errors.append({"index": source_index, "error": _codec_detection_error(src["file"])})
             continue
         ok, err = start_media_stream(
             source_index,
