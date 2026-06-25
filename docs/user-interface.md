@@ -23,17 +23,17 @@ Workspace is especially useful when an application produces several build output
 
 ![Insight Workspace view showing a pipeline sequence graph and workspace artifacts.](images/insight-workspace-overview.png)
 
-## Media Library
+## Media Sources
 
-The Media Library is where you manage media files used for application tests. You can upload videos or images, filter the file list, preview selected files, inspect basic media metadata, and delete files that are no longer needed.
+Media Sources is where you manage media files used for application tests. You can upload videos or images, filter the file list, preview selected files, inspect basic media metadata, and delete files that are no longer needed.
 
-Supported video formats include common container formats such as `mp4`, `mov`, `avi`, `mkv`, and `webm`. When supported tooling is available, uploaded MP4 files are optimized for low-latency streaming.
+Supported video formats include common container formats such as `mp4`, `mov`, `avi`, `mkv`, and `webm`. Insight also recognizes MJPEG assets and HEVC/H.265 media for codec-aware streaming. When supported tooling is available, uploaded H.264 MP4 files are optimized for low-latency streaming. MJPEG and HEVC media are preserved so they can be streamed with their original codec behavior.
 
-Use Media Library before configuring RTSP sources so you know which files are available and whether they are readable.
+Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
-![Insight Media Library view showing a selected video preview and media metadata.](images/insight-media-library.png)
+![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
-The Media Library combines file selection, preview, metadata inspection, upload, and delete actions in one view.
+Media Sources combines file selection, preview, metadata inspection, upload, and delete actions in one view.
 
 SiMa provides curated videos for repeatable testing. Use these when you need a known media set:
 
@@ -47,11 +47,11 @@ https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
 https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
 ```
 
-Download the files you need, then import them with the Media Library upload action.
+Download the files you need, then import them with the Media Sources upload action.
 
-## RTSP Source
+## Streaming Sources
 
-The RTSP Source view turns uploaded media files into live RTSP streams. Each source slot maps to an RTSP path:
+The Streaming Sources view turns uploaded media files into live source slots. Each source slot can expose an RTSP URL:
 
 ```text
 rtsp://127.0.0.1:8554/src1
@@ -61,13 +61,21 @@ rtsp://127.0.0.1:8554/src3
 
 Those URLs are correct for applications running in the same SDK container as Insight. If the application runs on a DevKit or another external machine, use the SDK host IP address and the mapped `rtsp.tcp` host port from `neat --json`.
 
-You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy RTSP URLs for use by applications or test harnesses.
+Insight selects codec and transport options from the assigned media:
+
+- H.264 media streams over RTSP as H.264.
+- HEVC/H.265 media streams over RTSP as H.265.
+- MJPEG media can stream over RTSP as MJPEG or over HTTP as multipart MJPEG.
+
+The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
+
+You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
-![Insight RTSP Source view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
+![Insight Streaming Sources view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
 
-The RTSP Source view lets you assign media files to source slots, start or stop streams, and preview the selected source before wiring it into an application.
+The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
 
 ## Video Viewer
 

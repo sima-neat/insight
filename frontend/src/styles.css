@@ -678,7 +678,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 48px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 54px 48px minmax(180px, 1fr) 100px 100px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -711,6 +711,26 @@ button:hover:not(:disabled) {
 .src-state.stopped {
   background: #eef2f6;
   color: #5f7487;
+}
+
+.codec-lock {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #eef2f6;
+  color: #40596d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.codec-lock.empty {
+  color: #7b8c9c;
+  font-weight: 700;
 }
 
 .icon-action-btn svg {
@@ -2604,7 +2624,7 @@ button:disabled {
   }
 
   .source-row {
-    grid-template-columns: 54px 48px minmax(0, 1fr) auto auto auto;
+    grid-template-columns: 54px 48px minmax(0, 1fr) 96px 96px auto auto auto;
   }
 
   .masthead {
