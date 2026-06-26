@@ -207,6 +207,15 @@ jobs:
           print("config:", cfg)
           PY
 
+      - name: Prepare certificate tooling
+        run: |
+          set -euo pipefail
+          if ! command -v mkcert >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y mkcert libnss3-tools
+          fi
+          mkcert -install
+
       - name: Run service smoke test
         run: |
           set -euo pipefail
@@ -224,12 +233,28 @@ jobs:
           }
           trap cleanup EXIT
 
-          for _ in $(seq 1 45); do
+          ready=0
+          for attempt in $(seq 1 90); do
             if curl -ksf "https://127.0.0.1:${PORT}/api/health" > /tmp/health.json; then
+              ready=1
               break
+            fi
+            if ! kill -0 "${APP_PID}" 2>/dev/null; then
+              echo "neat-insight exited before becoming ready" >&2
+              cat "${LOG}" >&2 || true
+              exit 1
+            fi
+            if (( attempt % 10 == 0 )); then
+              echo "Waiting for neat-insight health endpoint (${attempt}/90)..."
             fi
             sleep 1
           done
+
+          if [[ "${ready}" != "1" ]]; then
+            echo "neat-insight did not become healthy within 90 seconds" >&2
+            cat "${LOG}" >&2 || true
+            exit 1
+          fi
 
           cat /tmp/health.json
           .venv-insight/bin/python - <<'PY'
