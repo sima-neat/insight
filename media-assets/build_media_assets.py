@@ -215,6 +215,8 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
             return [
                 "-c:v",
                 "h264_videotoolbox",
+                "-allow_sw",
+                "1",
                 "-b:v",
                 video_bitrate(rendition),
                 "-pix_fmt",
@@ -239,6 +241,8 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
             return [
                 "-c:v",
                 "hevc_videotoolbox",
+                "-allow_sw",
+                "1",
                 "-b:v",
                 video_bitrate(rendition),
                 "-pix_fmt",

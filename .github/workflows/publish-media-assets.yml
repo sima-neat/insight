@@ -1,4 +1,4 @@
-name: Publish Media Assets
+name: Media Asset Conversion and Publishing
 
 on:
   workflow_dispatch:
@@ -131,6 +131,10 @@ jobs:
           path: dist
 
       - name: Build media asset renditions
+        env:
+          SOURCE_ID: ${{ inputs.source_id }}
+          REGENERATE: ${{ inputs.regenerate }}
+          PROFILES: ${{ matrix.profiles }}
         run: |
           set -euo pipefail
           args=(
@@ -141,13 +145,22 @@ jobs:
           if [[ -f dist/existing-media-assets-index.json ]]; then
             args+=(--existing-index dist/existing-media-assets-index.json)
           fi
-          if [[ -n "${{ inputs.source_id }}" ]]; then
-            args+=(--source-id "${{ inputs.source_id }}")
+          if [[ -n "${SOURCE_ID}" ]]; then
+            args+=(--source-id "${SOURCE_ID}")
           fi
-          if [[ "${{ inputs.regenerate }}" == "true" ]]; then
+          if [[ "${REGENERATE}" == "true" ]]; then
             args+=(--regenerate)
           fi
-          for profile in ${{ matrix.profiles }}; do
+          read -r -a profiles <<< "${PROFILES}"
+          if [ "${#profiles[@]}" -eq 0 ]; then
+            echo "At least one profile must be specified." >&2
+            exit 1
+          fi
+          for profile in "${profiles[@]}"; do
+            if [[ ! "${profile}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+              echo "Invalid profile name: ${profile}" >&2
+              exit 1
+            fi
             args+=(--profile "${profile}")
           done
           python3 media-assets/build_media_assets.py "${args[@]}"
@@ -212,6 +225,9 @@ jobs:
           path: dist/shards
 
       - name: Merge media asset shards and regenerate index
+        env:
+          SOURCE_ID: ${{ inputs.source_id }}
+          REGENERATE: ${{ inputs.regenerate }}
         run: |
           set -euo pipefail
           mkdir -p dist/media-assets
@@ -229,13 +245,13 @@ jobs:
           if [[ -f dist/existing-media-assets-index.json ]]; then
             args+=(--existing-index dist/existing-media-assets-index.json)
           fi
-          if [[ -n "${{ inputs.source_id }}" ]]; then
-            args+=(--source-id "${{ inputs.source_id }}")
+          if [[ -n "${SOURCE_ID}" ]]; then
+            args+=(--source-id "${SOURCE_ID}")
           fi
-          if [[ "${{ inputs.regenerate }}" == "true" ]]; then
+          if [[ "${REGENERATE}" == "true" ]]; then
             args+=(--regenerate)
           fi
-          if [[ -z "${{ inputs.source_id }}" ]]; then
+          if [[ -z "${SOURCE_ID}" ]]; then
             args+=(--prune-removed-sources)
           fi
           args+=(--index-only)
