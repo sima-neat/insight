@@ -78,6 +78,13 @@ def parse_args() -> argparse.Namespace:
         help="Existing published index.json used to skip already-published renditions.",
     )
     parser.add_argument(
+        "--merge-index",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional index.json file to merge into the generated metadata. Can be passed multiple times.",
+    )
+    parser.add_argument(
         "--source-id",
         action="append",
         default=[],
@@ -395,6 +402,15 @@ def index_assets_by_path(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return assets
 
 
+def index_sources_by_id(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    sources: dict[str, dict[str, Any]] = {}
+    for item in index.get("sources", []):
+        source_id = str(item.get("id", ""))
+        if source_id:
+            sources[source_id] = item
+    return sources
+
+
 def asset_record(
     source: dict[str, Any], rendition: Rendition, output_root: Path, rel_path: Path, ffprobe: str
 ) -> dict[str, Any]:
@@ -495,6 +511,11 @@ def main() -> int:
     output_root.mkdir(parents=True, exist_ok=True)
     existing_index = load_existing_index(args.existing_index)
     existing_assets = index_assets_by_path(existing_index)
+    merged_index_sources = index_sources_by_id(existing_index)
+    for merge_index_path in args.merge_index:
+        merge_index = load_existing_index(merge_index_path)
+        existing_assets.update(index_assets_by_path(merge_index))
+        merged_index_sources.update(index_sources_by_id(merge_index))
     assets_by_path = dict(existing_assets)
     manifest_source_ids = {str(source.get("id")) for source in config.get("sources", []) if source.get("id")}
     removed_assets: list[dict[str, Any]] = []
@@ -545,11 +566,11 @@ def main() -> int:
     if args.prune_removed_sources:
         index_sources = {
             str(source.get("id")): source
-            for source in existing_index.get("sources", [])
+            for source in merged_index_sources.values()
             if str(source.get("id")) in manifest_source_ids
         }
     else:
-        index_sources = {str(source.get("id")): source for source in existing_index.get("sources", [])}
+        index_sources = dict(merged_index_sources)
     for source in sources:
         index_sources[source["id"]] = source
     write_index(output_root, base_url, list(index_sources.values()), list(assets_by_path.values()))
