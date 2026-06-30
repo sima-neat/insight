@@ -17,6 +17,14 @@ on:
         required: false
         default: false
         type: boolean
+      fps_upsample_mode:
+        description: Frame-rate upsampling mode. Use interpolate for smoother output, duplicate for faster test runs.
+        required: false
+        default: interpolate
+        type: choice
+        options:
+          - interpolate
+          - duplicate
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -108,6 +116,7 @@ jobs:
         env:
           SOURCE_ID: ${{ inputs.source_id }}
           REGENERATE: ${{ inputs.regenerate }}
+          FPS_UPSAMPLE_MODE: ${{ inputs.fps_upsample_mode }}
           PROFILES: ${{ matrix.profiles }}
         run: |
           set -euo pipefail
@@ -115,7 +124,14 @@ jobs:
             --sources media-assets/sources.json
             --output "dist/media-assets-${{ matrix.name }}"
             --encoder-mode videotoolbox
+            --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
+            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
+            --delete-after-publish
           )
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            args+=(--publish-sse aws:kms)
+            args+=(--publish-sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
           if [[ -f dist/existing-media-assets-index.json ]]; then
             args+=(--existing-index dist/existing-media-assets-index.json)
           fi
@@ -148,11 +164,6 @@ jobs:
           if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
             publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
           fi
-          aws s3 sync "dist/media-assets-${{ matrix.name }}" \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
-            --exclude "index.json" \
-            --exclude "removed-assets.json" \
-            "${publish_args[@]}"
           aws s3 cp "dist/media-assets-${{ matrix.name }}/index.json" \
             "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/${{ matrix.name }}.index.json" \
             "${publish_args[@]}"

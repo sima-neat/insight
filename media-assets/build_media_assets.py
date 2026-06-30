@@ -104,6 +104,12 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Encoder backend for H.264/HEVC. auto uses VideoToolbox when available.",
     )
+    parser.add_argument(
+        "--fps-upsample-mode",
+        choices=("interpolate", "duplicate"),
+        default="interpolate",
+        help="How to increase frame rate when target FPS is higher than source FPS.",
+    )
     parser.add_argument("--regenerate", action="store_true", help="Rebuild even if index says output exists")
     parser.add_argument("--keep-raw", action="store_true", help="Do not delete downloaded raw files")
     parser.add_argument(
@@ -115,6 +121,26 @@ def parse_args() -> argparse.Namespace:
         "--index-only",
         action="store_true",
         help="Only generate metadata for files already present in the output folder; do not download or convert.",
+    )
+    parser.add_argument(
+        "--publish-s3-uri",
+        default="",
+        help="Optional destination S3 URI. When set, each generated media file is uploaded immediately.",
+    )
+    parser.add_argument(
+        "--publish-sse",
+        default="",
+        help="Optional AWS S3 server-side encryption mode used with --publish-s3-uri.",
+    )
+    parser.add_argument(
+        "--publish-sse-kms-key-id",
+        default="",
+        help="Optional AWS KMS key id used with --publish-s3-uri when --publish-sse is aws:kms.",
+    )
+    parser.add_argument(
+        "--delete-after-publish",
+        action="store_true",
+        help="Delete each generated media file after it is uploaded with --publish-s3-uri.",
     )
     return parser.parse_args()
 
@@ -308,9 +334,11 @@ def source_video_rate(ffprobe: str, path: Path) -> float:
     return parse_rate(str(stream.get("avg_frame_rate") or stream.get("r_frame_rate") or ""))
 
 
-def video_filter(rendition: Rendition, source_fps: float) -> str:
+def video_filter(rendition: Rendition, source_fps: float, fps_upsample_mode: str) -> str:
     scale = f"scale=-2:{rendition.height}:flags=lanczos"
     if source_fps > 0 and rendition.fps > source_fps + 0.5:
+        if fps_upsample_mode == "duplicate":
+            return f"{scale},fps={rendition.fps}"
         return (
             f"{scale},fps={source_fps:.3f},"
             f"minterpolate=fps={rendition.fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
@@ -330,13 +358,14 @@ def run_ffmpeg(
     rendition: Rendition,
     encoder_mode: str,
     source_fps: float,
+    fps_upsample_mode: str,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_output = output_path.with_name(f".{output_path.stem}.tmp{output_path.suffix}")
     if tmp_output.exists():
         tmp_output.unlink()
 
-    vf = video_filter(rendition, source_fps)
+    vf = video_filter(rendition, source_fps, fps_upsample_mode)
     command = [
         ffmpeg,
         "-hide_banner",
@@ -385,6 +414,25 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def s3_uri_join(base_uri: str, rel_path: Path) -> str:
+    return f"{base_uri.rstrip('/')}/{rel_path.as_posix()}"
+
+
+def publish_asset_to_s3(
+    path: Path,
+    destination_uri: str,
+    sse: str,
+    sse_kms_key_id: str,
+) -> None:
+    command = ["aws", "s3", "cp", str(path), destination_uri]
+    if sse:
+        command.extend(["--sse", sse])
+    if sse_kms_key_id:
+        command.extend(["--sse-kms-key-id", sse_kms_key_id])
+    print(f"Uploading {path.name} to {destination_uri}")
+    subprocess.run(command, check=True)
 
 
 def load_existing_index(path: Path | None) -> dict[str, Any]:
@@ -483,6 +531,10 @@ def main() -> int:
     args = parse_args()
     validate_tool(args.ffmpeg)
     validate_tool(args.ffprobe)
+    if args.publish_s3_uri:
+        validate_tool("aws")
+    if args.delete_after_publish and not args.publish_s3_uri:
+        raise SystemExit("--delete-after-publish requires --publish-s3-uri")
     encoder_mode = choose_encoder_mode(args.encoder_mode, available_ffmpeg_encoders(args.ffmpeg))
     print(f"Using encoder mode: {encoder_mode}")
 
@@ -552,10 +604,27 @@ def main() -> int:
                 elif not output_path.exists() or args.regenerate:
                     if raw_path is None:
                         raise RuntimeError("internal error: raw source path missing during conversion")
-                    run_ffmpeg(args.ffmpeg, raw_path, output_path, rendition, encoder_mode, source_fps)
-                assets_by_path[rel_path.as_posix()] = asset_record(
-                    source, rendition, output_root, rel_path, args.ffprobe
-                )
+                    run_ffmpeg(
+                        args.ffmpeg,
+                        raw_path,
+                        output_path,
+                        rendition,
+                        encoder_mode,
+                        source_fps,
+                        args.fps_upsample_mode,
+                    )
+                asset = asset_record(source, rendition, output_root, rel_path, args.ffprobe)
+                assets_by_path[rel_path.as_posix()] = asset
+                if args.publish_s3_uri and output_path.exists():
+                    publish_asset_to_s3(
+                        output_path,
+                        s3_uri_join(args.publish_s3_uri, rel_path),
+                        args.publish_sse,
+                        args.publish_sse_kms_key_id,
+                    )
+                    if args.delete_after_publish:
+                        output_path.unlink()
+                        print(f"Deleted local media file after upload: {output_path}")
 
             if raw_path is not None and not args.keep_raw and args.raw_cache is not None:
                 raw_path.unlink(missing_ok=True)
