@@ -60,16 +60,29 @@ jobs:
           ffprobe -version | head -n 1
 
       - name: Convert selected profiles
+        env:
+          SOURCE_ID: ${{ inputs.source_id }}
+          ENCODER_MODE: ${{ inputs.encoder_mode }}
+          PROFILES: ${{ inputs.profiles }}
         run: |
           set -euo pipefail
           args=(
             --sources media-assets/sources.json
             --output dist/media-assets
-            --source-id "${{ inputs.source_id }}"
-            --encoder-mode "${{ inputs.encoder_mode }}"
+            --source-id "${SOURCE_ID}"
+            --encoder-mode "${ENCODER_MODE}"
             --regenerate
           )
-          for profile in ${{ inputs.profiles }}; do
+          read -r -a profiles <<< "${PROFILES}"
+          if [ "${#profiles[@]}" -eq 0 ]; then
+            echo "At least one profile must be specified." >&2
+            exit 1
+          fi
+          for profile in "${profiles[@]}"; do
+            if [[ ! "${profile}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+              echo "Invalid profile name: ${profile}" >&2
+              exit 1
+            fi
             args+=(--profile "${profile}")
           done
           python3 media-assets/build_media_assets.py "${args[@]}"
