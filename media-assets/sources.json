@@ -1,0 +1,12 @@
+{
+  "schema": "sima.neat.insight.media-assets.sources.v1",
+  "base_url": "https://docs.sima.ai/assets/raw-videos/",
+  "sources": [
+    {
+      "id": "parking_garage_cars",
+      "title": "Parking Garage Cars",
+      "description": "Parking garage traffic scene for Insight media-source and streaming validation.",
+      "file": "parking_garage_cars.mp4"
+    }
+  ]
+}

@@ -1,0 +1,299 @@
+name: Publish Media Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_labels:
+        description: JSON runs-on labels. Use ["macos-latest"] for GitHub-hosted macOS.
+        required: true
+        default: '["macos-latest"]'
+        type: string
+      source_id:
+        description: Optional source id from media-assets/sources.json.
+        required: false
+        type: string
+      regenerate:
+        description: Rebuild assets even if the published index already lists them.
+        required: false
+        default: false
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  MEDIA_ASSETS_PREFIX: media-assets
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-vulcan-config:
+    name: Resolve Vulcan Config
+    uses: sima-neat/.github/.github/workflows/vulcan-resolve-config.yml@main
+    with:
+      vulcan_env: ${{ vars.VULCAN_ENV || 'production' }}
+
+  prepare-existing-index:
+    name: Prepare existing index
+    needs: resolve-vulcan-config
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+
+    steps:
+      - name: Install AWS CLI
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade awscli
+          aws --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+          role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+
+      - name: Fetch existing media asset index
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if aws s3 cp \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/index.json" \
+            dist/existing-media-assets-index.json; then
+            echo "Existing media asset index downloaded."
+          else
+            echo "No existing media asset index found."
+            printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
+              > dist/existing-media-assets-index.json
+          fi
+          python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
+
+      - name: Upload existing index artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: insight-media-assets-existing-index
+          path: dist/existing-media-assets-index.json
+          if-no-files-found: error
+          retention-days: 3
+
+  build-and-publish:
+    name: Build media assets (${{ matrix.name }})
+    needs:
+      - resolve-vulcan-config
+      - prepare-existing-index
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: 4k
+            profiles: "4kp30"
+          - name: 1080p-high-fps
+            profiles: "1080p120"
+          - name: 1080p-standard
+            profiles: "1080p30"
+          - name: 720p60
+            profiles: "720p60"
+          - name: 720p30
+            profiles: "720p30"
+          - name: 480p-preview
+            profiles: "480p30 preview_320p30"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: |
+          set -euo pipefail
+          if ! command -v brew >/dev/null 2>&1; then
+            echo "Homebrew is required on the macOS media asset runner." >&2
+            exit 1
+          fi
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            brew install ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Download existing index
+        uses: actions/download-artifact@v7
+        with:
+          name: insight-media-assets-existing-index
+          path: dist
+
+      - name: Build media asset renditions
+        run: |
+          set -euo pipefail
+          args=(
+            --sources media-assets/sources.json
+            --output "dist/media-assets-${{ matrix.name }}"
+            --encoder-mode videotoolbox
+          )
+          if [[ -f dist/existing-media-assets-index.json ]]; then
+            args+=(--existing-index dist/existing-media-assets-index.json)
+          fi
+          if [[ -n "${{ inputs.source_id }}" ]]; then
+            args+=(--source-id "${{ inputs.source_id }}")
+          fi
+          if [[ "${{ inputs.regenerate }}" == "true" ]]; then
+            args+=(--regenerate)
+          fi
+          for profile in ${{ matrix.profiles }}; do
+            args+=(--profile "${profile}")
+          done
+          python3 media-assets/build_media_assets.py "${args[@]}"
+          python3 -m json.tool "dist/media-assets-${{ matrix.name }}/index.json" >/dev/null
+          find "dist/media-assets-${{ matrix.name }}" -maxdepth 4 -type f -print
+
+      - name: Upload media asset shard
+        uses: actions/upload-artifact@v6
+        with:
+          name: insight-media-assets-${{ matrix.name }}
+          path: |
+            dist/media-assets-${{ matrix.name }}/**/*
+            !dist/media-assets-${{ matrix.name }}/index.json
+            !dist/media-assets-${{ matrix.name }}/removed-assets.json
+          if-no-files-found: error
+          retention-days: 3
+
+  publish-media-assets:
+    name: Publish media assets
+    needs:
+      - resolve-vulcan-config
+      - prepare-existing-index
+      - build-and-publish
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg and AWS CLI
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 -m pip install --upgrade awscli
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+          aws --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+          role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+
+      - name: Download existing index
+        uses: actions/download-artifact@v7
+        with:
+          name: insight-media-assets-existing-index
+          path: dist
+
+      - name: Download media asset shards
+        uses: actions/download-artifact@v7
+        with:
+          pattern: insight-media-assets-*
+          path: dist/shards
+
+      - name: Merge media asset shards and regenerate index
+        run: |
+          set -euo pipefail
+          mkdir -p dist/media-assets
+          find dist/shards -mindepth 2 -type f ! -name index.json ! -name removed-assets.json -print0 \
+            | while IFS= read -r -d '' file; do
+                rel="${file#dist/shards/*/}"
+                mkdir -p "dist/media-assets/$(dirname "${rel}")"
+                cp "${file}" "dist/media-assets/${rel}"
+              done
+
+          args=(
+            --sources media-assets/sources.json
+            --output dist/media-assets
+          )
+          if [[ -f dist/existing-media-assets-index.json ]]; then
+            args+=(--existing-index dist/existing-media-assets-index.json)
+          fi
+          if [[ -n "${{ inputs.source_id }}" ]]; then
+            args+=(--source-id "${{ inputs.source_id }}")
+          fi
+          if [[ "${{ inputs.regenerate }}" == "true" ]]; then
+            args+=(--regenerate)
+          fi
+          if [[ -z "${{ inputs.source_id }}" ]]; then
+            args+=(--prune-removed-sources)
+          fi
+          args+=(--index-only)
+          python3 media-assets/build_media_assets.py "${args[@]}"
+          python3 -m json.tool dist/media-assets/index.json >/dev/null
+          find dist/media-assets -maxdepth 4 -type f -print
+
+      - name: Delete media assets removed from sources.json
+        run: |
+          set -euo pipefail
+          if [[ ! -f dist/media-assets/removed-assets.json ]]; then
+            echo "No removed-assets.json manifest found; skipping deletion."
+            exit 0
+          fi
+          python3 - <<'PY' > /tmp/removed-media-assets.txt
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("dist/media-assets/removed-assets.json").read_text(encoding="utf-8"))
+          for asset in payload.get("assets", []):
+              path = str(asset.get("path", "")).strip()
+              if path:
+                  print(path)
+          PY
+          if [[ ! -s /tmp/removed-media-assets.txt ]]; then
+            echo "No removed media asset paths to delete."
+            exit 0
+          fi
+          while IFS= read -r rel; do
+            echo "Deleting removed media asset: ${rel}"
+            aws s3 rm \
+              "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/${rel}"
+          done < /tmp/removed-media-assets.txt
+
+      - name: Publish media assets to artifact bucket
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          aws s3 sync dist/media-assets \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
+            --exclude "removed-assets.json" \
+            "${publish_args[@]}"
+
+      - name: Invalidate CloudFront media asset cache
+        if: ${{ needs.resolve-vulcan-config.outputs.artifact_cloudfront_distribution_id != '' }}
+        run: |
+          set -euo pipefail
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ needs.resolve-vulcan-config.outputs.artifact_cloudfront_distribution_id }}" \
+            --paths "/${MEDIA_ASSETS_PREFIX}/*"
+
+      - name: Upload generated index
+        uses: actions/upload-artifact@v6
+        with:
+          name: insight-media-assets-index
+          path: dist/media-assets/index.json
+          if-no-files-found: error
+          retention-days: 7
