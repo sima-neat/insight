@@ -1,0 +1,85 @@
+name: Test Media Asset Conversion
+
+on:
+  workflow_dispatch:
+    inputs:
+      implementation_ref:
+        description: Branch, tag, or SHA containing media-assets/build_media_assets.py.
+        required: true
+        default: codex/issue-50-media-assets
+        type: string
+      source_id:
+        description: Source id from media-assets/sources.json.
+        required: true
+        default: parking_garage_cars
+        type: string
+      profiles:
+        description: Space-separated profile list to build for manual testing.
+        required: true
+        default: preview_320p30
+        type: string
+      encoder_mode:
+        description: Encoder backend for H.264/HEVC.
+        required: true
+        default: videotoolbox
+        type: choice
+        options:
+          - videotoolbox
+          - auto
+          - software
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  convert:
+    name: Convert selected media assets
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout implementation
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.implementation_ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: |
+          set -euo pipefail
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            brew install ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Convert selected profiles
+        run: |
+          set -euo pipefail
+          args=(
+            --sources media-assets/sources.json
+            --output dist/media-assets
+            --source-id "${{ inputs.source_id }}"
+            --encoder-mode "${{ inputs.encoder_mode }}"
+            --regenerate
+          )
+          for profile in ${{ inputs.profiles }}; do
+            args+=(--profile "${profile}")
+          done
+          python3 media-assets/build_media_assets.py "${args[@]}"
+          python3 -m json.tool dist/media-assets/index.json >/dev/null
+          find dist/media-assets -maxdepth 4 -type f -print
+
+      - name: Upload converted assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: media-assets-manual-test
+          path: dist/media-assets/**/*
+          if-no-files-found: error
+          retention-days: 3
