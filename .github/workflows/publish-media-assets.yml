@@ -92,7 +92,7 @@ jobs:
           python3 -m pip install --upgrade awscli
           aws --version
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials for media build
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
@@ -168,6 +168,13 @@ jobs:
           python3 media-assets/build_media_assets.py "${args[@]}"
           python3 -m json.tool "dist/media-assets-${{ matrix.name }}/index.json" >/dev/null
           find "dist/media-assets-${{ matrix.name }}" -maxdepth 4 -type f -print
+
+      - name: Refresh AWS credentials for shard index publish
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+          role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+          role-session-name: insight-media-shard-index-${{ github.run_id }}-${{ matrix.name }}
 
       - name: Publish media asset shard to S3
         run: |
