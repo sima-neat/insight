@@ -123,6 +123,16 @@ def parse_args() -> argparse.Namespace:
         help="Only generate metadata for files already present in the output folder; do not download or convert.",
     )
     parser.add_argument(
+        "--shard-index",
+        action="store_true",
+        help="Write index.json with only records produced by this invocation.",
+    )
+    parser.add_argument(
+        "--allow-empty-sources",
+        action="store_true",
+        help="Allow sources.json or --source-id filtering to select no sources.",
+    )
+    parser.add_argument(
         "--publish-s3-uri",
         default="",
         help="Optional destination S3 URI. When set, each generated media file is uploaded immediately.",
@@ -547,7 +557,7 @@ def main() -> int:
         missing = selected.difference({source.get("id") for source in sources})
         if missing:
             raise SystemExit(f"Unknown source id(s): {', '.join(sorted(missing))}")
-    if not sources:
+    if not sources and not args.allow_empty_sources:
         raise SystemExit("No sources selected")
     renditions = list(RENDITIONS)
     if args.profile:
@@ -569,6 +579,8 @@ def main() -> int:
         existing_assets.update(index_assets_by_path(merge_index))
         merged_index_sources.update(index_sources_by_id(merge_index))
     assets_by_path = dict(existing_assets)
+    shard_assets_by_path: dict[str, dict[str, Any]] = {}
+    shard_source_ids: set[str] = set()
     manifest_source_ids = {str(source.get("id")) for source in config.get("sources", []) if source.get("id")}
     removed_assets: list[dict[str, Any]] = []
     if args.prune_removed_sources:
@@ -615,6 +627,8 @@ def main() -> int:
                     )
                 asset = asset_record(source, rendition, output_root, rel_path, args.ffprobe)
                 assets_by_path[rel_path.as_posix()] = asset
+                shard_assets_by_path[rel_path.as_posix()] = asset
+                shard_source_ids.add(source["id"])
                 if args.publish_s3_uri and output_path.exists():
                     publish_asset_to_s3(
                         output_path,
@@ -642,7 +656,11 @@ def main() -> int:
         index_sources = dict(merged_index_sources)
     for source in sources:
         index_sources[source["id"]] = source
-    write_index(output_root, base_url, list(index_sources.values()), list(assets_by_path.values()))
+    if args.shard_index:
+        shard_sources = [source for source in sources if source["id"] in shard_source_ids]
+        write_index(output_root, base_url, shard_sources, list(shard_assets_by_path.values()))
+    else:
+        write_index(output_root, base_url, list(index_sources.values()), list(assets_by_path.values()))
     write_removed_assets(output_root, removed_assets)
     print(f"Wrote media asset index: {output_root / 'index.json'}")
     print(f"Wrote removed asset manifest: {output_root / 'removed-assets.json'}")

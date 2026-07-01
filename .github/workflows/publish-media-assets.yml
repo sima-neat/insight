@@ -50,6 +50,7 @@ jobs:
     name: Build media assets (${{ matrix.name }})
     needs: resolve-vulcan-config
     runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
     strategy:
       fail-fast: false
       matrix:
@@ -101,14 +102,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          if aws s3 cp \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/index.json" \
-            dist/existing-media-assets-index.json; then
+          bucket="${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}"
+          key="${MEDIA_ASSETS_PREFIX}/index.json"
+          if aws s3api head-object --bucket "${bucket}" --key "${key}" >/tmp/media-index-head.json 2>/tmp/media-index-head.err; then
+            aws s3 cp "s3://${bucket}/${key}" dist/existing-media-assets-index.json
             echo "Existing media asset index downloaded."
           else
-            echo "No existing media asset index found."
-            printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
-              > dist/existing-media-assets-index.json
+            if grep -Eq "Not Found|404" /tmp/media-index-head.err; then
+              echo "No existing media asset index found."
+              printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
+                > dist/existing-media-assets-index.json
+            else
+              cat /tmp/media-index-head.err >&2
+              exit 1
+            fi
           fi
           python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
 
@@ -125,8 +132,10 @@ jobs:
             --output "dist/media-assets-${{ matrix.name }}"
             --encoder-mode videotoolbox
             --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
-            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
+            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/media"
             --delete-after-publish
+            --shard-index
+            --allow-empty-sources
           )
           if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
             args+=(--publish-sse aws:kms)
@@ -165,7 +174,7 @@ jobs:
             publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
           fi
           aws s3 cp "dist/media-assets-${{ matrix.name }}/index.json" \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/${{ matrix.name }}.index.json" \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes/${{ matrix.name }}.index.json" \
             "${publish_args[@]}"
 
   publish-media-assets:
@@ -207,17 +216,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/staged-indexes
-          if aws s3 cp \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/index.json" \
-            dist/existing-media-assets-index.json; then
+          bucket="${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}"
+          key="${MEDIA_ASSETS_PREFIX}/index.json"
+          if aws s3api head-object --bucket "${bucket}" --key "${key}" >/tmp/media-index-head.json 2>/tmp/media-index-head.err; then
+            aws s3 cp "s3://${bucket}/${key}" dist/existing-media-assets-index.json
             echo "Existing media asset index downloaded."
           else
-            echo "No existing media asset index found."
-            printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
-              > dist/existing-media-assets-index.json
+            if grep -Eq "Not Found|404" /tmp/media-index-head.err; then
+              echo "No existing media asset index found."
+              printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
+                > dist/existing-media-assets-index.json
+            else
+              cat /tmp/media-index-head.err >&2
+              exit 1
+            fi
           fi
           aws s3 sync \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}" \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes" \
             dist/staged-indexes \
             --exclude "*" \
             --include "*.index.json"
@@ -237,6 +252,7 @@ jobs:
             --sources media-assets/sources.json
             --output dist/media-assets
             --index-only
+            --allow-empty-sources
           )
           if [[ -f dist/existing-media-assets-index.json ]]; then
             args+=(--existing-index dist/existing-media-assets-index.json)
@@ -256,6 +272,31 @@ jobs:
           python3 media-assets/build_media_assets.py "${args[@]}"
           python3 -m json.tool dist/media-assets/index.json >/dev/null
           find dist/media-assets -maxdepth 4 -type f -print
+
+      - name: Promote staged media assets
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          aws s3 sync \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/media" \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
+            "${publish_args[@]}"
+
+      - name: Publish canonical media asset index
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          aws s3 cp dist/media-assets/index.json \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/index.json" \
+            "${publish_args[@]}"
 
       - name: Delete media assets removed from sources.json
         if: ${{ needs.build-and-publish.result == 'success' }}
@@ -284,18 +325,6 @@ jobs:
             aws s3 rm \
               "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/${rel}"
           done < /tmp/removed-media-assets.txt
-
-      - name: Publish canonical media asset index
-        if: ${{ needs.build-and-publish.result == 'success' }}
-        run: |
-          set -euo pipefail
-          publish_args=()
-          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
-            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
-          fi
-          aws s3 cp dist/media-assets/index.json \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/index.json" \
-            "${publish_args[@]}"
 
       - name: Remove staged media asset indexes
         if: ${{ always() }}
