@@ -133,6 +133,8 @@ jobs:
             --encoder-mode videotoolbox
             --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
             --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/media"
+            --aws-refresh-role-arn "${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}"
+            --aws-refresh-region "${{ needs.resolve-vulcan-config.outputs.aws_region }}"
             --delete-after-publish
             --shard-index
             --allow-empty-sources

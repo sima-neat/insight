@@ -10,8 +10,10 @@ layout, and index generation.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -146,6 +148,31 @@ def parse_args() -> argparse.Namespace:
         "--publish-sse-kms-key-id",
         default="",
         help="Optional AWS KMS key id used with --publish-s3-uri when --publish-sse is aws:kms.",
+    )
+    parser.add_argument(
+        "--aws-refresh-role-arn",
+        default="",
+        help=(
+            "Optional AWS role ARN to re-assume with GitHub OIDC before S3 uploads. "
+            "Use this for long conversion jobs where the initial GitHub Actions AWS session can expire."
+        ),
+    )
+    parser.add_argument(
+        "--aws-refresh-region",
+        default="",
+        help="AWS region to set after refreshing credentials with --aws-refresh-role-arn.",
+    )
+    parser.add_argument(
+        "--aws-refresh-duration-seconds",
+        type=int,
+        default=3600,
+        help="Requested duration for refreshed upload credentials.",
+    )
+    parser.add_argument(
+        "--aws-refresh-threshold-seconds",
+        type=int,
+        default=900,
+        help="Refresh AWS credentials when they expire within this many seconds.",
     )
     parser.add_argument(
         "--delete-after-publish",
@@ -430,12 +457,98 @@ def s3_uri_join(base_uri: str, rel_path: Path) -> str:
     return f"{base_uri.rstrip('/')}/{rel_path.as_posix()}"
 
 
+class AwsCredentialRefresher:
+    """Refresh AWS upload credentials during long GitHub Actions media builds.
+
+    GitHub's configure-aws-credentials action normally mints credentials once at
+    the start of a job. 4K and interpolated high-FPS media conversion can take
+    longer than that session, so uploads late in the job must re-assume the
+    artifact publisher role with a fresh GitHub OIDC token.
+    """
+
+    def __init__(self, role_arn: str, region: str, duration_seconds: int, threshold_seconds: int) -> None:
+        self.role_arn = role_arn
+        self.region = region
+        self.duration_seconds = duration_seconds
+        self.threshold_seconds = threshold_seconds
+        self.expires_at = 0.0
+
+    def refresh_if_needed(self) -> None:
+        if not self.role_arn:
+            return
+        if time.time() + self.threshold_seconds < self.expires_at:
+            return
+        oidc_token = self._github_oidc_token()
+        session_name = f"insight-media-assets-{int(time.time())}"
+        command = [
+            "aws",
+            "sts",
+            "assume-role-with-web-identity",
+            "--role-arn",
+            self.role_arn,
+            "--role-session-name",
+            session_name,
+            "--web-identity-token",
+            oidc_token,
+            "--duration-seconds",
+            str(self.duration_seconds),
+            "--query",
+            "Credentials",
+            "--output",
+            "json",
+        ]
+        refresh_env = os.environ.copy()
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+            refresh_env.pop(name, None)
+        proc = subprocess.run(command, text=True, capture_output=True, env=refresh_env)
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise RuntimeError(f"Failed to refresh AWS upload credentials: {detail}")
+        payload = proc.stdout
+        credentials = json.loads(payload)
+        os.environ["AWS_ACCESS_KEY_ID"] = credentials["AccessKeyId"]
+        os.environ["AWS_SECRET_ACCESS_KEY"] = credentials["SecretAccessKey"]
+        os.environ["AWS_SESSION_TOKEN"] = credentials["SessionToken"]
+        if self.region:
+            os.environ["AWS_REGION"] = self.region
+            os.environ["AWS_DEFAULT_REGION"] = self.region
+        self.expires_at = parse_aws_expiration(credentials["Expiration"])
+        print(f"Refreshed AWS upload credentials; session expires at {credentials['Expiration']}")
+
+    @staticmethod
+    def _github_oidc_token() -> str:
+        request_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL")
+        request_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+        if not request_url or not request_token:
+            raise RuntimeError(
+                "GitHub OIDC token request environment is unavailable. "
+                "Set job permissions id-token: write before using --aws-refresh-role-arn."
+            )
+        separator = "&" if "?" in request_url else "?"
+        url = f"{request_url}{separator}{urllib.parse.urlencode({'audience': 'sts.amazonaws.com'})}"
+        request = urllib.request.Request(url, headers={"Authorization": f"bearer {request_token}"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        token = payload.get("value")
+        if not token:
+            raise RuntimeError("GitHub OIDC token response did not include a token value")
+        return str(token)
+
+
+def parse_aws_expiration(value: str) -> float:
+    normalized = value.replace("Z", "+00:00")
+    return dt.datetime.fromisoformat(normalized).timestamp()
+
+
 def publish_asset_to_s3(
     path: Path,
     destination_uri: str,
     sse: str,
     sse_kms_key_id: str,
+    credential_refresher: AwsCredentialRefresher | None,
 ) -> None:
+    if credential_refresher is not None:
+        credential_refresher.refresh_if_needed()
     command = ["aws", "s3", "cp", str(path), destination_uri]
     if sse:
         command.extend(["--sse", sse])
@@ -545,6 +658,14 @@ def main() -> int:
         validate_tool("aws")
     if args.delete_after_publish and not args.publish_s3_uri:
         raise SystemExit("--delete-after-publish requires --publish-s3-uri")
+    credential_refresher = None
+    if args.aws_refresh_role_arn:
+        credential_refresher = AwsCredentialRefresher(
+            args.aws_refresh_role_arn,
+            args.aws_refresh_region,
+            args.aws_refresh_duration_seconds,
+            args.aws_refresh_threshold_seconds,
+        )
     encoder_mode = choose_encoder_mode(args.encoder_mode, available_ffmpeg_encoders(args.ffmpeg))
     print(f"Using encoder mode: {encoder_mode}")
 
@@ -635,6 +756,7 @@ def main() -> int:
                         s3_uri_join(args.publish_s3_uri, rel_path),
                         args.publish_sse,
                         args.publish_sse_kms_key_id,
+                        credential_refresher,
                     )
                     if args.delete_after_publish:
                         output_path.unlink()
