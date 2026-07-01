@@ -140,6 +140,14 @@ def parse_args() -> argparse.Namespace:
         help="Optional destination S3 URI. When set, each generated media file is uploaded immediately.",
     )
     parser.add_argument(
+        "--skip-existing-s3-uri",
+        default="",
+        help=(
+            "Optional S3 URI prefix for already-published assets. When a target object exists there, "
+            "download it for metadata and skip transcoding."
+        ),
+    )
+    parser.add_argument(
         "--publish-sse",
         default="",
         help="Optional AWS S3 server-side encryption mode used with --publish-s3-uri.",
@@ -457,6 +465,13 @@ def s3_uri_join(base_uri: str, rel_path: Path) -> str:
     return f"{base_uri.rstrip('/')}/{rel_path.as_posix()}"
 
 
+def parse_s3_uri(uri: str) -> tuple[str, str]:
+    parsed = urllib.parse.urlparse(uri)
+    if parsed.scheme != "s3" or not parsed.netloc:
+        raise ValueError(f"Invalid S3 URI: {uri}")
+    return parsed.netloc, parsed.path.lstrip("/")
+
+
 class AwsCredentialRefresher:
     """Refresh AWS upload credentials during long GitHub Actions media builds.
 
@@ -556,6 +571,35 @@ def publish_asset_to_s3(
         command.extend(["--sse-kms-key-id", sse_kms_key_id])
     print(f"Uploading {path.name} to {destination_uri}")
     subprocess.run(command, check=True)
+
+
+def s3_object_exists(destination_uri: str, credential_refresher: AwsCredentialRefresher | None) -> bool:
+    if credential_refresher is not None:
+        credential_refresher.refresh_if_needed()
+    bucket, key = parse_s3_uri(destination_uri)
+    proc = subprocess.run(
+        ["aws", "s3api", "head-object", "--bucket", bucket, "--key", key],
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        return True
+    detail = (proc.stderr or proc.stdout).strip()
+    if "Not Found" in detail or "404" in detail or "NoSuchKey" in detail:
+        return False
+    raise RuntimeError(f"Failed to check S3 object {destination_uri}: {detail}")
+
+
+def download_asset_from_s3(
+    source_uri: str,
+    output_path: Path,
+    credential_refresher: AwsCredentialRefresher | None,
+) -> None:
+    if credential_refresher is not None:
+        credential_refresher.refresh_if_needed()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Found existing published object, downloading metadata source: {source_uri}")
+    subprocess.run(["aws", "s3", "cp", source_uri, str(output_path)], check=True)
 
 
 def load_existing_index(path: Path | None) -> dict[str, Any]:
@@ -719,10 +763,8 @@ def main() -> int:
 
     try:
         for source in sources:
-            raw_path = None if args.index_only else download_source(source, raw_cache, base_url)
-            source_fps = 0.0 if raw_path is None else source_video_rate(args.ffprobe, raw_path)
-            if source_fps:
-                print(f"Detected source FPS for {source['id']}: {source_fps:.3f}")
+            raw_path = None
+            source_fps = 0.0
             for rendition in renditions:
                 rel_path = relative_output_path(source["id"], rendition)
                 output_path = output_root / rel_path
@@ -730,34 +772,47 @@ def main() -> int:
                 if already_published and not args.regenerate:
                     print(f"Skipping already-published asset from existing index: {rel_path.as_posix()}")
                     continue
+                reused_existing_s3_object = False
                 if args.index_only:
                     if not output_path.exists():
                         print(f"Skipping missing output while indexing: {rel_path.as_posix()}")
                         continue
                 elif not output_path.exists() or args.regenerate:
-                    if raw_path is None:
-                        raise RuntimeError("internal error: raw source path missing during conversion")
-                    run_ffmpeg(
-                        args.ffmpeg,
-                        raw_path,
-                        output_path,
-                        rendition,
-                        encoder_mode,
-                        source_fps,
-                        args.fps_upsample_mode,
-                    )
+                    existing_s3_uri = s3_uri_join(args.skip_existing_s3_uri, rel_path) if args.skip_existing_s3_uri else ""
+                    if existing_s3_uri and not args.regenerate and s3_object_exists(existing_s3_uri, credential_refresher):
+                        download_asset_from_s3(existing_s3_uri, output_path, credential_refresher)
+                        reused_existing_s3_object = True
+                    else:
+                        if raw_path is None:
+                            raw_path = download_source(source, raw_cache, base_url)
+                        if not source_fps:
+                            source_fps = source_video_rate(args.ffprobe, raw_path)
+                            if source_fps:
+                                print(f"Detected source FPS for {source['id']}: {source_fps:.3f}")
+                        run_ffmpeg(
+                            args.ffmpeg,
+                            raw_path,
+                            output_path,
+                            rendition,
+                            encoder_mode,
+                            source_fps,
+                            args.fps_upsample_mode,
+                        )
                 asset = asset_record(source, rendition, output_root, rel_path, args.ffprobe)
                 assets_by_path[rel_path.as_posix()] = asset
                 shard_assets_by_path[rel_path.as_posix()] = asset
                 shard_source_ids.add(source["id"])
                 if args.publish_s3_uri and output_path.exists():
-                    publish_asset_to_s3(
-                        output_path,
-                        s3_uri_join(args.publish_s3_uri, rel_path),
-                        args.publish_sse,
-                        args.publish_sse_kms_key_id,
-                        credential_refresher,
-                    )
+                    if reused_existing_s3_object:
+                        print(f"Skipping upload for existing published object: {rel_path.as_posix()}")
+                    else:
+                        publish_asset_to_s3(
+                            output_path,
+                            s3_uri_join(args.publish_s3_uri, rel_path),
+                            args.publish_sse,
+                            args.publish_sse_kms_key_id,
+                            credential_refresher,
+                        )
                     if args.delete_after_publish:
                         output_path.unlink()
                         print(f"Deleted local media file after upload: {output_path}")
