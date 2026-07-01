@@ -7,6 +7,30 @@
       "title": "Parking Garage Cars",
       "description": "Parking garage traffic scene for Insight media-source and streaming validation.",
       "file": "parking_garage_cars.mp4"
+    },
+    {
+      "id": "person_gym_bike",
+      "title": "Person Gym Bike",
+      "description": "Indoor gym cycling scene for Insight media-source and video analytics validation.",
+      "file": "person_gym_bike.mp4"
+    },
+    {
+      "id": "person_gym_jumping",
+      "title": "Person Gym Jumping",
+      "description": "Indoor gym jumping exercise scene for Insight media-source and video analytics validation.",
+      "file": "person_gym_jumping.mp4"
+    },
+    {
+      "id": "person_gym_threadmill",
+      "title": "Person Gym Treadmill",
+      "description": "Indoor gym treadmill exercise scene for Insight media-source and video analytics validation.",
+      "file": "person_gym_threadmill.mp4"
+    },
+    {
+      "id": "person_gym_workout",
+      "title": "Person Gym Workout",
+      "description": "Indoor gym workout scene for Insight media-source and video analytics validation.",
+      "file": "person_gym_workout.mp4"
     }
   ]
 }
