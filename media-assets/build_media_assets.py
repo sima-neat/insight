@@ -140,6 +140,14 @@ def parse_args() -> argparse.Namespace:
         help="Optional destination S3 URI. When set, each generated media file is uploaded immediately.",
     )
     parser.add_argument(
+        "--publish-progress-index-s3-uri",
+        default="",
+        help=(
+            "Optional destination S3 URI for this shard's progress index. "
+            "When set, index.json is updated and uploaded after each completed asset."
+        ),
+    )
+    parser.add_argument(
         "--skip-existing-s3-uri",
         default="",
         help=(
@@ -673,6 +681,17 @@ def write_index(output_root: Path, base_url: str, sources: list[dict[str, Any]],
         f.write("\n")
 
 
+def write_shard_index(
+    output_root: Path,
+    base_url: str,
+    sources: list[dict[str, Any]],
+    shard_source_ids: set[str],
+    shard_assets_by_path: dict[str, dict[str, Any]],
+) -> None:
+    shard_sources = [source for source in sources if source["id"] in shard_source_ids]
+    write_index(output_root, base_url, shard_sources, list(shard_assets_by_path.values()))
+
+
 def write_removed_assets(output_root: Path, removed_assets: list[dict[str, Any]]) -> None:
     payload = {
         "schema": "sima.neat.insight.media-assets.removed.v1",
@@ -698,7 +717,7 @@ def main() -> int:
     args = parse_args()
     validate_tool(args.ffmpeg)
     validate_tool(args.ffprobe)
-    if args.publish_s3_uri:
+    if args.publish_s3_uri or args.publish_progress_index_s3_uri:
         validate_tool("aws")
     if args.delete_after_publish and not args.publish_s3_uri:
         raise SystemExit("--delete-after-publish requires --publish-s3-uri")
@@ -816,6 +835,15 @@ def main() -> int:
                     if args.delete_after_publish:
                         output_path.unlink()
                         print(f"Deleted local media file after upload: {output_path}")
+                if args.publish_progress_index_s3_uri:
+                    write_shard_index(output_root, base_url, sources, shard_source_ids, shard_assets_by_path)
+                    publish_asset_to_s3(
+                        output_root / "index.json",
+                        args.publish_progress_index_s3_uri,
+                        args.publish_sse,
+                        args.publish_sse_kms_key_id,
+                        credential_refresher,
+                    )
 
             if raw_path is not None and not args.keep_raw and args.raw_cache is not None:
                 raw_path.unlink(missing_ok=True)
@@ -834,8 +862,7 @@ def main() -> int:
     for source in sources:
         index_sources[source["id"]] = source
     if args.shard_index:
-        shard_sources = [source for source in sources if source["id"] in shard_source_ids]
-        write_index(output_root, base_url, shard_sources, list(shard_assets_by_path.values()))
+        write_shard_index(output_root, base_url, sources, shard_source_ids, shard_assets_by_path)
     else:
         write_index(output_root, base_url, list(index_sources.values()), list(assets_by_path.values()))
     write_removed_assets(output_root, removed_assets)

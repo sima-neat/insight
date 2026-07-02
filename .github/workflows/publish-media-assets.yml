@@ -132,7 +132,8 @@ jobs:
             --output "dist/media-assets-${{ matrix.name }}"
             --encoder-mode videotoolbox
             --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
-            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/media"
+            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
+            --publish-progress-index-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes/${{ matrix.name }}.index.json"
             --skip-existing-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
             --aws-refresh-role-arn "${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}"
             --aws-refresh-region "${{ needs.resolve-vulcan-config.outputs.aws_region }}"
@@ -283,19 +284,6 @@ jobs:
           python3 -m json.tool dist/media-assets/index.json >/dev/null
           find dist/media-assets -maxdepth 4 -type f -print
 
-      - name: Promote staged media assets
-        if: ${{ needs.build-and-publish.result == 'success' }}
-        run: |
-          set -euo pipefail
-          publish_args=()
-          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
-            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
-          fi
-          aws s3 sync \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/media" \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
-            "${publish_args[@]}"
-
       - name: Publish canonical media asset index
         if: ${{ needs.build-and-publish.result == 'success' }}
         run: |
@@ -337,7 +325,7 @@ jobs:
           done < /tmp/removed-media-assets.txt
 
       - name: Remove staged media asset indexes
-        if: ${{ always() }}
+        if: ${{ needs.build-and-publish.result == 'success' }}
         run: |
           set -euo pipefail
           aws s3 rm \
