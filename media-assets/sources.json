@@ -31,6 +31,72 @@
       "title": "Person Gym Workout",
       "description": "Indoor gym workout scene for Insight media-source and video analytics validation.",
       "file": "person_gym_workout.mp4"
+    },
+    {
+      "id": "sj_almaden_street",
+      "title": "San Jose Almaden Street",
+      "description": "Urban San Jose street scene for Insight media-source and traffic analytics validation.",
+      "file": "sj_almaden_street.mp4"
+    },
+    {
+      "id": "sj_highway",
+      "title": "San Jose Highway",
+      "description": "San Jose highway traffic scene for Insight media-source and vehicle analytics validation.",
+      "file": "sj_highway.mp4"
+    },
+    {
+      "id": "sj_highway2",
+      "title": "San Jose Highway 2",
+      "description": "San Jose highway traffic scene for Insight media-source and vehicle analytics validation.",
+      "file": "sj_highway2.mp4"
+    },
+    {
+      "id": "sj_highway3",
+      "title": "San Jose Highway 3",
+      "description": "San Jose highway traffic scene for Insight media-source and vehicle analytics validation.",
+      "file": "sj_highway3.mp4"
+    },
+    {
+      "id": "sj_highway4",
+      "title": "San Jose Highway 4",
+      "description": "San Jose highway traffic scene for Insight media-source and vehicle analytics validation.",
+      "file": "sj_highway4.mp4"
+    },
+    {
+      "id": "sj_intersection_san_carlos",
+      "title": "San Jose San Carlos Intersection",
+      "description": "San Jose intersection scene for Insight media-source and traffic analytics validation.",
+      "file": "sj_intersection_san_carlos.mp4"
+    },
+    {
+      "id": "sj_intersection_san_carlos2",
+      "title": "San Jose San Carlos Intersection 2",
+      "description": "San Jose intersection scene for Insight media-source and traffic analytics validation.",
+      "file": "sj_intersection_san_carlos2.mp4"
+    },
+    {
+      "id": "sj_intersection",
+      "title": "San Jose Intersection",
+      "description": "San Jose intersection scene for Insight media-source and traffic analytics validation.",
+      "file": "sj_intersection.mp4"
+    },
+    {
+      "id": "sj_park",
+      "title": "San Jose Park",
+      "description": "San Jose park scene for Insight media-source and pedestrian analytics validation.",
+      "file": "sj_park.mp4"
+    },
+    {
+      "id": "sj_train_cars",
+      "title": "San Jose Train Cars",
+      "description": "San Jose train and vehicle scene for Insight media-source and traffic analytics validation.",
+      "file": "sj_train_cars.mp4"
+    },
+    {
+      "id": "sj_walking_street",
+      "title": "San Jose Walking Street",
+      "description": "San Jose pedestrian street scene for Insight media-source and pedestrian analytics validation.",
+      "file": "sj_walking_street.mp4"
     }
   ]
 }
