@@ -116,6 +116,9 @@ jobs:
             echo "Homebrew is required on the macOS media asset runner." >&2
             exit 1
           fi
+          if brew tap | grep -qx "aws/tap"; then
+            brew untap aws/tap
+          fi
           if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
             brew install ffmpeg
           fi
