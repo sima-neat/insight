@@ -207,7 +207,7 @@ jobs:
         with:
           aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
           role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
-          role-session-name: insight-media-shard-index-${{ github.run_id }}-${{ matrix.name }}
+          role-session-name: insight-media-${{ github.run_id }}
 
       - name: Publish media asset shard to S3
         run: |
