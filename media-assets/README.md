@@ -23,9 +23,10 @@ writes `index.json` for tools and workflows to consume.
 Use `--regenerate` to rebuild outputs even when an existing destination manifest
 already lists them.
 
-The GitHub publishing workflow uploads each completed rendition directly to the
-durable `media-assets/` artifact prefix and updates a per-run shard index as
-progress is made. If a long conversion job is cancelled or times out, already
-uploaded files can be reused by a later run instead of being transcoded again.
-The canonical `media-assets/index.json` is refreshed only after all workflow
-shards complete successfully, avoiding concurrent writes from parallel jobs.
+The GitHub publishing workflow shards conversion by source video and profile
+group, uploads each completed rendition directly to the durable `media-assets/`
+artifact prefix, and updates a per-run shard index as progress is made. If a
+long conversion job is cancelled or times out, already uploaded files can be
+reused by a later run instead of being transcoded again. The canonical
+`media-assets/index.json` is refreshed only after all workflow shards complete
+successfully, avoiding concurrent writes from parallel jobs.

@@ -25,6 +25,11 @@ on:
         options:
           - interpolate
           - duplicate
+      max_parallel:
+        description: Maximum number of media conversion shards to run at once.
+        required: false
+        default: "8"
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -46,27 +51,54 @@ jobs:
     with:
       vulcan_env: ${{ vars.VULCAN_ENV || 'production' }}
 
+  prepare-media-matrix:
+    name: Prepare media matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_json: ${{ steps.matrix.outputs.matrix_json }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Validate max parallel
+        run: |
+          set -euo pipefail
+          if [[ ! "${{ inputs.max_parallel }}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "max_parallel must be a positive integer." >&2
+            exit 1
+          fi
+
+      - name: Create matrix
+        id: matrix
+        run: |
+          set -euo pipefail
+          args=(
+            --sources media-assets/sources.json
+            --github-output "${GITHUB_OUTPUT}"
+          )
+          if [[ -n "${{ inputs.source_id }}" ]]; then
+            args+=(--source-id "${{ inputs.source_id }}")
+          fi
+          python3 media-assets/create_media_asset_matrix.py "${args[@]}"
+
   build-and-publish:
     name: Build media assets (${{ matrix.name }})
-    needs: resolve-vulcan-config
+    needs:
+      - resolve-vulcan-config
+      - prepare-media-matrix
     runs-on: ${{ fromJSON(inputs.runner_labels) }}
     environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
       matrix:
-        include:
-          - name: 4k
-            profiles: "4kp30"
-          - name: 1080p-high-fps
-            profiles: "1080p120"
-          - name: 1080p-standard
-            profiles: "1080p30"
-          - name: 720p60
-            profiles: "720p60"
-          - name: 720p30
-            profiles: "720p30"
-          - name: 480p-preview
-            profiles: "480p30 preview_320p30"
+        include: ${{ fromJSON(needs.prepare-media-matrix.outputs.matrix_json) }}
 
     steps:
       - name: Checkout
@@ -121,7 +153,7 @@ jobs:
 
       - name: Build media asset renditions
         env:
-          SOURCE_ID: ${{ inputs.source_id }}
+          SOURCE_ID: ${{ matrix.source_id }}
           REGENERATE: ${{ inputs.regenerate }}
           FPS_UPSAMPLE_MODE: ${{ inputs.fps_upsample_mode }}
           PROFILES: ${{ matrix.profiles }}
