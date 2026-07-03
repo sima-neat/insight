@@ -711,6 +711,11 @@ export default function App() {
     return typeMatchingCatalogAssets.filter((asset) => selected.has(asset.path))
   }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
   const selectedCatalogAsset = matchingCatalogAssets.find((asset) => asset.path === catalogAssetPath) || matchingCatalogAssets[0] || null
+  const selectedCatalogAssetBytes = selectedCatalogAsset ? Number(selectedCatalogAsset.bytes || 0) : 0
+  const selectedTypeCatalogBytes = useMemo(
+    () => selectedTypeCatalogAssets.reduce((total, asset) => total + Number(asset.bytes || 0), 0),
+    [selectedTypeCatalogAssets]
+  )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
@@ -2072,7 +2077,12 @@ export default function App() {
                               <div className="catalog-import-footer">
                                 <div>
                                   <strong>{selectedCatalogAsset ? catalogAssetLabel(selectedCatalogAsset) : 'No variant selected'}</strong>
-                                  {selectedCatalogAsset && <p>{selectedCatalogAsset.path}</p>}
+                                  {selectedCatalogAsset && (
+                                    <>
+                                      <p>{selectedCatalogAsset.path}</p>
+                                      <p>Total selected: {formatBytes(selectedCatalogAssetBytes)}</p>
+                                    </>
+                                  )}
                                 </div>
                                 <button
                                   type="button"
@@ -2153,6 +2163,7 @@ export default function App() {
                           <div>
                             <strong>{selectedTypeCatalogAssets.length} asset(s) selected</strong>
                             <p>{catalogProfile || 'Any resolution & fps'} / {catalogCodec ? prettyCodec(catalogCodec) : 'Any codec'}</p>
+                            <p>Total selected: {formatBytes(selectedTypeCatalogBytes)}</p>
                           </div>
                           <button
                             type="button"
