@@ -1151,6 +1151,9 @@ def _youtube_video_id(url: str) -> str:
     elif parsed.path.startswith("/embed/"):
         parts = [part for part in parsed.path.split("/") if part]
         candidate = parts[1] if len(parts) > 1 else ""
+    elif parsed.path.startswith("/live/"):
+        parts = [part for part in parsed.path.split("/") if part]
+        candidate = parts[1] if len(parts) > 1 else ""
 
     if not YOUTUBE_ID_RE.match(candidate):
         raise ValueError("Could not find a valid YouTube video id in the URL.")
