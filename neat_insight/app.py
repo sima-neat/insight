@@ -1067,21 +1067,29 @@ def _safe_catalog_asset_path(asset_path: str) -> str:
 def _catalog_import_filename(asset: dict[str, Any]) -> str:
     source_id = secure_filename(str(asset.get("source_id") or "catalog_asset")) or "catalog_asset"
     profile = secure_filename(str(asset.get("profile") or f"{asset.get('target_height') or 'video'}p")) or "video"
-    fps = str(asset.get("fps") or "").strip()
+    fps = secure_filename(str(asset.get("fps") or "").strip())
     codec = secure_filename(str(asset.get("codec") or asset.get("codec_name") or "video")) or "video"
     extension = secure_filename(str(asset.get("container") or Path(str(asset.get("path") or "")).suffix.lstrip(".") or "mp4")) or "mp4"
     fps_part = f"_{fps}fps" if fps else ""
     return f"{source_id}_{profile}{fps_part}_{codec}.{extension.lower()}"
 
 
+def _ensure_media_target_path(path: Path) -> Path:
+    media_root = MEDIA_DIR.resolve()
+    resolved = path.resolve(strict=False)
+    if not resolved.is_relative_to(media_root):
+        raise ValueError("Invalid media target path")
+    return path
+
+
 def _unique_media_path(rel_path: Path) -> Path:
-    candidate = MEDIA_DIR / rel_path
+    candidate = _ensure_media_target_path(MEDIA_DIR / rel_path)
     if not candidate.exists():
         return candidate
     stem = candidate.stem
     suffix = candidate.suffix
     for index in range(2, 1000):
-        next_candidate = candidate.with_name(f"{stem}_{index}{suffix}")
+        next_candidate = _ensure_media_target_path(candidate.with_name(f"{stem}_{index}{suffix}"))
         if not next_candidate.exists():
             return next_candidate
     raise RuntimeError(f"Could not choose a unique filename for {rel_path}")

@@ -2505,7 +2505,7 @@ button:disabled {
 
 .catalog-source-list {
   min-height: 0;
-  overflow: visible;
+  overflow: auto;
   display: grid;
   align-content: start;
   gap: 6px;
@@ -2620,7 +2620,7 @@ button:disabled {
 
 .catalog-variant-list {
   min-height: 0;
-  overflow: visible;
+  overflow: auto;
   display: grid;
   align-content: start;
   gap: 6px;
