@@ -34,7 +34,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   MEDIA_ASSETS_PREFIX: media-assets
-  MEDIA_ASSETS_STAGING_PREFIX: media-assets/_staging/${{ github.run_id }}-${{ github.run_attempt }}
+  MEDIA_ASSETS_STAGING_PREFIX: media-assets/_staging/${{ github.run_id }}
 
 permissions:
   contents: read
@@ -56,6 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix_json: ${{ steps.matrix.outputs.matrix_json }}
+      max_parallel: ${{ steps.validate-max-parallel.outputs.max_parallel }}
 
     steps:
       - name: Checkout
@@ -67,23 +68,29 @@ jobs:
           python-version: "3.11"
 
       - name: Validate max parallel
+        id: validate-max-parallel
+        env:
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
         run: |
           set -euo pipefail
-          if [[ ! "${{ inputs.max_parallel }}" =~ ^[1-9][0-9]*$ ]]; then
+          if [[ ! "${MAX_PARALLEL}" =~ ^[1-9][0-9]*$ ]]; then
             echo "max_parallel must be a positive integer." >&2
             exit 1
           fi
+          echo "max_parallel=${MAX_PARALLEL}" >> "${GITHUB_OUTPUT}"
 
       - name: Create matrix
         id: matrix
+        env:
+          SOURCE_ID: ${{ inputs.source_id }}
         run: |
           set -euo pipefail
           args=(
             --sources media-assets/sources.json
             --github-output "${GITHUB_OUTPUT}"
           )
-          if [[ -n "${{ inputs.source_id }}" ]]; then
-            args+=(--source-id "${{ inputs.source_id }}")
+          if [[ -n "${SOURCE_ID}" ]]; then
+            args+=(--source-id "${SOURCE_ID}")
           fi
           python3 media-assets/create_media_asset_matrix.py "${args[@]}"
 
@@ -96,7 +103,7 @@ jobs:
     environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      max-parallel: ${{ fromJSON(needs.prepare-media-matrix.outputs.max_parallel) }}
       matrix:
         include: ${{ fromJSON(needs.prepare-media-matrix.outputs.matrix_json) }}
 
@@ -134,6 +141,7 @@ jobs:
           role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
 
       - name: Fetch existing media asset index
+        if: ${{ matrix.prune_only != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -155,6 +163,7 @@ jobs:
           python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
 
       - name: Build media asset renditions
+        if: ${{ matrix.prune_only != 'true' }}
         env:
           SOURCE_ID: ${{ matrix.source_id }}
           REGENERATE: ${{ inputs.regenerate }}
@@ -167,7 +176,7 @@ jobs:
             --output "dist/media-assets-${{ matrix.name }}"
             --encoder-mode videotoolbox
             --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
-            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
+            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/assets"
             --publish-progress-index-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes/${{ matrix.name }}.index.json"
             --skip-existing-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
             --aws-refresh-role-arn "${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}"
@@ -206,6 +215,7 @@ jobs:
           find "dist/media-assets-${{ matrix.name }}" -maxdepth 4 -type f -print
 
       - name: Refresh AWS credentials for shard index publish
+        if: ${{ matrix.prune_only != 'true' }}
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
@@ -213,6 +223,7 @@ jobs:
           role-session-name: insight-media-${{ github.run_id }}
 
       - name: Publish media asset shard to S3
+        if: ${{ matrix.prune_only != 'true' }}
         run: |
           set -euo pipefail
           publish_args=()
@@ -277,11 +288,16 @@ jobs:
               exit 1
             fi
           fi
-          aws s3 sync \
-            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes" \
-            dist/staged-indexes \
-            --exclude "*" \
-            --include "*.index.json"
+          staged_index_prefix="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes"
+          if aws s3 ls "${staged_index_prefix}/" >/dev/null 2>&1; then
+            aws s3 sync \
+              "${staged_index_prefix}" \
+              dist/staged-indexes \
+              --exclude "*" \
+              --include "*.index.json"
+          else
+            echo "No staged media asset indexes found."
+          fi
           python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
           find dist/staged-indexes -type f -name "*.index.json" -print
 
@@ -318,6 +334,24 @@ jobs:
           python3 media-assets/build_media_assets.py "${args[@]}"
           python3 -m json.tool dist/media-assets/index.json >/dev/null
           find dist/media-assets -maxdepth 4 -type f -print
+
+      - name: Promote staged media assets
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          staged_asset_prefix="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/assets"
+          if aws s3 ls "${staged_asset_prefix}/" >/dev/null 2>&1; then
+            aws s3 sync \
+              "${staged_asset_prefix}" \
+              "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
+              "${publish_args[@]}"
+          else
+            echo "No staged media assets found."
+          fi
 
       - name: Publish canonical media asset index
         if: ${{ needs.build-and-publish.result == 'success' }}

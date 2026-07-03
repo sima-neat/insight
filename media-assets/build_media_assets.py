@@ -634,6 +634,30 @@ def index_sources_by_id(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return sources
 
 
+def source_index_record(source: dict[str, Any], base_url: str) -> dict[str, Any]:
+    return {
+        "id": source["id"],
+        "title": source.get("title", source["id"]),
+        "description": source.get("description", ""),
+        "file": source.get("file", source_filename(source)),
+        "url": source_url(source, base_url),
+    }
+
+
+def source_record_changed(source: dict[str, Any], existing_source: dict[str, Any] | None, base_url: str) -> bool:
+    if existing_source is None:
+        return False
+    current = source_index_record(source, base_url)
+    return any(str(existing_source.get(key, "")) != str(current.get(key, "")) for key in current)
+
+
+def source_content_changed(source: dict[str, Any], existing_source: dict[str, Any] | None, base_url: str) -> bool:
+    if existing_source is None:
+        return False
+    current = source_index_record(source, base_url)
+    return any(str(existing_source.get(key, "")) != str(current.get(key, "")) for key in ("file", "url"))
+
+
 def asset_record(
     source: dict[str, Any], rendition: Rendition, output_root: Path, rel_path: Path, ffprobe: str
 ) -> dict[str, Any]:
@@ -663,16 +687,7 @@ def write_index(output_root: Path, base_url: str, sources: list[dict[str, Any]],
     index = {
         "schema": "sima.neat.insight.media-assets.index.v1",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "sources": [
-            {
-                "id": source["id"],
-                "title": source.get("title", source["id"]),
-                "description": source.get("description", ""),
-                "file": source.get("file", source_filename(source)),
-                "url": source_url(source, base_url),
-            }
-            for source in sources
-        ],
+        "sources": [source_index_record(source, base_url) for source in sources],
         "assets": sorted(assets, key=lambda item: (item["source_id"], item["profile"], item["codec"])),
     }
     output_root.mkdir(parents=True, exist_ok=True)
@@ -757,7 +772,8 @@ def main() -> int:
     output_root.mkdir(parents=True, exist_ok=True)
     existing_index = load_existing_index(args.existing_index)
     existing_assets = index_assets_by_path(existing_index)
-    merged_index_sources = index_sources_by_id(existing_index)
+    existing_index_sources = index_sources_by_id(existing_index)
+    merged_index_sources = dict(existing_index_sources)
     for merge_index_path in args.merge_index:
         merge_index = load_existing_index(merge_index_path)
         existing_assets.update(index_assets_by_path(merge_index))
@@ -784,11 +800,16 @@ def main() -> int:
         for source in sources:
             raw_path = None
             source_fps = 0.0
+            existing_source = existing_index_sources.get(str(source.get("id", "")))
+            source_record_has_changed = source_record_changed(source, existing_source, base_url)
+            source_media_has_changed = source_content_changed(source, existing_source, base_url)
+            if source_record_has_changed:
+                print(f"Refreshing asset records for changed source definition: {source['id']}")
             for rendition in renditions:
                 rel_path = relative_output_path(source["id"], rendition)
                 output_path = output_root / rel_path
                 already_published = rel_path.as_posix() in existing_assets
-                if already_published and not args.regenerate:
+                if already_published and not source_record_has_changed and not args.regenerate:
                     print(f"Skipping already-published asset from existing index: {rel_path.as_posix()}")
                     continue
                 reused_existing_s3_object = False
@@ -797,7 +818,11 @@ def main() -> int:
                         print(f"Skipping missing output while indexing: {rel_path.as_posix()}")
                         continue
                 elif not output_path.exists() or args.regenerate:
-                    existing_s3_uri = s3_uri_join(args.skip_existing_s3_uri, rel_path) if args.skip_existing_s3_uri else ""
+                    existing_s3_uri = (
+                        s3_uri_join(args.skip_existing_s3_uri, rel_path)
+                        if args.skip_existing_s3_uri and not source_media_has_changed
+                        else ""
+                    )
                     if existing_s3_uri and not args.regenerate and s3_object_exists(existing_s3_uri, credential_refresher):
                         download_asset_from_s3(existing_s3_uri, output_path, credential_refresher)
                         reused_existing_s3_object = True

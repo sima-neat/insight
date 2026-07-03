@@ -75,7 +75,15 @@ def create_matrix(sources: list[dict[str, Any]], source_id: str) -> list[dict[st
                 }
             )
     if not matrix:
-        raise SystemExit("Media asset matrix is empty")
+        matrix.append(
+            {
+                "name": "prune-only",
+                "source_id": "",
+                "profile_group": "prune",
+                "profiles": "",
+                "prune_only": "true",
+            }
+        )
     return matrix
 
 
