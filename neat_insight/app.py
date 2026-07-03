@@ -1,6 +1,7 @@
 import argparse
 import atexit
 import base64
+import hashlib
 import ipaddress
 import json
 import logging
@@ -80,8 +81,15 @@ STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg"
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
 UNKNOWN_CODEC = "unknown"
 OPTIMIZED_VIDEO_BITRATE = "2M"
-OPTIMIZED_VIDEO_FPS = "30"
 OPTIMIZED_VIDEO_GOP = "30"
+MEDIA_CATALOG_INDEX_URL = os.getenv(
+    "NEAT_INSIGHT_MEDIA_CATALOG_INDEX_URL",
+    "https://artifacts.neat.sima.ai/media-assets/index.json",
+)
+MEDIA_CATALOG_BASE_URL = os.getenv(
+    "NEAT_INSIGHT_MEDIA_CATALOG_BASE_URL",
+    "https://artifacts.neat.sima.ai/media-assets/",
+)
 
 
 def _resolve_frontend_dist() -> Path:
@@ -128,6 +136,12 @@ LOG_DIR = "/var/log"
 
 def _json_error(message: str, status: int = 400):
     return jsonify({"error": message}), status
+
+
+def _json_urlopen(url: str, timeout: float = 20.0) -> dict[str, Any]:
+    request_obj = urllib.request.Request(url, headers={"User-Agent": "neat-insight/asset-catalog"})
+    with urllib.request.urlopen(request_obj, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def _request_host_name() -> str:
@@ -942,8 +956,6 @@ def _optimize_video_file(path: Path):
         f"keyint={OPTIMIZED_VIDEO_GOP}:min-keyint={OPTIMIZED_VIDEO_GOP}:no-scenecut=1:repeat-headers=1:aud=1",
         "-b:v",
         OPTIMIZED_VIDEO_BITRATE,
-        "-r",
-        OPTIMIZED_VIDEO_FPS,
         "-g",
         OPTIMIZED_VIDEO_GOP,
         "-bf",
@@ -1004,7 +1016,7 @@ def _optimize_video_file(path: Path):
         return
 
     output_path.replace(path)
-    yield f"Optimized {label}: H.264 baseline, {OPTIMIZED_VIDEO_FPS} fps, GOP {OPTIMIZED_VIDEO_GOP}, B-frames disabled.\n"
+    yield f"Optimized {label}: H.264 baseline, GOP {OPTIMIZED_VIDEO_GOP}, B-frames disabled, source frame rate preserved.\n"
 
 
 def _optimize_media_files(root: Path):
@@ -1016,6 +1028,190 @@ def _optimize_media_files(root: Path):
     for index, video_path in enumerate(videos, start=1):
         yield f"Preparing file {index}/{len(videos)}: {_relative_media_label(video_path)}\n"
         yield from _optimize_video_file(video_path)
+
+
+def _media_catalog_index() -> dict[str, Any]:
+    catalog = _json_urlopen(MEDIA_CATALOG_INDEX_URL)
+    if not isinstance(catalog, dict):
+        raise RuntimeError("Catalog index is not a JSON object")
+    catalog.setdefault("sources", [])
+    catalog.setdefault("assets", [])
+    return catalog
+
+
+def _catalog_source_by_id(catalog: dict[str, Any], source_id: str) -> Optional[dict[str, Any]]:
+    for source in catalog.get("sources", []):
+        if isinstance(source, dict) and str(source.get("id") or "") == source_id:
+            return source
+    return None
+
+
+def _catalog_asset_by_path(catalog: dict[str, Any], asset_path: str) -> Optional[dict[str, Any]]:
+    for asset in catalog.get("assets", []):
+        if isinstance(asset, dict) and str(asset.get("path") or "") == asset_path:
+            return asset
+    return None
+
+
+def _catalog_asset_url(asset_path: str) -> str:
+    return urllib.parse.urljoin(MEDIA_CATALOG_BASE_URL.rstrip("/") + "/", asset_path)
+
+
+def _safe_catalog_asset_path(asset_path: str) -> str:
+    normalized = str(asset_path or "").strip().replace("\\", "/")
+    if not normalized or normalized.startswith("/") or ".." in Path(normalized).parts:
+        raise ValueError("Invalid catalog asset path")
+    return normalized
+
+
+def _catalog_import_filename(asset: dict[str, Any]) -> str:
+    source_id = secure_filename(str(asset.get("source_id") or "catalog_asset")) or "catalog_asset"
+    profile = secure_filename(str(asset.get("profile") or f"{asset.get('target_height') or 'video'}p")) or "video"
+    fps = secure_filename(str(asset.get("fps") or "").strip())
+    codec = secure_filename(str(asset.get("codec") or asset.get("codec_name") or "video")) or "video"
+    extension = secure_filename(str(asset.get("container") or Path(str(asset.get("path") or "")).suffix.lstrip(".") or "mp4")) or "mp4"
+    fps_part = f"_{fps}fps" if fps else ""
+    return f"{source_id}_{profile}{fps_part}_{codec}.{extension.lower()}"
+
+
+def _ensure_media_target_path(path: Path) -> Path:
+    media_root = MEDIA_DIR.resolve()
+    resolved = path.resolve(strict=False)
+    if not resolved.is_relative_to(media_root):
+        raise ValueError("Invalid media target path")
+    return path
+
+
+def _unique_media_path(rel_path: Path) -> Path:
+    candidate = _ensure_media_target_path(MEDIA_DIR / rel_path)
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    for index in range(2, 1000):
+        next_candidate = _ensure_media_target_path(candidate.with_name(f"{stem}_{index}{suffix}"))
+        if not next_candidate.exists():
+            return next_candidate
+    raise RuntimeError(f"Could not choose a unique filename for {rel_path}")
+
+
+def _stream_catalog_asset_download(asset: dict[str, Any], source: dict[str, Any]):
+    asset_path = _safe_catalog_asset_path(str(asset.get("path") or ""))
+    asset_url = _catalog_asset_url(asset_path)
+    source_id = str(asset.get("source_id") or source.get("id") or "catalog")
+    rel_path = Path("catalog") / secure_filename(source_id) / _catalog_import_filename(asset)
+    target_path = _unique_media_path(rel_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_path.with_name(f".{target_path.name}.download")
+    temp_path.unlink(missing_ok=True)
+
+    expected_sha = str(asset.get("sha256") or "").strip().lower()
+    expected_bytes = asset.get("bytes")
+    try:
+        expected_bytes_int = int(expected_bytes) if expected_bytes is not None else 0
+    except (TypeError, ValueError):
+        expected_bytes_int = 0
+
+    yield f"Downloading catalog asset: {source.get('title') or source_id} {asset.get('profile')} {asset.get('codec')}\n"
+    request_obj = urllib.request.Request(asset_url, headers={"User-Agent": "neat-insight/asset-catalog"})
+    digest = hashlib.sha256()
+    copied = 0
+    last_report = 0.0
+    try:
+        with urllib.request.urlopen(request_obj, timeout=120) as response, temp_path.open("wb") as out:
+            total_header = response.headers.get("Content-Length")
+            total_bytes = int(total_header) if total_header and total_header.isdigit() else expected_bytes_int
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                digest.update(chunk)
+                copied += len(chunk)
+                now = time.monotonic()
+                if now - last_report >= 0.75:
+                    last_report = now
+                    if total_bytes:
+                        percent = min(99, max(0, int((copied / total_bytes) * 100)))
+                        yield f"Downloading catalog asset: {percent}% ({copied} / {total_bytes} bytes)\n"
+                    else:
+                        yield f"Downloading catalog asset: {copied} bytes downloaded\n"
+
+        actual_sha = digest.hexdigest()
+        if expected_sha and actual_sha != expected_sha:
+            temp_path.unlink(missing_ok=True)
+            yield f"Checksum mismatch for catalog asset: expected {expected_sha}, got {actual_sha}\n"
+            return
+        if expected_bytes_int and copied != expected_bytes_int:
+            temp_path.unlink(missing_ok=True)
+            yield f"Size mismatch for catalog asset: expected {expected_bytes_int} bytes, got {copied}\n"
+            return
+
+        temp_path.replace(target_path)
+        rel_saved = target_path.relative_to(MEDIA_DIR).as_posix()
+        yield f"Saved catalog asset to {rel_saved}\n"
+        yield "Catalog import complete.\n"
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        yield f"Catalog import failed: {exc}\n"
+
+
+@app.get("/api/media-catalog")
+def media_catalog():
+    """Return the published Insight media asset catalog with resolved asset URLs."""
+    try:
+        catalog = _media_catalog_index()
+    except Exception as exc:
+        return _json_error(f"Failed to load media catalog: {exc}", 502)
+
+    sources = catalog.get("sources") if isinstance(catalog.get("sources"), list) else []
+    assets = catalog.get("assets") if isinstance(catalog.get("assets"), list) else []
+    enriched_assets = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        enriched = dict(asset)
+        asset_path = str(asset.get("path") or "")
+        if asset_path:
+            enriched["url"] = _catalog_asset_url(asset_path)
+        enriched_assets.append(enriched)
+
+    return jsonify(
+        {
+            "schema": catalog.get("schema"),
+            "generated_at": catalog.get("generated_at"),
+            "index_url": MEDIA_CATALOG_INDEX_URL,
+            "base_url": MEDIA_CATALOG_BASE_URL.rstrip("/") + "/",
+            "sources": sources,
+            "assets": enriched_assets,
+        }
+    )
+
+
+@app.post("/api/import/media-catalog")
+def import_media_catalog_asset():
+    """Download a published catalog asset into the local media library while streaming progress."""
+    data = request.get_json(silent=True) or {}
+    requested_asset_path = data.get("path") or data.get("asset_path")
+    if not requested_asset_path:
+        return _json_error("Missing catalog asset path")
+
+    try:
+        asset_path = _safe_catalog_asset_path(str(requested_asset_path))
+        catalog = _media_catalog_index()
+        asset = _catalog_asset_by_path(catalog, asset_path)
+        if not asset:
+            return _json_error("Catalog asset not found", 404)
+        source = _catalog_source_by_id(catalog, str(asset.get("source_id") or "")) or {}
+    except ValueError as exc:
+        return _json_error(str(exc), 403)
+    except Exception as exc:
+        return _json_error(f"Failed to load media catalog: {exc}", 502)
+
+    return Response(
+        stream_with_context(_stream_catalog_asset_download(asset, source)),
+        mimetype="text/plain",
+    )
 
 
 # API: upload a media file or archive into the neat-insight media library.
