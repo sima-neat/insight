@@ -36,12 +36,14 @@ setup(
     zip_safe=False,
     install_requires=[
         "flask",
+        "certifi",
         "pillow",
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",
         "paramiko",
         "webssh>=1.6.3",
+        "yt-dlp",
     ],
     package_data={
         "neat_insight": [
