@@ -289,14 +289,19 @@ jobs:
             fi
           fi
           staged_index_prefix="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes"
-          if aws s3 ls "${staged_index_prefix}/" >/dev/null 2>&1; then
+          if aws s3 ls "${staged_index_prefix}/" >/tmp/staged-indexes.ls 2>/tmp/staged-indexes.err; then
+            if [[ ! -s /tmp/staged-indexes.ls ]]; then
+              echo "No staged media asset indexes found."
+              exit 0
+            fi
             aws s3 sync \
               "${staged_index_prefix}" \
               dist/staged-indexes \
               --exclude "*" \
               --include "*.index.json"
           else
-            echo "No staged media asset indexes found."
+            cat /tmp/staged-indexes.err >&2
+            exit 1
           fi
           python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
           find dist/staged-indexes -type f -name "*.index.json" -print
@@ -344,13 +349,18 @@ jobs:
             publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
           fi
           staged_asset_prefix="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/assets"
-          if aws s3 ls "${staged_asset_prefix}/" >/dev/null 2>&1; then
+          if aws s3 ls "${staged_asset_prefix}/" >/tmp/staged-assets.ls 2>/tmp/staged-assets.err; then
+            if [[ ! -s /tmp/staged-assets.ls ]]; then
+              echo "No staged media assets found."
+              exit 0
+            fi
             aws s3 sync \
               "${staged_asset_prefix}" \
               "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
               "${publish_args[@]}"
           else
-            echo "No staged media assets found."
+            cat /tmp/staged-assets.err >&2
+            exit 1
           fi
 
       - name: Publish canonical media asset index
