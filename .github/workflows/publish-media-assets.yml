@@ -292,15 +292,25 @@ jobs:
           if aws s3 ls "${staged_index_prefix}/" >/tmp/staged-indexes.ls 2>/tmp/staged-indexes.err; then
             if [[ ! -s /tmp/staged-indexes.ls ]]; then
               echo "No staged media asset indexes found."
-              exit 0
+            else
+              aws s3 sync \
+                "${staged_index_prefix}" \
+                dist/staged-indexes \
+                --exclude "*" \
+                --include "*.index.json"
             fi
-            aws s3 sync \
-              "${staged_index_prefix}" \
-              dist/staged-indexes \
-              --exclude "*" \
-              --include "*.index.json"
           else
             cat /tmp/staged-indexes.err >&2
+            exit 1
+          fi
+          staged_removed_manifest="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/removed-assets.json"
+          if aws s3 cp "${staged_removed_manifest}" dist/staged-removed-assets.json 2>/tmp/staged-removed-assets.err; then
+            echo "Staged removed-asset manifest downloaded."
+            python3 -m json.tool dist/staged-removed-assets.json >/dev/null
+          elif grep -Eq "404|Not Found|NoSuchKey" /tmp/staged-removed-assets.err; then
+            echo "No staged removed-asset manifest found."
+          else
+            cat /tmp/staged-removed-assets.err >&2
             exit 1
           fi
           python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
@@ -339,6 +349,22 @@ jobs:
           python3 media-assets/build_media_assets.py "${args[@]}"
           python3 -m json.tool dist/media-assets/index.json >/dev/null
           find dist/media-assets -maxdepth 4 -type f -print
+
+      - name: Persist removed media asset manifest
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          if [[ ! -f dist/media-assets/removed-assets.json ]]; then
+            echo "No removed-assets.json manifest generated; nothing to persist."
+            exit 0
+          fi
+          aws s3 cp dist/media-assets/removed-assets.json \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/removed-assets.json" \
+            "${publish_args[@]}"
 
       - name: Promote staged media assets
         if: ${{ needs.build-and-publish.result == 'success' }}
@@ -379,19 +405,31 @@ jobs:
         if: ${{ needs.build-and-publish.result == 'success' }}
         run: |
           set -euo pipefail
-          if [[ ! -f dist/media-assets/removed-assets.json ]]; then
-            echo "No removed-assets.json manifest found; skipping deletion."
+          manifests=()
+          if [[ -f dist/staged-removed-assets.json ]]; then
+            manifests+=(dist/staged-removed-assets.json)
+          fi
+          if [[ -f dist/media-assets/removed-assets.json ]]; then
+            manifests+=(dist/media-assets/removed-assets.json)
+          fi
+          if [[ "${#manifests[@]}" -eq 0 ]]; then
+            echo "No removed-asset manifest found; skipping deletion."
             exit 0
           fi
-          python3 - <<'PY' > /tmp/removed-media-assets.txt
+          python3 - "${manifests[@]}" <<'PY' > /tmp/removed-media-assets.txt
           import json
+          import sys
           from pathlib import Path
 
-          payload = json.loads(Path("dist/media-assets/removed-assets.json").read_text(encoding="utf-8"))
-          for asset in payload.get("assets", []):
-              path = str(asset.get("path", "")).strip()
-              if path:
-                  print(path)
+          paths = set()
+          for manifest in sys.argv[1:]:
+              payload = json.loads(Path(manifest).read_text(encoding="utf-8"))
+              for asset in payload.get("assets", []):
+                  path = str(asset.get("path", "")).strip()
+                  if path:
+                      paths.add(path)
+          for path in sorted(paths):
+              print(path)
           PY
           if [[ ! -s /tmp/removed-media-assets.txt ]]; then
             echo "No removed media asset paths to delete."
