@@ -2550,9 +2550,10 @@ button:disabled {
 .catalog-detail {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, auto) auto auto;
-  align-content: start;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  align-content: stretch;
   gap: 12px;
   overflow: hidden;
 }
@@ -2707,6 +2708,7 @@ button:disabled {
 
 .catalog-import-footer {
   flex: 0 0 auto;
+  min-height: 68px;
   border-top: 1px solid var(--line);
   padding-top: 12px;
   background: #fff;
