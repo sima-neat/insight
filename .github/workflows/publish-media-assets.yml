@@ -354,13 +354,44 @@ jobs:
         if: ${{ needs.build-and-publish.result == 'success' }}
         run: |
           set -euo pipefail
+          manifests=()
+          if [[ -f dist/staged-removed-assets.json ]]; then
+            manifests+=(dist/staged-removed-assets.json)
+          fi
+          if [[ -f dist/media-assets/removed-assets.json ]]; then
+            manifests+=(dist/media-assets/removed-assets.json)
+          fi
+          if [[ "${#manifests[@]}" -eq 0 ]]; then
+            echo "No removed-asset manifest generated; nothing to persist."
+            exit 0
+          fi
+          python3 - "${manifests[@]}" <<'PY' > dist/media-assets/removed-assets.json.tmp
+          import json
+          import sys
+          import time
+          from pathlib import Path
+
+          assets = {}
+          for manifest in sys.argv[1:]:
+              payload = json.loads(Path(manifest).read_text(encoding="utf-8"))
+              for asset in payload.get("assets", []):
+                  path = str(asset.get("path", "")).strip()
+                  if not path:
+                      continue
+                  source_id = str(asset.get("source_id", ""))
+                  assets[path] = {"source_id": source_id, "path": path}
+          payload = {
+              "schema": "sima.neat.insight.media-assets.removed.v1",
+              "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "assets": sorted(assets.values(), key=lambda item: (item["source_id"], item["path"])),
+          }
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+          mv dist/media-assets/removed-assets.json.tmp dist/media-assets/removed-assets.json
+          python3 -m json.tool dist/media-assets/removed-assets.json >/dev/null
           publish_args=()
           if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
             publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
-          fi
-          if [[ ! -f dist/media-assets/removed-assets.json ]]; then
-            echo "No removed-assets.json manifest generated; nothing to persist."
-            exit 0
           fi
           aws s3 cp dist/media-assets/removed-assets.json \
             "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/removed-assets.json" \
