@@ -19,6 +19,16 @@ const TABS = [
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
+const YOUTUBE_IMPORT_TARGETS = [
+  { value: '1080p30', label: '1080p30' },
+  { value: '720p30', label: '720p30' },
+  { value: '480p30', label: '480p30' }
+]
+const YOUTUBE_CLIP_DURATIONS = [
+  { value: '60', label: '1 minute' },
+  { value: '180', label: '3 minutes' },
+  { value: '300', label: '5 minutes' }
+]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
 const ROUTE_TO_TAB = {
   workspace: 'workspace',
@@ -103,6 +113,7 @@ function flattenFiles(tree, acc = []) {
 }
 
 function prettyKey(key) {
+  if (key === 'duration_ms') return 'Duration'
   return key.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
 }
 
@@ -186,6 +197,78 @@ function catalogImportProgressForLine(line, asset) {
     title: 'Importing catalog asset',
     detail: cleanLine || catalogAssetLabel(asset),
     percent: null
+  }
+}
+
+function youtubeImportProgressForLine(line, target) {
+  const cleanLine = line.trim()
+  const captureMatch = cleanLine.match(/^Capturing YouTube clip:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (captureMatch) {
+    return {
+      title: 'Capturing YouTube clip',
+      detail: `${target} - ${captureMatch[2]}`,
+      percent: Number.parseInt(captureMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Capturing YouTube clip:')) {
+    return {
+      title: 'Capturing YouTube clip',
+      detail: cleanLine.replace(/^Capturing YouTube clip:\s*/, '') || target,
+      percent: null,
+      variant: 'pending'
+    }
+  }
+  const downloadMatch = cleanLine.match(/^Downloading YouTube video:\s+(\d+)%/)
+  if (downloadMatch) {
+    return {
+      title: 'Downloading YouTube video',
+      detail: target,
+      percent: Number.parseInt(downloadMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Downloading YouTube video:')) {
+    return {
+      title: 'Downloading YouTube video',
+      detail: cleanLine.replace(/^Downloading YouTube video:\s*/, '') || target,
+      percent: null,
+      variant: 'pending'
+    }
+  }
+  const prepareMatch = cleanLine.match(/^Preparing YouTube media:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (prepareMatch) {
+    return {
+      title: 'Preparing YouTube media',
+      detail: `${target} - ${prepareMatch[2]}`,
+      percent: Number.parseInt(prepareMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Preparing YouTube media:')) {
+    return {
+      title: 'Preparing YouTube media',
+      detail: cleanLine.replace(/^Preparing YouTube media:\s*/, '') || target,
+      percent: null,
+      variant: 'pending'
+    }
+  }
+  if (cleanLine.startsWith('Saved YouTube media to ')) {
+    return {
+      title: 'YouTube media saved',
+      detail: cleanLine.replace(/^Saved YouTube media to\s+/, ''),
+      percent: 100
+    }
+  }
+  if (cleanLine === 'YouTube import complete.') {
+    return {
+      title: 'YouTube import complete',
+      detail: target,
+      percent: 100
+    }
+  }
+  return {
+    title: 'Importing YouTube video',
+    detail: cleanLine || target,
+    percent: null,
+    variant: 'pending'
   }
 }
 
@@ -565,20 +648,25 @@ function MiniSeriesCard({ name, samples }) {
 
 function UploadProgressCard({ progress, className = '' }) {
   if (!progress) return null
+  const hasPercent = Number.isFinite(progress.percent)
+  const barClass = [
+    'upload-progress-bar',
+    hasPercent ? '' : (progress.variant === 'pending' ? 'pending' : 'indeterminate')
+  ].filter(Boolean).join(' ')
 
   return (
     <div className={['upload-progress-card', className].filter(Boolean).join(' ')} role="status" aria-live="polite">
       <div className="upload-progress-heading">
         <span>{progress.title}</span>
-        {Number.isFinite(progress.percent) && <span>{progress.percent}%</span>}
+        {hasPercent && <span>{progress.percent}%</span>}
       </div>
       <div className="upload-progress-detail" title={progress.detail}>
         {progress.detail}
       </div>
       <div className="upload-progress-track" aria-hidden="true">
         <div
-          className={Number.isFinite(progress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
-          style={Number.isFinite(progress.percent) ? { width: `${progress.percent}%` } : undefined}
+          className={barClass}
+          style={hasPercent ? { width: `${progress.percent}%` } : undefined}
         />
       </div>
     </div>
@@ -622,6 +710,13 @@ export default function App() {
   const [catalogCodec, setCatalogCodec] = useState('')
   const [catalogAssetPath, setCatalogAssetPath] = useState('')
   const [catalogSelectedAssetPaths, setCatalogSelectedAssetPaths] = useState([])
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [youtubeTarget, setYoutubeTarget] = useState('1080p30')
+  const [youtubeClipStart, setYoutubeClipStart] = useState('0:00')
+  const [youtubeClipDuration, setYoutubeClipDuration] = useState('300')
+  const [youtubePreview, setYoutubePreview] = useState(null)
+  const [youtubeValidating, setYoutubeValidating] = useState(false)
+  const [youtubeError, setYoutubeError] = useState('')
   const [viewerUrl, setViewerUrl] = useState('')
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
   const [metrics, setMetrics] = useState(null)
@@ -643,6 +738,7 @@ export default function App() {
   const [tourStep, setTourStep] = useState(0)
   const [error, setError] = useState('')
   const metricEs = useRef(null)
+  const youtubeImportAbortRef = useRef(null)
 
   const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
   const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
@@ -981,6 +1077,132 @@ export default function App() {
     const failureLine = text.split(/\r?\n/).find((line) => /^Catalog import failed:|^Checksum mismatch|^Size mismatch/.test(line.trim()))
     if (failureLine) throw new Error(failureLine.trim())
     return text
+  }
+
+  async function readYoutubeImportProgress(response, target) {
+    if (!response.body) {
+      const text = await response.text()
+      if (!response.ok) throw new Error(text || 'YouTube import failed')
+      const lastLine = text.trim().split(/\r?\n/).filter(Boolean).pop()
+      if (lastLine) setUploadProgress(youtubeImportProgressForLine(lastLine, target))
+      const failureLine = text.split(/\r?\n/).find((line) => /^YouTube import failed:/.test(line.trim()))
+      if (failureLine) throw new Error(failureLine.trim())
+      return text
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        const lastLine = lines.map((line) => line.trim()).filter(Boolean).pop()
+        if (lastLine) setUploadProgress(youtubeImportProgressForLine(lastLine, target))
+      }
+      if (done) break
+    }
+
+    const finalLine = pending.trim()
+    if (finalLine) setUploadProgress(youtubeImportProgressForLine(finalLine, target))
+    if (!response.ok) throw new Error(text || 'YouTube import failed')
+    const failureLine = text.split(/\r?\n/).find((line) => /^YouTube import failed:/.test(line.trim()))
+    if (failureLine) throw new Error(failureLine.trim())
+    return text
+  }
+
+  async function validateYoutubeUrl() {
+    const url = youtubeUrl.trim()
+    if (!url) {
+      setYoutubeError('Enter a YouTube URL.')
+      setYoutubePreview(null)
+      return null
+    }
+    setYoutubeValidating(true)
+    setYoutubeError('')
+    try {
+      const preview = await fetchJson('/api/import/youtube/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      })
+      setYoutubePreview(preview)
+      setYoutubeUrl(preview.normalized_url || url)
+      const clipStart = Number.parseInt(preview.clip_start, 10)
+      if (Number.isFinite(clipStart)) setYoutubeClipStart(String(clipStart))
+      return preview
+    } catch (err) {
+      setYoutubePreview(null)
+      setYoutubeError(err.message || 'Could not validate YouTube URL.')
+      return null
+    } finally {
+      setYoutubeValidating(false)
+    }
+  }
+
+  async function importYoutubeVideo() {
+    const preview = youtubePreview || (await validateYoutubeUrl())
+    if (!preview) return
+    setUploadBusy(true)
+    setUploadStatus('')
+    setError('')
+    setUploadProgress({
+      title: 'Importing YouTube video',
+      detail: youtubeTarget,
+      percent: null,
+      variant: 'pending'
+    })
+    const controller = new AbortController()
+    youtubeImportAbortRef.current = controller
+    try {
+      const res = await fetch('/api/import/youtube', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: preview.normalized_url || youtubeUrl.trim(),
+          target: youtubeTarget,
+          clip_start: youtubeClipStart,
+          clip_duration: Number.parseInt(youtubeClipDuration, 10)
+        })
+      })
+      const text = await readYoutubeImportProgress(res, youtubeTarget)
+      const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved YouTube media to '))
+      const savedPath = savedLine ? savedLine.replace(/^Saved YouTube media to\s+/, '').trim() : ''
+      await loadMedia()
+      if (savedPath) setSelectedFile(savedPath)
+      setUploadProgress(null)
+      setUploadStatus('Imported YouTube video.')
+      setImportDialogOpen(false)
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setYoutubeError('')
+        setUploadStatus('YouTube import canceled.')
+        setUploadProgress({
+          title: 'YouTube import canceled',
+          detail: youtubeTarget,
+          percent: null,
+          variant: 'pending'
+        })
+        return
+      }
+      setError(err.message)
+      setYoutubeError(err.message)
+      setUploadProgress(null)
+    } finally {
+      youtubeImportAbortRef.current = null
+      setUploadBusy(false)
+    }
+  }
+
+  function cancelYoutubeImport() {
+    youtubeImportAbortRef.current?.abort()
   }
 
   function toggleCatalogAssetSelection(path) {
@@ -1898,7 +2120,7 @@ export default function App() {
               <div>
                 <p className="sysinfo-eyebrow">Media Import</p>
                 <h3>Import Media</h3>
-                <p>Upload local files or import a curated asset from the catalog.</p>
+                <p>Upload local files, import catalog assets, or bring in a YouTube video.</p>
               </div>
               <button type="button" onClick={() => setImportDialogOpen(false)} disabled={uploadBusy}>
                 Close
@@ -1926,6 +2148,15 @@ export default function App() {
                 }}
               >
                 Catalog
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={importTab === 'youtube'}
+                className={importTab === 'youtube' ? 'active' : ''}
+                onClick={() => setImportTab('youtube')}
+              >
+                YouTube
               </button>
             </div>
 
@@ -2178,6 +2409,114 @@ export default function App() {
                     )}
                   </>
                 )}
+              </section>
+            )}
+
+            {importTab === 'youtube' && (
+              <section className="youtube-import-panel">
+                <div className="youtube-form-grid">
+                  <label>
+                    <span>YouTube URL</span>
+                    <input
+                      className="search-input"
+                      type="url"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      value={youtubeUrl}
+                      onChange={(e) => {
+                        setYoutubeUrl(e.target.value)
+                        setYoutubePreview(null)
+                        setYoutubeError('')
+                      }}
+                      disabled={uploadBusy}
+                    />
+                  </label>
+                  <label>
+                    <span>Target Resolution &amp; FPS</span>
+                    <select value={youtubeTarget} onChange={(e) => setYoutubeTarget(e.target.value)} disabled={uploadBusy}>
+                      {YOUTUBE_IMPORT_TARGETS.map((target) => (
+                        <option key={target.value} value={target.value}>{target.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Start Time</span>
+                    <input
+                      className="search-input"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0:00"
+                      value={youtubeClipStart}
+                      onChange={(e) => setYoutubeClipStart(e.target.value)}
+                      disabled={uploadBusy}
+                    />
+                  </label>
+                  <label>
+                    <span>Clip Length</span>
+                    <select value={youtubeClipDuration} onChange={(e) => setYoutubeClipDuration(e.target.value)} disabled={uploadBusy}>
+                      {YOUTUBE_CLIP_DURATIONS.map((duration) => (
+                        <option key={duration.value} value={duration.value}>{duration.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={validateYoutubeUrl}
+                    disabled={uploadBusy || youtubeValidating || !youtubeUrl.trim()}
+                  >
+                    {youtubeValidating ? 'Validating...' : 'Validate'}
+                  </button>
+                </div>
+
+                {youtubeError && <div className="sysinfo-error">{youtubeError}</div>}
+
+                <div className="youtube-preview-panel">
+                  {youtubePreview ? (
+                    <>
+                      <iframe
+                        title="YouTube preview"
+                        src={youtubePreview.embed_url}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
+                      <div>
+                        <h4>{youtubePreview.title || 'YouTube Preview'}</h4>
+                        <p>{youtubePreview.normalized_url}</p>
+                        {youtubePreview.is_live && <p>Live stream import is clipped to the selected duration.</p>}
+                        <small>
+                          Insight will import up to {Number.parseInt(youtubeClipDuration, 10) / 60} minute(s)
+                          from {youtubeClipStart || '0:00'} as {youtubeTarget} H.264 with B-frames disabled.
+                        </small>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="youtube-preview-empty">Validate a YouTube link to show the preview before import.</div>
+                  )}
+                </div>
+
+                {uploadBusy && uploadProgress && (
+                  <div className="import-progress-actions">
+                    <UploadProgressCard progress={uploadProgress} className="import-progress-card" />
+                    <button type="button" className="btn-ghost danger" onClick={cancelYoutubeImport}>
+                      Cancel Import
+                    </button>
+                  </div>
+                )}
+
+                <div className="catalog-import-footer">
+                  <div>
+                    <strong>{youtubePreview ? 'Ready to import YouTube video' : 'Validate a YouTube URL'}</strong>
+                    <p>{youtubeTarget} / {Number.parseInt(youtubeClipDuration, 10) / 60} min max / H.264 / WebRTC-friendly import</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-tonal"
+                    onClick={importYoutubeVideo}
+                    disabled={uploadBusy || !youtubeUrl.trim() || !youtubePreview}
+                  >
+                    {uploadBusy ? 'Importing...' : 'Import'}
+                  </button>
+                </div>
               </section>
             )}
           </div>

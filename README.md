@@ -82,7 +82,7 @@ and tracks can be aligned with the displayed WebRTC frame.
 Use this when you need to modify functionality.
 
 Prerequisites:
-- Python 3.8+
+- Python 3.10+
 - Node.js 20+ and npm
 - Go 1.24+
 - mkcert, or a supported package manager for automatic runtime installation
