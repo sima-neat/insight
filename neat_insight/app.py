@@ -101,6 +101,7 @@ YOUTUBE_IMPORT_TARGETS = {
 }
 YOUTUBE_MAX_CLIP_SECONDS = 5 * 60
 YOUTUBE_DEFAULT_CLIP_SECONDS = YOUTUBE_MAX_CLIP_SECONDS
+YOUTUBE_DOWNLOAD_MEDIA_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".webm"}
 YOUTUBE_HOSTS = {
     "youtube.com",
     "www.youtube.com",
@@ -1176,6 +1177,7 @@ def _youtube_metadata_payload(url: str) -> dict[str, Any]:
     yt_dlp = _yt_dlp_command()
     cmd = [
         *yt_dlp,
+        "--ignore-config",
         "--dump-single-json",
         "--skip-download",
         "--no-playlist",
@@ -1332,6 +1334,7 @@ def _stream_youtube_import(url: str, target_name: str, clip_start: Any = 0, clip
             download_template = temp_root / "%(id)s.%(ext)s"
             download_cmd = [
                 *yt_dlp,
+                "--ignore-config",
                 "--newline",
                 "--no-playlist",
                 "-f",
@@ -1413,7 +1416,11 @@ def _stream_youtube_import(url: str, target_name: str, clip_start: Any = 0, clip
                 yield f"YouTube import failed: {details}\n"
                 return
 
-            downloaded_files = sorted(path for path in temp_root.iterdir() if path.is_file())
+            downloaded_files = sorted(
+                path
+                for path in temp_root.iterdir()
+                if path.is_file() and path.suffix.lower() in YOUTUBE_DOWNLOAD_MEDIA_EXTENSIONS
+            )
             if not downloaded_files:
                 yield "YouTube import failed: no downloaded media file was produced.\n"
                 return
