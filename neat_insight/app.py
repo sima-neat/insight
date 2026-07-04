@@ -1107,17 +1107,40 @@ def _ensure_media_target_path(path: Path) -> Path:
     return path
 
 
-def _unique_media_path(rel_path: Path) -> Path:
+def _media_path_candidates(rel_path: Path):
     candidate = _ensure_media_target_path(MEDIA_DIR / rel_path)
-    if not candidate.exists():
-        return candidate
+    yield candidate
     stem = candidate.stem
     suffix = candidate.suffix
     for index in range(2, 1000):
-        next_candidate = _ensure_media_target_path(candidate.with_name(f"{stem}_{index}{suffix}"))
-        if not next_candidate.exists():
-            return next_candidate
+        yield _ensure_media_target_path(candidate.with_name(f"{stem}_{index}{suffix}"))
+
+
+def _unique_media_path(rel_path: Path) -> Path:
+    for candidate in _media_path_candidates(rel_path):
+        if not candidate.exists():
+            return candidate
     raise RuntimeError(f"Could not choose a unique filename for {rel_path}")
+
+
+def _hidden_media_temp_path(target_path: Path, label: str) -> Path:
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{target_path.stem}.",
+        suffix=f".{label}{target_path.suffix}",
+        dir=target_path.parent,
+    )
+    os.close(fd)
+    return Path(temp_name)
+
+
+def _publish_unique_media_file(source_path: Path, rel_path: Path) -> Path:
+    for candidate in _media_path_candidates(rel_path):
+        try:
+            os.link(source_path, candidate)
+            return candidate
+        except FileExistsError:
+            continue
+    raise RuntimeError(f"Could not publish a unique filename for {rel_path}")
 
 
 def _yt_dlp_command() -> list[str]:
@@ -1362,10 +1385,8 @@ def _stream_youtube_import(url: str, target_name: str, clip_start: Any = 0, clip
         f"youtube_{video_id}_{target['name']}_"
         f"s{clip['start']}_d{clip['duration']}_h264.mp4"
     )
-    target_path = _unique_media_path(rel_path)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = target_path.with_name(f".{target_path.stem}.transcode{target_path.suffix}")
-    temp_output.unlink(missing_ok=True)
+    target_base_path = _ensure_media_target_path(MEDIA_DIR / rel_path)
+    target_base_path.parent.mkdir(parents=True, exist_ok=True)
 
     yield f"Validating YouTube video: {video_id}\n"
     try:
@@ -1374,6 +1395,7 @@ def _stream_youtube_import(url: str, target_name: str, clip_start: Any = 0, clip
         yield f"YouTube import failed: {exc}\n"
         return
 
+    temp_output = _hidden_media_temp_path(target_base_path, "transcode")
     active_process: Optional[subprocess.Popen] = None
     try:
         with tempfile.TemporaryDirectory(prefix="neat-insight-youtube-") as temp_dir:
@@ -1563,7 +1585,12 @@ def _stream_youtube_import(url: str, target_name: str, clip_start: Any = 0, clip
                 yield f"YouTube import failed: {details}\n"
                 return
 
-            temp_output.replace(target_path)
+            try:
+                target_path = _publish_unique_media_file(temp_output, rel_path)
+            except RuntimeError as exc:
+                temp_output.unlink(missing_ok=True)
+                yield f"YouTube import failed: {exc}\n"
+                return
             rel_saved = target_path.relative_to(MEDIA_DIR).as_posix()
             yield f"Saved YouTube media to {rel_saved}\n"
             yield "YouTube import complete.\n"
