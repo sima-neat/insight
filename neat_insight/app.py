@@ -1204,13 +1204,20 @@ def _youtube_metadata_payload(url: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise RuntimeError("Could not parse YouTube metadata response.") from exc
 
+    live_status = str(metadata.get("live_status") or "").lower()
+    if metadata.get("is_live") or live_status in {"is_live", "is_upcoming"}:
+        raise RuntimeError(
+            "Active YouTube live streams are not supported for import yet. "
+            "Use a regular video URL or wait until the live stream archive is available."
+        )
+
     payload = dict(preview)
     payload.update(
         {
             "title": metadata.get("title") or "",
             "duration": metadata.get("duration"),
             "is_live": bool(metadata.get("is_live")),
-            "live_status": metadata.get("live_status") or "",
+            "live_status": live_status,
         }
     )
     if metadata.get("thumbnail"):
