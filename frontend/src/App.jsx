@@ -1134,6 +1134,8 @@ export default function App() {
       })
       setYoutubePreview(preview)
       setYoutubeUrl(preview.normalized_url || url)
+      const clipStart = Number.parseInt(preview.clip_start, 10)
+      if (Number.isFinite(clipStart)) setYoutubeClipStart(String(clipStart))
       return preview
     } catch (err) {
       setYoutubePreview(null)

@@ -112,6 +112,9 @@ YOUTUBE_HOSTS = {
     "youtu.be",
 }
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+YOUTUBE_SHARE_TIME_RE = re.compile(
+    r"^(?:(?P<hours>\d+)h)?(?:(?P<minutes>\d+)m)?(?:(?P<seconds>\d+)s?)?$"
+)
 
 
 def _resolve_frontend_dist() -> Path:
@@ -1130,7 +1133,7 @@ def _yt_dlp_command() -> list[str]:
     raise RuntimeError("yt-dlp is not installed. Install yt-dlp in the Insight environment and try again.")
 
 
-def _youtube_video_id(url: str) -> str:
+def _parse_youtube_url(url: str) -> urllib.parse.ParseResult:
     raw_url = str(url or "").strip()
     if raw_url and "://" not in raw_url:
         raw_url = f"https://{raw_url}"
@@ -1138,7 +1141,12 @@ def _youtube_video_id(url: str) -> str:
     host = parsed.netloc.lower().split("@")[-1].split(":")[0]
     if host not in YOUTUBE_HOSTS:
         raise ValueError("Enter a YouTube URL.")
+    return parsed
 
+
+def _youtube_video_id(url: str) -> str:
+    parsed = _parse_youtube_url(url)
+    host = parsed.netloc.lower().split("@")[-1].split(":")[0]
     candidate = ""
     if host == "youtu.be":
         candidate = parsed.path.strip("/").split("/")[0]
@@ -1161,15 +1169,54 @@ def _youtube_video_id(url: str) -> str:
     return candidate
 
 
-def _youtube_preview_payload(url: str) -> dict[str, str]:
+def _parse_youtube_share_time_seconds(value: Any) -> Optional[int]:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    try:
+        return _parse_youtube_time_seconds(text)
+    except ValueError:
+        pass
+
+    match = YOUTUBE_SHARE_TIME_RE.match(text)
+    if not match:
+        return None
+    hours = int(match.group("hours") or 0)
+    minutes = int(match.group("minutes") or 0)
+    seconds = int(match.group("seconds") or 0)
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _youtube_share_start_seconds(url: str) -> Optional[int]:
+    parsed = _parse_youtube_url(url)
+    params = urllib.parse.parse_qs(parsed.query)
+    if parsed.fragment:
+        for key, value in urllib.parse.parse_qs(parsed.fragment).items():
+            params.setdefault(key, value)
+
+    for key in ("t", "start"):
+        for value in params.get(key, []):
+            seconds = _parse_youtube_share_time_seconds(value)
+            if seconds is not None:
+                return seconds
+    return None
+
+
+def _youtube_preview_payload(url: str) -> dict[str, Any]:
     video_id = _youtube_video_id(url)
+    start_seconds = _youtube_share_start_seconds(url)
     normalized_url = f"https://www.youtube.com/watch?v={video_id}"
-    return {
+    embed_url = f"https://www.youtube.com/embed/{video_id}"
+    payload = {
         "video_id": video_id,
         "normalized_url": normalized_url,
-        "embed_url": f"https://www.youtube.com/embed/{video_id}",
+        "embed_url": embed_url,
         "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
     }
+    if start_seconds is not None:
+        payload["clip_start"] = start_seconds
+        payload["embed_url"] = f"{embed_url}?start={start_seconds}"
+    return payload
 
 
 def _youtube_metadata_payload(url: str) -> dict[str, Any]:
