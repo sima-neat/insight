@@ -1,15 +1,20 @@
 import argparse
 import atexit
 import base64
+import hashlib
 import ipaddress
 import json
 import logging
 import os
 import platform
+import queue
+import re
 import shutil
 import signal
 import ssl
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -80,8 +85,36 @@ STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg"
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
 UNKNOWN_CODEC = "unknown"
 OPTIMIZED_VIDEO_BITRATE = "2M"
-OPTIMIZED_VIDEO_FPS = "30"
 OPTIMIZED_VIDEO_GOP = "30"
+MEDIA_CATALOG_INDEX_URL = os.getenv(
+    "NEAT_INSIGHT_MEDIA_CATALOG_INDEX_URL",
+    "https://artifacts.neat.sima.ai/media-assets/index.json",
+)
+MEDIA_CATALOG_BASE_URL = os.getenv(
+    "NEAT_INSIGHT_MEDIA_CATALOG_BASE_URL",
+    "https://artifacts.neat.sima.ai/media-assets/",
+)
+YOUTUBE_IMPORT_TARGETS = {
+    "1080p30": {"height": 1080, "fps": 30, "bitrate": "6M"},
+    "720p30": {"height": 720, "fps": 30, "bitrate": "3M"},
+    "480p30": {"height": 480, "fps": 30, "bitrate": "1500k"},
+}
+YOUTUBE_MAX_CLIP_SECONDS = 5 * 60
+YOUTUBE_DEFAULT_CLIP_SECONDS = YOUTUBE_MAX_CLIP_SECONDS
+YOUTUBE_DOWNLOAD_MEDIA_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".mov", ".webm"}
+YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+    "youtube-nocookie.com",
+    "www.youtube-nocookie.com",
+    "youtu.be",
+}
+YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+YOUTUBE_SHARE_TIME_RE = re.compile(
+    r"^(?:(?P<hours>\d+)h)?(?:(?P<minutes>\d+)m)?(?:(?P<seconds>\d+)s?)?$"
+)
 
 
 def _resolve_frontend_dist() -> Path:
@@ -128,6 +161,12 @@ LOG_DIR = "/var/log"
 
 def _json_error(message: str, status: int = 400):
     return jsonify({"error": message}), status
+
+
+def _json_urlopen(url: str, timeout: float = 20.0) -> dict[str, Any]:
+    request_obj = urllib.request.Request(url, headers={"User-Agent": "neat-insight/asset-catalog"})
+    with urllib.request.urlopen(request_obj, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def _request_host_name() -> str:
@@ -942,8 +981,6 @@ def _optimize_video_file(path: Path):
         f"keyint={OPTIMIZED_VIDEO_GOP}:min-keyint={OPTIMIZED_VIDEO_GOP}:no-scenecut=1:repeat-headers=1:aud=1",
         "-b:v",
         OPTIMIZED_VIDEO_BITRATE,
-        "-r",
-        OPTIMIZED_VIDEO_FPS,
         "-g",
         OPTIMIZED_VIDEO_GOP,
         "-bf",
@@ -1004,7 +1041,7 @@ def _optimize_video_file(path: Path):
         return
 
     output_path.replace(path)
-    yield f"Optimized {label}: H.264 baseline, {OPTIMIZED_VIDEO_FPS} fps, GOP {OPTIMIZED_VIDEO_GOP}, B-frames disabled.\n"
+    yield f"Optimized {label}: H.264 baseline, GOP {OPTIMIZED_VIDEO_GOP}, B-frames disabled, source frame rate preserved.\n"
 
 
 def _optimize_media_files(root: Path):
@@ -1016,6 +1053,682 @@ def _optimize_media_files(root: Path):
     for index, video_path in enumerate(videos, start=1):
         yield f"Preparing file {index}/{len(videos)}: {_relative_media_label(video_path)}\n"
         yield from _optimize_video_file(video_path)
+
+
+def _media_catalog_index() -> dict[str, Any]:
+    catalog = _json_urlopen(MEDIA_CATALOG_INDEX_URL)
+    if not isinstance(catalog, dict):
+        raise RuntimeError("Catalog index is not a JSON object")
+    catalog.setdefault("sources", [])
+    catalog.setdefault("assets", [])
+    return catalog
+
+
+def _catalog_source_by_id(catalog: dict[str, Any], source_id: str) -> Optional[dict[str, Any]]:
+    for source in catalog.get("sources", []):
+        if isinstance(source, dict) and str(source.get("id") or "") == source_id:
+            return source
+    return None
+
+
+def _catalog_asset_by_path(catalog: dict[str, Any], asset_path: str) -> Optional[dict[str, Any]]:
+    for asset in catalog.get("assets", []):
+        if isinstance(asset, dict) and str(asset.get("path") or "") == asset_path:
+            return asset
+    return None
+
+
+def _catalog_asset_url(asset_path: str) -> str:
+    return urllib.parse.urljoin(MEDIA_CATALOG_BASE_URL.rstrip("/") + "/", asset_path)
+
+
+def _safe_catalog_asset_path(asset_path: str) -> str:
+    normalized = str(asset_path or "").strip().replace("\\", "/")
+    if not normalized or normalized.startswith("/") or ".." in Path(normalized).parts:
+        raise ValueError("Invalid catalog asset path")
+    return normalized
+
+
+def _catalog_import_filename(asset: dict[str, Any]) -> str:
+    source_id = secure_filename(str(asset.get("source_id") or "catalog_asset")) or "catalog_asset"
+    profile = secure_filename(str(asset.get("profile") or f"{asset.get('target_height') or 'video'}p")) or "video"
+    fps = secure_filename(str(asset.get("fps") or "").strip())
+    codec = secure_filename(str(asset.get("codec") or asset.get("codec_name") or "video")) or "video"
+    extension = secure_filename(str(asset.get("container") or Path(str(asset.get("path") or "")).suffix.lstrip(".") or "mp4")) or "mp4"
+    fps_part = f"_{fps}fps" if fps else ""
+    return f"{source_id}_{profile}{fps_part}_{codec}.{extension.lower()}"
+
+
+def _ensure_media_target_path(path: Path) -> Path:
+    media_root = MEDIA_DIR.resolve()
+    resolved = path.resolve(strict=False)
+    if not resolved.is_relative_to(media_root):
+        raise ValueError("Invalid media target path")
+    return path
+
+
+def _unique_media_path(rel_path: Path) -> Path:
+    candidate = _ensure_media_target_path(MEDIA_DIR / rel_path)
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    for index in range(2, 1000):
+        next_candidate = _ensure_media_target_path(candidate.with_name(f"{stem}_{index}{suffix}"))
+        if not next_candidate.exists():
+            return next_candidate
+    raise RuntimeError(f"Could not choose a unique filename for {rel_path}")
+
+
+def _yt_dlp_command() -> list[str]:
+    """Prefer the installed Python module, but support an external yt-dlp binary for dev setups."""
+    try:
+        import yt_dlp  # noqa: F401
+
+        return [sys.executable, "-m", "yt_dlp"]
+    except ImportError:
+        executable = shutil.which("yt-dlp")
+        if executable:
+            return [executable]
+    raise RuntimeError("yt-dlp is not installed. Install yt-dlp in the Insight environment and try again.")
+
+
+def _parse_youtube_url(url: str) -> urllib.parse.ParseResult:
+    raw_url = str(url or "").strip()
+    if raw_url and "://" not in raw_url:
+        raw_url = f"https://{raw_url}"
+    parsed = urllib.parse.urlparse(raw_url)
+    host = parsed.netloc.lower().split("@")[-1].split(":")[0]
+    if host not in YOUTUBE_HOSTS:
+        raise ValueError("Enter a YouTube URL.")
+    return parsed
+
+
+def _youtube_video_id(url: str) -> str:
+    parsed = _parse_youtube_url(url)
+    host = parsed.netloc.lower().split("@")[-1].split(":")[0]
+    candidate = ""
+    if host == "youtu.be":
+        candidate = parsed.path.strip("/").split("/")[0]
+    elif parsed.path in {"", "/"}:
+        candidate = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+    elif parsed.path == "/watch":
+        candidate = urllib.parse.parse_qs(parsed.query).get("v", [""])[0]
+    elif parsed.path.startswith("/shorts/"):
+        parts = [part for part in parsed.path.split("/") if part]
+        candidate = parts[1] if len(parts) > 1 else ""
+    elif parsed.path.startswith("/embed/"):
+        parts = [part for part in parsed.path.split("/") if part]
+        candidate = parts[1] if len(parts) > 1 else ""
+    elif parsed.path.startswith("/live/"):
+        parts = [part for part in parsed.path.split("/") if part]
+        candidate = parts[1] if len(parts) > 1 else ""
+
+    if not YOUTUBE_ID_RE.match(candidate):
+        raise ValueError("Could not find a valid YouTube video id in the URL.")
+    return candidate
+
+
+def _parse_youtube_share_time_seconds(value: Any) -> Optional[int]:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    try:
+        return _parse_youtube_time_seconds(text)
+    except ValueError:
+        pass
+
+    match = YOUTUBE_SHARE_TIME_RE.match(text)
+    if not match:
+        return None
+    hours = int(match.group("hours") or 0)
+    minutes = int(match.group("minutes") or 0)
+    seconds = int(match.group("seconds") or 0)
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _youtube_share_start_seconds(url: str) -> Optional[int]:
+    parsed = _parse_youtube_url(url)
+    params = urllib.parse.parse_qs(parsed.query)
+    if parsed.fragment:
+        for key, value in urllib.parse.parse_qs(parsed.fragment).items():
+            params.setdefault(key, value)
+
+    for key in ("t", "start"):
+        for value in params.get(key, []):
+            seconds = _parse_youtube_share_time_seconds(value)
+            if seconds is not None:
+                return seconds
+    return None
+
+
+def _youtube_preview_payload(url: str) -> dict[str, Any]:
+    video_id = _youtube_video_id(url)
+    start_seconds = _youtube_share_start_seconds(url)
+    normalized_url = f"https://www.youtube.com/watch?v={video_id}"
+    embed_url = f"https://www.youtube.com/embed/{video_id}"
+    payload = {
+        "video_id": video_id,
+        "normalized_url": normalized_url,
+        "embed_url": embed_url,
+        "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
+    }
+    if start_seconds is not None:
+        payload["clip_start"] = start_seconds
+        payload["embed_url"] = f"{embed_url}?start={start_seconds}"
+    return payload
+
+
+def _youtube_metadata_payload(url: str) -> dict[str, Any]:
+    preview = _youtube_preview_payload(url)
+    yt_dlp = _yt_dlp_command()
+    cmd = [
+        *yt_dlp,
+        "--ignore-config",
+        "--dump-single-json",
+        "--skip-download",
+        "--no-playlist",
+        "--no-warnings",
+        preview["normalized_url"],
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=25,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Timed out while validating YouTube video availability.") from exc
+
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip().splitlines()
+        message = details[-1].strip() if details else f"yt-dlp exited with status {result.returncode}"
+        raise RuntimeError(f"YouTube video is not available for import: {message}")
+
+    try:
+        metadata = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Could not parse YouTube metadata response.") from exc
+
+    live_status = str(metadata.get("live_status") or "").lower()
+    if metadata.get("is_live") or live_status in {"is_live", "is_upcoming"}:
+        raise RuntimeError(
+            "Active YouTube live streams are not supported for import yet. "
+            "Use a regular video URL or wait until the live stream archive is available."
+        )
+
+    payload = dict(preview)
+    payload.update(
+        {
+            "title": metadata.get("title") or "",
+            "duration": metadata.get("duration"),
+            "is_live": bool(metadata.get("is_live")),
+            "live_status": live_status,
+        }
+    )
+    if metadata.get("thumbnail"):
+        payload["thumbnail_url"] = metadata["thumbnail"]
+    return payload
+
+
+def _youtube_target_profile(value: str) -> dict[str, Any]:
+    target = str(value or "").strip()
+    if target not in YOUTUBE_IMPORT_TARGETS:
+        raise ValueError(f"Unsupported YouTube import target: {target or '<empty>'}")
+    return {"name": target, **YOUTUBE_IMPORT_TARGETS[target]}
+
+
+def _parse_youtube_time_seconds(value: Any, default: int = 0) -> int:
+    if value in {None, ""}:
+        return default
+    if isinstance(value, (int, float)):
+        seconds = int(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            return default
+        if ":" in text:
+            parts = text.split(":")
+            if len(parts) > 3:
+                raise ValueError("Use seconds, MM:SS, or HH:MM:SS for YouTube clip time.")
+            try:
+                numbers = [int(part) for part in parts]
+            except ValueError as exc:
+                raise ValueError("Use seconds, MM:SS, or HH:MM:SS for YouTube clip time.") from exc
+            seconds = 0
+            for number in numbers:
+                if number < 0:
+                    raise ValueError("YouTube clip time cannot be negative.")
+                seconds = seconds * 60 + number
+        else:
+            try:
+                seconds = int(float(text))
+            except ValueError as exc:
+                raise ValueError("Use seconds, MM:SS, or HH:MM:SS for YouTube clip time.") from exc
+    if seconds < 0:
+        raise ValueError("YouTube clip time cannot be negative.")
+    return seconds
+
+
+def _youtube_clip_range(start_value: Any, duration_value: Any) -> dict[str, Any]:
+    start_seconds = _parse_youtube_time_seconds(start_value, 0)
+    duration_seconds = _parse_youtube_time_seconds(duration_value, YOUTUBE_DEFAULT_CLIP_SECONDS)
+    if duration_seconds <= 0:
+        raise ValueError("YouTube clip duration must be greater than 0 seconds.")
+    duration_seconds = min(duration_seconds, YOUTUBE_MAX_CLIP_SECONDS)
+    end_seconds = start_seconds + duration_seconds
+    return {
+        "start": start_seconds,
+        "duration": duration_seconds,
+        "end": end_seconds,
+        "section": f"*{_format_duration(start_seconds)}-{_format_duration(end_seconds)}",
+    }
+
+
+def _terminate_process(process: Optional[subprocess.Popen], timeout: float = 3.0) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=timeout)
+
+
+def _read_process_output(process: subprocess.Popen, out_queue: "queue.Queue[Optional[str]]") -> None:
+    try:
+        if process.stdout:
+            for raw_line in process.stdout:
+                out_queue.put(raw_line)
+    finally:
+        out_queue.put(None)
+
+
+def _stream_youtube_import(url: str, target_name: str, clip_start: Any = 0, clip_duration: Any = YOUTUBE_DEFAULT_CLIP_SECONDS):
+    try:
+        preview = _youtube_metadata_payload(url)
+        target = _youtube_target_profile(target_name)
+        clip = _youtube_clip_range(clip_start, clip_duration)
+    except (RuntimeError, ValueError) as exc:
+        yield f"YouTube import failed: {exc}\n"
+        return
+
+    video_id = preview["video_id"]
+    rel_path = Path("youtube") / (
+        f"youtube_{video_id}_{target['name']}_"
+        f"s{clip['start']}_d{clip['duration']}_h264.mp4"
+    )
+    target_path = _unique_media_path(rel_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = target_path.with_name(f".{target_path.stem}.transcode{target_path.suffix}")
+    temp_output.unlink(missing_ok=True)
+
+    yield f"Validating YouTube video: {video_id}\n"
+    try:
+        yt_dlp = _yt_dlp_command()
+    except RuntimeError as exc:
+        yield f"YouTube import failed: {exc}\n"
+        return
+
+    active_process: Optional[subprocess.Popen] = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="neat-insight-youtube-") as temp_dir:
+            temp_root = Path(temp_dir)
+            download_template = temp_root / "%(id)s.%(ext)s"
+            download_cmd = [
+                *yt_dlp,
+                "--ignore-config",
+                "--newline",
+                "--no-playlist",
+                "-f",
+                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
+                "--merge-output-format",
+                "mp4",
+                "--download-sections",
+                str(clip["section"]),
+                "-o",
+                str(download_template),
+                preview["normalized_url"],
+            ]
+
+            is_live = bool(preview.get("is_live"))
+            download_phase = "Capturing YouTube clip" if is_live else "Downloading YouTube video"
+            yield (
+                f"{download_phase}: waiting for first media data. This can take a while; please wait. "
+                f"{target['name']} source, {_format_duration(int(clip['start']))}-{_format_duration(int(clip['end']))}\n"
+            )
+            active_process = subprocess.Popen(
+                download_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            diagnostics: List[str] = []
+            last_percent = -1
+            download_started_at = time.monotonic()
+            last_capture_report_at = download_started_at
+            stdout_queue: "queue.Queue[Optional[str]]" = queue.Queue()
+            stdout_thread = threading.Thread(
+                target=_read_process_output,
+                args=(active_process, stdout_queue),
+                daemon=True,
+            )
+            stdout_thread.start()
+
+            while active_process.poll() is None or not stdout_queue.empty():
+                try:
+                    raw_line = stdout_queue.get(timeout=0.25)
+                except queue.Empty:
+                    raw_line = ""
+
+                if raw_line is None:
+                    raw_line = ""
+
+                if raw_line:
+                    line = raw_line.strip()
+                    if line:
+                        diagnostics.append(line)
+                        diagnostics = diagnostics[-12:]
+                        if not is_live:
+                            match = re.search(r"\[download\]\s+(\d+(?:\.\d+)?)%", line)
+                            if match:
+                                percent = min(99, max(0, int(float(match.group(1)))))
+                                if percent > last_percent:
+                                    last_percent = percent
+                                    yield f"Downloading YouTube video: {percent}%\n"
+
+                if is_live:
+                    now = time.monotonic()
+                    if now - last_capture_report_at >= 1.0:
+                        last_capture_report_at = now
+                        elapsed_wall = max(0.0, now - download_started_at)
+                        percent = min(99, max(0, int((elapsed_wall / int(clip["duration"])) * 100)))
+                        if percent > last_percent:
+                            last_percent = percent
+                            yield (
+                                f"Capturing YouTube clip: {percent}% "
+                                f"({_format_duration(elapsed_wall)} / {_format_duration(int(clip['duration']))})\n"
+                            )
+
+            return_code = active_process.wait()
+            active_process = None
+            if return_code != 0:
+                details = "\n".join(diagnostics[-4:]) or f"yt-dlp exited with status {return_code}"
+                yield f"YouTube import failed: {details}\n"
+                return
+
+            downloaded_files = sorted(
+                path
+                for path in temp_root.iterdir()
+                if path.is_file() and path.suffix.lower() in YOUTUBE_DOWNLOAD_MEDIA_EXTENSIONS
+            )
+            if not downloaded_files:
+                yield "YouTube import failed: no downloaded media file was produced.\n"
+                return
+            source_path = downloaded_files[0]
+
+            if shutil.which("ffmpeg") is None:
+                yield "YouTube import failed: ffmpeg is not installed.\n"
+                return
+
+            duration = _video_duration_seconds(source_path)
+            ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(source_path),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-vf",
+            f"scale=-2:{target['height']}:flags=lanczos,fps={target['fps']}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-pix_fmt",
+            "yuv420p",
+            "-x264-params",
+            f"keyint={target['fps']}:min-keyint={target['fps']}:no-scenecut=1:repeat-headers=1:aud=1",
+            "-b:v",
+            str(target["bitrate"]),
+            "-g",
+            str(target["fps"]),
+            "-bf",
+            "0",
+            "-movflags",
+            "+faststart",
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            str(temp_output),
+            ]
+
+            yield f"Preparing YouTube media: {target['name']} H.264\n"
+            active_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            diagnostics = []
+            last_progress_at = 0.0
+            if active_process.stdout:
+                for raw_line in active_process.stdout:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if "=" not in line:
+                        diagnostics.append(line)
+                        diagnostics = diagnostics[-8:]
+                        continue
+                    key, value = line.split("=", 1)
+                    elapsed = _parse_ffmpeg_progress_seconds(key, value)
+                    if elapsed is None:
+                        continue
+                    now = time.monotonic()
+                    if now - last_progress_at < 1.0:
+                        continue
+                    last_progress_at = now
+                    if duration:
+                        percent = min(99, max(0, int((elapsed / duration) * 100)))
+                        yield (
+                            f"Preparing YouTube media: {percent}% "
+                            f"({_format_duration(elapsed)} / {_format_duration(duration)})\n"
+                        )
+                    else:
+                        yield f"Preparing YouTube media: {_format_duration(elapsed)} processed\n"
+
+            return_code = active_process.wait()
+            active_process = None
+            if return_code != 0:
+                temp_output.unlink(missing_ok=True)
+                details = "\n".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}"
+                yield f"YouTube import failed: {details}\n"
+                return
+
+            temp_output.replace(target_path)
+            rel_saved = target_path.relative_to(MEDIA_DIR).as_posix()
+            yield f"Saved YouTube media to {rel_saved}\n"
+            yield "YouTube import complete.\n"
+    except GeneratorExit:
+        _terminate_process(active_process)
+        temp_output.unlink(missing_ok=True)
+        raise
+
+
+def _stream_catalog_asset_download(asset: dict[str, Any], source: dict[str, Any]):
+    asset_path = _safe_catalog_asset_path(str(asset.get("path") or ""))
+    asset_url = _catalog_asset_url(asset_path)
+    source_id = str(asset.get("source_id") or source.get("id") or "catalog")
+    rel_path = Path("catalog") / secure_filename(source_id) / _catalog_import_filename(asset)
+    target_path = _unique_media_path(rel_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_path.with_name(f".{target_path.name}.download")
+    temp_path.unlink(missing_ok=True)
+
+    expected_sha = str(asset.get("sha256") or "").strip().lower()
+    expected_bytes = asset.get("bytes")
+    try:
+        expected_bytes_int = int(expected_bytes) if expected_bytes is not None else 0
+    except (TypeError, ValueError):
+        expected_bytes_int = 0
+
+    yield f"Downloading catalog asset: {source.get('title') or source_id} {asset.get('profile')} {asset.get('codec')}\n"
+    request_obj = urllib.request.Request(asset_url, headers={"User-Agent": "neat-insight/asset-catalog"})
+    digest = hashlib.sha256()
+    copied = 0
+    last_report = 0.0
+    try:
+        with urllib.request.urlopen(request_obj, timeout=120) as response, temp_path.open("wb") as out:
+            total_header = response.headers.get("Content-Length")
+            total_bytes = int(total_header) if total_header and total_header.isdigit() else expected_bytes_int
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+                digest.update(chunk)
+                copied += len(chunk)
+                now = time.monotonic()
+                if now - last_report >= 0.75:
+                    last_report = now
+                    if total_bytes:
+                        percent = min(99, max(0, int((copied / total_bytes) * 100)))
+                        yield f"Downloading catalog asset: {percent}% ({copied} / {total_bytes} bytes)\n"
+                    else:
+                        yield f"Downloading catalog asset: {copied} bytes downloaded\n"
+
+        actual_sha = digest.hexdigest()
+        if expected_sha and actual_sha != expected_sha:
+            temp_path.unlink(missing_ok=True)
+            yield f"Checksum mismatch for catalog asset: expected {expected_sha}, got {actual_sha}\n"
+            return
+        if expected_bytes_int and copied != expected_bytes_int:
+            temp_path.unlink(missing_ok=True)
+            yield f"Size mismatch for catalog asset: expected {expected_bytes_int} bytes, got {copied}\n"
+            return
+
+        temp_path.replace(target_path)
+        rel_saved = target_path.relative_to(MEDIA_DIR).as_posix()
+        yield f"Saved catalog asset to {rel_saved}\n"
+        yield "Catalog import complete.\n"
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        yield f"Catalog import failed: {exc}\n"
+
+
+@app.get("/api/media-catalog")
+def media_catalog():
+    """Return the published Insight media asset catalog with resolved asset URLs."""
+    try:
+        catalog = _media_catalog_index()
+    except Exception as exc:
+        return _json_error(f"Failed to load media catalog: {exc}", 502)
+
+    sources = catalog.get("sources") if isinstance(catalog.get("sources"), list) else []
+    assets = catalog.get("assets") if isinstance(catalog.get("assets"), list) else []
+    enriched_assets = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        enriched = dict(asset)
+        asset_path = str(asset.get("path") or "")
+        if asset_path:
+            enriched["url"] = _catalog_asset_url(asset_path)
+        enriched_assets.append(enriched)
+
+    return jsonify(
+        {
+            "schema": catalog.get("schema"),
+            "generated_at": catalog.get("generated_at"),
+            "index_url": MEDIA_CATALOG_INDEX_URL,
+            "base_url": MEDIA_CATALOG_BASE_URL.rstrip("/") + "/",
+            "sources": sources,
+            "assets": enriched_assets,
+        }
+    )
+
+
+@app.post("/api/import/media-catalog")
+def import_media_catalog_asset():
+    """Download a published catalog asset into the local media library while streaming progress."""
+    data = request.get_json(silent=True) or {}
+    requested_asset_path = data.get("path") or data.get("asset_path")
+    if not requested_asset_path:
+        return _json_error("Missing catalog asset path")
+
+    try:
+        asset_path = _safe_catalog_asset_path(str(requested_asset_path))
+        catalog = _media_catalog_index()
+        asset = _catalog_asset_by_path(catalog, asset_path)
+        if not asset:
+            return _json_error("Catalog asset not found", 404)
+        source = _catalog_source_by_id(catalog, str(asset.get("source_id") or "")) or {}
+    except ValueError as exc:
+        return _json_error(str(exc), 403)
+    except Exception as exc:
+        return _json_error(f"Failed to load media catalog: {exc}", 502)
+
+    return Response(
+        stream_with_context(_stream_catalog_asset_download(asset, source)),
+        mimetype="text/plain",
+    )
+
+
+@app.post("/api/import/youtube/validate")
+def validate_youtube_import():
+    """Validate a YouTube URL and return preview data for the import dialog."""
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url") or "").strip()
+    if not url:
+        return _json_error("Missing YouTube URL")
+    try:
+        return jsonify(_youtube_metadata_payload(url))
+    except (RuntimeError, ValueError) as exc:
+        return _json_error(str(exc))
+
+
+@app.post("/api/import/youtube")
+def import_youtube_media():
+    """Download a YouTube video into the media library while streaming import progress."""
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url") or "").strip()
+    target = str(data.get("target") or "").strip()
+    clip_start = data.get("clip_start", 0)
+    clip_duration = data.get("clip_duration", YOUTUBE_DEFAULT_CLIP_SECONDS)
+    if not url:
+        return _json_error("Missing YouTube URL")
+    if not target:
+        return _json_error("Missing YouTube import target")
+
+    try:
+        _youtube_preview_payload(url)
+        _youtube_target_profile(target)
+        _youtube_clip_range(clip_start, clip_duration)
+    except ValueError as exc:
+        return _json_error(str(exc))
+
+    return Response(
+        stream_with_context(_stream_youtube_import(url, target, clip_start, clip_duration)),
+        mimetype="text/plain",
+    )
 
 
 # API: upload a media file or archive into the neat-insight media library.

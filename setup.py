@@ -36,12 +36,14 @@ setup(
     zip_safe=False,
     install_requires=[
         "flask",
+        "certifi",
         "pillow",
         "psutil",
         "pyzmq",
         "cryptography>=41.0.5,<45",
         "paramiko",
         "webssh>=1.6.3",
+        "yt-dlp",
     ],
     package_data={
         "neat_insight": [
@@ -68,7 +70,7 @@ setup(
         "Framework :: Flask",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     distclass=BinaryDistribution,
     cmdclass={"bdist_wheel": PlatformPy3Wheel},
 )

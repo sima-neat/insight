@@ -1,49 +1,115 @@
-name: Test Media Asset Conversion
+name: Media Asset Conversion and Publishing
 
 on:
   workflow_dispatch:
     inputs:
-      implementation_ref:
-        description: Branch, tag, or SHA containing media-assets/build_media_assets.py.
+      runner_labels:
+        description: JSON runs-on labels. Use ["macos-latest"] for GitHub-hosted macOS.
         required: true
-        default: codex/issue-50-media-assets
+        default: '["macos-latest"]'
         type: string
       source_id:
-        description: Source id from media-assets/sources.json.
-        required: true
-        default: parking_garage_cars
+        description: Optional source id from media-assets/sources.json.
+        required: false
         type: string
-      profiles:
-        description: Space-separated profile list to build for manual testing.
-        required: true
-        default: preview_320p30
-        type: string
-      encoder_mode:
-        description: Encoder backend for H.264/HEVC.
-        required: true
-        default: videotoolbox
+      regenerate:
+        description: Rebuild assets even if the published index already lists them.
+        required: false
+        default: false
+        type: boolean
+      fps_upsample_mode:
+        description: Frame-rate upsampling mode. Use interpolate for smoother output, duplicate for faster test runs.
+        required: false
+        default: interpolate
         type: choice
         options:
-          - videotoolbox
-          - auto
-          - software
+          - interpolate
+          - duplicate
+      max_parallel:
+        description: Maximum number of media conversion shards to run at once.
+        required: false
+        default: "8"
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  MEDIA_ASSETS_PREFIX: media-assets
+  MEDIA_ASSETS_STAGING_PREFIX: media-assets/_staging/${{ github.run_id }}
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
-  convert:
-    name: Convert selected media assets
-    runs-on: macos-latest
+  resolve-vulcan-config:
+    name: Resolve Vulcan Config
+    uses: sima-neat/.github/.github/workflows/vulcan-resolve-config.yml@main
+    with:
+      vulcan_env: ${{ vars.VULCAN_ENV || 'production' }}
+
+  prepare-media-matrix:
+    name: Prepare media matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_json: ${{ steps.matrix.outputs.matrix_json }}
+      max_parallel: ${{ steps.validate-max-parallel.outputs.max_parallel }}
 
     steps:
-      - name: Checkout implementation
+      - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          ref: ${{ inputs.implementation_ref }}
+          python-version: "3.11"
+
+      - name: Validate max parallel
+        id: validate-max-parallel
+        env:
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${MAX_PARALLEL}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "max_parallel must be a positive integer." >&2
+            exit 1
+          fi
+          echo "max_parallel=${MAX_PARALLEL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create matrix
+        id: matrix
+        env:
+          SOURCE_ID: ${{ inputs.source_id }}
+        run: |
+          set -euo pipefail
+          args=(
+            --sources media-assets/sources.json
+            --github-output "${GITHUB_OUTPUT}"
+          )
+          if [[ -n "${SOURCE_ID}" ]]; then
+            args+=(--source-id "${SOURCE_ID}")
+          fi
+          python3 media-assets/create_media_asset_matrix.py "${args[@]}"
+
+  build-and-publish:
+    name: Build media assets (${{ matrix.name }})
+    needs:
+      - resolve-vulcan-config
+      - prepare-media-matrix
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare-media-matrix.outputs.max_parallel) }}
+      matrix:
+        include: ${{ fromJSON(needs.prepare-media-matrix.outputs.matrix_json) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -53,26 +119,85 @@ jobs:
       - name: Install ffmpeg
         run: |
           set -euo pipefail
+          if ! command -v brew >/dev/null 2>&1; then
+            echo "Homebrew is required on the macOS media asset runner." >&2
+            exit 1
+          fi
+          if brew tap | grep -qx "aws/tap"; then
+            brew untap aws/tap
+          fi
           if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
             brew install ffmpeg
           fi
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
+          python3 -m pip install --upgrade awscli
+          aws --version
 
-      - name: Convert selected profiles
+      - name: Configure AWS credentials for media build
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+          role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+
+      - name: Fetch existing media asset index
+        if: ${{ matrix.prune_only != 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          bucket="${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}"
+          key="${MEDIA_ASSETS_PREFIX}/index.json"
+          if aws s3api head-object --bucket "${bucket}" --key "${key}" >/tmp/media-index-head.json 2>/tmp/media-index-head.err; then
+            aws s3 cp "s3://${bucket}/${key}" dist/existing-media-assets-index.json
+            echo "Existing media asset index downloaded."
+          else
+            if grep -Eq "Not Found|404" /tmp/media-index-head.err; then
+              echo "No existing media asset index found."
+              printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
+                > dist/existing-media-assets-index.json
+            else
+              cat /tmp/media-index-head.err >&2
+              exit 1
+            fi
+          fi
+          python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
+
+      - name: Build media asset renditions
+        if: ${{ matrix.prune_only != 'true' }}
         env:
-          SOURCE_ID: ${{ inputs.source_id }}
-          ENCODER_MODE: ${{ inputs.encoder_mode }}
-          PROFILES: ${{ inputs.profiles }}
+          SOURCE_ID: ${{ matrix.source_id }}
+          REGENERATE: ${{ inputs.regenerate }}
+          FPS_UPSAMPLE_MODE: ${{ inputs.fps_upsample_mode }}
+          PROFILES: ${{ matrix.profiles }}
         run: |
           set -euo pipefail
           args=(
             --sources media-assets/sources.json
-            --output dist/media-assets
-            --source-id "${SOURCE_ID}"
-            --encoder-mode "${ENCODER_MODE}"
-            --regenerate
+            --output "dist/media-assets-${{ matrix.name }}"
+            --encoder-mode videotoolbox
+            --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
+            --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/assets"
+            --publish-progress-index-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes/${{ matrix.name }}.index.json"
+            --skip-existing-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}"
+            --aws-refresh-role-arn "${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}"
+            --aws-refresh-region "${{ needs.resolve-vulcan-config.outputs.aws_region }}"
+            --delete-after-publish
+            --shard-index
+            --allow-empty-sources
           )
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            args+=(--publish-sse aws:kms)
+            args+=(--publish-sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          if [[ -f dist/existing-media-assets-index.json ]]; then
+            args+=(--existing-index dist/existing-media-assets-index.json)
+          fi
+          if [[ -n "${SOURCE_ID}" ]]; then
+            args+=(--source-id "${SOURCE_ID}")
+          fi
+          if [[ "${REGENERATE}" == "true" ]]; then
+            args+=(--regenerate)
+          fi
           read -r -a profiles <<< "${PROFILES}"
           if [ "${#profiles[@]}" -eq 0 ]; then
             echo "At least one profile must be specified." >&2
@@ -86,13 +211,279 @@ jobs:
             args+=(--profile "${profile}")
           done
           python3 media-assets/build_media_assets.py "${args[@]}"
+          python3 -m json.tool "dist/media-assets-${{ matrix.name }}/index.json" >/dev/null
+          find "dist/media-assets-${{ matrix.name }}" -maxdepth 4 -type f -print
+
+      - name: Refresh AWS credentials for shard index publish
+        if: ${{ matrix.prune_only != 'true' }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+          role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+          role-session-name: insight-media-${{ github.run_id }}
+
+      - name: Publish media asset shard to S3
+        if: ${{ matrix.prune_only != 'true' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          aws s3 cp "dist/media-assets-${{ matrix.name }}/index.json" \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes/${{ matrix.name }}.index.json" \
+            "${publish_args[@]}"
+
+  publish-media-assets:
+    name: Publish media assets
+    if: ${{ always() && needs.resolve-vulcan-config.result == 'success' }}
+    needs:
+      - resolve-vulcan-config
+      - build-and-publish
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg and AWS CLI
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 -m pip install --upgrade awscli
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+          aws --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+          role-to-assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+
+      - name: Fetch existing and staged media asset indexes
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/staged-indexes
+          bucket="${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}"
+          key="${MEDIA_ASSETS_PREFIX}/index.json"
+          if aws s3api head-object --bucket "${bucket}" --key "${key}" >/tmp/media-index-head.json 2>/tmp/media-index-head.err; then
+            aws s3 cp "s3://${bucket}/${key}" dist/existing-media-assets-index.json
+            echo "Existing media asset index downloaded."
+          else
+            if grep -Eq "Not Found|404" /tmp/media-index-head.err; then
+              echo "No existing media asset index found."
+              printf '{"schema":"sima.neat.insight.media-assets.index.v1","sources":[],"assets":[]}\n' \
+                > dist/existing-media-assets-index.json
+            else
+              cat /tmp/media-index-head.err >&2
+              exit 1
+            fi
+          fi
+          staged_index_prefix="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes"
+          if aws s3 ls "${staged_index_prefix}/" >/tmp/staged-indexes.ls 2>/tmp/staged-indexes.err; then
+            if [[ ! -s /tmp/staged-indexes.ls ]]; then
+              echo "No staged media asset indexes found."
+            else
+              aws s3 sync \
+                "${staged_index_prefix}" \
+                dist/staged-indexes \
+                --exclude "*" \
+                --include "*.index.json"
+            fi
+          else
+            cat /tmp/staged-indexes.err >&2
+            exit 1
+          fi
+          staged_removed_manifest="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/removed-assets.json"
+          if aws s3 cp "${staged_removed_manifest}" dist/staged-removed-assets.json 2>/tmp/staged-removed-assets.err; then
+            echo "Staged removed-asset manifest downloaded."
+            python3 -m json.tool dist/staged-removed-assets.json >/dev/null
+          elif grep -Eq "404|Not Found|NoSuchKey" /tmp/staged-removed-assets.err; then
+            echo "No staged removed-asset manifest found."
+          else
+            cat /tmp/staged-removed-assets.err >&2
+            exit 1
+          fi
+          python3 -m json.tool dist/existing-media-assets-index.json >/dev/null
+          find dist/staged-indexes -type f -name "*.index.json" -print
+
+      - name: Regenerate canonical media asset index
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        env:
+          SOURCE_ID: ${{ inputs.source_id }}
+          REGENERATE: ${{ inputs.regenerate }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/media-assets
+
+          args=(
+            --sources media-assets/sources.json
+            --output dist/media-assets
+            --index-only
+            --allow-empty-sources
+          )
+          if [[ -f dist/existing-media-assets-index.json ]]; then
+            args+=(--existing-index dist/existing-media-assets-index.json)
+          fi
+          while IFS= read -r -d '' index_file; do
+            args+=(--merge-index "${index_file}")
+          done < <(find dist/staged-indexes -type f -name "*.index.json" -print0)
+          if [[ -n "${SOURCE_ID}" ]]; then
+            args+=(--source-id "${SOURCE_ID}")
+          fi
+          if [[ "${REGENERATE}" == "true" ]]; then
+            args+=(--regenerate)
+          fi
+          if [[ -z "${SOURCE_ID}" ]]; then
+            args+=(--prune-removed-sources)
+          fi
+          python3 media-assets/build_media_assets.py "${args[@]}"
           python3 -m json.tool dist/media-assets/index.json >/dev/null
           find dist/media-assets -maxdepth 4 -type f -print
 
-      - name: Upload converted assets
-        uses: actions/upload-artifact@v6
-        with:
-          name: media-assets-manual-test
-          path: dist/media-assets/**/*
-          if-no-files-found: error
-          retention-days: 3
+      - name: Persist removed media asset manifest
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          manifests=()
+          if [[ -f dist/staged-removed-assets.json ]]; then
+            manifests+=(dist/staged-removed-assets.json)
+          fi
+          if [[ -f dist/media-assets/removed-assets.json ]]; then
+            manifests+=(dist/media-assets/removed-assets.json)
+          fi
+          if [[ "${#manifests[@]}" -eq 0 ]]; then
+            echo "No removed-asset manifest generated; nothing to persist."
+            exit 0
+          fi
+          python3 - "${manifests[@]}" <<'PY' > dist/media-assets/removed-assets.json.tmp
+          import json
+          import sys
+          import time
+          from pathlib import Path
+
+          assets = {}
+          for manifest in sys.argv[1:]:
+              payload = json.loads(Path(manifest).read_text(encoding="utf-8"))
+              for asset in payload.get("assets", []):
+                  path = str(asset.get("path", "")).strip()
+                  if not path:
+                      continue
+                  source_id = str(asset.get("source_id", ""))
+                  assets[path] = {"source_id": source_id, "path": path}
+          payload = {
+              "schema": "sima.neat.insight.media-assets.removed.v1",
+              "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+              "assets": sorted(assets.values(), key=lambda item: (item["source_id"], item["path"])),
+          }
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+          mv dist/media-assets/removed-assets.json.tmp dist/media-assets/removed-assets.json
+          python3 -m json.tool dist/media-assets/removed-assets.json >/dev/null
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          aws s3 cp dist/media-assets/removed-assets.json \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/removed-assets.json" \
+            "${publish_args[@]}"
+
+      - name: Promote staged media assets
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          staged_asset_prefix="s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/assets"
+          if aws s3 ls "${staged_asset_prefix}/" >/tmp/staged-assets.ls 2>/tmp/staged-assets.err; then
+            if [[ ! -s /tmp/staged-assets.ls ]]; then
+              echo "No staged media assets found."
+              exit 0
+            fi
+            aws s3 sync \
+              "${staged_asset_prefix}" \
+              "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}" \
+              "${publish_args[@]}"
+          else
+            cat /tmp/staged-assets.err >&2
+            exit 1
+          fi
+
+      - name: Publish canonical media asset index
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          publish_args=()
+          if [[ -n "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}" ]]; then
+            publish_args+=(--sse aws:kms --sse-kms-key-id "${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}")
+          fi
+          aws s3 cp dist/media-assets/index.json \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/index.json" \
+            "${publish_args[@]}"
+
+      - name: Delete media assets removed from sources.json
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          manifests=()
+          if [[ -f dist/staged-removed-assets.json ]]; then
+            manifests+=(dist/staged-removed-assets.json)
+          fi
+          if [[ -f dist/media-assets/removed-assets.json ]]; then
+            manifests+=(dist/media-assets/removed-assets.json)
+          fi
+          if [[ "${#manifests[@]}" -eq 0 ]]; then
+            echo "No removed-asset manifest found; skipping deletion."
+            exit 0
+          fi
+          python3 - "${manifests[@]}" <<'PY' > /tmp/removed-media-assets.txt
+          import json
+          import sys
+          from pathlib import Path
+
+          paths = set()
+          for manifest in sys.argv[1:]:
+              payload = json.loads(Path(manifest).read_text(encoding="utf-8"))
+              for asset in payload.get("assets", []):
+                  path = str(asset.get("path", "")).strip()
+                  if path:
+                      paths.add(path)
+          for path in sorted(paths):
+              print(path)
+          PY
+          if [[ ! -s /tmp/removed-media-assets.txt ]]; then
+            echo "No removed media asset paths to delete."
+            exit 0
+          fi
+          while IFS= read -r rel; do
+            echo "Deleting removed media asset: ${rel}"
+            aws s3 rm \
+              "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_PREFIX}/${rel}"
+          done < /tmp/removed-media-assets.txt
+
+      - name: Remove staged media asset indexes
+        if: ${{ needs.build-and-publish.result == 'success' }}
+        run: |
+          set -euo pipefail
+          aws s3 rm \
+            "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}" \
+            --recursive || true
+
+      - name: Invalidate CloudFront media asset cache
+        if: ${{ needs.build-and-publish.result == 'success' && needs.resolve-vulcan-config.outputs.artifact_cloudfront_distribution_id != '' }}
+        run: |
+          set -euo pipefail
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ needs.resolve-vulcan-config.outputs.artifact_cloudfront_distribution_id }}" \
+            --paths "/${MEDIA_ASSETS_PREFIX}/*"

@@ -19,6 +19,16 @@ const TABS = [
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
+const YOUTUBE_IMPORT_TARGETS = [
+  { value: '1080p30', label: '1080p30' },
+  { value: '720p30', label: '720p30' },
+  { value: '480p30', label: '480p30' }
+]
+const YOUTUBE_CLIP_DURATIONS = [
+  { value: '60', label: '1 minute' },
+  { value: '180', label: '3 minutes' },
+  { value: '300', label: '5 minutes' }
+]
 const TAB_STORAGE_KEY = 'neat-insight:selected-tab'
 const ROUTE_TO_TAB = {
   workspace: 'workspace',
@@ -103,6 +113,7 @@ function flattenFiles(tree, acc = []) {
 }
 
 function prettyKey(key) {
+  if (key === 'duration_ms') return 'Duration'
   return key.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
 }
 
@@ -118,14 +129,147 @@ function prettyCodec(value) {
 function prettyValue(key, value) {
   if (value === null || value === undefined || value === '') return '-'
   if (key === 'codec' || key === 'normalized_codec') return prettyCodec(value)
-  if (typeof value === 'number' && key.includes('size')) {
-    if (value < 1024) return `${value} B`
-    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-    if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-    return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
-  }
+  if (typeof value === 'number' && key.includes('size')) return formatBytes(value)
   if (typeof value === 'number' && key.includes('duration')) return `${(value / 1000).toFixed(2)} sec`
   return String(value)
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return '-'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function catalogAssetLabel(asset) {
+  if (!asset) return ''
+  return [
+    asset.profile,
+    asset.fps ? `${asset.fps} fps` : '',
+    asset.codec ? prettyCodec(asset.codec) : '',
+    asset.width && asset.height ? `${asset.width}x${asset.height}` : ''
+  ].filter(Boolean).join(' / ')
+}
+
+function catalogAssetSortKey(asset) {
+  return [
+    String(asset.source_title || asset.source_id || ''),
+    Number(asset.target_height || asset.height || 0),
+    Number(asset.fps || 0),
+    String(asset.codec || ''),
+    String(asset.path || '')
+  ].join('|')
+}
+
+function catalogImportProgressForLine(line, asset) {
+  const cleanLine = line.trim()
+  const percentMatch = cleanLine.match(/^Downloading catalog asset:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (percentMatch) {
+    return {
+      title: 'Importing catalog asset',
+      detail: `${catalogAssetLabel(asset)} - ${percentMatch[2]}`,
+      percent: Number.parseInt(percentMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Downloading catalog asset:')) {
+    return {
+      title: 'Importing catalog asset',
+      detail: cleanLine.replace(/^Downloading catalog asset:\s*/, '') || catalogAssetLabel(asset),
+      percent: null
+    }
+  }
+  if (cleanLine.startsWith('Saved catalog asset to ')) {
+    return {
+      title: 'Catalog asset saved',
+      detail: cleanLine.replace(/^Saved catalog asset to\s+/, ''),
+      percent: 100
+    }
+  }
+  if (cleanLine === 'Catalog import complete.') {
+    return {
+      title: 'Catalog import complete',
+      detail: catalogAssetLabel(asset),
+      percent: 100
+    }
+  }
+  return {
+    title: 'Importing catalog asset',
+    detail: cleanLine || catalogAssetLabel(asset),
+    percent: null
+  }
+}
+
+function youtubeImportProgressForLine(line, target) {
+  const cleanLine = line.trim()
+  const captureMatch = cleanLine.match(/^Capturing YouTube clip:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (captureMatch) {
+    return {
+      title: 'Capturing YouTube clip',
+      detail: `${target} - ${captureMatch[2]}`,
+      percent: Number.parseInt(captureMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Capturing YouTube clip:')) {
+    return {
+      title: 'Capturing YouTube clip',
+      detail: cleanLine.replace(/^Capturing YouTube clip:\s*/, '') || target,
+      percent: null,
+      variant: 'pending'
+    }
+  }
+  const downloadMatch = cleanLine.match(/^Downloading YouTube video:\s+(\d+)%/)
+  if (downloadMatch) {
+    return {
+      title: 'Downloading YouTube video',
+      detail: target,
+      percent: Number.parseInt(downloadMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Downloading YouTube video:')) {
+    return {
+      title: 'Downloading YouTube video',
+      detail: cleanLine.replace(/^Downloading YouTube video:\s*/, '') || target,
+      percent: null,
+      variant: 'pending'
+    }
+  }
+  const prepareMatch = cleanLine.match(/^Preparing YouTube media:\s+(\d+)%\s+\(([^)]+)\)/)
+  if (prepareMatch) {
+    return {
+      title: 'Preparing YouTube media',
+      detail: `${target} - ${prepareMatch[2]}`,
+      percent: Number.parseInt(prepareMatch[1], 10)
+    }
+  }
+  if (cleanLine.startsWith('Preparing YouTube media:')) {
+    return {
+      title: 'Preparing YouTube media',
+      detail: cleanLine.replace(/^Preparing YouTube media:\s*/, '') || target,
+      percent: null,
+      variant: 'pending'
+    }
+  }
+  if (cleanLine.startsWith('Saved YouTube media to ')) {
+    return {
+      title: 'YouTube media saved',
+      detail: cleanLine.replace(/^Saved YouTube media to\s+/, ''),
+      percent: 100
+    }
+  }
+  if (cleanLine === 'YouTube import complete.') {
+    return {
+      title: 'YouTube import complete',
+      detail: target,
+      percent: 100
+    }
+  }
+  return {
+    title: 'Importing YouTube video',
+    detail: cleanLine || target,
+    percent: null,
+    variant: 'pending'
+  }
 }
 
 function sysInfoValue(value) {
@@ -502,6 +646,33 @@ function MiniSeriesCard({ name, samples }) {
   )
 }
 
+function UploadProgressCard({ progress, className = '' }) {
+  if (!progress) return null
+  const hasPercent = Number.isFinite(progress.percent)
+  const barClass = [
+    'upload-progress-bar',
+    hasPercent ? '' : (progress.variant === 'pending' ? 'pending' : 'indeterminate')
+  ].filter(Boolean).join(' ')
+
+  return (
+    <div className={['upload-progress-card', className].filter(Boolean).join(' ')} role="status" aria-live="polite">
+      <div className="upload-progress-heading">
+        <span>{progress.title}</span>
+        {hasPercent && <span>{progress.percent}%</span>}
+      </div>
+      <div className="upload-progress-detail" title={progress.detail}>
+        {progress.detail}
+      </div>
+      <div className="upload-progress-track" aria-hidden="true">
+        <div
+          className={barClass}
+          style={hasPercent ? { width: `${progress.percent}%` } : undefined}
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const initialRoute = routeStateFromLocation()
   const [tab, setTab] = useState(() => {
@@ -517,6 +688,7 @@ export default function App() {
   const [mediaFilter, setMediaFilter] = useState('')
   const [sources, setSources] = useState([])
   const [selectedFile, setSelectedFile] = useState('')
+  const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
@@ -525,6 +697,26 @@ export default function App() {
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
+  const [localDropActive, setLocalDropActive] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importTab, setImportTab] = useState('local')
+  const [catalog, setCatalog] = useState(null)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState('')
+  const [catalogMode, setCatalogMode] = useState('type')
+  const [catalogFilter, setCatalogFilter] = useState('')
+  const [catalogSourceId, setCatalogSourceId] = useState('')
+  const [catalogProfile, setCatalogProfile] = useState('')
+  const [catalogCodec, setCatalogCodec] = useState('')
+  const [catalogAssetPath, setCatalogAssetPath] = useState('')
+  const [catalogSelectedAssetPaths, setCatalogSelectedAssetPaths] = useState([])
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [youtubeTarget, setYoutubeTarget] = useState('1080p30')
+  const [youtubeClipStart, setYoutubeClipStart] = useState('0:00')
+  const [youtubeClipDuration, setYoutubeClipDuration] = useState('300')
+  const [youtubePreview, setYoutubePreview] = useState(null)
+  const [youtubeValidating, setYoutubeValidating] = useState(false)
+  const [youtubeError, setYoutubeError] = useState('')
   const [viewerUrl, setViewerUrl] = useState('')
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
   const [metrics, setMetrics] = useState(null)
@@ -546,6 +738,7 @@ export default function App() {
   const [tourStep, setTourStep] = useState(0)
   const [error, setError] = useState('')
   const metricEs = useRef(null)
+  const youtubeImportAbortRef = useRef(null)
 
   const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
   const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
@@ -554,7 +747,74 @@ export default function App() {
     if (!q) return allFiles
     return allFiles.filter((f) => f.toLowerCase().includes(q))
   }, [allFiles, mediaFilter])
+  const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
+  const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
+  const catalogSourcesById = useMemo(() => {
+    const byId = new Map()
+    for (const source of catalogSources) {
+      if (source.id) byId.set(source.id, source)
+    }
+    return byId
+  }, [catalogSources])
+  const catalogAssetsBySource = useMemo(() => {
+    const grouped = new Map()
+    for (const asset of catalogAssets) {
+      const sourceId = asset.source_id
+      if (!sourceId) continue
+      if (!grouped.has(sourceId)) grouped.set(sourceId, [])
+      grouped.get(sourceId).push(asset)
+    }
+    for (const assets of grouped.values()) {
+      assets.sort((a, b) => catalogAssetSortKey(a).localeCompare(catalogAssetSortKey(b)))
+    }
+    return grouped
+  }, [catalogAssets])
+  const filteredCatalogSources = useMemo(() => {
+    const q = catalogFilter.trim().toLowerCase()
+    if (!q) return catalogSources
+    return catalogSources.filter((source) =>
+      [source.title, source.description, source.id].filter(Boolean).some((value) => String(value).toLowerCase().includes(q))
+    )
+  }, [catalogFilter, catalogSources])
+  const selectedCatalogSource = catalogSources.find((source) => source.id === catalogSourceId) || filteredCatalogSources[0] || null
+  const selectedCatalogAssets = selectedCatalogSource ? catalogAssetsBySource.get(selectedCatalogSource.id) || [] : []
+  const activeCatalogOptionAssets = catalogMode === 'type' ? catalogAssets : selectedCatalogAssets
+  const catalogProfiles = useMemo(() => [...new Set(activeCatalogOptionAssets.map((asset) => asset.profile).filter(Boolean))].sort(), [activeCatalogOptionAssets])
+  const catalogCodecOptions = useMemo(() => [...new Set(activeCatalogOptionAssets.map((asset) => asset.codec).filter(Boolean))].sort(), [activeCatalogOptionAssets])
+  const matchingCatalogAssets = useMemo(() => {
+    return selectedCatalogAssets.filter((asset) => {
+      if (asset.preview) return false
+      if (catalogProfile && asset.profile !== catalogProfile) return false
+      if (catalogCodec && asset.codec !== catalogCodec) return false
+      return true
+    })
+  }, [catalogCodec, catalogProfile, selectedCatalogAssets])
+  const typeMatchingCatalogAssets = useMemo(() => {
+    const q = catalogFilter.trim().toLowerCase()
+    return catalogAssets.filter((asset) => {
+      if (asset.preview) return false
+      if (catalogProfile && asset.profile !== catalogProfile) return false
+      if (catalogCodec && asset.codec !== catalogCodec) return false
+      if (!q) return true
+      const source = catalogSourcesById.get(asset.source_id) || {}
+      return [source.title, source.description, source.id, asset.source_title, asset.source_id]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q))
+    }).sort((a, b) => catalogAssetSortKey(a).localeCompare(catalogAssetSortKey(b)))
+  }, [catalogAssets, catalogCodec, catalogFilter, catalogProfile, catalogSourcesById])
+  const selectedTypeCatalogAssets = useMemo(() => {
+    const selected = new Set(catalogSelectedAssetPaths)
+    return typeMatchingCatalogAssets.filter((asset) => selected.has(asset.path))
+  }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
+  const selectedCatalogAsset = matchingCatalogAssets.find((asset) => asset.path === catalogAssetPath) || matchingCatalogAssets[0] || null
+  const selectedCatalogAssetBytes = selectedCatalogAsset ? Number(selectedCatalogAsset.bytes || 0) : 0
+  const selectedTypeCatalogBytes = useMemo(
+    () => selectedTypeCatalogAssets.reduce((total, asset) => total + Number(asset.bytes || 0), 0),
+    [selectedTypeCatalogAssets]
+  )
+  const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+  const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
     setTab(nextTab)
@@ -694,6 +954,44 @@ export default function App() {
   }, [selectedFile])
 
   useEffect(() => {
+    if (!selectedMediaPaths.length) return
+    const available = new Set(allFiles)
+    const next = selectedMediaPaths.filter((path) => available.has(path))
+    if (next.length !== selectedMediaPaths.length) {
+      setSelectedMediaPaths(next)
+    }
+  }, [allFiles, selectedMediaPaths])
+
+  useEffect(() => {
+    if (!selectedCatalogSource) {
+      setCatalogSourceId('')
+      return
+    }
+    if (catalogSourceId !== selectedCatalogSource.id) {
+      setCatalogSourceId(selectedCatalogSource.id)
+    }
+  }, [catalogSourceId, selectedCatalogSource])
+
+  useEffect(() => {
+    if (matchingCatalogAssets.length === 0) {
+      if (catalogAssetPath) setCatalogAssetPath('')
+      return
+    }
+    if (!matchingCatalogAssets.some((asset) => asset.path === catalogAssetPath)) {
+      setCatalogAssetPath(matchingCatalogAssets[0].path)
+    }
+  }, [catalogAssetPath, matchingCatalogAssets])
+
+  useEffect(() => {
+    if (catalogSelectedAssetPaths.length === 0) return
+    const available = new Set(typeMatchingCatalogAssets.map((asset) => asset.path))
+    const next = catalogSelectedAssetPaths.filter((path) => available.has(path))
+    if (next.length !== catalogSelectedAssetPaths.length) {
+      setCatalogSelectedAssetPaths(next)
+    }
+  }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
+
+  useEffect(() => {
     if (tab !== 'visualizer') return
     refreshMetrics()
 
@@ -718,6 +1016,253 @@ export default function App() {
       es.close()
     }
   }, [tab])
+
+  async function loadCatalog() {
+    setCatalogLoading(true)
+    setCatalogError('')
+    try {
+      const data = await fetchJson('/api/media-catalog')
+      setCatalog(data)
+      if (!catalogSourceId && Array.isArray(data.sources) && data.sources.length) {
+        setCatalogSourceId(data.sources[0].id)
+      }
+    } catch (e) {
+      setCatalogError(e.message)
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
+
+  function openImportDialog(nextTab = 'local') {
+    setImportTab(nextTab)
+    setImportDialogOpen(true)
+    if (nextTab === 'catalog' && !catalog && !catalogLoading) {
+      loadCatalog()
+    }
+  }
+
+  async function readCatalogImportProgress(response, asset) {
+    if (!response.body) {
+      const text = await response.text()
+      if (!response.ok) throw new Error(text || 'Catalog import failed')
+      const lastLine = text.trim().split(/\r?\n/).filter(Boolean).pop()
+      if (lastLine) setUploadProgress(catalogImportProgressForLine(lastLine, asset))
+      const failureLine = text.split(/\r?\n/).find((line) => /^Catalog import failed:|^Checksum mismatch|^Size mismatch/.test(line.trim()))
+      if (failureLine) throw new Error(failureLine.trim())
+      return text
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        const lastLine = lines.map((line) => line.trim()).filter(Boolean).pop()
+        if (lastLine) setUploadProgress(catalogImportProgressForLine(lastLine, asset))
+      }
+      if (done) break
+    }
+
+    const finalLine = pending.trim()
+    if (finalLine) setUploadProgress(catalogImportProgressForLine(finalLine, asset))
+    if (!response.ok) throw new Error(text || 'Catalog import failed')
+    const failureLine = text.split(/\r?\n/).find((line) => /^Catalog import failed:|^Checksum mismatch|^Size mismatch/.test(line.trim()))
+    if (failureLine) throw new Error(failureLine.trim())
+    return text
+  }
+
+  async function readYoutubeImportProgress(response, target) {
+    if (!response.body) {
+      const text = await response.text()
+      if (!response.ok) throw new Error(text || 'YouTube import failed')
+      const lastLine = text.trim().split(/\r?\n/).filter(Boolean).pop()
+      if (lastLine) setUploadProgress(youtubeImportProgressForLine(lastLine, target))
+      const failureLine = text.split(/\r?\n/).find((line) => /^YouTube import failed:/.test(line.trim()))
+      if (failureLine) throw new Error(failureLine.trim())
+      return text
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        const lastLine = lines.map((line) => line.trim()).filter(Boolean).pop()
+        if (lastLine) setUploadProgress(youtubeImportProgressForLine(lastLine, target))
+      }
+      if (done) break
+    }
+
+    const finalLine = pending.trim()
+    if (finalLine) setUploadProgress(youtubeImportProgressForLine(finalLine, target))
+    if (!response.ok) throw new Error(text || 'YouTube import failed')
+    const failureLine = text.split(/\r?\n/).find((line) => /^YouTube import failed:/.test(line.trim()))
+    if (failureLine) throw new Error(failureLine.trim())
+    return text
+  }
+
+  async function validateYoutubeUrl() {
+    const url = youtubeUrl.trim()
+    if (!url) {
+      setYoutubeError('Enter a YouTube URL.')
+      setYoutubePreview(null)
+      return null
+    }
+    setYoutubeValidating(true)
+    setYoutubeError('')
+    try {
+      const preview = await fetchJson('/api/import/youtube/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      })
+      setYoutubePreview(preview)
+      setYoutubeUrl(preview.normalized_url || url)
+      const clipStart = Number.parseInt(preview.clip_start, 10)
+      if (Number.isFinite(clipStart)) setYoutubeClipStart(String(clipStart))
+      return preview
+    } catch (err) {
+      setYoutubePreview(null)
+      setYoutubeError(err.message || 'Could not validate YouTube URL.')
+      return null
+    } finally {
+      setYoutubeValidating(false)
+    }
+  }
+
+  async function importYoutubeVideo() {
+    const preview = youtubePreview || (await validateYoutubeUrl())
+    if (!preview) return
+    setUploadBusy(true)
+    setUploadStatus('')
+    setError('')
+    setUploadProgress({
+      title: 'Importing YouTube video',
+      detail: youtubeTarget,
+      percent: null,
+      variant: 'pending'
+    })
+    const controller = new AbortController()
+    youtubeImportAbortRef.current = controller
+    try {
+      const res = await fetch('/api/import/youtube', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: preview.normalized_url || youtubeUrl.trim(),
+          target: youtubeTarget,
+          clip_start: youtubeClipStart,
+          clip_duration: Number.parseInt(youtubeClipDuration, 10)
+        })
+      })
+      const text = await readYoutubeImportProgress(res, youtubeTarget)
+      const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved YouTube media to '))
+      const savedPath = savedLine ? savedLine.replace(/^Saved YouTube media to\s+/, '').trim() : ''
+      await loadMedia()
+      if (savedPath) setSelectedFile(savedPath)
+      setUploadProgress(null)
+      setUploadStatus('Imported YouTube video.')
+      setImportDialogOpen(false)
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        setYoutubeError('')
+        setUploadStatus('YouTube import canceled.')
+        setUploadProgress({
+          title: 'YouTube import canceled',
+          detail: youtubeTarget,
+          percent: null,
+          variant: 'pending'
+        })
+        return
+      }
+      setError(err.message)
+      setYoutubeError(err.message)
+      setUploadProgress(null)
+    } finally {
+      youtubeImportAbortRef.current = null
+      setUploadBusy(false)
+    }
+  }
+
+  function cancelYoutubeImport() {
+    youtubeImportAbortRef.current?.abort()
+  }
+
+  function toggleCatalogAssetSelection(path) {
+    setCatalogSelectedAssetPaths((prev) => {
+      if (prev.includes(path)) return prev.filter((item) => item !== path)
+      return [...prev, path]
+    })
+  }
+
+  function selectAllMatchingCatalogAssets() {
+    setCatalogSelectedAssetPaths(typeMatchingCatalogAssets.map((asset) => asset.path))
+  }
+
+  async function importCatalogAssets(assets) {
+    const assetsToImport = assets.filter(Boolean)
+    if (!assetsToImport.length) return
+    setUploadBusy(true)
+    setUploadProgress({
+      title: 'Importing catalog asset',
+      detail: catalogAssetLabel(assetsToImport[0]),
+      percent: null
+    })
+    setUploadStatus('')
+    setError('')
+    try {
+      let lastSavedPath = ''
+      for (let index = 0; index < assetsToImport.length; index += 1) {
+        const asset = assetsToImport[index]
+        setUploadProgress({
+          title: `Importing catalog asset ${index + 1}/${assetsToImport.length}`,
+          detail: catalogAssetLabel(asset),
+          percent: null
+        })
+        const res = await fetch('/api/import/media-catalog', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: asset.path })
+        })
+        const text = await readCatalogImportProgress(res, asset)
+        const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved catalog asset to '))
+        const savedPath = savedLine ? savedLine.replace(/^Saved catalog asset to\s+/, '').trim() : ''
+        if (savedPath) lastSavedPath = savedPath
+      }
+      await loadMedia()
+      if (lastSavedPath) setSelectedFile(lastSavedPath)
+      setUploadProgress(null)
+      setUploadStatus(`Imported ${assetsToImport.length} catalog asset(s).`)
+      setImportDialogOpen(false)
+      setCatalogSelectedAssetPaths([])
+    } catch (e) {
+      setError(e.message)
+      setUploadProgress(null)
+    } finally {
+      setUploadBusy(false)
+    }
+  }
+
+  async function importCatalogAsset() {
+    await importCatalogAssets([selectedCatalogAsset])
+  }
 
   async function readUploadProgress(response, file, position, total) {
     if (!response.body) {
@@ -759,8 +1304,8 @@ export default function App() {
     return text
   }
 
-  async function onUpload(e) {
-    const files = Array.from(e.target.files || [])
+  async function uploadFiles(filesInput) {
+    const files = Array.from(filesInput || [])
     if (!files.length) return
 
     setUploadBusy(true)
@@ -793,6 +1338,7 @@ export default function App() {
       if (!failed.length) {
         setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
+        setImportDialogOpen(false)
       } else {
         setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount}/${files.length} file(s).`)
@@ -804,22 +1350,96 @@ export default function App() {
     } finally {
       setUploadBusy(false)
       setUploadProgress(null)
-      e.target.value = ''
     }
   }
 
+  async function onUpload(e) {
+    await uploadFiles(e.target.files)
+    e.target.value = ''
+  }
+
+  function onLocalDropDragOver(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (uploadBusy) return
+    e.dataTransfer.dropEffect = 'copy'
+    setLocalDropActive(true)
+  }
+
+  function onLocalDropDragLeave(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget.contains(e.relatedTarget)) return
+    setLocalDropActive(false)
+  }
+
+  async function onLocalDrop(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    setLocalDropActive(false)
+    if (uploadBusy) return
+    await uploadFiles(e.dataTransfer.files)
+  }
+
+  function onImportDragOver(e) {
+    if (importTab !== 'local') return
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (!uploadBusy) {
+      e.dataTransfer.dropEffect = 'copy'
+      setLocalDropActive(true)
+    }
+  }
+
+  function onImportDrop(e) {
+    if (importTab !== 'local') return
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    setLocalDropActive(false)
+    if (!uploadBusy) {
+      uploadFiles(e.dataTransfer.files)
+    }
+  }
+
+  function toggleSelectedMediaPath(path) {
+    setSelectedMediaPaths((current) => (
+      current.includes(path)
+        ? current.filter((item) => item !== path)
+        : [...current, path]
+    ))
+  }
+
+  function clearSelectedMediaPaths() {
+    setSelectedMediaPaths([])
+  }
+
   async function onDelete() {
-    if (!selectedFile) return
+    const paths = [...deleteTargetPaths]
+    if (!paths.length) return
     try {
-      await fetchJson('/api/delete-media', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedFile })
-      })
-      const deletedFile = selectedFile
+      const failed = []
+      for (const path of paths) {
+        try {
+          await fetchJson('/api/delete-media', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+          })
+        } catch (err) {
+          failed.push(err?.message ? `${path}: ${err.message}` : `${path}: delete failed`)
+        }
+      }
       setDeleteConfirmOpen(false)
+      setSelectedMediaPaths([])
       await Promise.all([loadMedia(true), loadSources()])
-      setUploadStatus(`Removed: ${deletedFile}`)
+      if (failed.length) {
+        setError(failed[0])
+        setUploadStatus(`Removed ${paths.length - failed.length}/${paths.length} media file(s).`)
+      } else {
+        setUploadStatus(`Removed ${paths.length} media file(s).`)
+      }
     } catch (e) {
       setError(e.message)
     }
@@ -1127,24 +1747,10 @@ export default function App() {
       <div className={blurForOverview ? 'tour-blur-shell' : ''}>
         <div className="toast-stack" aria-live="polite">
           {error && <div className="toast error">{error}</div>}
-          {uploadBusy && uploadProgress ? (
-            <div className="upload-progress-card" role="status" aria-live="polite">
-              <div className="upload-progress-heading">
-                <span>{uploadProgress.title}</span>
-                {Number.isFinite(uploadProgress.percent) && <span>{uploadProgress.percent}%</span>}
-              </div>
-              <div className="upload-progress-detail" title={uploadProgress.detail}>
-                {uploadProgress.detail}
-              </div>
-              <div className="upload-progress-track" aria-hidden="true">
-                <div
-                  className={Number.isFinite(uploadProgress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
-                  style={Number.isFinite(uploadProgress.percent) ? { width: `${uploadProgress.percent}%` } : undefined}
-                />
-              </div>
-            </div>
+          {uploadBusy && uploadProgress && !importDialogOpen ? (
+            <UploadProgressCard progress={uploadProgress} />
           ) : (
-            uploadStatus && <div className="toast status">{uploadStatus}</div>
+            !importDialogOpen && uploadStatus && <div className="toast status">{uploadStatus}</div>
           )}
         </div>
 
@@ -1201,18 +1807,20 @@ export default function App() {
                   <h2>Media Sources</h2>
                   <p className="section-note">Browse, preview, and manage local media assets.</p>
                 </div>
-                <label
+                <button
+                  type="button"
                   className={uploadBusy ? 'upload-icon-btn busy' : 'upload-icon-btn'}
-                  title="Upload Media"
-                  aria-label="Upload Media"
+                  title="Import Media"
+                  aria-label="Import Media"
                   aria-busy={uploadBusy ? 'true' : 'false'}
+                  disabled={uploadBusy}
+                  onClick={() => openImportDialog('local')}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 3l4.5 4.5-1.4 1.4-2.1-2.1V16h-2V6.8L8.9 8.9 7.5 7.5 12 3zM5 18h14v2H5v-2z" />
                   </svg>
-                  <span className="sr-only">Upload Media</span>
-                  <input type="file" multiple onChange={onUpload} disabled={uploadBusy} />
-                </label>
+                  <span className="sr-only">Import Media</span>
+                </button>
               </div>
               <p className="meta-count">{filteredFiles.length} files</p>
 
@@ -1221,12 +1829,28 @@ export default function App() {
               </div>
 
               <div className="media-list">
-                {filteredFiles.map((path) => (
-                  <button key={path} className={path === selectedFile ? 'media-row active' : 'media-row'} onClick={() => setSelectedFile(path)}>
-                    <span className="media-name">{path}</span>
-                    <span className="media-ext">{path.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                  </button>
-                ))}
+                {filteredFiles.map((path) => {
+                  const checked = selectedMediaPaths.includes(path)
+                  const className = [
+                    'media-row',
+                    path === selectedFile ? 'active' : '',
+                    checked ? 'selected' : ''
+                  ].filter(Boolean).join(' ')
+                  return (
+                    <div key={path} className={className}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleSelectedMediaPath(path)}
+                        aria-label={`Select ${path} for deletion`}
+                      />
+                      <button type="button" className="media-row-preview" onClick={() => setSelectedFile(path)}>
+                        <span className="media-name">{path}</span>
+                        <span className="media-ext">{path.split('.').pop()?.toUpperCase() || 'FILE'}</span>
+                      </button>
+                    </div>
+                  )
+                })}
                 {filteredFiles.length === 0 && <p className="empty">No files match the filter.</p>}
               </div>
             </section>
@@ -1243,7 +1867,12 @@ export default function App() {
               </div>
 
               <div className="actions">
-                <button className="delete-icon-btn" onClick={() => setDeleteConfirmOpen(true)} disabled={!selectedFile} aria-label="Delete Selected" title="Delete Selected">
+                {selectedMediaPaths.length > 0 && (
+                  <button type="button" className="btn-ghost" onClick={clearSelectedMediaPaths}>
+                    Clear {selectedMediaPaths.length}
+                  </button>
+                )}
+                <button className="delete-icon-btn" onClick={() => setDeleteConfirmOpen(true)} disabled={!deleteTargetPaths.length} aria-label="Delete Selected" title="Delete Selected">
                   <img src="/icons/delete.png" alt="" />
                   <span className="sr-only">Delete</span>
                 </button>
@@ -1473,11 +2102,442 @@ export default function App() {
         </main>
       </div>
 
+      {importDialogOpen && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Import media"
+          onDragOverCapture={onImportDragOver}
+          onDropCapture={onImportDrop}
+          onDragLeaveCapture={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget)) return
+            setLocalDropActive(false)
+          }}
+        >
+          <div className={localDropActive && importTab === 'local' ? 'import-modal-card drag-active' : 'import-modal-card'}>
+            <header className="import-modal-header">
+              <div>
+                <p className="sysinfo-eyebrow">Media Import</p>
+                <h3>Import Media</h3>
+                <p>Upload local files, import catalog assets, or bring in a YouTube video.</p>
+              </div>
+              <button type="button" onClick={() => setImportDialogOpen(false)} disabled={uploadBusy}>
+                Close
+              </button>
+            </header>
+
+            <div className="import-tabs" role="tablist" aria-label="Import source">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={importTab === 'local'}
+                className={importTab === 'local' ? 'active' : ''}
+                onClick={() => setImportTab('local')}
+              >
+                Local files
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={importTab === 'catalog'}
+                className={importTab === 'catalog' ? 'active' : ''}
+                onClick={() => {
+                  setImportTab('catalog')
+                  if (!catalog && !catalogLoading) loadCatalog()
+                }}
+              >
+                Catalog
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={importTab === 'youtube'}
+                className={importTab === 'youtube' ? 'active' : ''}
+                onClick={() => setImportTab('youtube')}
+              >
+                YouTube
+              </button>
+            </div>
+
+            {uploadStatus && !uploadBusy && <div className="import-status">{uploadStatus}</div>}
+
+            {importTab === 'local' && (
+              <section className="import-local-panel">
+                <p className="section-note">
+                  Local MP4 uploads are normalized for low-latency playback with B-frames disabled while preserving the source frame rate.
+                </p>
+                <label
+                  className={[
+                    'file-import-drop',
+                    uploadBusy ? 'busy' : '',
+                    localDropActive ? 'drag-active' : ''
+                  ].filter(Boolean).join(' ')}
+                  onDragEnter={onLocalDropDragOver}
+                  onDragOver={onLocalDropDragOver}
+                  onDragLeave={onLocalDropDragLeave}
+                  onDrop={onLocalDrop}
+                >
+                  <input type="file" multiple onChange={onUpload} disabled={uploadBusy} />
+                  <span>Choose or drop local media files</span>
+                  <small>Supported media: MP4 or AVI with H.264, H.265, or MJPEG video.</small>
+                </label>
+                {uploadBusy && uploadProgress && <UploadProgressCard progress={uploadProgress} className="import-progress-card" />}
+              </section>
+            )}
+
+            {importTab === 'catalog' && (
+              <section className="catalog-import-panel">
+                <div className="catalog-toolbar">
+                  <input
+                    className="search-input"
+                    placeholder="Search catalog..."
+                    value={catalogFilter}
+                    onChange={(e) => setCatalogFilter(e.target.value)}
+                  />
+                  <button type="button" className="btn-ghost" onClick={loadCatalog} disabled={catalogLoading}>
+                    {catalogLoading ? 'Loading...' : 'Refresh'}
+                  </button>
+                </div>
+
+                {catalogError && <div className="sysinfo-error">{catalogError}</div>}
+                {catalogLoading && !catalog && <div className="sysinfo-loading">Loading catalog...</div>}
+
+                {catalog && (
+                  <>
+                    <div className="catalog-mode-tabs" role="tablist" aria-label="Catalog browsing mode">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={catalogMode === 'type'}
+                        className={catalogMode === 'type' ? 'active' : ''}
+                        onClick={() => setCatalogMode('type')}
+                      >
+                        Catalog by asset type
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={catalogMode === 'name'}
+                        className={catalogMode === 'name' ? 'active' : ''}
+                        onClick={() => setCatalogMode('name')}
+                      >
+                        Catalog by asset name
+                      </button>
+                    </div>
+
+                    {catalogMode === 'name' && (
+                      <div className="catalog-grid">
+                        <div className="catalog-source-list">
+                          {filteredCatalogSources.map((source) => {
+                            const count = (catalogAssetsBySource.get(source.id) || []).filter((asset) => !asset.preview).length
+                            return (
+                              <button
+                                key={source.id}
+                                type="button"
+                                className={selectedCatalogSource?.id === source.id ? 'catalog-source-row active' : 'catalog-source-row'}
+                                onClick={() => {
+                              setCatalogSourceId(source.id)
+                              setCatalogProfile('')
+                              setCatalogCodec('')
+                              setCatalogAssetPath('')
+                                }}
+                              >
+                                <span>{source.title || source.id}</span>
+                                <small>{count} variants</small>
+                              </button>
+                            )
+                          })}
+                          {filteredCatalogSources.length === 0 && <p className="empty">No catalog sources match the filter.</p>}
+                        </div>
+
+                        <div className="catalog-detail">
+                          {selectedCatalogSource ? (
+                            <>
+                              <div className="catalog-preview-tile">
+                                {selectedCatalogPreview?.url ? (
+                                  <video controls muted loop src={selectedCatalogPreview.url} />
+                                ) : (
+                                  <div className="catalog-preview-empty">No preview available</div>
+                                )}
+                                <div>
+                                  <h4>{selectedCatalogSource.title || selectedCatalogSource.id}</h4>
+                                  <p>{selectedCatalogSource.description || 'Curated Insight media asset.'}</p>
+                                  {selectedCatalogPreview && <small>Preview: {catalogAssetLabel(selectedCatalogPreview)}</small>}
+                                </div>
+                              </div>
+
+                          <div className="catalog-filters">
+                            <label>
+                              <span>Resolution &amp; FPS</span>
+                              <select value={catalogProfile} onChange={(e) => setCatalogProfile(e.target.value)}>
+                                <option value="">Any</option>
+                                {catalogProfiles.filter((profile) => profile !== 'preview_320p30').map((profile) => (
+                                  <option key={profile} value={profile}>{profile}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Codec</span>
+                              <select value={catalogCodec} onChange={(e) => setCatalogCodec(e.target.value)}>
+                                    <option value="">Any</option>
+                                    {catalogCodecOptions.map((codec) => (
+                                      <option key={codec} value={codec}>{prettyCodec(codec)}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+
+                              <div className="catalog-variant-list" role="radiogroup" aria-label="Catalog variants">
+                                {matchingCatalogAssets.map((asset) => (
+                                  <button
+                                    key={asset.path}
+                                    type="button"
+                                    className={selectedCatalogAsset?.path === asset.path ? 'catalog-variant-row active' : 'catalog-variant-row'}
+                                    onClick={() => setCatalogAssetPath(asset.path)}
+                                  >
+                                    <span>{catalogAssetLabel(asset)}</span>
+                                    <small>{formatBytes(Number(asset.bytes || 0))}</small>
+                                  </button>
+                                ))}
+                                {matchingCatalogAssets.length === 0 && <p className="empty">No variants match the selected filters.</p>}
+                              </div>
+
+                              {uploadBusy && uploadProgress && <UploadProgressCard progress={uploadProgress} className="import-progress-card" />}
+
+                              <div className="catalog-import-footer">
+                                <div>
+                                  <strong>{selectedCatalogAsset ? catalogAssetLabel(selectedCatalogAsset) : 'No variant selected'}</strong>
+                                  {selectedCatalogAsset && (
+                                    <>
+                                      <p>{selectedCatalogAsset.path}</p>
+                                      <p>Total selected: {formatBytes(selectedCatalogAssetBytes)}</p>
+                                    </>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn-tonal"
+                                  onClick={importCatalogAsset}
+                                  disabled={!selectedCatalogAsset || uploadBusy}
+                                >
+                                  {uploadBusy ? 'Importing...' : 'Import'}
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <p className="empty">Select a catalog source.</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {catalogMode === 'type' && (
+                      <div className="catalog-type-panel">
+                        <div className="catalog-filters">
+                          <label>
+                            <span>Resolution &amp; FPS</span>
+                            <select value={catalogProfile} onChange={(e) => setCatalogProfile(e.target.value)}>
+                              <option value="">Any</option>
+                              {catalogProfiles.filter((profile) => profile !== 'preview_320p30').map((profile) => (
+                                <option key={profile} value={profile}>{profile}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Codec</span>
+                            <select value={catalogCodec} onChange={(e) => setCatalogCodec(e.target.value)}>
+                              <option value="">Any</option>
+                              {catalogCodecOptions.map((codec) => (
+                                <option key={codec} value={codec}>{prettyCodec(codec)}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="catalog-bulk-actions">
+                          <span>{typeMatchingCatalogAssets.length} matching assets / {selectedTypeCatalogAssets.length} selected</span>
+                          <div>
+                            <button type="button" className="btn-ghost" onClick={selectAllMatchingCatalogAssets} disabled={!typeMatchingCatalogAssets.length}>
+                              Select All
+                            </button>
+                            <button type="button" className="btn-ghost" onClick={() => setCatalogSelectedAssetPaths([])} disabled={!catalogSelectedAssetPaths.length}>
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="catalog-type-list">
+                          {typeMatchingCatalogAssets.map((asset) => {
+                            const source = catalogSourcesById.get(asset.source_id) || {}
+                            const selected = catalogSelectedAssetPaths.includes(asset.path)
+                            return (
+                              <label key={asset.path} className={selected ? 'catalog-type-row active' : 'catalog-type-row'}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => toggleCatalogAssetSelection(asset.path)}
+                                />
+                                <span>
+                                  <strong>{source.title || asset.source_title || asset.source_id}</strong>
+                                  <small>{catalogAssetLabel(asset)} / {formatBytes(Number(asset.bytes || 0))}</small>
+                                </span>
+                              </label>
+                            )
+                          })}
+                          {typeMatchingCatalogAssets.length === 0 && <p className="empty">No catalog assets match the selected type filters.</p>}
+                        </div>
+
+                        {uploadBusy && uploadProgress && <UploadProgressCard progress={uploadProgress} className="import-progress-card" />}
+
+                        <div className="catalog-import-footer">
+                          <div>
+                            <strong>{selectedTypeCatalogAssets.length} asset(s) selected</strong>
+                            <p>{catalogProfile || 'Any resolution & fps'} / {catalogCodec ? prettyCodec(catalogCodec) : 'Any codec'}</p>
+                            <p>Total selected: {formatBytes(selectedTypeCatalogBytes)}</p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-tonal"
+                            onClick={() => importCatalogAssets(selectedTypeCatalogAssets)}
+                            disabled={!selectedTypeCatalogAssets.length || uploadBusy}
+                          >
+                            {uploadBusy ? 'Importing...' : 'Import Selected'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {importTab === 'youtube' && (
+              <section className="youtube-import-panel">
+                <div className="youtube-form-grid">
+                  <label>
+                    <span>YouTube URL</span>
+                    <input
+                      className="search-input"
+                      type="url"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      value={youtubeUrl}
+                      onChange={(e) => {
+                        setYoutubeUrl(e.target.value)
+                        setYoutubePreview(null)
+                        setYoutubeError('')
+                      }}
+                      disabled={uploadBusy}
+                    />
+                  </label>
+                  <label>
+                    <span>Target Resolution &amp; FPS</span>
+                    <select value={youtubeTarget} onChange={(e) => setYoutubeTarget(e.target.value)} disabled={uploadBusy}>
+                      {YOUTUBE_IMPORT_TARGETS.map((target) => (
+                        <option key={target.value} value={target.value}>{target.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Start Time</span>
+                    <input
+                      className="search-input"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0:00"
+                      value={youtubeClipStart}
+                      onChange={(e) => setYoutubeClipStart(e.target.value)}
+                      disabled={uploadBusy}
+                    />
+                  </label>
+                  <label>
+                    <span>Clip Length</span>
+                    <select value={youtubeClipDuration} onChange={(e) => setYoutubeClipDuration(e.target.value)} disabled={uploadBusy}>
+                      {YOUTUBE_CLIP_DURATIONS.map((duration) => (
+                        <option key={duration.value} value={duration.value}>{duration.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={validateYoutubeUrl}
+                    disabled={uploadBusy || youtubeValidating || !youtubeUrl.trim()}
+                  >
+                    {youtubeValidating ? 'Validating...' : 'Validate'}
+                  </button>
+                </div>
+
+                {youtubeError && <div className="sysinfo-error">{youtubeError}</div>}
+
+                <div className="youtube-preview-panel">
+                  {youtubePreview ? (
+                    <>
+                      <iframe
+                        title="YouTube preview"
+                        src={youtubePreview.embed_url}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
+                      <div>
+                        <h4>{youtubePreview.title || 'YouTube Preview'}</h4>
+                        <p>{youtubePreview.normalized_url}</p>
+                        {youtubePreview.is_live && <p>Live stream import is clipped to the selected duration.</p>}
+                        <small>
+                          Insight will import up to {Number.parseInt(youtubeClipDuration, 10) / 60} minute(s)
+                          from {youtubeClipStart || '0:00'} as {youtubeTarget} H.264 with B-frames disabled.
+                        </small>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="youtube-preview-empty">Validate a YouTube link to show the preview before import.</div>
+                  )}
+                </div>
+
+                {uploadBusy && uploadProgress && (
+                  <div className="import-progress-actions">
+                    <UploadProgressCard progress={uploadProgress} className="import-progress-card" />
+                    <button type="button" className="btn-ghost danger" onClick={cancelYoutubeImport}>
+                      Cancel Import
+                    </button>
+                  </div>
+                )}
+
+                <div className="catalog-import-footer">
+                  <div>
+                    <strong>{youtubePreview ? 'Ready to import YouTube video' : 'Validate a YouTube URL'}</strong>
+                    <p>{youtubeTarget} / {Number.parseInt(youtubeClipDuration, 10) / 60} min max / H.264 / WebRTC-friendly import</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-tonal"
+                    onClick={importYoutubeVideo}
+                    disabled={uploadBusy || !youtubeUrl.trim() || !youtubePreview}
+                  >
+                    {uploadBusy ? 'Importing...' : 'Import'}
+                  </button>
+                </div>
+              </section>
+            )}
+          </div>
+        </div>
+      )}
+
       {deleteConfirmOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm deletion">
-          <div className="modal-card">
-            <h3>Delete File</h3>
-            <p>Delete <code>{selectedFile}</code>?</p>
+          <div className="modal-card delete-confirm-card">
+            <h3>{deleteTargetPaths.length > 1 ? 'Delete Files' : 'Delete File'}</h3>
+            <p className="delete-confirm-message">
+              <span>Delete {deleteTargetPaths.length > 1 ? `${deleteTargetPaths.length} media files` : 'this media file'}</span>
+              {deleteTargetPaths.length === 1 ? (
+                <code>{deleteTargetPaths[0]}</code>
+              ) : (
+                <span className="delete-file-list">
+                  {deleteTargetPaths.map((path) => <code key={path}>{path}</code>)}
+                </span>
+              )}
+              <span>?</span>
+            </p>
             <div className="modal-actions">
               <button onClick={() => setDeleteConfirmOpen(false)}>Cancel</button>
               <button className="danger" onClick={onDelete}>Delete</button>
