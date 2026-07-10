@@ -22,7 +22,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const metadataTab = document.getElementById("viewer-metadata");
   const addViewerObjectBtn = document.getElementById("addViewerObject");
   const objectTableBody = document.getElementById("viewerObjectTableBody");
+  const segmentationConfidenceSlider = document.getElementById("segmentationConfidenceSlider");
+  const segmentationConfidenceDisplay = document.getElementById("segmentationConfidenceDisplay");
+  const segmentationOpacitySlider = document.getElementById("segmentationOpacitySlider");
+  const segmentationOpacityDisplay = document.getElementById("segmentationOpacityDisplay");
+  const segmentationObjectList = document.getElementById("segmentationObjectList");
+  const addSegmentationObjectBtn = document.getElementById("addSegmentationObject");
+  const segmentationObjectTableBody = document.getElementById("segmentationObjectTableBody");
   const objectDetectionSettings = document.getElementById("objectDetectionSettings");
+  const segmentationSettings = document.getElementById("segmentationSettings");
   const trackingSettings = document.getElementById("trackingSettings");
   const metadataNoSettings = document.getElementById("metadataNoSettings");
   const roiToggle = document.getElementById("toggleRoiVisibility");
@@ -68,6 +76,14 @@ document.addEventListener("DOMContentLoaded", () => {
     confidenceDisplay.textContent = confidenceSlider.value;
   });
 
+  segmentationConfidenceSlider.addEventListener("input", () => {
+    segmentationConfidenceDisplay.textContent = segmentationConfidenceSlider.value;
+  });
+
+  segmentationOpacitySlider.addEventListener("input", () => {
+    segmentationOpacityDisplay.textContent = segmentationOpacitySlider.value;
+  });
+
   trackingConfidenceSlider.addEventListener("input", () => {
     trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
   });
@@ -100,6 +116,9 @@ document.addEventListener("DOMContentLoaded", () => {
     settings.general.applyRoiFiltering = roiFilteringToggle.checked;
     settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceSlider.value);
     settings.types["object-detection"].objects = getObjectEntries();
+    settings.types.segmentation.confidenceThreshold = parseFloat(segmentationConfidenceSlider.value);
+    settings.types.segmentation.maskOpacity = parseFloat(segmentationOpacitySlider.value);
+    settings.types.segmentation.objects = getSegmentationEntries();
     settings.types.tracking.confidenceThreshold = parseFloat(trackingConfidenceSlider.value);
     settings.types.tracking.history = {
       enabled: trackHistoryToggle.checked,
@@ -147,9 +166,10 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateMetadataTypeSection() {
     const selectedType = metadataTypeSelector.value;
     objectDetectionSettings.style.display = selectedType === "object-detection" ? "flex" : "none";
+    segmentationSettings.style.display = selectedType === "segmentation" ? "flex" : "none";
     trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
     metadataNoSettings.style.display =
-      selectedType !== "object-detection" && selectedType !== "tracking" ? "flex" : "none";
+      selectedType !== "object-detection" && selectedType !== "segmentation" && selectedType !== "tracking" ? "flex" : "none";
   }
 
   function updateTrackTrailLengthDisplay() {
@@ -233,14 +253,79 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function createSegmentationEntry(label, color, lineStyle, lineWidth) {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `<td><input type="text" placeholder="enter new object name" value="${label}" /></td>
+      <td><input type="color" value="${color}" /></td>
+      <td>
+        <select>
+          <option value="solid" ${lineStyle === "solid" ? "selected" : ""}>Solid</option>
+          <option value="dashed" ${lineStyle === "dashed" ? "selected" : ""}>Dashed</option>
+          <option value="dotted" ${lineStyle === "dotted" ? "selected" : ""}>Dotted</option>
+        </select>
+      </td>
+      <td>
+        <select>
+          <option value="1" ${lineWidth == 1 ? "selected" : ""}>Thin</option>
+          <option value="3" ${lineWidth == 3 ? "selected" : ""}>Thick</option>
+        </select>
+      </td>
+      <td><button class="delete-entry" title="Delete" style="visibility: hidden;">&times;</button></td>`;
+
+    row.addEventListener("click", () => {
+      if (selectedRow && selectedRow !== row) {
+        selectedRow.querySelector(".delete-entry").style.visibility = "hidden";
+      }
+      selectedRow = row;
+      row.querySelector(".delete-entry").style.visibility = "visible";
+    });
+
+    row.querySelector(".delete-entry").addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+      row.remove();
+      if (selectedRow === row) selectedRow = null;
+    });
+
+    segmentationObjectTableBody.appendChild(row);
+  }
+
+  function getSegmentationEntries() {
+    const entries = [];
+    segmentationObjectTableBody.querySelectorAll("tr").forEach((row) => {
+      const inputs = row.querySelectorAll("input, select");
+      if (inputs.length >= 4) {
+        entries.push({
+          label: inputs[0].value,
+          color: inputs[1].value,
+          style: inputs[2].value,
+          width: parseInt(inputs[3].value, 10)
+        });
+      }
+    });
+    return entries;
+  }
+
+  function loadSegmentationEntries(objects) {
+    segmentationObjectTableBody.innerHTML = "";
+    objects.forEach((obj) => {
+      createSegmentationEntry(obj.label, obj.color, obj.style, obj.width);
+    });
+  }
+
   function loadSettings() {
     const settings = settingsApi.readScopeSettings(scope);
     const objectDetectionTypeSettings = settings.types["object-detection"];
+    const segmentationTypeSettings = settings.types.segmentation;
     const trackingTypeSettings = settings.types.tracking;
     const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
 
     confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
     confidenceDisplay.textContent = confidenceSlider.value;
+    segmentationConfidenceSlider.value = segmentationTypeSettings.confidenceThreshold ?? 0;
+    segmentationConfidenceDisplay.textContent = segmentationConfidenceSlider.value;
+    segmentationOpacitySlider.value = segmentationTypeSettings.maskOpacity ?? settingsApi.defaults.types.segmentation.maskOpacity;
+    segmentationOpacityDisplay.textContent = segmentationOpacitySlider.value;
     trackingConfidenceSlider.value = trackingTypeSettings.confidenceThreshold ?? 0;
     trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
     trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
@@ -254,6 +339,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateLostTrackTtlDisplay();
     updateTrackHistoryControls();
     loadObjectEntries(objectDetectionTypeSettings.objects || settingsApi.defaults.types["object-detection"].objects);
+    loadSegmentationEntries(segmentationTypeSettings.objects || settingsApi.defaults.types.segmentation.objects);
 
     const lastMetadataType = localStorage.getItem("lastViewerMetadataType");
     const supportedType = settingsApi.metadataTypes.some((metadataType) => metadataType.value === lastMetadataType);
@@ -265,11 +351,19 @@ document.addEventListener("DOMContentLoaded", () => {
     createObjectEntry("", "#ff0000", "solid", 1);
   });
 
+  addSegmentationObjectBtn?.addEventListener("click", () => {
+    createSegmentationEntry("", "#ff0000", "solid", 1);
+  });
+
   metadataTab.style.flexDirection = "column";
   objectList.style.flex = "1";
   objectList.style.overflowY = "auto";
   objectList.style.maxHeight = "280px";
   objectList.style.marginBottom = "1rem";
+  segmentationObjectList.style.flex = "1";
+  segmentationObjectList.style.overflowY = "auto";
+  segmentationObjectList.style.maxHeight = "280px";
+  segmentationObjectList.style.marginBottom = "1rem";
 
   tabSections.forEach((section) => {
     section.style.display = "none";

@@ -230,6 +230,17 @@ function updateTrackHistory(trackHistory, channelIndex, tracks, now, historySett
   });
 }
 
+function deriveBboxFromPolygon(points) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  points.forEach(([px, py]) => {
+    if (px < minX) minX = px;
+    if (py < minY) minY = py;
+    if (px > maxX) maxX = px;
+    if (py > maxY) maxY = py;
+  });
+  return [minX, minY, maxX - minX, maxY - minY];
+}
+
 window.drawStrategies = {
   "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.objects) return;
@@ -331,34 +342,100 @@ window.drawStrategies = {
   },
 
   "segmentation": (ctx, canvas, data, video, index, drawContext = {}) => {
-    if (!data?.segments) return;
+    if (!Array.isArray(data?.segments)) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "segmentation");
-    const strokeColor = settings.type.segmentationStrokeColor || 'orange';
-    const lineWidth = settings.type.segmentationLineWidth || 2;
-    const font = settings.type.segmentationFont || FONT;
+    const objectStyles = {};
+    (settings.type.objects || []).forEach(entry => {
+      objectStyles[entry.label] = entry;
+    });
 
-    const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+    const defaultStyle = objectStyles["default"];
+    const threshold = settings.type.confidenceThreshold ?? 0;
+    const opacity = settings.type.maskOpacity ?? 0.4;
+    const showRoi = settings.general.showRoi !== false;
+    const applyRoiFiltering = settings.general.applyRoiFiltering !== false;
 
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = lineWidth;
-    ctx.font = font;
+    const roiPolygons = loadRoiPolygons(index);
+    const scale = computeScaleAndOffset(video, canvas);
+    const { scaleX, scaleY, offsetX, offsetY } = scale;
+    if (showRoi) {
+      drawRoiPolygons(ctx, roiPolygons, video, scale);
+    }
 
     data.segments.forEach(seg => {
+      if ((seg.confidence ?? 1) < threshold) return;
+      if (seg.mask_format !== "polygon" && seg.mask_format !== "rle") return;
+
+      let bbox = Array.isArray(seg.bbox) && seg.bbox.length === 4 ? seg.bbox : null;
+      if (seg.mask_format === "polygon") {
+        if (!Array.isArray(seg.mask) || seg.mask.length < 3) return;
+        if (!bbox) bbox = deriveBboxFromPolygon(seg.mask);
+      }
+      if (!bbox) return;
+      if (!passesRoiFilter(bbox, roiPolygons, video, scale, applyRoiFiltering)) return;
+
+      const style = objectStyles[seg.label] || defaultStyle;
+      const color = style?.color || 'lime';
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = style?.width || 2;
+      ctx.setLineDash(style?.style === "dashed" ? [6, 4] :
+        style?.style === "dotted" ? [2, 2] : []);
+      ctx.font = "14px sans-serif";
+      ctx.fillStyle = color;
+
       if (seg.mask_format === "polygon") {
         const poly = seg.mask;
-        if (!Array.isArray(poly) || poly.length < 3) return;
-
         ctx.beginPath();
         ctx.moveTo(poly[0][0] * scaleX + offsetX, poly[0][1] * scaleY + offsetY);
         for (let i = 1; i < poly.length; i++) {
           ctx.lineTo(poly[i][0] * scaleX + offsetX, poly[i][1] * scaleY + offsetY);
         }
         ctx.closePath();
+
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.fill();
+        ctx.restore();
         ctx.stroke();
       } else if (seg.mask_format === "rle") {
-        ctx.fillText(`RLE mask (${seg.label})`, 10 * scaleX + offsetX, (canvas.height - 10) * scaleY + offsetY);
+        const mask = seg.mask;
+        if (!mask || !Array.isArray(mask.size) || !Array.isArray(mask.counts)) return;
+        const maskHeight = mask.size[0];
+        const maskWidth = mask.size[1];
+        if (!(maskWidth > 0) || !(maskHeight > 0)) return;
+
+        const off = document.createElement("canvas");
+        off.width = maskWidth;
+        off.height = maskHeight;
+        const octx = off.getContext("2d");
+        octx.fillStyle = color;
+        let pos = 0;
+        let foreground = false;
+        mask.counts.forEach(count => {
+          for (let i = 0; i < count; i++, pos++) {
+            if (foreground) octx.fillRect(pos % maskWidth, Math.floor(pos / maskWidth), 1, 1);
+          }
+          foreground = !foreground;
+        });
+
+        ctx.save();
+        ctx.globalAlpha = opacity;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(
+          off,
+          bbox[0] * scaleX + offsetX,
+          bbox[1] * scaleY + offsetY,
+          bbox[2] * scaleX,
+          bbox[3] * scaleY
+        );
+        ctx.restore();
       }
+
+      ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
+      const label = `${seg.label} (${Math.round((seg.confidence ?? 1) * 100)}%)`;
+      ctx.fillText(label, (bbox[0] + 2) * scaleX + offsetX, (bbox[1] - 6) * scaleY + offsetY);
     });
   },
 
