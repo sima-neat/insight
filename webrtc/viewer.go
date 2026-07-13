@@ -21,12 +21,13 @@ import (
 )
 
 type Channel struct {
-	Port              int
-	Track             atomic.Pointer[webrtc.TrackLocalStaticRTP]
-	DataChannel       atomic.Pointer[webrtc.DataChannel]
-	DataChannelPeerID atomic.Uint64
-	Stats             *IngestStats
-	Egress            *EgressStats
+	Port          int
+	Track         atomic.Pointer[webrtc.TrackLocalStaticRTP]
+	MetadataPeers metadataPeerRegistry
+	MetadataSync  *metadataTimestampCorrelator
+	MetadataReady chan correlatedMetadata
+	Stats         *IngestStats
+	Egress        *EgressStats
 }
 
 var channels [80]*Channel
@@ -38,6 +39,9 @@ const (
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
+	metadataCorrelationCapacity  = 256
+	metadataForwardQueueCapacity = 128
+	metadataCorrelationMaxAge    = 5 * time.Second
 )
 
 type neatPortMapConfig struct {
@@ -62,12 +66,15 @@ func main() {
 
 	for i := 0; i < 80; i++ {
 		channels[i] = &Channel{
-			Port:   9000 + i,
-			Stats:  NewIngestStats(i, 9000+i, 9100+i),
-			Egress: NewEgressStats(i),
+			Port:          9000 + i,
+			MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
+			MetadataReady: make(chan correlatedMetadata, metadataForwardQueueCapacity),
+			Stats:         NewIngestStats(i, 9000+i, 9100+i),
+			Egress:        NewEgressStats(i),
 		}
 		go startUDPListener(channels[i])
 		go startMetadataListener(channels[i], 9100+i)
+		go startMetadataForwarder(channels[i])
 	}
 
 	http.HandleFunc("/", serveViewer)
@@ -287,17 +294,15 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[Channel %d] Incoming DataChannel: %s", idx, dc.Label())
 		if dc.Label() == "metadata" {
-			ch.DataChannel.Store(dc)
 			ch.Egress.UpdateDataChannelState(egressPeerID, "connecting")
 			dc.OnOpen(func() {
 				log.Printf("[Channel %d] DataChannel open", idx)
-				ch.DataChannelPeerID.Store(egressPeerID)
+				ch.MetadataPeers.add(egressPeerID, dc)
 				ch.Egress.UpdateDataChannelState(egressPeerID, "open")
 			})
 			dc.OnClose(func() {
 				log.Printf("[Channel %d] DataChannel closed", idx)
-				ch.DataChannel.Store(nil)
-				ch.DataChannelPeerID.Store(0)
+				ch.MetadataPeers.remove(egressPeerID, dc)
 				ch.Egress.UpdateDataChannelState(egressPeerID, "closed")
 			})
 			dc.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -470,7 +475,8 @@ func startUDPListener(ch *Channel) {
 			continue
 		}
 
-		frameTimestamp := timestampRewriter.timestampForFrame(time.Now())
+		frameAt := time.Now()
+		frameTimestamp := timestampRewriter.timestampForFrame(frameAt)
 		track := ch.Track.Load()
 		if track == nil {
 			for range framePackets {
@@ -480,6 +486,7 @@ func startUDPListener(ch *Channel) {
 			continue
 		}
 
+		frameForwarded := false
 		for _, rawPacket := range framePackets {
 			packetToWrite, err := rewriteRTPPacketTimestamp(rawPacket, frameTimestamp)
 			if err != nil {
@@ -493,6 +500,14 @@ func startUDPListener(ch *Channel) {
 				continue
 			}
 			ch.Stats.RecordForwarded(len(packetToWrite))
+			frameForwarded = true
+		}
+		if frameForwarded {
+			for _, metadata := range ch.MetadataSync.addVideoFrame(
+				pkt.SSRC, pkt.Timestamp, frameTimestamp, frameAt,
+			) {
+				enqueueMetadata(ch, metadata)
+			}
 		}
 		framePackets = framePackets[:0]
 	}
@@ -520,20 +535,8 @@ func startMetadataListener(ch *Channel, port int) {
 		trimmed := bytes.TrimRight(buf[:n], "\x00")
 		ch.Stats.RecordMetadataMessage(len(trimmed), remoteAddr, trimmed)
 
-		dc := ch.DataChannel.Load()
-		if dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen {
-			jsonStr := string(trimmed)
-			if err := dc.SendText(jsonStr); err != nil {
-				ch.Stats.RecordMetadataSendError(err)
-				ch.Egress.RecordMetadataSendError(ch.DataChannelPeerID.Load(), err)
-				log.Println("❌ Failed to send metadata via DataChannel:", err)
-			} else {
-				ch.Stats.RecordMetadataForwarded(len(trimmed))
-				ch.Egress.RecordMetadataSent(ch.DataChannelPeerID.Load(), len(trimmed))
-			}
-		} else {
-			ch.Stats.RecordMetadataDroppedNoDataChannel()
-			ch.Egress.RecordMetadataDroppedNoDataChannel()
+		for _, metadata := range ch.MetadataSync.addMetadata(trimmed, time.Now()) {
+			enqueueMetadata(ch, metadata)
 		}
 	}
 }

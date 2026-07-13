@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
+
 const MAX_CHANNELS = 80;
 const MAX_VIDEOS_PER_PAGE = 80;
 const DEFAULT_VISIBLE_PER_PAGE = 4;
 const PAGE_SIZE_PRESETS = [1, 4, 9, 16, 40, 80];
-const METADATA_QUEUE_HARD_LIMIT = 300;
-const METADATA_QUEUE_SOFT_LIMIT = 20;
-const METADATA_DRAWABLE_HOLD_MS = 400;
-const METADATA_QUEUE_MAX_AGE_MS = 5000;
+const METADATA_DRAWABLE_HOLD_MS = 150;
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
@@ -34,17 +33,6 @@ function getResolvedViewerSettings(channelIndex, metadataType = "object-detectio
 function getMetadataDelayMs(channelIndex) {
   const settings = getResolvedViewerSettings(channelIndex);
   return typeof settings.general.metadataDelay === "number" ? settings.general.metadataDelay : 0;
-}
-
-function chooseMetadataCandidate(queue, metadataDelayMs) {
-  if (!queue.length) return null;
-  if (metadataDelayMs <= 0) return queue[queue.length - 1];
-  const now = performance.now();
-  for (let i = queue.length - 1; i >= 0; i -= 1) {
-    const item = queue[i];
-    if (now - item.timestamp >= metadataDelayMs) return item;
-  }
-  return null;
 }
 
 function getObjectConfidenceThreshold(channelIndex) {
@@ -79,6 +67,9 @@ function chooseOverlayMetadata(candidate, overlayState, channelIndex, now) {
       overlayState.lastDrawableAt = now;
       return candidate;
     }
+    overlayState.lastDrawable = null;
+    overlayState.lastDrawableAt = 0;
+    return null;
   }
 
   if (
@@ -92,24 +83,6 @@ function chooseOverlayMetadata(candidate, overlayState, channelIndex, now) {
   overlayState.lastDrawable = null;
   overlayState.lastDrawableAt = 0;
   return null;
-}
-
-function pruneMetadataQueue(queue, selectedCandidate, metadataDelayMs, now) {
-  let removeCount = 0;
-  if (selectedCandidate) {
-    const selectedIndex = queue.indexOf(selectedCandidate);
-    if (selectedIndex >= 0) removeCount = selectedIndex + 1;
-  }
-
-  const maxAgeMs = Math.max(METADATA_QUEUE_MAX_AGE_MS, metadataDelayMs + 1000);
-  while (removeCount < queue.length && now - queue[removeCount].timestamp > maxAgeMs) {
-    removeCount += 1;
-  }
-
-  if (removeCount > 0) queue.splice(0, removeCount);
-  if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
-    queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
-  }
 }
 
 function applyLayout(count) {
@@ -133,7 +106,7 @@ function applyLayout(count) {
 function ChannelTile({ index, onActiveChange, debug }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const metadataQueueRef = useRef([]);
+  const metadataQueueRef = useRef(createMetadataQueue());
   const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
   const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
@@ -153,6 +126,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
     let pc = null;
     let metadataChannel = null;
     let animationFrame = null;
+    let videoFrameCallback = null;
     let statsInterval = null;
     let reconnectTimer = null;
     let reconnectPending = false;
@@ -193,6 +167,22 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (!mounted) return;
       currentSession += 1;
       const sessionId = currentSession;
+      if (animationFrame != null) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      if (statsInterval != null) {
+        window.clearInterval(statsInterval);
+        statsInterval = null;
+      }
+      if (videoFrameCallback != null && videoRef.current?.cancelVideoFrameCallback) {
+        videoRef.current.cancelVideoFrameCallback(videoFrameCallback);
+        videoFrameCallback = null;
+      }
+      if (metadataChannel) {
+        metadataChannel.close();
+        metadataChannel = null;
+      }
       if (pc) {
         // Avoid self-triggered reconnect from deliberate close.
         pc.onconnectionstatechange = null;
@@ -204,7 +194,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       }
       setTileActive(false);
       setBanner(`Channel ${index}`);
-      metadataQueueRef.current = [];
+      metadataQueueRef.current = createMetadataQueue();
       overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
       trackHistoryRef.current.clear();
       rtcpRef.current = {
@@ -227,12 +217,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
       metadataChannel.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
-          const queue = metadataQueueRef.current;
-          queue.push({ timestamp: performance.now(), data: parsed });
+          enqueueMetadata(metadataQueueRef.current, parsed, performance.now());
           rtcpRef.current.messageCount += 1;
-          if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
-            queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
-          }
         } catch (_err) {
           // Ignore malformed data channel payloads.
         }
@@ -267,6 +253,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
           debugLog("track onunmute");
           video.play().catch(() => {});
         };
+        startVideoFrameLoop();
       };
 
       pc.onconnectionstatechange = () => {
@@ -285,23 +272,15 @@ function ChannelTile({ index, onActiveChange, debug }) {
         debugLog("iceGatheringState", pc.iceGatheringState);
       };
 
-      const draw = () => {
-        if (!mounted || !canvasRef.current || !videoRef.current) return;
+      const drawFrame = (now, frameMetadata) => {
+        if (!mounted || sessionId !== currentSession || !canvasRef.current || !videoRef.current) return;
         const canvas = canvasRef.current;
         const video = videoRef.current;
-        const queue = metadataQueueRef.current;
         const ctx = canvas.getContext("2d");
 
         if (video.readyState >= 2) {
-          const now = Date.now();
-          if (
-            playbackRef.current.lastFrameAt > 0 &&
-            now - playbackRef.current.lastFrameAt <= STREAM_STALE_MS
-          ) {
-            setTileActive(true);
-          } else {
-            setTileActive(false);
-          }
+          playbackRef.current.lastFrameAt = Date.now();
+          setTileActive(true);
 
           if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
             canvas.width = canvas.clientWidth;
@@ -312,9 +291,13 @@ function ChannelTile({ index, onActiveChange, debug }) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             const metadataDelayMs = getMetadataDelayMs(index);
-            const candidate = chooseMetadataCandidate(queue, metadataDelayMs);
-            const nowPerf = performance.now();
-            const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, nowPerf);
+            const candidate = takeMetadataForFrame(
+              metadataQueueRef.current,
+              frameMetadata?.rtpTimestamp,
+              metadataDelayMs,
+              now,
+            );
+            const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, now);
             if (overlayMetadata) {
               const metadataType = overlayMetadata.data?.type;
               const strategy = window.drawStrategies?.[metadataType];
@@ -323,23 +306,34 @@ function ChannelTile({ index, onActiveChange, debug }) {
                 const drawContext = {
                   settings: resolvedSettings,
                   trackHistory: trackHistoryRef.current,
-                  now: nowPerf,
+                  now,
                 };
                 strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
               }
             }
-            pruneMetadataQueue(queue, candidate, metadataDelayMs, nowPerf);
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
           trackHistoryRef.current.clear();
         }
-
-        animationFrame = requestAnimationFrame(draw);
       };
 
-      draw();
+      const startVideoFrameLoop = () => {
+        const video = videoRef.current;
+        if (!mounted || sessionId !== currentSession || !video) return;
+        if (typeof video.requestVideoFrameCallback === "function") {
+          videoFrameCallback = video.requestVideoFrameCallback((now, frameMetadata) => {
+            drawFrame(now, frameMetadata);
+            startVideoFrameLoop();
+          });
+          return;
+        }
+        animationFrame = requestAnimationFrame((now) => {
+          drawFrame(now, undefined);
+          startVideoFrameLoop();
+        });
+      };
 
       statsInterval = window.setInterval(async () => {
         if (!mounted || !pc || pc.connectionState !== "connected") return;
@@ -364,6 +358,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
             ) {
               playbackRef.current.lastFrameAt = Date.now();
               setTileActive(true);
+            }
+            if (
+              playbackRef.current.lastFrameAt > 0 &&
+              Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
+            ) {
+              setTileActive(false);
             }
             setBanner(
               `Channel ${index} | ${width}x${height} | ${fps} fps | ${bitrate} kbps | ${tracker.lastCount} msgs/sec`
@@ -467,6 +467,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (statsInterval) window.clearInterval(statsInterval);
       if (animationFrame) cancelAnimationFrame(animationFrame);
+      if (videoFrameCallback != null && videoRef.current?.cancelVideoFrameCallback) {
+        videoRef.current.cancelVideoFrameCallback(videoFrameCallback);
+      }
       if (metadataChannel && metadataChannel.readyState === "open") {
         metadataChannel.close();
       }

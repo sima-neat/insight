@@ -66,6 +66,7 @@ type IngestStats struct {
 	metadataMessagesForwarded uint64
 	metadataBytesForwarded    uint64
 	metadataDroppedNoDC       uint64
+	metadataDroppedQueueFull  uint64
 	metadataSendErrors        uint64
 	metadataInvalidJSON       uint64
 
@@ -143,6 +144,7 @@ type MetadataSnapshot struct {
 	MessagesForwarded uint64  `json:"messages_forwarded"`
 	BytesForwarded    uint64  `json:"bytes_forwarded"`
 	DroppedNoDataChan uint64  `json:"dropped_no_data_channel"`
+	DroppedQueueFull  uint64  `json:"dropped_queue_full"`
 	SendErrors        uint64  `json:"send_errors"`
 	InvalidJSON       uint64  `json:"invalid_json"`
 }
@@ -252,6 +254,12 @@ func (s *IngestStats) RecordMetadataDroppedNoDataChannel() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.metadataDroppedNoDC++
+}
+
+func (s *IngestStats) RecordMetadataDroppedQueueFull() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.metadataDroppedQueueFull++
 }
 
 func (s *IngestStats) RecordMetadataSendError(err error) {
@@ -400,6 +408,7 @@ func (s *IngestStats) snapshotMetadataLocked(now time.Time) MetadataSnapshot {
 		MessagesForwarded: s.metadataMessagesForwarded,
 		BytesForwarded:    s.metadataBytesForwarded,
 		DroppedNoDataChan: s.metadataDroppedNoDC,
+		DroppedQueueFull:  s.metadataDroppedQueueFull,
 		SendErrors:        s.metadataSendErrors,
 		InvalidJSON:       s.metadataInvalidJSON,
 	}
