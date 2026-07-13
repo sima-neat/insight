@@ -17,6 +17,53 @@ type metadataPeerRegistry struct {
 	peers map[uint64]*webrtc.DataChannel
 }
 
+type metadataForwardQueue struct {
+	mu       sync.Mutex
+	notEmpty *sync.Cond
+	items    []correlatedMetadata
+	head     int
+	size     int
+}
+
+func newMetadataForwardQueue(capacity int) *metadataForwardQueue {
+	queue := &metadataForwardQueue{
+		items: make([]correlatedMetadata, capacity),
+	}
+	queue.notEmpty = sync.NewCond(&queue.mu)
+	return queue
+}
+
+func (q *metadataForwardQueue) enqueue(metadata correlatedMetadata) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	dropped := q.size == len(q.items)
+	if dropped {
+		q.items[q.head] = metadata
+		q.head = (q.head + 1) % len(q.items)
+	} else {
+		index := (q.head + q.size) % len(q.items)
+		q.items[index] = metadata
+		q.size++
+	}
+	q.notEmpty.Signal()
+	return dropped
+}
+
+func (q *metadataForwardQueue) dequeue() correlatedMetadata {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for q.size == 0 {
+		q.notEmpty.Wait()
+	}
+	metadata := q.items[q.head]
+	q.items[q.head] = correlatedMetadata{}
+	q.head = (q.head + 1) % len(q.items)
+	q.size--
+	return metadata
+}
+
 func (r *metadataPeerRegistry) add(peerID uint64, channel *webrtc.DataChannel) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -45,16 +92,14 @@ func (r *metadataPeerRegistry) snapshot() []metadataPeer {
 }
 
 func enqueueMetadata(ch *Channel, metadata correlatedMetadata) {
-	select {
-	case ch.MetadataReady <- metadata:
-	default:
+	if ch.MetadataReady.enqueue(metadata) {
 		ch.Stats.RecordMetadataDroppedQueueFull()
 	}
 }
 
 func startMetadataForwarder(ch *Channel) {
-	for metadata := range ch.MetadataReady {
-		forwardMetadata(ch, metadata)
+	for {
+		forwardMetadata(ch, ch.MetadataReady.dequeue())
 	}
 }
 

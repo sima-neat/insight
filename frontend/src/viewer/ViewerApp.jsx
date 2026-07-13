@@ -211,7 +211,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
       pc.addTransceiver("video", { direction: "recvonly" });
-      metadataChannel = pc.createDataChannel("metadata");
+      metadataChannel = pc.createDataChannel("metadata", {
+        ordered: false,
+        maxRetransmits: 0,
+      });
       debugLog("pc created");
 
       metadataChannel.onmessage = (event) => {

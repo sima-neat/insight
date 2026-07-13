@@ -25,7 +25,7 @@ type Channel struct {
 	Track         atomic.Pointer[webrtc.TrackLocalStaticRTP]
 	MetadataPeers metadataPeerRegistry
 	MetadataSync  *metadataTimestampCorrelator
-	MetadataReady chan correlatedMetadata
+	MetadataReady *metadataForwardQueue
 	Stats         *IngestStats
 	Egress        *EgressStats
 }
@@ -40,7 +40,7 @@ const (
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
 	metadataCorrelationCapacity  = 256
-	metadataForwardQueueCapacity = 128
+	metadataForwardQueueCapacity = 16
 	metadataCorrelationMaxAge    = 5 * time.Second
 )
 
@@ -68,7 +68,7 @@ func main() {
 		channels[i] = &Channel{
 			Port:          9000 + i,
 			MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
-			MetadataReady: make(chan correlatedMetadata, metadataForwardQueueCapacity),
+			MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
 			Stats:         NewIngestStats(i, 9000+i, 9100+i),
 			Egress:        NewEgressStats(i),
 		}
@@ -523,6 +523,7 @@ func startMetadataListener(ch *Channel, port int) {
 
 	log.Printf("🧠 Listening for metadata on %s:%d", net.IPv4zero, port)
 	buf := make([]byte, 65507)
+	reassembler := newMetadataReassembler()
 
 	for {
 		n, remoteAddr, err := conn.ReadFrom(buf)
@@ -531,8 +532,14 @@ func startMetadataListener(ch *Channel, port int) {
 			continue
 		}
 
+		result := reassembler.accept(buf[:n], remoteAddr, time.Now())
+		ch.Stats.RecordMetadataReassembly(result)
+		if !result.complete {
+			continue
+		}
+
 		// Trim trailing 0s (null bytes) from fixed-size padded messages
-		trimmed := bytes.TrimRight(buf[:n], "\x00")
+		trimmed := bytes.TrimRight(result.message, "\x00")
 		ch.Stats.RecordMetadataMessage(len(trimmed), remoteAddr, trimmed)
 
 		for _, metadata := range ch.MetadataSync.addMetadata(trimmed, time.Now()) {

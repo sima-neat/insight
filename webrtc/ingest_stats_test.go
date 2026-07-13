@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"net"
+	"testing"
+	"time"
+)
 
 func TestParseH264NALObservationsSingleNAL(t *testing.T) {
 	tests := []struct {
@@ -74,5 +78,21 @@ func TestParseH264NALObservationsFUA(t *testing.T) {
 	}
 	if got[0].Type != 5 || got[0].Start || got[0].Mode != "fu-a" {
 		t.Fatalf("unexpected FU-A middle observation: %#v", got[0])
+	}
+}
+
+func TestIngestStatsRecordsMetadataReassembly(t *testing.T) {
+	stats := NewIngestStats(0, 9000, 9100)
+	reassembler := newMetadataReassembler()
+	source := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 5000}
+	now := time.Unix(1, 0)
+
+	stats.RecordMetadataReassembly(reassembler.accept(metadataChunk(61, 0, 2, []byte(`{"value":`)), source, now))
+	stats.RecordMetadataReassembly(reassembler.accept(metadataChunk(61, 1, 2, []byte(`1}`)), source, now))
+	stats.RecordMetadataReassembly(reassembler.accept([]byte{metadataChunkMagic, metadataChunkVersion}, source, now))
+
+	snapshot := stats.Snapshot(false, false, now).Metadata
+	if snapshot.ChunkDatagramsReceived != 3 || snapshot.MessagesReassembled != 1 || snapshot.ReassemblyDrops != 1 {
+		t.Fatalf("unexpected metadata reassembly counters: %#v", snapshot)
 	}
 }

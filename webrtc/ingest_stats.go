@@ -69,6 +69,9 @@ type IngestStats struct {
 	metadataDroppedQueueFull  uint64
 	metadataSendErrors        uint64
 	metadataInvalidJSON       uint64
+	metadataChunkDatagrams    uint64
+	metadataReassembled       uint64
+	metadataReassemblyDrops   uint64
 
 	metadataSampleStartedAt time.Time
 	metadataSampleBytes     uint64
@@ -132,21 +135,24 @@ type ForwardingSnapshot struct {
 }
 
 type MetadataSnapshot struct {
-	UDPPort           int     `json:"udp_port"`
-	Active            bool    `json:"active"`
-	FirstMessageAt    string  `json:"first_message_at,omitempty"`
-	LastMessageAt     string  `json:"last_message_at,omitempty"`
-	RemoteAddr        string  `json:"remote_addr,omitempty"`
-	MessagesReceived  uint64  `json:"messages_received"`
-	BytesReceived     uint64  `json:"bytes_received"`
-	BitrateBPS        float64 `json:"bitrate_bps"`
-	MessageRateMPS    float64 `json:"message_rate_mps"`
-	MessagesForwarded uint64  `json:"messages_forwarded"`
-	BytesForwarded    uint64  `json:"bytes_forwarded"`
-	DroppedNoDataChan uint64  `json:"dropped_no_data_channel"`
-	DroppedQueueFull  uint64  `json:"dropped_queue_full"`
-	SendErrors        uint64  `json:"send_errors"`
-	InvalidJSON       uint64  `json:"invalid_json"`
+	UDPPort                int     `json:"udp_port"`
+	Active                 bool    `json:"active"`
+	FirstMessageAt         string  `json:"first_message_at,omitempty"`
+	LastMessageAt          string  `json:"last_message_at,omitempty"`
+	RemoteAddr             string  `json:"remote_addr,omitempty"`
+	MessagesReceived       uint64  `json:"messages_received"`
+	BytesReceived          uint64  `json:"bytes_received"`
+	BitrateBPS             float64 `json:"bitrate_bps"`
+	MessageRateMPS         float64 `json:"message_rate_mps"`
+	MessagesForwarded      uint64  `json:"messages_forwarded"`
+	BytesForwarded         uint64  `json:"bytes_forwarded"`
+	DroppedNoDataChan      uint64  `json:"dropped_no_data_channel"`
+	DroppedQueueFull       uint64  `json:"dropped_queue_full"`
+	SendErrors             uint64  `json:"send_errors"`
+	InvalidJSON            uint64  `json:"invalid_json"`
+	ChunkDatagramsReceived uint64  `json:"chunk_datagrams_received"`
+	MessagesReassembled    uint64  `json:"messages_reassembled"`
+	ReassemblyDrops        uint64  `json:"reassembly_drops"`
 }
 
 type MediaSnapshot struct {
@@ -241,6 +247,18 @@ func (s *IngestStats) RecordMetadataMessage(messageBytes int, remote net.Addr, p
 	}
 
 	s.updateMetadataSample(messageBytes, now)
+}
+
+func (s *IngestStats) RecordMetadataReassembly(result metadataReassemblyResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if result.chunked {
+		s.metadataChunkDatagrams++
+	}
+	if result.reassembled {
+		s.metadataReassembled++
+	}
+	s.metadataReassemblyDrops += result.dropped
 }
 
 func (s *IngestStats) RecordMetadataForwarded(messageBytes int) {
@@ -396,21 +414,24 @@ func (s *IngestStats) snapshotMetadataLocked(now time.Time) MetadataSnapshot {
 		messageRate = 0
 	}
 	return MetadataSnapshot{
-		UDPPort:           s.metadataUDPPort,
-		Active:            active,
-		FirstMessageAt:    formatTime(s.metadataFirstMessageAt),
-		LastMessageAt:     formatTime(s.metadataLastMessageAt),
-		RemoteAddr:        s.metadataRemoteAddr,
-		MessagesReceived:  s.metadataMessagesReceived,
-		BytesReceived:     s.metadataBytesReceived,
-		BitrateBPS:        roundFloat(bitrate, 1),
-		MessageRateMPS:    roundFloat(messageRate, 1),
-		MessagesForwarded: s.metadataMessagesForwarded,
-		BytesForwarded:    s.metadataBytesForwarded,
-		DroppedNoDataChan: s.metadataDroppedNoDC,
-		DroppedQueueFull:  s.metadataDroppedQueueFull,
-		SendErrors:        s.metadataSendErrors,
-		InvalidJSON:       s.metadataInvalidJSON,
+		UDPPort:                s.metadataUDPPort,
+		Active:                 active,
+		FirstMessageAt:         formatTime(s.metadataFirstMessageAt),
+		LastMessageAt:          formatTime(s.metadataLastMessageAt),
+		RemoteAddr:             s.metadataRemoteAddr,
+		MessagesReceived:       s.metadataMessagesReceived,
+		BytesReceived:          s.metadataBytesReceived,
+		BitrateBPS:             roundFloat(bitrate, 1),
+		MessageRateMPS:         roundFloat(messageRate, 1),
+		MessagesForwarded:      s.metadataMessagesForwarded,
+		BytesForwarded:         s.metadataBytesForwarded,
+		DroppedNoDataChan:      s.metadataDroppedNoDC,
+		DroppedQueueFull:       s.metadataDroppedQueueFull,
+		SendErrors:             s.metadataSendErrors,
+		InvalidJSON:            s.metadataInvalidJSON,
+		ChunkDatagramsReceived: s.metadataChunkDatagrams,
+		MessagesReassembled:    s.metadataReassembled,
+		ReassemblyDrops:        s.metadataReassemblyDrops,
 	}
 }
 
