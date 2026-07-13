@@ -94,7 +94,10 @@ function resolveViewerDrawSettings(index, metadataType) {
   if (typeof window.resolveTypeSettings === "function") {
     return window.resolveTypeSettings(index, metadataType);
   }
-  return { general: { metadataDelay: 0, showRoi: true }, type: {} };
+  return {
+    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    type: {}
+  };
 }
 
 function loadRoiPolygons(index) {

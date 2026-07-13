@@ -1,5 +1,5 @@
 (() => {
-  const SETTINGS_VERSION = 2;
+  const SETTINGS_VERSION = 3;
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -26,7 +26,8 @@
     classification: {}
   };
   const GENERAL_DEFAULTS = {
-    metadataDelay: 0,
+    videoSyncBufferMs: 350,
+    metadataRetentionMs: 0,
     showRoi: true,
     applyRoiFiltering: true
   };
@@ -80,8 +81,15 @@
 
   function normalizeGeneral(rawGeneral = {}, fillDefaults = true) {
     const general = fillDefaults ? clone(GENERAL_DEFAULTS) : {};
-    if (Object.prototype.hasOwnProperty.call(rawGeneral, "metadataDelay")) {
-      general.metadataDelay = Math.max(0, parseNumber(rawGeneral.metadataDelay, GENERAL_DEFAULTS.metadataDelay));
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "videoSyncBufferMs")) {
+      general.videoSyncBufferMs = Math.round(
+        clampNumber(rawGeneral.videoSyncBufferMs, 0, 4000, GENERAL_DEFAULTS.videoSyncBufferMs)
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "metadataRetentionMs")) {
+      general.metadataRetentionMs = Math.round(
+        clampNumber(rawGeneral.metadataRetentionMs, 0, 30000, GENERAL_DEFAULTS.metadataRetentionMs)
+      );
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "showRoi")) {
       general.showRoi = rawGeneral.showRoi !== false;
@@ -162,7 +170,7 @@
 
     if (!rawSettings || typeof rawSettings !== "object") return settings;
 
-    if (rawSettings.version === SETTINGS_VERSION) {
+    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
       settings.general = normalizeGeneral(rawSettings.general);
       METADATA_TYPES.forEach((type) => {
         settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value]);
@@ -171,7 +179,6 @@
     }
 
     settings.general = normalizeGeneral({
-      metadataDelay: rawSettings.metadataDelay,
       showRoi: rawSettings.showRoi,
       applyRoiFiltering: rawSettings.applyRoiFiltering
     });
@@ -195,7 +202,7 @@
     const overrides = { general: {}, types: {} };
     if (!rawSettings || typeof rawSettings !== "object") return overrides;
 
-    if (rawSettings.version === SETTINGS_VERSION) {
+    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
       overrides.general = normalizeGeneral(rawSettings.general, false);
       METADATA_TYPES.forEach((type) => {
         const rawType = rawSettings.types?.[type.value];
@@ -207,9 +214,6 @@
     }
 
     const legacyGeneral = {};
-    if (Object.prototype.hasOwnProperty.call(rawSettings, "metadataDelay")) {
-      legacyGeneral.metadataDelay = rawSettings.metadataDelay;
-    }
     if (Object.prototype.hasOwnProperty.call(rawSettings, "showRoi")) {
       legacyGeneral.showRoi = rawSettings.showRoi;
     }

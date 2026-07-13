@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
+import {
+  applyVideoSyncBuffer,
+  createMetadataQueue,
+  enqueueMetadata,
+  metadataQueueSnapshot,
+  takeMetadataForFrame,
+} from "./metadataSync.js";
 
 const MAX_CHANNELS = 80;
 const MAX_VIDEOS_PER_PAGE = 80;
 const DEFAULT_VISIBLE_PER_PAGE = 4;
 const PAGE_SIZE_PRESETS = [1, 4, 9, 16, 40, 80];
-const METADATA_DRAWABLE_HOLD_MS = 150;
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
@@ -27,12 +32,20 @@ function getResolvedViewerSettings(channelIndex, metadataType = "object-detectio
   if (typeof window.resolveTypeSettings === "function") {
     return window.resolveTypeSettings(channelIndex, metadataType);
   }
-  return { general: { metadataDelay: 0, showRoi: true }, type: {} };
+  return {
+    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    type: {},
+  };
 }
 
-function getMetadataDelayMs(channelIndex) {
+function getSynchronizationSettings(channelIndex) {
   const settings = getResolvedViewerSettings(channelIndex);
-  return typeof settings.general.metadataDelay === "number" ? settings.general.metadataDelay : 0;
+  return {
+    videoSyncBufferMs:
+      typeof settings.general.videoSyncBufferMs === "number" ? settings.general.videoSyncBufferMs : 350,
+    metadataRetentionMs:
+      typeof settings.general.metadataRetentionMs === "number" ? settings.general.metadataRetentionMs : 0,
+  };
 }
 
 function getObjectConfidenceThreshold(channelIndex) {
@@ -60,31 +73,6 @@ function hasDrawableMetadata(message, channelIndex) {
   }
 }
 
-function chooseOverlayMetadata(candidate, overlayState, channelIndex, now) {
-  if (candidate) {
-    if (hasDrawableMetadata(candidate.data, channelIndex)) {
-      overlayState.lastDrawable = candidate;
-      overlayState.lastDrawableAt = now;
-      return candidate;
-    }
-    overlayState.lastDrawable = null;
-    overlayState.lastDrawableAt = 0;
-    return null;
-  }
-
-  if (
-    overlayState.lastDrawable &&
-    overlayState.lastDrawableAt > 0 &&
-    now - overlayState.lastDrawableAt <= METADATA_DRAWABLE_HOLD_MS
-  ) {
-    return overlayState.lastDrawable;
-  }
-
-  overlayState.lastDrawable = null;
-  overlayState.lastDrawableAt = 0;
-  return null;
-}
-
 function applyLayout(count) {
   const grid = document.getElementById("videoGrid");
   if (!grid) return;
@@ -107,7 +95,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const metadataQueueRef = useRef(createMetadataQueue());
-  const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
+  const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
+  const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
   const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
@@ -124,6 +113,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
   useEffect(() => {
     let mounted = true;
     let pc = null;
+    let videoReceiver = null;
     let metadataChannel = null;
     let animationFrame = null;
     let videoFrameCallback = null;
@@ -145,10 +135,18 @@ function ChannelTile({ index, onActiveChange, debug }) {
       debugLog("active", nextActive);
     };
 
+    const applySynchronizationSettings = () => {
+      synchronizationSettingsRef.current = getSynchronizationSettings(index);
+      videoSyncStatusRef.current = applyVideoSyncBuffer(
+        videoReceiver,
+        synchronizationSettingsRef.current.videoSyncBufferMs,
+      );
+    };
+
     const onViewerSettingsChanged = (event) => {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
-      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      applySynchronizationSettings();
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -195,7 +193,6 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
-      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
       trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
@@ -205,12 +202,15 @@ function ChannelTile({ index, onActiveChange, debug }) {
         lastFramesDecoded: null,
       };
       playbackRef.current = { lastFrameAt: 0 };
-      debugLog("connect start", { metadataDelayMs: getMetadataDelayMs(index) });
+      synchronizationSettingsRef.current = getSynchronizationSettings(index);
+      debugLog("connect start", synchronizationSettingsRef.current);
 
       pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
-      pc.addTransceiver("video", { direction: "recvonly" });
+      const videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
+      videoReceiver = videoTransceiver.receiver;
+      applySynchronizationSettings();
       metadataChannel = pc.createDataChannel("metadata", {
         ordered: false,
         maxRetransmits: 0,
@@ -293,16 +293,14 @@ function ChannelTile({ index, onActiveChange, debug }) {
           if (ctx) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const metadataDelayMs = getMetadataDelayMs(index);
             const candidate = takeMetadataForFrame(
               metadataQueueRef.current,
               frameMetadata?.rtpTimestamp,
-              metadataDelayMs,
+              synchronizationSettingsRef.current.metadataRetentionMs,
               now,
             );
-            const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, now);
-            if (overlayMetadata) {
-              const metadataType = overlayMetadata.data?.type;
+            if (candidate && hasDrawableMetadata(candidate.data, index)) {
+              const metadataType = candidate.data?.type;
               const strategy = window.drawStrategies?.[metadataType];
               if (strategy) {
                 const resolvedSettings = getResolvedViewerSettings(index, metadataType);
@@ -311,13 +309,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
                   trackHistory: trackHistoryRef.current,
                   now,
                 };
-                strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
+                strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
               }
             }
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
           trackHistoryRef.current.clear();
         }
       };
@@ -355,6 +352,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
             const deltaTime = hasPreviousSample ? (report.timestamp - tracker.lastTs) / 1000 : 0;
             const bitrateBps = deltaTime > 0 ? (deltaBytes * 8) / deltaTime : 0;
             const bitrate = (bitrateBps / 1000).toFixed(1);
+            const jitterBufferDelayMs =
+              report.jitterBufferEmittedCount > 0
+                ? (report.jitterBufferDelay / report.jitterBufferEmittedCount) * 1000
+                : 0;
             if (
               typeof report.framesDecoded === "number" &&
               (tracker.lastFramesDecoded == null || report.framesDecoded > tracker.lastFramesDecoded)
@@ -386,6 +387,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
 
             if (metadataChannel?.readyState === "open") {
               const video = videoRef.current;
+              const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
+              const videoSync = videoSyncStatusRef.current;
               const lastFrameAgeMs =
                 playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
               metadataChannel.send(
@@ -412,6 +415,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
                     freeze_count: report.freezeCount,
                     pause_count: report.pauseCount,
                     bitrate_bps: Number(bitrateBps.toFixed(1)),
+                    average_jitter_buffer_delay_ms: Number(jitterBufferDelayMs.toFixed(1)),
                   },
                   video: {
                     ready_state: video?.readyState ?? 0,
@@ -425,6 +429,21 @@ function ChannelTile({ index, onActiveChange, debug }) {
                   data_channel: {
                     state: metadataChannel.readyState,
                     metadata_messages_per_sec: tracker.lastCount,
+                  },
+                  synchronization: {
+                    video_sync_buffer_ms: synchronizationSettingsRef.current.videoSyncBufferMs,
+                    metadata_retention_ms: synchronizationSettingsRef.current.metadataRetentionMs,
+                    jitter_buffer_target_supported: videoSync.supported,
+                    jitter_buffer_target_applied: videoSync.applied,
+                    jitter_buffer_target_ms: videoSync.targetMs,
+                    timestamp_matches: metadataSync.timestampMatches,
+                    arrival_fallbacks: metadataSync.arrivalFallbacks,
+                    frame_misses: metadataSync.frameMisses,
+                    metadata_expired: metadataSync.expired,
+                    metadata_evicted: metadataSync.evicted,
+                    untimestamped_metadata_received: metadataSync.untimestampedReceived,
+                    timestamped_metadata_pending: metadataSync.timestampedPending,
+                    arrival_metadata_pending: metadataSync.arrivalPending,
                   },
                 })
               );

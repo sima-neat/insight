@@ -1,7 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
+import {
+  applyVideoSyncBuffer,
+  createMetadataQueue,
+  enqueueMetadata,
+  metadataQueueSnapshot,
+  takeMetadataForFrame,
+} from "./metadataSync.js";
+
+test("video synchronization configures the browser receiver jitter target", () => {
+  const receiver = { jitterBufferTarget: 0 };
+
+  assert.deepEqual(applyVideoSyncBuffer(receiver, 350), {
+    supported: true,
+    applied: true,
+    targetMs: 350,
+  });
+  assert.equal(receiver.jitterBufferTarget, 350);
+});
+
+test("video synchronization reports unsupported browser receivers", () => {
+  assert.deepEqual(applyVideoSyncBuffer({}, 350), {
+    supported: false,
+    applied: false,
+    targetMs: null,
+  });
+});
 
 test("timestamped metadata is selected only for its decoded RTP frame", () => {
   const queue = createMetadataQueue();
@@ -18,14 +43,13 @@ test("timestamped metadata is selected only for its decoded RTP frame", () => {
   assert.equal(takeMetadataForFrame(queue, 1234, 0, 20), null);
 });
 
-test("metadata without a source timestamp falls back to arrival delay", () => {
+test("metadata without a source timestamp falls back to the next video frame", () => {
   const queue = createMetadataQueue();
   const message = { type: "classification", data: { top_classes: [] } };
 
   enqueueMetadata(queue, message, 10);
 
-  assert.equal(takeMetadataForFrame(queue, 1234, 20, 29), null);
-  assert.deepEqual(takeMetadataForFrame(queue, 1234, 20, 30)?.data, message);
+  assert.deepEqual(takeMetadataForFrame(queue, 1234, 20, 0)?.data, message);
 });
 
 test("timestamped metadata queue evicts its oldest entry at capacity", () => {
@@ -39,11 +63,18 @@ test("timestamped metadata queue evicts its oldest entry at capacity", () => {
   assert.equal(takeMetadataForFrame(queue, 1, 0, 300)?.data._insight.rtp_timestamp, 1);
 });
 
-test("expired timestamped metadata cannot render", () => {
+test("configured retention expires unmatched timestamped metadata", () => {
   const queue = createMetadataQueue();
   enqueueMetadata(queue, { _insight: { rtp_timestamp: 1234 } }, 10);
 
-  assert.equal(takeMetadataForFrame(queue, 1234, 0, 5011), null);
+  assert.equal(takeMetadataForFrame(queue, 1234, 5000, 5011), null);
+});
+
+test("zero retention keeps metadata until match or capacity eviction", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { _insight: { rtp_timestamp: 1234 } }, 10);
+
+  assert.equal(takeMetadataForFrame(queue, 1234, 0, 500_000)?.data._insight.rtp_timestamp, 1234);
 });
 
 test("duplicate RTP timestamp keeps the newest metadata", () => {
@@ -52,4 +83,43 @@ test("duplicate RTP timestamp keeps the newest metadata", () => {
   enqueueMetadata(queue, { value: "new", _insight: { rtp_timestamp: 1234 } }, 20);
 
   assert.equal(takeMetadataForFrame(queue, 1234, 0, 30)?.data.value, "new");
+});
+
+test("replacing a timestamp keeps retention ordered by newest arrival", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { value: "old", _insight: { rtp_timestamp: 1 } }, 0);
+  enqueueMetadata(queue, { value: "expired", _insight: { rtp_timestamp: 2 } }, 10);
+  enqueueMetadata(queue, { value: "new", _insight: { rtp_timestamp: 1 } }, 20);
+
+  assert.equal(takeMetadataForFrame(queue, 2, 15, 30), null);
+  assert.equal(takeMetadataForFrame(queue, 1, 15, 30)?.data.value, "new");
+});
+
+test("metadata queue reports exact timestamp matches", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { _insight: { rtp_timestamp: 1234 } }, 10);
+
+  takeMetadataForFrame(queue, 1234, 0, 20);
+
+  assert.equal(metadataQueueSnapshot(queue).timestampMatches, 1);
+});
+
+test("metadata queue reports fallback, misses, expiry, and capacity eviction", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "classification" }, 0);
+  takeMetadataForFrame(queue, 1, 0, 1);
+  takeMetadataForFrame(queue, 2, 0, 2);
+  enqueueMetadata(queue, { _insight: { rtp_timestamp: 3 } }, 0);
+  takeMetadataForFrame(queue, 4, 1, 2);
+  for (let timestamp = 10; timestamp <= 310; timestamp += 1) {
+    enqueueMetadata(queue, { _insight: { rtp_timestamp: timestamp } }, timestamp);
+  }
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.arrivalFallbacks, 1);
+  assert.equal(snapshot.frameMisses, 2);
+  assert.equal(snapshot.expired, 1);
+  assert.equal(snapshot.evicted, 1);
+  assert.equal(snapshot.untimestampedReceived, 1);
+  assert.equal(snapshot.timestampedPending, 300);
 });
