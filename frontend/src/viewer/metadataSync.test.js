@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
+import {
+  canHoldPastFrameMetadata,
+  createMetadataQueue,
+  enqueueMetadata,
+  signedRtpDelta,
+  takeMetadataForFrame,
+} from "./metadataSync.js";
+
+test("bounded hold accepts recent past metadata and rejects future or old metadata", () => {
+  assert.equal(canHoldPastFrameMetadata(109000, 100000), true);
+  assert.equal(canHoldPastFrameMetadata(112000, 100000), true);
+  assert.equal(canHoldPastFrameMetadata(112001, 100000), false);
+  assert.equal(canHoldPastFrameMetadata(100000, 109000), false);
+  assert.equal(canHoldPastFrameMetadata(100000, 100000), false);
+});
+
+test("RTP delta and bounded hold handle timestamp wraparound", () => {
+  assert.equal(signedRtpDelta(1000, 0xfffff000), 5096);
+  assert.equal(canHoldPastFrameMetadata(1000, 0xfffff000), true);
+  assert.equal(signedRtpDelta(0xfffff000, 1000), -5096);
+  assert.equal(canHoldPastFrameMetadata(0xfffff000, 1000), false);
+});
 
 test("timestamped metadata is selected only for its decoded RTP frame", () => {
   const queue = createMetadataQueue();
@@ -13,6 +34,7 @@ test("timestamped metadata is selected only for its decoded RTP frame", () => {
 
   enqueueMetadata(queue, message, 10);
 
+  assert.equal(queue.frameSynchronized, true);
   assert.equal(takeMetadataForFrame(queue, 4321, 0, 20), null);
   assert.deepEqual(takeMetadataForFrame(queue, 1234, 0, 20)?.data, message);
   assert.equal(takeMetadataForFrame(queue, 1234, 0, 20), null);
@@ -24,6 +46,7 @@ test("metadata without a source timestamp falls back to arrival delay", () => {
 
   enqueueMetadata(queue, message, 10);
 
+  assert.equal(queue.frameSynchronized, false);
   assert.equal(takeMetadataForFrame(queue, 1234, 20, 29), null);
   assert.deepEqual(takeMetadataForFrame(queue, 1234, 20, 30)?.data, message);
 });

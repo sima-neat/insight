@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
+import {
+  canHoldPastFrameMetadata,
+  createMetadataQueue,
+  enqueueMetadata,
+  takeMetadataForFrame,
+} from "./metadataSync.js";
 
 const MAX_CHANNELS = 80;
 const MAX_VIDEOS_PER_PAGE = 80;
@@ -60,28 +65,43 @@ function hasDrawableMetadata(message, channelIndex) {
   }
 }
 
-function chooseOverlayMetadata(candidate, overlayState, channelIndex, now) {
+function chooseOverlayMetadata(
+  candidate,
+  overlayState,
+  channelIndex,
+  now,
+  frameSynchronized,
+  currentFrameRtp,
+) {
   if (candidate) {
     if (hasDrawableMetadata(candidate.data, channelIndex)) {
       overlayState.lastDrawable = candidate;
       overlayState.lastDrawableAt = now;
+      overlayState.lastDrawableRtp = candidate.data?._insight?.rtp_timestamp;
       return candidate;
     }
     overlayState.lastDrawable = null;
     overlayState.lastDrawableAt = 0;
+    overlayState.lastDrawableRtp = null;
     return null;
   }
 
-  if (
+  const withinWallClockHold =
     overlayState.lastDrawable &&
     overlayState.lastDrawableAt > 0 &&
-    now - overlayState.lastDrawableAt <= METADATA_DRAWABLE_HOLD_MS
-  ) {
+    now - overlayState.lastDrawableAt <= METADATA_DRAWABLE_HOLD_MS;
+  const withinFrameSynchronizedHold =
+    frameSynchronized &&
+    withinWallClockHold &&
+    canHoldPastFrameMetadata(currentFrameRtp, overlayState.lastDrawableRtp);
+  const withinArrivalHold = !frameSynchronized && withinWallClockHold;
+  if (withinFrameSynchronizedHold || withinArrivalHold) {
     return overlayState.lastDrawable;
   }
 
   overlayState.lastDrawable = null;
   overlayState.lastDrawableAt = 0;
+  overlayState.lastDrawableRtp = null;
   return null;
 }
 
@@ -107,7 +127,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const metadataQueueRef = useRef(createMetadataQueue());
-  const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
+  const overlayStateRef = useRef({
+    lastDrawable: null,
+    lastDrawableAt: 0,
+    lastDrawableRtp: null,
+  });
   const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
@@ -148,7 +172,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
     const onViewerSettingsChanged = (event) => {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
-      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      overlayStateRef.current = {
+        lastDrawable: null,
+        lastDrawableAt: 0,
+        lastDrawableRtp: null,
+      };
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -195,7 +223,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
-      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      overlayStateRef.current = {
+        lastDrawable: null,
+        lastDrawableAt: 0,
+        lastDrawableRtp: null,
+      };
       trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
@@ -213,7 +245,6 @@ function ChannelTile({ index, onActiveChange, debug }) {
       pc.addTransceiver("video", { direction: "recvonly" });
       metadataChannel = pc.createDataChannel("metadata", {
         ordered: false,
-        maxRetransmits: 0,
       });
       debugLog("pc created");
 
@@ -300,7 +331,14 @@ function ChannelTile({ index, onActiveChange, debug }) {
               metadataDelayMs,
               now,
             );
-            const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, now);
+            const overlayMetadata = chooseOverlayMetadata(
+              candidate,
+              overlayStateRef.current,
+              index,
+              now,
+              metadataQueueRef.current.frameSynchronized,
+              frameMetadata?.rtpTimestamp,
+            );
             if (overlayMetadata) {
               const metadataType = overlayMetadata.data?.type;
               const strategy = window.drawStrategies?.[metadataType];
@@ -317,7 +355,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+          overlayStateRef.current = {
+            lastDrawable: null,
+            lastDrawableAt: 0,
+            lastDrawableRtp: null,
+          };
           trackHistoryRef.current.clear();
         }
       };
