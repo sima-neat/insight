@@ -61,6 +61,11 @@ func TestEgressStatsRecordsBrowserReport(t *testing.T) {
 			ReadyState: 4,
 			Active:     true,
 		},
+		Synchronization: BrowserSynchronizationStats{
+			VideoSyncBufferMS: 350,
+			TimestampMatches:  15,
+			FrameMisses:       1,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,5 +81,8 @@ func TestEgressStatsRecordsBrowserReport(t *testing.T) {
 	report := snapshot.Peers[0].Browser
 	if report == nil || report.InboundRTP.FramesDecoded != 16 || !report.Video.Active {
 		t.Fatalf("unexpected browser report: %#v", report)
+	}
+	if report.Synchronization.VideoSyncBufferMS != 350 || report.Synchronization.TimestampMatches != 15 {
+		t.Fatalf("unexpected synchronization report: %#v", report.Synchronization)
 	}
 }

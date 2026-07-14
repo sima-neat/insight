@@ -10,12 +10,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const trackingConfidenceSlider = document.getElementById("trackingConfidenceSlider");
   const trackTrailLengthSlider = document.getElementById("trackTrailLengthSlider");
   const lostTrackTtlSlider = document.getElementById("lostTrackTtlSlider");
-  const metadataDelaySlider = document.getElementById("metadataDelaySlider");
+  const videoSyncBufferSlider = document.getElementById("videoSyncBufferSlider");
+  const metadataRetentionSlider = document.getElementById("metadataRetentionSlider");
   const confidenceDisplay = document.getElementById("confidenceDisplay");
   const trackingConfidenceDisplay = document.getElementById("trackingConfidenceDisplay");
   const trackTrailLengthDisplay = document.getElementById("trackTrailLengthDisplay");
   const lostTrackTtlDisplay = document.getElementById("lostTrackTtlDisplay");
-  const metadataDelayDisplay = document.getElementById("metadataDelayDisplay");
+  const videoSyncBufferDisplay = document.getElementById("videoSyncBufferDisplay");
+  const metadataRetentionDisplay = document.getElementById("metadataRetentionDisplay");
   const tabButtons = document.querySelectorAll(".settings-tab-link");
   const tabSections = document.querySelectorAll(".settings-tab-section");
   const objectList = document.getElementById("viewerObjectList");
@@ -84,8 +86,12 @@ document.addEventListener("DOMContentLoaded", () => {
     updateTrackHistoryControls();
   });
 
-  metadataDelaySlider.addEventListener("input", () => {
-    metadataDelayDisplay.textContent = metadataDelaySlider.value;
+  videoSyncBufferSlider.addEventListener("input", () => {
+    videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
+  });
+
+  metadataRetentionSlider.addEventListener("input", () => {
+    metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
   });
 
   metadataTypeSelector.addEventListener("change", () => {
@@ -95,7 +101,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   saveViewerSettings.addEventListener("click", () => {
     const settings = settingsApi.readScopeSettings(scope);
-    settings.general.metadataDelay = parseFloat(metadataDelaySlider.value);
+    settings.general.videoSyncBufferMs = parseInt(videoSyncBufferSlider.value, 10);
+    settings.general.metadataRetentionMs = parseInt(metadataRetentionSlider.value, 10);
     settings.general.showRoi = roiToggle.checked;
     settings.general.applyRoiFiltering = roiFilteringToggle.checked;
     settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceSlider.value);
@@ -245,8 +252,10 @@ document.addEventListener("DOMContentLoaded", () => {
     trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
     trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
     lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
-    metadataDelaySlider.value = settings.general.metadataDelay ?? 0;
-    metadataDelayDisplay.textContent = metadataDelaySlider.value;
+    videoSyncBufferSlider.value = settings.general.videoSyncBufferMs ?? 350;
+    videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
+    metadataRetentionSlider.value = settings.general.metadataRetentionMs ?? 0;
+    metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
