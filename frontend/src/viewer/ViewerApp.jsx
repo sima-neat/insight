@@ -213,7 +213,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       videoReceiver = videoTransceiver.receiver;
       applySynchronizationSettings();
       metadataChannel = pc.createDataChannel("metadata", {
-        ordered: false,
+        ordered: true,
         maxRetransmits: 0,
       });
       debugLog("pc created");
@@ -283,8 +283,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
         const ctx = canvas.getContext("2d");
 
         if (video.readyState >= 2) {
-          playbackRef.current.lastFrameAt = Date.now();
-          setTileActive(true);
+          if (frameMetadata) {
+            playbackRef.current.lastFrameAt = Date.now();
+            setTileActive(true);
+          }
 
           if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
             canvas.width = canvas.clientWidth;
@@ -369,6 +371,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
               Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
             ) {
               setTileActive(false);
+              const canvas = canvasRef.current;
+              canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+              trackHistoryRef.current.clear();
             }
             setBanner(
               `Channel ${index} | ${width}x${height} | ${fps} fps | ${bitrate} kbps | ${tracker.lastCount} msgs/sec`

@@ -79,7 +79,7 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 ## Video Viewer
 
-The Video Viewer displays low-latency WebRTC output from the video forwarder. It supports 80 addressable channels and displays up to 48 simultaneous streams per page. The available page sizes are 1, 4, 9, 16, 24, 36, and 48. Inside the SDK container, video channels use UDP ports `9000-9079`, and matching metadata channels use UDP ports `9100-9179`.
+The Video Viewer displays low-latency WebRTC streams from the video forwarder.
 
 For channel `N`:
 
@@ -92,7 +92,7 @@ For example, channel `0` uses video UDP `9000` and metadata UDP `9100`; channel 
 
 If the sender runs on a DevKit or another external machine, use the mapped `videoUDP` and `metadataUDP` host port ranges from `neat --json`. The channel math is the same, but the starting ports may be different.
 
-The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and metadata delay.
+The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and synchronization buffering. Metadata timestamps use source PTS milliseconds and are omitted when unavailable.
 
 Use the Video Viewer to confirm:
 

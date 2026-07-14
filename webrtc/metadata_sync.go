@@ -57,6 +57,7 @@ func (c *metadataTimestampCorrelator) addVideoFrame(
 	defer c.mu.Unlock()
 
 	if c.haveSSRC && c.ssrc != ssrc {
+		// Pending metadata has no source generation, so retaining it could match a restarted source.
 		c.frames = c.frames[:0]
 		c.pending = c.pending[:0]
 	}

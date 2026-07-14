@@ -56,12 +56,26 @@ export function enqueueMetadata(queue, data, receivedAt) {
 
 export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, now) {
   pruneMetadataQueue(queue, metadataRetentionMs, now);
-  if (Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0) {
+  const hasFrameTimestamp = Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0;
+  if (hasFrameTimestamp) {
     const key = rtpTimestamp >>> 0;
     const item = queue.timestamped.get(key) ?? null;
     if (item) {
       queue.timestamped.delete(key);
       queue.stats.timestampMatches += 1;
+      return item;
+    }
+  }
+
+  if (!hasFrameTimestamp) {
+    let item = queue.arrival.at(-1) ?? null;
+    for (const timestamped of queue.timestamped.values()) {
+      if (!item || timestamped.receivedAt >= item.receivedAt) item = timestamped;
+    }
+    queue.timestamped.clear();
+    queue.arrival.length = 0;
+    if (item) {
+      queue.stats.arrivalFallbacks += 1;
       return item;
     }
   }

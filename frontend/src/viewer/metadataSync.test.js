@@ -52,6 +52,38 @@ test("metadata without a source timestamp falls back to the next video frame", (
   assert.deepEqual(takeMetadataForFrame(queue, 1234, 20, 0)?.data, message);
 });
 
+test("timestamped metadata falls back when the decoded frame has no RTP timestamp", () => {
+  const queue = createMetadataQueue();
+  const message = {
+    type: "object-detection",
+    data: { objects: [] },
+    _insight: { rtp_timestamp: 1234 },
+  };
+
+  enqueueMetadata(queue, message, 10);
+
+  assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 20)?.data, message);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 0);
+});
+
+test("missing frame identity selects the newest arrival across metadata queues", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { value: "timestamped", _insight: { rtp_timestamp: 1234 } }, 10);
+  enqueueMetadata(queue, { value: "untimestamped" }, 20);
+
+  assert.equal(takeMetadataForFrame(queue, undefined, 0, 30)?.data.value, "untimestamped");
+  assert.deepEqual(metadataQueueSnapshot(queue), {
+    timestampMatches: 0,
+    arrivalFallbacks: 1,
+    frameMisses: 0,
+    expired: 0,
+    evicted: 0,
+    untimestampedReceived: 1,
+    timestampedPending: 0,
+    arrivalPending: 0,
+  });
+});
+
 test("timestamped metadata queue evicts its oldest entry at capacity", () => {
   const queue = createMetadataQueue();
 
