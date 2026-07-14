@@ -19,10 +19,10 @@ test("persisted page sizes normalize to a supported option", () => {
   assert.equal(normalizeVisiblePerPage("invalid"), 4);
 });
 
-test("24 visible streams use four columns and six rows", () => {
-  assert.deepEqual(gridDimensions(24), { columns: 4, rows: 6 });
+test("24 visible streams use four rows and six columns", () => {
+  assert.deepEqual(gridDimensions(24), { columns: 6, rows: 4 });
 });
 
-test("48 visible streams use six columns and eight rows", () => {
-  assert.deepEqual(gridDimensions(48), { columns: 6, rows: 8 });
+test("48 visible streams use six rows and eight columns", () => {
+  assert.deepEqual(gridDimensions(48), { columns: 8, rows: 6 });
 });
