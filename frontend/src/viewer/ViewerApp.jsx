@@ -7,11 +7,12 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import {
+  MAX_CHANNELS,
+  PAGE_SIZE_PRESETS,
+  normalizeVisiblePerPage,
+} from "./viewerLayout.js";
 
-const MAX_CHANNELS = 80;
-const MAX_VIDEOS_PER_PAGE = 80;
-const DEFAULT_VISIBLE_PER_PAGE = 4;
-const PAGE_SIZE_PRESETS = [1, 4, 9, 16, 40, 80];
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
@@ -541,8 +542,7 @@ export default function ViewerApp() {
 
   const [visiblePerPage, setVisiblePerPage] = useState(() => {
     const raw = window.localStorage.getItem("layoutCount");
-    const parsed = Number.parseInt(raw || `${DEFAULT_VISIBLE_PER_PAGE}`, 10);
-    return Number.isNaN(parsed) ? DEFAULT_VISIBLE_PER_PAGE : Math.max(1, Math.min(MAX_VIDEOS_PER_PAGE, parsed));
+    return normalizeVisiblePerPage(raw);
   });
   const [currentPage, setCurrentPage] = useState(0);
   const [activeMap, setActiveMap] = useState({});
@@ -604,8 +604,7 @@ export default function ViewerApp() {
   }, []);
 
   const handleVisiblePerPageChange = (value) => {
-    const count = Number.parseInt(value, 10);
-    const safeCount = Number.isNaN(count) ? DEFAULT_VISIBLE_PER_PAGE : Math.max(1, Math.min(MAX_VIDEOS_PER_PAGE, count));
+    const safeCount = normalizeVisiblePerPage(value);
     setVisiblePerPage(safeCount);
     window.localStorage.setItem("layoutCount", `${safeCount}`);
     setCurrentPage(0);

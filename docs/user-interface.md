@@ -79,7 +79,7 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 ## Video Viewer
 
-The Video Viewer displays low-latency WebRTC output from the video forwarder. It supports up to 80 channels. Inside the SDK container, video channels use UDP ports `9000-9079`, and matching metadata channels use UDP ports `9100-9179`.
+The Video Viewer displays low-latency WebRTC output from the video forwarder. It supports 80 addressable channels and displays up to 48 simultaneous streams per page. The available page sizes are 1, 4, 9, 16, 24, 36, and 48. Inside the SDK container, video channels use UDP ports `9000-9079`, and matching metadata channels use UDP ports `9100-9179`.
 
 For channel `N`:
 
