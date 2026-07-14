@@ -10,6 +10,7 @@ import {
 import {
   MAX_CHANNELS,
   PAGE_SIZE_PRESETS,
+  gridDimensions,
   normalizeVisiblePerPage,
 } from "./viewerLayout.js";
 
@@ -85,9 +86,8 @@ function applyLayout(count) {
     return;
   }
 
-  const cols = Math.ceil(Math.sqrt(count));
-  const rows = Math.ceil(count / cols);
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  const { columns, rows } = gridDimensions(count);
+  grid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
   grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
   document.body.classList.toggle("single-tile", count === 1);
 }

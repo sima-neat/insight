@@ -151,7 +151,7 @@ def init_environment():
         media_src_file.parent.mkdir(parents=True, exist_ok=True)
         media_src_file.write_text("[]")
 
-    default_source_count = 16
+    default_source_count = 48
 
     return {
         "MEDIA_DIR": media_dir,
