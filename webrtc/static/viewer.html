@@ -118,10 +118,17 @@
           <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td><label for="metadataDelaySlider">Overlay Delay (msec)</label></td>
+                <td><label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label></td>
                 <td>
-                  <input type="range" id="metadataDelaySlider" class="settings-slider"  min="0" max="4000" step="50" value="0">
-                  <span id="metadataDelayDisplay">0</span>
+                  <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="350">
+                  <span id="videoSyncBufferDisplay">350</span>
+                </td>
+              </tr>
+              <tr>
+                <td><label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label></td>
+                <td>
+                  <input type="range" id="metadataRetentionSlider" class="settings-slider" min="0" max="30000" step="250" value="0">
+                  <span id="metadataRetentionDisplay">0</span>
                 </td>
               </tr>
             </table>

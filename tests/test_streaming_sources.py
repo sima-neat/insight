@@ -41,7 +41,8 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(sources[0]["transport"], "rtsp")
         self.assertEqual(sources[0]["codec"], "h264")
         self.assertEqual(sources[0]["file"], "sample.mp4")
-        self.assertEqual(len(sources), app_module.DEFAULT_SOURCE_COUNT)
+        self.assertEqual(len(sources), 48)
+        self.assertEqual(sources[-1]["index"], 48)
 
     def test_http_source_start_persists_mjpeg_transport(self):
         (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")

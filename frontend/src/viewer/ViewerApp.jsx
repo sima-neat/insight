@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const MAX_CHANNELS = 80;
-const MAX_VIDEOS_PER_PAGE = 80;
-const DEFAULT_VISIBLE_PER_PAGE = 4;
-const PAGE_SIZE_PRESETS = [1, 4, 9, 16, 40, 80];
-const METADATA_QUEUE_HARD_LIMIT = 300;
-const METADATA_QUEUE_SOFT_LIMIT = 20;
-const METADATA_DRAWABLE_HOLD_MS = 400;
-const METADATA_QUEUE_MAX_AGE_MS = 5000;
+import {
+  applyVideoSyncBuffer,
+  createMetadataQueue,
+  enqueueMetadata,
+  metadataQueueSnapshot,
+  takeMetadataForFrame,
+} from "./metadataSync.js";
+import {
+  MAX_CHANNELS,
+  PAGE_SIZE_PRESETS,
+  gridDimensions,
+  normalizeVisiblePerPage,
+} from "./viewerLayout.js";
+
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
@@ -28,23 +34,20 @@ function getResolvedViewerSettings(channelIndex, metadataType = "object-detectio
   if (typeof window.resolveTypeSettings === "function") {
     return window.resolveTypeSettings(channelIndex, metadataType);
   }
-  return { general: { metadataDelay: 0, showRoi: true }, type: {} };
+  return {
+    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    type: {},
+  };
 }
 
-function getMetadataDelayMs(channelIndex) {
+function getSynchronizationSettings(channelIndex) {
   const settings = getResolvedViewerSettings(channelIndex);
-  return typeof settings.general.metadataDelay === "number" ? settings.general.metadataDelay : 0;
-}
-
-function chooseMetadataCandidate(queue, metadataDelayMs) {
-  if (!queue.length) return null;
-  if (metadataDelayMs <= 0) return queue[queue.length - 1];
-  const now = performance.now();
-  for (let i = queue.length - 1; i >= 0; i -= 1) {
-    const item = queue[i];
-    if (now - item.timestamp >= metadataDelayMs) return item;
-  }
-  return null;
+  return {
+    videoSyncBufferMs:
+      typeof settings.general.videoSyncBufferMs === "number" ? settings.general.videoSyncBufferMs : 350,
+    metadataRetentionMs:
+      typeof settings.general.metadataRetentionMs === "number" ? settings.general.metadataRetentionMs : 0,
+  };
 }
 
 function getObjectConfidenceThreshold(channelIndex) {
@@ -72,69 +75,29 @@ function hasDrawableMetadata(message, channelIndex) {
   }
 }
 
-function chooseOverlayMetadata(candidate, overlayState, channelIndex, now) {
-  if (candidate) {
-    if (hasDrawableMetadata(candidate.data, channelIndex)) {
-      overlayState.lastDrawable = candidate;
-      overlayState.lastDrawableAt = now;
-      return candidate;
-    }
-  }
-
-  if (
-    overlayState.lastDrawable &&
-    overlayState.lastDrawableAt > 0 &&
-    now - overlayState.lastDrawableAt <= METADATA_DRAWABLE_HOLD_MS
-  ) {
-    return overlayState.lastDrawable;
-  }
-
-  overlayState.lastDrawable = null;
-  overlayState.lastDrawableAt = 0;
-  return null;
-}
-
-function pruneMetadataQueue(queue, selectedCandidate, metadataDelayMs, now) {
-  let removeCount = 0;
-  if (selectedCandidate) {
-    const selectedIndex = queue.indexOf(selectedCandidate);
-    if (selectedIndex >= 0) removeCount = selectedIndex + 1;
-  }
-
-  const maxAgeMs = Math.max(METADATA_QUEUE_MAX_AGE_MS, metadataDelayMs + 1000);
-  while (removeCount < queue.length && now - queue[removeCount].timestamp > maxAgeMs) {
-    removeCount += 1;
-  }
-
-  if (removeCount > 0) queue.splice(0, removeCount);
-  if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
-    queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
-  }
-}
-
 function applyLayout(count) {
   const grid = document.getElementById("videoGrid");
   if (!grid) return;
 
   if (count <= 0) {
     grid.style.gridTemplateColumns = "1fr";
-    grid.style.gridTemplateRows = "1fr";
+    grid.style.gridTemplateRows = "";
     document.body.classList.remove("single-tile");
     return;
   }
 
-  const cols = Math.ceil(Math.sqrt(count));
-  const rows = Math.ceil(count / cols);
-  grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+  const { columns } = gridDimensions(count);
+  grid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
+  grid.style.gridTemplateRows = "";
   document.body.classList.toggle("single-tile", count === 1);
 }
 
 function ChannelTile({ index, onActiveChange, debug }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const metadataQueueRef = useRef([]);
-  const overlayStateRef = useRef({ lastDrawable: null, lastDrawableAt: 0 });
+  const metadataQueueRef = useRef(createMetadataQueue());
+  const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
+  const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
   const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
@@ -151,8 +114,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
   useEffect(() => {
     let mounted = true;
     let pc = null;
+    let videoReceiver = null;
     let metadataChannel = null;
     let animationFrame = null;
+    let videoFrameCallback = null;
     let statsInterval = null;
     let reconnectTimer = null;
     let reconnectPending = false;
@@ -171,10 +136,18 @@ function ChannelTile({ index, onActiveChange, debug }) {
       debugLog("active", nextActive);
     };
 
+    const applySynchronizationSettings = () => {
+      synchronizationSettingsRef.current = getSynchronizationSettings(index);
+      videoSyncStatusRef.current = applyVideoSyncBuffer(
+        videoReceiver,
+        synchronizationSettingsRef.current.videoSyncBufferMs,
+      );
+    };
+
     const onViewerSettingsChanged = (event) => {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
-      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      applySynchronizationSettings();
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -193,6 +166,22 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (!mounted) return;
       currentSession += 1;
       const sessionId = currentSession;
+      if (animationFrame != null) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      if (statsInterval != null) {
+        window.clearInterval(statsInterval);
+        statsInterval = null;
+      }
+      if (videoFrameCallback != null && videoRef.current?.cancelVideoFrameCallback) {
+        videoRef.current.cancelVideoFrameCallback(videoFrameCallback);
+        videoFrameCallback = null;
+      }
+      if (metadataChannel) {
+        metadataChannel.close();
+        metadataChannel = null;
+      }
       if (pc) {
         // Avoid self-triggered reconnect from deliberate close.
         pc.onconnectionstatechange = null;
@@ -204,8 +193,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       }
       setTileActive(false);
       setBanner(`Channel ${index}`);
-      metadataQueueRef.current = [];
-      overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
+      metadataQueueRef.current = createMetadataQueue();
       trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
@@ -215,24 +203,26 @@ function ChannelTile({ index, onActiveChange, debug }) {
         lastFramesDecoded: null,
       };
       playbackRef.current = { lastFrameAt: 0 };
-      debugLog("connect start", { metadataDelayMs: getMetadataDelayMs(index) });
+      synchronizationSettingsRef.current = getSynchronizationSettings(index);
+      debugLog("connect start", synchronizationSettingsRef.current);
 
       pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
-      pc.addTransceiver("video", { direction: "recvonly" });
-      metadataChannel = pc.createDataChannel("metadata");
+      const videoTransceiver = pc.addTransceiver("video", { direction: "recvonly" });
+      videoReceiver = videoTransceiver.receiver;
+      applySynchronizationSettings();
+      metadataChannel = pc.createDataChannel("metadata", {
+        ordered: true,
+        maxRetransmits: 0,
+      });
       debugLog("pc created");
 
       metadataChannel.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
-          const queue = metadataQueueRef.current;
-          queue.push({ timestamp: performance.now(), data: parsed });
+          enqueueMetadata(metadataQueueRef.current, parsed, performance.now());
           rtcpRef.current.messageCount += 1;
-          if (queue.length > METADATA_QUEUE_HARD_LIMIT) {
-            queue.splice(0, queue.length - METADATA_QUEUE_SOFT_LIMIT);
-          }
         } catch (_err) {
           // Ignore malformed data channel payloads.
         }
@@ -267,6 +257,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
           debugLog("track onunmute");
           video.play().catch(() => {});
         };
+        startVideoFrameLoop();
       };
 
       pc.onconnectionstatechange = () => {
@@ -285,22 +276,16 @@ function ChannelTile({ index, onActiveChange, debug }) {
         debugLog("iceGatheringState", pc.iceGatheringState);
       };
 
-      const draw = () => {
-        if (!mounted || !canvasRef.current || !videoRef.current) return;
+      const drawFrame = (now, frameMetadata) => {
+        if (!mounted || sessionId !== currentSession || !canvasRef.current || !videoRef.current) return;
         const canvas = canvasRef.current;
         const video = videoRef.current;
-        const queue = metadataQueueRef.current;
         const ctx = canvas.getContext("2d");
 
         if (video.readyState >= 2) {
-          const now = Date.now();
-          if (
-            playbackRef.current.lastFrameAt > 0 &&
-            now - playbackRef.current.lastFrameAt <= STREAM_STALE_MS
-          ) {
+          if (frameMetadata) {
+            playbackRef.current.lastFrameAt = Date.now();
             setTileActive(true);
-          } else {
-            setTileActive(false);
           }
 
           if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
@@ -311,35 +296,47 @@ function ChannelTile({ index, onActiveChange, debug }) {
           if (ctx) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const metadataDelayMs = getMetadataDelayMs(index);
-            const candidate = chooseMetadataCandidate(queue, metadataDelayMs);
-            const nowPerf = performance.now();
-            const overlayMetadata = chooseOverlayMetadata(candidate, overlayStateRef.current, index, nowPerf);
-            if (overlayMetadata) {
-              const metadataType = overlayMetadata.data?.type;
+            const candidate = takeMetadataForFrame(
+              metadataQueueRef.current,
+              frameMetadata?.rtpTimestamp,
+              synchronizationSettingsRef.current.metadataRetentionMs,
+              now,
+            );
+            if (candidate && hasDrawableMetadata(candidate.data, index)) {
+              const metadataType = candidate.data?.type;
               const strategy = window.drawStrategies?.[metadataType];
               if (strategy) {
                 const resolvedSettings = getResolvedViewerSettings(index, metadataType);
                 const drawContext = {
                   settings: resolvedSettings,
                   trackHistory: trackHistoryRef.current,
-                  now: nowPerf,
+                  now,
                 };
-                strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
+                strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
               }
             }
-            pruneMetadataQueue(queue, candidate, metadataDelayMs, nowPerf);
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          overlayStateRef.current = { lastDrawable: null, lastDrawableAt: 0 };
           trackHistoryRef.current.clear();
         }
-
-        animationFrame = requestAnimationFrame(draw);
       };
 
-      draw();
+      const startVideoFrameLoop = () => {
+        const video = videoRef.current;
+        if (!mounted || sessionId !== currentSession || !video) return;
+        if (typeof video.requestVideoFrameCallback === "function") {
+          videoFrameCallback = video.requestVideoFrameCallback((now, frameMetadata) => {
+            drawFrame(now, frameMetadata);
+            startVideoFrameLoop();
+          });
+          return;
+        }
+        animationFrame = requestAnimationFrame((now) => {
+          drawFrame(now, undefined);
+          startVideoFrameLoop();
+        });
+      };
 
       statsInterval = window.setInterval(async () => {
         if (!mounted || !pc || pc.connectionState !== "connected") return;
@@ -358,12 +355,25 @@ function ChannelTile({ index, onActiveChange, debug }) {
             const deltaTime = hasPreviousSample ? (report.timestamp - tracker.lastTs) / 1000 : 0;
             const bitrateBps = deltaTime > 0 ? (deltaBytes * 8) / deltaTime : 0;
             const bitrate = (bitrateBps / 1000).toFixed(1);
+            const jitterBufferDelayMs =
+              report.jitterBufferEmittedCount > 0
+                ? (report.jitterBufferDelay / report.jitterBufferEmittedCount) * 1000
+                : 0;
             if (
               typeof report.framesDecoded === "number" &&
               (tracker.lastFramesDecoded == null || report.framesDecoded > tracker.lastFramesDecoded)
             ) {
               playbackRef.current.lastFrameAt = Date.now();
               setTileActive(true);
+            }
+            if (
+              playbackRef.current.lastFrameAt > 0 &&
+              Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
+            ) {
+              setTileActive(false);
+              const canvas = canvasRef.current;
+              canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+              trackHistoryRef.current.clear();
             }
             setBanner(
               `Channel ${index} | ${width}x${height} | ${fps} fps | ${bitrate} kbps | ${tracker.lastCount} msgs/sec`
@@ -383,6 +393,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
 
             if (metadataChannel?.readyState === "open") {
               const video = videoRef.current;
+              const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
+              const videoSync = videoSyncStatusRef.current;
               const lastFrameAgeMs =
                 playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
               metadataChannel.send(
@@ -409,6 +421,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
                     freeze_count: report.freezeCount,
                     pause_count: report.pauseCount,
                     bitrate_bps: Number(bitrateBps.toFixed(1)),
+                    average_jitter_buffer_delay_ms: Number(jitterBufferDelayMs.toFixed(1)),
                   },
                   video: {
                     ready_state: video?.readyState ?? 0,
@@ -422,6 +435,21 @@ function ChannelTile({ index, onActiveChange, debug }) {
                   data_channel: {
                     state: metadataChannel.readyState,
                     metadata_messages_per_sec: tracker.lastCount,
+                  },
+                  synchronization: {
+                    video_sync_buffer_ms: synchronizationSettingsRef.current.videoSyncBufferMs,
+                    metadata_retention_ms: synchronizationSettingsRef.current.metadataRetentionMs,
+                    jitter_buffer_target_supported: videoSync.supported,
+                    jitter_buffer_target_applied: videoSync.applied,
+                    jitter_buffer_target_ms: videoSync.targetMs,
+                    timestamp_matches: metadataSync.timestampMatches,
+                    arrival_fallbacks: metadataSync.arrivalFallbacks,
+                    frame_misses: metadataSync.frameMisses,
+                    metadata_expired: metadataSync.expired,
+                    metadata_evicted: metadataSync.evicted,
+                    untimestamped_metadata_received: metadataSync.untimestampedReceived,
+                    timestamped_metadata_pending: metadataSync.timestampedPending,
+                    arrival_metadata_pending: metadataSync.arrivalPending,
                   },
                 })
               );
@@ -467,6 +495,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
       if (statsInterval) window.clearInterval(statsInterval);
       if (animationFrame) cancelAnimationFrame(animationFrame);
+      if (videoFrameCallback != null && videoRef.current?.cancelVideoFrameCallback) {
+        videoRef.current.cancelVideoFrameCallback(videoFrameCallback);
+      }
       if (metadataChannel && metadataChannel.readyState === "open") {
         metadataChannel.close();
       }
@@ -516,8 +547,7 @@ export default function ViewerApp() {
 
   const [visiblePerPage, setVisiblePerPage] = useState(() => {
     const raw = window.localStorage.getItem("layoutCount");
-    const parsed = Number.parseInt(raw || `${DEFAULT_VISIBLE_PER_PAGE}`, 10);
-    return Number.isNaN(parsed) ? DEFAULT_VISIBLE_PER_PAGE : Math.max(1, Math.min(MAX_VIDEOS_PER_PAGE, parsed));
+    return normalizeVisiblePerPage(raw);
   });
   const [currentPage, setCurrentPage] = useState(0);
   const [activeMap, setActiveMap] = useState({});
@@ -579,8 +609,7 @@ export default function ViewerApp() {
   }, []);
 
   const handleVisiblePerPageChange = (value) => {
-    const count = Number.parseInt(value, 10);
-    const safeCount = Number.isNaN(count) ? DEFAULT_VISIBLE_PER_PAGE : Math.max(1, Math.min(MAX_VIDEOS_PER_PAGE, count));
+    const safeCount = normalizeVisiblePerPage(value);
     setVisiblePerPage(safeCount);
     window.localStorage.setItem("layoutCount", `${safeCount}`);
     setCurrentPage(0);

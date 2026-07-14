@@ -133,13 +133,14 @@ type EgressDiagnostics struct {
 }
 
 type BrowserEgressReport struct {
-	Type        string                  `json:"type,omitempty"`
-	Channel     int                     `json:"channel,omitempty"`
-	Time        string                  `json:"time,omitempty"`
-	Connection  BrowserConnectionState  `json:"connection,omitempty"`
-	InboundRTP  BrowserInboundRTPStats  `json:"inbound_rtp,omitempty"`
-	Video       BrowserVideoState       `json:"video,omitempty"`
-	DataChannel BrowserDataChannelState `json:"data_channel,omitempty"`
+	Type            string                      `json:"type,omitempty"`
+	Channel         int                         `json:"channel,omitempty"`
+	Time            string                      `json:"time,omitempty"`
+	Connection      BrowserConnectionState      `json:"connection,omitempty"`
+	InboundRTP      BrowserInboundRTPStats      `json:"inbound_rtp,omitempty"`
+	Video           BrowserVideoState           `json:"video,omitempty"`
+	DataChannel     BrowserDataChannelState     `json:"data_channel,omitempty"`
+	Synchronization BrowserSynchronizationStats `json:"synchronization,omitempty"`
 }
 
 type BrowserConnectionState struct {
@@ -150,18 +151,19 @@ type BrowserConnectionState struct {
 }
 
 type BrowserInboundRTPStats struct {
-	BytesReceived   uint64  `json:"bytes_received,omitempty"`
-	PacketsReceived uint64  `json:"packets_received,omitempty"`
-	PacketsLost     int64   `json:"packets_lost,omitempty"`
-	FramesReceived  uint64  `json:"frames_received,omitempty"`
-	FramesDecoded   uint64  `json:"frames_decoded,omitempty"`
-	FramesDropped   uint64  `json:"frames_dropped,omitempty"`
-	FramesPerSecond float64 `json:"frames_per_second,omitempty"`
-	FrameWidth      uint64  `json:"frame_width,omitempty"`
-	FrameHeight     uint64  `json:"frame_height,omitempty"`
-	FreezeCount     uint64  `json:"freeze_count,omitempty"`
-	PauseCount      uint64  `json:"pause_count,omitempty"`
-	BitrateBPS      float64 `json:"bitrate_bps,omitempty"`
+	BytesReceived              uint64  `json:"bytes_received,omitempty"`
+	PacketsReceived            uint64  `json:"packets_received,omitempty"`
+	PacketsLost                int64   `json:"packets_lost,omitempty"`
+	FramesReceived             uint64  `json:"frames_received,omitempty"`
+	FramesDecoded              uint64  `json:"frames_decoded,omitempty"`
+	FramesDropped              uint64  `json:"frames_dropped,omitempty"`
+	FramesPerSecond            float64 `json:"frames_per_second,omitempty"`
+	FrameWidth                 uint64  `json:"frame_width,omitempty"`
+	FrameHeight                uint64  `json:"frame_height,omitempty"`
+	FreezeCount                uint64  `json:"freeze_count,omitempty"`
+	PauseCount                 uint64  `json:"pause_count,omitempty"`
+	BitrateBPS                 float64 `json:"bitrate_bps,omitempty"`
+	AverageJitterBufferDelayMS float64 `json:"average_jitter_buffer_delay_ms,omitempty"`
 }
 
 type BrowserVideoState struct {
@@ -177,6 +179,22 @@ type BrowserVideoState struct {
 type BrowserDataChannelState struct {
 	State                  string `json:"state,omitempty"`
 	MetadataMessagesPerSec uint64 `json:"metadata_messages_per_sec,omitempty"`
+}
+
+type BrowserSynchronizationStats struct {
+	VideoSyncBufferMS             uint64  `json:"video_sync_buffer_ms"`
+	MetadataRetentionMS           uint64  `json:"metadata_retention_ms"`
+	JitterBufferTargetSupported   bool    `json:"jitter_buffer_target_supported"`
+	JitterBufferTargetApplied     bool    `json:"jitter_buffer_target_applied"`
+	JitterBufferTargetMS          float64 `json:"jitter_buffer_target_ms"`
+	TimestampMatches              uint64  `json:"timestamp_matches"`
+	ArrivalFallbacks              uint64  `json:"arrival_fallbacks"`
+	FrameMisses                   uint64  `json:"frame_misses"`
+	MetadataExpired               uint64  `json:"metadata_expired"`
+	MetadataEvicted               uint64  `json:"metadata_evicted"`
+	UntimestampedMetadataReceived uint64  `json:"untimestamped_metadata_received"`
+	TimestampedMetadataPending    uint64  `json:"timestamped_metadata_pending"`
+	ArrivalMetadataPending        uint64  `json:"arrival_metadata_pending"`
 }
 
 func NewEgressStats(channel int) *EgressStats {

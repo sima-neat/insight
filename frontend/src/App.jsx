@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
-const SOURCE_COUNT = 16
+const SOURCE_COUNT = 48
 const STREAMING_TRANSPORTS = [
   { value: 'rtsp', label: 'RTSP' },
   { value: 'http', label: 'HTTP' }
