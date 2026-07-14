@@ -81,14 +81,14 @@ function applyLayout(count) {
 
   if (count <= 0) {
     grid.style.gridTemplateColumns = "1fr";
-    grid.style.gridTemplateRows = "1fr";
+    grid.style.gridTemplateRows = "";
     document.body.classList.remove("single-tile");
     return;
   }
 
-  const { columns, rows } = gridDimensions(count);
+  const { columns } = gridDimensions(count);
   grid.style.gridTemplateColumns = `repeat(${columns}, 1fr)`;
-  grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+  grid.style.gridTemplateRows = "";
   document.body.classList.toggle("single-tile", count === 1);
 }
 
