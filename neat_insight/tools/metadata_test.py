@@ -123,7 +123,7 @@ def _generate_segments():
             segment["mask"] = [[x + w // 2, y], [x + w, y + h], [x, y + h]]
         else:
             segment["mask_format"] = "rle"
-            segment["mask"] = {"size": [4, 4], "counts": [4, 8, 4]}
+            segment["mask"] = {"size": [4, 3], "counts": [0, 6, 6]}
         segments.append(segment)
     return segments
 

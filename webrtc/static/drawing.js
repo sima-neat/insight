@@ -415,7 +415,7 @@ window.drawStrategies = {
         let foreground = false;
         mask.counts.forEach(count => {
           for (let i = 0; i < count; i++, pos++) {
-            if (foreground) octx.fillRect(pos % maskWidth, Math.floor(pos / maskWidth), 1, 1);
+            if (foreground) octx.fillRect(Math.floor(pos / maskHeight), pos % maskHeight, 1, 1);
           }
           foreground = !foreground;
         });
