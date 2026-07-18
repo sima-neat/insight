@@ -331,6 +331,8 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
                 "1",
                 "-b:v",
                 video_bitrate(rendition),
+                "-profile:v",
+                "main",
                 "-pix_fmt",
                 "yuv420p",
                 "-tag:v",
@@ -345,6 +347,8 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
             "medium",
             "-crf",
             "28",
+            "-profile:v",
+            "main",
             "-pix_fmt",
             "yuv420p",
             "-tag:v",
@@ -450,7 +454,10 @@ def probe_video(ffprobe: str, path: Path) -> dict[str, Any]:
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=codec_name,width,height,r_frame_rate,avg_frame_rate,duration",
+        (
+            "stream=codec_name,profile,pix_fmt,bits_per_raw_sample,"
+            "width,height,r_frame_rate,avg_frame_rate,duration"
+        ),
         "-of",
         "json",
         str(path),
@@ -459,6 +466,24 @@ def probe_video(ffprobe: str, path: Path) -> dict[str, Any]:
     data = json.loads(payload)
     streams = data.get("streams") or []
     return streams[0] if streams else {}
+
+
+def validate_rendition_output(rendition: Rendition, output_path: Path, stream: dict[str, Any]) -> None:
+    if rendition.codec != "hevc":
+        return
+
+    codec = str(stream.get("codec_name") or "")
+    profile = str(stream.get("profile") or "")
+    pixel_format = str(stream.get("pix_fmt") or "")
+    if (codec, profile, pixel_format) == ("hevc", "Main", "yuv420p"):
+        return
+
+    raise RuntimeError(
+        f"{output_path} produced incompatible HEVC output: "
+        f"codec={codec or '<missing>'}, profile={profile or '<missing>'}, "
+        f"pix_fmt={pixel_format or '<missing>'}; "
+        "expected codec=hevc, profile=Main, pix_fmt=yuv420p"
+    )
 
 
 def sha256(path: Path) -> str:
@@ -663,6 +688,7 @@ def asset_record(
 ) -> dict[str, Any]:
     output_path = output_root / rel_path
     stream = probe_video(ffprobe, output_path)
+    validate_rendition_output(rendition, output_path, stream)
     return {
         "source_id": source["id"],
         "source_title": source.get("title", source["id"]),
@@ -678,6 +704,9 @@ def asset_record(
         "width": stream.get("width"),
         "height": stream.get("height"),
         "codec_name": stream.get("codec_name"),
+        "codec_profile": stream.get("profile"),
+        "pixel_format": stream.get("pix_fmt"),
+        "bits_per_raw_sample": stream.get("bits_per_raw_sample"),
         "avg_frame_rate": stream.get("avg_frame_rate"),
         "duration": stream.get("duration"),
     }
