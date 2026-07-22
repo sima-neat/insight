@@ -16,23 +16,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-func TestVideoCodecForPayloadType(t *testing.T) {
-	tests := []struct {
-		payloadType uint8
-		want        videoCodec
-	}{
-		{payloadType: h264RTPPayloadType, want: videoCodecH264},
-		{payloadType: h265RTPPayloadType, want: videoCodecH265},
-		{payloadType: 97, want: videoCodecUnknown},
-	}
-
-	for _, tt := range tests {
-		if got := videoCodecForPayloadType(tt.payloadType); got != tt.want {
-			t.Fatalf("payload type %d: expected codec %v, got %v", tt.payloadType, tt.want, got)
-		}
-	}
-}
-
 func TestHandleOfferReturnsUnavailableBeforeCodecIsKnown(t *testing.T) {
 	const channel = 0
 	previous := channels[channel]

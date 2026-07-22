@@ -86,7 +86,6 @@ type IngestStats struct {
 	idrCount                 uint64
 	keyframeCount            uint64
 	lastKeyframeRTPTimestamp uint32
-	haveKeyframeRTPTimestamp bool
 	lastSPSAt                time.Time
 	lastPPSAt                time.Time
 	lastVPSAt                time.Time
@@ -569,11 +568,10 @@ func (s *IngestStats) updateH265Media(payload []byte, rtpTimestamp uint32, now t
 			s.packetizationModesSeen[observation.Mode]++
 		}
 		if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
-			if !s.haveKeyframeRTPTimestamp || s.lastKeyframeRTPTimestamp != rtpTimestamp {
+			if s.keyframeCount == 0 || s.lastKeyframeRTPTimestamp != rtpTimestamp {
 				s.keyframeCount++
 				s.lastKeyframeAt = now
 				s.lastKeyframeRTPTimestamp = rtpTimestamp
-				s.haveKeyframeRTPTimestamp = true
 			}
 		}
 		switch observation.Type {
@@ -602,7 +600,6 @@ func (s *IngestStats) resetMediaDiagnostics() {
 	s.idrCount = 0
 	s.keyframeCount = 0
 	s.lastKeyframeRTPTimestamp = 0
-	s.haveKeyframeRTPTimestamp = false
 	s.lastSPSAt = time.Time{}
 	s.lastPPSAt = time.Time{}
 	s.lastVPSAt = time.Time{}
