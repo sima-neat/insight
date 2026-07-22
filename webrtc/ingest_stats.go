@@ -79,18 +79,21 @@ type IngestStats struct {
 	metadataBitrateBps      float64
 	metadataMessageRateMPS  float64
 
-	seenSPS                bool
-	seenPPS                bool
-	seenVPS                bool
-	idrCount               uint64
-	keyframeCount          uint64
-	lastSPSAt              time.Time
-	lastPPSAt              time.Time
-	lastVPSAt              time.Time
-	lastIDRAt              time.Time
-	lastKeyframeAt         time.Time
-	nalTypeCounts          map[uint8]uint64
-	packetizationModesSeen map[string]uint64
+	seenSPS                  bool
+	seenPPS                  bool
+	seenVPS                  bool
+	mediaCodec               videoCodec
+	idrCount                 uint64
+	keyframeCount            uint64
+	lastKeyframeRTPTimestamp uint32
+	haveKeyframeRTPTimestamp bool
+	lastSPSAt                time.Time
+	lastPPSAt                time.Time
+	lastVPSAt                time.Time
+	lastIDRAt                time.Time
+	lastKeyframeAt           time.Time
+	nalTypeCounts            map[uint8]uint64
+	packetizationModesSeen   map[string]uint64
 
 	peers      map[uint64]string
 	nextPeerID uint64
@@ -230,11 +233,18 @@ func (s *IngestStats) RecordRTPPacket(pkt *rtp.Packet, packetBytes int, remote n
 	s.updateSequenceGap(pkt, previousSSRC)
 	s.updateJitter(pkt, now)
 	s.updateSample(packetBytes, now)
-	switch videoCodecForPayloadType(pkt.PayloadType) {
+	codec := videoCodecForPayloadType(pkt.PayloadType)
+	if codec != videoCodecUnknown && s.mediaCodec != videoCodecUnknown && codec != s.mediaCodec {
+		s.resetMediaDiagnostics()
+	}
+	if codec != videoCodecUnknown {
+		s.mediaCodec = codec
+	}
+	switch codec {
 	case videoCodecH264:
 		s.updateH264Media(pkt.Payload, now)
 	case videoCodecH265:
-		s.updateH265Media(pkt.Payload, now)
+		s.updateH265Media(pkt.Payload, pkt.Timestamp, now)
 	}
 	s.ssrc = pkt.SSRC
 	s.lastSequence = pkt.SequenceNumber
@@ -365,7 +375,7 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 		packetRate = 0
 	}
 
-	codec := videoCodecForPayloadType(s.payloadType)
+	codec := s.mediaCodec
 	codecName := "unknown"
 	if codec == videoCodecH264 {
 		codecName = "H264"
@@ -552,15 +562,19 @@ func (s *IngestStats) updateH264Media(payload []byte, now time.Time) {
 	}
 }
 
-func (s *IngestStats) updateH265Media(payload []byte, now time.Time) {
+func (s *IngestStats) updateH265Media(payload []byte, rtpTimestamp uint32, now time.Time) {
 	for _, observation := range parseH265NALObservations(payload) {
 		s.nalTypeCounts[observation.Type]++
 		if observation.Mode != "" {
 			s.packetizationModesSeen[observation.Mode]++
 		}
 		if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
-			s.keyframeCount++
-			s.lastKeyframeAt = now
+			if !s.haveKeyframeRTPTimestamp || s.lastKeyframeRTPTimestamp != rtpTimestamp {
+				s.keyframeCount++
+				s.lastKeyframeAt = now
+				s.lastKeyframeRTPTimestamp = rtpTimestamp
+				s.haveKeyframeRTPTimestamp = true
+			}
 		}
 		switch observation.Type {
 		case 19, 20:
@@ -579,6 +593,23 @@ func (s *IngestStats) updateH265Media(payload []byte, now time.Time) {
 			s.lastPPSAt = now
 		}
 	}
+}
+
+func (s *IngestStats) resetMediaDiagnostics() {
+	s.seenSPS = false
+	s.seenPPS = false
+	s.seenVPS = false
+	s.idrCount = 0
+	s.keyframeCount = 0
+	s.lastKeyframeRTPTimestamp = 0
+	s.haveKeyframeRTPTimestamp = false
+	s.lastSPSAt = time.Time{}
+	s.lastPPSAt = time.Time{}
+	s.lastVPSAt = time.Time{}
+	s.lastIDRAt = time.Time{}
+	s.lastKeyframeAt = time.Time{}
+	clear(s.nalTypeCounts)
+	clear(s.packetizationModesSeen)
 }
 
 func (s *IngestStats) snapshotWebRTC() WebRTCSnapshot {

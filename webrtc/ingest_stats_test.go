@@ -144,7 +144,11 @@ func TestIngestStatsReportsH265ParameterSetsAndKeyframes(t *testing.T) {
 	}
 	for sequence, payload := range packets {
 		stats.RecordRTPPacket(&rtp.Packet{
-			Header:  rtp.Header{PayloadType: h265RTPPayloadType, SequenceNumber: uint16(sequence)},
+			Header: rtp.Header{
+				PayloadType:    h265RTPPayloadType,
+				SequenceNumber: uint16(sequence),
+				Timestamp:      uint32(sequence * 3000),
+			},
 			Payload: payload,
 		}, len(payload)+12, nil)
 	}
@@ -161,6 +165,77 @@ func TestIngestStatsReportsH265ParameterSetsAndKeyframes(t *testing.T) {
 	}
 	if snapshot.Diagnostics.PacketizationModesSeen["ap"] != 3 || snapshot.Diagnostics.PacketizationModesSeen["fu"] != 1 {
 		t.Fatalf("unexpected H.265 packetization diagnostics: %#v", snapshot.Diagnostics)
+	}
+}
+
+func TestIngestStatsResetsMediaDiagnosticsOnCodecTransition(t *testing.T) {
+	stats := NewIngestStats(0, 9000, 9100)
+	for sequence, payload := range [][]byte{{0x67, 0x42}, {0x68, 0xce}, {0x65, 0x88}} {
+		stats.RecordRTPPacket(&rtp.Packet{
+			Header:  rtp.Header{PayloadType: h264RTPPayloadType, SequenceNumber: uint16(sequence)},
+			Payload: payload,
+		}, len(payload)+12, nil)
+	}
+
+	stats.RecordRTPPacket(&rtp.Packet{
+		Header:  rtp.Header{PayloadType: h265RTPPayloadType, SequenceNumber: 3},
+		Payload: []byte{0x02, 0x01, 0xaa},
+	}, 15, nil)
+
+	h265Snapshot := stats.Snapshot(true, false, time.Now())
+	if h265Snapshot.Media.Codec != "H265" || h265Snapshot.Media.SeenSPS || h265Snapshot.Media.SeenPPS || h265Snapshot.Media.IDRCount != 0 {
+		t.Fatalf("H.265 snapshot retained H.264 media diagnostics: %#v", h265Snapshot.Media)
+	}
+	if h265Snapshot.RTP.PacketsReceived != 4 {
+		t.Fatalf("codec transition reset transport counters: %#v", h265Snapshot.RTP)
+	}
+	if h265Snapshot.Diagnostics.NALTypeCounts["7"] != 0 || h265Snapshot.Diagnostics.NALTypeCounts["8"] != 0 || h265Snapshot.Diagnostics.NALTypeCounts["5"] != 0 {
+		t.Fatalf("H.265 snapshot retained H.264 NAL counts: %#v", h265Snapshot.Diagnostics.NALTypeCounts)
+	}
+
+	for sequence, payload := range [][]byte{{0x40, 0x01}, {0x42, 0x01}, {0x44, 0x01}, {0x26, 0x01}} {
+		stats.RecordRTPPacket(&rtp.Packet{
+			Header: rtp.Header{
+				PayloadType:    h265RTPPayloadType,
+				SequenceNumber: uint16(sequence + 4),
+				Timestamp:      3000,
+			},
+			Payload: payload,
+		}, len(payload)+12, nil)
+	}
+	stats.RecordRTPPacket(&rtp.Packet{
+		Header:  rtp.Header{PayloadType: h264RTPPayloadType, SequenceNumber: 8},
+		Payload: []byte{0x61, 0xaa},
+	}, 14, nil)
+
+	h264Snapshot := stats.Snapshot(true, false, time.Now())
+	if h264Snapshot.Media.Codec != "H264" || h264Snapshot.Media.SeenSPS || h264Snapshot.Media.SeenPPS || h264Snapshot.Media.IDRCount != 0 {
+		t.Fatalf("H.264 snapshot retained H.265 media diagnostics: %#v", h264Snapshot.Media)
+	}
+	if h264Snapshot.RTP.PacketsReceived != 9 {
+		t.Fatalf("codec transition reset transport counters: %#v", h264Snapshot.RTP)
+	}
+	if h264Snapshot.Diagnostics.NALTypeCounts["32"] != 0 || h264Snapshot.Diagnostics.NALTypeCounts["33"] != 0 || h264Snapshot.Diagnostics.NALTypeCounts["34"] != 0 || h264Snapshot.Diagnostics.NALTypeCounts["19"] != 0 {
+		t.Fatalf("H.264 snapshot retained H.265 NAL counts: %#v", h264Snapshot.Diagnostics.NALTypeCounts)
+	}
+}
+
+func TestIngestStatsCountsH265KeyframeOncePerRTPTimestamp(t *testing.T) {
+	stats := NewIngestStats(0, 9000, 9100)
+	for sequence, timestamp := range []uint32{3000, 3000, 6000} {
+		stats.RecordRTPPacket(&rtp.Packet{
+			Header: rtp.Header{
+				PayloadType:    h265RTPPayloadType,
+				SequenceNumber: uint16(sequence),
+				Timestamp:      timestamp,
+			},
+			Payload: []byte{0x26, 0x01, byte(sequence)},
+		}, 15, nil)
+	}
+
+	media := stats.Snapshot(false, false, time.Now()).Media
+	if media.KeyframeCount != 2 {
+		t.Fatalf("expected two H.265 keyframe access units, got %#v", media)
 	}
 }
 
