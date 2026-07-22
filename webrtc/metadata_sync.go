@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const rtpTimestampTolerance = uint32(videoClockRate / 1000)
+const rtpTimestampTolerance = uint32(h264ClockRate / 1000)
 
 type rtpTimestampMapping struct {
 	source   uint32

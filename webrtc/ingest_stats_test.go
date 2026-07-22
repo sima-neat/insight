@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -85,56 +86,47 @@ func TestParseH264NALObservationsFUA(t *testing.T) {
 	}
 }
 
-func TestParseH265NALObservationsSingleNAL(t *testing.T) {
+func TestParseH265NALObservations(t *testing.T) {
 	tests := []struct {
-		name     string
-		payload  []byte
-		wantType uint8
+		name    string
+		payload []byte
+		want    []nalObservation
 	}{
-		{name: "vps", payload: []byte{0x40, 0x01, 0xaa}, wantType: 32},
-		{name: "sps", payload: []byte{0x42, 0x01, 0xbb}, wantType: 33},
-		{name: "pps", payload: []byte{0x44, 0x01, 0xcc}, wantType: 34},
-		{name: "idr", payload: []byte{0x26, 0x01, 0xdd}, wantType: 19},
+		{
+			name: "single NAL", payload: []byte{0x40, 0x01, 0xaa},
+			want: []nalObservation{{Type: 32, Start: true, Mode: "single-nal"}},
+		},
+		{
+			name: "aggregation packet",
+			payload: []byte{
+				0x60, 0x01,
+				0x00, 0x03, 0x40, 0x01, 0xaa,
+				0x00, 0x03, 0x42, 0x01, 0xbb,
+				0x00, 0x03, 0x44, 0x01, 0xcc,
+			},
+			want: []nalObservation{
+				{Type: 32, Start: true, Mode: "ap"},
+				{Type: 33, Start: true, Mode: "ap"},
+				{Type: 34, Start: true, Mode: "ap"},
+			},
+		},
+		{
+			name: "fragment start", payload: []byte{0x62, 0x01, 0x93, 0xaa},
+			want: []nalObservation{{Type: 19, Start: true, Mode: "fu"}},
+		},
+		{
+			name: "fragment continuation", payload: []byte{0x62, 0x01, 0x13, 0xbb},
+			want: []nalObservation{{Type: 19, Mode: "fu"}},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := parseH265NALObservations(tt.payload)
-			if len(got) != 1 || got[0].Type != tt.wantType || !got[0].Start || got[0].Mode != "single-nal" {
-				t.Fatalf("unexpected single NAL observation: %#v", got)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("expected %#v, got %#v", tt.want, got)
 			}
 		})
-	}
-}
-
-func TestParseH265NALObservationsAP(t *testing.T) {
-	payload := []byte{
-		0x60, 0x01,
-		0x00, 0x03, 0x40, 0x01, 0xaa,
-		0x00, 0x03, 0x42, 0x01, 0xbb,
-		0x00, 0x03, 0x44, 0x01, 0xcc,
-	}
-
-	got := parseH265NALObservations(payload)
-	if len(got) != 3 || got[0].Type != 32 || got[1].Type != 33 || got[2].Type != 34 {
-		t.Fatalf("expected VPS/SPS/PPS observations, got %#v", got)
-	}
-	for _, observation := range got {
-		if !observation.Start || observation.Mode != "ap" {
-			t.Fatalf("unexpected aggregation observation: %#v", observation)
-		}
-	}
-}
-
-func TestParseH265NALObservationsFU(t *testing.T) {
-	start := parseH265NALObservations([]byte{0x62, 0x01, 0x93, 0xaa})
-	if len(start) != 1 || start[0].Type != 19 || !start[0].Start || start[0].Mode != "fu" {
-		t.Fatalf("unexpected FU start observation: %#v", start)
-	}
-
-	middle := parseH265NALObservations([]byte{0x62, 0x01, 0x13, 0xbb})
-	if len(middle) != 1 || middle[0].Type != 19 || middle[0].Start || middle[0].Mode != "fu" {
-		t.Fatalf("unexpected FU middle observation: %#v", middle)
 	}
 }
 

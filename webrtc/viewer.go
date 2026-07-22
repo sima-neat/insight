@@ -22,7 +22,8 @@ import (
 
 type Channel struct {
 	Port          int
-	Track         atomic.Pointer[channelVideoTrack]
+	Codec         atomic.Uint32
+	Track         atomic.Pointer[webrtc.TrackLocalStaticRTP]
 	MetadataPeers metadataPeerRegistry
 	MetadataSync  *metadataTimestampCorrelator
 	MetadataReady *metadataForwardQueue
@@ -31,6 +32,30 @@ type Channel struct {
 }
 
 var channels [80]*Channel
+
+type videoCodec uint32
+
+const (
+	videoCodecUnknown videoCodec = iota
+	videoCodecH264
+	videoCodecH265
+)
+
+const (
+	h264RTPPayloadType = 96
+	h265RTPPayloadType = 98
+)
+
+func videoCodecForPayloadType(payloadType uint8) videoCodec {
+	switch payloadType {
+	case h264RTPPayloadType:
+		return videoCodecH264
+	case h265RTPPayloadType:
+		return videoCodecH265
+	default:
+		return videoCodecUnknown
+	}
+}
 
 const (
 	neatPortMapPath              = "/home/docker/.insight-config/neat-port-map.json"
@@ -209,19 +234,27 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid SDP offer", http.StatusBadRequest)
 		return
 	}
-	codec := ch.Stats.VideoCodec()
+	codec := videoCodec(ch.Codec.Load())
 	if codec == videoCodecUnknown {
-		w.Header().Set("Retry-After", "1")
 		http.Error(w, "Video codec not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	m := webrtc.MediaEngine{}
-	parameters, _ := videoRTPCodecParameters(codec)
-	if err := m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo); err != nil {
-		http.Error(w, "Codec registration failed", http.StatusInternalServerError)
-		return
+	parameters := webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{ClockRate: h264ClockRate},
 	}
+	switch codec {
+	case videoCodecH264:
+		parameters.MimeType = webrtc.MimeTypeH264
+		parameters.SDPFmtpLine = "packetization-mode=1;profile-level-id=42e01f"
+		parameters.PayloadType = h264RTPPayloadType
+	case videoCodecH265:
+		parameters.MimeType = webrtc.MimeTypeH265
+		parameters.PayloadType = h265RTPPayloadType
+	}
+
+	m := webrtc.MediaEngine{}
+	m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo)
 
 	// === Add NAT and Port Range logic ===
 	s := webrtc.SettingEngine{}
@@ -274,15 +307,15 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	track := ch.Track.Load()
-	if track == nil || track.codec != codec {
-		track, err = newChannelVideoTrack(codec)
+	if track == nil || track.Codec().MimeType != parameters.MimeType {
+		track, err = webrtc.NewTrackLocalStaticRTP(parameters.RTPCodecCapability, "video", "pion")
 		if err != nil {
 			http.Error(w, "Track creation failed", http.StatusInternalServerError)
 			return
 		}
 		ch.Track.Store(track)
 	}
-	sender, err := pc.AddTrack(track.track)
+	sender, err := pc.AddTrack(track)
 	if err != nil {
 		http.Error(w, "AddTrack failed", http.StatusInternalServerError)
 		return
@@ -381,7 +414,7 @@ func newRTPTimestampRewriter() rtpTimestampRewriter {
 
 func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
 	if r.haveFrameTime {
-		step := uint32(float64(videoClockRate) * now.Sub(r.lastFrameAt).Seconds())
+		step := uint32(float64(h264ClockRate) * now.Sub(r.lastFrameAt).Seconds())
 		if step == 0 {
 			step = 1
 		}
@@ -466,6 +499,9 @@ func startUDPListener(ch *Channel) {
 			log.Println("❌ RTP unmarshal error:", err)
 			continue
 		}
+		if codec := videoCodecForPayloadType(pkt.PayloadType); codec != videoCodecUnknown {
+			ch.Codec.Store(uint32(codec))
+		}
 		ch.Stats.RecordRTPPacket(&pkt, n, remoteAddr)
 
 		raw := append([]byte(nil), buf[:n]...)
@@ -493,7 +529,7 @@ func startUDPListener(ch *Channel) {
 				log.Println("❌ RTP timestamp rewrite error:", err)
 				continue
 			}
-			if _, err := track.track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
+			if _, err := track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
 				ch.Stats.RecordWriteError(err)
 				log.Println("❌ Write error:", err)
 				continue

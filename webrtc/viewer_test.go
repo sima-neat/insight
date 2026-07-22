@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -34,51 +33,10 @@ func TestVideoCodecForPayloadType(t *testing.T) {
 	}
 }
 
-func TestVideoRTPCodecParameters(t *testing.T) {
-	tests := []struct {
-		codec       videoCodec
-		mimeType    string
-		payloadType webrtc.PayloadType
-	}{
-		{codec: videoCodecH264, mimeType: webrtc.MimeTypeH264, payloadType: h264RTPPayloadType},
-		{codec: videoCodecH265, mimeType: webrtc.MimeTypeH265, payloadType: h265RTPPayloadType},
-	}
-
-	for _, tt := range tests {
-		parameters, ok := videoRTPCodecParameters(tt.codec)
-		if !ok {
-			t.Fatalf("expected parameters for codec %v", tt.codec)
-		}
-		if parameters.MimeType != tt.mimeType || parameters.PayloadType != tt.payloadType || parameters.ClockRate != videoClockRate {
-			t.Fatalf("unexpected parameters for codec %v: %#v", tt.codec, parameters)
-		}
-	}
-
-	if _, ok := videoRTPCodecParameters(videoCodecUnknown); ok {
-		t.Fatal("expected unknown codec to have no RTP parameters")
-	}
-}
-
-func TestNewChannelVideoTrackUsesSelectedCodec(t *testing.T) {
-	for _, codec := range []videoCodec{videoCodecH264, videoCodecH265} {
-		track, err := newChannelVideoTrack(codec)
-		if err != nil {
-			t.Fatalf("expected track for codec %v: %v", codec, err)
-		}
-		parameters, _ := videoRTPCodecParameters(codec)
-		if track.codec != codec || track.track.Codec().MimeType != parameters.MimeType {
-			t.Fatalf("unexpected track for codec %v: codec=%v capability=%#v", codec, track.codec, track.track.Codec())
-		}
-	}
-}
-
 func TestHandleOfferReturnsUnavailableBeforeCodecIsKnown(t *testing.T) {
 	const channel = 0
 	previous := channels[channel]
-	channels[channel] = &Channel{
-		Stats:  NewIngestStats(channel, 9000, 9100),
-		Egress: NewEgressStats(channel),
-	}
+	channels[channel] = &Channel{}
 	t.Cleanup(func() { channels[channel] = previous })
 
 	request := httptest.NewRequest(http.MethodPost, "/offer?channel=0", strings.NewReader(`{"type":"offer","sdp":""}`))
@@ -87,9 +45,6 @@ func TestHandleOfferReturnsUnavailableBeforeCodecIsKnown(t *testing.T) {
 
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected HTTP %d, got %d: %s", http.StatusServiceUnavailable, response.Code, response.Body.String())
-	}
-	if response.Header().Get("Retry-After") != "1" {
-		t.Fatalf("expected retry guidance, got headers %#v", response.Header())
 	}
 }
 
@@ -106,21 +61,27 @@ func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 
 	for index, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parameters, _ := videoRTPCodecParameters(tt.codec)
-			browserParameters := parameters
-			browserParameters.PayloadType = tt.offerPayloadType
+			browserParameters := webrtc.RTPCodecParameters{
+				RTPCodecCapability: webrtc.RTPCodecCapability{
+					MimeType:  tt.mimeType,
+					ClockRate: h264ClockRate,
+				},
+				PayloadType: tt.offerPayloadType,
+			}
 			browser, offer := newReceiveOnlyOffer(t, browserParameters)
 			t.Cleanup(func() { _ = browser.Close() })
 
 			previous := channels[index]
-			stats := NewIngestStats(index, 9000+index, 9100+index)
-			stats.RecordRTPPacket(&rtp.Packet{Header: rtp.Header{PayloadType: uint8(parameters.PayloadType)}}, 12, nil)
-			channels[index] = &Channel{Stats: stats, Egress: NewEgressStats(index)}
-			previousCodec := videoCodecH264
+			channels[index] = &Channel{Egress: NewEgressStats(index), Stats: NewIngestStats(index, 9000+index, 9100+index)}
+			channels[index].Codec.Store(uint32(tt.codec))
+			previousMimeType := webrtc.MimeTypeH264
 			if tt.codec == videoCodecH264 {
-				previousCodec = videoCodecH265
+				previousMimeType = webrtc.MimeTypeH265
 			}
-			previousTrack, _ := newChannelVideoTrack(previousCodec)
+			previousTrack, _ := webrtc.NewTrackLocalStaticRTP(
+				webrtc.RTPCodecCapability{MimeType: previousMimeType, ClockRate: h264ClockRate},
+				"video", "pion",
+			)
 			channels[index].Track.Store(previousTrack)
 			t.Cleanup(func() { channels[index] = previous })
 
@@ -128,7 +89,7 @@ func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/offer?channel="+strconv.Itoa(index), bytes.NewReader(body))
+			request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/offer?channel=%d", index), bytes.NewReader(body))
 			response := httptest.NewRecorder()
 			handleOffer(response, request)
 
@@ -144,7 +105,7 @@ func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 				t.Fatalf("expected answer to advertise %s: %s", tt.mimeType, answer.SDP)
 			}
 			track := channels[index].Track.Load()
-			if track == nil || track == previousTrack || track.codec != tt.codec || track.track.Codec().MimeType != tt.mimeType {
+			if track == nil || track == previousTrack || track.Codec().MimeType != tt.mimeType {
 				t.Fatalf("unexpected channel track: %#v", track)
 			}
 		})

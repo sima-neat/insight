@@ -16,6 +16,7 @@ import (
 
 const (
 	ingestActiveTTL = 3 * time.Second
+	h264ClockRate   = 90000
 	maxRecentErrors = 8
 )
 
@@ -159,18 +160,19 @@ type MetadataSnapshot struct {
 }
 
 type MediaSnapshot struct {
-	Kind           string `json:"kind"`
-	Codec          string `json:"codec"`
-	ClockRate      int    `json:"clock_rate"`
+	Kind      string `json:"kind"`
+	Codec     string `json:"codec"`
+	ClockRate int    `json:"clock_rate"`
+	SeenSPS   bool   `json:"seen_sps"`
+	SeenPPS   bool   `json:"seen_pps"`
+	IDRCount  uint64 `json:"idr_count"`
+	LastSPSAt string `json:"last_sps_at,omitempty"`
+	LastPPSAt string `json:"last_pps_at,omitempty"`
+	LastIDRAt string `json:"last_idr_at,omitempty"`
+
 	SeenVPS        bool   `json:"seen_vps,omitempty"`
-	SeenSPS        bool   `json:"seen_sps"`
-	SeenPPS        bool   `json:"seen_pps"`
-	IDRCount       uint64 `json:"idr_count"`
 	KeyframeCount  uint64 `json:"keyframe_count,omitempty"`
 	LastVPSAt      string `json:"last_vps_at,omitempty"`
-	LastSPSAt      string `json:"last_sps_at,omitempty"`
-	LastPPSAt      string `json:"last_pps_at,omitempty"`
-	LastIDRAt      string `json:"last_idr_at,omitempty"`
 	LastKeyframeAt string `json:"last_keyframe_at,omitempty"`
 }
 
@@ -228,7 +230,12 @@ func (s *IngestStats) RecordRTPPacket(pkt *rtp.Packet, packetBytes int, remote n
 	s.updateSequenceGap(pkt, previousSSRC)
 	s.updateJitter(pkt, now)
 	s.updateSample(packetBytes, now)
-	s.updateVideoMedia(videoCodecForPayloadType(pkt.PayloadType), pkt.Payload, now)
+	switch videoCodecForPayloadType(pkt.PayloadType) {
+	case videoCodecH264:
+		s.updateH264Media(pkt.Payload, now)
+	case videoCodecH265:
+		s.updateH265Media(pkt.Payload, now)
+	}
 	s.ssrc = pkt.SSRC
 	s.lastSequence = pkt.SequenceNumber
 	s.lastRTPTimestamp = pkt.Timestamp
@@ -346,12 +353,6 @@ func (s *IngestStats) UpdatePeerState(peerID uint64, state string) {
 	s.peers[peerID] = state
 }
 
-func (s *IngestStats) VideoCodec() videoCodec {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return videoCodecForPayloadType(s.payloadType)
-}
-
 func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time.Time) ChannelIngestSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -365,10 +366,16 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 	}
 
 	codec := videoCodecForPayloadType(s.payloadType)
+	codecName := "unknown"
+	if codec == videoCodecH264 {
+		codecName = "H264"
+	} else if codec == videoCodecH265 {
+		codecName = "H265"
+	}
 	media := MediaSnapshot{
 		Kind:      "video",
-		Codec:     codec.name(),
-		ClockRate: videoClockRate,
+		Codec:     codecName,
+		ClockRate: h264ClockRate,
 		SeenSPS:   s.seenSPS,
 		SeenPPS:   s.seenPPS,
 		IDRCount:  s.idrCount,
@@ -418,7 +425,7 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 			NALTypeCounts:          uint8MapToStringMap(s.nalTypeCounts),
 			PacketizationModesSeen: copyStringUint64Map(s.packetizationModesSeen),
 			EstimatedSequenceGaps:  s.sequenceGaps,
-			EstimatedJitterMS:      roundFloat((s.jitter/videoClockRate)*1000, 3),
+			EstimatedJitterMS:      roundFloat((s.jitter/h264ClockRate)*1000, 3),
 			MalformedPackets:       s.malformedPackets,
 			RecentErrors:           append([]string(nil), s.recentErrors...),
 		}
@@ -472,7 +479,7 @@ func (s *IngestStats) updateSequenceGap(pkt *rtp.Packet, previousSSRC uint32) {
 }
 
 func (s *IngestStats) updateJitter(pkt *rtp.Packet, now time.Time) {
-	arrivalRTPUnits := (now.UnixNano() * videoClockRate) / int64(time.Second)
+	arrivalRTPUnits := (now.UnixNano() * h264ClockRate) / int64(time.Second)
 	transit := arrivalRTPUnits - int64(pkt.Timestamp)
 	if s.haveTransit {
 		d := transit - s.lastTransit
@@ -542,15 +549,6 @@ func (s *IngestStats) updateH264Media(payload []byte, now time.Time) {
 			s.seenPPS = true
 			s.lastPPSAt = now
 		}
-	}
-}
-
-func (s *IngestStats) updateVideoMedia(codec videoCodec, payload []byte, now time.Time) {
-	switch codec {
-	case videoCodecH264:
-		s.updateH264Media(payload, now)
-	case videoCodecH265:
-		s.updateH265Media(payload, now)
 	}
 }
 
