@@ -16,7 +16,6 @@ import (
 
 const (
 	ingestActiveTTL = 3 * time.Second
-	h264ClockRate   = 90000
 	maxRecentErrors = 8
 )
 
@@ -81,10 +80,14 @@ type IngestStats struct {
 
 	seenSPS                bool
 	seenPPS                bool
+	seenVPS                bool
 	idrCount               uint64
+	keyframeCount          uint64
 	lastSPSAt              time.Time
 	lastPPSAt              time.Time
+	lastVPSAt              time.Time
 	lastIDRAt              time.Time
+	lastKeyframeAt         time.Time
 	nalTypeCounts          map[uint8]uint64
 	packetizationModesSeen map[string]uint64
 
@@ -156,15 +159,19 @@ type MetadataSnapshot struct {
 }
 
 type MediaSnapshot struct {
-	Kind      string `json:"kind"`
-	Codec     string `json:"codec"`
-	ClockRate int    `json:"clock_rate"`
-	SeenSPS   bool   `json:"seen_sps"`
-	SeenPPS   bool   `json:"seen_pps"`
-	IDRCount  uint64 `json:"idr_count"`
-	LastSPSAt string `json:"last_sps_at,omitempty"`
-	LastPPSAt string `json:"last_pps_at,omitempty"`
-	LastIDRAt string `json:"last_idr_at,omitempty"`
+	Kind           string `json:"kind"`
+	Codec          string `json:"codec"`
+	ClockRate      int    `json:"clock_rate"`
+	SeenVPS        bool   `json:"seen_vps,omitempty"`
+	SeenSPS        bool   `json:"seen_sps"`
+	SeenPPS        bool   `json:"seen_pps"`
+	IDRCount       uint64 `json:"idr_count"`
+	KeyframeCount  uint64 `json:"keyframe_count,omitempty"`
+	LastVPSAt      string `json:"last_vps_at,omitempty"`
+	LastSPSAt      string `json:"last_sps_at,omitempty"`
+	LastPPSAt      string `json:"last_pps_at,omitempty"`
+	LastIDRAt      string `json:"last_idr_at,omitempty"`
+	LastKeyframeAt string `json:"last_keyframe_at,omitempty"`
 }
 
 type WebRTCSnapshot struct {
@@ -182,7 +189,7 @@ type DiagnosticsSnapshot struct {
 	RecentErrors           []string          `json:"recent_errors,omitempty"`
 }
 
-type h264NALObservation struct {
+type nalObservation struct {
 	Type  uint8
 	Start bool
 	Mode  string
@@ -221,7 +228,7 @@ func (s *IngestStats) RecordRTPPacket(pkt *rtp.Packet, packetBytes int, remote n
 	s.updateSequenceGap(pkt, previousSSRC)
 	s.updateJitter(pkt, now)
 	s.updateSample(packetBytes, now)
-	s.updateH264Media(pkt.Payload, now)
+	s.updateVideoMedia(videoCodecForPayloadType(pkt.PayloadType), pkt.Payload, now)
 	s.ssrc = pkt.SSRC
 	s.lastSequence = pkt.SequenceNumber
 	s.lastRTPTimestamp = pkt.Timestamp
@@ -339,6 +346,12 @@ func (s *IngestStats) UpdatePeerState(peerID uint64, state string) {
 	s.peers[peerID] = state
 }
 
+func (s *IngestStats) VideoCodec() videoCodec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return videoCodecForPayloadType(s.payloadType)
+}
+
 func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time.Time) ChannelIngestSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -349,6 +362,25 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 	if !active {
 		bitrate = 0
 		packetRate = 0
+	}
+
+	codec := videoCodecForPayloadType(s.payloadType)
+	media := MediaSnapshot{
+		Kind:      "video",
+		Codec:     codec.name(),
+		ClockRate: videoClockRate,
+		SeenSPS:   s.seenSPS,
+		SeenPPS:   s.seenPPS,
+		IDRCount:  s.idrCount,
+		LastSPSAt: formatTime(s.lastSPSAt),
+		LastPPSAt: formatTime(s.lastPPSAt),
+		LastIDRAt: formatTime(s.lastIDRAt),
+	}
+	if codec == videoCodecH265 {
+		media.SeenVPS = s.seenVPS
+		media.KeyframeCount = s.keyframeCount
+		media.LastVPSAt = formatTime(s.lastVPSAt)
+		media.LastKeyframeAt = formatTime(s.lastKeyframeAt)
 	}
 
 	snapshot := ChannelIngestSnapshot{
@@ -376,17 +408,7 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 			PacketsDroppedNoTrack: s.droppedNoTrack,
 			WriteErrors:           s.writeErrors,
 		},
-		Media: MediaSnapshot{
-			Kind:      "video",
-			Codec:     "H264",
-			ClockRate: h264ClockRate,
-			SeenSPS:   s.seenSPS,
-			SeenPPS:   s.seenPPS,
-			IDRCount:  s.idrCount,
-			LastSPSAt: formatTime(s.lastSPSAt),
-			LastPPSAt: formatTime(s.lastPPSAt),
-			LastIDRAt: formatTime(s.lastIDRAt),
-		},
+		Media:  media,
 		WebRTC: s.snapshotWebRTC(),
 	}
 
@@ -396,7 +418,7 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 			NALTypeCounts:          uint8MapToStringMap(s.nalTypeCounts),
 			PacketizationModesSeen: copyStringUint64Map(s.packetizationModesSeen),
 			EstimatedSequenceGaps:  s.sequenceGaps,
-			EstimatedJitterMS:      roundFloat((s.jitter/h264ClockRate)*1000, 3),
+			EstimatedJitterMS:      roundFloat((s.jitter/videoClockRate)*1000, 3),
 			MalformedPackets:       s.malformedPackets,
 			RecentErrors:           append([]string(nil), s.recentErrors...),
 		}
@@ -450,7 +472,7 @@ func (s *IngestStats) updateSequenceGap(pkt *rtp.Packet, previousSSRC uint32) {
 }
 
 func (s *IngestStats) updateJitter(pkt *rtp.Packet, now time.Time) {
-	arrivalRTPUnits := (now.UnixNano() * h264ClockRate) / int64(time.Second)
+	arrivalRTPUnits := (now.UnixNano() * videoClockRate) / int64(time.Second)
 	transit := arrivalRTPUnits - int64(pkt.Timestamp)
 	if s.haveTransit {
 		d := transit - s.lastTransit
@@ -523,6 +545,44 @@ func (s *IngestStats) updateH264Media(payload []byte, now time.Time) {
 	}
 }
 
+func (s *IngestStats) updateVideoMedia(codec videoCodec, payload []byte, now time.Time) {
+	switch codec {
+	case videoCodecH264:
+		s.updateH264Media(payload, now)
+	case videoCodecH265:
+		s.updateH265Media(payload, now)
+	}
+}
+
+func (s *IngestStats) updateH265Media(payload []byte, now time.Time) {
+	for _, observation := range parseH265NALObservations(payload) {
+		s.nalTypeCounts[observation.Type]++
+		if observation.Mode != "" {
+			s.packetizationModesSeen[observation.Mode]++
+		}
+		if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
+			s.keyframeCount++
+			s.lastKeyframeAt = now
+		}
+		switch observation.Type {
+		case 19, 20:
+			if observation.Start {
+				s.idrCount++
+				s.lastIDRAt = now
+			}
+		case 32:
+			s.seenVPS = true
+			s.lastVPSAt = now
+		case 33:
+			s.seenSPS = true
+			s.lastSPSAt = now
+		case 34:
+			s.seenPPS = true
+			s.lastPPSAt = now
+		}
+	}
+}
+
 func (s *IngestStats) snapshotWebRTC() WebRTCSnapshot {
 	states := map[string]int{}
 	peerCount := 0
@@ -545,32 +605,32 @@ func (s *IngestStats) addRecentErrorLocked(message string) {
 	}
 }
 
-func parseH264NALObservations(payload []byte) []h264NALObservation {
+func parseH264NALObservations(payload []byte) []nalObservation {
 	if len(payload) == 0 {
 		return nil
 	}
 	nalType := payload[0] & 0x1f
 	switch nalType {
 	case 1, 2, 3, 4, 5, 6, 7, 8, 9:
-		return []h264NALObservation{{Type: nalType, Start: true, Mode: "single-nal"}}
+		return []nalObservation{{Type: nalType, Start: true, Mode: "single-nal"}}
 	case 24:
 		return parseSTAPA(payload)
 	case 28:
 		if len(payload) < 2 {
 			return nil
 		}
-		return []h264NALObservation{{
+		return []nalObservation{{
 			Type:  payload[1] & 0x1f,
 			Start: payload[1]&0x80 != 0,
 			Mode:  "fu-a",
 		}}
 	default:
-		return []h264NALObservation{{Type: nalType, Start: true, Mode: "other"}}
+		return []nalObservation{{Type: nalType, Start: true, Mode: "other"}}
 	}
 }
 
-func parseSTAPA(payload []byte) []h264NALObservation {
-	var observations []h264NALObservation
+func parseSTAPA(payload []byte) []nalObservation {
+	var observations []nalObservation
 	offset := 1
 	for offset+2 <= len(payload) {
 		size := int(payload[offset])<<8 | int(payload[offset+1])
@@ -578,10 +638,52 @@ func parseSTAPA(payload []byte) []h264NALObservation {
 		if size <= 0 || offset+size > len(payload) {
 			break
 		}
-		observations = append(observations, h264NALObservation{
+		observations = append(observations, nalObservation{
 			Type:  payload[offset] & 0x1f,
 			Start: true,
 			Mode:  "stap-a",
+		})
+		offset += size
+	}
+	return observations
+}
+
+func parseH265NALObservations(payload []byte) []nalObservation {
+	if len(payload) < 2 {
+		return nil
+	}
+	nalType := (payload[0] >> 1) & 0x3f
+	switch {
+	case nalType <= 47:
+		return []nalObservation{{Type: nalType, Start: true, Mode: "single-nal"}}
+	case nalType == 48:
+		return parseH265AP(payload)
+	case nalType == 49:
+		if len(payload) < 3 {
+			return nil
+		}
+		return []nalObservation{{
+			Type:  payload[2] & 0x3f,
+			Start: payload[2]&0x80 != 0,
+			Mode:  "fu",
+		}}
+	default:
+		return []nalObservation{{Type: nalType, Start: true, Mode: "other"}}
+	}
+}
+
+func parseH265AP(payload []byte) []nalObservation {
+	var observations []nalObservation
+	for offset := 2; offset+2 <= len(payload); {
+		size := int(payload[offset])<<8 | int(payload[offset+1])
+		offset += 2
+		if size < 2 || offset+size > len(payload) {
+			break
+		}
+		observations = append(observations, nalObservation{
+			Type:  (payload[offset] >> 1) & 0x3f,
+			Start: true,
+			Mode:  "ap",
 		})
 		offset += size
 	}

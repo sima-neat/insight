@@ -22,7 +22,7 @@ import (
 
 type Channel struct {
 	Port          int
-	Track         atomic.Pointer[webrtc.TrackLocalStaticRTP]
+	Track         atomic.Pointer[channelVideoTrack]
 	MetadataPeers metadataPeerRegistry
 	MetadataSync  *metadataTimestampCorrelator
 	MetadataReady *metadataForwardQueue
@@ -209,17 +209,19 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid SDP offer", http.StatusBadRequest)
 		return
 	}
+	codec := ch.Stats.VideoCodec()
+	if codec == videoCodecUnknown {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "Video codec not available", http.StatusServiceUnavailable)
+		return
+	}
 
 	m := webrtc.MediaEngine{}
-	m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:     webrtc.MimeTypeH264,
-			ClockRate:    90000,
-			SDPFmtpLine:  "packetization-mode=1;profile-level-id=42e01f",
-			RTCPFeedback: nil,
-		},
-		PayloadType: 96,
-	}, webrtc.RTPCodecTypeVideo)
+	parameters, _ := videoRTPCodecParameters(codec)
+	if err := m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo); err != nil {
+		http.Error(w, "Codec registration failed", http.StatusInternalServerError)
+		return
+	}
 
 	// === Add NAT and Port Range logic ===
 	s := webrtc.SettingEngine{}
@@ -272,18 +274,15 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	track := ch.Track.Load()
-	if track == nil {
-		track, err = webrtc.NewTrackLocalStaticRTP(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000},
-			"video", "pion",
-		)
+	if track == nil || track.codec != codec {
+		track, err = newChannelVideoTrack(codec)
 		if err != nil {
 			http.Error(w, "Track creation failed", http.StatusInternalServerError)
 			return
 		}
 		ch.Track.Store(track)
 	}
-	sender, err := pc.AddTrack(track)
+	sender, err := pc.AddTrack(track.track)
 	if err != nil {
 		http.Error(w, "AddTrack failed", http.StatusInternalServerError)
 		return
@@ -382,7 +381,7 @@ func newRTPTimestampRewriter() rtpTimestampRewriter {
 
 func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
 	if r.haveFrameTime {
-		step := uint32(float64(h264ClockRate) * now.Sub(r.lastFrameAt).Seconds())
+		step := uint32(float64(videoClockRate) * now.Sub(r.lastFrameAt).Seconds())
 		if step == 0 {
 			step = 1
 		}
@@ -494,7 +493,7 @@ func startUDPListener(ch *Channel) {
 				log.Println("❌ RTP timestamp rewrite error:", err)
 				continue
 			}
-			if _, err := track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
+			if _, err := track.track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
 				ch.Stats.RecordWriteError(err)
 				log.Println("❌ Write error:", err)
 				continue
