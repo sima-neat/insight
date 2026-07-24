@@ -64,6 +64,7 @@ const (
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
+	rtpReceiveBufferBytes        = 2 * 1024 * 1024
 	metadataCorrelationCapacity  = 256
 	metadataForwardQueueCapacity = 16
 	metadataCorrelationMaxAge    = 5 * time.Second
@@ -480,6 +481,9 @@ func startUDPListener(ch *Channel) {
 		log.Fatalf("Failed to bind UDP port %d: %v", ch.Port, err)
 	}
 	defer conn.Close()
+	if err := conn.SetReadBuffer(rtpReceiveBufferBytes); err != nil {
+		log.Fatalf("Failed to set RTP receive buffer on port %d: %v", ch.Port, err)
+	}
 
 	log.Printf("🧠 Listening for RTP on %s:%d", net.IPv4zero, ch.Port)
 	buf := make([]byte, 4096)
