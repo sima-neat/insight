@@ -85,6 +85,103 @@ type rtpTimestampRewriter struct {
 	haveFrameTime bool
 }
 
+type rtpAccessUnit struct {
+	packets   [][]byte
+	ssrc      uint32
+	timestamp uint32
+}
+
+type rtpAccessUnitBuffer struct {
+	packets                    [][]byte
+	ssrc                       uint32
+	timestamp                  uint32
+	nextSequence               uint16
+	sequenceSSRC               uint32
+	haveSequence               bool
+	codec                      videoCodec
+	complete                   bool
+	discontinuity              bool
+	randomAccess               bool
+	waitingForH265RandomAccess bool
+	active                     bool
+}
+
+func newRTPAccessUnitBuffer() *rtpAccessUnitBuffer {
+	return &rtpAccessUnitBuffer{waitingForH265RandomAccess: true}
+}
+
+func (b *rtpAccessUnitBuffer) resetH265Recovery() {
+	b.waitingForH265RandomAccess = true
+}
+
+func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit, bool) {
+	startsAccessUnit, randomAccess := h265PacketState(pkt)
+	sequenceDiscontinuity := b.haveSequence &&
+		(pkt.SSRC != b.sequenceSSRC || pkt.SequenceNumber != b.nextSequence)
+	b.nextSequence = pkt.SequenceNumber + 1
+	b.sequenceSSRC = pkt.SSRC
+	b.haveSequence = true
+
+	newAccessUnit := !b.active || pkt.SSRC != b.ssrc || pkt.Timestamp != b.timestamp
+	if newAccessUnit {
+		b.packets = b.packets[:0]
+		b.ssrc = pkt.SSRC
+		b.timestamp = pkt.Timestamp
+		b.codec = videoCodecForPayloadType(pkt.PayloadType)
+		b.complete = startsAccessUnit
+		b.discontinuity = b.active || sequenceDiscontinuity
+		b.randomAccess = randomAccess
+		b.active = true
+	} else if sequenceDiscontinuity {
+		b.complete = false
+		b.discontinuity = true
+	}
+	b.packets = append(b.packets, raw)
+	b.randomAccess = b.randomAccess || randomAccess
+	if !pkt.Marker {
+		return rtpAccessUnit{}, false
+	}
+
+	accessUnit := rtpAccessUnit{
+		packets:   b.packets,
+		ssrc:      b.ssrc,
+		timestamp: b.timestamp,
+	}
+	codec := b.codec
+	complete := b.complete
+	discontinuity := b.discontinuity
+	randomAccess = b.randomAccess
+	b.packets = b.packets[:0]
+	b.active = false
+	if codec == videoCodecH265 && (discontinuity || !complete) {
+		b.waitingForH265RandomAccess = true
+	}
+	if !complete {
+		return rtpAccessUnit{}, false
+	}
+	if randomAccess {
+		b.waitingForH265RandomAccess = false
+	}
+	if codec == videoCodecH265 && b.waitingForH265RandomAccess {
+		return rtpAccessUnit{}, false
+	}
+	return accessUnit, true
+}
+
+func h265PacketState(pkt *rtp.Packet) (bool, bool) {
+	if videoCodecForPayloadType(pkt.PayloadType) != videoCodecH265 {
+		return true, false
+	}
+	observations := parseH265NALObservations(pkt.Payload)
+	startsAccessUnit := len(observations) > 0 && observations[0].Start
+	for _, observation := range observations {
+		if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
+			return startsAccessUnit, true
+		}
+	}
+	return startsAccessUnit, false
+}
+
 func main() {
 	certPath := flag.String("cert", "", "Path to TLS certificate (PEM)")
 	keyPath := flag.String("key", "", "Path to TLS private key (PEM)")
@@ -487,7 +584,8 @@ func startUDPListener(ch *Channel) {
 
 	log.Printf("🧠 Listening for RTP on %s:%d", net.IPv4zero, ch.Port)
 	buf := make([]byte, 4096)
-	framePackets := make([][]byte, 0, 128)
+	accessUnitBuffer := newRTPAccessUnitBuffer()
+	var activeTrack *webrtc.TrackLocalStaticRTP
 	timestampRewriter := newRTPTimestampRewriter()
 
 	for {
@@ -508,25 +606,31 @@ func startUDPListener(ch *Channel) {
 		}
 		ch.Stats.RecordRTPPacket(&pkt, n, remoteAddr)
 
+		track := ch.Track.Load()
+		if track != activeTrack {
+			accessUnitBuffer.resetH265Recovery()
+			activeTrack = track
+		}
 		raw := append([]byte(nil), buf[:n]...)
-		framePackets = append(framePackets, raw)
-		if !pkt.Marker {
+		accessUnit, ready := accessUnitBuffer.accept(&pkt, raw)
+		if !ready {
+			continue
+		}
+
+		if track == nil {
+			for range accessUnit.packets {
+				ch.Stats.RecordDroppedNoTrack()
+			}
+			accessUnitBuffer.resetH265Recovery()
+			activeTrack = nil
 			continue
 		}
 
 		frameAt := time.Now()
 		frameTimestamp := timestampRewriter.timestampForFrame(frameAt)
-		track := ch.Track.Load()
-		if track == nil {
-			for range framePackets {
-				ch.Stats.RecordDroppedNoTrack()
-			}
-			framePackets = framePackets[:0]
-			continue
-		}
 
 		frameForwarded := false
-		for _, rawPacket := range framePackets {
+		for _, rawPacket := range accessUnit.packets {
 			packetToWrite, err := rewriteRTPPacketTimestamp(rawPacket, frameTimestamp)
 			if err != nil {
 				ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
@@ -543,12 +647,11 @@ func startUDPListener(ch *Channel) {
 		}
 		if frameForwarded {
 			for _, metadata := range ch.MetadataSync.addVideoFrame(
-				pkt.SSRC, pkt.Timestamp, frameTimestamp, frameAt,
+				accessUnit.ssrc, accessUnit.timestamp, frameTimestamp, frameAt,
 			) {
 				enqueueMetadata(ch, metadata)
 			}
 		}
-		framePackets = framePackets[:0]
 	}
 }
 

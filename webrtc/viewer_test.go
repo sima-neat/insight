@@ -225,3 +225,93 @@ func TestRewriteRTPPacketTimestamp(t *testing.T) {
 		t.Fatalf("expected non-timestamp RTP header fields to be preserved: %#v", got.Header)
 	}
 }
+
+func TestRTPAccessUnitBufferRejectsSequenceGap(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	first := testRTPPacket(t, 10, 9000, false, []byte{0x26, 0x01, 0x80})
+	last := testRTPPacket(t, 12, 9000, true, []byte{0x26, 0x01, 0x00})
+
+	if _, ready := buffer.accept(first.packet, first.raw); ready {
+		t.Fatal("expected access unit to remain incomplete before marker")
+	}
+	if _, ready := buffer.accept(last.packet, last.raw); ready {
+		t.Fatal("expected access unit with an RTP sequence gap to be rejected")
+	}
+}
+
+func TestRTPAccessUnitBufferRejectsMissingH265FragmentStart(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	continuation := testRTPPacket(t, 10, 9000, true, []byte{0x62, 0x01, 0x13})
+
+	if _, ready := buffer.accept(continuation.packet, continuation.raw); ready {
+		t.Fatal("expected an H.265 continuation without its start to be rejected")
+	}
+}
+
+func TestH265RecoveryGateWaitsForRandomAccessAfterLoss(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	delta := testRTPPacket(t, 10, 9000, true, []byte{0x02, 0x01})
+	randomAccess := testRTPPacket(t, 11, 18000, true, []byte{0x26, 0x01})
+	nextDelta := testRTPPacket(t, 12, 27000, true, []byte{0x02, 0x01})
+
+	if _, ready := buffer.accept(delta.packet, delta.raw); ready {
+		t.Fatal("expected startup to wait for an H.265 random-access access unit")
+	}
+	if _, ready := buffer.accept(randomAccess.packet, randomAccess.raw); !ready {
+		t.Fatal("expected random-access H.265 access unit to open recovery")
+	}
+	if _, ready := buffer.accept(nextDelta.packet, nextDelta.raw); !ready {
+		t.Fatal("expected complete H.265 access units after random-access recovery")
+	}
+}
+
+func TestRTPAccessUnitBufferReportsAbandonedFrame(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	abandoned := testRTPPacket(t, 10, 9000, false, []byte{0x02, 0x01})
+	next := testRTPPacket(t, 11, 18000, true, []byte{0x02, 0x01})
+
+	if _, ready := buffer.accept(abandoned.packet, abandoned.raw); ready {
+		t.Fatal("expected first access unit to remain pending")
+	}
+	if _, ready := buffer.accept(next.packet, next.raw); ready {
+		t.Fatal("expected abandoned H.265 frame to require new random access")
+	}
+}
+
+func TestRTPAccessUnitBufferDetectsLossBetweenAccessUnits(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	randomAccess := testRTPPacket(t, 10, 9000, true, []byte{0x26, 0x01})
+	afterGap := testRTPPacket(t, 12, 18000, true, []byte{0x02, 0x01})
+
+	if _, ready := buffer.accept(randomAccess.packet, randomAccess.raw); !ready {
+		t.Fatal("expected initial random-access frame")
+	}
+	if _, ready := buffer.accept(afterGap.packet, afterGap.raw); ready {
+		t.Fatal("expected RTP loss between access units to rearm H.265 recovery")
+	}
+}
+
+type testRTP struct {
+	packet *rtp.Packet
+	raw    []byte
+}
+
+func testRTPPacket(t *testing.T, sequence uint16, timestamp uint32, marker bool, payload []byte) testRTP {
+	t.Helper()
+	packet := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    h265RTPPayloadType,
+			SequenceNumber: sequence,
+			Timestamp:      timestamp,
+			SSRC:           99,
+			Marker:         marker,
+		},
+		Payload: payload,
+	}
+	raw, err := packet.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return testRTP{packet: packet, raw: raw}
+}
