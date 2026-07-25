@@ -31,13 +31,14 @@ type IngestStats struct {
 	lastPacketAt  time.Time
 	remoteAddr    string
 
-	packetsReceived  uint64
-	bytesReceived    uint64
-	packetsForwarded uint64
-	bytesForwarded   uint64
-	droppedNoTrack   uint64
-	writeErrors      uint64
-	malformedPackets uint64
+	packetsReceived           uint64
+	bytesReceived             uint64
+	packetsForwarded          uint64
+	bytesForwarded            uint64
+	droppedNoTrack            uint64
+	writeErrors               uint64
+	malformedPackets          uint64
+	unsupportedPayloadPackets uint64
 
 	ssrc             uint32
 	payloadType      uint8
@@ -184,13 +185,14 @@ type WebRTCSnapshot struct {
 }
 
 type DiagnosticsSnapshot struct {
-	PayloadTypesSeen       map[string]uint64 `json:"payload_types_seen,omitempty"`
-	NALTypeCounts          map[string]uint64 `json:"nal_type_counts,omitempty"`
-	PacketizationModesSeen map[string]uint64 `json:"packetization_modes_seen,omitempty"`
-	EstimatedSequenceGaps  uint64            `json:"estimated_sequence_gaps"`
-	EstimatedJitterMS      float64           `json:"estimated_jitter_ms"`
-	MalformedPackets       uint64            `json:"malformed_packets"`
-	RecentErrors           []string          `json:"recent_errors,omitempty"`
+	PayloadTypesSeen          map[string]uint64 `json:"payload_types_seen,omitempty"`
+	UnsupportedPayloadPackets uint64            `json:"unsupported_payload_packets"`
+	NALTypeCounts             map[string]uint64 `json:"nal_type_counts,omitempty"`
+	PacketizationModesSeen    map[string]uint64 `json:"packetization_modes_seen,omitempty"`
+	EstimatedSequenceGaps     uint64            `json:"estimated_sequence_gaps"`
+	EstimatedJitterMS         float64           `json:"estimated_jitter_ms"`
+	MalformedPackets          uint64            `json:"malformed_packets"`
+	RecentErrors              []string          `json:"recent_errors,omitempty"`
 }
 
 type nalObservation struct {
@@ -226,19 +228,22 @@ func (s *IngestStats) RecordRTPPacket(pkt *rtp.Packet, packetBytes int, remote n
 
 	s.packetsReceived++
 	s.bytesReceived += uint64(packetBytes)
+	s.payloadTypesSeen[pkt.PayloadType]++
+	codec := videoCodecForPayloadType(pkt.PayloadType)
+	s.updateSample(packetBytes, now)
+	if codec == videoCodecUnknown {
+		s.unsupportedPayloadPackets++
+		return
+	}
+
 	previousSSRC := s.ssrc
 	s.payloadType = pkt.PayloadType
-	s.payloadTypesSeen[pkt.PayloadType]++
 	s.updateSequenceGap(pkt, previousSSRC)
 	s.updateJitter(pkt, now)
-	s.updateSample(packetBytes, now)
-	codec := videoCodecForPayloadType(pkt.PayloadType)
-	if codec != videoCodecUnknown && s.mediaCodec != videoCodecUnknown && codec != s.mediaCodec {
+	if s.mediaCodec != videoCodecUnknown && codec != s.mediaCodec {
 		s.resetMediaDiagnostics()
 	}
-	if codec != videoCodecUnknown {
-		s.mediaCodec = codec
-	}
+	s.mediaCodec = codec
 	switch codec {
 	case videoCodecH264:
 		s.updateH264Media(pkt.Payload, now)
@@ -430,13 +435,14 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 
 	if includeVerbose {
 		snapshot.Diagnostics = &DiagnosticsSnapshot{
-			PayloadTypesSeen:       uint8MapToStringMap(s.payloadTypesSeen),
-			NALTypeCounts:          uint8MapToStringMap(s.nalTypeCounts),
-			PacketizationModesSeen: copyStringUint64Map(s.packetizationModesSeen),
-			EstimatedSequenceGaps:  s.sequenceGaps,
-			EstimatedJitterMS:      roundFloat((s.jitter/h264ClockRate)*1000, 3),
-			MalformedPackets:       s.malformedPackets,
-			RecentErrors:           append([]string(nil), s.recentErrors...),
+			PayloadTypesSeen:          uint8MapToStringMap(s.payloadTypesSeen),
+			UnsupportedPayloadPackets: s.unsupportedPayloadPackets,
+			NALTypeCounts:             uint8MapToStringMap(s.nalTypeCounts),
+			PacketizationModesSeen:    copyStringUint64Map(s.packetizationModesSeen),
+			EstimatedSequenceGaps:     s.sequenceGaps,
+			EstimatedJitterMS:         roundFloat((s.jitter/h264ClockRate)*1000, 3),
+			MalformedPackets:          s.malformedPackets,
+			RecentErrors:              append([]string(nil), s.recentErrors...),
 		}
 	}
 

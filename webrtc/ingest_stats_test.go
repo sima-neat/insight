@@ -174,6 +174,27 @@ func TestIngestStatsCountsH265KeyframeOncePerRTPTimestamp(t *testing.T) {
 	}
 }
 
+func TestIngestStatsReportsUnsupportedPayloadWithoutDisturbingMediaState(t *testing.T) {
+	stats := NewIngestStats(0, 9000, 9100)
+	recordTestRTPPacket(stats, h265RTPPayloadType, 10, 3000, []byte{0x26, 0x01})
+	recordTestRTPPacket(stats, 72, 0, 1, []byte{0xc8, 0x00})
+	recordTestRTPPacket(stats, h265RTPPayloadType, 11, 6000, []byte{0x02, 0x01})
+
+	snapshot := stats.Snapshot(true, false, time.Now())
+	if snapshot.Diagnostics.UnsupportedPayloadPackets != 1 {
+		t.Fatalf("expected one unsupported payload packet, got %#v", snapshot.Diagnostics)
+	}
+	if snapshot.Diagnostics.EstimatedSequenceGaps != 0 {
+		t.Fatalf("unsupported payload disturbed media sequence tracking: %#v", snapshot.Diagnostics)
+	}
+	if snapshot.RTP.PayloadType != h265RTPPayloadType || snapshot.Media.Codec != "H265" {
+		t.Fatalf("unsupported payload replaced current media state: %#v", snapshot)
+	}
+	if snapshot.Diagnostics.PayloadTypesSeen["72"] != 1 {
+		t.Fatalf("unsupported payload type was not recorded: %#v", snapshot.Diagnostics)
+	}
+}
+
 func TestIngestStatsPreservesH264MediaDiagnostics(t *testing.T) {
 	stats := NewIngestStats(0, 9000, 9100)
 	for sequence, payload := range [][]byte{{0x67, 0x42}, {0x68, 0xce}, {0x65, 0x88}} {

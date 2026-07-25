@@ -120,6 +120,11 @@ func (b *rtpAccessUnitBuffer) resetH265Recovery() {
 }
 
 func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit, bool) {
+	codec := videoCodecForPayloadType(pkt.PayloadType)
+	if codec == videoCodecUnknown {
+		return rtpAccessUnit{}, false
+	}
+
 	startsAccessUnit, randomAccess := h265PacketState(pkt)
 	sequenceDiscontinuity := b.haveSequence &&
 		(pkt.SSRC != b.sequenceSSRC || pkt.SequenceNumber != b.nextSequence)
@@ -132,7 +137,7 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 		b.packets = b.packets[:0]
 		b.ssrc = pkt.SSRC
 		b.timestamp = pkt.Timestamp
-		b.codec = videoCodecForPayloadType(pkt.PayloadType)
+		b.codec = codec
 		b.complete = startsAccessUnit
 		b.discontinuity = b.active || sequenceDiscontinuity
 		b.randomAccess = randomAccess
@@ -152,13 +157,13 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 		ssrc:      b.ssrc,
 		timestamp: b.timestamp,
 	}
-	codec := b.codec
+	accessUnitCodec := b.codec
 	complete := b.complete
 	discontinuity := b.discontinuity
 	randomAccess = b.randomAccess
 	b.packets = b.packets[:0]
 	b.active = false
-	if codec == videoCodecH265 && (discontinuity || !complete) {
+	if accessUnitCodec == videoCodecH265 && (discontinuity || !complete) {
 		b.waitingForH265RandomAccess = true
 	}
 	if !complete {
@@ -167,7 +172,7 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	if randomAccess {
 		b.waitingForH265RandomAccess = false
 	}
-	if codec == videoCodecH265 && b.waitingForH265RandomAccess {
+	if accessUnitCodec == videoCodecH265 && b.waitingForH265RandomAccess {
 		return rtpAccessUnit{}, false
 	}
 	return accessUnit, true

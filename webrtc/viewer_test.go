@@ -303,6 +303,37 @@ func TestH265RecoveryGateWaitsForRandomAccessAfterLoss(t *testing.T) {
 	}
 }
 
+func TestRTPAccessUnitBufferIgnoresUnsupportedPayloadType(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	randomAccess := testRTPPacket(t, 10, 9000, true, []byte{0x26, 0x01})
+	unsupported := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    72,
+			SequenceNumber: 0,
+			Timestamp:      1,
+			SSRC:           123,
+			Marker:         true,
+		},
+		Payload: []byte{0xc8, 0x00},
+	}
+	unsupportedRaw, err := unsupported.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextDelta := testRTPPacket(t, 11, 18000, true, []byte{0x02, 0x01})
+
+	if _, ready := buffer.accept(randomAccess.packet, randomAccess.raw); !ready {
+		t.Fatal("expected initial random-access frame")
+	}
+	if _, ready := buffer.accept(unsupported, unsupportedRaw); ready {
+		t.Fatal("expected unsupported payload type to be dropped")
+	}
+	if _, ready := buffer.accept(nextDelta.packet, nextDelta.raw); !ready {
+		t.Fatal("expected unsupported payload type not to disturb H.265 sequence state")
+	}
+}
+
 func TestRTPAccessUnitBufferReportsAbandonedFrame(t *testing.T) {
 	buffer := newRTPAccessUnitBuffer()
 	abandoned := testRTPPacket(t, 10, 9000, false, []byte{0x02, 0x01})
