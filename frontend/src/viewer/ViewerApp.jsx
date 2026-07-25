@@ -13,6 +13,7 @@ import {
   gridDimensions,
   normalizeVisiblePerPage,
 } from "./viewerLayout.js";
+import { requestWebRTCAnswer } from "./webrtcSignaling.js";
 
 const RECONNECT_DELAY_MS = 5000;
 const STREAM_STALE_MS = 1800;
@@ -467,15 +468,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       }, 1000);
 
       try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        const response = await fetch(`/offer?channel=${index}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(offer),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const answer = await response.json();
+        const answer = await requestWebRTCAnswer(pc, `/offer?channel=${index}`);
         if (!mounted || sessionId !== currentSession) return;
         await pc.setRemoteDescription(answer);
         debugLog("setRemoteDescription ok");
