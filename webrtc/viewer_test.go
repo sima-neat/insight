@@ -191,7 +191,8 @@ func TestRTPTimestampRewriterAdvancesPerFrame(t *testing.T) {
 	}
 }
 
-func TestRewriteRTPPacketTimestamp(t *testing.T) {
+func TestRTPPacketRewriterSetsTimestamp(t *testing.T) {
+	rewriter := newRTPPacketRewriter()
 	original := &rtp.Packet{
 		Header: rtp.Header{
 			Version:        2,
@@ -208,7 +209,7 @@ func TestRewriteRTPPacketTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rewritten, err := rewriteRTPPacketTimestamp(raw, 5678)
+	rewritten, err := rewriter.rewrite(raw, 5678)
 	if err != nil {
 		t.Fatalf("expected timestamp rewrite to succeed: %v", err)
 	}
@@ -223,6 +224,43 @@ func TestRewriteRTPPacketTimestamp(t *testing.T) {
 	if got.SequenceNumber != original.SequenceNumber || got.SSRC != original.SSRC ||
 		got.PayloadType != original.PayloadType || !got.Marker {
 		t.Fatalf("expected non-timestamp RTP header fields to be preserved: %#v", got.Header)
+	}
+}
+
+func TestRTPPacketRewriterKeepsSequenceContinuousAcrossSourceGap(t *testing.T) {
+	rewriter := newRTPPacketRewriter()
+	first := testRTPPacket(t, 7, 1234, true, []byte{0x26, 0x01})
+	afterGap := testRTPPacket(t, 4000, 5678, true, []byte{0x02, 0x01})
+
+	firstRaw, err := rewriter.rewrite(first.raw, 9000)
+	if err != nil {
+		t.Fatalf("expected first packet rewrite to succeed: %v", err)
+	}
+	afterGapRaw, err := rewriter.rewrite(afterGap.raw, 18000)
+	if err != nil {
+		t.Fatalf("expected packet rewrite after source gap to succeed: %v", err)
+	}
+
+	var firstRewritten, afterGapRewritten rtp.Packet
+	if err := firstRewritten.Unmarshal(firstRaw); err != nil {
+		t.Fatalf("expected first rewritten packet to unmarshal: %v", err)
+	}
+	if err := afterGapRewritten.Unmarshal(afterGapRaw); err != nil {
+		t.Fatalf("expected rewritten packet after source gap to unmarshal: %v", err)
+	}
+	if afterGapRewritten.SequenceNumber != firstRewritten.SequenceNumber+1 {
+		t.Fatalf(
+			"expected continuous outgoing sequence numbers, got first=%d after-gap=%d",
+			firstRewritten.SequenceNumber,
+			afterGapRewritten.SequenceNumber,
+		)
+	}
+	if firstRewritten.Timestamp != 9000 || afterGapRewritten.Timestamp != 18000 {
+		t.Fatalf(
+			"expected outgoing frame timestamps 9000 and 18000, got %d and %d",
+			firstRewritten.Timestamp,
+			afterGapRewritten.Timestamp,
+		)
 	}
 }
 

@@ -85,6 +85,11 @@ type rtpTimestampRewriter struct {
 	haveFrameTime bool
 }
 
+type rtpPacketRewriter struct {
+	nextSequence uint16
+	haveSequence bool
+}
+
 type rtpAccessUnit struct {
 	packets   [][]byte
 	ssrc      uint32
@@ -523,13 +528,29 @@ func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
 	return r.nextTimestamp
 }
 
-func rewriteRTPPacketTimestamp(raw []byte, timestamp uint32) ([]byte, error) {
+func newRTPPacketRewriter() rtpPacketRewriter {
+	return rtpPacketRewriter{}
+}
+
+func (r *rtpPacketRewriter) rewrite(raw []byte, timestamp uint32) ([]byte, error) {
 	var pkt rtp.Packet
 	if err := pkt.Unmarshal(raw); err != nil {
 		return nil, err
 	}
+	// Pion preserves input sequence numbers, so keep one continuous outgoing
+	// sequence space when incomplete access units are dropped or a source restarts.
+	if !r.haveSequence {
+		r.nextSequence = pkt.SequenceNumber
+		r.haveSequence = true
+	}
+	pkt.SequenceNumber = r.nextSequence
 	pkt.Timestamp = timestamp
-	return pkt.Marshal()
+	rewritten, err := pkt.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	r.nextSequence++
+	return rewritten, nil
 }
 
 func sendRTCP(pc *webrtc.PeerConnection) {
@@ -587,6 +608,7 @@ func startUDPListener(ch *Channel) {
 	accessUnitBuffer := newRTPAccessUnitBuffer()
 	var activeTrack *webrtc.TrackLocalStaticRTP
 	timestampRewriter := newRTPTimestampRewriter()
+	packetRewriter := newRTPPacketRewriter()
 
 	for {
 		n, remoteAddr, err := conn.ReadFrom(buf)
@@ -631,10 +653,10 @@ func startUDPListener(ch *Channel) {
 
 		frameForwarded := false
 		for _, rawPacket := range accessUnit.packets {
-			packetToWrite, err := rewriteRTPPacketTimestamp(rawPacket, frameTimestamp)
+			packetToWrite, err := packetRewriter.rewrite(rawPacket, frameTimestamp)
 			if err != nil {
 				ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
-				log.Println("❌ RTP timestamp rewrite error:", err)
+				log.Println("❌ RTP packet rewrite error:", err)
 				continue
 			}
 			if _, err := track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
