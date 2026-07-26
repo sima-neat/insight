@@ -7,6 +7,7 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import { updateDecoderHealth } from "./decoderHealth.js";
 import {
   MAX_CHANNELS,
   PAGE_SIZE_PRESETS,
@@ -16,6 +17,7 @@ import {
 import { requestWebRTCAnswer } from "./webrtcSignaling.js";
 
 const RECONNECT_DELAY_MS = 5000;
+const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
 function parseIndices(srcParam) {
@@ -105,7 +107,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
     lastTs: null,
     messageCount: 0,
     lastCount: 0,
-    lastFramesDecoded: null,
+    decoderHealth: {
+      lastFramesReceived: null,
+      lastFramesDecoded: null,
+      stalledSinceMs: null,
+    },
   });
   const playbackRef = useRef({ lastFrameAt: 0 });
   const activeRef = useRef(false);
@@ -201,7 +207,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
         lastTs: null,
         messageCount: 0,
         lastCount: 0,
-        lastFramesDecoded: null,
+        decoderHealth: {
+          lastFramesReceived: null,
+          lastFramesDecoded: null,
+          stalledSinceMs: null,
+        },
       };
       playbackRef.current = { lastFrameAt: 0 };
       synchronizationSettingsRef.current = getSynchronizationSettings(index);
@@ -343,6 +353,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         if (!mounted || !pc || pc.connectionState !== "connected") return;
         try {
           const stats = await pc.getStats();
+          let decoderStalled = false;
           stats.forEach((report) => {
             if (report.type !== "inbound-rtp" || report.kind !== "video") return;
 
@@ -360,13 +371,17 @@ function ChannelTile({ index, onActiveChange, debug }) {
               report.jitterBufferEmittedCount > 0
                 ? (report.jitterBufferDelay / report.jitterBufferEmittedCount) * 1000
                 : 0;
-            if (
-              typeof report.framesDecoded === "number" &&
-              (tracker.lastFramesDecoded == null || report.framesDecoded > tracker.lastFramesDecoded)
-            ) {
+            tracker.decoderHealth = updateDecoderHealth(
+              tracker.decoderHealth,
+              report,
+              Date.now(),
+              DECODER_STALL_MS,
+            );
+            if (tracker.decoderHealth.decodedAdvanced) {
               playbackRef.current.lastFrameAt = Date.now();
               setTileActive(true);
             }
+            decoderStalled ||= tracker.decoderHealth.stalled;
             if (
               playbackRef.current.lastFrameAt > 0 &&
               Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
@@ -458,10 +473,13 @@ function ChannelTile({ index, onActiveChange, debug }) {
 
             tracker.lastBytes = report.bytesReceived;
             tracker.lastTs = report.timestamp;
-            tracker.lastFramesDecoded = report.framesDecoded ?? tracker.lastFramesDecoded;
             tracker.lastCount = tracker.messageCount;
             tracker.messageCount = 0;
           });
+          if (decoderStalled && mounted && sessionId === currentSession) {
+            debugLog("decoder stalled; reconnecting channel");
+            await connect();
+          }
         } catch (_err) {
           // Ignore getStats failures for transient states.
         }
