@@ -164,6 +164,13 @@ type BrowserInboundRTPStats struct {
 	PauseCount                 uint64  `json:"pause_count,omitempty"`
 	BitrateBPS                 float64 `json:"bitrate_bps,omitempty"`
 	AverageJitterBufferDelayMS float64 `json:"average_jitter_buffer_delay_ms,omitempty"`
+
+	// Which decoder the browser actually got. A viewer that cannot decode the
+	// negotiated codec reports a null decoder here and stops producing frames.
+	DecoderImplementation string `json:"decoder_implementation,omitempty"`
+	// Pointer so an absent report stays distinguishable from a reported false:
+	// false is the diagnostic signal when no hardware decoder was available.
+	PowerEfficientDecoder *bool `json:"power_efficient_decoder,omitempty"`
 }
 
 type BrowserVideoState struct {

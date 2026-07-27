@@ -146,7 +146,7 @@ A peer is `active` when its connection is up. That is not a statement about how 
 
 Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
 
-Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms` and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
+Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
 
 Examples:
 
@@ -154,6 +154,40 @@ Examples:
 curl -k https://127.0.0.1:9900/api/egress/stats
 curl -k 'https://127.0.0.1:9900/api/egress/stats?all=1&verbose=1'
 ```
+
+## Localizing A Video Problem
+
+"The video is stalled" can fail at any hop between the application and the
+browser's decoder. Walk these in order and stop at the first one that fails;
+each step names the field that decides it. Take two samples a few seconds apart
+and compare deltas, because every counter here is cumulative.
+
+| Step | Question | Field | Failing means |
+| --- | --- | --- | --- |
+| 1 | Is RTP reaching vf? | `rtp.packets_received` rising, channel `active` | Nothing arrived. Check app receiver host/port against `neat --json`, not vf. |
+| 2 | Is vf forwarding it? | `forwarding.packets_forwarded` rising with `rtp.packets_received` | vf is dropping. Check `diagnostics.estimated_sequence_gaps` and `diagnostics.malformed_packets`. |
+| 3 | Is a viewer attached? | `forwarding.webrtc_track_attached` | No browser is bound to the channel. `forwarding.packets_dropped_no_track` counts what was discarded meanwhile. |
+| 4 | Is the browser receiving? | peer `browser.inbound_rtp.packets_received` rising | Transport problem between vf and the browser. Check the peer's ICE and connection states. |
+| 5 | Is the browser decoding? | `browser.inbound_rtp.frames_decoded` rising | Frames arrive but do not decode. Continue to step 6. |
+| 6 | Which decoder did it get? | `browser.inbound_rtp.decoder_implementation` | A name starting with `Null` means the browser has no decoder for the negotiated codec. Reconnecting cannot fix it. |
+
+Step 5 is where codec problems surface. If `frames_received` rises while
+`frames_decoded` stays flat and `frames_dropped` rises to match, the stream
+reached the browser intact and the decoder rejected it — vf and the application
+are both healthy and the fault is browser-side.
+
+Two field notes that matter when reading this:
+
+- `media.idr_count` stays `0` for H.265. Use `media.keyframe_count` for H.265
+  random-access points; `idr_count` applies to H.264 only.
+- `forwarding.webrtc_track_attached` means a viewer is bound to the channel,
+  not that a track object exists. With no viewer open it is `false` and
+  `packets_dropped_no_track` climbs, which is expected rather than a fault.
+
+When `/offer` fails, the HTTP response carries a stable short message; the
+underlying cause is written to the vf service log with its channel index. Read
+the log rather than inferring from the response text, which is identical across
+several different causes.
 
 ## Synthetic Metadata Testing
 

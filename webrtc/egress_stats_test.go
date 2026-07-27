@@ -46,6 +46,44 @@ func TestEgressStatsRecordsRTCPFeedback(t *testing.T) {
 	}
 }
 
+func TestEgressStatsPreservesDecoderFieldsFromBrowser(t *testing.T) {
+	stats := NewEgressStats(2)
+	peerID := stats.RegisterPeer()
+	// Sent as raw JSON so the test fails if the backend struct stops carrying
+	// these keys, which is how they were silently discarded before.
+	payload := []byte(`{
+		"type": "browser_egress_stats",
+		"channel": 2,
+		"inbound_rtp": {
+			"frames_received": 1489,
+			"frames_decoded": 10,
+			"decoder_implementation": "NullVideoDecoder (fallback from: ExternalDecoder (VideoToolboxVideoDecoder))",
+			"power_efficient_decoder": false
+		}
+	}`)
+
+	if !stats.RecordBrowserReport(peerID, payload) {
+		t.Fatalf("expected browser report to be accepted")
+	}
+	snapshot, ok := stats.Snapshot(true, false, time.Now())
+	if !ok {
+		t.Fatalf("expected channel snapshot")
+	}
+	report := snapshot.Peers[0].Browser
+	if report == nil {
+		t.Fatal("expected a browser report")
+	}
+	if report.InboundRTP.DecoderImplementation == "" {
+		t.Fatalf("decoder implementation was discarded: %#v", report.InboundRTP)
+	}
+	if report.InboundRTP.PowerEfficientDecoder == nil {
+		t.Fatal("a reported false must stay distinguishable from an absent value")
+	}
+	if *report.InboundRTP.PowerEfficientDecoder {
+		t.Fatalf("expected power_efficient_decoder=false to survive the round trip")
+	}
+}
+
 func TestEgressStatsRecordsBrowserReport(t *testing.T) {
 	stats := NewEgressStats(1)
 	peerID := stats.RegisterPeer()

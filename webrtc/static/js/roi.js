@@ -30,6 +30,23 @@ function setStreamStatus(message = "") {
   streamStatus.classList.toggle("hidden", !message);
 }
 
+function schedulePreviewReconnect(scope) {
+  if (previewReconnectTimer != null) return;
+  previewReconnectTimer = window.setTimeout(() => {
+    previewReconnectTimer = null;
+    connectToStream(scope);
+  }, RECONNECT_DELAY_MS);
+}
+
+// Clearing the handler first keeps a deliberate close from scheduling a
+// reconnect against the connection we are replacing.
+function closePreviewPeer() {
+  if (!previewPeerConnection) return;
+  previewPeerConnection.onconnectionstatechange = null;
+  previewPeerConnection.close();
+  previewPeerConnection = null;
+}
+
 async function connectToStream(scope = "global") {
   currentScope = scope;
   previewSession += 1;
@@ -38,12 +55,18 @@ async function connectToStream(scope = "global") {
     window.clearTimeout(previewReconnectTimer);
     previewReconnectTimer = null;
   }
-  if (previewPeerConnection) {
-    previewPeerConnection.close();
-  }
+  closePreviewPeer();
 
   const pc = new RTCPeerConnection();
   previewPeerConnection = pc;
+  // A codec change retires this peer server-side, so the preview has to notice
+  // the close itself rather than only handling a failed initial offer.
+  pc.onconnectionstatechange = () => {
+    if (session !== previewSession) return;
+    if (pc.connectionState !== "failed" && pc.connectionState !== "closed") return;
+    setStreamStatus("Reconnecting to stream…");
+    schedulePreviewReconnect(scope);
+  };
   liveVideo.srcObject = null;
   // Installed before the track can arrive; ontrack assigns srcObject as soon as
   // the answer is applied, and every early return below skips this function's tail.
@@ -64,17 +87,19 @@ async function connectToStream(scope = "global") {
   try {
     const answer = await requestWebRTCAnswer(pc, `/offer?channel=${scope}`);
     if (session !== previewSession) {
+      pc.onconnectionstatechange = null;
       pc.close();
       return;
     }
     await pc.setRemoteDescription(answer);
   } catch (error) {
+    pc.onconnectionstatechange = null;
     pc.close();
     if (session !== previewSession) return;
     previewPeerConnection = null;
     if (isRetryableWebRTCAnswerError(error)) {
       setStreamStatus("Waiting for stream…");
-      previewReconnectTimer = window.setTimeout(() => connectToStream(scope), RECONNECT_DELAY_MS);
+      schedulePreviewReconnect(scope);
       return;
     }
     setStreamStatus(`Preview connection failed: ${error?.message || "Unknown error"}`);
