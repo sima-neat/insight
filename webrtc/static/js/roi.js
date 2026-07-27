@@ -5,7 +5,7 @@ import {
   requestWebRTCAnswer,
 } from "./webrtcSignaling.js";
 
-const RECONNECT_DELAY_MS = 5000;
+const RECONNECT_DELAY_MS = 2000;
 
 let drawing = false;
 let currentPoints = [];

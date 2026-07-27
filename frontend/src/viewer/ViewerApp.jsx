@@ -7,11 +7,7 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
-import {
-  channelLabel,
-  formatChannelStatus,
-  resolveCodecLabel,
-} from "./channelStatus.js";
+import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import {
   MAX_CHANNELS,
@@ -24,7 +20,10 @@ import {
   requestWebRTCAnswer,
 } from "../../../webrtc/static/js/webrtcSignaling.js";
 
-const RECONNECT_DELAY_MS = 5000;
+const RECONNECT_DELAY_MS = 2000;
+// Deliberately longer than the retry delay: a decoder can legitimately produce
+// nothing for a moment while it waits for a keyframe, and reconnecting is the
+// more expensive response.
 const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
@@ -364,7 +363,6 @@ function ChannelTile({ index, onActiveChange, debug }) {
         try {
           const stats = await pc.getStats();
           let decoderStalled = false;
-          let decoderUnsupported = false;
           stats.forEach((report) => {
             if (report.type !== "inbound-rtp" || report.kind !== "video") return;
 
@@ -397,7 +395,6 @@ function ChannelTile({ index, onActiveChange, debug }) {
               setTileActive(true);
             }
             decoderStalled ||= tracker.decoderHealth.stalled;
-            decoderUnsupported ||= tracker.decoderHealth.unsupported;
             if (
               playbackRef.current.lastFrameAt > 0 &&
               Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
@@ -502,12 +499,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
             tracker.lastCount = tracker.messageCount;
             tracker.messageCount = 0;
           });
-          if (decoderUnsupported && mounted && sessionId === currentSession) {
-            debugLog("no decoder for the negotiated codec; not reconnecting");
-            setBanner(
-              `${channelLabel(index, rtcpRef.current.codecLabel)} | Codec not supported by this browser`,
-            );
-          } else if (decoderStalled && mounted && sessionId === currentSession) {
+          if (decoderStalled && mounted && sessionId === currentSession) {
             debugLog("decoder stalled; reconnecting channel");
             scheduleReconnect();
           }
