@@ -357,6 +357,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         try {
           const stats = await pc.getStats();
           let decoderStalled = false;
+          let decoderUnsupported = false;
           stats.forEach((report) => {
             if (report.type !== "inbound-rtp" || report.kind !== "video") return;
 
@@ -385,6 +386,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               setTileActive(true);
             }
             decoderStalled ||= tracker.decoderHealth.stalled;
+            decoderUnsupported ||= tracker.decoderHealth.unsupported;
             if (
               playbackRef.current.lastFrameAt > 0 &&
               Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
@@ -435,6 +437,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
                     frames_decoded: report.framesDecoded,
                     frames_dropped: report.framesDropped,
                     frames_per_second: report.framesPerSecond,
+                    decoder_implementation: report.decoderImplementation,
+                    power_efficient_decoder: report.powerEfficientDecoder,
                     frame_width: report.frameWidth,
                     frame_height: report.frameHeight,
                     freeze_count: report.freezeCount,
@@ -479,7 +483,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
             tracker.lastCount = tracker.messageCount;
             tracker.messageCount = 0;
           });
-          if (decoderStalled && mounted && sessionId === currentSession) {
+          if (decoderUnsupported && mounted && sessionId === currentSession) {
+            debugLog("no decoder for the negotiated codec; not reconnecting");
+            setBanner(`Channel ${index} | Codec not supported by this browser`);
+          } else if (decoderStalled && mounted && sessionId === currentSession) {
             debugLog("decoder stalled; reconnecting channel");
             scheduleReconnect();
           }

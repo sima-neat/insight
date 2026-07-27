@@ -62,3 +62,47 @@ test("missing decode counters do not trigger recovery", () => {
   assert.equal(state.stalledSinceMs, null);
   assert.equal(state.stalled, false);
 });
+
+test("a null decoder is reported as unsupported rather than stalled", () => {
+  const nullDecoder = "NullVideoDecoder (fallback from: ExternalDecoder (VideoToolboxVideoDecoder))";
+  let state = updateDecoderHealth(
+    initialState(),
+    { framesReceived: 10, framesDecoded: 5, decoderImplementation: nullDecoder },
+    0,
+    STALL_MS,
+  );
+  state = updateDecoderHealth(
+    state,
+    { framesReceived: 60, framesDecoded: 5, decoderImplementation: nullDecoder },
+    6000,
+    STALL_MS,
+  );
+
+  assert.equal(state.unsupported, true);
+  assert.equal(state.stalled, false, "reconnecting cannot recover an absent decoder");
+});
+
+test("a real decoder that stops producing is still a recoverable stall", () => {
+  const real = "ExternalDecoder (VideoToolboxVideoDecoder)";
+  let state = updateDecoderHealth(
+    initialState(),
+    { framesReceived: 10, framesDecoded: 5, decoderImplementation: real },
+    0,
+    STALL_MS,
+  );
+  state = updateDecoderHealth(
+    state,
+    { framesReceived: 20, framesDecoded: 5, decoderImplementation: real },
+    1000,
+    STALL_MS,
+  );
+  state = updateDecoderHealth(
+    state,
+    { framesReceived: 60, framesDecoded: 5, decoderImplementation: real },
+    6000,
+    STALL_MS,
+  );
+
+  assert.equal(state.unsupported, false);
+  assert.equal(state.stalled, true);
+});
