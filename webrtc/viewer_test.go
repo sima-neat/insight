@@ -47,7 +47,7 @@ func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 			browserParameters := webrtc.RTPCodecParameters{
 				RTPCodecCapability: webrtc.RTPCodecCapability{
 					MimeType:  tt.mimeType,
-					ClockRate: h264ClockRate,
+					ClockRate: videoRTPClockRate,
 				},
 				PayloadType: tt.offerPayloadType,
 			}
@@ -56,17 +56,10 @@ func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 
 			previous := channels[index]
 			channels[index] = &Channel{Egress: NewEgressStats(index), Stats: NewIngestStats(index, 9000+index, 9100+index)}
-			channels[index].Codec.Store(uint32(tt.codec))
-			previousMimeType := webrtc.MimeTypeH264
-			if tt.codec == videoCodecH264 {
-				previousMimeType = webrtc.MimeTypeH265
-			}
-			previousTrack, _ := webrtc.NewTrackLocalStaticRTP(
-				webrtc.RTPCodecCapability{MimeType: previousMimeType, ClockRate: h264ClockRate},
-				"video", "pion",
-			)
-			channels[index].Track.Store(previousTrack)
+			media := mustNewChannelMedia(t, tt.codec)
+			channels[index].Media.Store(media)
 			t.Cleanup(func() { channels[index] = previous })
+			t.Cleanup(media.peers.retire)
 
 			body, err := json.Marshal(offer)
 			if err != nil {
@@ -87,12 +80,435 @@ func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 			if !strings.Contains(answer.SDP, rtpmap) {
 				t.Fatalf("expected answer to advertise %s: %s", tt.mimeType, answer.SDP)
 			}
-			track := channels[index].Track.Load()
-			if track == nil || track == previousTrack || track.Codec().MimeType != tt.mimeType {
-				t.Fatalf("unexpected channel track: %#v", track)
+			if got := channels[index].Media.Load(); got != media || got.track.Codec().MimeType != tt.mimeType {
+				t.Fatalf("handleOffer replaced the published channel media: %#v", got)
 			}
 		})
 	}
+}
+
+func TestHandleOfferReturnsUnavailableWhenMediaRetiresDuringNegotiation(t *testing.T) {
+	const channelIndex = 76
+	media := mustNewChannelMedia(t, videoCodecH264)
+	browser, offer := newReceiveOnlyOffer(t, media.parameters)
+	t.Cleanup(func() { _ = browser.Close() })
+
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	channel.Media.Store(media)
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+	body, err := json.Marshal(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/offer?channel=76", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handleOffer(response, request)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		media.peers.mu.Lock()
+		peerCount := len(media.peers.peers)
+		media.peers.mu.Unlock()
+		if peerCount > 0 {
+			break
+		}
+		select {
+		case <-done:
+			t.Fatalf("offer completed before registering its media generation: HTTP %d", response.Code)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("offer did not register its media generation")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := channel.publishMediaForCodec(videoCodecH265); err != nil {
+		t.Fatalf("publish H.265 media: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("offer did not stop after its media generation retired")
+	}
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected retryable HTTP %d, got %d: %s", http.StatusServiceUnavailable, response.Code, response.Body.String())
+	}
+}
+
+func mustNewChannelMedia(t *testing.T, codec videoCodec) *channelMedia {
+	t.Helper()
+	media, err := newChannelMedia(codec)
+	if err != nil {
+		t.Fatalf("create channel media: %v", err)
+	}
+	return media
+}
+
+func TestChannelMediaSharesTrackAcrossNegotiatedViewers(t *testing.T) {
+	media := mustNewChannelMedia(t, videoCodecH265)
+	type negotiationResult struct {
+		sender   *webrtc.PeerConnection
+		receiver *webrtc.PeerConnection
+		err      error
+	}
+
+	start := make(chan struct{})
+	results := make(chan negotiationResult, 2)
+	for range 2 {
+		go func() {
+			<-start
+			sender, receiver, err := negotiateTestViewer(media)
+			results <- negotiationResult{sender: sender, receiver: receiver, err: err}
+		}()
+	}
+	close(start)
+
+	negotiations := make([]negotiationResult, 0, 2)
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			t.Fatalf("negotiate viewer: %v", result.err)
+		}
+		negotiations = append(negotiations, result)
+	}
+	for _, result := range negotiations {
+		t.Cleanup(func() {
+			_ = result.sender.Close()
+			_ = result.receiver.Close()
+		})
+		if got := result.sender.GetSenders()[0].Track(); got != media.track {
+			t.Fatalf("viewer did not bind the published track: %#v", got)
+		}
+	}
+
+	if got := media.track.bindingCount.Load(); got != 2 {
+		t.Fatalf("expected two bindings on the shared track, got %d", got)
+	}
+	if err := negotiations[0].sender.Close(); err != nil {
+		t.Fatalf("close first sender: %v", err)
+	}
+	if got := media.track.bindingCount.Load(); got != 1 {
+		t.Fatalf("expected one binding after first viewer closed, got %d", got)
+	}
+	if got := media.track.idleEpoch.Load(); got != 0 {
+		t.Fatalf("closing one of two viewers marked the track idle: epoch=%d", got)
+	}
+	if err := negotiations[1].sender.Close(); err != nil {
+		t.Fatalf("close second sender: %v", err)
+	}
+	if got := media.track.bindingCount.Load(); got != 0 {
+		t.Fatalf("expected no bindings after both viewers closed, got %d", got)
+	}
+	if got := media.track.idleEpoch.Load(); got != 1 {
+		t.Fatalf("expected one idle transition, got epoch=%d", got)
+	}
+	if err := negotiations[1].sender.Close(); err != nil {
+		t.Fatalf("close second sender again: %v", err)
+	}
+	if got := media.track.bindingCount.Load(); got != 0 {
+		t.Fatalf("closing a viewer twice changed the binding count: %d", got)
+	}
+}
+
+func TestChannelMediaCodecTransitionPublishesOneGeneration(t *testing.T) {
+	channel := &Channel{}
+	h264, err := channel.publishMediaForCodec(videoCodecH264)
+	if err != nil {
+		t.Fatalf("publish H.264 media: %v", err)
+	}
+	sameH264, err := channel.publishMediaForCodec(videoCodecH264)
+	if err != nil {
+		t.Fatalf("reuse H.264 media: %v", err)
+	}
+	if sameH264 != h264 {
+		t.Fatal("same codec replaced the media generation")
+	}
+
+	h265, err := channel.publishMediaForCodec(videoCodecH265)
+	if err != nil {
+		t.Fatalf("publish H.265 media: %v", err)
+	}
+	if h265 == h264 || h265.track == h264.track {
+		t.Fatal("codec transition reused the previous media generation")
+	}
+	if got := channel.Media.Load(); got != h265 {
+		t.Fatalf("codec transition did not atomically publish the new generation: %#v", got)
+	}
+	if h265.codec != videoCodecH265 || h265.parameters.MimeType != webrtc.MimeTypeH265 ||
+		h265.track.Codec().MimeType != webrtc.MimeTypeH265 {
+		t.Fatalf("published H.265 generation is internally inconsistent: %#v", h265)
+	}
+}
+
+func TestCodecTransitionRetiresPreviousMediaPeers(t *testing.T) {
+	channel := &Channel{}
+	h264, err := channel.publishMediaForCodec(videoCodecH264)
+	if err != nil {
+		t.Fatalf("publish H.264 media: %v", err)
+	}
+	sender, receiver, err := negotiateTestViewer(h264)
+	if err != nil {
+		t.Fatalf("negotiate H.264 viewer: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sender.Close()
+		_ = receiver.Close()
+	})
+	if !h264.peers.add(sender) {
+		t.Fatal("active H.264 generation rejected its negotiated peer")
+	}
+	if got := h264.track.bindingCount.Load(); got != 1 {
+		t.Fatalf("expected one H.264 binding before codec transition, got %d", got)
+	}
+
+	h265, err := channel.publishMediaForCodec(videoCodecH265)
+	if err != nil {
+		t.Fatalf("publish H.265 media: %v", err)
+	}
+	if h265 == h264 {
+		t.Fatal("codec transition reused the retired media generation")
+	}
+	// Rejecting new peers is synchronous with the generation swap; closing the
+	// existing ones is not, so that teardown stays off the RTP read loop.
+	if h264.peers.add(sender) {
+		t.Fatal("retired media generation accepted another peer")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sender.ConnectionState() == webrtc.PeerConnectionStateClosed &&
+			h264.track.bindingCount.Load() == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf(
+		"retired media peer did not close: state=%s bindings=%d",
+		sender.ConnectionState(),
+		h264.track.bindingCount.Load(),
+	)
+}
+
+func TestRTPForwarderCountsDropsWithoutTrackBindings(t *testing.T) {
+	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
+	media := mustNewChannelMedia(t, videoCodecH264)
+	channel.Media.Store(media)
+	packet := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    h264RTPPayloadType,
+			SequenceNumber: 10,
+			Timestamp:      9000,
+			SSRC:           99,
+			Marker:         true,
+		},
+		Payload: []byte{0x65, 0x88, 0x84},
+	}
+	raw, err := packet.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newRTPForwarder().forward(channel, media, packet, raw, nil)
+	snapshot := channel.Stats.Snapshot(false, false, time.Now())
+	if snapshot.Forwarding.PacketsDroppedNoTrack != 1 || snapshot.Forwarding.PacketsForwarded != 0 {
+		t.Fatalf("unexpected zero-binding forwarding diagnostics: %#v", snapshot.Forwarding)
+	}
+}
+
+func TestIngestStatsTrackAttachmentFollowsCurrentMediaBindings(t *testing.T) {
+	const channelIndex = 77
+	previous := channels[channelIndex]
+	channel := &Channel{Stats: NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex)}
+	media := mustNewChannelMedia(t, videoCodecH265)
+	channel.Media.Store(media)
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+
+	if snapshot := ingestChannelSnapshot(t, channelIndex); snapshot.Forwarding.WebRTCTrackAttached {
+		t.Fatal("unbound media reported a WebRTC track attachment")
+	}
+	sender, receiver, err := negotiateTestViewer(media)
+	if err != nil {
+		t.Fatalf("negotiate viewer: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sender.Close()
+		_ = receiver.Close()
+	})
+	if snapshot := ingestChannelSnapshot(t, channelIndex); !snapshot.Forwarding.WebRTCTrackAttached {
+		t.Fatal("negotiated viewer did not report a WebRTC track attachment")
+	}
+	if err := sender.Close(); err != nil {
+		t.Fatalf("close sender: %v", err)
+	}
+	if err := sender.Close(); err != nil {
+		t.Fatalf("close sender again: %v", err)
+	}
+	if snapshot := ingestChannelSnapshot(t, channelIndex); snapshot.Forwarding.WebRTCTrackAttached {
+		t.Fatal("closed viewer left the WebRTC track attachment set")
+	}
+}
+
+func TestH265ForwarderRearmsAfterIdleTransitionBetweenPackets(t *testing.T) {
+	channel := &Channel{
+		Stats:         NewIngestStats(0, 9000, 9100),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
+		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+	}
+	media := mustNewChannelMedia(t, videoCodecH265)
+	channel.Media.Store(media)
+	media.track.bindingCount.Store(1)
+	forwarder := newRTPForwarder()
+
+	randomAccess := testRTPPacket(t, 10, 9000, true, []byte{0x26, 0x01})
+	forwarder.forward(channel, media, randomAccess.packet, randomAccess.raw, nil)
+	if got := channel.Stats.Snapshot(false, true, time.Now()).Forwarding.PacketsForwarded; got != 1 {
+		t.Fatalf("expected initial random-access packet to be forwarded, got %d", got)
+	}
+
+	// The last viewer leaves and a new one arrives without a completed access unit
+	// in between, so only the idle epoch records the transition.
+	media.track.bindingCount.Store(0)
+	media.track.idleEpoch.Add(1)
+	media.track.bindingCount.Store(1)
+
+	delta := testRTPPacket(t, 11, 18000, true, []byte{0x02, 0x01})
+	forwarder.forward(channel, media, delta.packet, delta.raw, nil)
+	if got := channel.Stats.Snapshot(false, true, time.Now()).Forwarding.PacketsForwarded; got != 1 {
+		t.Fatalf("delta packet crossed an idle viewer transition: forwarded=%d", got)
+	}
+
+	nextRandomAccess := testRTPPacket(t, 12, 27000, true, []byte{0x26, 0x01})
+	forwarder.forward(channel, media, nextRandomAccess.packet, nextRandomAccess.raw, nil)
+	if got := channel.Stats.Snapshot(false, true, time.Now()).Forwarding.PacketsForwarded; got != 2 {
+		t.Fatalf("new random-access packet did not reopen forwarding: forwarded=%d", got)
+	}
+}
+
+func TestRTPForwarderDoesNotCombineAccessUnitsAcrossCodecGenerations(t *testing.T) {
+	channel := &Channel{
+		Stats:         NewIngestStats(0, 9000, 9100),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
+		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+	}
+	h264 := mustNewChannelMedia(t, videoCodecH264)
+	h264.track.bindingCount.Store(1)
+	forwarder := newRTPForwarder()
+	h264Start := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    h264RTPPayloadType,
+			SequenceNumber: 10,
+			Timestamp:      9000,
+			SSRC:           99,
+		},
+		Payload: []byte{0x65, 0x88},
+	}
+	h264Raw, err := h264Start.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	forwarder.forward(channel, h264, h264Start, h264Raw, nil)
+
+	h265 := mustNewChannelMedia(t, videoCodecH265)
+	h265.track.bindingCount.Store(1)
+	h265RandomAccess := testRTPPacket(t, 11, 9000, true, []byte{0x26, 0x01})
+	forwarder.forward(channel, h265, h265RandomAccess.packet, h265RandomAccess.raw, nil)
+
+	snapshot := channel.Stats.Snapshot(false, true, time.Now())
+	if snapshot.Forwarding.PacketsForwarded != 1 {
+		t.Fatalf("codec transition forwarded packets from two media generations: %#v", snapshot.Forwarding)
+	}
+}
+
+func ingestChannelSnapshot(t *testing.T, channelIndex int) ChannelIngestSnapshot {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/ingest/stats?all=1", nil)
+	response := httptest.NewRecorder()
+	handleIngestStats(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected ingest stats HTTP 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var stats IngestStatsResponse
+	if err := json.NewDecoder(response.Body).Decode(&stats); err != nil {
+		t.Fatalf("decode ingest stats: %v", err)
+	}
+	for _, channel := range stats.Channels {
+		if channel.Channel == channelIndex {
+			return channel
+		}
+	}
+	t.Fatalf("channel %d missing from ingest stats", channelIndex)
+	return ChannelIngestSnapshot{}
+}
+
+func negotiateTestViewer(media *channelMedia) (*webrtc.PeerConnection, *webrtc.PeerConnection, error) {
+	receiverEngine := webrtc.MediaEngine{}
+	if err := receiverEngine.RegisterCodec(media.parameters, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, fmt.Errorf("register receiver codec: %w", err)
+	}
+	receiver, err := webrtc.NewAPI(webrtc.WithMediaEngine(&receiverEngine)).NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create receiver: %w", err)
+	}
+	if _, err := receiver.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	}); err != nil {
+		_ = receiver.Close()
+		return nil, nil, fmt.Errorf("add receiver transceiver: %w", err)
+	}
+	offer, err := receiver.CreateOffer(nil)
+	if err != nil {
+		_ = receiver.Close()
+		return nil, nil, fmt.Errorf("create offer: %w", err)
+	}
+	if err := receiver.SetLocalDescription(offer); err != nil {
+		_ = receiver.Close()
+		return nil, nil, fmt.Errorf("set receiver description: %w", err)
+	}
+
+	senderEngine := webrtc.MediaEngine{}
+	if err := senderEngine.RegisterCodec(media.parameters, webrtc.RTPCodecTypeVideo); err != nil {
+		_ = receiver.Close()
+		return nil, nil, fmt.Errorf("register sender codec: %w", err)
+	}
+	sender, err := webrtc.NewAPI(webrtc.WithMediaEngine(&senderEngine)).NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		_ = receiver.Close()
+		return nil, nil, fmt.Errorf("create sender: %w", err)
+	}
+	closePeers := func(err error) (*webrtc.PeerConnection, *webrtc.PeerConnection, error) {
+		_ = sender.Close()
+		_ = receiver.Close()
+		return nil, nil, err
+	}
+	if _, err := sender.AddTrack(media.track); err != nil {
+		return closePeers(fmt.Errorf("add sender track: %w", err))
+	}
+	if err := sender.SetRemoteDescription(*receiver.LocalDescription()); err != nil {
+		return closePeers(fmt.Errorf("set sender remote description: %w", err))
+	}
+	answer, err := sender.CreateAnswer(nil)
+	if err != nil {
+		return closePeers(fmt.Errorf("create answer: %w", err))
+	}
+	if err := sender.SetLocalDescription(answer); err != nil {
+		return closePeers(fmt.Errorf("set sender local description: %w", err))
+	}
+	if err := receiver.SetRemoteDescription(*sender.LocalDescription()); err != nil {
+		return closePeers(fmt.Errorf("set receiver remote description: %w", err))
+	}
+	return sender, receiver, nil
 }
 
 func newReceiveOnlyOffer(t *testing.T, parameters webrtc.RTPCodecParameters) (*webrtc.PeerConnection, webrtc.SessionDescription) {
@@ -192,7 +608,7 @@ func TestRTPTimestampRewriterAdvancesPerFrame(t *testing.T) {
 }
 
 func TestRTPPacketRewriterSetsTimestamp(t *testing.T) {
-	rewriter := newRTPPacketRewriter()
+	rewriter := rtpPacketRewriter{}
 	original := &rtp.Packet{
 		Header: rtp.Header{
 			Version:        2,
@@ -228,7 +644,7 @@ func TestRTPPacketRewriterSetsTimestamp(t *testing.T) {
 }
 
 func TestRTPPacketRewriterKeepsSequenceContinuousAcrossSourceGap(t *testing.T) {
-	rewriter := newRTPPacketRewriter()
+	rewriter := rtpPacketRewriter{}
 	first := testRTPPacket(t, 7, 1234, true, []byte{0x26, 0x01})
 	afterGap := testRTPPacket(t, 4000, 5678, true, []byte{0x02, 0x01})
 

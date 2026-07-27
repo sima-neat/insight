@@ -469,7 +469,7 @@ func receiverReportSnapshot(report rtcp.ReceptionReport) *ReceiverReportSnapshot
 		TotalLost:           report.TotalLost,
 		LastSequenceNumber:  report.LastSequenceNumber,
 		Jitter:              report.Jitter,
-		JitterMS:            roundFloat((float64(report.Jitter)/h264ClockRate)*1000, 3),
+		JitterMS:            roundFloat((float64(report.Jitter)/videoRTPClockRate)*1000, 3),
 	}
 }
 

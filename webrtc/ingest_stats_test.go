@@ -111,10 +111,10 @@ func TestIngestStatsReportsH265ParameterSetsAndKeyframes(t *testing.T) {
 	if snapshot.Media.Codec != "H265" || !snapshot.Media.SeenVPS || !snapshot.Media.SeenSPS || !snapshot.Media.SeenPPS {
 		t.Fatalf("unexpected H.265 parameter-set diagnostics: %#v", snapshot.Media)
 	}
-	if snapshot.Media.IDRCount != 1 || snapshot.Media.KeyframeCount != 2 {
+	if snapshot.Media.IDRCount != 0 || snapshot.Media.KeyframeCount != 2 {
 		t.Fatalf("unexpected H.265 keyframe diagnostics: %#v", snapshot.Media)
 	}
-	if snapshot.Media.LastVPSAt == "" || snapshot.Media.LastKeyframeAt == "" {
+	if snapshot.Media.LastVPSAt == "" || snapshot.Media.LastKeyframeAt == "" || snapshot.Media.LastIDRAt != "" {
 		t.Fatalf("expected H.265 parameter-set and keyframe timestamps: %#v", snapshot.Media)
 	}
 	modes := snapshot.Diagnostics.PacketizationModesSeen
@@ -181,9 +181,6 @@ func TestIngestStatsReportsUnsupportedPayloadWithoutDisturbingMediaState(t *test
 	recordTestRTPPacket(stats, h265RTPPayloadType, 11, 6000, []byte{0x02, 0x01})
 
 	snapshot := stats.Snapshot(true, false, time.Now())
-	if snapshot.Diagnostics.UnsupportedPayloadPackets != 1 {
-		t.Fatalf("expected one unsupported payload packet, got %#v", snapshot.Diagnostics)
-	}
 	if snapshot.Diagnostics.EstimatedSequenceGaps != 0 {
 		t.Fatalf("unsupported payload disturbed media sequence tracking: %#v", snapshot.Diagnostics)
 	}
@@ -192,6 +189,13 @@ func TestIngestStatsReportsUnsupportedPayloadWithoutDisturbingMediaState(t *test
 	}
 	if snapshot.Diagnostics.PayloadTypesSeen["72"] != 1 {
 		t.Fatalf("unsupported payload type was not recorded: %#v", snapshot.Diagnostics)
+	}
+	diagnostics, err := json.Marshal(snapshot.Diagnostics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(diagnostics), "unsupported_payload_packets") {
+		t.Fatalf("diagnostics duplicated the payload type history: %s", diagnostics)
 	}
 }
 

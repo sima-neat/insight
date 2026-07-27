@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	ingestActiveTTL = 3 * time.Second
-	h264ClockRate   = 90000
-	maxRecentErrors = 8
+	ingestActiveTTL   = 3 * time.Second
+	videoRTPClockRate = 90000
+	maxRecentErrors   = 8
 )
 
 type IngestStats struct {
@@ -31,14 +31,13 @@ type IngestStats struct {
 	lastPacketAt  time.Time
 	remoteAddr    string
 
-	packetsReceived           uint64
-	bytesReceived             uint64
-	packetsForwarded          uint64
-	bytesForwarded            uint64
-	droppedNoTrack            uint64
-	writeErrors               uint64
-	malformedPackets          uint64
-	unsupportedPayloadPackets uint64
+	packetsReceived  uint64
+	bytesReceived    uint64
+	packetsForwarded uint64
+	bytesForwarded   uint64
+	droppedNoTrack   uint64
+	writeErrors      uint64
+	malformedPackets uint64
 
 	ssrc             uint32
 	payloadType      uint8
@@ -185,14 +184,13 @@ type WebRTCSnapshot struct {
 }
 
 type DiagnosticsSnapshot struct {
-	PayloadTypesSeen          map[string]uint64 `json:"payload_types_seen,omitempty"`
-	UnsupportedPayloadPackets uint64            `json:"unsupported_payload_packets"`
-	NALTypeCounts             map[string]uint64 `json:"nal_type_counts,omitempty"`
-	PacketizationModesSeen    map[string]uint64 `json:"packetization_modes_seen,omitempty"`
-	EstimatedSequenceGaps     uint64            `json:"estimated_sequence_gaps"`
-	EstimatedJitterMS         float64           `json:"estimated_jitter_ms"`
-	MalformedPackets          uint64            `json:"malformed_packets"`
-	RecentErrors              []string          `json:"recent_errors,omitempty"`
+	PayloadTypesSeen       map[string]uint64 `json:"payload_types_seen,omitempty"`
+	NALTypeCounts          map[string]uint64 `json:"nal_type_counts,omitempty"`
+	PacketizationModesSeen map[string]uint64 `json:"packetization_modes_seen,omitempty"`
+	EstimatedSequenceGaps  uint64            `json:"estimated_sequence_gaps"`
+	EstimatedJitterMS      float64           `json:"estimated_jitter_ms"`
+	MalformedPackets       uint64            `json:"malformed_packets"`
+	RecentErrors           []string          `json:"recent_errors,omitempty"`
 }
 
 type nalObservation struct {
@@ -232,7 +230,6 @@ func (s *IngestStats) RecordRTPPacket(pkt *rtp.Packet, packetBytes int, remote n
 	codec := videoCodecForPayloadType(pkt.PayloadType)
 	s.updateSample(packetBytes, now)
 	if codec == videoCodecUnknown {
-		s.unsupportedPayloadPackets++
 		return
 	}
 
@@ -389,7 +386,7 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 	media := MediaSnapshot{
 		Kind:      "video",
 		Codec:     codecName,
-		ClockRate: h264ClockRate,
+		ClockRate: videoRTPClockRate,
 		SeenSPS:   s.seenSPS,
 		SeenPPS:   s.seenPPS,
 		IDRCount:  s.idrCount,
@@ -435,14 +432,13 @@ func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time
 
 	if includeVerbose {
 		snapshot.Diagnostics = &DiagnosticsSnapshot{
-			PayloadTypesSeen:          uint8MapToStringMap(s.payloadTypesSeen),
-			UnsupportedPayloadPackets: s.unsupportedPayloadPackets,
-			NALTypeCounts:             uint8MapToStringMap(s.nalTypeCounts),
-			PacketizationModesSeen:    copyStringUint64Map(s.packetizationModesSeen),
-			EstimatedSequenceGaps:     s.sequenceGaps,
-			EstimatedJitterMS:         roundFloat((s.jitter/h264ClockRate)*1000, 3),
-			MalformedPackets:          s.malformedPackets,
-			RecentErrors:              append([]string(nil), s.recentErrors...),
+			PayloadTypesSeen:       uint8MapToStringMap(s.payloadTypesSeen),
+			NALTypeCounts:          uint8MapToStringMap(s.nalTypeCounts),
+			PacketizationModesSeen: copyStringUint64Map(s.packetizationModesSeen),
+			EstimatedSequenceGaps:  s.sequenceGaps,
+			EstimatedJitterMS:      roundFloat((s.jitter/videoRTPClockRate)*1000, 3),
+			MalformedPackets:       s.malformedPackets,
+			RecentErrors:           append([]string(nil), s.recentErrors...),
 		}
 	}
 
@@ -494,7 +490,7 @@ func (s *IngestStats) updateSequenceGap(pkt *rtp.Packet, previousSSRC uint32) {
 }
 
 func (s *IngestStats) updateJitter(pkt *rtp.Packet, now time.Time) {
-	arrivalRTPUnits := (now.UnixNano() * h264ClockRate) / int64(time.Second)
+	arrivalRTPUnits := (now.UnixNano() * videoRTPClockRate) / int64(time.Second)
 	transit := arrivalRTPUnits - int64(pkt.Timestamp)
 	if s.haveTransit {
 		d := transit - s.lastTransit
@@ -581,11 +577,6 @@ func (s *IngestStats) updateH265Media(payload []byte, rtpTimestamp uint32, now t
 			}
 		}
 		switch observation.Type {
-		case 19, 20:
-			if observation.Start {
-				s.idrCount++
-				s.lastIDRAt = now
-			}
 		case 32:
 			s.seenVPS = true
 			s.lastVPSAt = now

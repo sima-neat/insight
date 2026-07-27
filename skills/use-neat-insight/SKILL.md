@@ -111,7 +111,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 
 ## Ingest Stats
 
-`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached, whether H264 stream headers/keyframes are present, and whether metadata is flowing to the viewer.
+`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached, whether H.264 or H.265 parameter sets and keyframes are present, and whether metadata is flowing to the viewer.
 
 | Query | Behavior |
 | --- | --- |
@@ -120,7 +120,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 | `verbose=1` | Include diagnostics such as NAL type counts, payload type history, estimated sequence gaps, jitter estimate, malformed packet count, and recent errors. |
 | `all=1&verbose=1` | Return the full diagnostic view for all vf channels. |
 
-Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. Metadata should show increasing `metadata.messages_received`; if `metadata.messages_received` grows but `metadata.messages_forwarded` stays flat, the browser DataChannel is not open (or vf is not currently able to send metadata to the browser).
+Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`; if `metadata.messages_received` grows but `metadata.messages_forwarded` stays flat, the browser DataChannel is not open (or vf is not currently able to send metadata to the browser).
 
 Examples:
 
@@ -268,6 +268,7 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
+| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
@@ -282,5 +283,6 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `404` for missing logs, media files, or media-source indexes.
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information.
+- `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.
