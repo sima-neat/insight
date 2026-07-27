@@ -18,7 +18,29 @@ const (
 	ingestActiveTTL   = 3 * time.Second
 	videoRTPClockRate = 90000
 	maxRecentErrors   = 8
+	// A recently dropped viewer stays diagnosable, but no further back than
+	// that. Peers are registered per negotiation attempt, so any client that
+	// retries — a reconnecting tile, or a browser that cannot decode the
+	// channel — would otherwise grow these maps for as long as vf runs.
+	maxRetiredPeers = 8
 )
+
+// retiredPeerStates are the connection states a peer never leaves.
+func isRetiredPeerState(state string) bool {
+	return state == "closed" || state == "failed"
+}
+
+// pruneRetiredPeers keeps the newest retired peers and drops the rest. Peer IDs
+// are allocated monotonically, so ordering by ID is ordering by registration.
+func pruneRetiredPeers(retired []uint64, delete func(uint64)) {
+	if len(retired) <= maxRetiredPeers {
+		return
+	}
+	sort.Slice(retired, func(i, j int) bool { return retired[i] < retired[j] })
+	for _, id := range retired[:len(retired)-maxRetiredPeers] {
+		delete(id)
+	}
+}
 
 type IngestStats struct {
 	mu sync.Mutex
@@ -362,6 +384,16 @@ func (s *IngestStats) UpdatePeerState(peerID uint64, state string) {
 		state = "unknown"
 	}
 	s.peers[peerID] = state
+	if !isRetiredPeerState(state) {
+		return
+	}
+	retired := make([]uint64, 0, len(s.peers))
+	for id, peerState := range s.peers {
+		if isRetiredPeerState(peerState) {
+			retired = append(retired, id)
+		}
+	}
+	pruneRetiredPeers(retired, func(id uint64) { delete(s.peers, id) })
 }
 
 func (s *IngestStats) Snapshot(includeVerbose bool, trackAttached bool, now time.Time) ChannelIngestSnapshot {

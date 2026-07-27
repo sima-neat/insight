@@ -241,6 +241,16 @@ func (s *EgressStats) UpdatePeerConnectionState(peerID uint64, connectionState, 
 	if signalingState != "" {
 		peer.SignalingState = signalingState
 	}
+	if !isRetiredPeerState(peer.ConnectionState) {
+		return
+	}
+	retired := make([]uint64, 0, len(s.peers))
+	for id, candidate := range s.peers {
+		if isRetiredPeerState(candidate.ConnectionState) {
+			retired = append(retired, id)
+		}
+	}
+	pruneRetiredPeers(retired, func(id uint64) { delete(s.peers, id) })
 }
 
 func (s *EgressStats) UpdateDataChannelState(peerID uint64, state string) {

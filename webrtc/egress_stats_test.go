@@ -124,3 +124,58 @@ func TestEgressStatsRecordsBrowserReport(t *testing.T) {
 		t.Fatalf("unexpected synchronization report: %#v", report.Synchronization)
 	}
 }
+
+func TestEgressStatsBoundsRetiredPeers(t *testing.T) {
+	stats := NewEgressStats(3)
+	var live uint64
+	for i := 0; i < 50; i++ {
+		peerID := stats.RegisterPeer()
+		if i == 25 {
+			// One peer stays connected and must survive every later eviction.
+			live = peerID
+			stats.UpdatePeerConnectionState(peerID, "connected", "connected", "stable")
+			continue
+		}
+		stats.UpdatePeerConnectionState(peerID, "failed", "failed", "stable")
+	}
+
+	snapshot, _ := stats.Snapshot(true, false, time.Now())
+	if len(snapshot.Peers) != maxRetiredPeers+1 {
+		t.Fatalf("expected %d retired peers plus the live one, got %d",
+			maxRetiredPeers, len(snapshot.Peers))
+	}
+	found := false
+	for _, peer := range snapshot.Peers {
+		if peer.ID == live {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("eviction dropped the connected peer %d", live)
+	}
+	// The survivors must be the most recent retirements, not the oldest.
+	newest := snapshot.Peers[len(snapshot.Peers)-1].ID
+	if newest != 50 {
+		t.Fatalf("expected the newest peer retained, got %d", newest)
+	}
+}
+
+func TestIngestStatsBoundsRetiredPeers(t *testing.T) {
+	stats := NewIngestStats(3, 9003, 9103)
+	for i := 0; i < 50; i++ {
+		peerID := stats.RegisterPeer()
+		stats.UpdatePeerState(peerID, "closed")
+	}
+	live := stats.RegisterPeer()
+	stats.UpdatePeerState(live, "connected")
+
+	webrtcSnapshot := stats.Snapshot(false, false, time.Now()).WebRTC
+	// PeerCount already excludes retired peers; the bound is visible in the
+	// state histogram, which is what grew without limit before.
+	if got := webrtcSnapshot.ConnectionStates["closed"]; got != maxRetiredPeers {
+		t.Fatalf("expected retired peers capped at %d, got %d", maxRetiredPeers, got)
+	}
+	if webrtcSnapshot.PeerCount != 1 || webrtcSnapshot.ConnectionStates["connected"] != 1 {
+		t.Fatalf("live peer lost to eviction: %#v", webrtcSnapshot)
+	}
+}
