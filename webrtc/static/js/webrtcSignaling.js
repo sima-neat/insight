@@ -1,17 +1,3 @@
-function waitForIceGathering(peerConnection) {
-  if (peerConnection.iceGatheringState === "complete") return Promise.resolve();
-
-  return new Promise((resolve) => {
-    const onGatheringStateChange = () => {
-      if (peerConnection.iceGatheringState !== "complete") return;
-      peerConnection.removeEventListener("icegatheringstatechange", onGatheringStateChange);
-      resolve();
-    };
-    peerConnection.addEventListener("icegatheringstatechange", onGatheringStateChange);
-    onGatheringStateChange();
-  });
-}
-
 // Only an explicit 4xx is a permanent rejection of this offer. Transport and
 // local failures (fetch rejection, setRemoteDescription) carry no status, and a
 // 5xx is a server-side condition that commonly clears — vf answers 503 until RTP
@@ -25,14 +11,20 @@ export function isRetryableWebRTCAnswerError(error) {
   return status === undefined || status >= 500;
 }
 
+// The offer is posted before gathering completes, and deliberately so. Chrome
+// obfuscates local addresses as mDNS ".local" candidates, which vf would then
+// have to resolve by mDNS from inside its container — measured slower on every
+// sample and occasionally stalling for seconds. An offer carrying no candidates
+// lets the browser connect straight to the host candidates in the answer, which
+// vf accepts as peer-reflexive.
 export async function requestWebRTCAnswer(peerConnection, offerUrl, fetchRequest = globalThis.fetch) {
-  await peerConnection.setLocalDescription(await peerConnection.createOffer());
-  await waitForIceGathering(peerConnection);
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
 
   const response = await fetchRequest(offerUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(peerConnection.localDescription),
+    body: JSON.stringify(offer),
   });
   if (!response.ok) {
     const error = new Error(`HTTP ${response.status}`);
