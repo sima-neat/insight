@@ -17,6 +17,9 @@ function waitForIceGathering(peerConnection) {
 // 5xx is a server-side condition that commonly clears — vf answers 503 until RTP
 // identifies the codec, and 500 when the ephemeral UDP range is momentarily
 // exhausted. Treating either as permanent leaves a tile dead until page reload.
+// A browser that cannot decode the channel codec gets 415 instead, precisely so
+// it lands here as permanent rather than retrying a negotiation that can never
+// succeed.
 export function isRetryableWebRTCAnswerError(error) {
   const status = error?.status;
   return status === undefined || status >= 500;

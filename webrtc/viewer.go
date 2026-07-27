@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -364,14 +365,19 @@ func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet
 	}
 
 	accessUnit, ready := f.accessUnitBuffer.accept(pkt, raw)
-	if !ready {
+	// Counted per packet rather than per completed access unit: while no viewer
+	// is bound the H.265 recovery gate withholds every access unit between
+	// random-access points, and those never reach a completion the loop below
+	// could count. Accounting only for completed units undercounts the
+	// discarded traffic by most of the stream.
+	if media.track.bindingCount.Load() == 0 {
+		ch.Stats.RecordDroppedNoTrack()
+		if ready {
+			f.accessUnitBuffer.resetH265Recovery()
+		}
 		return
 	}
-	if media.track.bindingCount.Load() == 0 {
-		for range accessUnit.packets {
-			ch.Stats.RecordDroppedNoTrack()
-		}
-		f.accessUnitBuffer.resetH265Recovery()
+	if !ready {
 		return
 	}
 
@@ -538,6 +544,33 @@ func handleReverseOffer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(pc.LocalDescription())
 }
 
+// offerAdvertisesCodec reports whether the browser offered the encoding this
+// channel carries. A malformed offer is treated as advertising it, so the
+// existing SDP error path stays responsible for reporting that.
+func offerAdvertisesCodec(offer webrtc.SessionDescription, mimeType string) bool {
+	parsed, err := offer.Unmarshal()
+	if err != nil {
+		return true
+	}
+	// RTP encoding names are case-insensitive, and the trailing slash keeps
+	// "H264/90000" from satisfying a search for H265.
+	wanted := strings.ToUpper(strings.TrimPrefix(mimeType, "video/")) + "/"
+	for _, media := range parsed.MediaDescriptions {
+		if media.MediaName.Media != "video" {
+			continue
+		}
+		for _, attribute := range media.Attributes {
+			if attribute.Key != "rtpmap" {
+				continue
+			}
+			if strings.Contains(strings.ToUpper(attribute.Value), wanted) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func handleOffer(w http.ResponseWriter, r *http.Request) {
 	channelIdxStr := r.URL.Query().Get("channel")
 	idx, err := strconv.Atoi(channelIdxStr)
@@ -558,6 +591,15 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parameters := media.parameters
+	// Rejected before anything is allocated. A browser with no decoder for this
+	// channel's codec can never negotiate, so the answer must say so with a
+	// status the viewer treats as permanent. Letting Pion fail instead would
+	// return 500, which the viewer retries, and every attempt would register
+	// peer records for a connection that cannot succeed.
+	if !offerAdvertisesCodec(offer, parameters.MimeType) {
+		http.Error(w, "Browser does not support the channel codec", http.StatusUnsupportedMediaType)
+		return
+	}
 
 	m := webrtc.MediaEngine{}
 	m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo)

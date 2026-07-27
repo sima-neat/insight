@@ -306,7 +306,7 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
-| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec. |
+| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode it. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
@@ -321,6 +321,7 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `404` for missing logs, media files, or media-source indexes.
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information.
+- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
 - `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

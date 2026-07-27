@@ -298,6 +298,98 @@ func TestCodecTransitionRetiresPreviousMediaPeers(t *testing.T) {
 	)
 }
 
+func TestRTPForwarderCountsGatedH265DropsWithoutTrackBindings(t *testing.T) {
+	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
+	media := mustNewChannelMedia(t, videoCodecH265)
+	channel.Media.Store(media)
+	forwarder := newRTPForwarder()
+
+	// One random-access unit followed by delta units. With no viewer bound the
+	// recovery gate re-arms after the IRAP, so the deltas never complete an
+	// access unit; they must still be accounted for as discarded.
+	packets := []struct {
+		sequence uint16
+		payload  []byte
+	}{
+		{10, []byte{0x26, 0x01}},
+		{11, []byte{0x02, 0x01}},
+		{12, []byte{0x02, 0x01}},
+		{13, []byte{0x02, 0x01}},
+	}
+	for i, p := range packets {
+		pkt := testRTPPacket(t, p.sequence, uint32(9000*(i+1)), true, p.payload)
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+	}
+
+	snapshot := channel.Stats.Snapshot(false, false, time.Now())
+	if got := snapshot.Forwarding.PacketsDroppedNoTrack; got != uint64(len(packets)) {
+		t.Fatalf("expected every unbound packet counted, got %d of %d", got, len(packets))
+	}
+	if snapshot.Forwarding.PacketsForwarded != 0 {
+		t.Fatalf("unexpected forwarding without a bound viewer: %#v", snapshot.Forwarding)
+	}
+}
+
+func TestHandleOfferRejectsOfferWithoutChannelCodec(t *testing.T) {
+	const channelIndex = 76
+	previous := channels[channelIndex]
+	channel := &Channel{
+		Stats:  NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		Egress: NewEgressStats(channelIndex),
+	}
+	channel.Media.Store(mustNewChannelMedia(t, videoCodecH265))
+	channels[channelIndex] = channel
+	t.Cleanup(func() { channels[channelIndex] = previous })
+
+	// A browser with no HEVC support: the offer advertises H.264 only.
+	browser, offer := newReceiveOnlyOffer(t, webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeH264,
+			ClockRate:   videoRTPClockRate,
+			SDPFmtpLine: "packetization-mode=1;profile-level-id=42e01f",
+		},
+		PayloadType: 96,
+	})
+	t.Cleanup(func() { _ = browser.Close() })
+
+	body, err := json.Marshal(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/offer?channel=%d", channelIndex), bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	handleOffer(response, request)
+
+	// 4xx so the viewer stops instead of renegotiating every few seconds.
+	if response.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected HTTP %d, got %d: %s",
+			http.StatusUnsupportedMediaType, response.Code, response.Body.String())
+	}
+	snapshot, _ := channel.Egress.Snapshot(true, false, time.Now())
+	if len(snapshot.Peers) != 0 {
+		t.Fatalf("a rejected offer registered peer records: %#v", snapshot.Peers)
+	}
+}
+
+func TestOfferAdvertisesCodecMatchesEncodingName(t *testing.T) {
+	h265Offer := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "v=0\r\n" +
+		"o=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n" +
+		"m=video 9 UDP/TLS/RTP/SAVPF 116\r\nc=IN IP4 0.0.0.0\r\n" +
+		"a=rtpmap:116 H265/90000\r\n"}
+
+	if !offerAdvertisesCodec(h265Offer, webrtc.MimeTypeH265) {
+		t.Fatal("expected an H.265 offer to satisfy an H.265 channel")
+	}
+	if offerAdvertisesCodec(h265Offer, webrtc.MimeTypeH264) {
+		t.Fatal("H265/90000 must not satisfy a search for H264")
+	}
+	malformed := webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: "not sdp"}
+	if !offerAdvertisesCodec(malformed, webrtc.MimeTypeH265) {
+		t.Fatal("a malformed offer must defer to the existing SDP error path")
+	}
+}
+
 func TestRTPForwarderCountsDropsWithoutTrackBindings(t *testing.T) {
 	channel := &Channel{Stats: NewIngestStats(0, 9000, 9100)}
 	media := mustNewChannelMedia(t, videoCodecH264)
