@@ -7,6 +7,11 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import {
+  channelLabel,
+  formatChannelStatus,
+  resolveCodecLabel,
+} from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import {
   MAX_CHANNELS,
@@ -110,6 +115,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
     lastTs: null,
     messageCount: 0,
     lastCount: 0,
+    codecLabel: null,
     decoderHealth: {
       lastFramesReceived: null,
       lastFramesDecoded: null,
@@ -210,6 +216,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         lastTs: null,
         messageCount: 0,
         lastCount: 0,
+        codecLabel: null,
         decoderHealth: {
           lastFramesReceived: null,
           lastFramesDecoded: null,
@@ -366,6 +373,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
             const height = report.frameHeight ?? "?";
 
             const tracker = rtcpRef.current;
+            // Retained across samples so a report that omits the codec does not
+            // blank the segment; reset on connect so a codec change cannot show
+            // the previous session's label.
+            tracker.codecLabel = resolveCodecLabel(stats, report) ?? tracker.codecLabel;
             const hasPreviousSample = tracker.lastBytes != null && tracker.lastTs != null;
             const deltaBytes = hasPreviousSample ? report.bytesReceived - tracker.lastBytes : 0;
             const deltaTime = hasPreviousSample ? (report.timestamp - tracker.lastTs) / 1000 : 0;
@@ -397,7 +408,15 @@ function ChannelTile({ index, onActiveChange, debug }) {
               trackHistoryRef.current.clear();
             }
             setBanner(
-              `Channel ${index} | ${width}x${height} | ${fps} fps | ${bitrate} kbps | ${tracker.lastCount} msgs/sec`
+              formatChannelStatus({
+                index,
+                codec: tracker.codecLabel,
+                width,
+                height,
+                fps,
+                bitrate,
+                messageRate: tracker.lastCount,
+              })
             );
             debugLog("stats", {
               framesReceived: report.framesReceived,
@@ -485,7 +504,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
           });
           if (decoderUnsupported && mounted && sessionId === currentSession) {
             debugLog("no decoder for the negotiated codec; not reconnecting");
-            setBanner(`Channel ${index} | Codec not supported by this browser`);
+            setBanner(
+              `${channelLabel(index, rtcpRef.current.codecLabel)} | Codec not supported by this browser`,
+            );
           } else if (decoderStalled && mounted && sessionId === currentSession) {
             debugLog("decoder stalled; reconnecting channel");
             scheduleReconnect();
