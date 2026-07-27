@@ -629,17 +629,21 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[Channel %d] ICE candidate: %s", idx, c.String())
 		}
 	})
-	respondNegotiationError := func(message string) {
+	// The response carries a stable message; the cause goes to the log. Callers
+	// cannot act on a Pion error, and it is the only record of why a viewer
+	// failed to connect.
+	respondNegotiationError := func(message string, cause error) {
 		if media.peers.isRetired() {
 			http.Error(w, "Video codec changed", http.StatusServiceUnavailable)
 			return
 		}
+		log.Printf("[Channel %d] %s: %v", idx, message, cause)
 		http.Error(w, message, http.StatusInternalServerError)
 	}
 
 	sender, err := pc.AddTrack(media.track)
 	if err != nil {
-		respondNegotiationError("AddTrack failed")
+		respondNegotiationError("AddTrack failed", err)
 		return
 	}
 
@@ -663,16 +667,16 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	if err := pc.SetRemoteDescription(offer); err != nil {
-		respondNegotiationError("SetRemoteDescription failed")
+		respondNegotiationError("SetRemoteDescription failed", err)
 		return
 	}
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		respondNegotiationError("CreateAnswer failed")
+		respondNegotiationError("CreateAnswer failed", err)
 		return
 	}
 	if err = pc.SetLocalDescription(answer); err != nil {
-		respondNegotiationError("SetLocalDescription failed")
+		respondNegotiationError("SetLocalDescription failed", err)
 		return
 	}
 	go readSenderRTCP(sender, ch.Egress, egressPeerID)

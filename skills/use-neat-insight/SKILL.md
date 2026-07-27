@@ -140,6 +140,10 @@ curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1'
 | `verbose=1` | Include peer diagnostics such as recent RTCP read errors. |
 | `all=1&verbose=1` | Return the full egress diagnostic view. |
 
+`all=1` returns closed and failed peers alongside live ones, so a channel can list far more peers than it has viewers. `peer_count` counts only active peers while the `peers` array holds every returned record, and any total computed across that array includes dead sessions. Filter on each peer's `active` field before aggregating, or omit `all=1` when you want the live view.
+
+A peer is `active` when its connection is up. That is not a statement about how current its numbers are: a viewer whose tab is backgrounded stops reporting while staying connected, so its `browser` block can be minutes old and still appear under an active peer. Compare the peer's `last_browser_report_at` against the response's top-level `time` — both are server timestamps — before trusting `frames_decoded` or `frames_per_second`.
+
 Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
 
 Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms` and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
