@@ -14,7 +14,10 @@ import {
   gridDimensions,
   normalizeVisiblePerPage,
 } from "./viewerLayout.js";
-import { requestWebRTCAnswer } from "./webrtcSignaling.js";
+import {
+  isRetryableWebRTCAnswerError,
+  requestWebRTCAnswer,
+} from "../../../webrtc/static/js/webrtcSignaling.js";
 
 const RECONNECT_DELAY_MS = 5000;
 const DECODER_STALL_MS = 5000;
@@ -478,7 +481,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
           });
           if (decoderStalled && mounted && sessionId === currentSession) {
             debugLog("decoder stalled; reconnecting channel");
-            await connect();
+            scheduleReconnect();
           }
         } catch (_err) {
           // Ignore getStats failures for transient states.
@@ -491,9 +494,27 @@ function ChannelTile({ index, onActiveChange, debug }) {
         await pc.setRemoteDescription(answer);
         debugLog("setRemoteDescription ok");
       } catch (_err) {
-        if (!mounted) return;
+        if (!mounted || sessionId !== currentSession) return;
         debugLog("connect error", _err?.message || _err);
-        scheduleReconnect();
+        if (statsInterval != null) {
+          window.clearInterval(statsInterval);
+          statsInterval = null;
+        }
+        if (metadataChannel) {
+          metadataChannel.close();
+          metadataChannel = null;
+        }
+        if (pc) {
+          pc.onconnectionstatechange = null;
+          pc.close();
+          pc = null;
+        }
+        if (isRetryableWebRTCAnswerError(_err)) {
+          setBanner(`Channel ${index} | Waiting for stream`);
+          scheduleReconnect();
+          return;
+        }
+        setBanner(`Channel ${index} | Connection failed: ${_err?.message || "Unknown error"}`);
       }
     };
 

@@ -1,11 +1,21 @@
 // roi-manual.js — direct ROI drawing over live video stream
 
+import {
+  isRetryableWebRTCAnswerError,
+  requestWebRTCAnswer,
+} from "./webrtcSignaling.js";
+
+const RECONNECT_DELAY_MS = 5000;
+
 let drawing = false;
 let currentPoints = [];
 let currentPolygon = null;
 let selectedPolygon = null;
 let currentScope = "global";
 let previewLine = null;
+let previewPeerConnection = null;
+let previewReconnectTimer = null;
+let previewSession = 0;
 
 
 const roiOverlay = document.getElementById("roiOverlay");
@@ -13,32 +23,62 @@ const modeSelector = document.getElementById("roiModeSelector");
 const startBtn = document.getElementById("startROITool");
 const clearBtn = document.getElementById("clearROIs");
 const liveVideo = document.getElementById("roiLiveVideo");
+const streamStatus = document.getElementById("roiStreamStatus");
 
-function connectToStream(scope = "global") {
+function setStreamStatus(message = "") {
+  streamStatus.textContent = message;
+  streamStatus.classList.toggle("hidden", !message);
+}
+
+async function connectToStream(scope = "global") {
   currentScope = scope;
+  previewSession += 1;
+  const session = previewSession;
+  if (previewReconnectTimer != null) {
+    window.clearTimeout(previewReconnectTimer);
+    previewReconnectTimer = null;
+  }
+  if (previewPeerConnection) {
+    previewPeerConnection.close();
+  }
+
   const pc = new RTCPeerConnection();
+  previewPeerConnection = pc;
+  liveVideo.srcObject = null;
+  // Installed before the track can arrive; ontrack assigns srcObject as soon as
+  // the answer is applied, and every early return below skips this function's tail.
+  liveVideo.onloadedmetadata = () => {
+    observeAndResizeOverlay();
+  };
+  setStreamStatus("Connecting to stream…");
   pc.addTransceiver("video", { direction: "recvonly" });
   pc.ontrack = (event) => {
-    if (event.track.kind === "video") {
+    if (session === previewSession && event.track.kind === "video") {
       const stream = new MediaStream();
       stream.addTrack(event.track);
       liveVideo.srcObject = stream;
+      setStreamStatus();
     }
   };
-  pc.createOffer().then(offer => {
-    pc.setLocalDescription(offer);
-    return fetch(`/offer?channel=${scope}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(offer)
-    });
-  }).then(res => res.json()).then(answer => {
-    pc.setRemoteDescription(answer);
-  });
 
-  liveVideo.onloadedmetadata = () => {
-    observeAndResizeOverlay();
-  };  
+  try {
+    const answer = await requestWebRTCAnswer(pc, `/offer?channel=${scope}`);
+    if (session !== previewSession) {
+      pc.close();
+      return;
+    }
+    await pc.setRemoteDescription(answer);
+  } catch (error) {
+    pc.close();
+    if (session !== previewSession) return;
+    previewPeerConnection = null;
+    if (isRetryableWebRTCAnswerError(error)) {
+      setStreamStatus("Waiting for stream…");
+      previewReconnectTimer = window.setTimeout(() => connectToStream(scope), RECONNECT_DELAY_MS);
+      return;
+    }
+    setStreamStatus(`Preview connection failed: ${error?.message || "Unknown error"}`);
+  }
 }
 
 window.addEventListener("resize", observeAndResizeOverlay);
@@ -349,3 +389,6 @@ function showHandles(polygon) {
 function removeHandles() {
   document.querySelectorAll(".roi-handle").forEach(el => el.remove());
 }
+
+window.connectToStream = connectToStream;
+window.loadPolygons = loadPolygons;
