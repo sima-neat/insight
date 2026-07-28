@@ -280,8 +280,11 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	}
 
 	startsAccessUnit, randomAccess := rtpPacketState(pkt)
-	sequenceDiscontinuity := b.haveSequence &&
-		(pkt.SSRC != b.sequenceSSRC || pkt.SequenceNumber != b.nextSequence)
+	// An SSRC change is a new sender, not loss from the current one. It carries
+	// no sequence baseline to compare against, and any unfinished access unit it
+	// interrupts belonged to the previous source.
+	sameSource := b.haveSequence && pkt.SSRC == b.sequenceSSRC
+	sequenceDiscontinuity := sameSource && pkt.SequenceNumber != b.nextSequence
 	b.nextSequence = pkt.SequenceNumber + 1
 	b.sequenceSSRC = pkt.SSRC
 	b.haveSequence = true
@@ -293,7 +296,7 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 		b.timestamp = pkt.Timestamp
 		b.codec = codec
 		b.complete = startsAccessUnit
-		b.discontinuity = b.active || sequenceDiscontinuity
+		b.discontinuity = (b.active && sameSource) || sequenceDiscontinuity
 		b.randomAccess = randomAccess
 		b.active = true
 	} else if sequenceDiscontinuity {

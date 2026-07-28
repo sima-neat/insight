@@ -851,6 +851,60 @@ func TestH265RecoveryGateRejectsDamagedRandomAccessUnit(t *testing.T) {
 	}
 }
 
+// A restarted sender arrives with an unrelated SSRC and sequence number. Both
+// restart shapes matter: one after a completed access unit, one interrupting an
+// access unit that never reached its marker.
+func TestRTPAccessUnitBufferForwardsFirstUnitFromRestartedSource(t *testing.T) {
+	tests := []struct {
+		name        string
+		payloadType uint8
+		payload     []byte
+	}{
+		{name: "h264", payloadType: h264RTPPayloadType, payload: []byte{0x65, 0x88}},
+		{name: "h265", payloadType: h265RTPPayloadType, payload: []byte{0x26, 0x01}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"/after a completed unit", func(t *testing.T) {
+			buffer := newRTPAccessUnitBuffer()
+			original := testRTPPacketForCodec(t, tt.payloadType, 10, 9000, true, tt.payload)
+			if _, ready := buffer.accept(original.packet, original.raw); !ready {
+				t.Fatal("expected the original source's access unit to be forwarded")
+			}
+
+			restarted := testRTPPacketForCodec(t, tt.payloadType, 500, 18000, true, tt.payload)
+			restarted.packet.SSRC = 4242
+			raw, err := restarted.packet.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ready := buffer.accept(restarted.packet, raw); !ready {
+				t.Fatal("expected the restarted source's first random-access unit to be forwarded")
+			}
+		})
+
+		t.Run(tt.name+"/interrupting an unfinished unit", func(t *testing.T) {
+			buffer := newRTPAccessUnitBuffer()
+			original := testRTPPacketForCodec(t, tt.payloadType, 10, 9000, true, tt.payload)
+			if _, ready := buffer.accept(original.packet, original.raw); !ready {
+				t.Fatal("expected the original source's access unit to be forwarded")
+			}
+			abandoned := testRTPPacketForCodec(t, tt.payloadType, 11, 18000, false, tt.payload)
+			buffer.accept(abandoned.packet, abandoned.raw)
+
+			restarted := testRTPPacketForCodec(t, tt.payloadType, 500, 27000, true, tt.payload)
+			restarted.packet.SSRC = 4242
+			raw, err := restarted.packet.Marshal()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ready := buffer.accept(restarted.packet, raw); !ready {
+				t.Fatal("expected a restart mid access unit to forward the new source's first unit")
+			}
+		})
+	}
+}
+
 func TestH265RecoveryGateWaitsForRandomAccessAfterLoss(t *testing.T) {
 	buffer := newRTPAccessUnitBuffer()
 	delta := testRTPPacket(t, 10, 9000, true, []byte{0x02, 0x01})
