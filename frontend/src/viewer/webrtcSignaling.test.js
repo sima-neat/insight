@@ -20,7 +20,7 @@ test("viewer posts the offer without waiting for candidate gathering", async () 
       this.iceGatheringState = "gathering";
     },
     addEventListener() {
-      throw new Error("must not subscribe to gathering; mDNS candidates delay vf");
+      throw new Error("must not wait for gathering; it blocks on the STUN server");
     },
   };
 

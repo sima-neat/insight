@@ -11,12 +11,15 @@ export function isRetryableWebRTCAnswerError(error) {
   return status === undefined || status >= 500;
 }
 
-// The offer is posted before gathering completes, and deliberately so. Chrome
-// obfuscates local addresses as mDNS ".local" candidates, which vf would then
-// have to resolve by mDNS from inside its container — measured slower on every
-// sample and occasionally stalling for seconds. An offer carrying no candidates
-// lets the browser connect straight to the host candidates in the answer, which
-// vf accepts as peer-reflexive.
+// The offer is posted before gathering completes, and deliberately so. Gathering
+// cannot report complete until every configured ICE server has answered or
+// exhausted its STUN retransmission schedule, so waiting on it puts a public
+// internet round trip in front of a connection between two processes on the same
+// host. Measured browser-side, waiting cost 120 ms when the STUN server answered
+// and 3.9 s, 15.9 s, or 25 s when its packets were dropped — the RFC 5389 backoff
+// steps. Posting immediately needs none of those candidates: the browser reaches
+// vf on the host candidates in the answer, and vf accepts the browser's source
+// address as peer-reflexive. That path connects in 5-10 ms.
 export async function requestWebRTCAnswer(peerConnection, offerUrl, fetchRequest = globalThis.fetch) {
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
