@@ -105,6 +105,7 @@
             <div id="roiDrawingArea" class="roi-canvas-container">
               <video id="roiLiveVideo" autoplay muted playsinline></video>
               <svg id="roiOverlay" preserveAspectRatio="none"></svg>
+              <div id="roiStreamStatus" class="roi-stream-status hidden" role="status" aria-live="polite"></div>
             </div>
             <div class="roi-header">
               <button id="clearROIs" title="Clear all ROIs" class="icon-button">
@@ -152,7 +153,7 @@
   <link rel="stylesheet" href="/static/css/settings.css">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
-  <script src="/static/js/roi.js"></script>
+  <script type="module" src="/static/js/roi.js"></script>
   <script src="/static/settings.js"></script>
 
 </body>

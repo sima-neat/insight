@@ -7,14 +7,24 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
+import { updateDecoderHealth } from "./decoderHealth.js";
 import {
   MAX_CHANNELS,
   PAGE_SIZE_PRESETS,
   gridDimensions,
   normalizeVisiblePerPage,
 } from "./viewerLayout.js";
+import {
+  isRetryableWebRTCAnswerError,
+  requestWebRTCAnswer,
+} from "../../../webrtc/static/js/webrtcSignaling.js";
 
-const RECONNECT_DELAY_MS = 5000;
+const RECONNECT_DELAY_MS = 2000;
+// Deliberately longer than the retry delay: a decoder can legitimately produce
+// nothing for a moment while it waits for a keyframe, and reconnecting is the
+// more expensive response.
+const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
 
 function parseIndices(srcParam) {
@@ -104,7 +114,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
     lastTs: null,
     messageCount: 0,
     lastCount: 0,
-    lastFramesDecoded: null,
+    codecLabel: null,
+    decoderHealth: {
+      lastFramesReceived: null,
+      lastFramesDecoded: null,
+      stalledSinceMs: null,
+    },
   });
   const playbackRef = useRef({ lastFrameAt: 0 });
   const activeRef = useRef(false);
@@ -200,7 +215,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
         lastTs: null,
         messageCount: 0,
         lastCount: 0,
-        lastFramesDecoded: null,
+        codecLabel: null,
+        decoderHealth: {
+          lastFramesReceived: null,
+          lastFramesDecoded: null,
+          stalledSinceMs: null,
+        },
       };
       playbackRef.current = { lastFrameAt: 0 };
       synchronizationSettingsRef.current = getSynchronizationSettings(index);
@@ -342,6 +362,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         if (!mounted || !pc || pc.connectionState !== "connected") return;
         try {
           const stats = await pc.getStats();
+          let decoderStalled = false;
           stats.forEach((report) => {
             if (report.type !== "inbound-rtp" || report.kind !== "video") return;
 
@@ -350,6 +371,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
             const height = report.frameHeight ?? "?";
 
             const tracker = rtcpRef.current;
+            // Retained across samples so a report that omits the codec does not
+            // blank the segment; reset on connect so a codec change cannot show
+            // the previous session's label.
+            tracker.codecLabel = resolveCodecLabel(stats, report) ?? tracker.codecLabel;
             const hasPreviousSample = tracker.lastBytes != null && tracker.lastTs != null;
             const deltaBytes = hasPreviousSample ? report.bytesReceived - tracker.lastBytes : 0;
             const deltaTime = hasPreviousSample ? (report.timestamp - tracker.lastTs) / 1000 : 0;
@@ -359,13 +384,17 @@ function ChannelTile({ index, onActiveChange, debug }) {
               report.jitterBufferEmittedCount > 0
                 ? (report.jitterBufferDelay / report.jitterBufferEmittedCount) * 1000
                 : 0;
-            if (
-              typeof report.framesDecoded === "number" &&
-              (tracker.lastFramesDecoded == null || report.framesDecoded > tracker.lastFramesDecoded)
-            ) {
+            tracker.decoderHealth = updateDecoderHealth(
+              tracker.decoderHealth,
+              report,
+              Date.now(),
+              DECODER_STALL_MS,
+            );
+            if (tracker.decoderHealth.decodedAdvanced) {
               playbackRef.current.lastFrameAt = Date.now();
               setTileActive(true);
             }
+            decoderStalled ||= tracker.decoderHealth.stalled;
             if (
               playbackRef.current.lastFrameAt > 0 &&
               Date.now() - playbackRef.current.lastFrameAt > STREAM_STALE_MS
@@ -376,7 +405,15 @@ function ChannelTile({ index, onActiveChange, debug }) {
               trackHistoryRef.current.clear();
             }
             setBanner(
-              `Channel ${index} | ${width}x${height} | ${fps} fps | ${bitrate} kbps | ${tracker.lastCount} msgs/sec`
+              formatChannelStatus({
+                index,
+                codec: tracker.codecLabel,
+                width,
+                height,
+                fps,
+                bitrate,
+                messageRate: tracker.lastCount,
+              })
             );
             debugLog("stats", {
               framesReceived: report.framesReceived,
@@ -416,6 +453,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
                     frames_decoded: report.framesDecoded,
                     frames_dropped: report.framesDropped,
                     frames_per_second: report.framesPerSecond,
+                    decoder_implementation: report.decoderImplementation,
+                    power_efficient_decoder: report.powerEfficientDecoder,
                     frame_width: report.frameWidth,
                     frame_height: report.frameHeight,
                     freeze_count: report.freezeCount,
@@ -457,32 +496,45 @@ function ChannelTile({ index, onActiveChange, debug }) {
 
             tracker.lastBytes = report.bytesReceived;
             tracker.lastTs = report.timestamp;
-            tracker.lastFramesDecoded = report.framesDecoded ?? tracker.lastFramesDecoded;
             tracker.lastCount = tracker.messageCount;
             tracker.messageCount = 0;
           });
+          if (decoderStalled && mounted && sessionId === currentSession) {
+            debugLog("decoder stalled; reconnecting channel");
+            scheduleReconnect();
+          }
         } catch (_err) {
           // Ignore getStats failures for transient states.
         }
       }, 1000);
 
       try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        const response = await fetch(`/offer?channel=${index}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(offer),
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const answer = await response.json();
+        const answer = await requestWebRTCAnswer(pc, `/offer?channel=${index}`);
         if (!mounted || sessionId !== currentSession) return;
         await pc.setRemoteDescription(answer);
         debugLog("setRemoteDescription ok");
       } catch (_err) {
-        if (!mounted) return;
+        if (!mounted || sessionId !== currentSession) return;
         debugLog("connect error", _err?.message || _err);
-        scheduleReconnect();
+        if (statsInterval != null) {
+          window.clearInterval(statsInterval);
+          statsInterval = null;
+        }
+        if (metadataChannel) {
+          metadataChannel.close();
+          metadataChannel = null;
+        }
+        if (pc) {
+          pc.onconnectionstatechange = null;
+          pc.close();
+          pc = null;
+        }
+        if (isRetryableWebRTCAnswerError(_err)) {
+          setBanner(`Channel ${index} | Waiting for stream`);
+          scheduleReconnect();
+          return;
+        }
+        setBanner(`Channel ${index} | Connection failed: ${_err?.message || "Unknown error"}`);
       }
     };
 

@@ -111,7 +111,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 
 ## Ingest Stats
 
-`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached, whether H264 stream headers/keyframes are present, and whether metadata is flowing to the viewer.
+`/api/ingest/stats` proxies vf's non-decoding ingest stats for both video RTP (UDP `9000-9079`) and metadata JSON (UDP `9100-9179`). Use it to answer whether UDP is reaching vf, whether vf has a WebRTC track attached, whether H.264 or H.265 parameter sets and keyframes are present, and whether metadata is flowing to the viewer.
 
 | Query | Behavior |
 | --- | --- |
@@ -120,7 +120,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 | `verbose=1` | Include diagnostics such as NAL type counts, payload type history, estimated sequence gaps, jitter estimate, malformed packet count, and recent errors. |
 | `all=1&verbose=1` | Return the full diagnostic view for all vf channels. |
 
-Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. Metadata should show increasing `metadata.messages_received`; if `metadata.messages_received` grows but `metadata.messages_forwarded` stays flat, the browser DataChannel is not open (or vf is not currently able to send metadata to the browser).
+Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`; if `metadata.messages_received` grows but `metadata.messages_forwarded` stays flat, the browser DataChannel is not open (or vf is not currently able to send metadata to the browser).
 
 Examples:
 
@@ -140,9 +140,13 @@ curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1'
 | `verbose=1` | Include peer diagnostics such as recent RTCP read errors. |
 | `all=1&verbose=1` | Return the full egress diagnostic view. |
 
+`all=1` returns closed and failed peers alongside live ones, so a channel can list far more peers than it has viewers. `peer_count` counts only active peers while the `peers` array holds every returned record, and any total computed across that array includes dead sessions. Filter on each peer's `active` field before aggregating, or omit `all=1` when you want the live view.
+
+A peer is `active` when its connection is up. That is not a statement about how current its numbers are: a viewer whose tab is backgrounded stops reporting while staying connected, so its `browser` block can be minutes old and still appear under an active peer. Compare the peer's `last_browser_report_at` against the response's top-level `time` — both are server timestamps — before trusting `frames_decoded` or `frames_per_second`.
+
 Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
 
-Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms` and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
+Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
 
 Examples:
 
@@ -150,6 +154,40 @@ Examples:
 curl -k https://127.0.0.1:9900/api/egress/stats
 curl -k 'https://127.0.0.1:9900/api/egress/stats?all=1&verbose=1'
 ```
+
+## Localizing A Video Problem
+
+"The video is stalled" can fail at any hop between the application and the
+browser's decoder. Walk these in order and stop at the first one that fails;
+each step names the field that decides it. Take two samples a few seconds apart
+and compare deltas, because every counter here is cumulative.
+
+| Step | Question | Field | Failing means |
+| --- | --- | --- | --- |
+| 1 | Is RTP reaching vf? | `rtp.packets_received` rising, channel `active` | Nothing arrived. Check app receiver host/port against `neat --json`, not vf. |
+| 2 | Is vf forwarding it? | `forwarding.packets_forwarded` rising with `rtp.packets_received` | vf is dropping. Check `diagnostics.estimated_sequence_gaps` and `diagnostics.malformed_packets`. |
+| 3 | Is a viewer attached? | `forwarding.webrtc_track_attached` | No browser is bound to the channel. `forwarding.packets_dropped_no_track` counts what was discarded meanwhile. |
+| 4 | Is the browser receiving? | peer `browser.inbound_rtp.packets_received` rising | Transport problem between vf and the browser. Check the peer's ICE and connection states. |
+| 5 | Is the browser decoding? | `browser.inbound_rtp.frames_decoded` rising | Frames arrive but do not decode. Continue to step 6. |
+| 6 | Which decoder did it get? | `browser.inbound_rtp.decoder_implementation` | A name starting with `Null` means the browser has no decoder for the negotiated codec. Reconnecting cannot fix it. |
+
+Step 5 is where codec problems surface. If `frames_received` rises while
+`frames_decoded` stays flat and `frames_dropped` rises to match, the stream
+reached the browser intact and the decoder rejected it — vf and the application
+are both healthy and the fault is browser-side.
+
+Two field notes that matter when reading this:
+
+- `media.idr_count` stays `0` for H.265. Use `media.keyframe_count` for H.265
+  random-access points; `idr_count` applies to H.264 only.
+- `forwarding.webrtc_track_attached` means a viewer is bound to the channel,
+  not that a track object exists. With no viewer open it is `false` and
+  `packets_dropped_no_track` climbs, which is expected rather than a fault.
+
+When `/offer` fails, the HTTP response carries a stable short message; the
+underlying cause is written to the vf service log with its channel index. Read
+the log rather than inferring from the response text, which is identical across
+several different causes.
 
 ## Synthetic Metadata Testing
 
@@ -268,6 +306,7 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/api/buildinfo` | Return parsed local/remote SiMa build metadata, or host platform details when no devkit is configured. |
 | `GET` | `/api/server-ip` | Return `CONTAINER_HOST_IP` when set, otherwise infer a browser-reachable local IP or fall back to `127.0.0.1`. |
 | `GET` | `/api/viewer-url?mode=light&src=0,1` | Return the HTTPS vf viewer URL using the mapped `videoUI` port when the SDK port map is available. |
+| `POST` | `/offer?channel=<N>` | Negotiate a vf viewer connection; returns 503 until supported RTP identifies the channel codec, or 415 when the browser cannot decode it. |
 | `GET` | `/` | Serve built frontend `index.html`, or 503 when the frontend is not built. |
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
@@ -282,5 +321,7 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `404` for missing logs, media files, or media-source indexes.
 - `500` for local processing or stream startup failures.
 - `502` for unreachable or unreadable remote devkit build information.
+- `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
+- `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,7 +24,7 @@ import (
 
 type Channel struct {
 	Port          int
-	Track         atomic.Pointer[webrtc.TrackLocalStaticRTP]
+	Media         atomic.Pointer[channelMedia]
 	MetadataPeers metadataPeerRegistry
 	MetadataSync  *metadataTimestampCorrelator
 	MetadataReady *metadataForwardQueue
@@ -32,6 +34,175 @@ type Channel struct {
 
 var channels [80]*Channel
 
+type videoCodec uint32
+
+type channelMedia struct {
+	codec      videoCodec
+	parameters webrtc.RTPCodecParameters
+	track      *trackedRTPTrack
+	peers      mediaPeerRegistry
+}
+
+type mediaPeerRegistry struct {
+	mu      sync.Mutex
+	retired bool
+	peers   map[*webrtc.PeerConnection]struct{}
+}
+
+func (r *mediaPeerRegistry) add(peer *webrtc.PeerConnection) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.retired {
+		return false
+	}
+	if r.peers == nil {
+		r.peers = map[*webrtc.PeerConnection]struct{}{}
+	}
+	r.peers[peer] = struct{}{}
+	return true
+}
+
+func (r *mediaPeerRegistry) remove(peer *webrtc.PeerConnection) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.peers, peer)
+}
+
+func (r *mediaPeerRegistry) isRetired() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.retired
+}
+
+func (r *mediaPeerRegistry) retire() {
+	r.mu.Lock()
+	if r.retired {
+		r.mu.Unlock()
+		return
+	}
+	r.retired = true
+	peers := make([]*webrtc.PeerConnection, 0, len(r.peers))
+	for peer := range r.peers {
+		peers = append(peers, peer)
+	}
+	clear(r.peers)
+	r.mu.Unlock()
+
+	// The retired flag is set synchronously above, so a concurrent offer is
+	// rejected the moment the generation is replaced. Closing is not: it blocks
+	// on DTLS and ICE teardown per peer, and retire() runs on the channel's RTP
+	// read loop.
+	go func() {
+		for _, peer := range peers {
+			_ = peer.Close()
+		}
+	}()
+}
+
+// trackedRTPTrack counts live Pion bindings so ingest diagnostics can answer
+// "is a viewer actually receiving this channel" without a second counter that
+// could drift from Pion's own state. Both fields are atomic rather than mutex
+// guarded: Bind and Unbind run on Pion's negotiation goroutines, forward() runs
+// on the channel's RTP read loop, and handleIngestStats reads bindingCount on
+// HTTP goroutines. Nothing here needs those to be mutually exclusive — a read
+// that straddles a bind only misattributes one access unit's counters.
+type trackedRTPTrack struct {
+	*webrtc.TrackLocalStaticRTP
+	bindingCount atomic.Int64
+	// idleEpoch advances each time the last viewer leaves. forward() re-arms the
+	// H.265 random-access gate when it changes, so a viewer attaching to an idle
+	// channel starts at an IRAP instead of mid-GOP. The zero-binding branch in
+	// forward() re-arms on every completed access unit, but only while access
+	// units are completing; this covers an unbind/rebind that spans one.
+	idleEpoch atomic.Uint64
+}
+
+func (t *trackedRTPTrack) Bind(context webrtc.TrackLocalContext) (webrtc.RTPCodecParameters, error) {
+	parameters, err := t.TrackLocalStaticRTP.Bind(context)
+	if err == nil {
+		t.bindingCount.Add(1)
+	}
+	return parameters, err
+}
+
+func (t *trackedRTPTrack) Unbind(context webrtc.TrackLocalContext) error {
+	// Pion reports ErrUnbindFailed for a context it no longer holds, which is how
+	// a double close arrives here. Returning early keeps the count paired with
+	// the bindings Pion actually released.
+	if err := t.TrackLocalStaticRTP.Unbind(context); err != nil {
+		return err
+	}
+	if t.bindingCount.Add(-1) == 0 {
+		t.idleEpoch.Add(1)
+	}
+	return nil
+}
+
+const (
+	videoCodecUnknown videoCodec = iota
+	videoCodecH264
+	videoCodecH265
+)
+
+const (
+	h264RTPPayloadType = 96
+	h265RTPPayloadType = 98
+)
+
+func videoCodecForPayloadType(payloadType uint8) videoCodec {
+	switch payloadType {
+	case h264RTPPayloadType:
+		return videoCodecH264
+	case h265RTPPayloadType:
+		return videoCodecH265
+	default:
+		return videoCodecUnknown
+	}
+}
+
+func newChannelMedia(codec videoCodec) (*channelMedia, error) {
+	parameters := webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{ClockRate: videoRTPClockRate},
+	}
+	switch codec {
+	case videoCodecH264:
+		parameters.MimeType = webrtc.MimeTypeH264
+		parameters.SDPFmtpLine = "packetization-mode=1;profile-level-id=42e01f"
+		parameters.PayloadType = h264RTPPayloadType
+	case videoCodecH265:
+		parameters.MimeType = webrtc.MimeTypeH265
+		parameters.PayloadType = h265RTPPayloadType
+	default:
+		return nil, fmt.Errorf("unsupported video codec %d", codec)
+	}
+
+	track, err := webrtc.NewTrackLocalStaticRTP(parameters.RTPCodecCapability, "video", "pion")
+	if err != nil {
+		return nil, err
+	}
+	return &channelMedia{
+		codec:      codec,
+		parameters: parameters,
+		track:      &trackedRTPTrack{TrackLocalStaticRTP: track},
+	}, nil
+}
+
+func (ch *Channel) publishMediaForCodec(codec videoCodec) (*channelMedia, error) {
+	previous := ch.Media.Load()
+	if previous != nil && previous.codec == codec {
+		return previous, nil
+	}
+	media, err := newChannelMedia(codec)
+	if err != nil {
+		return nil, err
+	}
+	ch.Media.Store(media)
+	if previous != nil {
+		previous.peers.retire()
+	}
+	return media, nil
+}
+
 const (
 	neatPortMapPath              = "/home/docker/.insight-config/neat-port-map.json"
 	defaultEphemeralUDPPortStart = uint16(40000)
@@ -39,6 +210,7 @@ const (
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
+	rtpReceiveBufferBytes        = 2 * 1024 * 1024
 	metadataCorrelationCapacity  = 256
 	metadataForwardQueueCapacity = 16
 	metadataCorrelationMaxAge    = 5 * time.Second
@@ -57,6 +229,203 @@ type rtpTimestampRewriter struct {
 	nextTimestamp uint32
 	lastFrameAt   time.Time
 	haveFrameTime bool
+}
+
+type rtpPacketRewriter struct {
+	nextSequence uint16
+	haveSequence bool
+}
+
+type rtpForwarder struct {
+	accessUnitBuffer  *rtpAccessUnitBuffer
+	media             *channelMedia
+	idleEpoch         uint64
+	timestampRewriter rtpTimestampRewriter
+	packetRewriter    rtpPacketRewriter
+}
+
+type rtpAccessUnit struct {
+	packets   [][]byte
+	ssrc      uint32
+	timestamp uint32
+}
+
+type rtpAccessUnitBuffer struct {
+	packets                    [][]byte
+	ssrc                       uint32
+	timestamp                  uint32
+	nextSequence               uint16
+	sequenceSSRC               uint32
+	haveSequence               bool
+	codec                      videoCodec
+	complete                   bool
+	discontinuity              bool
+	randomAccess               bool
+	waitingForH265RandomAccess bool
+	active                     bool
+}
+
+func newRTPAccessUnitBuffer() *rtpAccessUnitBuffer {
+	return &rtpAccessUnitBuffer{waitingForH265RandomAccess: true}
+}
+
+func (b *rtpAccessUnitBuffer) resetH265Recovery() {
+	b.waitingForH265RandomAccess = true
+}
+
+func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit, bool) {
+	codec := videoCodecForPayloadType(pkt.PayloadType)
+	if codec == videoCodecUnknown {
+		return rtpAccessUnit{}, false
+	}
+
+	startsAccessUnit, randomAccess := rtpPacketState(pkt)
+	// An SSRC change is a new sender, not loss from the current one. It carries
+	// no sequence baseline to compare against, and any unfinished access unit it
+	// interrupts belonged to the previous source.
+	sameSource := b.haveSequence && pkt.SSRC == b.sequenceSSRC
+	sequenceDiscontinuity := sameSource && pkt.SequenceNumber != b.nextSequence
+	b.nextSequence = pkt.SequenceNumber + 1
+	b.sequenceSSRC = pkt.SSRC
+	b.haveSequence = true
+
+	newAccessUnit := !b.active || pkt.SSRC != b.ssrc || pkt.Timestamp != b.timestamp
+	if newAccessUnit {
+		b.packets = b.packets[:0]
+		b.ssrc = pkt.SSRC
+		b.timestamp = pkt.Timestamp
+		b.codec = codec
+		b.complete = startsAccessUnit
+		b.discontinuity = (b.active && sameSource) || sequenceDiscontinuity
+		b.randomAccess = randomAccess
+		b.active = true
+	} else if sequenceDiscontinuity {
+		b.complete = false
+		b.discontinuity = true
+	}
+	b.packets = append(b.packets, raw)
+	b.randomAccess = b.randomAccess || randomAccess
+	if !pkt.Marker {
+		return rtpAccessUnit{}, false
+	}
+
+	accessUnit := rtpAccessUnit{
+		packets:   b.packets,
+		ssrc:      b.ssrc,
+		timestamp: b.timestamp,
+	}
+	accessUnitCodec := b.codec
+	complete := b.complete
+	discontinuity := b.discontinuity
+	randomAccess = b.randomAccess
+	b.packets = b.packets[:0]
+	b.active = false
+	if accessUnitCodec == videoCodecH265 && (discontinuity || !complete) {
+		b.waitingForH265RandomAccess = true
+	}
+	// A sequence gap is the only evidence that an access unit lost its opening
+	// packets: RTP marks the end of an access unit, never the start, so a unit
+	// whose first packet is gone still presents a payload that legitimately
+	// begins a NAL. Withholding it also keeps a damaged random-access unit from
+	// clearing the recovery gate below, since a partial IRAP would seed every
+	// frame in the group from a corrupt reference.
+	if !complete || discontinuity {
+		return rtpAccessUnit{}, false
+	}
+	if randomAccess {
+		b.waitingForH265RandomAccess = false
+	}
+	if accessUnitCodec == videoCodecH265 && b.waitingForH265RandomAccess {
+		return rtpAccessUnit{}, false
+	}
+	return accessUnit, true
+}
+
+// Reports whether pkt opens an access unit, and whether that unit is a random
+// access point. Both codecs need the start flag: an access unit whose opening
+// fragment was lost must not be forwarded, because rtpPacketRewriter renumbers
+// the outgoing sequence space and would leave the browser unable to see the gap.
+// Random access is reported for H.265 alone, being consumed only by the recovery
+// gate in accept, which withholds delta units until an IRAP restores the stream.
+func rtpPacketState(pkt *rtp.Packet) (startsAccessUnit bool, randomAccess bool) {
+	switch videoCodecForPayloadType(pkt.PayloadType) {
+	case videoCodecH265:
+		observations := parseH265NALObservations(pkt.Payload)
+		startsAccessUnit = len(observations) > 0 && observations[0].Start
+		for _, observation := range observations {
+			if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
+				return startsAccessUnit, true
+			}
+		}
+		return startsAccessUnit, false
+	case videoCodecH264:
+		observations := parseH264NALObservations(pkt.Payload)
+		return len(observations) > 0 && observations[0].Start, false
+	default:
+		return true, false
+	}
+}
+
+func newRTPForwarder() *rtpForwarder {
+	return &rtpForwarder{
+		accessUnitBuffer:  newRTPAccessUnitBuffer(),
+		timestampRewriter: newRTPTimestampRewriter(),
+	}
+}
+
+func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet, raw []byte, remoteAddr net.Addr) {
+	idleEpoch := media.track.idleEpoch.Load()
+	if media != f.media {
+		f.accessUnitBuffer = newRTPAccessUnitBuffer()
+		f.media = media
+		f.idleEpoch = idleEpoch
+	} else if idleEpoch != f.idleEpoch {
+		f.accessUnitBuffer.resetH265Recovery()
+		f.idleEpoch = idleEpoch
+	}
+
+	accessUnit, ready := f.accessUnitBuffer.accept(pkt, raw)
+	// Counted per packet rather than per completed access unit: while no viewer
+	// is bound the H.265 recovery gate withholds every access unit between
+	// random-access points, and those never reach a completion the loop below
+	// could count. Accounting only for completed units undercounts the
+	// discarded traffic by most of the stream.
+	if media.track.bindingCount.Load() == 0 {
+		ch.Stats.RecordDroppedNoTrack()
+		if ready {
+			f.accessUnitBuffer.resetH265Recovery()
+		}
+		return
+	}
+	if !ready {
+		return
+	}
+
+	frameAt := time.Now()
+	frameTimestamp := f.timestampRewriter.timestampForFrame(frameAt)
+	frameForwarded := false
+	for _, rawPacket := range accessUnit.packets {
+		packetToWrite, err := f.packetRewriter.rewrite(rawPacket, frameTimestamp)
+		if err != nil {
+			ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
+			log.Println("❌ RTP packet rewrite error:", err)
+			continue
+		}
+		if _, err := media.track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
+			ch.Stats.RecordWriteError(err)
+			log.Println("❌ Write error:", err)
+			continue
+		}
+		ch.Stats.RecordForwarded(len(packetToWrite))
+		frameForwarded = true
+	}
+	if frameForwarded {
+		for _, metadata := range ch.MetadataSync.addVideoFrame(
+			accessUnit.ssrc, accessUnit.timestamp, frameTimestamp, frameAt,
+		) {
+			enqueueMetadata(ch, metadata)
+		}
+	}
 }
 
 func main() {
@@ -195,6 +564,33 @@ func handleReverseOffer(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(pc.LocalDescription())
 }
 
+// offerAdvertisesCodec reports whether the browser offered the encoding this
+// channel carries. A malformed offer is treated as advertising it, so the
+// existing SDP error path stays responsible for reporting that.
+func offerAdvertisesCodec(offer webrtc.SessionDescription, mimeType string) bool {
+	parsed, err := offer.Unmarshal()
+	if err != nil {
+		return true
+	}
+	// RTP encoding names are case-insensitive, and the trailing slash keeps
+	// "H264/90000" from satisfying a search for H265.
+	wanted := strings.ToUpper(strings.TrimPrefix(mimeType, "video/")) + "/"
+	for _, media := range parsed.MediaDescriptions {
+		if media.MediaName.Media != "video" {
+			continue
+		}
+		for _, attribute := range media.Attributes {
+			if attribute.Key != "rtpmap" {
+				continue
+			}
+			if strings.Contains(strings.ToUpper(attribute.Value), wanted) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func handleOffer(w http.ResponseWriter, r *http.Request) {
 	channelIdxStr := r.URL.Query().Get("channel")
 	idx, err := strconv.Atoi(channelIdxStr)
@@ -209,17 +605,24 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid SDP offer", http.StatusBadRequest)
 		return
 	}
+	media := ch.Media.Load()
+	if media == nil {
+		http.Error(w, "Video codec not available", http.StatusServiceUnavailable)
+		return
+	}
+	parameters := media.parameters
+	// Rejected before anything is allocated. A browser with no decoder for this
+	// channel's codec can never negotiate, so the answer must say so with a
+	// status the viewer treats as permanent. Letting Pion fail instead would
+	// return 500, which the viewer retries, and every attempt would register
+	// peer records for a connection that cannot succeed.
+	if !offerAdvertisesCodec(offer, parameters.MimeType) {
+		http.Error(w, "Browser does not support the channel codec", http.StatusUnsupportedMediaType)
+		return
+	}
 
 	m := webrtc.MediaEngine{}
-	m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:     webrtc.MimeTypeH264,
-			ClockRate:    90000,
-			SDPFmtpLine:  "packetization-mode=1;profile-level-id=42e01f",
-			RTCPFeedback: nil,
-		},
-		PayloadType: 96,
-	}, webrtc.RTPCodecTypeVideo)
+	m.RegisterCodec(parameters, webrtc.RTPCodecTypeVideo)
 
 	// === Add NAT and Port Range logic ===
 	s := webrtc.SettingEngine{}
@@ -245,6 +648,18 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "PeerConnection failed", http.StatusInternalServerError)
 		return
 	}
+	if !media.peers.add(pc) {
+		_ = pc.Close()
+		http.Error(w, "Video codec changed", http.StatusServiceUnavailable)
+		return
+	}
+	success := false
+	defer func() {
+		if !success {
+			media.peers.remove(pc)
+			_ = pc.Close()
+		}
+	}()
 	ingestPeerID := ch.Stats.RegisterPeer()
 	egressPeerID := ch.Egress.RegisterPeer()
 	ch.Stats.UpdatePeerState(ingestPeerID, pc.ConnectionState().String())
@@ -257,6 +672,12 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		ch.Stats.UpdatePeerState(ingestPeerID, state.String())
 		ch.Egress.UpdatePeerConnectionState(egressPeerID, state.String(), pc.ICEConnectionState().String(), pc.SignalingState().String())
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
+			media.peers.remove(pc)
+		}
+		if state == webrtc.PeerConnectionStateFailed {
+			_ = pc.Close()
+		}
 	})
 	pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		ch.Egress.UpdatePeerConnectionState(egressPeerID, pc.ConnectionState().String(), state.String(), pc.SignalingState().String())
@@ -270,26 +691,23 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[Channel %d] ICE candidate: %s", idx, c.String())
 		}
 	})
-
-	track := ch.Track.Load()
-	if track == nil {
-		track, err = webrtc.NewTrackLocalStaticRTP(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000},
-			"video", "pion",
-		)
-		if err != nil {
-			http.Error(w, "Track creation failed", http.StatusInternalServerError)
+	// The response carries a stable message; the cause goes to the log. Callers
+	// cannot act on a Pion error, and it is the only record of why a viewer
+	// failed to connect.
+	respondNegotiationError := func(message string, cause error) {
+		if media.peers.isRetired() {
+			http.Error(w, "Video codec changed", http.StatusServiceUnavailable)
 			return
 		}
-		ch.Track.Store(track)
+		log.Printf("[Channel %d] %s: %v", idx, message, cause)
+		http.Error(w, message, http.StatusInternalServerError)
 	}
-	sender, err := pc.AddTrack(track)
+
+	sender, err := pc.AddTrack(media.track)
 	if err != nil {
-		http.Error(w, "AddTrack failed", http.StatusInternalServerError)
+		respondNegotiationError("AddTrack failed", err)
 		return
 	}
-	go readSenderRTCP(sender, ch.Egress, egressPeerID)
-	go sendRTCP(pc)
 
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		log.Printf("[Channel %d] Incoming DataChannel: %s", idx, dc.Label())
@@ -310,24 +728,33 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	})
-
 	if err := pc.SetRemoteDescription(offer); err != nil {
-		http.Error(w, "SetRemoteDescription failed", http.StatusInternalServerError)
+		respondNegotiationError("SetRemoteDescription failed", err)
 		return
 	}
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		http.Error(w, "CreateAnswer failed", http.StatusInternalServerError)
+		respondNegotiationError("CreateAnswer failed", err)
 		return
 	}
 	if err = pc.SetLocalDescription(answer); err != nil {
-		http.Error(w, "SetLocalDescription failed", http.StatusInternalServerError)
+		respondNegotiationError("SetLocalDescription failed", err)
 		return
 	}
+	go readSenderRTCP(sender, ch.Egress, egressPeerID)
+	go sendRTCP(pc)
 	<-webrtc.GatheringCompletePromise(pc)
+	if media.peers.isRetired() {
+		http.Error(w, "Video codec changed", http.StatusServiceUnavailable)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pc.LocalDescription())
+	if err := json.NewEncoder(w).Encode(pc.LocalDescription()); err != nil {
+		log.Printf("Failed to encode SDP answer: %v", err)
+		return
+	}
+	success = true
 }
 
 func configuredEphemeralUDPPortRange() (uint16, uint16) {
@@ -382,7 +809,7 @@ func newRTPTimestampRewriter() rtpTimestampRewriter {
 
 func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
 	if r.haveFrameTime {
-		step := uint32(float64(h264ClockRate) * now.Sub(r.lastFrameAt).Seconds())
+		step := uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
 		if step == 0 {
 			step = 1
 		}
@@ -393,22 +820,39 @@ func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
 	return r.nextTimestamp
 }
 
-func rewriteRTPPacketTimestamp(raw []byte, timestamp uint32) ([]byte, error) {
+func (r *rtpPacketRewriter) rewrite(raw []byte, timestamp uint32) ([]byte, error) {
 	var pkt rtp.Packet
 	if err := pkt.Unmarshal(raw); err != nil {
 		return nil, err
 	}
+	// Pion preserves input sequence numbers, so keep one continuous outgoing
+	// sequence space when incomplete access units are dropped or a source restarts.
+	if !r.haveSequence {
+		r.nextSequence = pkt.SequenceNumber
+		r.haveSequence = true
+	}
+	pkt.SequenceNumber = r.nextSequence
 	pkt.Timestamp = timestamp
-	return pkt.Marshal()
+	rewritten, err := pkt.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	r.nextSequence++
+	return rewritten, nil
 }
 
 func sendRTCP(pc *webrtc.PeerConnection) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+			return
+		}
 		if err := pc.WriteRTCP([]rtcp.Packet{
 			&rtcp.PictureLossIndication{MediaSSRC: 1},
-		}); err != nil && err != io.ErrClosedPipe {
+		}); err == io.ErrClosedPipe {
+			return
+		} else if err != nil {
 			log.Println("❌ RTCP PLI send error:", err)
 		}
 	}
@@ -431,7 +875,9 @@ func handleIngestStats(w http.ResponseWriter, r *http.Request) {
 		if ch == nil || ch.Stats == nil {
 			continue
 		}
-		snapshot := ch.Stats.Snapshot(includeVerbose, ch.Track.Load() != nil, now)
+		media := ch.Media.Load()
+		trackAttached := media != nil && media.track.bindingCount.Load() > 0
+		snapshot := ch.Stats.Snapshot(includeVerbose, trackAttached, now)
 		if !includeAll && !snapshot.Active {
 			continue
 		}
@@ -448,11 +894,13 @@ func startUDPListener(ch *Channel) {
 		log.Fatalf("Failed to bind UDP port %d: %v", ch.Port, err)
 	}
 	defer conn.Close()
+	if err := conn.SetReadBuffer(rtpReceiveBufferBytes); err != nil {
+		log.Printf("Failed to set RTP receive buffer on port %d: %v", ch.Port, err)
+	}
 
 	log.Printf("🧠 Listening for RTP on %s:%d", net.IPv4zero, ch.Port)
 	buf := make([]byte, 4096)
-	framePackets := make([][]byte, 0, 128)
-	timestampRewriter := newRTPTimestampRewriter()
+	forwarder := newRTPForwarder()
 
 	for {
 		n, remoteAddr, err := conn.ReadFrom(buf)
@@ -468,48 +916,17 @@ func startUDPListener(ch *Channel) {
 			continue
 		}
 		ch.Stats.RecordRTPPacket(&pkt, n, remoteAddr)
-
+		codec := videoCodecForPayloadType(pkt.PayloadType)
+		if codec == videoCodecUnknown {
+			continue
+		}
+		media, err := ch.publishMediaForCodec(codec)
+		if err != nil {
+			log.Printf("Failed to publish channel media on port %d: %v", ch.Port, err)
+			continue
+		}
 		raw := append([]byte(nil), buf[:n]...)
-		framePackets = append(framePackets, raw)
-		if !pkt.Marker {
-			continue
-		}
-
-		frameAt := time.Now()
-		frameTimestamp := timestampRewriter.timestampForFrame(frameAt)
-		track := ch.Track.Load()
-		if track == nil {
-			for range framePackets {
-				ch.Stats.RecordDroppedNoTrack()
-			}
-			framePackets = framePackets[:0]
-			continue
-		}
-
-		frameForwarded := false
-		for _, rawPacket := range framePackets {
-			packetToWrite, err := rewriteRTPPacketTimestamp(rawPacket, frameTimestamp)
-			if err != nil {
-				ch.Stats.RecordMalformedPacket(len(rawPacket), remoteAddr, err)
-				log.Println("❌ RTP timestamp rewrite error:", err)
-				continue
-			}
-			if _, err := track.Write(packetToWrite); err != nil && err != io.ErrClosedPipe {
-				ch.Stats.RecordWriteError(err)
-				log.Println("❌ Write error:", err)
-				continue
-			}
-			ch.Stats.RecordForwarded(len(packetToWrite))
-			frameForwarded = true
-		}
-		if frameForwarded {
-			for _, metadata := range ch.MetadataSync.addVideoFrame(
-				pkt.SSRC, pkt.Timestamp, frameTimestamp, frameAt,
-			) {
-				enqueueMetadata(ch, metadata)
-			}
-		}
-		framePackets = framePackets[:0]
+		forwarder.forward(ch, media, &pkt, raw, remoteAddr)
 	}
 }
 
