@@ -819,6 +819,38 @@ func TestRTPAccessUnitBufferAcceptsFragmentedH264AccessUnit(t *testing.T) {
 	}
 }
 
+// The surviving packet carries a complete single NAL, so its start flag is
+// legitimately set; only the sequence gap shows the unit lost its opening packet.
+func TestRTPAccessUnitBufferRejectsUnitThatLostItsFirstPacket(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	first := testRTPPacketForCodec(t, h264RTPPayloadType, 10, 9000, true, []byte{0x65, 0x88})
+	afterLoss := testRTPPacketForCodec(t, h264RTPPayloadType, 13, 18000, true, []byte{0x41, 0x88})
+
+	if _, ready := buffer.accept(first.packet, first.raw); !ready {
+		t.Fatal("expected an intact H.264 access unit to be forwarded")
+	}
+	if _, ready := buffer.accept(afterLoss.packet, afterLoss.raw); ready {
+		t.Fatal("expected an H.264 access unit missing its first packet to be rejected")
+	}
+}
+
+func TestH265RecoveryGateRejectsDamagedRandomAccessUnit(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	opening := testRTPPacket(t, 10, 9000, true, []byte{0x26, 0x01})
+	damaged := testRTPPacket(t, 13, 18000, true, []byte{0x26, 0x01})
+	clean := testRTPPacket(t, 14, 27000, true, []byte{0x26, 0x01})
+
+	if _, ready := buffer.accept(opening.packet, opening.raw); !ready {
+		t.Fatal("expected the opening random-access unit to be forwarded")
+	}
+	if _, ready := buffer.accept(damaged.packet, damaged.raw); ready {
+		t.Fatal("expected a random-access unit with a sequence gap to be rejected")
+	}
+	if _, ready := buffer.accept(clean.packet, clean.raw); !ready {
+		t.Fatal("expected the next intact random-access unit to restore the stream")
+	}
+}
+
 func TestH265RecoveryGateWaitsForRandomAccessAfterLoss(t *testing.T) {
 	buffer := newRTPAccessUnitBuffer()
 	delta := testRTPPacket(t, 10, 9000, true, []byte{0x02, 0x01})

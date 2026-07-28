@@ -320,7 +320,13 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	if accessUnitCodec == videoCodecH265 && (discontinuity || !complete) {
 		b.waitingForH265RandomAccess = true
 	}
-	if !complete {
+	// A sequence gap is the only evidence that an access unit lost its opening
+	// packets: RTP marks the end of an access unit, never the start, so a unit
+	// whose first packet is gone still presents a payload that legitimately
+	// begins a NAL. Withholding it also keeps a damaged random-access unit from
+	// clearing the recovery gate below, since a partial IRAP would seed every
+	// frame in the group from a corrupt reference.
+	if !complete || discontinuity {
 		return rtpAccessUnit{}, false
 	}
 	if randomAccess {
