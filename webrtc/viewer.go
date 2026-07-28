@@ -279,7 +279,7 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 		return rtpAccessUnit{}, false
 	}
 
-	startsAccessUnit, randomAccess := h265PacketState(pkt)
+	startsAccessUnit, randomAccess := rtpPacketState(pkt)
 	sequenceDiscontinuity := b.haveSequence &&
 		(pkt.SSRC != b.sequenceSSRC || pkt.SequenceNumber != b.nextSequence)
 	b.nextSequence = pkt.SequenceNumber + 1
@@ -332,18 +332,29 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	return accessUnit, true
 }
 
-func h265PacketState(pkt *rtp.Packet) (bool, bool) {
-	if videoCodecForPayloadType(pkt.PayloadType) != videoCodecH265 {
+// Reports whether pkt opens an access unit, and whether that unit is a random
+// access point. Both codecs need the start flag: an access unit whose opening
+// fragment was lost must not be forwarded, because rtpPacketRewriter renumbers
+// the outgoing sequence space and would leave the browser unable to see the gap.
+// Random access is reported for H.265 alone, being consumed only by the recovery
+// gate in accept, which withholds delta units until an IRAP restores the stream.
+func rtpPacketState(pkt *rtp.Packet) (startsAccessUnit bool, randomAccess bool) {
+	switch videoCodecForPayloadType(pkt.PayloadType) {
+	case videoCodecH265:
+		observations := parseH265NALObservations(pkt.Payload)
+		startsAccessUnit = len(observations) > 0 && observations[0].Start
+		for _, observation := range observations {
+			if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
+				return startsAccessUnit, true
+			}
+		}
+		return startsAccessUnit, false
+	case videoCodecH264:
+		observations := parseH264NALObservations(pkt.Payload)
+		return len(observations) > 0 && observations[0].Start, false
+	default:
 		return true, false
 	}
-	observations := parseH265NALObservations(pkt.Payload)
-	startsAccessUnit := len(observations) > 0 && observations[0].Start
-	for _, observation := range observations {
-		if observation.Start && observation.Type >= 16 && observation.Type <= 23 {
-			return startsAccessUnit, true
-		}
-	}
-	return startsAccessUnit, false
 }
 
 func newRTPForwarder() *rtpForwarder {

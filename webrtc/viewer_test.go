@@ -794,6 +794,31 @@ func TestRTPAccessUnitBufferRejectsMissingH265FragmentStart(t *testing.T) {
 	}
 }
 
+// FU-A payloads are {indicator, header, ...}: indicator type 28 marks the
+// fragmentation unit, and bit 0x80 of the header is the S bit that flags the
+// fragment carrying the start of the NAL unit.
+func TestRTPAccessUnitBufferRejectsMissingH264FragmentStart(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	continuation := testRTPPacketForCodec(t, h264RTPPayloadType, 10, 9000, true, []byte{0x7c, 0x05, 0x88})
+
+	if _, ready := buffer.accept(continuation.packet, continuation.raw); ready {
+		t.Fatal("expected an H.264 FU-A continuation without its start to be rejected")
+	}
+}
+
+func TestRTPAccessUnitBufferAcceptsFragmentedH264AccessUnit(t *testing.T) {
+	buffer := newRTPAccessUnitBuffer()
+	start := testRTPPacketForCodec(t, h264RTPPayloadType, 10, 9000, false, []byte{0x7c, 0x85, 0x88})
+	end := testRTPPacketForCodec(t, h264RTPPayloadType, 11, 9000, true, []byte{0x7c, 0x45, 0x84})
+
+	if _, ready := buffer.accept(start.packet, start.raw); ready {
+		t.Fatal("expected a fragmented access unit to remain incomplete before its marker")
+	}
+	if _, ready := buffer.accept(end.packet, end.raw); !ready {
+		t.Fatal("expected a fully fragmented H.264 access unit to be forwarded")
+	}
+}
+
 func TestH265RecoveryGateWaitsForRandomAccessAfterLoss(t *testing.T) {
 	buffer := newRTPAccessUnitBuffer()
 	delta := testRTPPacket(t, 10, 9000, true, []byte{0x02, 0x01})
@@ -875,10 +900,15 @@ type testRTP struct {
 
 func testRTPPacket(t *testing.T, sequence uint16, timestamp uint32, marker bool, payload []byte) testRTP {
 	t.Helper()
+	return testRTPPacketForCodec(t, h265RTPPayloadType, sequence, timestamp, marker, payload)
+}
+
+func testRTPPacketForCodec(t *testing.T, payloadType uint8, sequence uint16, timestamp uint32, marker bool, payload []byte) testRTP {
+	t.Helper()
 	packet := &rtp.Packet{
 		Header: rtp.Header{
 			Version:        2,
-			PayloadType:    h265RTPPayloadType,
+			PayloadType:    payloadType,
 			SequenceNumber: sequence,
 			Timestamp:      timestamp,
 			SSRC:           99,
