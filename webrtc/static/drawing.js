@@ -244,6 +244,68 @@ function deriveBboxFromPolygon(points) {
   return [minX, minY, maxX - minX, maxY - minY];
 }
 
+// Ceiling on the shared decode buffer below: 2048 * 2048 pixels is 16 MiB at 4 bytes each.
+// A memory bound only. It cannot tell a full-image mask sent by mistake from a large
+// legitimate one, since the schema lets a producer send at bbox resolution; that mistake is
+// caught by the dropped-segment warning and the README, not by this number.
+const MAX_RLE_MASK_PIXELS = 2048 * 2048;
+
+let maskCanvas = null;
+let maskPixels = null;
+const droppedSegmentWarnings = new Set();
+
+// Resizing a canvas clears it, so the guards keep an unchanged mask size from paying for a
+// clear on every frame.
+function sharedMaskContext(width, height) {
+  if (!maskCanvas) maskCanvas = document.createElement("canvas");
+  if (maskCanvas.width !== width) maskCanvas.width = width;
+  if (maskCanvas.height !== height) maskCanvas.height = height;
+  return maskCanvas.getContext("2d");
+}
+
+// Grows to the largest mask seen and is handed back zeroed, which is what
+// decodeRleMaskAlpha expects. One buffer is enough because a segment is decoded and
+// blitted before the next one is touched.
+function sharedMaskPixels(total) {
+  const length = total * 4;
+  if (!maskPixels || maskPixels.length < length) maskPixels = new Uint8ClampedArray(length);
+  else maskPixels.fill(0, 0, length);
+  return maskPixels.subarray(0, length);
+}
+
+// The same segment is redrawn every animation frame, so each channel and id warns once.
+// The set stops growing at 64 instead of flushing: ids come from the untrusted producer,
+// and flushing would let an id warn a second time.
+function warnDroppedSegment(channelIndex, id, reason) {
+  const name = id ?? "<no id>";
+  const key = `${channelIndex}:${name}`;
+  if (droppedSegmentWarnings.has(key) || droppedSegmentWarnings.size >= 64) return;
+  droppedSegmentWarnings.add(key);
+  console.warn(`segmentation: channel ${channelIndex} dropped RLE segment "${name}": ${reason}`);
+}
+
+// Runs alternate over the mask flattened column-major and the first run is background.
+// Fills a zeroed buffer, leaving foreground pixels opaque black for the caller to tint.
+function decodeRleMaskAlpha(pixels, counts, maskWidth, maskHeight) {
+  const total = maskWidth * maskHeight;
+  let pos = 0;
+  let foreground = false;
+
+  for (let i = 0; i < counts.length && pos < total; i += 1) {
+    const run = Number(counts[i]);
+    const end = run > 0 ? Math.min(pos + run, total) : pos;
+    if (foreground) {
+      for (; pos < end; pos += 1) {
+        pixels[((pos % maskHeight) * maskWidth + Math.floor(pos / maskHeight)) * 4 + 3] = 255;
+      }
+    } else {
+      pos = end;
+    }
+    foreground = !foreground;
+  }
+  return pixels;
+}
+
 window.drawStrategies = {
   "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.objects) return;
@@ -375,7 +437,11 @@ window.drawStrategies = {
         if (!Array.isArray(seg.mask) || seg.mask.length < 3) return;
         if (!bbox) bbox = deriveBboxFromPolygon(seg.mask);
       }
-      if (!bbox) return;
+      // Polygon bboxes are derived above, so only RLE can still be missing one.
+      if (!bbox) {
+        warnDroppedSegment(index, seg.id, "an RLE mask needs a bbox as its destination rectangle");
+        return;
+      }
       if (!passesRoiFilter(bbox, roiPolygons, video, scale, applyRoiFiltering)) return;
 
       const style = objectStyles[seg.label] || defaultStyle;
@@ -404,30 +470,42 @@ window.drawStrategies = {
         ctx.stroke();
       } else if (seg.mask_format === "rle") {
         const mask = seg.mask;
-        if (!mask || !Array.isArray(mask.size) || !Array.isArray(mask.counts)) return;
-        const maskHeight = mask.size[0];
-        const maskWidth = mask.size[1];
-        if (!(maskWidth > 0) || !(maskHeight > 0)) return;
+        if (!mask || !Array.isArray(mask.size)) {
+          warnDroppedSegment(index, seg.id, "mask.size must be an array [mask_h, mask_w]");
+          return;
+        }
+        if (!Array.isArray(mask.counts)) {
+          warnDroppedSegment(index, seg.id, "mask.counts must be an array of run lengths, not a compressed byte string");
+          return;
+        }
+        const maskHeight = Math.floor(mask.size[0]);
+        const maskWidth = Math.floor(mask.size[1]);
+        if (!(maskWidth > 0) || !(maskHeight > 0)) {
+          warnDroppedSegment(index, seg.id, `mask.size must be positive, got ${maskHeight}x${maskWidth}`);
+          return;
+        }
+        if (maskWidth * maskHeight > MAX_RLE_MASK_PIXELS) {
+          warnDroppedSegment(index, seg.id, `mask is ${maskHeight}x${maskWidth}, over the ${MAX_RLE_MASK_PIXELS} pixel decode buffer limit`);
+          return;
+        }
 
-        const off = document.createElement("canvas");
-        off.width = maskWidth;
-        off.height = maskHeight;
-        const octx = off.getContext("2d");
+        const octx = sharedMaskContext(maskWidth, maskHeight);
+        const pixels = sharedMaskPixels(maskWidth * maskHeight);
+        decodeRleMaskAlpha(pixels, mask.counts, maskWidth, maskHeight);
+        octx.putImageData(new ImageData(pixels, maskWidth, maskHeight), 0, 0);
+        octx.save();
+        octx.globalCompositeOperation = "source-in";
         octx.fillStyle = color;
-        let pos = 0;
-        let foreground = false;
-        mask.counts.forEach(count => {
-          for (let i = 0; i < count; i++, pos++) {
-            if (foreground) octx.fillRect(Math.floor(pos / maskHeight), pos % maskHeight, 1, 1);
-          }
-          foreground = !foreground;
-        });
+        octx.fillRect(0, 0, maskWidth, maskHeight);
+        octx.restore();
 
         ctx.save();
         ctx.globalAlpha = opacity;
-        ctx.imageSmoothingEnabled = false;
+        // Masks arrive at mask-head resolution and are stretched over a much larger bbox,
+        // so the upscale is interpolated rather than shown as mask-sized blocks.
+        ctx.imageSmoothingEnabled = true;
         ctx.drawImage(
-          off,
+          octx.canvas,
           bbox[0] * scaleX + offsetX,
           bbox[1] * scaleY + offsetY,
           bbox[2] * scaleX,
@@ -504,3 +582,6 @@ window.drawStrategies = {
     });
   }
 };
+
+// Exposed for frontend/src/viewer/rleMask.test.js.
+window.decodeRleMaskAlpha = decodeRleMaskAlpha;

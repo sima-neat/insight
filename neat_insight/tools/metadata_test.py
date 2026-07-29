@@ -104,6 +104,34 @@ def generate_pose_estimation():
     }
 
 
+def _ellipse_rle(mask_h, mask_w):
+    """Encode an ellipse filling a bbox-local mask as alternating run lengths.
+
+    Runs walk the mask column-major and the first run is background, which is the
+    encoding the viewer decodes. The mask is bbox-local, so one mask at mask-head
+    resolution is valid for every bounding box.
+    """
+    counts = []
+    previous = 0
+    run = 0
+    for x in range(mask_w):
+        for y in range(mask_h):
+            nx = (x + 0.5) / mask_w * 2 - 1
+            ny = (y + 0.5) / mask_h * 2 - 1
+            value = 1 if nx * nx + ny * ny <= 1.0 else 0
+            if value == previous:
+                run += 1
+            else:
+                counts.append(run)
+                previous = value
+                run = 1
+    counts.append(run)
+    return {"size": [mask_h, mask_w], "counts": counts}
+
+
+RLE_MASK = _ellipse_rle(mask_h=60, mask_w=40)
+
+
 def _generate_segments():
     segments = []
     labels = ["person", "car"]
@@ -123,7 +151,7 @@ def _generate_segments():
             segment["mask"] = [[x + w // 2, y], [x + w, y + h], [x, y + h]]
         else:
             segment["mask_format"] = "rle"
-            segment["mask"] = {"size": [4, 3], "counts": [0, 6, 6]}
+            segment["mask"] = RLE_MASK
         segments.append(segment)
     return segments
 
