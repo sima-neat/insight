@@ -104,31 +104,27 @@ def generate_pose_estimation():
     }
 
 
-def _random_polygon(num_points=4, width=FRAME_WIDTH, height=FRAME_HEIGHT):
-    return [[random.randint(0, width), random.randint(0, height)] for _ in range(num_points)]
-
-
 def _generate_segments():
     segments = []
-    for index in range(random.randint(1, 3)):
-        segments.append(
-            {
-                "id": f"seg_{index + 1}",
-                "label": random.choice(["road", "grass", "car", "building"]),
-                "mask_format": "polygon",
-                "mask": _random_polygon(),
-            }
-        )
-    if random.random() < 0.5:
-        segments.append(
-            {
-                "id": "seg_rle",
-                "label": "car",
-                "confidence": round(random.uniform(0.8, 1.0), 2),
-                "mask_format": "rle",
-                "mask": "eJztwTEBAAAAwqD1T20ND6AAAA...",
-            }
-        )
+    labels = ["person", "car"]
+    for index in range(random.randint(2, 4)):
+        w = random.randint(120, 320)
+        h = random.randint(120, 320)
+        x = random.randint(0, FRAME_WIDTH - w)
+        y = random.randint(0, FRAME_HEIGHT - h)
+        segment = {
+            "id": f"seg_{index + 1}",
+            "label": random.choice(labels),
+            "confidence": round(random.uniform(0.55, 0.98), 2),
+            "bbox": [x, y, w, h],
+        }
+        if index % 2 == 0:
+            segment["mask_format"] = "polygon"
+            segment["mask"] = [[x + w // 2, y], [x + w, y + h], [x, y + h]]
+        else:
+            segment["mask_format"] = "rle"
+            segment["mask"] = {"size": [4, 3], "counts": [0, 6, 6]}
+        segments.append(segment)
     return segments
 
 

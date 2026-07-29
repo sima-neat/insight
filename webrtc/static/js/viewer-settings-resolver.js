@@ -22,7 +22,11 @@
       }
     },
     "pose-estimation": {},
-    segmentation: {},
+    segmentation: {
+      confidenceThreshold: 0,
+      maskOpacity: 0.4,
+      objects: DEFAULT_OBJECTS
+    },
     classification: {}
   };
   const GENERAL_DEFAULTS = {
@@ -119,12 +123,15 @@
 
   function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
-    if (metadataType === "object-detection") {
+    if (metadataType === "object-detection" || metadataType === "segmentation") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
         type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
       }
       if (Object.prototype.hasOwnProperty.call(rawType, "objects")) {
         type.objects = normalizeObjects(rawType.objects);
+      }
+      if (metadataType === "segmentation" && Object.prototype.hasOwnProperty.call(rawType, "maskOpacity")) {
+        type.maskOpacity = clampNumber(rawType.maskOpacity, 0, 1, TYPE_DEFAULTS.segmentation.maskOpacity);
       }
     } else if (metadataType === "tracking") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
@@ -192,7 +199,7 @@
       trailLength: rawSettings.trailLength,
       lostTrackTtlMs: rawSettings.lostTrackTtlMs
     });
-    ["classification", "pose-estimation", "segmentation"].forEach((metadataType) => {
+    ["classification", "pose-estimation"].forEach((metadataType) => {
       settings.types[metadataType] = normalizeTypeSettings(metadataType, rawSettings);
     });
     return settings;
@@ -266,12 +273,16 @@
     };
 
     let typeSettings;
-    if (type === "object-detection") {
+    if (type === "object-detection" || type === "segmentation") {
       typeSettings = {
         confidenceThreshold:
           channelType.confidenceThreshold ?? globalType.confidenceThreshold ?? TYPE_DEFAULTS[type].confidenceThreshold,
         objects: mergeObjectStyles(TYPE_DEFAULTS[type].objects, globalType.objects || [], channelType.objects || [])
       };
+      if (type === "segmentation") {
+        typeSettings.maskOpacity =
+          channelType.maskOpacity ?? globalType.maskOpacity ?? TYPE_DEFAULTS[type].maskOpacity;
+      }
     } else if (type === "tracking") {
       const defaultHistory = TYPE_DEFAULTS[type].history;
       const globalHistory = globalType.history || {};
