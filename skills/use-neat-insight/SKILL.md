@@ -86,6 +86,11 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
 - Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
+- Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
+- Confirm which viewer JS is loaded before trusting a rendering result. Static assets have no `ETag`, so a browser can serve a stale `drawing.js` for days after a release.
+- Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters.
+- Reproduce overlay loss against a wall-clock-paced source. Metadata pairs with video within one millisecond, so a source that outruns the consuming model drifts out of tolerance permanently and fails for every application.
+- Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
 
 ## Health And Metrics
 

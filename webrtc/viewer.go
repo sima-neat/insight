@@ -213,7 +213,10 @@ const (
 	rtpReceiveBufferBytes        = 2 * 1024 * 1024
 	metadataCorrelationCapacity  = 256
 	metadataForwardQueueCapacity = 16
-	metadataCorrelationMaxAge    = 5 * time.Second
+	// Retention only binds while a side's arrivals fit in the capacity above. At
+	// the ~100 messages per second measured on a DevKit, 256 slots hold ~2.5 s, so
+	// a sustained correlation failure reports evictions before it reports expiries.
+	metadataCorrelationRetention = 5 * time.Second
 )
 
 type neatPortMapConfig struct {
@@ -436,7 +439,7 @@ func main() {
 	for i := 0; i < 80; i++ {
 		channels[i] = &Channel{
 			Port:          9000 + i,
-			MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
+			MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
 			MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
 			Stats:         NewIngestStats(i, 9000+i, 9100+i),
 			Egress:        NewEgressStats(i),
@@ -878,6 +881,7 @@ func handleIngestStats(w http.ResponseWriter, r *http.Request) {
 		media := ch.Media.Load()
 		trackAttached := media != nil && media.track.bindingCount.Load() > 0
 		snapshot := ch.Stats.Snapshot(includeVerbose, trackAttached, now)
+		snapshot.Metadata.MetadataCorrelationSnapshot = ch.MetadataSync.pruneAndSnapshot(now)
 		if !includeAll && !snapshot.Active {
 			continue
 		}

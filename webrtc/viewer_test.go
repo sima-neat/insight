@@ -420,7 +420,10 @@ func TestRTPForwarderCountsDropsWithoutTrackBindings(t *testing.T) {
 func TestIngestStatsTrackAttachmentFollowsCurrentMediaBindings(t *testing.T) {
 	const channelIndex = 77
 	previous := channels[channelIndex]
-	channel := &Channel{Stats: NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex)}
+	channel := &Channel{
+		Stats:        NewIngestStats(channelIndex, 9000+channelIndex, 9100+channelIndex),
+		MetadataSync: newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+	}
 	media := mustNewChannelMedia(t, videoCodecH265)
 	channel.Media.Store(media)
 	channels[channelIndex] = channel
@@ -454,7 +457,7 @@ func TestIngestStatsTrackAttachmentFollowsCurrentMediaBindings(t *testing.T) {
 func TestH265ForwarderRearmsAfterIdleTransitionBetweenPackets(t *testing.T) {
 	channel := &Channel{
 		Stats:         NewIngestStats(0, 9000, 9100),
-		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
 		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
 	}
 	media := mustNewChannelMedia(t, videoCodecH265)
@@ -490,7 +493,7 @@ func TestH265ForwarderRearmsAfterIdleTransitionBetweenPackets(t *testing.T) {
 func TestRTPForwarderDoesNotCombineAccessUnitsAcrossCodecGenerations(t *testing.T) {
 	channel := &Channel{
 		Stats:         NewIngestStats(0, 9000, 9100),
-		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationMaxAge),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
 		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
 	}
 	h264 := mustNewChannelMedia(t, videoCodecH264)
