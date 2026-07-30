@@ -452,7 +452,7 @@ func main() {
 	http.HandleFunc("/egress/stats", handleEgressStats)
 	http.HandleFunc("/reverse", serveReverse)
 	http.HandleFunc("/reverse-offer", handleReverseOffer)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	http.Handle("/static/", staticAssets("static"))
 
 	addr := ":8081"
 
@@ -467,6 +467,17 @@ func main() {
 
 func serveViewer(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/viewer.html")
+}
+
+// no-cache means revalidate, not do not store. Without it FileServer sends only
+// Last-Modified, which leaves a browser free to reuse a viewer asset across an
+// install and render the previous release's code.
+func staticAssets(dir string) http.Handler {
+	files := http.StripPrefix("/static/", http.FileServer(http.Dir(dir)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})
 }
 
 func serveReverse(w http.ResponseWriter, r *http.Request) {
