@@ -164,14 +164,19 @@ Read them in this order:
 
 - `rtp.packets_received` flat: video is not reaching Insight, so correlation
   cannot happen.
+- `rtp.packets_received` climbing while `forwarding.packets_forwarded` stays
+  flat: frames are not entering correlation. Check
+  `forwarding.webrtc_track_attached`, `forwarding.packets_dropped_no_track`, and
+  `forwarding.write_errors` first.
 - `messages_received` climbing while every correlation outcome stays flat: the
   messages have no usable `timestamp` and bypass correlation. Check
   `invalid_json` and the producer schema.
 - `matched_*` both zero while `pending_metadata`, `expired_metadata`, or
-  `evicted_metadata` climbs, with video RTP present: timestamps are not matching.
-  Compare the metadata timestamp against the video RTP timestamp.
-- `matched_*` climbing, then stopping for good: progressive drift. Overlays that
-  "worked and then stopped" are this.
+  `evicted_metadata` climbs, with `forwarding.packets_forwarded` also climbing:
+  timestamps are not matching. Compare the metadata timestamp against the video
+  RTP timestamp.
+- `matched_*` climbing, then stopping while `forwarding.packets_forwarded` keeps
+  climbing: progressive drift. Overlays that "worked and then stopped" are this.
 - `evicted_metadata` climbing: unmatched metadata reached the capacity bound or
   was cleared by a source restart.
 - `pending_metadata` high with matches still occurring: ordinary arrival skew.
