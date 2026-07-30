@@ -185,11 +185,12 @@ type MetadataSnapshot struct {
 	MetadataCorrelationSnapshot
 }
 
-// MetadataCorrelationSnapshot reports how the timestamp correlator disposed of
-// the metadata it was given. The two Pending fields are instantaneous depths;
-// the other six are cumulative. Every timestamped message leaves through exactly
-// one of matched, expired, or evicted, or is still counted in PendingMetadata.
-// A video frame is not consumed by a match, so the video side closes separately.
+// MetadataCorrelationSnapshot reports metadata outcomes and retained frame-map
+// lifecycle. The two Pending fields are instantaneous depths; the other six are
+// cumulative. Every timestamped message leaves through exactly one of matched,
+// expired, or evicted, or is still counted in PendingMetadata. Frame mappings
+// remain reusable after a match, so their expiry and eviction are neutral buffer
+// retirement rather than correlation losses.
 type MetadataCorrelationSnapshot struct {
 	MatchedVideoFirst    uint64 `json:"matched_video_first"`
 	MatchedMetadataFirst uint64 `json:"matched_metadata_first"`

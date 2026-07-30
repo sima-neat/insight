@@ -405,7 +405,8 @@ func TestMetadataCorrelatorAccountingIdentityHoldsAcrossMixedSequence(t *testing
 	if matched := snapshot.MatchedVideoFirst + snapshot.MatchedMetadataFirst; matched != uint64(len(tally.outgoing)) {
 		t.Fatalf("match counters = %d, want %d correlated messages", matched, len(tally.outgoing))
 	}
-	// A frame is not consumed by a match, so the video side closes on its own.
+	// Frame mappings retire independently of matches because one frame can serve
+	// several metadata messages.
 	frameOut := snapshot.PendingVideo + snapshot.ExpiredVideo + snapshot.EvictedVideo
 	if tally.framesIn != frameOut {
 		t.Fatalf("video accounting lost frames: in=%d out=%d (%+v)", tally.framesIn, frameOut, snapshot)

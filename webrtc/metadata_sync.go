@@ -16,16 +16,17 @@ type arrival interface {
 	arrivedAt() time.Time
 }
 
-// retentionBuffer holds one side of the correlator, oldest arrival first. The
-// invariant the accounting rests on: an entry leaving this buffer either matched
-// or lands in expired or evicted, never neither.
+// retentionBuffer holds one side of the correlator, oldest arrival first.
+// Pending metadata leaves by match, expiry, or eviction. Frame mappings remain
+// reusable after a match, so their tallies describe buffer retirement only.
 type retentionBuffer[T arrival] struct {
 	capacity  int
 	retention time.Duration
 	items     []T
 
 	// expired aged past retention; evicted was dropped while still inside it, by
-	// capacity overflow or a source-restart reset.
+	// capacity overflow or a source-restart reset. For frame mappings these are
+	// retirement reasons, not evidence that no metadata matched the frame.
 	expired uint64
 	evicted uint64
 }
@@ -204,7 +205,7 @@ func (c *metadataTimestampCorrelator) addMetadata(payload []byte, now time.Time)
 }
 
 // Ages both sides before reading. An entry past retention is expired whether or
-// not a packet arrived to notice it, so a stalled stream reports its losses
+// not a packet arrived to notice it, so a stalled stream reports aged entries
 // rather than holding them as pending until the next arrival.
 func (c *metadataTimestampCorrelator) pruneAndSnapshot(now time.Time) MetadataCorrelationSnapshot {
 	c.mu.Lock()

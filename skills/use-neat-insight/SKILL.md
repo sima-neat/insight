@@ -125,7 +125,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 | `verbose=1` | Include diagnostics such as NAL type counts, payload type history, estimated sequence gaps, jitter estimate, malformed packet count, and recent errors. |
 | `all=1&verbose=1` | Return the full diagnostic view for all vf channels. |
 
-Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`; if `metadata.messages_received` grows but `metadata.messages_forwarded` stays flat, the browser DataChannel is not open (or vf is not currently able to send metadata to the browser).
+Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`. If it grows while `metadata.messages_forwarded` stays flat, inspect the correlation outcomes below before moving to the DataChannel.
 
 Examples:
 
@@ -146,30 +146,34 @@ capture.
 | --- | --- |
 | `matched_video_first` | Metadata matched a frame that was already retained. |
 | `matched_metadata_first` | Metadata waited, and a later frame released it. |
-| `pending_video` | Frames retained now, waiting for metadata. |
+| `pending_video` | Frame timestamp mappings retained now for lookup; matches do not remove them. |
 | `pending_metadata` | Messages waiting now for their frame. |
-| `expired_video` | Frames that aged past retention unused. |
+| `expired_video` | Frame mappings retired after retention, whether or not they matched metadata. |
 | `expired_metadata` | Messages that aged past retention without matching. |
-| `evicted_video` | Frames dropped inside retention, by capacity or a source restart. |
+| `evicted_video` | Frame mappings retired inside retention, by capacity or a source restart, whether or not they matched metadata. |
 | `evicted_metadata` | Messages dropped inside retention, by capacity or a source restart. |
 | `messages_forwarded` | Delivered to a browser DataChannel. Not a correlation result. |
-| `dropped_no_data_channel` | Correlated, but no browser peer accepted it. |
+| `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
 
 Every timestamped message leaves through exactly one of matched, expired, or
-evicted, or is still counted in `pending_metadata`. A frame is not consumed by a
-match, since one frame can serve several messages, so the video side closes on
-its own identity.
+evicted, or is still counted in `pending_metadata`. The video fields describe
+the lifetime of reusable timestamp mappings, not match or loss outcomes.
 
 Read them in this order:
 
-- `matched_*` both zero while `messages_received` climbs: metadata and video are
-  not on the same timebase. Compare the metadata timestamp against the video RTP
-  timestamp; do not spend time on capacity or the browser.
+- `rtp.packets_received` flat: video is not reaching Insight, so correlation
+  cannot happen.
+- `messages_received` climbing while every correlation outcome stays flat: the
+  messages have no usable `timestamp` and bypass correlation. Check
+  `invalid_json` and the producer schema.
+- `matched_*` both zero while `pending_metadata`, `expired_metadata`, or
+  `evicted_metadata` climbs, with video RTP present: timestamps are not matching.
+  Compare the metadata timestamp against the video RTP timestamp.
 - `matched_*` climbing, then stopping for good: progressive drift. Overlays that
   "worked and then stopped" are this.
-- `evicted_*` climbing while `matched_*` also climbs: capacity or a restart, not
-  timing.
+- `evicted_metadata` climbing: unmatched metadata reached the capacity bound or
+  was cleared by a source restart.
 - `pending_metadata` high with matches still occurring: ordinary arrival skew.
 - `matched_*` climbing but `messages_forwarded` flat: correlation works. Inspect
   the DataChannel, the viewer, and the browser cache instead.
@@ -181,9 +185,8 @@ Two properties to respect when reading:
   the deltas, or a long-running channel looks broken from its history alone.
 - Retention only binds while arrivals fit in the correlator's capacity. At the
   ~100 messages per second measured on a DevKit, capacity holds ~2.5 s, so a
-  sustained failure reports evictions before expiries. Both are correlation
-  losses; the discriminator between timing and capacity is whether `matched_*`
-  ever moved, not which loss counter grew.
+  sustained metadata mismatch can report `evicted_metadata` before
+  `expired_metadata`. Both mean timestamped metadata failed to match.
 
 ## Egress Stats
 
