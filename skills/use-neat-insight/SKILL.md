@@ -87,9 +87,9 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 - Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
-- Confirm which viewer JS is loaded before trusting a rendering result. Static assets have no `ETag`, so a browser can serve a stale `drawing.js` for days after a release.
-- Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters.
-- Reproduce overlay loss against a wall-clock-paced source. Metadata pairs with video within one millisecond, so a source that outruns the consuming model drifts out of tolerance permanently and fails for every application.
+- Hard-reload the viewer after installing a new Insight before trusting a rendering result. A browser can serve a stale `drawing.js` for days.
+- Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
+- Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
 
 ## Health And Metrics
@@ -133,6 +133,57 @@ Examples:
 curl -k https://127.0.0.1:9900/api/ingest/stats
 curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1'
 ```
+
+### Metadata Correlation
+
+Overlays are drawn only when a metadata message is matched to the video frame it
+describes. Insight matches `metadata.timestamp * 90` against the incoming video
+RTP timestamp within ±90 units — one millisecond. Use these fields inside each
+channel's `metadata` object to attribute an overlay failure without a packet
+capture.
+
+| Field | Meaning |
+| --- | --- |
+| `matched_video_first` | Metadata matched a frame that was already retained. |
+| `matched_metadata_first` | Metadata waited, and a later frame released it. |
+| `pending_video` | Frames retained now, waiting for metadata. |
+| `pending_metadata` | Messages waiting now for their frame. |
+| `expired_video` | Frames that aged past retention unused. |
+| `expired_metadata` | Messages that aged past retention without matching. |
+| `evicted_video` | Frames dropped inside retention, by capacity or a source restart. |
+| `evicted_metadata` | Messages dropped inside retention, by capacity or a source restart. |
+| `messages_forwarded` | Delivered to a browser DataChannel. Not a correlation result. |
+| `dropped_no_data_channel` | Correlated, but no browser peer accepted it. |
+| `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
+
+Every timestamped message leaves through exactly one of matched, expired, or
+evicted, or is still counted in `pending_metadata`. A frame is not consumed by a
+match, since one frame can serve several messages, so the video side closes on
+its own identity.
+
+Read them in this order:
+
+- `matched_*` both zero while `messages_received` climbs: metadata and video are
+  not on the same timebase. Compare the metadata timestamp against the video RTP
+  timestamp; do not spend time on capacity or the browser.
+- `matched_*` climbing, then stopping for good: progressive drift. Overlays that
+  "worked and then stopped" are this.
+- `evicted_*` climbing while `matched_*` also climbs: capacity or a restart, not
+  timing.
+- `pending_metadata` high with matches still occurring: ordinary arrival skew.
+- `matched_*` climbing but `messages_forwarded` flat: correlation works. Inspect
+  the DataChannel, the viewer, and the browser cache instead.
+
+Two properties to respect when reading:
+
+- Only `pending_video` and `pending_metadata` are instantaneous depths;
+  everything else is cumulative. Sample twice over a known interval and compare
+  the deltas, or a long-running channel looks broken from its history alone.
+- Retention only binds while arrivals fit in the correlator's capacity. At the
+  ~100 messages per second measured on a DevKit, capacity holds ~2.5 s, so a
+  sustained failure reports evictions before expiries. Both are correlation
+  losses; the discriminator between timing and capacity is whether `matched_*`
+  ever moved, not which loss counter grew.
 
 ## Egress Stats
 
