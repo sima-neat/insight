@@ -181,6 +181,27 @@ type MetadataSnapshot struct {
 	ChunkDatagramsReceived uint64  `json:"chunk_datagrams_received"`
 	MessagesReassembled    uint64  `json:"messages_reassembled"`
 	ReassemblyDrops        uint64  `json:"reassembly_drops"`
+
+	MetadataCorrelationSnapshot
+}
+
+// MetadataCorrelationSnapshot reports metadata outcomes and retained frame-map
+// lifecycle. The two Pending fields are instantaneous depths; the other six are
+// cumulative. Every timestamped message leaves through exactly one of matched,
+// expired, or evicted, or is still counted in PendingMetadata. Frame mappings
+// remain reusable after a match, so their expiry and eviction are neutral buffer
+// retirement rather than correlation losses.
+type MetadataCorrelationSnapshot struct {
+	MatchedVideoFirst    uint64 `json:"matched_video_first"`
+	MatchedMetadataFirst uint64 `json:"matched_metadata_first"`
+	PendingVideo         uint64 `json:"pending_video"`
+	PendingMetadata      uint64 `json:"pending_metadata"`
+	ExpiredVideo         uint64 `json:"expired_video"`
+	ExpiredMetadata      uint64 `json:"expired_metadata"`
+	EvictedVideo         uint64 `json:"evicted_video"`
+	EvictedMetadata      uint64 `json:"evicted_metadata"`
+	// Diagnostics only; no behaviour correlates on it.
+	FrameID json.RawMessage `json:"frame_id,omitempty"`
 }
 
 type MediaSnapshot struct {

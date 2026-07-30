@@ -86,6 +86,11 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
 - Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
+- Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
+- Hard-reload the viewer after installing a new Insight before trusting a rendering result. A browser can serve a stale `drawing.js` for days.
+- Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
+- Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
+- Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
 
 ## Health And Metrics
 
@@ -120,7 +125,7 @@ curl -k https://127.0.0.1:9900/api/system/tools
 | `verbose=1` | Include diagnostics such as NAL type counts, payload type history, estimated sequence gaps, jitter estimate, malformed packet count, and recent errors. |
 | `all=1&verbose=1` | Return the full diagnostic view for all vf channels. |
 
-Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`; if `metadata.messages_received` grows but `metadata.messages_forwarded` stays flat, the browser DataChannel is not open (or vf is not currently able to send metadata to the browser).
+Each channel includes top-level RTP identity fields, an `rtp` object, a `forwarding` object, a `media` object, a `webrtc` object, plus a `metadata` object for the UDP JSON ingest + DataChannel forwarding path. A healthy inbound H.264 stream should normally show increasing `rtp.packets_received`, nonzero `rtp.bitrate_bps`, `media.seen_sps`, `media.seen_pps`, and periodic `media.idr_count` growth. A healthy H.265 stream should also show `media.seen_vps` and periodic `media.keyframe_count` growth. Metadata should show increasing `metadata.messages_received`. If it grows while `metadata.messages_forwarded` stays flat, inspect the correlation outcomes below before moving to the DataChannel.
 
 Examples:
 
@@ -128,6 +133,65 @@ Examples:
 curl -k https://127.0.0.1:9900/api/ingest/stats
 curl -k 'https://127.0.0.1:9900/api/ingest/stats?all=1&verbose=1'
 ```
+
+### Metadata Correlation
+
+Overlays are drawn only when a metadata message is matched to the video frame it
+describes. Insight matches `metadata.timestamp * 90` against the incoming video
+RTP timestamp within ±90 units — one millisecond. Use these fields inside each
+channel's `metadata` object to attribute an overlay failure without a packet
+capture.
+
+| Field | Meaning |
+| --- | --- |
+| `matched_video_first` | Metadata matched a frame that was already retained. |
+| `matched_metadata_first` | Metadata waited, and a later frame released it. |
+| `pending_video` | Frame timestamp mappings retained now for lookup; matches do not remove them. |
+| `pending_metadata` | Messages waiting now for their frame. |
+| `expired_video` | Frame mappings retired after retention, whether or not they matched metadata. |
+| `expired_metadata` | Messages that aged past retention without matching. |
+| `evicted_video` | Frame mappings retired inside retention, by capacity or a source restart, whether or not they matched metadata. |
+| `evicted_metadata` | Messages dropped inside retention, by capacity or a source restart. |
+| `messages_forwarded` | Delivered to a browser DataChannel. Not a correlation result. |
+| `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
+| `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
+
+Every timestamped message leaves through exactly one of matched, expired, or
+evicted, or is still counted in `pending_metadata`. The video fields describe
+the lifetime of reusable timestamp mappings, not match or loss outcomes.
+
+Read them in this order:
+
+- `rtp.packets_received` flat: video is not reaching Insight, so correlation
+  cannot happen.
+- `rtp.packets_received` climbing while `forwarding.packets_forwarded` stays
+  flat: frames are not entering correlation. Check
+  `forwarding.webrtc_track_attached`, `forwarding.packets_dropped_no_track`, and
+  `forwarding.write_errors` first.
+- `messages_received` climbing while every correlation outcome stays flat: the
+  messages have no usable `timestamp` and bypass correlation. Check
+  `invalid_json` and the producer schema.
+- `matched_*` both zero while `pending_metadata`, `expired_metadata`, or
+  `evicted_metadata` climbs, with `forwarding.packets_forwarded` also climbing:
+  timestamps are not matching. Compare the metadata timestamp against the video
+  RTP timestamp.
+- `matched_*` climbing, then stopping while `forwarding.packets_forwarded` keeps
+  climbing: progressive drift. Overlays that "worked and then stopped" are this.
+- `evicted_metadata` climbing: unmatched metadata reached the capacity bound or
+  was cleared by a source restart.
+- `pending_metadata` high with matches still occurring: ordinary arrival skew.
+- `matched_*` climbing but `messages_forwarded` flat: correlation works. Inspect
+  the DataChannel, the viewer, and the browser cache instead.
+
+Two properties to respect when reading:
+
+- Only `pending_video` and `pending_metadata` are instantaneous depths;
+  everything else is cumulative. Sample twice over a known interval and compare
+  the deltas, or a long-running channel looks broken from its history alone.
+- Retention only binds while arrivals fit in the correlator's capacity. At the
+  ~100 messages per second measured on a DevKit, capacity holds ~2.5 s, so a
+  sustained metadata mismatch can report `evicted_metadata` before
+  `expired_metadata`. Both mean timestamped metadata failed to match.
 
 ## Egress Stats
 

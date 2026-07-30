@@ -8,17 +8,99 @@ import (
 
 const rtpTimestampTolerance = uint32(videoRTPClockRate / 1000)
 
+// Bounds what a producer can echo into the stats response; payloads arrive over
+// UDP from outside the process.
+const maxReportedFrameIDBytes = 64
+
+type arrival interface {
+	arrivedAt() time.Time
+}
+
+// retentionBuffer holds one side of the correlator, oldest arrival first.
+// Pending metadata leaves by match, expiry, or eviction. Frame mappings remain
+// reusable after a match, so their tallies describe buffer retirement only.
+type retentionBuffer[T arrival] struct {
+	capacity  int
+	retention time.Duration
+	items     []T
+
+	// expired aged past retention; evicted was dropped while still inside it, by
+	// capacity overflow or a source-restart reset. For frame mappings these are
+	// retirement reasons, not evidence that no metadata matched the frame.
+	expired uint64
+	evicted uint64
+}
+
+func newRetentionBuffer[T arrival](capacity int, retention time.Duration) *retentionBuffer[T] {
+	return &retentionBuffer[T]{capacity: capacity, retention: retention}
+}
+
+func (b *retentionBuffer[T]) add(item T) {
+	b.items = append(b.items, item)
+	overflow := len(b.items) - b.capacity
+	if overflow <= 0 {
+		return
+	}
+	b.evicted += uint64(overflow)
+	b.items = append(b.items[:0], b.items[overflow:]...)
+}
+
+// Arrivals are held in arrival order, so the expired ones are always a prefix.
+func (b *retentionBuffer[T]) prune(now time.Time) {
+	first := 0
+	for first < len(b.items) && now.Sub(b.items[first].arrivedAt()) > b.retention {
+		first++
+	}
+	if first == 0 {
+		return
+	}
+	b.expired += uint64(first)
+	b.items = append(b.items[:0], b.items[first:]...)
+}
+
+// Discarded entries count as evicted, not expired: they are still inside their
+// retention window and are lost to the reset rather than to age.
+func (b *retentionBuffer[T]) reset() {
+	b.evicted += uint64(len(b.items))
+	b.items = b.items[:0]
+}
+
+func (b *retentionBuffer[T]) depth() uint64 {
+	return uint64(len(b.items))
+}
+
+// Unresolved arrivals stay in the buffer so a later frame can still match them.
+// A resolved arrival is counted by the caller as a match, not as a loss.
+func takeResolved[T arrival, U any](b *retentionBuffer[T], resolve func(T) (U, bool)) []U {
+	var resolved []U
+	kept := b.items[:0]
+	for _, item := range b.items {
+		value, ok := resolve(item)
+		if !ok {
+			kept = append(kept, item)
+			continue
+		}
+		resolved = append(resolved, value)
+	}
+	b.items = kept
+	return resolved
+}
+
 type rtpTimestampMapping struct {
 	source   uint32
 	outgoing uint32
 	recorded time.Time
 }
 
+func (m rtpTimestampMapping) arrivedAt() time.Time { return m.recorded }
+
 type pendingMetadata struct {
 	payload  []byte
 	source   uint32
 	recorded time.Time
 }
+
+func (p pendingMetadata) arrivedAt() time.Time { return p.recorded }
 
 type correlatedMetadata struct {
 	payload    []byte
@@ -33,18 +115,28 @@ func (m correlatedMetadata) encode() ([]byte, error) {
 	return enrichMetadataTimestamp(m.payload, m.outgoing)
 }
 
+// metadataTimestampCorrelator pairs a metadata message with the outgoing RTP
+// timestamp of the video frame it describes, in whichever order the two arrive.
+// Both sides share one capacity, one retention window, and one reset, and every
+// disposal is counted.
 type metadataTimestampCorrelator struct {
 	mu       sync.Mutex
-	capacity int
-	maxAge   time.Duration
 	ssrc     uint32
 	haveSSRC bool
-	frames   []rtpTimestampMapping
-	pending  []pendingMetadata
+
+	frames  *retentionBuffer[rtpTimestampMapping]
+	pending *retentionBuffer[pendingMetadata]
+
+	matchedVideoFirst    uint64
+	matchedMetadataFirst uint64
+	lastFrameID          json.RawMessage
 }
 
-func newMetadataTimestampCorrelator(capacity int, maxAge time.Duration) *metadataTimestampCorrelator {
-	return &metadataTimestampCorrelator{capacity: capacity, maxAge: maxAge}
+func newMetadataTimestampCorrelator(capacity int, retention time.Duration) *metadataTimestampCorrelator {
+	return &metadataTimestampCorrelator{
+		frames:  newRetentionBuffer[rtpTimestampMapping](capacity, retention),
+		pending: newRetentionBuffer[pendingMetadata](capacity, retention),
+	}
 }
 
 func (c *metadataTimestampCorrelator) addVideoFrame(
@@ -56,72 +148,90 @@ func (c *metadataTimestampCorrelator) addVideoFrame(
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Ageing before the reset is what keeps reset() an eviction: a restart after a
+	// gap longer than retention has already lost its entries to expiry, and
+	// reporting those as restart loss would read as capacity, not as timing.
+	c.frames.prune(now)
+	c.pending.prune(now)
 	if c.haveSSRC && c.ssrc != ssrc {
-		// Pending metadata has no source generation, so retaining it could match a restarted source.
-		c.frames = c.frames[:0]
-		c.pending = c.pending[:0]
+		// Neither side carries a source generation, so keeping entries across a
+		// restart would let a repeated source timestamp match the wrong frame.
+		c.frames.reset()
+		c.pending.reset()
 	}
 	c.ssrc = ssrc
 	c.haveSSRC = true
-	c.pruneFrames(now)
-	c.prunePending(now)
-	c.frames = append(c.frames, rtpTimestampMapping{source: source, outgoing: outgoing, recorded: now})
-	if len(c.frames) > c.capacity {
-		c.frames = c.frames[len(c.frames)-c.capacity:]
-	}
+	c.frames.add(rtpTimestampMapping{source: source, outgoing: outgoing, recorded: now})
 
-	ready := make([]correlatedMetadata, 0)
-	remaining := c.pending[:0]
-	for _, pending := range c.pending {
-		matched, ok := c.findOutgoingTimestamp(pending.source)
+	ready := takeResolved(c.pending, func(metadata pendingMetadata) (correlatedMetadata, bool) {
+		matched, ok := c.findOutgoingTimestamp(metadata.source)
 		if !ok {
-			remaining = append(remaining, pending)
-			continue
+			return correlatedMetadata{}, false
 		}
-		ready = append(ready, correlatedMetadata{
-			payload: pending.payload, outgoing: matched, correlated: true,
-		})
-	}
-	c.pending = remaining
+		return correlatedMetadata{payload: metadata.payload, outgoing: matched, correlated: true}, true
+	})
+	c.matchedMetadataFirst += uint64(len(ready))
 	return ready
 }
 
 func (c *metadataTimestampCorrelator) addMetadata(payload []byte, now time.Time) []correlatedMetadata {
-	timestampMS, ok := metadataTimestamp(payload)
-	if !ok {
-		return []correlatedMetadata{{payload: append([]byte(nil), payload...)}}
-	}
+	envelope := parseMetadataEnvelope(payload)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.pruneFrames(now)
-	c.prunePending(now)
-	source := uint32(uint64(timestampMS) * 90)
+	c.recordFrameID(envelope.FrameID)
+
+	if envelope.Timestamp == nil {
+		// Nothing to correlate against, so this is not a correlation outcome.
+		return []correlatedMetadata{{payload: append([]byte(nil), payload...)}}
+	}
+
+	c.frames.prune(now)
+	c.pending.prune(now)
+	source := uint32(uint64(*envelope.Timestamp) * 90)
 	outgoing, ok := c.findOutgoingTimestamp(source)
 	if !ok {
-		c.pending = append(c.pending, pendingMetadata{
+		c.pending.add(pendingMetadata{
 			payload:  append([]byte(nil), payload...),
 			source:   source,
 			recorded: now,
 		})
-		if len(c.pending) > c.capacity {
-			c.pending = c.pending[len(c.pending)-c.capacity:]
-		}
 		return nil
 	}
+	c.matchedVideoFirst++
 	return []correlatedMetadata{{
 		payload: append([]byte(nil), payload...), outgoing: outgoing, correlated: true,
 	}}
 }
 
-func (c *metadataTimestampCorrelator) prunePending(now time.Time) {
-	first := 0
-	for first < len(c.pending) && now.Sub(c.pending[first].recorded) > c.maxAge {
-		first++
+// Ages both sides before reading. An entry past retention is expired whether or
+// not a packet arrived to notice it, so a stalled stream reports aged entries
+// rather than holding them as pending until the next arrival.
+func (c *metadataTimestampCorrelator) pruneAndSnapshot(now time.Time) MetadataCorrelationSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.frames.prune(now)
+	c.pending.prune(now)
+	return MetadataCorrelationSnapshot{
+		MatchedVideoFirst:    c.matchedVideoFirst,
+		MatchedMetadataFirst: c.matchedMetadataFirst,
+		PendingVideo:         c.frames.depth(),
+		PendingMetadata:      c.pending.depth(),
+		ExpiredVideo:         c.frames.expired,
+		ExpiredMetadata:      c.pending.expired,
+		EvictedVideo:         c.frames.evicted,
+		EvictedMetadata:      c.pending.evicted,
+		FrameID:              append(json.RawMessage(nil), c.lastFrameID...),
 	}
-	if first > 0 {
-		c.pending = append(c.pending[:0], c.pending[first:]...)
+}
+
+// An oversized value is ignored rather than truncated: half a JSON value is not
+// reportable.
+func (c *metadataTimestampCorrelator) recordFrameID(frameID json.RawMessage) {
+	if len(frameID) == 0 || len(frameID) > maxReportedFrameIDBytes {
+		return
 	}
+	c.lastFrameID = append(c.lastFrameID[:0], frameID...)
 }
 
 func (c *metadataTimestampCorrelator) findOutgoingTimestamp(source uint32) (uint32, bool) {
@@ -130,25 +240,15 @@ func (c *metadataTimestampCorrelator) findOutgoingTimestamp(source uint32) (uint
 		outgoing     uint32
 		found        bool
 	)
-	for i := len(c.frames) - 1; i >= 0; i-- {
-		distance := rtpTimestampDistance(c.frames[i].source, source)
+	for i := len(c.frames.items) - 1; i >= 0; i-- {
+		distance := rtpTimestampDistance(c.frames.items[i].source, source)
 		if distance <= rtpTimestampTolerance && distance < bestDistance {
 			bestDistance = distance
-			outgoing = c.frames[i].outgoing
+			outgoing = c.frames.items[i].outgoing
 			found = true
 		}
 	}
 	return outgoing, found
-}
-
-func (c *metadataTimestampCorrelator) pruneFrames(now time.Time) {
-	first := 0
-	for first < len(c.frames) && now.Sub(c.frames[first].recorded) > c.maxAge {
-		first++
-	}
-	if first > 0 {
-		c.frames = append(c.frames[:0], c.frames[first:]...)
-	}
 }
 
 func rtpTimestampDistance(a, b uint32) uint32 {
@@ -159,14 +259,24 @@ func rtpTimestampDistance(a, b uint32) uint32 {
 	return uint32(delta)
 }
 
-func metadataTimestamp(payload []byte) (int64, bool) {
-	var envelope struct {
-		Timestamp *int64 `json:"timestamp"`
+type metadataEnvelope struct {
+	// Nil when the message carries no usable timestamp, which is the only case
+	// where the correlator forwards without correlating.
+	Timestamp *int64 `json:"timestamp"`
+	// Raw JSON so a producer sending a string or an object cannot cost the
+	// message its timestamp by failing the decode.
+	FrameID json.RawMessage `json:"frame_id"`
+}
+
+func parseMetadataEnvelope(payload []byte) metadataEnvelope {
+	var envelope metadataEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return metadataEnvelope{}
 	}
-	if err := json.Unmarshal(payload, &envelope); err != nil || envelope.Timestamp == nil || *envelope.Timestamp < 0 {
-		return 0, false
+	if envelope.Timestamp != nil && *envelope.Timestamp < 0 {
+		envelope.Timestamp = nil
 	}
-	return *envelope.Timestamp, true
+	return envelope
 }
 
 func enrichMetadataTimestamp(payload []byte, outgoing uint32) ([]byte, error) {
