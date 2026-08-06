@@ -1,6 +1,11 @@
 # Build artifacts
 build/
+dist/
 *.deb
+
+# Test artifacts
+.pytest_cache/
+tests/.test-token
 
 # Python bytecode
 __pycache__/

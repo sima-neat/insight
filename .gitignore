@@ -17,3 +17,4 @@ neat_insight/frontend_dist/
 cfg.json
 .vscode/
 *_mpk.tar.gz
+mipi-sweep-*.log

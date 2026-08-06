@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  purge)
+    # Drop the generated auth token and its directory on purge so a later
+    # fresh install provisions a new one.
+    rm -f /etc/sima-mipi-util/token
+    rmdir --ignore-fail-on-non-empty /etc/sima-mipi-util 2>/dev/null || true
+    # Drop the runtime audit log (and its rotation) too.
+    rm -f /var/log/sima-mipi-util-reapply.log /var/log/sima-mipi-util-reapply.log.1
+    # Drop the application log and any logrotate'd copies.
+    rm -f /var/log/sima-mipi-util.log /var/log/sima-mipi-util.log.*
+    # Per-camera settings are durable across upgrades/removal, but purge means
+    # the operator requested all application state to be deleted.
+    rm -f /var/lib/sima-mipi-util/camera-settings.json
+    rmdir --ignore-fail-on-non-empty /var/lib/sima-mipi-util 2>/dev/null || true
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+    fi
+    ;;
+esac
+exit 0

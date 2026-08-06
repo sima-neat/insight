@@ -1,0 +1,38 @@
+Building the sima-mipi-util Debian package
+------------------------------------------
+
+Preferred: use the build script (what CI runs). It builds from a clean tree,
+stamps the version, and prints the resulting .deb path.
+
+  ./build-deb.sh dist                 # -> dist/sima-mipi-util_<version>_all.deb
+  VERSION=1.2.3 ./build-deb.sh dist   # override the version (CI passes a
+                                      # branch/tag-derived value)
+
+Validate the result:
+
+  dpkg-deb --info    dist/sima-mipi-util_*_all.deb
+  dpkg-deb --contents dist/sima-mipi-util_*_all.deb
+
+Distribution
+------------
+This package is built, validated, and published as its own Vulcan package
+(gh:sima-neat/insight/mipi-util) by .github/workflows/mipi-util-vulcan-ci.yml
+on pushes that touch mipi-util/. End users install it with:
+
+  sima-cli neat install insight/mipi-util@<branch-or-tag>
+
+The Vulcan package bundles the .deb plus install_sima_mipi_util.py
+(from scripts/install-vulcan-sima-mipi-util.py), which installs it via apt so
+the runtime dependencies in DEBIAN/control are pulled in.
+
+Manual equivalent (no script), for reference
+--------------------------------------------
+  VERSION=$(awk -F': ' '/^Version:/{print $2}' DEBIAN/control)
+  rm -rf build
+  mkdir -p build/usr/share/sima-mipi-util build/usr/bin build/lib/systemd/system
+  cp source/camera_api.py source/camera_ui.html build/usr/share/sima-mipi-util/
+  cp source/sima-mipi-util                       build/usr/bin/
+  cp source/sima-mipi-util.service               build/lib/systemd/system/
+  cp -r DEBIAN                                    build/
+  chmod 0755 build/DEBIAN/postinst build/DEBIAN/prerm build/DEBIAN/postrm build/usr/bin/sima-mipi-util
+  dpkg-deb --build build "sima-mipi-util_${VERSION}_all.deb"

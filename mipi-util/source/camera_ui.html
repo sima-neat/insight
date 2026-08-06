@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MODALIX Camera Control</title>
+<title>SiMa.ai MIPI Camera Utility</title>
 <script>
 (function(){
   var saved = localStorage.getItem("sima-theme") || "light";
@@ -594,8 +594,8 @@ input[type=range]::-moz-range-thumb{
         </svg>
       </a>
       <div class="brand-text">
-        <div class="brand-name">Modalix</div>
-        <div class="brand-sub">Camera Control <span class="pro">Pro</span></div>
+        <div class="brand-name">SiMa.ai</div>
+        <div class="brand-sub">MIPI Camera <span class="pro">Utility</span></div>
       </div>
       <div class="brand-rule"></div>
     </div>
@@ -611,7 +611,8 @@ input[type=range]::-moz-range-thumb{
       <div class="eyebrow">Live Stats</div>
       <div class="kv" style="font-size:12px;gap:5px 10px">
         <div class="kv-label">Resolution</div><div class="kv-value" id="sb-res">—</div>
-        <div class="kv-label">FPS</div><div class="kv-value ok" id="sb-fps">—</div>
+        <div class="kv-label">Sensor FPS</div><div class="kv-value" id="sb-sensor-fps">—</div>
+        <div class="kv-label">Display FPS</div><div class="kv-value ok" id="sb-fps">—</div>
         <div class="kv-label">Avg FPS</div><div class="kv-value ok" id="sb-avg-fps">—</div>
         <div class="kv-label">Exposure</div><div class="kv-value" id="sb-exp-val">—</div>
         <div class="kv-label">Gain</div><div class="kv-value" id="sb-gain-val">—</div>
@@ -656,7 +657,7 @@ input[type=range]::-moz-range-thumb{
         <div class="metric"><span class="metric-label">Memory</span><span class="metric-value" id="sys-mem">41% <span class="bar mem"><span></span></span></span></div>
         <div class="metric"><span class="metric-label">Temp</span><span class="metric-value warn" id="sys-temp">52°C <span class="bar temp"><span></span></span></span></div>
         <button class="icon-btn" id="theme-toggle-btn" title="Toggle dark mode" onclick="toggleTheme()">☼</button>
-        <button class="icon-btn" id="restart-btn" title="Restart Device" onclick="showRestartModal()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="21.5 5 21.5 10.5 16 10.5"/><polyline points="2.5 19 2.5 13.5 8 13.5"/><path d="M4.8 9.2a8 8 0 0 1 13.2-3L21.5 10.5M2.5 13.5l3.5 4.3a8 8 0 0 0 13.2-3"/></svg></button>
+        <button class="icon-btn" id="restart-btn" title="Restart Service" onclick="showRestartModal()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="21.5 5 21.5 10.5 16 10.5"/><polyline points="2.5 19 2.5 13.5 8 13.5"/><path d="M4.8 9.2a8 8 0 0 1 13.2-3L21.5 10.5M2.5 13.5l3.5 4.3a8 8 0 0 0 13.2-3"/></svg></button>
       </div>
     </header>
 
@@ -690,6 +691,7 @@ input[type=range]::-moz-range-thumb{
               <div class="kv-label">Connection</div><div class="kv-value ok dv" id="inf-conn">Connected</div>
               <div class="kv-label">Streaming</div><div class="kv-value ok dv" id="inf-streaming">Active</div>
               <div class="kv-label">Frame Rate</div><div class="kv-value" id="inf-fps-side">29.97 FPS</div>
+              <div class="kv-label">Sensor / Display</div><div class="kv-value" id="inf-fps-compare">—</div>
               <div class="kv-label">Resolution</div><div class="kv-value" id="s-res-lbl">1280 x 720</div>
               <div class="kv-label">Format</div><div class="kv-value" id="inf-fmt">YUYV</div>
               <div class="kv-label">Bit Depth</div><div class="kv-value" id="inf-bitdepth">10-bit</div>
@@ -699,8 +701,8 @@ input[type=range]::-moz-range-thumb{
           <div class="sensor">
             <div class="sensor-list">
               <div class="kv">
-                <div class="kv-label">Exposure</div><div class="kv-value" id="s-exp">12.50 ms</div>
-                <div class="kv-label">Analog Gain</div><div class="kv-value" id="s-gain">1.00 x</div>
+                <div class="kv-label">Exposure</div><div class="kv-value" id="s-exp">—</div>
+                <div class="kv-label">Analog Gain</div><div class="kv-value" id="s-gain">—</div>
                 <div class="kv-label">Digital Gain</div><div class="kv-value" id="s-digain">—</div>
                 <div class="kv-label">VBlank</div><div class="kv-value" id="s-vblank">—</div>
                 <div class="kv-label">HBlank</div><div class="kv-value" id="s-hblank">—</div>
@@ -771,7 +773,8 @@ input[type=range]::-moz-range-thumb{
               <div class="card-body">
                 <div class="ctrl" data-manual="en_manual_iridix"><label class="ctrl-lbl">Contrast</label><input type="range" id="system_iridix_strength_target" min="0" max="255" value="0" oninput="sv(this)"><input class="num" type="number" id="system_iridix_strength_target_v" value="0" oninput="ss(this,'system_iridix_strength_target')"></div>
                 <div class="ctrl" data-manual="en_manual_iridix"><label class="ctrl-lbl">Gamma</label><input type="range" id="system_maximum_iridix_strength" min="0" max="255" value="64" oninput="sv(this)"><input class="num" type="number" id="system_maximum_iridix_strength_v" value="64" oninput="ss(this,'system_maximum_iridix_strength')"></div>
-                <div class="ctrl wide" data-manual="en_manual_iridix"><label class="ctrl-lbl">Tone Mapping</label><select class="sel-ctrl" id="tone_mapping_select" onchange="mark('system_iridix_strength_target', parseInt(this.value,10))"><option value="128">Medium</option><option value="64">Low</option><option value="200">High</option></select></div>
+                <div class="ctrl" data-manual="en_manual_iridix"><label class="ctrl-lbl">Iridix Min</label><input type="range" id="system_minimum_iridix_strength" min="0" max="255" value="0" oninput="sv(this)"><input class="num" type="number" id="system_minimum_iridix_strength_v" value="0" oninput="ss(this,'system_minimum_iridix_strength')"></div>
+                <div class="ctrl wide" data-manual="en_manual_iridix"><label class="ctrl-lbl">Tone Mapping</label><select class="sel-ctrl" id="tone_mapping_select" onchange="var n=document.getElementById('system_iridix_strength_target_v'); n.value=this.value; ss(n,'system_iridix_strength_target')"><option value="128">Medium</option><option value="64">Low</option><option value="200">High</option></select></div>
                 <span id="en_manual_iridix_l" style="display:none">On</span>
               </div>
             </div>
@@ -800,9 +803,9 @@ input[type=range]::-moz-range-thumb{
 
 <div class="overlay" id="restart-modal">
   <div class="modal">
-    <div class="modal-hdr"><h3>Restart Device</h3><button class="modal-close" onclick="closeRestart()">x</button></div>
-    <div class="modal-body">Restart the camera service/device to apply settings that require a reboot.</div>
-    <div class="modal-foot"><button class="btn-cancel" onclick="closeRestart()">Later</button><button class="btn-reboot" onclick="doReboot()">Restart Now</button></div>
+    <div class="modal-hdr"><h3>Restart Service</h3><button class="modal-close" onclick="closeRestart()">x</button></div>
+    <div class="modal-body">Restarts the <b>mipi-util service only</b>. (For a full device reboot, use an SSH/console session.)</div>
+    <div class="modal-foot"><button class="btn-cancel" onclick="closeRestart()">Later</button><button class="btn-reboot" onclick="doReboot()">Restart Service</button></div>
   </div>
 </div>
 
@@ -838,16 +841,70 @@ input[type=range]::-moz-range-thumb{
   </div>
 </div>
 
-<div class="reboot-ov" id="reboot-ov"><div class="spin"></div><div id="reboot-msg">Rebooting device...</div><div id="reboot-sub">Please wait 30-60 seconds.</div></div>
+<div class="reboot-ov" id="reboot-ov"><div class="spin"></div><div id="reboot-msg">Restarting service...</div><div id="reboot-sub">Please wait a few seconds.</div></div>
 <div class="toast-area" id="toasts"></div>
 
 <script>
+// ── API auth ──────────────────────────────────────────────────────────────
+// State-changing endpoints on the device require a per-install token (printed
+// by the installer). Reads stay open, so the page and live view load without
+// one; the token is only attached to write requests and prompted for when a
+// write is refused. Stored per-device (keyed by host) so pointing at another
+// board asks for that board's token instead of reusing the wrong one.
+function _tokKey() {
+  try { return "sima-auth-token:" + document.getElementById("host").value.trim(); }
+  catch(_) { return "sima-auth-token"; }
+}
+function getToken() { return localStorage.getItem(_tokKey()) || ""; }
+function setToken(t) {
+  if (t && t.trim()) localStorage.setItem(_tokKey(), t.trim());
+  else localStorage.removeItem(_tokKey());
+}
+function promptToken(msg) {
+  const t = window.prompt(msg || "Enter the device API token (shown by the installer):", getToken());
+  if (t !== null) setToken(t);
+  return t;
+}
+const _origFetch = window.fetch.bind(window);
+const CAMERA_CLIENT_ID = (() => {
+  let id = sessionStorage.getItem("sima-camera-client-id");
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() :
+      "client-" + Date.now() + "-" + Math.random().toString(16).slice(2));
+    sessionStorage.setItem("sima-camera-client-id", id);
+  }
+  return id;
+})();
+window.fetch = async (url, opts) => {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers, {"X-Camera-Client": CAMERA_CLIENT_ID});
+  const method = (opts.method || "GET").toUpperCase();
+  const guarded = method !== "GET" && method !== "HEAD";
+  if (guarded) {
+    const t = getToken();
+    if (t) opts.headers = Object.assign({}, opts.headers, {"X-Auth-Token": t});
+  }
+  let r = await _origFetch(url, opts);
+  if (r.status === 401 && guarded) {
+    // Token missing or rejected — ask once and retry the same request.
+    if (promptToken("This device rejected the request. Enter its API token:") !== null) {
+      opts.headers = Object.assign({}, opts.headers, {"X-Auth-Token": getToken()});
+      r = await _origFetch(url, opts);
+    }
+  }
+  return r;
+};
+
 let pending = {};
 let streamDev = "/dev/video0";
 let ctrlDev = "/dev/video0out";
 let cameraName = "—";
 let cameraDriver = "—";
 let diagTimer = null;
+// Last resolution we successfully read; survives a failed diagnostics poll so
+// the field doesn't flicker. Reset in selectCamera() — a different camera can
+// be running a different mode.
+let lastKnownRes = null;
 let diagIntervalMs = 4000;
 let histTimer = null;
 let healthTimer = null;
@@ -919,6 +976,11 @@ function switchTab(name) {
 async function connectAndLoad() {
   setConn("wait");
   try {
+    // Starting the stream builds the selected camera's pipeline. The controls
+    // endpoint waits for its per-camera restore pass, so fetch controls only
+    // after requesting the stream instead of briefly showing the previous
+    // camera's values from the ISP's shared context.
+    startStream();
     const r = await fetch(api("/api/controls"));
     if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
@@ -942,7 +1004,6 @@ async function connectAndLoad() {
       }
     } catch(_) {}
     updateDevInfo();
-    startStream();
     startDiag();
     startHistogram();
     startHealth();
@@ -1126,11 +1187,24 @@ let _previewLast = 0;
 let _previewTimer = null;
 function previewLive(id, val, immediate=false) {
   const v = parseInt(val, 10);
+  // Bind the write to the camera that was selected when the user made the
+  // change. A throttled trailing write may run after a camera switch; reading
+  // the global streamDev inside send() made an old IMX568 slider value arrive
+  // tagged as an IMX477 write (or vice versa), so the backend correctly but
+  // undesirably remembered it for the new camera.
+  const camera = streamDev;
   const send = () => {
     _previewLast = Date.now();
     return fetch(api("/api/set"), {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({control:id, value:v})
+      body:JSON.stringify({camera, control:id, value:v})
+    }).then(async r => {
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        toast(d.error || "Control write failed (HTTP " + r.status + ")", "err");
+        throw new Error(d.error || "HTTP " + r.status);
+      }
+      return r;
     }).catch(()=>{});
   };
   if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null; }
@@ -1138,6 +1212,13 @@ function previewLive(id, val, immediate=false) {
     return send();
   }
   return new Promise(resolve => { _previewTimer = setTimeout(() => resolve(send()), 100); });
+}
+
+function cancelPendingPreview() {
+  if (_previewTimer) {
+    clearTimeout(_previewTimer);
+    _previewTimer = null;
+  }
 }
 
 // Snapshot hardware state the moment a fresh round of edits starts, so
@@ -1184,10 +1265,12 @@ async function rejectPreview() {
     if (k in previewBaseline) controls[k] = previewBaseline[k];
   }
   try {
-    await fetch(api("/api/set_many"), {
+    const r = await fetch(api("/api/set_many"), {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({controls})
+      body:JSON.stringify({camera:streamDev, controls})
     });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
     toast("Changes discarded", "info");
   } catch(e) {
     toast("Discard failed: " + e.message, "err");
@@ -1343,9 +1426,10 @@ async function applyAll() {
     const r = await fetch(api("/api/set_many"), {
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({controls:pending})
+      body:JSON.stringify({camera:streamDev, controls:pending})
     });
     const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
     const bad = Object.values(d.results || {}).filter(v => !v.ok).length;
     if (bad) toast(`${bad} control(s) failed`, "err");
     else {
@@ -1366,12 +1450,29 @@ async function applyAll() {
   }
 }
 
+// Re-read every control's current value and paint it into the UI, WITHOUT
+// touching the live view. connectAndLoad() also calls startStream(), which
+// reassigns the <img> src and so tears down and re-opens the video connection
+// — a visible black frame and, whenever the reconnect raced anything, the
+// "Stream unavailable — retrying..." overlay with a Start button. Set Default
+// changes ISP registers; it does not change which camera is streaming, so the
+// video never needs to be disturbed.
+async function reloadControlValues() {
+  const r = await fetch(api("/api/controls"));
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  applyValuesToUI(await r.json());
+  pending = {};
+  updateCmd();
+}
+
 async function resetAll() {
   if (!confirm("Set all controls back to their default values?")) return;
   try {
-    await fetch(api("/api/reset"), {method:"POST"});
+    const r = await fetch(api("/api/reset"), {method:"POST"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    // Reload values only — the stream keeps running untouched.
+    await reloadControlValues();
     toast("Reset to defaults", "ok");
-    await connectAndLoad();
   } catch(e) {
     toast("Reset failed: " + e.message, "err");
   }
@@ -1435,13 +1536,13 @@ function startStream() {
   const img = document.getElementById("stream-img");
   document.getElementById("vid-overlay").classList.add("hidden");
   img.style.display = "block";
-  img.src = api(`/api/stream?device=${encodeURIComponent(streamDev)}&_t=${Date.now()}`);
+  img.src = api(`/api/stream?device=${encodeURIComponent(streamDev)}&client_id=${encodeURIComponent(CAMERA_CLIENT_ID)}&_t=${Date.now()}`);
   startFpsPoll();
 }
 
 function refreshStream() {
   const img = document.getElementById("stream-img");
-  img.src = api(`/api/stream?device=${encodeURIComponent(streamDev)}&_t=${Date.now()}`);
+  img.src = api(`/api/stream?device=${encodeURIComponent(streamDev)}&client_id=${encodeURIComponent(CAMERA_CLIENT_ID)}&_t=${Date.now()}`);
 }
 
 let _staleFpsCount = 0;
@@ -1462,6 +1563,16 @@ function startFpsPoll() {
       set("inf-fps-side", fps === "—" ? "—" : fps + " FPS");
       set("sb-fps", fps);
       set("sb-avg-fps", d.avg_fps != null ? d.avg_fps.toFixed(1) : "—");
+      // Sensor rate comes from the sensor's timing registers, capture rate is
+      // counted before the target_fps throttle, display rate is what actually
+      // reaches this page. Showing all three makes it visible whether a low
+      // display rate is the sensor, the ISP, or our own encode/throttle.
+      const sensor = d.sensor_fps != null ? d.sensor_fps.toFixed(1) : "—";
+      set("sb-sensor-fps", sensor);
+      const cmp = (sensor === "—" && fps === "—")
+        ? "—"
+        : sensor + " / " + fps + " FPS";
+      set("inf-fps-compare", cmp);
       // Watchdog: a stalled multipart stream doesn't fire the <img> error
       // event (the connection stays technically open, just idle), so
       // onStreamErr() never triggers its own retry. Only reconnect after
@@ -1488,10 +1599,35 @@ function onStreamLoad() {
   document.getElementById("vid-overlay").classList.add("hidden");
   if (_streamRetry) { clearTimeout(_streamRetry); _streamRetry = null; }
 }
+let _camOwnedByOther = false;
 function onStreamErr() {
-  showOverlay(`Stream unavailable (${streamDev}) — retrying...`, true);
+  // The <img> can't read the HTTP status, so distinguish the exclusive-owner
+  // case (423) using the ownership flag polled from /api/status.
+  if (_camOwnedByOther) {
+    showOverlay("Camera is in use by another browser/user — waiting for it to be released…", false);
+  } else {
+    showOverlay(`Stream unavailable (${streamDev}) — retrying...`, true);
+  }
   if (_streamRetry) clearTimeout(_streamRetry);
   _streamRetry = setTimeout(startStream, 6000);
+}
+
+// Poll camera ownership so a "someone else is using this camera" popup shows
+// even when the conflict starts after load — the <img> stream alone can't
+// report the 423. camera_owned_by_other is computed by the server relative to
+// this browser's X-Camera-Client id (added to every request).
+async function checkCameraOwnership() {
+  try {
+    const r = await fetch(api("/api/status"));
+    if (!r.ok) return;
+    const other = !!(await r.json()).camera_owned_by_other;
+    if (other) {
+      showOverlay("Camera is in use by another browser/user — waiting for it to be released…", false);
+    } else if (_camOwnedByOther) {
+      startStream();   // just released — reconnect our stream
+    }
+    _camOwnedByOther = other;
+  } catch(_) {}
 }
 function showOverlay(msg, showBtn) {
   document.getElementById("ov-msg").textContent = msg;
@@ -1507,28 +1643,60 @@ function startDiag() {
 }
 
 async function fetchDiag() {
+  checkCameraOwnership();
   try {
     const r = await fetch(api("/api/diagnostics"));
     if (!r.ok) return;
     const d = await r.json();
-    const res = d.sensor_width && d.sensor_height ? `${d.sensor_width}x${d.sensor_height}` : "-";
+    // Resolution only changes on a sensor mode change, so a poll that fails to
+    // read it means "could not ask this time", not "there is no resolution".
+    // Blanking on a single failed read is what made this field disappear for a
+    // few seconds and come back. Keep the last known value instead; it is
+    // cleared explicitly on a camera switch, where the mode really can differ.
+    if (d.sensor_width && d.sensor_height) {
+      lastKnownRes = `${d.sensor_width}x${d.sensor_height}`;
+    }
+    const res = lastKnownRes || "-";
     set("s-res", res);
     set("s-res-lbl", res);
     set("s-ae", d.get_ae_hist_mean != null ? d.get_ae_hist_mean : "-");
-    set("s-gain", d.get_gain_log2 != null ? d.get_gain_log2 : "-");
-    set("s-exp", d.get_expososure_log2 != null ? d.get_expososure_log2 : "-");
+    // The ISP reports exposure and gain as log₂ values in Q18 fixed point
+    // (2^18 = 262144 counts per unit of log₂). Derived + verified on-device by
+    // sweeping current_exposure with manual lock on and watching
+    // get_expososure_log2 move by exactly 2^18 per doubling of the exposure:
+    //   exposure_µs = 64 · 2^(get_expososure_log2 / 2^18)   (64µs reference pivot)
+    //   gain_×      =      2^(get_gain_log2       / 2^18)   (unity reference)
+    // Gain reads ≈1.00× in a bright scene, which is correct — the sensor only
+    // applies gain it needs. If a future ISP build changes the fixed-point
+    // scale, LOG2_Q is the single knob (and EXP_PIVOT_US the exposure pivot).
+    const LOG2_Q = 262144;       // 2^18 fixed-point scale
+    const EXP_PIVOT_US = 64;     // exposure reference, microseconds
+    const fmtGain = v => v != null ? Math.pow(2, v / LOG2_Q).toFixed(2) + "×" : "—";
+    const fmtExp  = v => {
+      if (v == null) return "—";
+      const us = EXP_PIVOT_US * Math.pow(2, v / LOG2_Q);
+      return us >= 1000 ? (us / 1000).toFixed(2) + " ms" : us.toFixed(0) + " µs";
+    };
+    set("s-gain", fmtGain(d.get_gain_log2));
+    set("s-exp", fmtExp(d.get_expososure_log2));
     set("s-ird", d.get_iridix_contrast != null ? d.get_iridix_contrast : "-");
     // Sidebar live stats (FPS is measured client-side from real frame arrivals,
     // not from the sensor_fps register — see onStreamLoad())
     set("sb-res", res);
-    set("sb-exp-val", d.get_expososure_log2 != null ? d.get_expososure_log2 : "—");
-    set("sb-gain-val", d.get_gain_log2 != null ? d.get_gain_log2 : "—");
+    set("sb-exp-val", fmtExp(d.get_expososure_log2));
+    set("sb-gain-val", fmtGain(d.get_gain_log2));
     set("sb-ae-val", d.get_ae_hist_mean != null ? d.get_ae_hist_mean : "—");
     set("sb-ird-val", d.get_iridix_contrast != null ? d.get_iridix_contrast : "—");
     // Real sensor-subdevice registers (vertical_blanking/horizontal_blanking/
     // digital_gain/link_frequency) — previously these fields were hardcoded
     // placeholder text that never updated.
-    set("s-digain", d.digital_gain_raw != null ? (d.digital_gain_raw / 256).toFixed(2) + " x" : "—");
+    // Digital gain: the sensor's raw register is a multiplier scaled to its
+    // own declared unity (imx477 unity is 256; imx568 declares 0..1048576 where
+    // 256 means nothing), so divide by the backend-reported unity rather than a
+    // hardcoded 256. When there is no unity to divide by, show the raw value.
+    set("s-digain", d.digital_gain_raw == null ? "—"
+        : (d.digital_gain_unity ? (d.digital_gain_raw / d.digital_gain_unity).toFixed(2) + " x"
+                                : String(d.digital_gain_raw)));
     set("s-vblank", d.vertical_blanking != null ? d.vertical_blanking : "—");
     set("s-hblank", d.horizontal_blanking != null ? d.horizontal_blanking : "—");
     set("s-linkfreq", d.link_frequency_hz != null ? (d.link_frequency_hz / 1e6).toFixed(0) + " MHz" : "—");
@@ -1703,6 +1871,7 @@ async function loadCamDropdown() {
 
 async function selectControlDevice(dev) {
   document.getElementById("cam-dropdown").classList.remove("open");
+  cancelPendingPreview();
   try {
     const r = await fetch(api("/api/device"), {
       method:"POST",
@@ -1722,6 +1891,9 @@ async function selectControlDevice(dev) {
 
 async function selectCamera(cam) {
   document.getElementById("cam-dropdown").classList.remove("open");
+  // Never let a trailing write from the previous camera cross this boundary.
+  cancelPendingPreview();
+  lastKnownRes = null;   // the new camera may run a different mode
   try {
     const r = await fetch(api("/api/device"), {
       method:"POST",
@@ -1766,9 +1938,9 @@ async function doReboot() {
   const sub = document.getElementById("reboot-sub");
   ov.classList.add("open");
   try {
-    await fetch(api("/api/restart"), {method:"POST", headers:{"Content-Type":"application/json"}, body:'{"type":"system"}'});
+    await fetch(api("/api/restart"), {method:"POST", headers:{"Content-Type":"application/json"}, body:'{"type":"service"}'});
   } catch(_) {}
-  sub.textContent = "Waiting for device to come back online...";
+  sub.textContent = "Waiting for the service to come back...";
   let tries = 0;
   const poll = setInterval(async () => {
     try {
@@ -1776,7 +1948,7 @@ async function doReboot() {
       if (r.ok) {
         clearInterval(poll);
         ov.classList.remove("open");
-        toast("Device back online", "ok");
+        toast("Service back online", "ok");
         await connectAndLoad();
       }
     } catch(_) {
@@ -1801,7 +1973,21 @@ async function autoConnectCamera() {
         showOverlay("Device busy — another application is using the camera", false);
         return;
       }
-      if (avail.length === 1) {
+      // If the server already has a valid (non-busy) camera selected, ADOPT it
+      // as-is and do NOT re-POST /api/device. Re-selecting on every page load —
+      // especially a DIFFERENT camera on a multi-camera board, where the busy
+      // flag can momentarily make one look like the only choice — tears down and
+      // rebuilds the shared pipeline, which re-arms every manual lock 0->1 (the
+      // "controls toggle off/on by themselves" churn). Only auto-select when the
+      // server has no usable selection yet AND there is exactly one candidate.
+      const selected = d.cameras.find(c => c.device === d.stream_device && !c.busy);
+      if (selected) {
+        streamDev = d.stream_device;
+        ctrlDev = d.control_device || ctrlDev;
+        cameraName = selected.name;
+        cameraDriver = selected.driver || "—";
+        updateDevInfo();
+      } else if (avail.length === 1) {
         const cam = avail[0];
         const res = await fetch(api("/api/device"), {
           method:"POST", headers:{"Content-Type":"application/json"},

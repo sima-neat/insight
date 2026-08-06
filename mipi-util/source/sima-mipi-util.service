@@ -1,0 +1,35 @@
+[Unit]
+Description=SiMa.ai MIPI Camera Utility — Modalix ISP Web UI
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/share/sima-mipi-util
+# Fail closed: if the token file is ever missing/unreadable, refuse
+# state-changing requests (503) rather than silently allowing them. postinst
+# provisions the token, so this normally just enforces auth; it's the safety net.
+Environment=SIMA_MIPI_UTIL_REQUIRE_AUTH=1
+# Free the camera before starting: reap any orphaned capture pipeline (e.g. a
+# gst-launch left behind by a hard `pkill` of a previous instance) so this one
+# can acquire the sensor instead of failing with "Device or resource busy". The
+# short sleep lets the kernel release the device. Leading '-' = no-match is OK.
+ExecStartPre=-/usr/bin/pkill -f gst-launch-1.0.*libcamerasrc
+ExecStartPre=-/bin/sleep 1
+ExecStart=/usr/bin/python3 /usr/share/sima-mipi-util/camera_api.py
+# KillMode=control-group (systemd default) already terminates the gst-launch
+# child on stop/restart; ExecStopPost reaps it too in case anything lingers, so
+# a clean `systemctl restart` never orphans a process holding the camera.
+ExecStopPost=-/usr/bin/pkill -f gst-launch-1.0.*libcamerasrc
+KillMode=control-group
+Restart=on-failure
+RestartSec=5
+# Log to a plain file (in addition to whatever systemd records about the unit
+# itself). Rotation is handled by /etc/logrotate.d/sima-mipi-util so the file
+# can't grow unbounded on the device. `journalctl -u sima-mipi-util` still shows
+# unit start/stop/crash events; application output goes to the file below.
+StandardOutput=append:/var/log/sima-mipi-util.log
+StandardError=append:/var/log/sima-mipi-util.log
+
+[Install]
+WantedBy=multi-user.target

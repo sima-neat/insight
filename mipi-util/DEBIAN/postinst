@@ -1,0 +1,80 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  configure)
+    # systemd may be absent (containers/chroots/build hosts). Don't fail the
+    # install — just skip service management and say how to run it manually.
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "systemd not detected; skipping service setup."
+        echo "Run manually with: sima-mipi-util"
+        exit 0
+    fi
+
+    # Provision a per-device auth token for the state-changing API if one
+    # isn't already present. Root-only; the value is printed once below so the
+    # operator can enter it in the web UI. Only create it when missing, so a
+    # reinstall/upgrade doesn't invalidate a token the operator already saved.
+    install -d -m 0755 /etc/sima-mipi-util
+    if [ ! -s /etc/sima-mipi-util/token ]; then
+        ( umask 077; head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > /etc/sima-mipi-util/token )
+        chmod 600 /etc/sima-mipi-util/token
+    fi
+    TOKEN=$(cat /etc/sima-mipi-util/token 2>/dev/null || echo "<unreadable>")
+
+    systemctl daemon-reload || true
+    systemctl enable sima-mipi-util.service >/dev/null 2>&1 || true
+
+    # Report the real outcome: a failed start must not print "installed
+    # successfully". `restart` returning non-zero, or the unit not being
+    # active afterwards, both count as failure.
+    STARTED=1
+    systemctl restart sima-mipi-util.service || STARTED=0
+    if [ "$STARTED" -eq 1 ] && ! systemctl is-active --quiet sima-mipi-util.service; then
+        STARTED=0
+    fi
+
+    IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+    echo ""
+    echo "============================================="
+    if [ "$STARTED" -eq 1 ]; then
+        # Ask the running service what camera it sees — /api/cameras is a read
+        # endpoint (no token needed) and reuses the same detection the UI does.
+        # Bounded to a few quick tries so a slow/no-camera start doesn't stall
+        # the whole package install.
+        CAM_INFO=$(python3 - <<'PYEOF'
+import json, urllib.request, time
+info = "Could not determine camera status (service did not respond)"
+for _ in range(5):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:5000/api/cameras", timeout=2) as r:
+            d = json.load(r)
+        cams = d.get("cameras", [])
+        if cams:
+            c = cams[0]
+            info = "Camera detected: {} ({})".format(c.get("name", "unknown"), c.get("device", "?"))
+        else:
+            info = "No camera detected - Live View will not work until a camera is connected"
+        break
+    except Exception:
+        time.sleep(1)
+print(info)
+PYEOF
+)
+        echo "  SiMa.ai MIPI Camera Utility installed"
+        echo "  ${CAM_INFO}"
+        echo "  Open browser: http://${IP}:5000"
+    else
+        echo "  SiMa.ai MIPI Camera Utility installed, but the service"
+        echo "  FAILED to start."
+        echo "  Check logs: journalctl -u sima-mipi-util.service -e"
+    fi
+    echo "  ---------------------------------------------"
+    echo "  API token (required to change settings from the UI):"
+    echo "    ${TOKEN}"
+    echo "============================================="
+    echo ""
+    ;;
+esac
+exit 0

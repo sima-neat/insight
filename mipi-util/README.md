@@ -1,4 +1,4 @@
-# MODALIX Camera Control PRO
+# SiMa.ai MIPI Camera Utility
 
 A web tool for tuning the camera ISP on a SiMa.ai Modalix board. Open it in a
 browser, move a slider, and the picture changes immediately.
@@ -9,22 +9,51 @@ browser, move a slider, and the picture changes immediately.
 
 ## Install
 
+### Recommended: `sima-cli`
+
 ```bash
-sudo apt install --reinstall ./camera_demo_app_v.1.0.0.deb
+sima-cli neat install insight/mipi-util@<branch-or-tag>
 ```
 
-When it finishes it prints the camera it found and the address to open:
+This is published as its own Vulcan package (`gh:sima-neat/insight/mipi-util`)
+by the **MIPI Util Vulcan CI** workflow
+([.github/workflows/mipi-util-vulcan-ci.yml](../.github/workflows/mipi-util-vulcan-ci.yml)),
+which builds the `.deb`, validates it, generates the package metadata, publishes
+to Vulcan (on `main`/tags), and smoke-tests the API.
+
+### Manual (`.deb`)
+
+Build the package (`./build-deb.sh dist`, see [BUILD.txt](BUILD.txt)) or use a
+prebuilt one, then:
+
+```bash
+sudo apt install ./sima-mipi-util_1.0.0_all.deb
+```
+
+When it finishes it prints the camera it found, the address to open, and the
+**API token** you'll need to change any settings from the UI:
 
 ```
 =============================================
-  cam-settings-tools installed successfully
+  SiMa.ai MIPI Camera Utility installed
   Camera detected: imx477 5-001a (/dev/video0)
   Open browser: http://192.168.131.157:5000
+  ---------------------------------------------
+  API token (required to change settings from the UI):
+    Qk3f9xR2pT...
 =============================================
 ```
 
 Open that address in a browser on the same network. The tool starts
 automatically on boot from then on.
+
+### API token
+
+Viewing the live stream needs no token, but **changing any setting** (or
+restarting the service) requires the per-device token printed above. The UI
+prompts for it the first time you move a control and remembers it in the
+browser. The token lives in `/etc/sima-mipi-util/token` (root-only) on the
+device if you need to look it up again.
 
 ---
 
@@ -71,7 +100,7 @@ across a service restart or a reboot — after that, controls return to defaults
 | Button | What it does |
 |---|---|
 | ☼ | Switch between day and night appearance |
-| ⟳ | Restart the device — asks for confirmation first, then reboots |
+| ⟳ | Restart the camera **service** — asks for confirmation first |
 
 ### Information panels
 
@@ -94,8 +123,11 @@ at 30; the difference is time spent compressing the picture for the browser.
 **Two browsers can watch at once.** Both get the live picture, and either can
 change settings.
 
-**If the picture freezes or nothing responds**, the camera hardware has locked
-up. Only a reboot clears it — use the ⟳ button in the top right.
+**If the picture freezes or nothing responds**, try the ⟳ button (top right) to
+restart the service first. If that doesn't clear it, the camera hardware has
+locked up and needs a full device reboot — do that from an SSH/console session
+(`sudo reboot`). For safety, a full reboot is no longer exposed through the web
+UI.
 
 ---
 

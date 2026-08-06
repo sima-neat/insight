@@ -1,0 +1,355 @@
+name: MIPI Util Vulcan CI
+
+run-name: sima-mipi-util (${{ vars.VULCAN_ENV || 'production' }})
+
+# Distinct Vulcan package for the standalone MIPI Camera Utility Debian
+# package (gh:sima-neat/insight/mipi-util), built/validated/published
+# alongside — but separately from — the main neat-insight wheel package.
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "*"
+    paths:
+      - "mipi-util/**"
+      - "scripts/install-vulcan-sima-mipi-util.py"
+      - "scripts/vulcan-prepare-mipi-util-dist.sh"
+      - ".github/workflows/mipi-util-vulcan-ci.yml"
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+  packages: read
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+jobs:
+  build-deb:
+    name: Build .deb
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.build.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Build package
+        id: build
+        working-directory: mipi-util
+        run: |
+          set -euo pipefail
+          # Version: base from DEBIAN/control, suffixed with a CI build id so
+          # branch builds are distinguishable and never pinned to a stale 1.0.0.
+          BASE="$(awk -F': ' '/^Version:/{print $2; exit}' DEBIAN/control)"
+          SHORT_SHA="${GITHUB_SHA::12}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            # Strip any non-digit prefix so a namespaced/prefixed tag such as
+            # "mipi-util-v0.1.0" or "v0.1.0" yields a Debian-valid version that
+            # starts with a digit (0.1.0). dpkg-deb rejects a leading non-digit.
+            VERSION="$(printf '%s' "${GITHUB_REF_NAME}" | sed -E 's/^[^0-9]*//')"
+          else
+            VERSION="${BASE}+ci.${SHORT_SHA}"
+          fi
+          echo "Building version ${VERSION}"
+          DEB="$(VERSION="${VERSION}" ./build-deb.sh dist)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          ls -lh "${DEB}"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sima-mipi-util-deb
+          path: mipi-util/dist/*.deb
+          if-no-files-found: error
+          retention-days: 3
+
+  validate-deb:
+    name: Validate .deb
+    runs-on: ubuntu-latest
+    needs: build-deb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sima-mipi-util-deb
+          path: dist
+
+      - name: Install lint tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lintian
+
+      - name: dpkg-deb metadata checks
+        run: |
+          set -euo pipefail
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          echo "Validating ${DEB}"
+          dpkg-deb --info "${DEB}"
+          contents="$(dpkg-deb --contents "${DEB}")"
+          echo "${contents}"
+          for want in \
+              usr/share/sima-mipi-util/camera_api.py \
+              usr/share/sima-mipi-util/camera_ui.html \
+              usr/bin/sima-mipi-util \
+              lib/systemd/system/sima-mipi-util.service \
+              etc/logrotate.d/sima-mipi-util; do
+            echo "${contents}" | grep -q "${want}" || { echo "MISSING ${want}" >&2; exit 1; }
+          done
+
+      - name: lintian (advisory)
+        run: |
+          set -euo pipefail
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          # Non-fatal: surface packaging warnings without blocking the build.
+          lintian --no-tag-display-limit "${DEB}" || true
+
+      - name: Maintainer-script syntax
+        run: |
+          set -euo pipefail
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          mkdir -p ctrl && dpkg-deb -e "${DEB}" ctrl
+          for s in postinst prerm postrm; do
+            [ -f "ctrl/${s}" ] && bash -n "ctrl/${s}" && echo "${s} OK"
+          done
+
+  package-lifecycle:
+    name: Package lifecycle (install/start/remove)
+    runs-on: ubuntu-latest
+    needs: build-deb
+    steps:
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sima-mipi-util-deb
+          path: dist
+
+      - name: Install -> verify -> remove -> purge
+        run: |
+          set -euo pipefail
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+
+          # Install ignoring the vendor-only deps (libcamera/gstreamer plugins
+          # aren't on a generic runner). postinst still runs and must exit 0 —
+          # it provisions the token, enables the unit, and reports a failed
+          # start gracefully (the app can't boot here without its deps).
+          echo "== install =="
+          sudo dpkg -i --force-depends "${DEB}"
+
+          echo "== files installed =="
+          dpkg -L sima-mipi-util
+          for f in /usr/share/sima-mipi-util/camera_api.py \
+                   /usr/bin/sima-mipi-util \
+                   /lib/systemd/system/sima-mipi-util.service; do
+            test -e "$f" || { echo "MISSING $f" >&2; exit 1; }
+          done
+
+          echo "== postinst provisioned the token =="
+          test -s /etc/sima-mipi-util/token && echo "token created (root-only)"
+          [ "$(stat -c '%a' /etc/sima-mipi-util/token)" = "600" ] || echo "WARN: token not 0600"
+
+          echo "== unit is enabled =="
+          systemctl is-enabled sima-mipi-util.service || true
+
+          echo "== remove (runs prerm) =="
+          sudo dpkg -r sima-mipi-util
+          test ! -e /usr/share/sima-mipi-util/camera_api.py && echo "app files removed"
+
+          echo "== purge (runs postrm -> removes token) =="
+          sudo dpkg -P sima-mipi-util || true
+          test ! -e /etc/sima-mipi-util/token && echo "token purged"
+
+  host-tests:
+    name: Host API tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run pytest (no hardware)
+        working-directory: mipi-util
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r tests/requirements.txt
+          python3 -m pytest tests/ -v
+
+  api-smoke:
+    name: API smoke ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    needs: build-deb
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: linux-amd64
+            runner: ubuntu-latest
+          - arch: linux-aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sima-mipi-util-deb
+          path: dist
+
+      - name: Boot the app from the packaged files and check the API
+        run: |
+          set -euo pipefail
+          # Generic-runner smoke: no MIPI camera present, so exercise the parts
+          # that don't need v4l2/gstreamer — service boots on waitress, reads
+          # are open, writes are token-gated, system reboot is refused.
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          dpkg-deb -x "${DEB}" pkg
+          python3 -m pip install --upgrade pip flask waitress
+
+          printf 'ci-token' > token
+          export SIMA_MIPI_UTIL_TOKEN_FILE="$PWD/token"
+          export SIMA_MIPI_UTIL_HOST=127.0.0.1
+          export SIMA_MIPI_UTIL_PORT=5099
+          python3 pkg/usr/share/sima-mipi-util/camera_api.py > app.log 2>&1 &
+          APP=$!
+          trap 'kill $APP 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 40); do
+            curl -s -o /dev/null "http://127.0.0.1:5099/api/status" && break || sleep 0.5
+          done
+          head -3 app.log || true
+
+          fail=0
+          check() { # name expected actual
+            if [ "$2" = "$3" ]; then echo "  PASS: $1 ($3)"; else echo "  FAIL: $1 (expected $2, got $3)"; fail=1; fi
+          }
+          c_status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5099/api/status)
+          check "GET /api/status open" 200 "$c_status"
+          c_noauth=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+                     -d '{"control":"sdev_digital_gain","value":300}' http://127.0.0.1:5099/api/set)
+          check "POST /api/set without token" 401 "$c_noauth"
+          c_reboot=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+                     -H 'X-Auth-Token: ci-token' -d '{"type":"system"}' http://127.0.0.1:5099/api/restart)
+          check "POST /api/restart system disabled" 403 "$c_reboot"
+          exit $fail
+
+  package-vulcan-metadata:
+    name: Package Vulcan Metadata
+    runs-on: ubuntu-latest
+    needs:
+      - build-deb
+      - validate-deb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install sima-cli package builder
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          SIMA_CLI_REF="${SIMA_CLI_REF:-main}"
+          python3 -m pip install "sima-cli @ git+https://github.com/sima-neat/sima-cli.git@${SIMA_CLI_REF}"
+          sima-cli packages build --help
+
+      - name: Download .deb artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: sima-mipi-util-deb
+          path: dist
+
+      - name: Generate Vulcan package metadata
+        run: |
+          set -euo pipefail
+          # Stage the install script next to the .deb and resolve the version.
+          VERSION="$(scripts/vulcan-prepare-mipi-util-dist.sh dist)"
+          echo "Version: ${VERSION}"
+
+          # Bundle the .deb directly (small, Architecture: all) — no --exclude,
+          # so the install script installs the local file with no extra download.
+          sima-cli packages build dist \
+            --name "gh:sima-neat/insight/mipi-util" \
+            --version "${VERSION}" \
+            --description "SiMa.ai MIPI Camera Utility - Debian package for Modalix ISP web UI" \
+            --install-script "python3 install_sima_mipi_util.py || python install_sima_mipi_util.py"
+
+          python3 -m json.tool dist/metadata.json >/dev/null
+          cat dist/metadata.json
+          ls -lh dist
+
+      - name: Upload Vulcan dist artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sima-mipi-util-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  resolve-vulcan-config:
+    name: Resolve Vulcan Config
+    uses: sima-neat/.github/.github/workflows/vulcan-resolve-config.yml@main
+    with:
+      vulcan_env: ${{ vars.VULCAN_ENV || 'production' }}
+
+  publish-vulcan-artifacts:
+    name: Publish to Vulcan
+    # Publish only from the default branch / tags so feature branches don't
+    # churn the store. NOTE: artifact_folder "mipi-util" keeps this distinct
+    # package's metadata.json from colliding with the main insight package at
+    # the bucket root — confirm this path with the Vulcan maintainers.
+    if: ${{ github.ref == 'refs/heads/main' || github.ref_type == 'tag' }}
+    needs:
+      - resolve-vulcan-config
+      - package-vulcan-metadata
+      - api-smoke
+      - host-tests
+      - package-lifecycle
+    uses: sima-neat/.github/.github/workflows/vulcan-publish-artifacts.yml@main
+    with:
+      aws_region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+      environment_name: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+      bucket: ${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}
+      role_to_assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+      sse_kms_key_id: ${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}
+      cloudfront_distribution_id: ${{ needs.resolve-vulcan-config.outputs.artifact_cloudfront_distribution_id }}
+      artifact_folder: "mipi-util"
+      artifact_pattern: sima-mipi-util-dist
+      artifact_glob: "*"
+      min_artifact_count: 2
+      cleanup_github_artifacts: true
+
+  promote-latest-tag:
+    name: Promote Vulcan latest tag
+    if: ${{ github.ref == 'refs/heads/main' || github.ref_type == 'tag' }}
+    needs:
+      - resolve-vulcan-config
+      - publish-vulcan-artifacts
+    uses: sima-neat/.github/.github/workflows/vulcan-update-latest-artifacts.yml@main
+    with:
+      aws_region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
+      environment_name: ${{ needs.resolve-vulcan-config.outputs.vulcan_env }}
+      bucket: ${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}
+      role_to_assume: ${{ needs.resolve-vulcan-config.outputs.artifact_publisher_role_arn }}
+      sse_kms_key_id: ${{ needs.resolve-vulcan-config.outputs.artifact_kms_key_id }}
+      artifact_folder: "mipi-util"

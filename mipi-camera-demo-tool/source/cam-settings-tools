@@ -1,3 +1,0 @@
-#!/bin/bash
-# Launch cam-settings-tools manually (not needed when the systemd service is running)
-exec /usr/bin/python3 /usr/share/cam-settings-tools/camera_api.py "$@"
