@@ -1,0 +1,11 @@
+Rebuilding the package from source/
+-----------------------------------
+  mkdir -p build/usr/share/cam-settings-tools build/usr/bin build/lib/systemd/system
+  cp source/camera_api.py source/camera_ui.html build/usr/share/cam-settings-tools/
+  cp source/cam-settings-tools                  build/usr/bin/
+  cp source/cam-settings-tools.service          build/lib/systemd/system/
+  cp -r DEBIAN                                  build/
+  chmod 0755 build/DEBIAN/postinst build/DEBIAN/prerm build/usr/bin/cam-settings-tools
+  dpkg-deb --build build camera_demo_app_v.1.0.0.deb
+
+Built 2026-07-28T14:12:43+00:00 on modalix.

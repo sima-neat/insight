@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  remove|purge)
+    systemctl stop cam-settings-tools.service || true
+    systemctl disable cam-settings-tools.service || true
+    ;;
+esac
+exit 0

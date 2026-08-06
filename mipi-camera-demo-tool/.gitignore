@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+*.deb
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# macOS metadata
+.DS_Store
+
+# Editor artifacts
+.vscode/
+.idea/

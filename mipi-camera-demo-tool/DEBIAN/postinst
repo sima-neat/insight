@@ -1,0 +1,44 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  configure)
+    systemctl daemon-reload
+    systemctl enable cam-settings-tools.service
+    systemctl restart cam-settings-tools.service || true
+    IP=$(hostname -I | awk '{print $1}')
+
+    # Give the freshly (re)started service a few seconds to come up, then
+    # ask it directly whether it actually sees a camera - reuses the same
+    # /api/cameras detection the tool itself relies on, so this reports
+    # exactly what the UI would show, not a separate guess.
+    CAM_INFO=$(python3 - <<'PYEOF'
+import json, urllib.request, time
+info = "Could not determine camera status (service did not respond)"
+for _ in range(10):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:5000/api/cameras", timeout=2) as r:
+            d = json.load(r)
+        cams = d.get("cameras", [])
+        if cams:
+            c = cams[0]
+            info = "Camera detected: {} ({})".format(c.get("name", "unknown"), c.get("device", "?"))
+        else:
+            info = "No camera detected - Live View will not work until a camera is connected"
+        break
+    except Exception:
+        time.sleep(1)
+print(info)
+PYEOF
+)
+
+    echo ""
+    echo "============================================="
+    echo "  cam-settings-tools installed successfully"
+    echo "  ${CAM_INFO}"
+    echo "  Open browser: http://${IP}:5000"
+    echo "============================================="
+    echo ""
+    ;;
+esac
+exit 0

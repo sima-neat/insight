@@ -1,0 +1,16 @@
+[Unit]
+Description=Camera Settings Tool — Modalix ISP Web UI
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/share/cam-settings-tools
+ExecStart=/usr/bin/python3 /usr/share/cam-settings-tools/camera_api.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

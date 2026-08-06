@@ -1,0 +1,18 @@
+Package: cam-settings-tools
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3, python3-flask, python3-opencv, python3-numpy, v4l-utils, gstreamer1.0-tools, libcamera-tools
+Maintainer: System AE Team <dev@modalix.local>
+Description: MODALIX Camera Control PRO - Web-based ISP control tool
+ Browser-based UI served at http://<device-ip>:5000 for tuning the
+ SiMa.ai Modalix ISP (white balance, exposure, gain, sharpening, noise
+ reduction, tone mapping, antiflicker) via v4l2-ctl, with a real-time
+ MJPEG live view, presets, per-camera capability detection, and system
+ restart integration.
+ .
+ Requires a SiMa.ai Modalix device with the vendor ISP/libcamera
+ pipeline handler already provisioned (i.e. another Modalix board) -
+ the ISP controls this tool exposes are vendor-specific and are not
+ present on generic Linux/V4L2 hardware.
