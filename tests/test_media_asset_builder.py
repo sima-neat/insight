@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -95,6 +96,7 @@ class MediaAssetBuilderTests(unittest.TestCase):
                                 args[args.index("-profile:v") + 1], expected_profile
                             )
                         if encoder_mode == "videotoolbox":
+                            self.assertEqual(args[args.index("-allow_sw") + 1], "0")
                             filters = build_media_assets.bitstream_filter_args(
                                 rendition, encoder_mode
                             )
@@ -112,6 +114,117 @@ class MediaAssetBuilderTests(unittest.TestCase):
                                 )
                             else:
                                 self.assertNotIn("dump_extra", filters[1])
+
+    def test_videotoolbox_failure_retries_with_software_encoder(self):
+        def failing_then_succeeding_encoder(commands):
+            def run_encoder(command, check):
+                self.assertTrue(check)
+                commands.append(command)
+                temporary_output = Path(command[-1])
+                if len(commands) == 1:
+                    temporary_output.parent.mkdir(parents=True, exist_ok=True)
+                    temporary_output.write_bytes(b"partial")
+                    raise subprocess.CalledProcessError(1, command)
+                self.assertFalse(temporary_output.exists())
+                temporary_output.write_bytes(b"software")
+
+            return run_encoder
+
+        for codec, hardware_encoder, software_encoder in (
+            ("h264", "h264_videotoolbox", "libx264"),
+            ("hevc", "hevc_videotoolbox", "libx265"),
+        ):
+            with self.subTest(codec=codec), tempfile.TemporaryDirectory() as temp_dir:
+                rendition = build_media_assets.Rendition(
+                    "720p20", 720, 20, codec, "mp4"
+                )
+                root = Path(temp_dir)
+                source_path = root / "source.mp4"
+                output_path = root / "sample" / "720p20" / "output.mp4"
+                source_path.write_bytes(b"source")
+                commands = []
+
+                with mock.patch.object(
+                    build_media_assets.subprocess,
+                    "run",
+                    side_effect=failing_then_succeeding_encoder(commands),
+                ):
+                    build_media_assets.run_ffmpeg(
+                        "ffmpeg",
+                        source_path,
+                        output_path,
+                        rendition,
+                        "videotoolbox",
+                        20.0,
+                        "interpolate",
+                    )
+
+                self.assertEqual(len(commands), 2)
+                self.assertIn(hardware_encoder, commands[0])
+                self.assertEqual(commands[0][commands[0].index("-allow_sw") + 1], "0")
+                self.assertIn(software_encoder, commands[1])
+                self.assertNotIn("-allow_sw", commands[1])
+                self.assertEqual(output_path.read_bytes(), b"software")
+
+    def test_successful_videotoolbox_encode_is_not_retried(self):
+        rendition = build_media_assets.Rendition("720p20", 720, 20, "h264", "mp4")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_path = root / "source.mp4"
+            output_path = root / "sample" / "720p20" / "output.mp4"
+            source_path.write_bytes(b"source")
+
+            def run_encoder(command, check):
+                self.assertTrue(check)
+                temporary_output = Path(command[-1])
+                temporary_output.parent.mkdir(parents=True, exist_ok=True)
+                temporary_output.write_bytes(b"hardware")
+
+            with mock.patch.object(
+                build_media_assets.subprocess, "run", side_effect=run_encoder
+            ) as run:
+                build_media_assets.run_ffmpeg(
+                    "ffmpeg",
+                    source_path,
+                    output_path,
+                    rendition,
+                    "videotoolbox",
+                    20.0,
+                    "interpolate",
+                )
+
+            run.assert_called_once()
+            self.assertIn("h264_videotoolbox", run.call_args.args[0])
+            self.assertEqual(output_path.read_bytes(), b"hardware")
+
+    def test_software_encoder_failure_is_not_retried(self):
+        rendition = build_media_assets.Rendition("720p20", 720, 20, "hevc", "mp4")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_path = root / "source.mp4"
+            output_path = root / "sample" / "720p20" / "output.mp4"
+            source_path.write_bytes(b"source")
+            failure = subprocess.CalledProcessError(1, ["ffmpeg"])
+
+            with (
+                mock.patch.object(
+                    build_media_assets.subprocess, "run", side_effect=failure
+                ) as run,
+                self.assertRaises(subprocess.CalledProcessError),
+            ):
+                build_media_assets.run_ffmpeg(
+                    "ffmpeg",
+                    source_path,
+                    output_path,
+                    rendition,
+                    "software",
+                    20.0,
+                    "interpolate",
+                )
+
+            run.assert_called_once()
 
     def test_encoder_mode_requires_a_complete_encoder_pair(self):
         with self.assertRaisesRegex(RuntimeError, "libx264 and libx265"):

@@ -387,7 +387,7 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
                 "-c:v",
                 "h264_videotoolbox",
                 "-allow_sw",
-                "1",
+                "0",
                 "-profile:v",
                 "constrained_baseline",
                 "-max_ref_frames",
@@ -421,7 +421,7 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
                 "-c:v",
                 "hevc_videotoolbox",
                 "-allow_sw",
-                "1",
+                "0",
                 "-profile:v",
                 "main",
                 "-max_ref_frames",
@@ -548,34 +548,48 @@ def run_ffmpeg(
         tmp_output.unlink()
 
     vf = video_filter(rendition, source_fps, fps_upsample_mode)
-    command = [
-        ffmpeg,
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-nostats",
-        "-y",
-        "-i",
-        str(source_path),
-        "-map",
-        "0:v:0",
-        "-an",
-        "-vf",
-        vf,
-        "-fps_mode",
-        "cfr",
-        *ffmpeg_codec_args(rendition, encoder_mode),
-        *bitstream_filter_args(rendition, encoder_mode),
-        *(["-movflags", "+faststart"] if rendition.extension == "mp4" else []),
-        "-avoid_negative_ts",
-        "make_zero",
-        str(tmp_output),
-    ]
-    print(
-        f"Converting {output_path.relative_to(output_path.parents[2])}: "
-        f"{rendition.codec} {rendition.profile} encoder={encoder_mode} filter='{vf}'"
-    )
-    subprocess.run(command, check=True)
+
+    def encode(mode: str) -> None:
+        command = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-nostats",
+            "-y",
+            "-i",
+            str(source_path),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-vf",
+            vf,
+            "-fps_mode",
+            "cfr",
+            *ffmpeg_codec_args(rendition, mode),
+            *bitstream_filter_args(rendition, mode),
+            *(["-movflags", "+faststart"] if rendition.extension == "mp4" else []),
+            "-avoid_negative_ts",
+            "make_zero",
+            str(tmp_output),
+        ]
+        print(
+            f"Converting {output_path.relative_to(output_path.parents[2])}: "
+            f"{rendition.codec} {rendition.profile} encoder={mode} filter='{vf}'"
+        )
+        subprocess.run(command, check=True)
+
+    try:
+        encode(encoder_mode)
+    except subprocess.CalledProcessError:
+        if encoder_mode != "videotoolbox" or rendition.codec not in {"h264", "hevc"}:
+            raise
+        tmp_output.unlink(missing_ok=True)
+        print(
+            f"VideoToolbox failed for {rendition.codec} {rendition.profile}; "
+            "retrying with the software encoder."
+        )
+        encode("software")
     tmp_output.replace(output_path)
 
 
