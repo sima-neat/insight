@@ -454,6 +454,18 @@ def ffmpeg_codec_args(rendition: Rendition, encoder_mode: str) -> list[str]:
     raise ValueError(f"unsupported codec: {rendition.codec}")
 
 
+def vui_tick_rate(rendition: Rendition) -> str:
+    """VUI clock for the advertised frame rate.
+
+    H.264 counts field ticks, so frame_rate = time_scale / (2 * num_units_in_tick);
+    HEVC counts frame ticks. Applied in every encoder mode: VideoToolbox omits VUI
+    timing entirely, and without it `h264parse`/`h265parse` report `0/1` once RTSP
+    strips the MP4 container.
+    """
+    ticks = rendition.fps * 2 if rendition.codec == "h264" else rendition.fps
+    return f":tick_rate={ticks}/1"
+
+
 def bitstream_filter_args(rendition: Rendition, encoder_mode: str) -> list[str]:
     if rendition.codec == "h264":
         level = (
@@ -461,10 +473,12 @@ def bitstream_filter_args(rendition: Rendition, encoder_mode: str) -> list[str]:
             if encoder_mode == "videotoolbox"
             else ""
         )
+        tick_rate = vui_tick_rate(rendition)
         return [
             "-bsf:v",
             (
-                f"h264_metadata=aud=remove,dump_extra=freq=keyframe,h264_metadata=aud=insert{level}"
+                f"h264_metadata=aud=remove,dump_extra=freq=keyframe,"
+                f"h264_metadata=aud=insert{level}{tick_rate}"
             ),
         ]
     if rendition.codec == "hevc":
@@ -473,9 +487,10 @@ def bitstream_filter_args(rendition: Rendition, encoder_mode: str) -> list[str]:
             if encoder_mode == "videotoolbox"
             else ""
         )
+        tick_rate = vui_tick_rate(rendition)
         return [
             "-bsf:v",
-            f"hevc_metadata=aud=remove,hevc_metadata=aud=insert{level}",
+            f"hevc_metadata=aud=remove,hevc_metadata=aud=insert{level}{tick_rate}",
         ]
     return []
 
