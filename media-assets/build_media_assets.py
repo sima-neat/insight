@@ -355,6 +355,10 @@ def video_level(rendition: Rendition) -> str:
     return "3.0"
 
 
+def expected_width(rendition: Rendition) -> int:
+    return {2160: 3840, 1080: 1920, 720: 1280, 480: 854, 320: 568}[rendition.height]
+
+
 def rate_control_args(rendition: Rendition) -> list[str]:
     bitrate = video_bitrate(rendition)
     return ["-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bitrate]
@@ -528,7 +532,7 @@ def source_video_rate(ffprobe: str, path: Path) -> float:
 def video_filter(
     rendition: Rendition, source_fps: float, fps_upsample_mode: str
 ) -> str:
-    scale = f"scale=-2:{rendition.height}:flags=lanczos,setpts=PTS-STARTPTS"
+    scale = f"scale={expected_width(rendition)}:{rendition.height}:flags=lanczos,setpts=PTS-STARTPTS"
     if source_fps > 0 and rendition.fps > source_fps + 0.5:
         if fps_upsample_mode == "duplicate":
             return f"{scale},fps={rendition.fps}"
@@ -650,6 +654,7 @@ def validate_rendition_output(
         "pix_fmt": "yuv420p",
         "level": expected_level_code(rendition),
         "has_b_frames": 0,
+        "width": expected_width(rendition),
         "height": rendition.height,
     }
     mismatches = [

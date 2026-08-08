@@ -35,6 +35,7 @@ class MediaAssetBuilderTests(unittest.TestCase):
             "pix_fmt": "yuv420p",
             "level": build_media_assets.expected_level_code(rendition),
             "has_b_frames": 0,
+            "width": build_media_assets.expected_width(rendition),
             "height": rendition.height,
             "r_frame_rate": f"{rendition.fps}/1",
             "avg_frame_rate": f"{rendition.fps}/1",
@@ -281,6 +282,7 @@ class MediaAssetBuilderTests(unittest.TestCase):
             "codec_tag_string": "hev1",
             "level": 32,
             "has_b_frames": 1,
+            "width": 1920,
             "r_frame_rate": "30/1",
         }.items():
             with self.subTest(key=key):
