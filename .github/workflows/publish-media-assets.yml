@@ -13,7 +13,7 @@ on:
         required: false
         type: string
       regenerate:
-        description: Rebuild assets even if the published index already lists them.
+        description: Rebuild assets listed in the published index. Required after encoding-contract changes.
         required: false
         default: false
         type: boolean
@@ -25,6 +25,15 @@ on:
         options:
           - interpolate
           - duplicate
+      encoder_mode:
+        description: H.264 and HEVC encoder implementation. All modes must pass the same output validation.
+        required: false
+        default: videotoolbox
+        type: choice
+        options:
+          - videotoolbox
+          - software
+          - auto
       max_parallel:
         description: Maximum number of media conversion shards to run at once.
         required: false
@@ -168,13 +177,14 @@ jobs:
           SOURCE_ID: ${{ matrix.source_id }}
           REGENERATE: ${{ inputs.regenerate }}
           FPS_UPSAMPLE_MODE: ${{ inputs.fps_upsample_mode }}
+          ENCODER_MODE: ${{ inputs.encoder_mode }}
           PROFILES: ${{ matrix.profiles }}
         run: |
           set -euo pipefail
           args=(
             --sources media-assets/sources.json
             --output "dist/media-assets-${{ matrix.name }}"
-            --encoder-mode videotoolbox
+            --encoder-mode "${ENCODER_MODE}"
             --fps-upsample-mode "${FPS_UPSAMPLE_MODE}"
             --publish-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/assets"
             --publish-progress-index-s3-uri "s3://${{ needs.resolve-vulcan-config.outputs.artifact_bucket }}/${MEDIA_ASSETS_STAGING_PREFIX}/indexes/${{ matrix.name }}.index.json"
