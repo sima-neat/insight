@@ -355,10 +355,6 @@ def video_level(rendition: Rendition) -> str:
     return "3.0"
 
 
-def expected_width(rendition: Rendition) -> int:
-    return {2160: 3840, 1080: 1920, 720: 1280, 480: 854, 320: 568}[rendition.height]
-
-
 def rate_control_args(rendition: Rendition) -> list[str]:
     bitrate = video_bitrate(rendition)
     return ["-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bitrate]
@@ -532,7 +528,7 @@ def source_video_rate(ffprobe: str, path: Path) -> float:
 def video_filter(
     rendition: Rendition, source_fps: float, fps_upsample_mode: str
 ) -> str:
-    scale = f"scale={expected_width(rendition)}:{rendition.height}:flags=lanczos,setpts=PTS-STARTPTS"
+    scale = f"scale=-2:{rendition.height}:flags=lanczos,setpts=PTS-STARTPTS"
     if source_fps > 0 and rendition.fps > source_fps + 0.5:
         if fps_upsample_mode == "duplicate":
             return f"{scale},fps={rendition.fps}"
@@ -654,7 +650,6 @@ def validate_rendition_output(
         "pix_fmt": "yuv420p",
         "level": expected_level_code(rendition),
         "has_b_frames": 0,
-        "width": expected_width(rendition),
         "height": rendition.height,
     }
     mismatches = [
@@ -747,9 +742,16 @@ def probe_reference_frames(ffmpeg: str, path: Path) -> int:
     return int(match.group(1))
 
 
+def vui_timing_fields(codec: str) -> tuple[str, str, str]:
+    """trace_headers field names carrying the VUI clock, per codec."""
+    if codec == "h264":
+        return "timing_info_present_flag", "num_units_in_tick", "time_scale"
+    return "vui_timing_info_present_flag", "vui_num_units_in_tick", "vui_time_scale"
+
+
 def probe_bitstream_contract(
     ffmpeg: str, path: Path, rendition: Rendition
-) -> tuple[int | None, set[int], list[tuple[bool, set[int]]]]:
+) -> tuple[int | None, set[int], list[tuple[bool, set[int]]], dict[str, int]]:
     pass_types = "7|8|9" if rendition.codec == "h264" else "32|33|34|35"
     command = [
         ffmpeg,
@@ -772,9 +774,23 @@ def probe_bitstream_contract(
     tier = None
     extradata_types: set[int] = set()
     packet_types: list[tuple[bool, set[int]]] = []
+    # Read the clock from the first parameter set, which is the extradata copy
+    # RTSP republishes as sprop-parameter-sets.
+    present_field, units_field, scale_field = vui_timing_fields(rendition.codec)
+    timing: dict[str, int] = {}
+    timing_keys = {
+        present_field: "present",
+        units_field: "num_units_in_tick",
+        scale_field: "time_scale",
+    }
     for line in proc.stderr.splitlines():
         if "[trace_headers" not in line:
             continue
+        for field, key in timing_keys.items():
+            if key not in timing and re.search(rf"\b{field}\s", line):
+                value = re.search(r"=\s*([0-9]+)\s*$", line)
+                if value:
+                    timing[key] = int(value.group(1))
         if "Packet:" in line:
             packet_types.append(("key frame" in line, set()))
             continue
@@ -786,7 +802,7 @@ def probe_bitstream_contract(
             tier_match = re.search(r"=\s*([01])\s*$", line)
             if tier_match:
                 tier = int(tier_match.group(1))
-    return tier, extradata_types, packet_types
+    return tier, extradata_types, packet_types, timing
 
 
 def validate_output_structure(
@@ -807,6 +823,7 @@ def validate_bitstream_contract(
     packet_types: list[tuple[bool, set[int]]],
     expected_packets: int,
     expected_keyframes: int,
+    timing: dict[str, int] | None = None,
 ) -> None:
     if rendition.codec == "h264":
         required_extradata = {7, 8}
@@ -836,6 +853,23 @@ def validate_bitstream_contract(
         raise RuntimeError(
             f"{output_path} is missing required keyframe parameter sets or AUD NAL units"
         )
+    if timing is not None:
+        # Container timestamps are not a substitute: RTSP stream-copies the
+        # elementary stream, so only the VUI clock reaches h264parse/h265parse.
+        # H.264 counts field ticks, HEVC counts frame ticks.
+        ticks_per_frame = 2 if rendition.codec == "h264" else 1
+        units = timing.get("num_units_in_tick", 0)
+        scale = timing.get("time_scale", 0)
+        if timing.get("present") != 1 or not units:
+            raise RuntimeError(
+                f"{output_path} parameter sets carry no VUI timing; "
+                f"h264parse/h265parse would report 0/1 over RTSP"
+            )
+        if scale != rendition.fps * ticks_per_frame * units:
+            raise RuntimeError(
+                f"{output_path} VUI timing is {scale}/{units}, "
+                f"expected {rendition.fps * ticks_per_frame}/1 for {rendition.fps} fps"
+            )
 
 
 def validate_rendition_timestamps(
@@ -1108,7 +1142,7 @@ def asset_record(
         format_name, codec_types = probe_output_structure(ffprobe, output_path)
         validate_output_structure(output_path, format_name, codec_types)
         packets = probe_packets(ffprobe, output_path)
-        tier, extradata_types, packet_types = probe_bitstream_contract(
+        tier, extradata_types, packet_types, timing = probe_bitstream_contract(
             ffmpeg, output_path, rendition
         )
         validate_bitstream_contract(
@@ -1119,6 +1153,7 @@ def asset_record(
             packet_types,
             len(packets),
             sum(1 for _pts, _dts, is_keyframe in packets if is_keyframe),
+            timing,
         )
         validate_rendition_timestamps(rendition, output_path, packets)
     return {

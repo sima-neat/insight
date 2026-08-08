@@ -35,7 +35,6 @@ class MediaAssetBuilderTests(unittest.TestCase):
             "pix_fmt": "yuv420p",
             "level": build_media_assets.expected_level_code(rendition),
             "has_b_frames": 0,
-            "width": build_media_assets.expected_width(rendition),
             "height": rendition.height,
             "r_frame_rate": f"{rendition.fps}/1",
             "avg_frame_rate": f"{rendition.fps}/1",
@@ -282,7 +281,6 @@ class MediaAssetBuilderTests(unittest.TestCase):
             "codec_tag_string": "hev1",
             "level": 32,
             "has_b_frames": 1,
-            "width": 1920,
             "r_frame_rate": "30/1",
         }.items():
             with self.subTest(key=key):
@@ -341,6 +339,29 @@ class MediaAssetBuilderTests(unittest.TestCase):
                 Path("output.mp4"), "mov,mp4,m4a,3gp,3g2,mj2", ["video", "audio"]
             )
 
+    def test_bitstream_validation_requires_vui_timing(self):
+        h264 = build_media_assets.Rendition("720p30", 720, 30, "h264", "mp4")
+        hevc = build_media_assets.Rendition("720p30", 720, 30, "hevc", "mp4")
+        h264_args = (h264, Path("output.mp4"), None, {7, 8}, [(True, {7, 8, 9})], 1, 1)
+        hevc_args = (hevc, Path("output.mp4"), 0, {32, 33, 34}, [(True, {35})], 1, 1)
+
+        # H.264 counts field ticks, so 30 fps is 60/1; HEVC counts frame ticks.
+        build_media_assets.validate_bitstream_contract(
+            *h264_args, {"present": 1, "num_units_in_tick": 1, "time_scale": 60}
+        )
+        build_media_assets.validate_bitstream_contract(
+            *hevc_args, {"present": 1, "num_units_in_tick": 1, "time_scale": 30}
+        )
+
+        # A VideoToolbox stream with correct MP4 timestamps but no VUI timing.
+        with self.assertRaisesRegex(RuntimeError, "no VUI timing"):
+            build_media_assets.validate_bitstream_contract(*h264_args, {"present": 0})
+        # Timing present but advertising the wrong rate.
+        with self.assertRaisesRegex(RuntimeError, "VUI timing is"):
+            build_media_assets.validate_bitstream_contract(
+                *h264_args, {"present": 1, "num_units_in_tick": 1, "time_scale": 30}
+            )
+
     def test_asset_record_includes_actual_codec_format(self):
         source = {"id": "sample", "title": "Sample"}
         rendition = build_media_assets.Rendition("720p30", 720, 30, "hevc", "mp4")
@@ -370,7 +391,12 @@ class MediaAssetBuilderTests(unittest.TestCase):
                 mock.patch.object(
                     build_media_assets,
                     "probe_bitstream_contract",
-                    return_value=(0, {32, 33, 34}, [(True, {35})]),
+                    return_value=(
+                        0,
+                        {32, 33, 34},
+                        [(True, {35})],
+                        {"present": 1, "num_units_in_tick": 1, "time_scale": 30},
+                    ),
                 ),
             ):
                 record = build_media_assets.asset_record(
