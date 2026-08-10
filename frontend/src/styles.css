@@ -838,6 +838,85 @@ button:disabled {
   background: #090d12;
 }
 
+.viewer-panel-topbar {
+  align-items: flex-start;
+}
+
+.viewer-capacity-help {
+  width: min(100%, 430px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+
+.viewer-capacity-help summary {
+  min-height: 38px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: #274155;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.viewer-capacity-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.viewer-capacity-help summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.viewer-capacity-help-mark {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(14, 90, 184, 0.38);
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-family: var(--font-display);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.viewer-capacity-help-copy {
+  border-top: 1px solid var(--line);
+  padding: 11px 12px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.viewer-capacity-help-copy strong {
+  display: block;
+  color: var(--ink);
+}
+
+.viewer-capacity-help-copy p {
+  margin: 7px 0 0;
+}
+
+.viewer-capacity-help-copy code {
+  display: block;
+  margin-top: 7px;
+  padding: 7px 9px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: #173b5f;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .workspace-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -3179,6 +3258,18 @@ button:disabled {
 }
 
 @media (max-width: 700px) {
+  .viewer-panel-topbar {
+    flex-direction: column;
+  }
+
+  .viewer-capacity-help {
+    width: 100%;
+  }
+
+  .viewer-capacity-help summary {
+    justify-content: space-between;
+  }
+
   .workspace-stats-summary,
   .workspace-mpk-summary,
   .workspace-pipeline-summary {

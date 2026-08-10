@@ -10,10 +10,11 @@ import {
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import {
-  MAX_CHANNELS,
-  PAGE_SIZE_PRESETS,
   gridDimensions,
+  normalizeMaxChannels,
   normalizeVisiblePerPage,
+  pageSizePresetsForLimit,
+  parseChannelIndices,
 } from "./viewerLayout.js";
 import {
   isRetryableWebRTCAnswerError,
@@ -26,19 +27,6 @@ const RECONNECT_DELAY_MS = 2000;
 // more expensive response.
 const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
-
-function parseIndices(srcParam) {
-  if (!srcParam) {
-    return Array.from({ length: MAX_CHANNELS }, (_, i) => i);
-  }
-  const seen = new Set();
-  srcParam
-    .split(",")
-    .map((value) => Number.parseInt(value, 10))
-    .filter((value) => Number.isInteger(value) && value >= 0 && value < MAX_CHANNELS)
-    .forEach((value) => seen.add(value));
-  return Array.from(seen).sort((a, b) => a - b);
-}
 
 function getResolvedViewerSettings(channelIndex, metadataType = "object-detection") {
   if (typeof window.resolveTypeSettings === "function") {
@@ -586,7 +574,12 @@ export default function ViewerApp() {
     if (searchParams.get("debug") === "1") return true;
     return window.localStorage.getItem("viewerDebug") === "1";
   }, [searchParams]);
-  const configuredChannels = useMemo(() => parseIndices(searchParams.get("src")), [searchParams]);
+  const maxChannels = useMemo(() => normalizeMaxChannels(searchParams.get("max_channels")), [searchParams]);
+  const configuredChannels = useMemo(
+    () => parseChannelIndices(searchParams.get("src"), maxChannels),
+    [searchParams, maxChannels],
+  );
+  const pageSizePresets = useMemo(() => pageSizePresetsForLimit(maxChannels), [maxChannels]);
 
   useEffect(() => {
     if (!debug) return;
@@ -599,7 +592,7 @@ export default function ViewerApp() {
 
   const [visiblePerPage, setVisiblePerPage] = useState(() => {
     const raw = window.localStorage.getItem("layoutCount");
-    return normalizeVisiblePerPage(raw);
+    return normalizeVisiblePerPage(raw, maxChannels);
   });
   const [currentPage, setCurrentPage] = useState(0);
   const [activeMap, setActiveMap] = useState({});
@@ -661,7 +654,7 @@ export default function ViewerApp() {
   }, []);
 
   const handleVisiblePerPageChange = (value) => {
-    const safeCount = normalizeVisiblePerPage(value);
+    const safeCount = normalizeVisiblePerPage(value, maxChannels);
     setVisiblePerPage(safeCount);
     window.localStorage.setItem("layoutCount", `${safeCount}`);
     setCurrentPage(0);
@@ -682,7 +675,7 @@ export default function ViewerApp() {
   const onChannelJumpSubmit = (event) => {
     event.preventDefault();
     const channel = Number.parseInt(channelInput, 10);
-    if (!Number.isInteger(channel) || channel < 0 || channel >= MAX_CHANNELS) return;
+    if (!Number.isInteger(channel) || channel < 0 || channel >= maxChannels) return;
     const absoluteIndex = configuredChannels.indexOf(channel);
     if (absoluteIndex < 0) return;
     setCurrentPage(Math.floor(absoluteIndex / visiblePerPage));
@@ -693,7 +686,7 @@ export default function ViewerApp() {
       <div id="controls">
         <span className="page-size-label">Videos Per Page:</span>
         <div className="layout-presets">
-          {PAGE_SIZE_PRESETS.map((preset) => (
+          {pageSizePresets.map((preset) => (
             <button
               key={preset}
               type="button"
@@ -745,7 +738,7 @@ export default function ViewerApp() {
               inputMode="numeric"
               pattern="[0-9]*"
               aria-label="Go to channel"
-              placeholder="0-79"
+              placeholder={`0-${maxChannels - 1}`}
             />
           </form>
         </div>
