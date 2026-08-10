@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 import unittest
 import unittest.mock as mock
 
@@ -24,8 +25,64 @@ class ViewerUrlTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.get_json()["url"],
-            "https://192.168.1.25:18081/static/viewer.html?mode=dark&src=0%2C1",
+            "https://192.168.1.25:18081/static/viewer.html?mode=dark&src=0%2C1&max_channels=80",
         )
+
+    def test_sdk_viewer_uses_configured_channel_capacity(self):
+        with mock.patch.object(app_module, "is_sima_board", return_value=False), \
+             mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
+            response = self.client.get("/api/viewer-url", headers={"Host": "developer.local:9900"})
+
+        payload = response.get_json()
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(payload["url"]).query)
+        self.assertEqual(payload["max_video_channels"], 4)
+        self.assertEqual(payload["channel_limit_source"], "sdk-port-map")
+        self.assertTrue(payload["sdk_channel_limited"])
+        self.assertEqual(query["src"], ["0,1,2,3"])
+        self.assertEqual(query["max_channels"], ["4"])
+
+    def test_sdk_viewer_filters_explicit_sources_above_configured_capacity(self):
+        with mock.patch.object(app_module, "is_sima_board", return_value=False), \
+             mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
+            response = self.client.get(
+                "/api/viewer-url?src=0,3,4,79,bad,3",
+                headers={"Host": "developer.local:9900"},
+            )
+
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
+        self.assertEqual(query["src"], ["0,3"])
+
+    def test_missing_channel_capacity_uses_legacy_eighty_channel_behavior(self):
+        with mock.patch.object(app_module, "is_sima_board", return_value=False), \
+             mock.patch.object(app_module, "_read_neat_port_map", return_value={}):
+            response = self.client.get("/api/viewer-url", headers={"Host": "developer.local:9900"})
+
+        payload = response.get_json()
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(payload["url"]).query)
+        self.assertEqual(payload["max_video_channels"], 80)
+        self.assertEqual(payload["channel_limit_source"], "legacy-default")
+        self.assertFalse(payload["sdk_channel_limited"])
+        self.assertEqual(len(query["src"][0].split(",")), 80)
+
+    def test_invalid_channel_capacity_uses_legacy_eighty_channel_behavior(self):
+        for invalid in (0, 81, "4", True):
+            with self.subTest(invalid=invalid), \
+                 mock.patch.object(app_module, "is_sima_board", return_value=False), \
+                 mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": invalid}):
+                response = self.client.get("/api/viewer-url", headers={"Host": "developer.local:9900"})
+
+            self.assertEqual(response.get_json()["max_video_channels"], 80)
+            self.assertEqual(response.get_json()["channel_limit_source"], "legacy-default")
+
+    def test_devkit_ignores_sdk_channel_capacity_and_keeps_eighty_channels(self):
+        with mock.patch.object(app_module, "is_sima_board", return_value=True), \
+             mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
+            response = self.client.get("/api/viewer-url", headers={"Host": "modalix.local:9900"})
+
+        payload = response.get_json()
+        self.assertEqual(payload["max_video_channels"], 80)
+        self.assertEqual(payload["channel_limit_source"], "devkit")
+        self.assertFalse(payload["sdk_channel_limited"])
 
     def test_viewer_url_accepts_nested_video_ui_port_name(self):
         ports = [

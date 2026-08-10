@@ -718,6 +718,7 @@ export default function App() {
   const [youtubeValidating, setYoutubeValidating] = useState(false)
   const [youtubeError, setYoutubeError] = useState('')
   const [viewerUrl, setViewerUrl] = useState('')
+  const [viewerCapacity, setViewerCapacity] = useState(null)
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
   const [metrics, setMetrics] = useState(null)
   const [metricEvents, setMetricEvents] = useState([])
@@ -844,6 +845,11 @@ export default function App() {
   async function loadViewerUrl() {
     const data = await fetchJson('/api/viewer-url')
     setViewerUrl(data.url)
+    setViewerCapacity({
+      maxChannels: Number.isInteger(data.max_video_channels) ? data.max_video_channels : 80,
+      source: data.channel_limit_source || 'legacy-default',
+      sdkLimited: data.sdk_channel_limited === true,
+    })
   }
 
   async function loadDevkitShellInfo() {
@@ -2016,8 +2022,45 @@ export default function App() {
 
         {tab === 'viewer' && (
           <section className="panel viewer-panel">
-            <h2>Video Viewer</h2>
-            <p className="section-note">Monitor active channels with low-latency WebRTC playback.</p>
+            <div className="panel-topbar viewer-panel-topbar">
+              <div>
+                <h2>Video Viewer</h2>
+                <p className="section-note">Monitor active channels with low-latency WebRTC playback.</p>
+              </div>
+              {viewerCapacity && (
+                <details className="viewer-capacity-help">
+                  <summary aria-label={`Video channel capacity: ${viewerCapacity.maxChannels}`}>
+                    <span>{viewerCapacity.maxChannels} channels</span>
+                    <span className="viewer-capacity-help-mark" aria-hidden="true">?</span>
+                  </summary>
+                  <div className="viewer-capacity-help-copy">
+                    {viewerCapacity.source === 'sdk-port-map' && viewerCapacity.sdkLimited ? (
+                      <>
+                        <strong>This SDK is configured for {viewerCapacity.maxChannels} video channels.</strong>
+                        <p>To increase the limit, recreate the SDK container with:</p>
+                        <code>sima-cli sdk setup --insight-video-channels N</code>
+                        <p>Choose N from 1 to 80. Larger values publish more host ports and can increase restart-time port collision risk.</p>
+                      </>
+                    ) : viewerCapacity.source === 'devkit' ? (
+                      <>
+                        <strong>DevKit capacity is unrestricted by SDK port mapping.</strong>
+                        <p>Insight supports the full 80 video channels on the DevKit.</p>
+                      </>
+                    ) : viewerCapacity.source === 'sdk-port-map' ? (
+                      <>
+                        <strong>This SDK already exposes all 80 video channels.</strong>
+                        <p>No channel-capacity change is needed.</p>
+                      </>
+                    ) : (
+                      <>
+                        <strong>Insight is using the legacy 80-channel behavior.</strong>
+                        <p>No <code>insightVideoChannels</code> setting was found in the SDK port map.</p>
+                      </>
+                    )}
+                  </div>
+                </details>
+              )}
+            </div>
             {viewerUrl ? <iframe title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
           </section>
         )}

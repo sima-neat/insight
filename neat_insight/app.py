@@ -649,7 +649,7 @@ def _sysinfo_port_map_candidates():
         yield path
 
 
-def _read_exposed_ports_from_port_map():
+def _read_neat_port_map():
     for path in _sysinfo_port_map_candidates():
         if not path.is_file():
             continue
@@ -659,13 +659,63 @@ def _read_exposed_ports_from_port_map():
             logging.debug("Failed to read neat port map %s: %s", path, exc)
             continue
 
-        rows = []
+        if isinstance(data, dict) and data:
+            return data
         if isinstance(data, dict):
-            for key, value in data.items():
-                _collect_port_map_rows([str(key)], value, rows)
-        if rows:
-            return rows
+            continue
+        logging.warning("Ignoring neat port map %s because its root is not an object", path)
+    return {}
+
+
+def _read_exposed_ports_from_port_map():
+    data = _read_neat_port_map()
+    rows = []
+    for key, value in data.items():
+        _collect_port_map_rows([str(key)], value, rows)
+    if rows:
+        return rows
     return []
+
+
+def _resolve_video_channel_capacity():
+    """Return the viewer channel capacity and how it was selected."""
+    if is_sima_board():
+        return VIEWER_CHANNEL_COUNT, "devkit", False
+
+    port_map = _read_neat_port_map()
+    configured = port_map.get("insightVideoChannels")
+    if configured is None:
+        return VIEWER_CHANNEL_COUNT, "legacy-default", False
+    if (
+        not isinstance(configured, int)
+        or isinstance(configured, bool)
+        or not 1 <= configured <= VIEWER_CHANNEL_COUNT
+    ):
+        logging.warning(
+            "Ignoring invalid insightVideoChannels value %r; using legacy %d-channel behavior",
+            configured,
+            VIEWER_CHANNEL_COUNT,
+        )
+        return VIEWER_CHANNEL_COUNT, "legacy-default", False
+    return configured, "sdk-port-map", configured < VIEWER_CHANNEL_COUNT
+
+
+def _sanitize_viewer_sources(value, max_channels):
+    if value is None:
+        return list(range(max_channels))
+
+    channels = []
+    seen = set()
+    for item in str(value).split(","):
+        try:
+            channel = int(item.strip())
+        except (TypeError, ValueError):
+            continue
+        if channel < 0 or channel >= max_channels or channel in seen:
+            continue
+        seen.add(channel)
+        channels.append(channel)
+    return channels
 
 
 def _valid_port(value):
@@ -2444,12 +2494,18 @@ def server_ip():
 def viewer_url():
     """Accept query args mode and src; return the browser-reachable HTTPS vf viewer URL."""
     mode = request.args.get("mode", "light")
-    default_src = ",".join(str(i) for i in range(VIEWER_CHANNEL_COUNT))
-    src = request.args.get("src", default_src)
+    max_channels, limit_source, sdk_limited = _resolve_video_channel_capacity()
+    channels = _sanitize_viewer_sources(request.args.get("src"), max_channels)
+    src = ",".join(str(channel) for channel in channels)
     host_ip = _request_host_name()
     viewer_port = _resolve_video_ui_port()
-    query = urllib.parse.urlencode({"mode": mode, "src": src})
-    return {"url": _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query)}
+    query = urllib.parse.urlencode({"mode": mode, "src": src, "max_channels": max_channels})
+    return {
+        "url": _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
+        "max_video_channels": max_channels,
+        "channel_limit_source": limit_source,
+        "sdk_channel_limited": sdk_limited,
+    }
 
 
 # API: serve the built single-page application entrypoint.
