@@ -25,6 +25,7 @@ test("persisted page sizes normalize to a supported option", () => {
 test("configured SDK capacity limits channel selection and page sizes", () => {
   assert.equal(normalizeMaxChannels("4"), 4);
   assert.deepEqual(parseChannelIndices(null, 4), [0, 1, 2, 3]);
+  assert.deepEqual(parseChannelIndices("", 4), []);
   assert.deepEqual(parseChannelIndices("3,4,79,bad,0,3", 4), [0, 3]);
   assert.deepEqual(pageSizePresetsForLimit(4), [1, 4]);
   assert.deepEqual(pageSizePresetsForLimit(3), [1, 3]);

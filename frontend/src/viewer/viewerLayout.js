@@ -12,7 +12,7 @@ export function normalizeMaxChannels(value) {
 
 export function parseChannelIndices(srcParam, maxChannels = MAX_CHANNELS) {
   const limit = normalizeMaxChannels(maxChannels);
-  if (!srcParam) {
+  if (srcParam === null || srcParam === undefined) {
     return Array.from({ length: limit }, (_, index) => index);
   }
 

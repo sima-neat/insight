@@ -649,7 +649,7 @@ def _sysinfo_port_map_candidates():
         yield path
 
 
-def _read_neat_port_map():
+def _iter_neat_port_maps():
     for path in _sysinfo_port_map_candidates():
         if not path.is_file():
             continue
@@ -659,21 +659,27 @@ def _read_neat_port_map():
             logging.debug("Failed to read neat port map %s: %s", path, exc)
             continue
 
-        if isinstance(data, dict) and data:
-            return data
         if isinstance(data, dict):
+            if data:
+                yield data
             continue
         logging.warning("Ignoring neat port map %s because its root is not an object", path)
+
+
+def _read_neat_port_map():
+    for data in _iter_neat_port_maps():
+        if "insightVideoChannels" in data:
+            return data
     return {}
 
 
 def _read_exposed_ports_from_port_map():
-    data = _read_neat_port_map()
-    rows = []
-    for key, value in data.items():
-        _collect_port_map_rows([str(key)], value, rows)
-    if rows:
-        return rows
+    for data in _iter_neat_port_maps():
+        rows = []
+        for key, value in data.items():
+            _collect_port_map_rows([str(key)], value, rows)
+        if rows:
+            return rows
     return []
 
 

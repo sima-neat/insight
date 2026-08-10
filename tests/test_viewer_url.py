@@ -1,7 +1,10 @@
+import json
 import os
-import urllib.parse
+import tempfile
 import unittest
 import unittest.mock as mock
+import urllib.parse
+from pathlib import Path
 
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55579")
 
@@ -51,6 +54,39 @@ class ViewerUrlTests(unittest.TestCase):
 
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(response.get_json()["url"]).query)
         self.assertEqual(query["src"], ["0,3"])
+
+    def test_sdk_viewer_preserves_an_explicit_selection_with_no_valid_channels(self):
+        with mock.patch.object(app_module, "is_sima_board", return_value=False), \
+             mock.patch.object(app_module, "_read_neat_port_map", return_value={"insightVideoChannels": 4}):
+            response = self.client.get(
+                "/api/viewer-url?src=79,bad",
+                headers={"Host": "developer.local:9900"},
+            )
+
+        query = urllib.parse.parse_qs(
+            urllib.parse.urlsplit(response.get_json()["url"]).query,
+            keep_blank_values=True,
+        )
+        self.assertEqual(query["src"], [""])
+
+    def test_port_discovery_skips_metadata_only_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stale = Path(directory) / "stale.json"
+            valid = Path(directory) / "valid.json"
+            stale.write_text(json.dumps({"schema": 1}), encoding="utf-8")
+            valid.write_text(
+                json.dumps({"videoUI": {"host": 18081, "protocol": "tcp"}}),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                app_module,
+                "_sysinfo_port_map_candidates",
+                return_value=iter((stale, valid)),
+            ):
+                ports = app_module._read_exposed_ports_from_port_map()
+
+        self.assertEqual(ports[0]["name"], "videoUI")
+        self.assertEqual(ports[0]["hostPortStart"], 18081)
 
     def test_missing_channel_capacity_uses_legacy_eighty_channel_behavior(self):
         with mock.patch.object(app_module, "is_sima_board", return_value=False), \
