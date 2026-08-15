@@ -1502,12 +1502,24 @@ function applyCapabilities(results) {
   }
 }
 
+// Re-enable controls disabled by applyCapabilities(); the tooltip string is
+// its marker, so manual-lock dimming (data-manual / .ctrl-off) is untouched.
+function clearCapabilities() {
+  document.querySelectorAll('[title="Configuration is not supported"]').forEach(el => {
+    el.disabled = false;
+    el.title = "";
+  });
+}
+
 async function loadCachedCapabilities() {
   try {
     const r = await fetch(api("/api/capabilities"));
     if (!r.ok) return;
     const d = await r.json();
+    // Empty cache (e.g. after a camera switch): clear the previous camera's
+    // stale disables instead of leaving them stuck.
     if (Object.keys(d).length) applyCapabilities(d);
+    else clearCapabilities();
   } catch(_) {}
 }
 
@@ -1901,6 +1913,11 @@ async function selectCamera(cam) {
       body:JSON.stringify({camera:cam.device})
     });
     const d = await r.json();
+    // On failure (423 lease held, 401 auth) keep the current camera state.
+    if (!r.ok || !d.stream_device) {
+      toast("Camera switch failed: " + (d.error || "HTTP " + r.status), "err");
+      return;
+    }
     streamDev = d.stream_device;
     ctrlDev = d.control_device;
     cameraName = cam.name;

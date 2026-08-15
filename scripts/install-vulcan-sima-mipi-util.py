@@ -61,9 +61,13 @@ def main() -> int:
               file=sys.stderr)
 
     # Fallback for hosts without apt (or if the above failed): dpkg then fix deps.
-    _run(sudo + ["dpkg", "-i", str(deb)])
-    if shutil.which("apt-get"):
-        _run(sudo + ["apt-get", "install", "-f", "-y"])
+    rc = _run(sudo + ["dpkg", "-i", str(deb)])
+    if rc != 0 and shutil.which("apt-get"):
+        rc = _run(sudo + ["apt-get", "install", "-f", "-y"])
+    if rc != 0:
+        # Don't report success when the fallback failed too.
+        print("sima-mipi-util installation failed — see errors above.", file=sys.stderr)
+        return 1
     print("sima-mipi-util installed. Open http://<device-ip>:5000")
     return 0
 

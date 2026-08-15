@@ -1721,7 +1721,17 @@ def _v4l2_set_verified(ctrl, val):
     When the lock is off, the ISP's auto algorithm owns that control and the
     write genuinely cannot stick. Say so plainly instead of quietly taking the
     control away from the algorithm."""
-    _remember(ctrl, val)
+    ok, err = _do_set_verified(ctrl, val)
+    if ok:
+        # Persist only writes that actually took. A rejected value (lock off,
+        # auto override) must not land in the settings file, or
+        # _reapply_desired() would quietly apply it on the next pipeline
+        # rebuild as if it had succeeded.
+        _remember(ctrl, val)
+    return ok, err
+
+
+def _do_set_verified(ctrl, val):
     ok, err = _v4l2_set_routed(ctrl, val)
     lock = _AUTO_LOCK_PAIRS.get(ctrl)
     # imx568 digital gain routes to the ISP sensor_digital_gain register, which
