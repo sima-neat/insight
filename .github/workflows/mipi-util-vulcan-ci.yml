@@ -336,7 +336,10 @@ jobs:
       artifact_pattern: sima-mipi-util-dist
       artifact_glob: "*"
       min_artifact_count: 2
-      cleanup_github_artifacts: true
+      # The uploaded artifact already has a three-day retention. Keep cleanup
+      # non-blocking here so a transient GitHub artifact DELETE failure cannot
+      # fail an otherwise successful Vulcan publication and skip promotion.
+      cleanup_github_artifacts: false
 
   promote-latest-tag:
     name: Promote Vulcan latest tag
