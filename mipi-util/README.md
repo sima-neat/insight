@@ -19,7 +19,9 @@ This is published as its own Vulcan package (`gh:sima-neat/insight/mipi-util`)
 by the **MIPI Util Vulcan CI** workflow
 ([.github/workflows/mipi-util-vulcan-ci.yml](../.github/workflows/mipi-util-vulcan-ci.yml)),
 which builds the `.deb`, validates it, generates the package metadata, publishes
-to Vulcan (on `main`/tags), and smoke-tests the API.
+branch and tag builds to Vulcan, and smoke-tests the API. Publishing branch
+builds makes the package available for end-to-end installation testing before
+the branch is merged.
 
 ### Manual (`.deb`)
 
