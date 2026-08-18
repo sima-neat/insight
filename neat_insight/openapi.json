@@ -1,0 +1,1114 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Neat Insight API",
+    "version": "1.0.0",
+    "description": "Neat Insight provides an HTTP control plane for preparing media, managing indexed streaming sources, discovering vf viewer URLs, inspecting runtime health, and browsing the active workspace. The same API drives the Insight web application and can be used from scripts, test automation, or development tools.\n\n## Before you begin\n\n- The default local endpoint is `https://127.0.0.1:9900`. Development installations normally use a locally generated certificate, so diagnostic clients may need to trust mkcert or use `curl -k`.\n- Call `GET /api/health` before a workflow to confirm that the backend is ready.\n- Media and workspace paths are always relative to their managed root. Absolute paths and traversal outside those roots are rejected.\n- Source slot indexes are **one-based**; vf viewer channel indexes are **zero-based**.\n- Operations that import, transcode, or upload media may return a streaming `text/plain` progress response. Read through the final line before deciding whether the operation succeeded.\n\n## Typical workflows\n\n1. **Prepare a stream:** upload or import media, inspect it, assign it to a source slot, then start the source.\n2. **Open a viewer:** request `/api/viewer-url` so the URL reflects the current host and configured SDK channel capacity.\n3. **Troubleshoot delivery:** check ingest statistics first; if RTP reaches vf but the browser still fails, continue with egress statistics.\n4. **Inspect artifacts:** browse the workspace tree, search paths, and preview files or members inside MPK archives.\n\n## Security\n\nThe API has no application-level authentication. Expose it only on trusted development networks and place an authenticated gateway in front of it if broader access is required.",
+    "license": {
+      "name": "Apache License 2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "The current Insight installation"
+    }
+  ],
+  "security": [],
+  "tags": [
+    {"name": "API documentation", "description": "Open the embedded Swagger UI or download the authoritative OpenAPI 3.1 document for generators, validators, and external documentation systems."},
+    {"name": "Service and system", "description": "Confirm readiness and discover the environment in which Insight is running. These endpoints expose logs, optional tool availability, Neat component status, platform build metadata, and the LAN address inferred for browser-facing links."},
+    {"name": "Diagnostics", "description": "Observe Insight, vf ingest, and WebRTC delivery. Start with the compact views for active channels, then add `all=1&verbose=1` when diagnosing inactive ports, packet loss, malformed RTP, missing keyframes, RTCP feedback, or browser decode problems."},
+    {"name": "Media library", "description": "Browse and inspect files managed under Insight's media root. Paths are relative to that root; destructive operations reject traversal and clear source assignments that would otherwise reference deleted media."},
+    {"name": "Media imports", "description": "Populate the media library by uploading local files or archives, downloading published test-media assets, or validating and transcoding YouTube clips. Long-running operations stream human-readable progress."},
+    {"name": "Media sources", "description": "Manage one-based source slots that publish assigned media over RTSP or HTTP MJPEG. A normal workflow is list videos → assign a slot → start it → inspect state → stop it before changing or deleting media."},
+    {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
+    {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
+    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."}
+  ],
+  "x-tagGroups": [
+    {
+      "name": "Observe Insight",
+      "tags": ["Service and system", "Diagnostics", "Viewer", "DevKit shell"]
+    },
+    {
+      "name": "Automate Insight",
+      "tags": ["Media library", "Media imports", "Media sources", "Workspace"]
+    },
+    {
+      "name": "API resources",
+      "tags": ["API documentation"]
+    }
+  ],
+  "paths": {
+    "/api/docs": {
+      "get": {
+        "tags": ["API documentation"],
+        "summary": "Open the interactive API reference",
+        "description": "Returns the Swagger UI bundled with Insight. Use it for quick exploration against the current installation; use `/api/openapi.json` when a tool needs the machine-readable contract.",
+        "operationId": "getSwaggerUi",
+        "responses": {
+          "200": {
+            "description": "Swagger UI HTML page.",
+            "content": {"text/html": {"schema": {"type": "string"}}}
+          }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "tags": ["API documentation"],
+        "summary": "Download the OpenAPI document",
+        "description": "Returns the exact OpenAPI 3.1 document used by the embedded Swagger UI and the generated core documentation. The document is suitable for linting, client generation, contract tests, and documentation builds.",
+        "operationId": "getOpenApiDocument",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document for the current Insight API.",
+            "content": {"application/vnd.oai.openapi+json": {"schema": {"type": "object"}}}
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Check service readiness",
+        "description": "A lightweight readiness probe with no dependency on vf, a DevKit, or media tools. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests.",
+        "operationId": "getHealth",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k https://<INSIGHT_HOST>:9900/api/health"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The backend is ready.",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Health"},
+                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/{logname}": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Read recent service log lines",
+        "description": "Reads a bounded tail of a whitelisted system log without exposing arbitrary filesystem paths. Use `EV74` for accelerator/runtime messages and `syslog` for broader platform diagnostics; the response is plain text rather than JSON.",
+        "operationId": "getLog",
+        "parameters": [
+          {
+            "name": "logname",
+            "in": "path",
+            "required": true,
+            "description": "Whitelisted log name.",
+            "schema": {"type": "string", "enum": ["EV74", "syslog"]}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to the latest 10,000 lines, bounded to 256 KiB.",
+            "content": {"text/plain": {"schema": {"type": "string"}}}
+          },
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "tags": ["Diagnostics"],
+        "summary": "Get a system metrics snapshot",
+        "description": "Returns the latest point-in-time metrics assembled for the Insight dashboard, including CPU, memory, disk, temperature, MLA, remote-platform, and pipeline compatibility fields. The payload is intentionally extensible, so clients should tolerate additional fields.",
+        "operationId": "getMetrics",
+        "responses": {
+          "200": {
+            "description": "CPU, memory, disk, temperature, MLA, remote, and compatibility metrics.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          }
+        }
+      }
+    },
+    "/api/neat-metrics": {
+      "get": {
+        "tags": ["Diagnostics"],
+        "summary": "Stream Neat metrics events",
+        "description": "Opens a long-lived server-sent events connection to the local metrics broker. Each SSE `data` field contains one JSON metrics event; clients should reconnect after network interruption and must not wait for the response body to terminate.",
+        "operationId": "streamNeatMetrics",
+        "responses": {
+          "200": {
+            "description": "A long-lived server-sent event stream. Each data field contains a JSON metrics event.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}}
+          }
+        }
+      }
+    },
+    "/api/ingest/stats": {
+      "get": {
+        "tags": ["Diagnostics"],
+        "summary": "Get vf UDP and RTP ingest statistics",
+        "description": "Shows whether video RTP and metadata JSON are reaching vf before WebRTC delivery is considered. A healthy H.264 input normally has increasing packet and bitrate counters, observed SPS/PPS, and periodic IDR frames. Add `verbose=1` for payload types, NAL counts, sequence gaps, jitter estimates, malformed packets, and recent errors; add `all=1` to include inactive channels.",
+        "operationId": "getIngestStats",
+        "parameters": [
+          {"$ref": "#/components/parameters/AllChannels"},
+          {"$ref": "#/components/parameters/VerboseStats"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-channel video RTP, metadata UDP, forwarding, media, and WebRTC attachment statistics.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          },
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/egress/stats": {
+      "get": {
+        "tags": ["Diagnostics"],
+        "summary": "Get vf WebRTC egress statistics",
+        "description": "Use this after ingest statistics confirm that RTP is arriving but a browser does not decode, render, or remain connected. The response combines vf peer state, RTCP feedback, metadata DataChannel counters, and the latest browser `RTCPeerConnection.getStats()` report. Add `verbose=1` for recent peer errors and `all=1` to retain inactive peers.",
+        "operationId": "getEgressStats",
+        "parameters": [
+          {"$ref": "#/components/parameters/AllChannels"},
+          {"$ref": "#/components/parameters/VerboseStats"}
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-channel and per-peer RTCP, browser decode/render, connection, and metadata DataChannel statistics.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          },
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/media-files": {
+      "get": {
+        "tags": ["Media library"],
+        "summary": "List media files as a folder tree",
+        "description": "Returns the complete visible media-library hierarchy using relative paths that can be passed directly to inspection, assignment, preview, and deletion APIs. Hidden entries and macOS archive metadata are omitted so the result matches what users see in Insight.",
+        "operationId": "listMediaFiles",
+        "responses": {
+          "200": {
+            "description": "Recursive media-library tree. Hidden files and macOS archive metadata are omitted.",
+            "content": {
+              "application/json": {
+                "schema": {"type": "array", "items": {"$ref": "#/components/schemas/MediaTreeNode"}}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/tools": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Check optional media tools",
+        "description": "Reports whether the helper executables used for probing, transcoding, and streaming are available on the backend `PATH`. This is a capability check only; a reported tool may still fail for an unsupported codec or input.",
+        "operationId": "getSystemTools",
+        "responses": {
+          "200": {
+            "description": "Availability of media helper executables on PATH.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ffmpeg", "ffprobe", "gstreamer"],
+                  "properties": {
+                    "ffmpeg": {"type": "boolean"},
+                    "ffprobe": {"type": "boolean"},
+                    "gstreamer": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sysinfo": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Get Neat system and component status",
+        "description": "Runs the Neat system-information command and enriches its structured result with Insight URL and port data. Use it for a broad installation snapshot; use the diagnostics endpoints for live transport-level investigation.",
+        "operationId": "getSystemInfo",
+        "responses": {
+          "200": {
+            "description": "Structured output from `neat --json`, enriched with Insight URL and port information.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          },
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/BadGateway"},
+          "504": {"$ref": "#/components/responses/GatewayTimeout"}
+        }
+      }
+    },
+    "/api/media-catalog": {
+      "get": {
+        "tags": ["Media imports"],
+        "summary": "List published test-media catalog assets",
+        "description": "Fetches the published test-media catalog and resolves each asset to a downloadable rendition. Use the returned catalog path—not an arbitrary URL—with the catalog import endpoint so Insight can validate and store the selected asset safely.",
+        "operationId": "getMediaCatalog",
+        "responses": {
+          "200": {
+            "description": "Published source and rendition metadata with resolved download URLs.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          },
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/import/media-catalog": {
+      "post": {
+        "tags": ["Media imports"],
+        "summary": "Import a published media-catalog asset",
+        "description": "Downloads one asset selected from `/api/media-catalog` into the local media library. The response streams progress as plain text and may remain open while the file is transferred; read the final line for completion or failure. Catalog paths are validated and cannot be used as general-purpose download URLs.",
+        "operationId": "importMediaCatalogAsset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/CatalogImportRequest"},
+              "example": {"path": "people/person-720p20-h264.mp4"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/ProgressStream"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/import/youtube/validate": {
+      "post": {
+        "tags": ["Media imports"],
+        "summary": "Validate a YouTube import URL",
+        "description": "Inspects a YouTube URL without downloading the media and returns the title, duration, thumbnail, and supported Insight transcode targets. Call this before starting an import so a UI or script can show the user the actual clip metadata and reject unsupported inputs early.",
+        "operationId": "validateYoutubeImport",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/YoutubeUrlRequest"},
+              "example": {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Video title, duration, thumbnail, and supported import targets.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/api/import/youtube": {
+      "post": {
+        "tags": ["Media imports"],
+        "summary": "Import and transcode a YouTube clip",
+        "description": "Downloads the selected clip segment and transcodes it to an Insight-compatible MP4 rendition. The response is a streaming progress log; imports can take significant time and clients should keep the connection open through the final status line. Clip duration is capped at five minutes to bound resource use.",
+        "operationId": "importYoutubeMedia",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/YoutubeImportRequest"},
+              "example": {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "target": "720p30", "clip_start": 0, "clip_duration": 30}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/ProgressStream"},
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/api/upload/media": {
+      "post": {
+        "tags": ["Media imports"],
+        "summary": "Upload media or a media archive",
+        "description": "Uploads one local file using multipart field `file`. Archives (`zip`, `tar`, `gz`, and `tar.gz`) are safely extracted beneath the media root, and compatible MP4 files may be optimized for browser playback after upload. The response is a plain-text progress stream, so clients should consume it through the final line rather than treating the first bytes as completion.",
+        "operationId": "uploadMedia",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -F \"file=@person_clip.mp4\" https://<INSIGHT_HOST>:9900/api/upload/media"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {"file": {"type": "string", "format": "binary"}}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/ProgressStream"}
+        }
+      }
+    },
+    "/api/delete-media": {
+      "post": {
+        "tags": ["Media library"],
+        "summary": "Delete a media file or directory",
+        "description": "Permanently deletes a file or directory beneath the media root. If the deleted path is assigned to a media-source slot, Insight clears that assignment to avoid leaving stale playback state. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
+        "operationId": "deleteMedia",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/MediaPathRequest"},
+              "example": {"path": "person_clip.mp4"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The path was deleted.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Message"}, "example": {"message": "Deleted successfully"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/media-info": {
+      "post": {
+        "tags": ["Media library"],
+        "summary": "Inspect a media file",
+        "description": "Probes one media-library file and returns normalized metadata suitable for deciding how it can be previewed or streamed. Images report dimensions, mode, and format; videos report track codec, normalized codec, duration, frame rate, and dimensions when available.",
+        "operationId": "getMediaInfo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/MediaPathRequest"},
+              "example": {"path": "person_clip.mp4"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File size plus image dimensions or video track metadata.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaInfo"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/media-preview/mjpeg": {
+      "get": {
+        "tags": ["Media library"],
+        "summary": "Stream an MJPEG preview for a media file",
+        "description": "Transcodes or relays a media-library file as a long-lived multipart MJPEG response for lightweight browser preview. This is a preview transport rather than a downloadable file; clients must handle an open-ended stream and close it when the preview is no longer visible.",
+        "operationId": "previewMediaAsMjpeg",
+        "parameters": [{"$ref": "#/components/parameters/MediaPath"}],
+        "responses": {
+          "200": {
+            "description": "Long-lived multipart MJPEG preview stream.",
+            "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/media/{filename}": {
+      "get": {
+        "tags": ["Media library"],
+        "summary": "Download or preview a media file",
+        "description": "Serves the original bytes for a relative path beneath the media root using the detected content type. Browsers may display supported media inline; automation can use the same route to download the file. Missing paths return `404` and traversal outside the library is not permitted.",
+        "operationId": "getMediaFile",
+        "parameters": [
+          {"name": "filename", "in": "path", "required": true, "description": "Relative media-library path, including any folders.", "schema": {"type": "string"}, "example": "catalog/people/person.mp4"}
+        ],
+        "responses": {
+          "200": {"description": "Raw file content using the detected media type.", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/mediasrc/videos": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "List assignable media files",
+        "description": "Returns a flat, sorted list of media-library paths whose extensions are supported by the source streamer. Use these exact relative paths in the assignment endpoint; the broader media tree can contain files that are inspectable but not streamable.",
+        "operationId": "listMediaSourceVideos",
+        "responses": {
+          "200": {
+            "description": "Sorted relative paths with streamable extensions.",
+            "content": {"application/json": {"schema": {"type": "array", "items": {"type": "string"}}, "example": ["person_clip.mp4", "samples/camera.mjpg"]}}
+          }
+        }
+      }
+    },
+    "/api/mediasrc": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Get source assignments and playback state",
+        "description": "Returns every configured one-based source slot with its assigned file, persisted playback state, detected codec, selected transport, compatible transports, and ready-to-use stream URLs. Read this endpoint before mutating sources so automation can avoid unnecessary restarts and choose a compatible transport.",
+        "operationId": "getMediaSources",
+        "responses": {
+          "200": {
+            "description": "Source slots enriched with active transport, codec, allowed transports, and stream URLs.",
+            "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/MediaSource"}}}}
+          }
+        }
+      }
+    },
+    "/api/mediasrc/assign": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Assign or clear one source slot",
+        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.",
+        "operationId": "assignMediaSource",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -H \"Content-Type: application/json\" -d '{\"index\":1,\"file\":\"person_clip.mp4\"}' https://<INSIGHT_HOST>:9900/api/mediasrc/assign"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/MediaSourceAssignment"},
+              "example": {"index": 1, "file": "person_clip.mp4"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/Success"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/mediasrc/auto-assign-all": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Assign available videos to source slots",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.",
+        "operationId": "autoAssignMediaSources",
+        "responses": {
+          "200": {
+            "description": "Assignment counts and success message.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+          }
+        }
+      }
+    },
+    "/api/mediasrc/start": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Start one source",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.",
+        "operationId": "startMediaSource",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -H \"Content-Type: application/json\" -d '{\"index\":1}' https://<INSIGHT_HOST>:9900/api/mediasrc/start"
+          }
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/Success"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/mediasrc/start-bulk": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Start multiple assigned sources",
+        "description": "Targets the first `count` assigned source slots in index order and starts each one independently. The result separates newly started slots, slots that were already running, and per-slot failures, allowing test automation to continue with partial success while preserving detailed diagnostics.",
+        "operationId": "startMediaSourcesBulk",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"type": "object", "required": ["count"], "properties": {"count": {"type": "integer", "minimum": 1}}},
+              "example": {"count": 4}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Start results including started, already-running, and failed source indexes.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BulkStartResult"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/api/mediasrc/stop": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Stop one source",
+        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.",
+        "operationId": "stopMediaSource",
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/Success"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/mediasrc/stop-all": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Stop every source",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.",
+        "operationId": "stopAllMediaSources",
+        "responses": {
+          "200": {
+            "description": "Number of sources that were previously playing.",
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "message": "Stopped 4 source(s)."}}}
+          }
+        }
+      }
+    },
+    "/api/mediasrc/reset": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Reset all source assignments",
+        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained.",
+        "operationId": "resetMediaSources",
+        "responses": {
+          "200": {
+            "description": "Every source was stopped and default empty assignments were written.",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SuccessMessage"}}}
+          }
+        }
+      }
+    },
+    "/stream/http/src{index}.mjpg": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Stream an active HTTP MJPEG source",
+        "description": "Relays the live multipart MJPEG output for a source slot configured with HTTP transport. The source must be assigned, started, and actively producing frames; RTSP sources are not converted by this route. The response remains open until the client disconnects or the source stops.",
+        "operationId": "streamHttpMjpegSource",
+        "parameters": [{"$ref": "#/components/parameters/SourceIndexPath"}],
+        "responses": {
+          "200": {"description": "Long-lived multipart MJPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
+        }
+      }
+    },
+    "/stream/http/src{index}.jpg": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Get one frame from an active HTTP MJPEG source",
+        "description": "Waits for and returns a single JPEG frame from an active HTTP MJPEG source. This is useful for thumbnails, readiness checks, and test assertions without maintaining a streaming connection. A stopped or non-HTTP source returns a conflict, and a frame acquisition timeout returns `504`.",
+        "operationId": "snapshotHttpMjpegSource",
+        "parameters": [{"$ref": "#/components/parameters/SourceIndexPath"}],
+        "responses": {
+          "200": {"description": "JPEG image.", "content": {"image/jpeg": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "504": {"$ref": "#/components/responses/GatewayTimeout"}
+        }
+      }
+    },
+    "/api/envinfo": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Get deployment environment flags",
+        "description": "Identifies whether Insight is running directly on a SiMa DevKit and whether a remote DevKit was configured through the environment. Frontends use these flags to select appropriate workflows and messaging; this endpoint does not modify deployment configuration.",
+        "operationId": "getEnvironmentInfo",
+        "responses": {
+          "200": {
+            "description": "DevKit and remote-DevKit mode flags.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["is_sima_board", "is_remote_devkit_configured"],
+                  "properties": {
+                    "is_sima_board": {"type": "boolean"},
+                    "is_remote_devkit_configured": {"type": "boolean"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devkit-shell": {
+      "get": {
+        "tags": ["DevKit shell"],
+        "summary": "Get DevKit shell availability and launch metadata",
+        "description": "Returns whether the optional hosted shell bridge is configured and running, along with its port, target metadata, and a prefilled launch URL when available. Use this endpoint to decide whether to show, start, or open the shell experience without guessing deployment details.",
+        "operationId": "getDevkitShell",
+        "responses": {
+          "200": {"description": "Configuration, service status, port, and prefilled launch URL.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/devkit-shell/start": {
+      "post": {
+        "tags": ["DevKit shell"],
+        "summary": "Start the hosted DevKit shell bridge",
+        "description": "Starts the optional backend service that hosts an interactive shell connection to the configured remote DevKit, then returns updated launch metadata. The DevKit connection must already be configured through the deployment environment; this operation does not accept or persist credentials.",
+        "operationId": "startDevkitShell",
+        "responses": {
+          "200": {"description": "Running service status and launch metadata.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/buildinfo": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Get local or remote platform build information",
+        "description": "Returns parsed SiMa release and platform metadata for the active environment. On a remote-DevKit installation the backend retrieves the target's build information; without a DevKit it falls back to host platform details. A `502` generally means the configured remote target could not be reached or read.",
+        "operationId": "getBuildInfo",
+        "responses": {
+          "200": {"description": "Parsed SiMa build metadata, or host platform details when no DevKit is configured.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/server-ip": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Get the browser-reachable backend IP",
+        "description": "Resolves the address that browser-facing links should use, preferring `CONTAINER_HOST_IP`, then an inferred LAN address, and finally `127.0.0.1`. This is intended for URL construction in container and bridge-network deployments, not as a complete network-interface inventory.",
+        "operationId": "getServerIp",
+        "responses": {
+          "200": {"description": "Configured or inferred LAN IP.", "content": {"application/json": {"schema": {"type": "object", "required": ["ip"], "properties": {"ip": {"type": "string"}}}, "example": {"ip": "192.168.1.25"}}}}
+        }
+      }
+    },
+    "/api/viewer-url": {
+      "get": {
+        "tags": ["Viewer"],
+        "summary": "Build a browser-reachable vf viewer URL",
+        "description": "Constructs the vf HTTPS viewer URL on port `8081` using the current request host, selected color mode, and zero-based channel selection. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
+        "operationId": "getViewerUrl",
+        "parameters": [
+          {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
+          {"name": "src", "in": "query", "description": "Comma-separated zero-based vf channel indexes. Invalid and out-of-capacity indexes are discarded.", "schema": {"type": "string"}, "example": "0,1,2,3"}
+        ],
+        "responses": {
+          "200": {"description": "Viewer URL plus the resolved SDK or DevKit channel capacity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ViewerUrl"}}}}
+        }
+      }
+    },
+    "/api/workspace/root": {
+      "get": {
+        "tags": ["Workspace"],
+        "summary": "Get the active workspace root",
+        "description": "Reports the logical root used by all workspace endpoints and whether the conventional `/workspace` mount is active. Returned paths establish context for the browser but subsequent API requests must still use relative workspace paths.",
+        "operationId": "getWorkspaceRoot",
+        "responses": {
+          "200": {
+            "description": "Resolved workspace root and whether `/workspace` is active.",
+            "content": {"application/json": {"schema": {"type": "object", "required": ["name", "path", "hasWorkspaceDir"], "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "hasWorkspaceDir": {"type": "boolean"}}}}}
+          }
+        }
+      }
+    },
+    "/api/workspace/tree": {
+      "get": {
+        "tags": ["Workspace"],
+        "summary": "List a workspace folder or MPK archive folder",
+        "description": "Lists the immediate children of a workspace directory or a directory inside an MPK tar archive. Use an empty path for the root and `archive_mpk.tar.gz::member/path` for archive navigation. Results are sorted and classified so clients can build a lazy-loading file browser without extracting archives.",
+        "operationId": "getWorkspaceTree",
+        "parameters": [{"$ref": "#/components/parameters/WorkspacePath"}],
+        "responses": {
+          "200": {"description": "Folder path and sorted immediate children.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceTree"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/workspace/search": {
+      "get": {
+        "tags": ["Workspace"],
+        "summary": "Search indexed workspace paths",
+        "description": "Performs a bounded, case-insensitive search across workspace filesystem names and relative paths. MPK archives are searchable as files, but members inside them are not indexed; browse an archive with the workspace tree endpoint instead. Results are ranked and capped at 200 entries. Supply `kind` to narrow broad queries to models, images, code, text, archives, executables, or binary files.",
+        "operationId": "searchWorkspace",
+        "parameters": [
+          {"name": "q", "in": "query", "description": "Case-insensitive filename or path fragment.", "schema": {"type": "string"}},
+          {"name": "kind", "in": "query", "description": "Optional node-kind filter.", "schema": {"$ref": "#/components/schemas/WorkspaceKind"}}
+        ],
+        "responses": {
+          "200": {"description": "Up to 200 ranked matches.", "content": {"application/json": {"schema": {"type": "object", "required": ["matches"], "properties": {"matches": {"type": "array", "items": {"allOf": [{"$ref": "#/components/schemas/WorkspaceNode"}, {"type": "object", "properties": {"score": {"type": "integer"}}}]}}}}}}}
+        }
+      }
+    },
+    "/api/workspace/file-info": {
+      "get": {
+        "tags": ["Workspace"],
+        "summary": "Get workspace path metadata",
+        "description": "Returns classification and filesystem metadata for one file, folder, archive, or MPK member without reading its content. Use this when a client needs size, modification time, or preview strategy before requesting the file-preview or raw-image endpoint.",
+        "operationId": "getWorkspaceFileInfo",
+        "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
+        "responses": {
+          "200": {"description": "File, folder, or MPK archive-member metadata.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceNode"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/workspace/raw": {
+      "get": {
+        "tags": ["Workspace"],
+        "summary": "Get raw workspace image content",
+        "description": "Returns original image bytes for an ordinary image file in the workspace filesystem. MPK archive-member paths are not supported by this endpoint. This route is intended for browser `<img>` sources and binary consumers; use the JSON file-preview endpoint for text and metadata. Non-image or inaccessible paths return an error rather than arbitrary file bytes.",
+        "operationId": "getWorkspaceRawFile",
+        "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
+        "responses": {
+          "200": {"description": "Raw image bytes using the detected media type.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/workspace/file": {
+      "get": {
+        "tags": ["Workspace"],
+        "summary": "Preview a workspace file or MPK archive member",
+        "description": "Returns node metadata together with a bounded text preview when the selected content is text-like. The `previewAvailable` and `truncated` flags tell clients whether content was returned and whether only a prefix is shown. Binary files remain discoverable but are not serialized into the JSON response.",
+        "operationId": "getWorkspaceFile",
+        "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
+        "responses": {
+          "200": {"description": "Node metadata and a bounded text preview when the content is text-like.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/WorkspaceFilePreview"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "AllChannels": {
+        "name": "all",
+        "in": "query",
+        "description": "Use `1` to include inactive channels or peers.",
+        "schema": {"type": "string", "enum": ["0", "1"], "default": "0"}
+      },
+      "VerboseStats": {
+        "name": "verbose",
+        "in": "query",
+        "description": "Use `1` to include expanded transport and error diagnostics.",
+        "schema": {"type": "string", "enum": ["0", "1"], "default": "0"}
+      },
+      "MediaPath": {
+        "name": "path",
+        "in": "query",
+        "required": true,
+        "description": "Relative path under the Insight media directory.",
+        "schema": {"type": "string"},
+        "example": "person_clip.mp4"
+      },
+      "SourceIndexPath": {
+        "name": "index",
+        "in": "path",
+        "required": true,
+        "description": "One-based media-source slot index.",
+        "schema": {"type": "integer", "minimum": 1},
+        "example": 1
+      },
+      "WorkspacePath": {
+        "name": "path",
+        "in": "query",
+        "description": "Relative workspace path. MPK members use `archive_mpk.tar.gz::member/path`.",
+        "schema": {"type": "string", "default": ""}
+      },
+      "RequiredWorkspacePath": {
+        "name": "path",
+        "in": "query",
+        "required": true,
+        "description": "Relative workspace path. MPK members use `archive_mpk.tar.gz::member/path`.",
+        "schema": {"type": "string"}
+      }
+    },
+    "requestBodies": {
+      "SourceIndex": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {"$ref": "#/components/schemas/SourceIndexRequest"},
+            "example": {"index": 1}
+          }
+        }
+      }
+    },
+    "responses": {
+      "Success": {
+        "description": "Operation completed.",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Success"}, "example": {"success": true}}}
+      },
+      "ProgressStream": {
+        "description": "Streaming progress messages. Inspect the final lines to determine whether the operation completed or failed.",
+        "content": {"text/plain": {"schema": {"type": "string"}}}
+      },
+      "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "Standard JSON error envelope returned by most failed API operations.",
+        "required": ["error"],
+        "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}},
+        "example": {"error": "Missing index"}
+      },
+      "Success": {
+        "type": "object",
+        "description": "Minimal acknowledgement for an operation that completed successfully.",
+        "required": ["success"],
+        "properties": {"success": {"type": "boolean", "const": true, "description": "Always `true` for this success response."}}
+      },
+      "Message": {
+        "type": "object",
+        "description": "Human-readable result message returned by an operation.",
+        "required": ["message"],
+        "properties": {"message": {"type": "string", "description": "Summary of the completed operation."}}
+      },
+      "SuccessMessage": {
+        "description": "Successful acknowledgement accompanied by a human-readable summary.",
+        "allOf": [
+          {"$ref": "#/components/schemas/Success"},
+          {"$ref": "#/components/schemas/Message"}
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "description": "Readiness result for the Insight Flask backend.",
+        "required": ["status", "service", "time"],
+        "properties": {
+          "status": {"type": "string", "const": "ok", "description": "Fixed readiness state returned when the backend can serve requests."},
+          "service": {"type": "string", "const": "neat-insight", "description": "Stable service identifier for automated probes."},
+          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."}
+        }
+      },
+      "MediaTreeNode": {
+        "type": "object",
+        "description": "One visible file or folder beneath Insight's managed media root.",
+        "required": ["name", "path", "type"],
+        "properties": {
+          "name": {"type": "string", "description": "Final filename or directory name displayed to the user."},
+          "path": {"type": "string", "description": "Relative media-library path accepted by other media endpoints."},
+          "type": {"type": "string", "enum": ["file", "folder"], "description": "Whether the node contains media bytes or nested nodes."},
+          "children": {"type": "array", "description": "Recursive children for a folder; omitted for files.", "items": {"$ref": "#/components/schemas/MediaTreeNode"}}
+        }
+      },
+      "MediaPathRequest": {
+        "type": "object",
+        "description": "Identifies a file or directory beneath Insight's managed media root.",
+        "required": ["path"],
+        "properties": {"path": {"type": "string", "description": "Relative path under the Insight media directory."}}
+      },
+      "CatalogImportRequest": {
+        "type": "object",
+        "description": "Selects one asset returned by the published media-catalog endpoint.",
+        "properties": {
+          "path": {"type": "string", "description": "Catalog asset path."},
+          "asset_path": {"type": "string", "description": "Compatibility alias for `path`."}
+        },
+        "anyOf": [{"required": ["path"]}, {"required": ["asset_path"]}]
+      },
+      "YoutubeUrlRequest": {
+        "type": "object",
+        "description": "YouTube video URL to inspect or import.",
+        "required": ["url"],
+        "properties": {"url": {"type": "string", "format": "uri", "description": "Public YouTube watch or share URL supported by the backend downloader."}}
+      },
+      "YoutubeImportRequest": {
+        "description": "Selects the output rendition and optional bounded clip range for a YouTube import.",
+        "allOf": [
+          {"$ref": "#/components/schemas/YoutubeUrlRequest"},
+          {
+            "type": "object",
+            "required": ["target"],
+            "properties": {
+              "target": {"type": "string", "enum": ["1080p30", "720p30", "480p30"], "description": "Insight-compatible resolution and frame-rate rendition to generate."},
+              "clip_start": {"type": "number", "minimum": 0, "default": 0, "description": "Zero-based start offset in seconds."},
+              "clip_duration": {"type": "number", "exclusiveMinimum": 0, "maximum": 300, "default": 300, "description": "Number of seconds to import, capped at five minutes."}
+            }
+          }
+        ]
+      },
+      "MediaInfo": {
+        "type": "object",
+        "description": "Normalized probe results for an image, video, or unrecognized media-library file.",
+        "required": ["filename", "size_bytes", "type"],
+        "properties": {
+          "filename": {"type": "string", "description": "Relative media-library path that was inspected."},
+          "size_bytes": {"type": "integer", "minimum": 0, "description": "On-disk file size in bytes."},
+          "type": {"type": "string", "enum": ["image", "video", "unknown"], "description": "High-level media classification used by the Insight UI."},
+          "width": {"type": ["integer", "null"], "description": "Pixel width when reported by the image or video probe."},
+          "height": {"type": ["integer", "null"], "description": "Pixel height when reported by the image or video probe."},
+          "mode": {"type": "string", "description": "Image pixel mode, such as `RGB` or `RGBA`; normally absent for video."},
+          "format": {"type": "string", "description": "Detected image or container format."},
+          "codec": {"type": "string", "description": "Codec name reported by the underlying media probe."},
+          "normalized_codec": {"type": ["string", "null"], "enum": ["h264", "h265", "mjpeg", "unknown", null], "description": "Codec normalized to the values understood by media-source transport selection."},
+          "duration_ms": {"type": ["number", "null"], "description": "Video duration in milliseconds when available."},
+          "frame_rate": {"type": ["string", "null"], "description": "Reported video frame rate, which may be a rational value such as `30000/1001`."}
+        }
+      },
+      "SourceIndexRequest": {
+        "type": "object",
+        "description": "Selects one one-based media-source slot.",
+        "required": ["index"],
+        "properties": {"index": {"type": "integer", "minimum": 1, "description": "One-based source slot index. This differs from the viewer's zero-based channel indexes."}}
+      },
+      "MediaSourceAssignment": {
+        "description": "Desired file and transport configuration for one media-source slot.",
+        "allOf": [
+          {"$ref": "#/components/schemas/SourceIndexRequest"},
+          {
+            "type": "object",
+            "required": ["file"],
+            "properties": {
+              "file": {"type": "string", "description": "Relative media-library path, or an empty string to clear the slot."},
+              "transport": {"type": "string", "enum": ["rtsp", "http"], "description": "Requested transport. Insight normalizes this to one supported by the detected codec."},
+              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."}
+            }
+          }
+        ]
+      },
+      "MediaSource": {
+        "type": "object",
+        "description": "Persisted configuration and current runtime state for one streaming source slot.",
+        "required": ["index", "file", "state", "transport", "codec", "allowed_transports", "urls"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
+          "file": {"type": "string", "description": "Assigned relative media-library path, or an empty string for an unassigned slot."},
+          "state": {"type": "string", "enum": ["playing", "stopped"], "description": "Persisted playback state; `playing` indicates a source process should be active."},
+          "transport": {"type": "string", "enum": ["rtsp", "http", ""], "description": "Selected output transport, or empty when the slot is unassigned."},
+          "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg", "unknown"], "description": "Codec detected from the assigned media."},
+          "allowed_transports": {"type": "array", "description": "Transports compatible with the detected codec and current backend capabilities.", "items": {"type": "string", "enum": ["rtsp", "http"]}},
+          "urls": {
+            "type": "object",
+            "description": "Client URLs for the selected source and transports.",
+            "properties": {
+              "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
+              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."}
+            }
+          }
+        }
+      },
+      "BulkStartResult": {
+        "type": "object",
+        "description": "Per-slot outcome summary for a bulk source-start request. Partial success is represented explicitly rather than converted to an HTTP error.",
+        "required": ["success", "requested", "targeted", "started", "already_running", "errors", "message", "started_or_running"],
+        "properties": {
+          "success": {"type": "boolean", "description": "Whether every targeted slot ended in a usable started or already-running state."},
+          "requested": {"type": "integer", "description": "Count requested by the caller."},
+          "targeted": {"type": "integer", "description": "Number of assigned source slots selected after walking slots in index order."},
+          "started": {"type": "array", "description": "Indexes newly started by this request.", "items": {"type": "integer"}},
+          "already_running": {"type": "array", "description": "Indexes that required no action because they were already playing.", "items": {"type": "integer"}},
+          "errors": {"type": "array", "description": "Per-slot startup failures that did not prevent other targets from being attempted.", "items": {"type": "object", "required": ["index", "error"], "properties": {"index": {"type": "integer", "description": "One-based source slot index."}, "error": {"type": "string", "description": "Human-readable startup failure."}}}},
+          "message": {"type": "string", "description": "Overall human-readable result summary."},
+          "started_or_running": {"type": "integer", "description": "Combined count of newly started and already-running targets."}
+        }
+      },
+      "ViewerUrl": {
+        "type": "object",
+        "description": "Browser-reachable vf viewer link and the channel-capacity decision used to construct it.",
+        "required": ["url", "max_video_channels", "channel_limit_source", "sdk_channel_limited"],
+        "properties": {
+          "url": {"type": "string", "format": "uri", "description": "HTTPS vf viewer URL on port 8081, including validated mode, source, and capacity query parameters."},
+          "max_video_channels": {"type": "integer", "minimum": 1, "maximum": 80, "description": "Maximum zero-based viewer channel count available in this deployment."},
+          "channel_limit_source": {"type": "string", "enum": ["sdk-port-map", "devkit", "legacy-default"], "description": "Why the capacity was selected: explicit SDK port publication, unrestricted DevKit behavior, or the backward-compatible fallback."},
+          "sdk_channel_limited": {"type": "boolean", "description": "Whether SDK Docker port publication restricts the viewer below the 80-channel engine ceiling."}
+        }
+      },
+      "WorkspaceKind": {
+        "type": "string",
+        "description": "Content classification used for workspace icons, filtering, and preview selection.",
+        "enum": ["folder", "archive", "model", "image", "code", "text", "executable", "binary"]
+      },
+      "WorkspaceNode": {
+        "type": "object",
+        "description": "Metadata for one workspace filesystem entry or virtual member inside an MPK archive.",
+        "required": ["name", "path", "type", "kind"],
+        "properties": {
+          "name": {"type": "string", "description": "Display name of the filesystem entry or archive member."},
+          "path": {"type": "string", "description": "Relative workspace path accepted by other workspace endpoints; archive members use `archive::member` syntax."},
+          "type": {"type": "string", "enum": ["file", "folder"], "description": "Structural node type used to distinguish files from navigable folders. MPK archives have type `folder` and kind `archive`."},
+          "kind": {"$ref": "#/components/schemas/WorkspaceKind"},
+          "size": {"type": "integer", "minimum": 0, "description": "Content size in bytes when known."},
+          "mtime": {"type": "number", "description": "Unix modification timestamp."},
+          "archive": {"type": "string", "description": "Containing MPK archive path for a virtual member; omitted for ordinary filesystem entries."}
+        },
+        "additionalProperties": true
+      },
+      "WorkspaceTree": {
+        "type": "object",
+        "description": "One level of a lazily browsable workspace directory or MPK archive directory.",
+        "required": ["path", "children"],
+        "properties": {
+          "path": {"type": "string", "description": "Relative folder or archive-member directory that was listed."},
+          "archive": {"type": "string", "description": "Containing MPK archive when the listed directory is virtual."},
+          "children": {"type": "array", "description": "Sorted immediate children; descendants are loaded with subsequent tree requests.", "items": {"$ref": "#/components/schemas/WorkspaceNode"}}
+        }
+      },
+      "WorkspaceFilePreview": {
+        "description": "Workspace node metadata plus a bounded textual preview when the content type is safe to represent as text.",
+        "allOf": [
+          {"$ref": "#/components/schemas/WorkspaceNode"},
+          {
+            "type": "object",
+            "required": ["content", "truncated", "previewAvailable"],
+            "properties": {
+              "content": {"type": "string", "description": "Decoded text prefix, or an empty string when no text preview is available."},
+              "truncated": {"type": "boolean", "description": "Whether content continues beyond the returned bounded preview."},
+              "previewAvailable": {"type": "boolean", "description": "Whether the selected node was classified as safely previewable text."}
+            }
+          }
+        ]
+      }
+    }
+  }
+}
