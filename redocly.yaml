@@ -1,0 +1,7 @@
+extends:
+  - recommended
+
+rules:
+  # Several read-only and streaming endpoints have no meaningful client-error
+  # response. Do not invent response contracts only to satisfy a style rule.
+  operation-4xx-response: off
