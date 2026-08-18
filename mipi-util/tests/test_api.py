@@ -153,6 +153,78 @@ def test_only_one_browser_can_access_camera(client, api, token, monkeypatch):
     after_release.close()
 
 
+def test_idle_producer_stop_runs_after_grace(api, monkeypatch):
+    timers = []
+    stopped = []
+
+    class FakeTimer:
+        def __init__(self, delay, callback):
+            self.delay = delay
+            self.callback = callback
+            self.daemon = False
+            self.cancelled = False
+            timers.append(self)
+
+        def start(self):
+            pass
+
+        def cancel(self):
+            self.cancelled = True
+
+    producer = {"clients": 0}
+    monkeypatch.setattr(api.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(
+        api, "_stop_producer",
+        lambda **kwargs: stopped.append(kwargs),
+    )
+
+    api._schedule_idle_producer_stop(producer)
+    assert timers[0].delay == api.PRODUCER_IDLE_TIMEOUT
+    timers[0].callback()
+    assert stopped == [{"expected": producer, "only_if_idle": True}]
+
+
+def test_reconnect_cancels_idle_producer_stop(api, monkeypatch):
+    timers = []
+    stopped = []
+
+    class FakeTimer:
+        def __init__(self, _delay, callback):
+            self.callback = callback
+            self.daemon = False
+            self.cancelled = False
+            timers.append(self)
+
+        def start(self):
+            pass
+
+        def cancel(self):
+            self.cancelled = True
+
+    monkeypatch.setattr(api.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(
+        api, "_stop_producer",
+        lambda **kwargs: stopped.append(kwargs),
+    )
+
+    api._schedule_idle_producer_stop({"clients": 0})
+    api._cancel_idle_producer_stop()
+    assert timers[0].cancelled is True
+    timers[0].callback()
+    assert stopped == []
+
+
+def test_idle_stop_keeps_producer_with_active_client(api):
+    producer = {"clients": 1}
+    old_producer = api._producer
+    api._producer = producer
+    try:
+        api._stop_producer(expected=producer, only_if_idle=True)
+        assert api._producer is producer
+    finally:
+        api._producer = old_producer
+
+
 # ── CORS ─────────────────────────────────────────────────────────────────────
 def test_no_wildcard_cors_by_default(client):
     r = client.get("/api/status")

@@ -4,14 +4,14 @@ Building the sima-mipi-util Debian package
 Preferred: use the build script (what CI runs). It builds from a clean tree,
 stamps the version, and prints the resulting .deb path.
 
-  ./build-deb.sh dist                 # -> dist/sima-mipi-util_<version>_all.deb
+  ./build-deb.sh dist                 # -> dist/sima-mipi-util_<version>_arm64.deb
   VERSION=1.2.3 ./build-deb.sh dist   # override the version (CI passes a
                                       # branch/tag-derived value)
 
 Validate the result:
 
-  dpkg-deb --info    dist/sima-mipi-util_*_all.deb
-  dpkg-deb --contents dist/sima-mipi-util_*_all.deb
+  dpkg-deb --info    dist/sima-mipi-util_*_arm64.deb
+  dpkg-deb --contents dist/sima-mipi-util_*_arm64.deb
 
 Distribution
 ------------
@@ -35,4 +35,4 @@ Manual equivalent (no script), for reference
   cp source/sima-mipi-util.service               build/lib/systemd/system/
   cp -r DEBIAN                                    build/
   chmod 0755 build/DEBIAN/postinst build/DEBIAN/prerm build/DEBIAN/postrm build/usr/bin/sima-mipi-util
-  dpkg-deb --build build "sima-mipi-util_${VERSION}_all.deb"
+  dpkg-deb --build build "sima-mipi-util_${VERSION}_arm64.deb"

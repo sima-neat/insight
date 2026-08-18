@@ -23,10 +23,10 @@ if [[ ! -f "${installer_src}" ]]; then
 fi
 
 shopt -s nullglob
-debs=( "${dist_dir}"/sima-mipi-util_*_all.deb )
+debs=( "${dist_dir}"/sima-mipi-util_*_arm64.deb )
 shopt -u nullglob
 if [[ "${#debs[@]}" -eq 0 ]]; then
-  echo "ERROR: no sima-mipi-util_*_all.deb found in ${dist_dir}" >&2
+  echo "ERROR: no sima-mipi-util_*_arm64.deb found in ${dist_dir}" >&2
   exit 1
 fi
 if [[ "${#debs[@]}" -ne 1 ]]; then
@@ -38,10 +38,10 @@ fi
 cp "${installer_src}" "${installer_dst}"
 chmod +x "${installer_dst}"
 
-# Version from filename: sima-mipi-util_<version>_all.deb
+# Version from filename: sima-mipi-util_<version>_arm64.deb
 base="$(basename "${debs[0]}")"
 version="${base#sima-mipi-util_}"
-version="${version%_all.deb}"
+version="${version%_arm64.deb}"
 
 echo "Prepared ${installer_dst}" >&2
 echo "Package deb: ${debs[0]}" >&2

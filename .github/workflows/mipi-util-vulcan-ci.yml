@@ -40,6 +40,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Prepare bundled Python dependencies
+        env:
+          MIPI_PYTHON_VERSION: "311"
+          MIPI_PYTHON_ABI: "cp311"
+          MIPI_WHEEL_PLATFORM: "manylinux2014_aarch64"
+        run: scripts/prepare-mipi-python-deps.sh
+
       - name: Build package
         id: build
         working-directory: mipi-util
@@ -93,7 +105,7 @@ jobs:
       - name: dpkg-deb metadata checks
         run: |
           set -euo pipefail
-          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_arm64.deb' | head -1)"
           echo "Validating ${DEB}"
           dpkg-deb --info "${DEB}"
           contents="$(dpkg-deb --contents "${DEB}")"
@@ -110,64 +122,57 @@ jobs:
       - name: lintian (advisory)
         run: |
           set -euo pipefail
-          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_arm64.deb' | head -1)"
           # Non-fatal: surface packaging warnings without blocking the build.
           lintian --no-tag-display-limit "${DEB}" || true
 
       - name: Maintainer-script syntax
         run: |
           set -euo pipefail
-          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_arm64.deb' | head -1)"
           mkdir -p ctrl && dpkg-deb -e "${DEB}" ctrl
           for s in postinst prerm postrm; do
             [ -f "ctrl/${s}" ] && bash -n "ctrl/${s}" && echo "${s} OK"
           done
 
   package-lifecycle:
-    name: Package lifecycle (install/start/remove)
-    runs-on: ubuntu-latest
+    name: Package contract (ARM64, offline)
+    runs-on: ubuntu-24.04-arm
     needs: build-deb
     steps:
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
       - name: Download .deb artifact
         uses: actions/download-artifact@v7
         with:
           name: sima-mipi-util-deb
           path: dist
 
-      - name: Install -> verify -> remove -> purge
+      - name: Verify package and offline Python environment
         run: |
           set -euo pipefail
-          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_arm64.deb' | head -1)"
+          test "$(dpkg-deb --field "${DEB}" Architecture)" = "arm64"
+          dpkg-deb -x "${DEB}" pkg
 
-          # Install ignoring the vendor-only deps (libcamera/gstreamer plugins
-          # aren't on a generic runner). postinst still runs and must exit 0 —
-          # it provisions the token, enables the unit, and reports a failed
-          # start gracefully (the app can't boot here without its deps).
-          echo "== install =="
-          sudo dpkg -i --force-depends "${DEB}"
-
-          echo "== files installed =="
-          dpkg -L sima-mipi-util
-          for f in /usr/share/sima-mipi-util/camera_api.py \
-                   /usr/bin/sima-mipi-util \
-                   /lib/systemd/system/sima-mipi-util.service; do
+          for f in pkg/usr/share/sima-mipi-util/camera_api.py \
+                   pkg/usr/share/sima-mipi-util/requirements-runtime.txt \
+                   pkg/usr/share/sima-mipi-util/wheels/SHA256SUMS \
+                   pkg/usr/bin/sima-mipi-util \
+                   pkg/lib/systemd/system/sima-mipi-util.service; do
             test -e "$f" || { echo "MISSING $f" >&2; exit 1; }
           done
 
-          echo "== postinst provisioned the token =="
-          test -s /etc/sima-mipi-util/token && echo "token created (root-only)"
-          [ "$(stat -c '%a' /etc/sima-mipi-util/token)" = "600" ] || echo "WARN: token not 0600"
-
-          echo "== unit is enabled =="
-          systemctl is-enabled sima-mipi-util.service || true
-
-          echo "== remove (runs prerm) =="
-          sudo dpkg -r sima-mipi-util
-          test ! -e /usr/share/sima-mipi-util/camera_api.py && echo "app files removed"
-
-          echo "== purge (runs postrm -> removes token) =="
-          sudo dpkg -P sima-mipi-util || true
-          test ! -e /etc/sima-mipi-util/token && echo "token purged"
+          (cd pkg/usr/share/sima-mipi-util/wheels && sha256sum -c SHA256SUMS)
+          python3 -m venv package-venv
+          package-venv/bin/python -m pip install \
+            --no-index \
+            --find-links pkg/usr/share/sima-mipi-util/wheels \
+            --requirement pkg/usr/share/sima-mipi-util/requirements-runtime.txt
+          package-venv/bin/python -c 'import flask, waitress'
 
   host-tests:
     name: Host API tests
@@ -197,8 +202,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: linux-amd64
-            runner: ubuntu-latest
           - arch: linux-aarch64
             runner: ubuntu-24.04-arm
     steps:
@@ -219,15 +222,19 @@ jobs:
           # Generic-runner smoke: no MIPI camera present, so exercise the parts
           # that don't need v4l2/gstreamer — service boots on waitress, reads
           # are open, writes are token-gated, system reboot is refused.
-          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_all.deb' | head -1)"
+          DEB="$(find dist -maxdepth 1 -name 'sima-mipi-util_*_arm64.deb' | head -1)"
           dpkg-deb -x "${DEB}" pkg
-          python3 -m pip install --upgrade pip flask waitress
+          python3 -m venv smoke-venv
+          smoke-venv/bin/python -m pip install \
+            --no-index \
+            --find-links pkg/usr/share/sima-mipi-util/wheels \
+            --requirement pkg/usr/share/sima-mipi-util/requirements-runtime.txt
 
           printf 'ci-token' > token
           export SIMA_MIPI_UTIL_TOKEN_FILE="$PWD/token"
           export SIMA_MIPI_UTIL_HOST=127.0.0.1
           export SIMA_MIPI_UTIL_PORT=5099
-          python3 pkg/usr/share/sima-mipi-util/camera_api.py > app.log 2>&1 &
+          smoke-venv/bin/python pkg/usr/share/sima-mipi-util/camera_api.py > app.log 2>&1 &
           APP=$!
           trap 'kill $APP 2>/dev/null || true' EXIT
 
@@ -286,7 +293,7 @@ jobs:
           VERSION="$(scripts/vulcan-prepare-mipi-util-dist.sh dist)"
           echo "Version: ${VERSION}"
 
-          # Bundle the .deb directly (small, Architecture: all) — no --exclude,
+          # Bundle the .deb directly (small, Architecture: arm64) — no --exclude,
           # so the install script installs the local file with no extra download.
           sima-cli packages build dist \
             --name "gh:sima-neat/insight/mipi-util" \

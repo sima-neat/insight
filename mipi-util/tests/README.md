@@ -25,7 +25,7 @@ Exercises the live HTTP API — service state, open reads, token-gated writes,
 and the disabled system reboot.
 
 ```bash
-# after: sudo apt install ./sima-mipi-util_1.0.0_all.deb
+# after: sudo apt install ./sima-mipi-util_1.0.0_arm64.deb
 tests/smoke_test.sh
 ```
 
@@ -39,7 +39,7 @@ BASE=http://192.168.1.20:5000 TOKEN=xxxx tests/smoke_test.sh
 Offline package validation (no install, just inspect the `.deb`):
 
 ```bash
-tests/smoke_test.sh --deb ./sima-mipi-util_1.0.0_all.deb
+tests/smoke_test.sh --deb ./sima-mipi-util_1.0.0_arm64.deb
 ```
 
 The script exits non-zero if any check fails, so it can gate CI.

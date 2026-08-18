@@ -665,6 +665,10 @@ input[type=range]::-moz-range-thumb{
       <div class="left-stack">
         <section class="panel live-panel">
           <div class="section-title">Live View</div>
+          <div style="color:var(--muted);font-size:12px;margin-bottom:8px">
+            While Live View is active, other applications cannot use this camera.
+            Close this browser and wait up to 5 seconds before starting another camera application.
+          </div>
           <div class="video" id="video-box">
             <img id="stream-img" style="display:none" onerror="onStreamErr()" onload="onStreamLoad()">
             <div class="vid-overlay hidden" id="vid-overlay">
@@ -834,7 +838,7 @@ input[type=range]::-moz-range-thumb{
         <input class="num" type="number" id="set-diag-v" value="4" oninput="syncSettingNum('set-diag')">
       </div>
       <div style="color:var(--muted);font-size:12px;margin-top:14px;line-height:1.5">
-        Target FPS and Diag Refresh apply immediately to the running stream. Stream Quality and Encode Workers apply the next time the video stream reconnects (e.g. after switching channels or reloading).
+        Target FPS and Diag Refresh apply immediately. Stream Quality applies after reconnecting. Encode Workers applies after switching cameras or restarting the service.
       </div>
     </div>
     <div class="modal-foot"><button class="btn-cancel" onclick="closeSettings()">Cancel</button><button class="btn-confirm" onclick="saveSettings()">Save</button></div>
@@ -1199,12 +1203,12 @@ function previewLive(id, val, immediate=false) {
       method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({camera, control:id, value:v})
     }).then(async r => {
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) {
         toast(d.error || "Control write failed (HTTP " + r.status + ")", "err");
         throw new Error(d.error || "HTTP " + r.status);
       }
-      return r;
+      return d;
     }).catch(()=>{});
   };
   if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null; }
@@ -1261,7 +1265,12 @@ async function rejectPreview() {
     return;
   }
   const controls = {};
-  for (const k of Object.keys(pending)) {
+  // Restore values before locks: releasing a lock first would make the
+  // value write fail (auto reclaims an unlocked control) on a discard
+  // that actually succeeded.
+  const keys = Object.keys(pending)
+    .sort((a, b) => a.startsWith("en_manual_") - b.startsWith("en_manual_"));
+  for (const k of keys) {
     if (k in previewBaseline) controls[k] = previewBaseline[k];
   }
   try {
@@ -1270,15 +1279,20 @@ async function rejectPreview() {
       body:JSON.stringify({camera:streamDev, controls})
     });
     const d = await r.json();
-    if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
+    const failed = Object.entries(d.results || {})
+      .filter(([, result]) => !result.ok)
+      .map(([control]) => control);
+    if (!r.ok || failed.length) {
+      throw new Error(d.error || "Failed controls: " + failed.join(", "));
+    }
     toast("Changes discarded", "info");
+    pending = {};
+    previewBaseline = null;
+    updateCmd();
+    await connectAndLoad();
   } catch(e) {
     toast("Discard failed: " + e.message, "err");
   }
-  pending = {};
-  previewBaseline = null;
-  updateCmd();
-  await connectAndLoad();
 }
 
 function updateCmd() {
@@ -1469,7 +1483,11 @@ async function resetAll() {
   if (!confirm("Set all controls back to their default values?")) return;
   try {
     const r = await fetch(api("/api/reset"), {method:"POST"});
-    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) {
+      const failed = Object.keys(d.failed || {}).join(", ");
+      throw new Error(d.error || (failed ? "Failed controls: " + failed : "HTTP " + r.status));
+    }
     // Reload values only — the stream keeps running untouched.
     await reloadControlValues();
     toast("Reset to defaults", "ok");
@@ -1955,8 +1973,18 @@ async function doReboot() {
   const sub = document.getElementById("reboot-sub");
   ov.classList.add("open");
   try {
-    await fetch(api("/api/restart"), {method:"POST", headers:{"Content-Type":"application/json"}, body:'{"type":"service"}'});
-  } catch(_) {}
+    const r = await fetch(api("/api/restart"), {method:"POST", headers:{"Content-Type":"application/json"}, body:'{"type":"service"}'});
+    const d = await r.json().catch(() => ({}));
+    // A received error response means no restart happened — abort.
+    if (!r.ok || d.ok === false) {
+      ov.classList.remove("open");
+      toast("Restart failed: " + (d.error || "HTTP " + r.status), "err");
+      return;
+    }
+  } catch(_) {
+    // Dropped connection: the restart likely killed the service before the
+    // response flushed — fall through and let the poll confirm recovery.
+  }
   sub.textContent = "Waiting for the service to come back...";
   let tries = 0;
   const poll = setInterval(async () => {

@@ -892,21 +892,9 @@ def v4l2_get_all(dev=None):
 # perform the ISP's required 3A/IPA initialization.
 # This ISP only allows one exclusive libcamerasrc capture session at a time,
 # which is why the capture pipeline is a singleton (see _start_producer). It is
-# NOT a reason to allow only one HTTP viewer: every connection reads the same
-# shared encoded frame slot and none of them touch the camera, so any number of
-# viewers can watch the one pipeline.
-#
-# An earlier server-side exclusivity lease conflated the two. It dated from the
-# design where each /api/stream connection started its own gst-launch — there a
-# second connection really did fail to acquire the camera and go blank. Once the
-# producer became a singleton that reasoning no longer held, but the lease
-# stayed and started refusing legitimate viewers with 409 "another live-view
-# connection is already active": a second browser, a second machine, or a second
-# tab showed "Stream unavailable — retrying" indefinitely while the first worked
-# fine. Worse, the lease was released only by the generator's finally: and
-# response.call_on_close(), neither of which is guaranteed to run under
-# waitress, so a client that vanished uncleanly could wedge it permanently and
-# lock out ALL viewers until the service restarted.
+# shared across reconnects from the one browser that owns camera access. After
+# that browser disconnects, a short idle grace avoids reload races before the
+# producer stops and releases the camera for another application.
 _stream_lock = threading.Lock()
 _own_stream_pids = set()
 
@@ -943,14 +931,51 @@ def _probe_stream_size(default=(1920, 1080)):
 # and Color & Tone all reverted to algorithm-driven values. Re-applying the
 # settings afterwards papered over that but always left a visible window.
 #
-# The pipeline is a singleton now. The first client starts it and it keeps
-# running across client disconnects, so a reload just attaches a new reader
-# to the pipeline that is already going: the ISP is never re-initialised, so
-# there is nothing to restore and nothing to flicker. Encoded frames go to
-# one shared slot that each client reads independently, which also means two
-# browsers no longer fight over the camera.
+# The pipeline is a singleton now. The first client starts it and a short idle
+# grace keeps it alive across an ordinary page reload. If no client reconnects,
+# the producer stops and releases the camera for another application.
 _producer_lock = threading.Lock()
 _producer = None
+_producer_idle_lock = threading.Lock()
+_producer_idle_timer = None
+_producer_idle_generation = 0
+PRODUCER_IDLE_TIMEOUT = 5.0
+# Close stream generators that see no fresh frames, so a stalled pipeline
+# can't pin waitress threads on dead sockets.
+STREAM_STALL_TIMEOUT = 5.0
+
+
+def _cancel_idle_producer_stop():
+    """Keep the shared producer alive when a browser reconnects."""
+    global _producer_idle_timer, _producer_idle_generation
+    with _producer_idle_lock:
+        _producer_idle_generation += 1
+        timer, _producer_idle_timer = _producer_idle_timer, None
+        if timer is not None:
+            timer.cancel()
+
+
+def _schedule_idle_producer_stop(prod):
+    """Release the camera if this producer remains unused after a short grace."""
+    global _producer_idle_timer, _producer_idle_generation
+    with _producer_idle_lock:
+        _producer_idle_generation += 1
+        generation = _producer_idle_generation
+        if _producer_idle_timer is not None:
+            _producer_idle_timer.cancel()
+
+        def stop_if_still_idle():
+            global _producer_idle_timer
+            with _producer_idle_lock:
+                if generation != _producer_idle_generation:
+                    return
+                _producer_idle_timer = None
+                _stop_producer(expected=prod, only_if_idle=True)
+
+        timer = threading.Timer(PRODUCER_IDLE_TIMEOUT, stop_if_still_idle)
+        timer.daemon = True
+        _producer_idle_timer = timer
+        timer.start()
 
 def _start_producer(width=None, height=None):
     """Build the capture pipeline and its worker threads. Caller must hold
@@ -1155,11 +1180,15 @@ def _start_producer(width=None, height=None):
             "jpeg_lock": jpeg_lock, "latest_jpeg": latest_jpeg,
             "width": width, "height": height}
 
-def _stop_producer():
+def _stop_producer(expected=None, only_if_idle=False):
     """Tear the shared pipeline down. Used on device change and shutdown —
     not on client disconnect, which is the whole point of the singleton."""
     global _producer
     with _producer_lock:
+        if expected is not None and _producer is not expected:
+            return
+        if only_if_idle and _producer is not None and _producer["clients"]:
+            return
         prod, _producer = _producer, None
     if not prod:
         return
@@ -1202,19 +1231,26 @@ def _libcamera_encoded_stream():
     """Per-client MJPEG generator. Owns no hardware — it only reads the
     shared producer's latest encoded frame, so disconnecting (or reloading
     the page) leaves the pipeline and the ISP completely untouched."""
+    _cancel_idle_producer_stop()
     prod = _ensure_producer()
     with _producer_lock:
         prod["clients"] += 1
         log.info("stream: client connected (%d active)", prod["clients"])
     last_seq = 0
     last_yield_ts = 0.0
+    last_fresh = time.monotonic()
     try:
         while not prod["stop"].is_set():
             with prod["jpeg_lock"]:
                 seq, jpg = prod["latest_jpeg"]["seq"], prod["latest_jpeg"]["data"]
             if jpg is None or seq == last_seq:
+                if time.monotonic() - last_fresh > STREAM_STALL_TIMEOUT:
+                    log.warning("stream: no fresh frame for %.0fs — closing client",
+                                STREAM_STALL_TIMEOUT)
+                    break
                 time.sleep(0.003)
                 continue
+            last_fresh = time.monotonic()
             # Read target_fps fresh every frame so dragging the FPS slider
             # throttles the stream already running instead of only taking
             # effect on the next reconnect.
@@ -1230,8 +1266,10 @@ def _libcamera_encoded_stream():
     finally:
         with _producer_lock:
             prod["clients"] = max(0, prod["clients"] - 1)
-            log.info("stream: client disconnected (%d active) — pipeline left running",
-                     prod["clients"])
+            clients = prod["clients"]
+            log.info("stream: client disconnected (%d active)", clients)
+        if clients == 0:
+            _schedule_idle_producer_stop(prod)
 
 def _release_camera_access(client_id):
     global _camera_access_owner
@@ -2289,6 +2327,7 @@ def api_reset():
     # re-assert the settings this reset just cleared.
     forget_desired()
     failed = {c: r for c, r in results.items() if not r.get("ok")}
+    failed.update({c: r for c, r in lock_results.items() if not r.get("ok")})
     return jsonify({"ok": not failed, "results": results,
                     "lock_writes": lock_results, "failed": failed})
 
@@ -2334,7 +2373,11 @@ def api_preset(name):
         _v4l2_set_routed(c, v)
     for lock in locks_needed:
         v4l2_set(lock, 0)
-        v4l2_set(lock, 1)
+        ok, err = v4l2_set(lock, 1)
+        lock_results[lock] = {"ok": ok, "error": err or None}
+        # Remember armed locks or _reapply_desired() releases them on rebuild.
+        if ok:
+            _remember(lock, 1)
 
     for c, v in values.items():
         lo, hi = effective_range(c)
@@ -2351,6 +2394,7 @@ def api_preset(name):
                       "readback": actual}
 
     failed = {c: r for c, r in results.items() if not r.get("ok")}
+    failed.update({c: r for c, r in lock_results.items() if not r.get("ok")})
     return jsonify({"ok": not failed, "preset": name,
                     "results": results, "lock_writes": lock_results,
                     "failed": failed})

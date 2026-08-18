@@ -2,8 +2,8 @@ Package: sima-mipi-util
 Version: 1.0.0
 Section: utils
 Priority: optional
-Architecture: all
-Depends: python3, python3-flask, python3-waitress, python3-opencv, python3-numpy,
+Architecture: arm64
+Depends: python3, python3-venv, python3-opencv, python3-numpy,
  v4l-utils, libcamera-tools, gstreamer1.0-tools, gstreamer1.0-plugins-good, psmisc
 Maintainer: Sima.ai <support@sima.ai>
 Description: SiMa.ai MIPI Camera Utility - Web-based ISP control tool

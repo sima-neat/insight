@@ -18,3 +18,4 @@ cfg.json
 .vscode/
 *_mpk.tar.gz
 mipi-sweep-*.log
+mipi-util/vendor/

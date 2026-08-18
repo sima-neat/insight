@@ -10,7 +10,7 @@
 #   tests/smoke_test.sh                      # hits http://127.0.0.1:5000, token from /etc
 #   BASE=http://192.168.1.20:5000 tests/smoke_test.sh
 #   TOKEN=xxxx tests/smoke_test.sh
-#   tests/smoke_test.sh --deb ./sima-mipi-util_1.0.0_all.deb   # offline package checks only
+#   tests/smoke_test.sh --deb ./sima-mipi-util_1.0.0_arm64.deb   # offline package checks only
 #
 # Logging (opt-in; the terminal output is unchanged):
 #   tests/smoke_test.sh --log                 # -> ./sima-mipi-util-smoke-<timestamp>.log
@@ -116,7 +116,20 @@ fi
 [ -z "$TOKEN" ] && warn "no token available — write-with-token checks will be skipped"
 
 # ── Service state ────────────────────────────────────────────────────────────
+status="$(dpkg-query -W -f='${db:Status-Status}' sima-mipi-util 2>/dev/null)"
+if [ "$status" = "installed" ]; then ok "package is fully installed"
+else bad "package status is '${status:-missing}' (expected installed)"; fi
+
+VENV_PYTHON=/opt/sima-mipi-util/venv/bin/python
+if [ -x "$VENV_PYTHON" ] && "$VENV_PYTHON" -c 'import cv2, flask, numpy, waitress' >/dev/null 2>&1; then
+  ok "application venv imports are healthy"
+else
+  bad "application venv is missing or imports failed"
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
+  if systemctl is-enabled --quiet sima-mipi-util.service; then ok "service is enabled"
+  else bad "service is not enabled"; fi
   if systemctl is-active --quiet sima-mipi-util.service; then ok "service is active"
   else bad "service is not active (journalctl -u sima-mipi-util.service -e)"; fi
 else

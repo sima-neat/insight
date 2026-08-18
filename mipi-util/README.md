@@ -29,7 +29,7 @@ Build the package (`./build-deb.sh dist`, see [BUILD.txt](BUILD.txt)) or use a
 prebuilt one, then:
 
 ```bash
-sudo apt install ./sima-mipi-util_1.0.0_all.deb
+sudo apt install ./sima-mipi-util_1.0.0_arm64.deb
 ```
 
 When it finishes it prints the camera it found, the address to open, and the
@@ -122,8 +122,8 @@ those work.
 **Frame rate sits around 28 fps.** The camera supplies 34 and the tool is capped
 at 30; the difference is time spent compressing the picture for the browser.
 
-**Two browsers can watch at once.** Both get the live picture, and either can
-change settings.
+**Only one browser/client can use the camera at a time.** Close the live-view
+browser before starting another camera application or opening it elsewhere.
 
 **If the picture freezes or nothing responds**, try the ⟳ button (top right) to
 restart the service first. If that doesn't clear it, the camera hardware has

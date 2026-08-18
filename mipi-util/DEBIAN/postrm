@@ -3,6 +3,8 @@ set -e
 
 case "$1" in
   purge)
+    rm -rf /opt/sima-mipi-util/venv
+    rmdir --ignore-fail-on-non-empty /opt/sima-mipi-util 2>/dev/null || true
     # Drop the generated auth token and its directory on purge so a later
     # fresh install provisions a new one.
     rm -f /etc/sima-mipi-util/token
