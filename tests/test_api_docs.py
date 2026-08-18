@@ -51,10 +51,22 @@ class ApiDocumentationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "text/html")
         self.assertIn('url: "/api/openapi.json"', html)
-        self.assertIn(f"swagger-ui-dist@{SWAGGER_UI_VERSION}/swagger-ui.css", html)
-        self.assertIn(f"swagger-ui-dist@{SWAGGER_UI_VERSION}/swagger-ui-bundle.js", html)
+        self.assertIn('href="/swagger-ui-assets/swagger-ui.css"', html)
+        self.assertIn('src="/swagger-ui-assets/swagger-ui-bundle.js"', html)
+        self.assertNotIn("unpkg.com", html)
         self.assertIn("validatorUrl: null", html)
         self.assertEqual(response.headers["Cache-Control"], "no-store, max-age=0")
+
+        for asset, content_type, marker in (
+            ("swagger-ui.css", "text/css", b".swagger-ui"),
+            ("swagger-ui-bundle.js", "application/javascript", b"SwaggerUIBundle"),
+        ):
+            with self.subTest(asset=asset, version=SWAGGER_UI_VERSION):
+                asset_response = self.client.get(f"/swagger-ui-assets/{asset}")
+                self.addCleanup(asset_response.close)
+                self.assertEqual(asset_response.status_code, 200)
+                self.assertTrue(asset_response.content_type.startswith(content_type))
+                self.assertIn(marker, asset_response.data)
 
     def test_openapi_operations_match_every_registered_api_route(self):
         flask_operations = set()
@@ -132,6 +144,8 @@ class ApiDocumentationTests(unittest.TestCase):
         self.assertIn("archive-member paths are not supported", raw_description)
         self.assertIn("mtime", workspace_properties)
         self.assertNotIn("modified", workspace_properties)
+        self.assertIn("type", workspace_properties)
+        self.assertIn("type", self.spec["components"]["schemas"]["WorkspaceNode"]["required"])
 
 
 if __name__ == "__main__":

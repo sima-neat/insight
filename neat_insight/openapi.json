@@ -1072,10 +1072,11 @@
       "WorkspaceNode": {
         "type": "object",
         "description": "Metadata for one workspace filesystem entry or virtual member inside an MPK archive.",
-        "required": ["name", "path", "kind"],
+        "required": ["name", "path", "type", "kind"],
         "properties": {
           "name": {"type": "string", "description": "Display name of the filesystem entry or archive member."},
           "path": {"type": "string", "description": "Relative workspace path accepted by other workspace endpoints; archive members use `archive::member` syntax."},
+          "type": {"type": "string", "enum": ["file", "folder"], "description": "Structural node type used to distinguish files from navigable folders. MPK archives have type `folder` and kind `archive`."},
           "kind": {"$ref": "#/components/schemas/WorkspaceKind"},
           "size": {"type": "integer", "minimum": 0, "description": "Content size in bytes when known."},
           "mtime": {"type": "number", "description": "Unix modification timestamp."},
