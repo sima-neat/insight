@@ -47,6 +47,7 @@ setup(
     ],
     package_data={
         "neat_insight": [
+            "openapi.json",
             "bin/vf",
             "bin/vf.exe",
             "bin/mediamtx",

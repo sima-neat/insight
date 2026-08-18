@@ -25,6 +25,7 @@ Insight is bundled with the Neat Development Environment and is also available a
 - [User Interface](user-interface.md) describes the Workspace, Media Sources, Streaming Sources, Video Viewer, Stats, and System Information views.
 - [Common Workflows](workflows.md) walks through single-stream, multi-stream, and debugging flows.
 - [Ports and Network Behavior](ports-network.md) lists the ports Insight uses and how SDK port mapping affects links.
+- [REST API Reference](api-reference.md) documents automation endpoints and the in-app OpenAPI/Swagger reference.
 
 ## Quick start
 
