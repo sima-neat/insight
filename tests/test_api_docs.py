@@ -107,6 +107,32 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertTrue(ref.startswith("#/"))
                 self.assertIsNotNone(_follow_json_pointer(self.spec, ref))
 
+    def test_sysinfo_documents_command_failure_statuses(self):
+        responses = self.spec["paths"]["/api/sysinfo"]["get"]["responses"]
+
+        self.assertEqual(
+            responses["502"]["$ref"], "#/components/responses/BadGateway"
+        )
+        self.assertEqual(
+            responses["504"]["$ref"], "#/components/responses/GatewayTimeout"
+        )
+
+    def test_workspace_contract_matches_index_and_raw_preview_behavior(self):
+        search_description = self.spec["paths"]["/api/workspace/search"]["get"][
+            "description"
+        ]
+        raw_description = self.spec["paths"]["/api/workspace/raw"]["get"][
+            "description"
+        ]
+        workspace_properties = self.spec["components"]["schemas"]["WorkspaceNode"][
+            "properties"
+        ]
+
+        self.assertIn("members inside them are not indexed", search_description)
+        self.assertIn("archive-member paths are not supported", raw_description)
+        self.assertIn("mtime", workspace_properties)
+        self.assertNotIn("modified", workspace_properties)
+
 
 if __name__ == "__main__":
     unittest.main()

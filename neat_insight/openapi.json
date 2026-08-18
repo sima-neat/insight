@@ -241,7 +241,9 @@
             "description": "Structured output from `neat --json`, enriched with Insight URL and port information.",
             "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
           },
-          "500": {"$ref": "#/components/responses/InternalError"}
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/BadGateway"},
+          "504": {"$ref": "#/components/responses/GatewayTimeout"}
         }
       }
     },
@@ -760,7 +762,7 @@
       "get": {
         "tags": ["Workspace"],
         "summary": "Search indexed workspace paths",
-        "description": "Performs a bounded, case-insensitive search across workspace names and relative paths, including discoverable archive members. Results are ranked and capped at 200 entries. Supply `kind` to narrow broad queries to models, images, code, text, folders, archives, executables, or binary files.",
+        "description": "Performs a bounded, case-insensitive search across workspace filesystem names and relative paths. MPK archives are searchable as files, but members inside them are not indexed; browse an archive with the workspace tree endpoint instead. Results are ranked and capped at 200 entries. Supply `kind` to narrow broad queries to models, images, code, text, archives, executables, or binary files.",
         "operationId": "searchWorkspace",
         "parameters": [
           {"name": "q", "in": "query", "description": "Case-insensitive filename or path fragment.", "schema": {"type": "string"}},
@@ -791,7 +793,7 @@
       "get": {
         "tags": ["Workspace"],
         "summary": "Get raw workspace image content",
-        "description": "Returns original image bytes for a workspace image or image member inside an MPK archive. This route is intended for browser `<img>` sources and binary consumers; use the JSON file-preview endpoint for text and metadata. Non-image or inaccessible paths return an error rather than arbitrary file bytes.",
+        "description": "Returns original image bytes for an ordinary image file in the workspace filesystem. MPK archive-member paths are not supported by this endpoint. This route is intended for browser `<img>` sources and binary consumers; use the JSON file-preview endpoint for text and metadata. Non-image or inaccessible paths return an error rather than arbitrary file bytes.",
         "operationId": "getWorkspaceRawFile",
         "parameters": [{"$ref": "#/components/parameters/RequiredWorkspacePath"}],
         "responses": {
@@ -889,8 +891,8 @@
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "BadGateway": {"description": "A required vf, DevKit, or remote catalog service was unavailable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "GatewayTimeout": {"description": "A media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+      "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
     },
     "schemas": {
       "Error": {
@@ -1076,7 +1078,7 @@
           "path": {"type": "string", "description": "Relative workspace path accepted by other workspace endpoints; archive members use `archive::member` syntax."},
           "kind": {"$ref": "#/components/schemas/WorkspaceKind"},
           "size": {"type": "integer", "minimum": 0, "description": "Content size in bytes when known."},
-          "modified": {"type": "number", "description": "Unix modification timestamp."},
+          "mtime": {"type": "number", "description": "Unix modification timestamp."},
           "archive": {"type": "string", "description": "Containing MPK archive path for a virtual member; omitted for ordinary filesystem entries."}
         },
         "additionalProperties": true
