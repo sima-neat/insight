@@ -1,0 +1,9 @@
+id: sima-use-neat-insight
+name: Use Neat Insight
+version: 0.1.0
+agents: [codex, claude]
+description: Use the neat-insight HTTP API as the control plane for media management, streaming source playback, vf ingest and WebRTC egress statistics, viewer URLs, metrics, and health checks.
+compatibility:
+  env_types: [sdk, board]
+  env_subtypes: [palette, modalix]
+  min_cli_version: 2.1.2

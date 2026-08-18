@@ -1,11 +1,21 @@
 // roi-manual.js — direct ROI drawing over live video stream
 
+import {
+  isRetryableWebRTCAnswerError,
+  requestWebRTCAnswer,
+} from "./webrtcSignaling.js";
+
+const RECONNECT_DELAY_MS = 2000;
+
 let drawing = false;
 let currentPoints = [];
 let currentPolygon = null;
 let selectedPolygon = null;
 let currentScope = "global";
 let previewLine = null;
+let previewPeerConnection = null;
+let previewReconnectTimer = null;
+let previewSession = 0;
 
 
 const roiOverlay = document.getElementById("roiOverlay");
@@ -13,32 +23,87 @@ const modeSelector = document.getElementById("roiModeSelector");
 const startBtn = document.getElementById("startROITool");
 const clearBtn = document.getElementById("clearROIs");
 const liveVideo = document.getElementById("roiLiveVideo");
+const streamStatus = document.getElementById("roiStreamStatus");
 
-function connectToStream(scope = "global") {
+function setStreamStatus(message = "") {
+  streamStatus.textContent = message;
+  streamStatus.classList.toggle("hidden", !message);
+}
+
+function schedulePreviewReconnect(scope) {
+  if (previewReconnectTimer != null) return;
+  previewReconnectTimer = window.setTimeout(() => {
+    previewReconnectTimer = null;
+    connectToStream(scope);
+  }, RECONNECT_DELAY_MS);
+}
+
+// Clearing the handler first keeps a deliberate close from scheduling a
+// reconnect against the connection we are replacing.
+function closePreviewPeer() {
+  if (!previewPeerConnection) return;
+  previewPeerConnection.onconnectionstatechange = null;
+  previewPeerConnection.close();
+  previewPeerConnection = null;
+}
+
+async function connectToStream(scope = "global") {
   currentScope = scope;
+  previewSession += 1;
+  const session = previewSession;
+  if (previewReconnectTimer != null) {
+    window.clearTimeout(previewReconnectTimer);
+    previewReconnectTimer = null;
+  }
+  closePreviewPeer();
+
   const pc = new RTCPeerConnection();
+  previewPeerConnection = pc;
+  // A codec change retires this peer server-side, so the preview has to notice
+  // the close itself rather than only handling a failed initial offer.
+  pc.onconnectionstatechange = () => {
+    if (session !== previewSession) return;
+    if (pc.connectionState !== "failed" && pc.connectionState !== "closed") return;
+    setStreamStatus("Reconnecting to stream…");
+    schedulePreviewReconnect(scope);
+  };
+  liveVideo.srcObject = null;
+  // Installed before the track can arrive; ontrack assigns srcObject as soon as
+  // the answer is applied, and every early return below skips this function's tail.
+  liveVideo.onloadedmetadata = () => {
+    observeAndResizeOverlay();
+  };
+  setStreamStatus("Connecting to stream…");
   pc.addTransceiver("video", { direction: "recvonly" });
   pc.ontrack = (event) => {
-    if (event.track.kind === "video") {
+    if (session === previewSession && event.track.kind === "video") {
       const stream = new MediaStream();
       stream.addTrack(event.track);
       liveVideo.srcObject = stream;
+      setStreamStatus();
     }
   };
-  pc.createOffer().then(offer => {
-    pc.setLocalDescription(offer);
-    return fetch(`/offer?channel=${scope}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(offer)
-    });
-  }).then(res => res.json()).then(answer => {
-    pc.setRemoteDescription(answer);
-  });
 
-  liveVideo.onloadedmetadata = () => {
-    observeAndResizeOverlay();
-  };  
+  try {
+    const answer = await requestWebRTCAnswer(pc, `/offer?channel=${scope}`);
+    if (session !== previewSession) {
+      pc.onconnectionstatechange = null;
+      pc.close();
+      return;
+    }
+    await pc.setRemoteDescription(answer);
+  } catch (error) {
+    pc.onconnectionstatechange = null;
+    pc.close();
+    if (session !== previewSession) return;
+    previewPeerConnection = null;
+    if (isRetryableWebRTCAnswerError(error)) {
+      setStreamStatus("Waiting for stream…");
+      schedulePreviewReconnect(scope);
+      return;
+    }
+    setStreamStatus(`Preview connection failed: ${error?.message || "Unknown error"}`);
+  }
 }
 
 window.addEventListener("resize", observeAndResizeOverlay);
@@ -349,3 +414,6 @@ function showHandles(polygon) {
 function removeHandles() {
   document.querySelectorAll(".roi-handle").forEach(el => el.remove());
 }
+
+window.connectToStream = connectToStream;
+window.loadPolygons = loadPolygons;

@@ -164,6 +164,13 @@ type BrowserInboundRTPStats struct {
 	PauseCount                 uint64  `json:"pause_count,omitempty"`
 	BitrateBPS                 float64 `json:"bitrate_bps,omitempty"`
 	AverageJitterBufferDelayMS float64 `json:"average_jitter_buffer_delay_ms,omitempty"`
+
+	// Which decoder the browser actually got. A viewer that cannot decode the
+	// negotiated codec reports a null decoder here and stops producing frames.
+	DecoderImplementation string `json:"decoder_implementation,omitempty"`
+	// Pointer so an absent report stays distinguishable from a reported false:
+	// false is the diagnostic signal when no hardware decoder was available.
+	PowerEfficientDecoder *bool `json:"power_efficient_decoder,omitempty"`
 }
 
 type BrowserVideoState struct {
@@ -234,6 +241,16 @@ func (s *EgressStats) UpdatePeerConnectionState(peerID uint64, connectionState, 
 	if signalingState != "" {
 		peer.SignalingState = signalingState
 	}
+	if !isRetiredPeerState(peer.ConnectionState) {
+		return
+	}
+	retired := make([]uint64, 0, len(s.peers))
+	for id, candidate := range s.peers {
+		if isRetiredPeerState(candidate.ConnectionState) {
+			retired = append(retired, id)
+		}
+	}
+	pruneRetiredPeers(retired, func(id uint64) { delete(s.peers, id) })
 }
 
 func (s *EgressStats) UpdateDataChannelState(peerID uint64, state string) {
@@ -469,7 +486,7 @@ func receiverReportSnapshot(report rtcp.ReceptionReport) *ReceiverReportSnapshot
 		TotalLost:           report.TotalLost,
 		LastSequenceNumber:  report.LastSequenceNumber,
 		Jitter:              report.Jitter,
-		JitterMS:            roundFloat((float64(report.Jitter)/h264ClockRate)*1000, 3),
+		JitterMS:            roundFloat((float64(report.Jitter)/videoRTPClockRate)*1000, 3),
 	}
 }
 

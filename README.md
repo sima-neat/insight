@@ -65,6 +65,7 @@ that channel.
 
 Available metadata settings:
 - Object Detection: confidence threshold and per-label box style.
+- Segmentation: confidence threshold, mask opacity, and per-label mask color and outline style.
 - Tracking: confidence threshold, track history visibility, trail length, and how
   long lost-track trails remain visible.
 - Other metadata types are rendered with defaults until type-specific settings

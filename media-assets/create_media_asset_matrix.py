@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Create the GitHub Actions matrix for Insight media asset conversion.
 
 The conversion workflow intentionally shards by source video and profile group.
@@ -16,21 +15,27 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 PROFILE_GROUPS: tuple[tuple[str, str], ...] = (
     ("4k", "4kp30"),
     ("1080p-high-fps", "1080p120"),
     ("1080p-standard", "1080p30"),
     ("720p60", "720p60"),
     ("720p30", "720p30"),
+    ("720p-low-fps", "720p20 720p10"),
     ("480p-preview", "480p30 preview_320p30"),
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create the media asset GitHub Actions matrix.")
-    parser.add_argument("--sources", type=Path, required=True, help="Path to media-assets/sources.json")
-    parser.add_argument("--source-id", default="", help="Optional single source id to include")
+    parser = argparse.ArgumentParser(
+        description="Create the media asset GitHub Actions matrix."
+    )
+    parser.add_argument(
+        "--sources", type=Path, required=True, help="Path to media-assets/sources.json"
+    )
+    parser.add_argument(
+        "--source-id", default="", help="Optional single source id to include"
+    )
     parser.add_argument(
         "--github-output",
         default="",
@@ -54,7 +59,9 @@ def safe_matrix_name(source_id: str, profile_group: str) -> str:
     return name
 
 
-def create_matrix(sources: list[dict[str, Any]], source_id: str) -> list[dict[str, str]]:
+def create_matrix(
+    sources: list[dict[str, Any]], source_id: str
+) -> list[dict[str, str]]:
     if source_id:
         sources = [source for source in sources if source.get("id") == source_id]
         if not sources:

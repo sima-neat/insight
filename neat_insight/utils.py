@@ -55,11 +55,15 @@ EXCLUDED_FOLDERS = {'env', 'bin'}
 DEVKIT_SYNC_DEVKIT_IP_ENV = "DEVKIT_SYNC_DEVKIT_IP"
 WEBSSH_PORT_ENV = "NEAT_INSIGHT_WEBSSH_PORT"
 DEFAULT_WEBSSH_PORT = 8022
+SDK_RELEASE_FILE = Path("/etc/sdk-release")
+SDK_WORKSPACE = Path("/workspace")
+SDK_MEDIA_DIR_NAME = ".insight-media"
+DEVKIT_NVME_ROOT = Path("/media/nvme")
 
 
 def _ensure_sima_board_neat_insight_home():
     user_root = Path.home() / "neat-insight"
-    nvme_root = Path("/media/nvme")
+    nvme_root = DEVKIT_NVME_ROOT
     nvme_user_root = nvme_root / "neat-insight"
 
     if nvme_root.exists() and nvme_root.is_dir():
@@ -85,6 +89,35 @@ def _ensure_sima_board_neat_insight_home():
 
     user_root.mkdir(parents=True, exist_ok=True)
     return user_root
+
+
+def is_sdk_environment():
+    """Return whether Insight is running inside a SiMa SDK image."""
+    return SDK_RELEASE_FILE.is_file()
+
+
+def _sdk_media_dir():
+    """Return persistent SDK media storage when the workspace is usable."""
+    if not is_sdk_environment():
+        return None
+
+    if not SDK_WORKSPACE.exists() or not SDK_WORKSPACE.is_dir():
+        print(
+            f"WARNING: SDK workspace {SDK_WORKSPACE} is unavailable; "
+            "Insight media will use ephemeral home-directory storage.",
+            file=sys.stderr,
+        )
+        return None
+
+    if not os.access(SDK_WORKSPACE, os.W_OK | os.X_OK):
+        print(
+            f"WARNING: SDK workspace {SDK_WORKSPACE} is not writable; "
+            "Insight media will use ephemeral home-directory storage.",
+            file=sys.stderr,
+        )
+        return None
+
+    return SDK_WORKSPACE / SDK_MEDIA_DIR_NAME
 
 
 def tail_lines(filename, num_lines, max_bytes):
@@ -135,7 +168,7 @@ def init_environment():
         media_src_file = user_root / "media_sources.json"
     else:
         user_root = Path.home() / ".simaai" / "neat-insight"
-        media_dir = user_root / "media"
+        media_dir = _sdk_media_dir() or user_root / "media"
         media_src_file = user_root / "media_sources.json"
 
         sima_mem_file = Path("/tmp/simaai-mem")
@@ -145,6 +178,7 @@ def init_environment():
 
     # Ensure media directory exists
     media_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Insight media directory: {media_dir}")
 
     # Ensure media source file exists
     if not media_src_file.exists():

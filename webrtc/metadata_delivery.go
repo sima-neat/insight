@@ -117,12 +117,10 @@ func forwardMetadata(ch *Channel, metadata correlatedMetadata) {
 
 	message := string(payload)
 	forwarded := false
-	hadOpenPeer := false
 	for _, peer := range peers {
 		if peer.channel.ReadyState() != webrtc.DataChannelStateOpen {
 			continue
 		}
-		hadOpenPeer = true
 		if sendErr := peer.channel.SendText(message); sendErr != nil {
 			ch.Stats.RecordMetadataSendError(sendErr)
 			ch.Egress.RecordMetadataSendError(peer.id, sendErr)
@@ -137,8 +135,11 @@ func forwardMetadata(ch *Channel, metadata correlatedMetadata) {
 
 	if forwarded {
 		ch.Stats.RecordMetadataForwarded(len(payload))
-	} else if !hadOpenPeer {
-		ch.Stats.RecordMetadataDroppedNoDataChannel()
-		ch.Egress.RecordMetadataDroppedNoDataChannel()
+		return
 	}
+	// No peer took the message, and a peer whose send failed was removed above.
+	// Counting it here is what keeps every received message attributable to
+	// exactly one outcome; send_errors stays the per-peer diagnostic.
+	ch.Stats.RecordMetadataDroppedNoDataChannel()
+	ch.Egress.RecordMetadataDroppedNoDataChannel()
 }

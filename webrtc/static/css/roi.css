@@ -21,6 +21,23 @@
   pointer-events: none;
 }
 
+.roi-stream-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  color: white;
+  background: rgb(0 0 0 / 65%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.roi-stream-status.hidden {
+  display: none;
+}
+
 
 #roiOverlay polygon.inclusion {
   fill: green;
