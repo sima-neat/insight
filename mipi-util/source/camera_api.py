@@ -2129,11 +2129,15 @@ def _pick_test_value(meta, current):
         candidate = current - step
     return max(lo, min(hi, candidate))
 
-def _values_roughly_match(meta, a, b):
+def _values_roughly_match(meta, a, b, cap=None):
     if meta.get("type") in ("bool", "menu"):
         return a == b
     span = max(1, meta["max"] - meta["min"])
     tol = max(2, span * 0.02)
+    # Never accept a readback that didn't move at least half the probe delta —
+    # an ignored write reads back the original, one full delta away.
+    if cap is not None:
+        tol = min(tol, cap)
     return abs(a - b) <= tol
 
 def _get_with_retry(c):
@@ -2149,9 +2153,11 @@ def _detect_one(c):
     if original is None:
         return {"supported": False, "reason": "unreadable"}
     test_val = _pick_test_value(meta, original)
+    step = abs(test_val - original) or 1
     ok, err = _v4l2_set_routed(c, test_val)
     readback = _get_with_retry(c) if ok else None
-    supported = bool(ok and readback is not None and _values_roughly_match(meta, readback, test_val))
+    supported = bool(ok and readback is not None
+                     and _values_roughly_match(meta, readback, test_val, cap=step / 2))
     _v4l2_set_routed(c, original)
     return {"supported": supported}
 

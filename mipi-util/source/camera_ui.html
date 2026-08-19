@@ -276,6 +276,10 @@ button{cursor:pointer}
   height:100%;
   min-height:228px;
   aspect-ratio:16 / 9;
+  /* Height-driven sizing can compute a width wider than the panel, pushing
+     the right edge (and the resolution badge) out of view — cap it. */
+  max-width:100%;
+  margin:0 auto;
   border-radius:5px;
   overflow:hidden;
   background:#05080d url("live_preview.png") center/cover no-repeat;
@@ -293,14 +297,18 @@ button{cursor:pointer}
   pointer-events:none;
   z-index:1;
 }
+/* Badges share one flex row so they wrap on narrow panels instead of
+   overlapping (each used to be absolutely pinned to its own corner). */
+.video-topbar{
+  position:absolute;z-index:2;top:11px;left:9px;right:9px;
+  display:flex;flex-wrap:wrap;gap:6px;pointer-events:none;
+}
 .video-badge{
-  position:absolute;z-index:2;top:11px;
   padding:7px 9px;border-radius:5px;background:rgba(8,11,16,.88);
   color:white;font-size:12px;
 }
 .video-badge .hot{color:#5fa0ff;font-weight:800;margin-right:8px}
-.video-badge.res{right:9px}
-.video-badge.fps{left:9px}
+.video-badge.res{margin-left:auto}
 .live-chip{
   position:absolute;z-index:2;left:10px;bottom:10px;
   background:rgba(6,9,13,.86);border-radius:5px;padding:7px 9px;font-weight:800;font-size:11px;
@@ -675,8 +683,10 @@ input[type=range]::-moz-range-thumb{
               <div id="ov-msg">Connect to start preview</div>
               <button class="ov-btn" id="ov-btn" style="display:none" onclick="startStream()">Start</button>
             </div>
-            <div class="video-badge fps"><span class="hot">FPS</span><span id="inf-fps">29.97</span></div>
-            <div class="video-badge res" id="s-res">1280x720</div>
+            <div class="video-topbar">
+              <div class="video-badge fps"><span class="hot">FPS</span><span id="inf-fps">29.97</span></div>
+              <div class="video-badge res" id="s-res">1280x720</div>
+            </div>
             <div class="live-chip">LIVE</div>
             <button class="capture" id="fullscreen-btn" title="Fullscreen" onclick="toggleFullscreen()">⛶</button>
           </div>
@@ -1268,9 +1278,10 @@ async function rejectPreview() {
   const controls = {};
   // Restore values before locks: releasing a lock first would make the
   // value write fail (auto reclaims an unlocked control) on a discard
-  // that actually succeeded.
-  const keys = Object.keys(pending)
-    .sort((a, b) => a.startsWith("en_manual_") - b.startsWith("en_manual_"));
+  // that actually succeeded. Locks are checkbox toggles (en_manual_*,
+  // syst_man_*); identifying them structurally covers all naming schemes.
+  const isLock = id => document.getElementById(id)?.type === "checkbox";
+  const keys = Object.keys(pending).sort((a, b) => isLock(a) - isLock(b));
   for (const k of keys) {
     if (k in previewBaseline) controls[k] = previewBaseline[k];
   }
