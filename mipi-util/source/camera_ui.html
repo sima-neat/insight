@@ -992,6 +992,7 @@ async function connectAndLoad() {
     setConn("on");
     toast("All parameters loaded successfully", "ok");
     pending = {};
+    previewBaseline = null;
     updateCmd();
     const sr = await fetch(api("/api/status"));
     if (sr.ok) {

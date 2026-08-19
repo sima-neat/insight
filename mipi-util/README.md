@@ -84,10 +84,10 @@ control instead of leaving it automatic.
 Every slider, toggle and dropdown is written to the camera the moment you change
 it. What you see in Live View is the real result.
 
-### Settings survive a page reload
+### Settings persist
 
-Reload the browser and everything stays where you left it. Settings are not kept
-across a service restart or a reboot — after that, controls return to defaults.
+Settings are saved and restored after a page reload, service restart, camera
+rebuild, or device reboot. Use **Set Default** to clear saved tuning values.
 
 ### Sidebar
 

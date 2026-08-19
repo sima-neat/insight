@@ -35,24 +35,23 @@ case "$1" in
         --requirement "$APP_DIR/requirements-runtime.txt"
     "$VENV_DIR/bin/python" -c 'import cv2, flask, numpy, waitress'
 
-    # systemd may be absent (containers/chroots/build hosts). Don't fail the
-    # install — just skip service management and say how to run it manually.
-    if ! command -v systemctl >/dev/null 2>&1; then
-        echo "systemd not detected; skipping service setup."
-        echo "Run manually with: sima-mipi-util"
-        exit 0
-    fi
-
-    # Provision a per-device auth token for the state-changing API if one
-    # isn't already present. Root-only; the value is printed once below so the
-    # operator can enter it in the web UI. Only create it when missing, so a
-    # reinstall/upgrade doesn't invalidate a token the operator already saved.
+    # Provision authentication before the systemd check so the documented
+    # manual launcher remains usable on hosts without service management.
     install -d -m 0755 /etc/sima-mipi-util
     if [ ! -s /etc/sima-mipi-util/token ]; then
         ( umask 077; head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > /etc/sima-mipi-util/token )
         chmod 600 /etc/sima-mipi-util/token
     fi
     TOKEN=$(cat /etc/sima-mipi-util/token 2>/dev/null || echo "<unreadable>")
+
+    # systemd may be absent (containers/chroots/build hosts). Don't fail the
+    # install — just skip service management and say how to run it manually.
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "systemd not detected; skipping service setup."
+        echo "Run manually with: sima-mipi-util"
+        echo "API token: ${TOKEN}"
+        exit 0
+    fi
 
     systemctl daemon-reload
     systemctl enable sima-mipi-util.service >/dev/null

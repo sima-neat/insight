@@ -13,7 +13,10 @@ Set MIPI_UTIL_INSTALL_DRY_RUN=1 to print the install command without running it.
 from __future__ import annotations
 
 import os
+import ipaddress
 import json
+import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -25,6 +28,74 @@ PACKAGE_NAME = "sima-mipi-util"
 SERVICE_NAME = "sima-mipi-util.service"
 VENV_PYTHON = Path("/opt/sima-mipi-util/venv/bin/python")
 HEALTH_URL = "http://127.0.0.1:5000/api/health"
+
+
+def _devkit_target() -> tuple[str, str] | None:
+    """Paired DevKit (user, ip) as exported by DevKit Sync, if any."""
+    ip = os.environ.get("SIMA_DEVKIT_IP") or os.environ.get("DEVKIT_SYNC_DEVKIT_IP")
+    if not ip:
+        return None
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError as exc:
+        raise RuntimeError(f"invalid paired DevKit IP: {ip}") from exc
+    return os.environ.get("DEVKIT_SYNC_DEVKIT_USER", "sima"), ip
+
+
+def _remote_install(deb: Path, script: Path) -> int:
+    """Install on the paired DevKit when this host is not arm64 (e.g. the
+    Neat SDK container). With NFS DevKit Sync the download directory is the
+    shared /workspace, so the .deb is already visible on the board at the
+    same path; otherwise the files are copied over first."""
+    try:
+        target = _devkit_target()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if target is None:
+        print(f"ERROR: {PACKAGE_NAME} is an arm64 DevKit package and this host is "
+              f"{platform.machine()}. Run sima-cli on the board, or pair a DevKit "
+              "first (sima-cli sdk setup --devkit <ip>).", file=sys.stderr)
+        return 1
+    user, ip = target
+    ssh = ["ssh", "-o", "StrictHostKeyChecking=accept-new", f"{user}@{ip}"]
+
+    workdir = Path.cwd().resolve()
+    mount = Path(os.environ.get("DEVKIT_SYNC_MOUNT_POINT", "/workspace")).resolve()
+    copied = False
+    if os.environ.get("DEVKIT_SYNC_METHOD") == "nfs" and workdir.is_relative_to(mount):
+        remote_dir = str(workdir)
+    else:
+        result = subprocess.run(
+            ssh + [f"mktemp -d /tmp/{PACKAGE_NAME}-install.XXXXXX"],
+            capture_output=True,
+            text=True,
+        )
+        remote_dir = result.stdout.strip()
+        if result.returncode != 0 or not remote_dir.startswith(
+                f"/tmp/{PACKAGE_NAME}-install."):
+            print(f"ERROR: cannot reach DevKit {ip} over ssh.", file=sys.stderr)
+            return 1
+        copied = True
+        rc = subprocess.run(["scp", "-o", "StrictHostKeyChecking=accept-new",
+                             str(deb), str(script), f"{user}@{ip}:{remote_dir}/"]).returncode
+        if rc != 0:
+            print("ERROR: failed to copy package to the DevKit.", file=sys.stderr)
+            subprocess.run(ssh + [f"rm -rf -- {shlex.quote(remote_dir)}"])
+            return rc
+
+    print(f"Host is {platform.machine()}; installing on paired DevKit {ip} ...")
+    remote_cmd = (f"cd -- {shlex.quote(remote_dir)} && "
+                  f"sudo python3 {shlex.quote(script.name)}")
+    if subprocess.run(ssh + ["sudo -n true"], capture_output=True).returncode != 0:
+        # sudo needs a password on the board — allocate a tty so it can prompt.
+        ssh = ssh[:1] + ["-t"] + ssh[1:]
+    rc = subprocess.run(ssh + [remote_cmd]).returncode
+    if copied:
+        # The directory came from mktemp and is owned by the SSH user.
+        cleanup_ssh = [part for part in ssh if part != "-t"]
+        subprocess.run(cleanup_ssh + [f"rm -rf -- {shlex.quote(remote_dir)}"])
+    return rc
 
 
 def _is_dry_run() -> bool:
@@ -113,6 +184,10 @@ def main() -> int:
         print(f"ERROR: no sima-mipi-util .deb found in {package_dir}", file=sys.stderr)
         return 1
     deb = debs[-1]
+
+    if platform.machine() != "aarch64" and not _is_dry_run():
+        return _remote_install(deb, Path(__file__).resolve())
+
     print(f"Installing {deb.name}")
 
     sudo = _sudo_prefix()

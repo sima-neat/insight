@@ -2143,7 +2143,8 @@ def _get_with_retry(c):
     return v if v is not None else _v4l2_get_routed(c)  # one retry for a transient hiccup
 
 def _detect_one(c):
-    meta = CONTROLS[c]
+    meta = dict(CONTROLS[c])
+    meta["min"], meta["max"] = effective_range(c)
     original = _get_with_retry(c)
     if original is None:
         return {"supported": False, "reason": "unreadable"}
