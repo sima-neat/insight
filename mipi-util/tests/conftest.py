@@ -52,6 +52,7 @@ def _mock_hw(monkeypatch, tmp_path):
     # Fake readbacks legitimately mismatch, so the frame-cadence settle grace
     # would add a real 1s poll per verified write — zero it on the host.
     monkeypatch.setattr(camera_api, "VERIFY_READBACK_GRACE", 0)
+    monkeypatch.setattr(camera_api, "DETECT_LOCK_SETTLE", 0)
     camera_api.state["camera_name"] = "imx477 test"
     yield
 

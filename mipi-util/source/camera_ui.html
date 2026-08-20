@@ -1187,9 +1187,21 @@ function onMenu(sel) {
 let lastInteractionTs = 0;
 const EDIT_QUIET_MS = 1500;
 
+// Mirror of the backend's _CEILING_PAIRS: writing a target above its current
+// ceiling makes the backend implicitly raise the ceiling too (_ensure_ceiling),
+// so the ceiling must be part of the undo state or Reject Changes restores the
+// target while leaving the ceiling raised.
+const CEILING_PAIRS = {system_iridix_strength_target: "system_maximum_iridix_strength"};
+
 function mark(id, val) {
   if (!id) return;
   pending[id] = parseInt(val, 10);
+  const ceil = CEILING_PAIRS[id];
+  if (ceil && previewBaseline && pending[id] > previewBaseline[ceil]) {
+    // The backend just raised the ceiling to this value — record it so the
+    // rollback restores the ceiling to its baseline along with the target.
+    pending[ceil] = Math.max(pending[ceil] ?? 0, pending[id]);
+  }
   lastInteractionTs = Date.now();
   updateCmd();
 }
@@ -1280,7 +1292,12 @@ async function rejectPreview() {
   // value write fail (auto reclaims an unlocked control) on a discard
   // that actually succeeded. Locks are checkbox toggles (en_manual_*,
   // syst_man_*); identifying them structurally covers all naming schemes.
-  const isLock = id => document.getElementById(id)?.type === "checkbox";
+  // Hidden locks with no DOM element (syst_man_un_direct_sharpening) fall
+  // back to the lock naming prefixes.
+  const isLock = id => {
+    const el = document.getElementById(id);
+    return el ? el.type === "checkbox" : /^(en_manual_|syst_man_)/.test(id);
+  };
   const keys = Object.keys(pending).sort((a, b) => isLock(a) - isLock(b));
   for (const k of keys) {
     if (k in previewBaseline) controls[k] = previewBaseline[k];
@@ -1347,6 +1364,16 @@ function onImageEnhancementTog(cb) {
       onTog(el);
     }
   });
+  // Presets also arm the hidden indirect-sharpening lock, which has no
+  // toggle of its own — switching the card off must release it too, or its
+  // preset value stays manually pinned with no visible way to clear it.
+  // (Card ON deliberately leaves it alone: no slider drives that value, so
+  // arming it would pin the indirect strength for no reason.)
+  if (!cb.checked) {
+    snapshotBaselineIfNeeded();
+    mark("syst_man_un_direct_sharpening", 0);
+    previewLive("syst_man_un_direct_sharpening", 0, true);
+  }
 }
 
 function setSettingValue(id, val) {

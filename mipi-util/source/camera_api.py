@@ -1783,6 +1783,10 @@ def _v4l2_set_verified(ctrl, val):
 # whose readback matches at once never waits (host tests zero the grace).
 VERIFY_READBACK_GRACE = 1.0
 VERIFY_READBACK_POLL = 0.1
+# Pause between kicking a lock 0->1 in capability detection and probing its
+# dependent controls — a freshly kicked lock is not reliably manual yet
+# (the flaky false negatives documented at api_detect_capabilities).
+DETECT_LOCK_SETTLE = 0.2
 
 
 def _readback_settles(ctrl, val):
@@ -2238,7 +2242,15 @@ def api_detect_capabilities():
 
     for lock, controls in by_lock.items():
         orig_lock = _get_with_retry(lock)
+        # Volatile lock registers can read 1 while manual mode has lapsed
+        # (e.g. after a pipeline rebuild), and writing 1 again produces no
+        # edge — the same behavior handled in _do_set_verified. Kick 0->1 so
+        # the engagement is real, then give the ISP a beat before probing:
+        # the flakiness note above was about probing too soon after a toggle,
+        # and the settle delay is what makes the kick safe here.
+        v4l2_set(lock, 0)
         v4l2_set(lock, 1)
+        time.sleep(DETECT_LOCK_SETTLE)
         engaged = _get_with_retry(lock) == 1
         results[lock] = {"supported": bool(engaged)}
         for c in controls:

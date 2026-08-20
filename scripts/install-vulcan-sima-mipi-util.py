@@ -179,11 +179,15 @@ def _verify_installation() -> None:
 
 def main() -> int:
     package_dir = Path(__file__).resolve().parent
-    debs = sorted(package_dir.glob("sima-mipi-util_*_arm64.deb"))
+    debs = list(package_dir.glob("sima-mipi-util_*_arm64.deb"))
     if not debs:
         print(f"ERROR: no sima-mipi-util .deb found in {package_dir}", file=sys.stderr)
         return 1
-    deb = debs[-1]
+    # Newest by mtime, not lexicographically: sima-cli downloads into a shared
+    # directory (/workspace with NFS DevKit Sync) where stale builds linger,
+    # and "1.0.0+ci.<hex-sha>" versions do not sort by recency — a stale
+    # a7de04c… build sorted after a fresh 6c08ec… one and got installed.
+    deb = max(debs, key=lambda p: p.stat().st_mtime)
 
     if platform.machine() != "aarch64" and not _is_dry_run():
         return _remote_install(deb, Path(__file__).resolve())

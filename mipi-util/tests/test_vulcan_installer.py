@@ -75,6 +75,35 @@ def test_main_rejects_false_success_after_apt(monkeypatch, tmp_path, capsys):
     assert "verification failed: package not found" in capsys.readouterr().err
 
 
+def test_main_installs_newest_deb_not_lexicographic_max(monkeypatch, tmp_path):
+    """A stale build left in the shared download directory must never win.
+    Version strings like 1.0.0+ci.<hex-sha> do not sort by recency — a stale
+    a7de04c… deb sorted after a fresh 6c08ec… one and got installed."""
+    import os as _os
+    fake_installer = tmp_path / "install_sima_mipi_util.py"
+    fake_installer.write_text("# test\n", encoding="utf-8")
+    stale = tmp_path / "sima-mipi-util_1.0.0+ci.a7de04c0c2e4_arm64.deb"
+    fresh = tmp_path / "sima-mipi-util_1.0.0+ci.6c08ec641260_arm64.deb"
+    stale.touch()
+    fresh.touch()
+    _os.utime(stale, (1000, 1000))   # stale: old mtime, lexicographically last
+    _os.utime(fresh, (2000, 2000))   # fresh: newest mtime
+
+    commands = []
+    monkeypatch.setattr(installer, "__file__", str(fake_installer))
+    monkeypatch.setattr(installer.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(installer.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(installer.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(installer, "_run", lambda cmd: commands.append(cmd) or 0)
+    monkeypatch.setattr(installer, "_verify_installation", lambda: None)
+
+    assert installer.main() == 0
+    installed = [a for cmd in commands for a in cmd if str(a).endswith(".deb")]
+    assert installed, "no .deb was passed to the installer commands"
+    assert all(str(fresh) == a for a in installed), \
+        f"stale deb selected: {installed}"
+
+
 def test_devkit_target_rejects_invalid_ip(monkeypatch):
     monkeypatch.setenv("DEVKIT_SYNC_DEVKIT_IP", "not-an-ip")
 
