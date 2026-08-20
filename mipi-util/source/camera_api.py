@@ -1215,12 +1215,14 @@ def _ensure_producer():
             if not prod["stop"].is_set() and prod["proc"].poll() is None:
                 return prod
             log.info("stream: producer died, rebuilding")
-    # Leave _producer set here so _stop_producer() below can actually see the
-    # stale producer and tear it down. Nulling it before the call makes
-    # _stop_producer() a no-op (it returns early when the global is None),
-    # which leaks the old gst-launch process — it can keep the camera
-    # exclusively held and block recovery until the service is restarted.
-    _stop_producer()
+    # Tear down only the exact producer observed above (expected=prod, so a
+    # genuinely stale producer is still reaped rather than leaked with its
+    # exclusive camera lease). Concurrent requests can both see the same dead
+    # producer; by the time the slower one gets here the faster one may have
+    # already installed a fresh pipeline, and an unconditional stop would kill
+    # that healthy replacement mid-stream.
+    if prod is not None:
+        _stop_producer(expected=prod)
     with _producer_lock:
         if _producer is None:
             _producer = _start_producer()
@@ -1345,23 +1347,27 @@ def api_set_device():
     data, error = _json_object()
     if error:
         return error
+    # Validate every supplied field before mutating anything: a valid camera
+    # plus an invalid control_device must reject the whole request, not leave
+    # state pointing at the new camera while the error return skips the cache
+    # invalidation and producer restart below.
+    cam = data.get("camera")
+    if "camera" in data and (not isinstance(cam, str)
+                             or not _STREAM_DEV_RE.match(cam)):
+        return jsonify({"ok": False, "error": "invalid camera device"}), 400
+    cd = data.get("control_device")
+    if "control_device" in data and (not isinstance(cd, str)
+                                     or not _CONTROL_DEV_RE.match(cd)):
+        return jsonify({"ok": False, "error": "invalid control device"}), 400
     with _lock:
-        if "camera" in data:
-            cam = data["camera"]
-            if not isinstance(cam, str) or not _STREAM_DEV_RE.match(cam):
-                return jsonify({"ok": False, "error": "invalid camera device"}), 400
-            if cam != state["stream_device"]:
-                state["stream_device"] = cam
-                state["control_device"] = ctrl_dev(cam)
-                state["camera_name"] = None  # force a fresh lookup for the new camera
-                camera_changed = True
-        if "control_device" in data:
-            cd = data["control_device"]
-            if not isinstance(cd, str) or not _CONTROL_DEV_RE.match(cd):
-                return jsonify({"ok": False, "error": "invalid control device"}), 400
-            if cd != state["control_device"]:
-                state["control_device"] = cd
-                control_changed = True
+        if "camera" in data and cam != state["stream_device"]:
+            state["stream_device"] = cam
+            state["control_device"] = ctrl_dev(cam)
+            state["camera_name"] = None  # force a fresh lookup for the new camera
+            camera_changed = True
+        if "control_device" in data and cd != state["control_device"]:
+            state["control_device"] = cd
+            control_changed = True
 
     global _sensor_subdev, _capability_cache
     if camera_changed:
@@ -1769,7 +1775,37 @@ def _v4l2_set_verified(ctrl, val):
     return ok, err
 
 
+# The ISP reflects a write on a frame cadence (~33ms at 30fps), so an instant
+# readback can still show the algorithm's previous value while the write is in
+# fact landing — seen on current_exposure with its lock properly armed, where
+# the picture changed but the immediate readback raised a false "rejected by
+# ISP". Poll briefly before treating a mismatch as an auto override; a write
+# whose readback matches at once never waits (host tests zero the grace).
+VERIFY_READBACK_GRACE = 1.0
+VERIFY_READBACK_POLL = 0.1
+
+
+def _readback_settles(ctrl, val):
+    """Re-read until the register reflects the write or the grace runs out.
+    Returns as soon as it catches up, so the common lag case costs one poll."""
+    deadline = time.monotonic() + VERIFY_READBACK_GRACE
+    while time.monotonic() < deadline:
+        time.sleep(VERIFY_READBACK_POLL)
+        if _v4l2_get_routed(ctrl) == val:
+            return True
+    return False
+
+
 def _do_set_verified(ctrl, val):
+    # Lock registers are volatile: they can read 1 while the algorithm is in
+    # fact running again (they lapse on pipeline restarts without the register
+    # changing), and writing 1 to such a register produces no edge — only a
+    # 0->1 kick genuinely re-engages manual mode. Arming a lock therefore
+    # always goes through the kick, exactly as presets/reset/reapply already
+    # do; releasing (0) stays a plain write.
+    if ctrl in _LOCK_NAMES and int(val) == 1:
+        v4l2_set(ctrl, 0)
+        return v4l2_set(ctrl, 1)
     ok, err = _v4l2_set_routed(ctrl, val)
     lock = _AUTO_LOCK_PAIRS.get(ctrl)
     # imx568 digital gain routes to the ISP sensor_digital_gain register, which
@@ -1786,12 +1822,16 @@ def _do_set_verified(ctrl, val):
             v4l2_set("en_manual_sensor_digital_gain", 0)
             v4l2_set("en_manual_sensor_digital_gain", 1)
             ok, err = _v4l2_set_routed(ctrl, val)
-            if ok and _v4l2_get_routed(ctrl) == val:
+            if ok and (_v4l2_get_routed(ctrl) == val or _readback_settles(ctrl, val)):
                 return ok, err
         return False, f"{ctrl} rejected by ISP (auto override)"
     if not ok or lock is None:
         return ok, err
     if _v4l2_get_routed(ctrl) == val:
+        return True, err
+    # Readback can lag the write by a frame — give it the settle grace before
+    # concluding the algorithm rejected it.
+    if _readback_settles(ctrl, val):
         return True, err
 
     if v4l2_get(lock) != 1:
@@ -1804,13 +1844,19 @@ def _do_set_verified(ctrl, val):
 
     # Lock is already on: re-arm it (0->1) and retry. This ends with the lock
     # in the state the user chose, so nothing changes from their point of view.
+    # Freshly kicking the lock briefly lets the algorithm run, which can race
+    # the write (same volatility handled for sdev_digital_gain above), so
+    # retry a few times — once the lock is stably armed the value holds.
     log.info("set %s=%s did not take, re-arming %s (already on) and retrying", ctrl, val, lock)
-    v4l2_set(lock, 0)
-    v4l2_set(lock, 1)
-    ok, err = _v4l2_set_routed(ctrl, val)
-    if ok and _v4l2_get_routed(ctrl) != val:
-        return False, f"{ctrl} rejected by ISP (auto override)"
-    return ok, err
+    for _ in range(3):
+        v4l2_set(lock, 0)
+        v4l2_set(lock, 1)
+        ok, err = _v4l2_set_routed(ctrl, val)
+        if not ok:
+            return ok, err
+        if _v4l2_get_routed(ctrl) == val or _readback_settles(ctrl, val):
+            return ok, err
+    return False, f"{ctrl} rejected by ISP (auto override)"
 
 
 # ── Desired state ───────────────────────────────────────────────────────────
@@ -2239,11 +2285,12 @@ def api_capabilities():
 @_serialized_hardware
 def api_reset():
     # Reset to the known Raw/Unprocessed baseline where it defines a value and
-    # to CONTROLS defaults elsewhere. Manual-lock controls use the same
-    # engage/write/kick/verified-rewrite sequence used by presets so the values
-    # actually land instead of being immediately overwritten by auto algorithms.
-    # Controls marked restart=True are deliberately excluded: Reset All must
-    # never reboot/restart the platform as a side effect.
+    # to CONTROLS defaults elsewhere. A locked control's value is written only
+    # when its lock resets to manual, using the preset engage/write/kick/
+    # verified-rewrite sequence so the value actually lands; values whose lock
+    # resets to auto are left for the released algorithm to own. Controls
+    # marked restart=True are deliberately excluded: Reset All must never
+    # reboot/restart the platform as a side effect.
     raw_values = _PRESETS["raw"]
 
     def _reset_target(c):
@@ -2251,24 +2298,32 @@ def api_reset():
 
     locked_controls = set(_AUTO_LOCK_PAIRS.keys())
     locks_needed = set(_AUTO_LOCK_PAIRS.values())
+    # A lock's reset state is its own default (currently 0/auto for all of
+    # them). Landing a manual baseline for a value whose lock is about to be
+    # released can pin the algorithm even after the lock reads 0 — the AWB CCT
+    # freeze documented at _AUTO_LOCK_PAIRS — so paired values are written
+    # only when their lock genuinely resets to manual.
+    manual_locks = {lk for lk in locks_needed if int(CONTROLS[lk]["default"]) == 1}
+    manual_controls = {c for c in locked_controls
+                       if _AUTO_LOCK_PAIRS[c] in manual_locks}
     results = {}
     lock_results = {}
 
-    for lock in locks_needed:
+    for lock in manual_locks:
         ok, err = v4l2_set(lock, 1)
         lock_results[lock] = {"ok": ok, "error": err or None}
 
     # First landing pass, followed by the known 0->1 lock kick.
-    for c in locked_controls:
+    for c in manual_controls:
         target = _reset_target(c)
         _ensure_ceiling(c, target)
         _v4l2_set_routed(c, target)
-    for lock in locks_needed:
+    for lock in manual_locks:
         v4l2_set(lock, 0)
         v4l2_set(lock, 1)
 
     # Final authoritative pass with routed readback verification.
-    for c in locked_controls:
+    for c in manual_controls:
         target = _reset_target(c)
         lo, hi = effective_range(c)
         if not (lo <= int(target) <= hi):
@@ -2283,6 +2338,11 @@ def api_reset():
                       "error": (err or None) if good
                                else (err or f"readback {actual}, expected {target}"),
                       "readback": actual}
+    for c in locked_controls - manual_controls:
+        results[c] = {"ok": True, "skipped": True,
+                      "reason": "lock resets to auto; the released algorithm "
+                                "owns this value, and writing a manual baseline "
+                                "first can pin it"}
 
     # Reset all remaining ordinary controls. Sensor-subdevice controls go
     # through the routed helper. Restart-triggering controls are skipped.

@@ -455,3 +455,100 @@ def test_resolve_live_control_device_none_when_nothing_streaming(api, monkeypatc
                         lambda p: ["/dev/video0out", "/dev/video1out"])
     monkeypatch.setattr(api, "v4l2_get", lambda ctrl, dev=None: 0)
     assert api.resolve_live_control_device() is None
+
+
+# ── Stream stall recovery (P1: stalled generators exhausted Waitress) ─────────
+def test_stalled_stream_generator_exits_after_timeout(api, monkeypatch):
+    """A producer that stays alive but stops publishing JPEGs must not pin its
+    Waitress thread (and the camera lease) forever: the per-client generator
+    closes itself once no fresh frame arrives within STREAM_STALL_TIMEOUT."""
+    prod = {"stop": api.threading.Event(), "clients": 0,
+            "jpeg_lock": api.threading.Lock(),
+            "latest_jpeg": {"seq": 0, "data": None}}
+    monkeypatch.setattr(api, "_ensure_producer", lambda: prod)
+    monkeypatch.setattr(api, "_cancel_idle_producer_stop", lambda: None)
+    scheduled = []
+    monkeypatch.setattr(api, "_schedule_idle_producer_stop", scheduled.append)
+    monkeypatch.setattr(api, "STREAM_STALL_TIMEOUT", 0.05)
+
+    frames = list(api._libcamera_encoded_stream())
+
+    assert frames == []                # generator gave up instead of spinning
+    assert prod["clients"] == 0        # its client slot was released
+    assert scheduled == [prod]         # idle teardown can now reap the producer
+
+
+# ── Preset manual locks survive a pipeline rebuild (P2 regression) ────────────
+def test_preset_locks_persist_and_rearm_after_rebuild(client, token, api,
+                                                      monkeypatch, tmp_path):
+    """/api/preset must remember each successfully armed lock so
+    _reapply_desired() re-arms it after a camera switch or producer rebuild.
+    Unremembered locks are released by the rebuild and the preset silently
+    stopped applying."""
+    api.state["stream_device"] = "/dev/video0"  # the imx477 settings slot
+
+    r = client.post("/api/preset/daylight", headers={"X-Auth-Token": token})
+    assert r.status_code == 200
+
+    # Persistence: the armed lock landed in the same per-camera store that
+    # _reapply_desired() restores from.
+    assert api._desired_by_camera["imx477"].get("en_manual_awb") == 1
+
+    # Restoration: a rebuild re-arms the remembered lock instead of releasing
+    # it. Record every lock write the reapply pass makes.
+    monkeypatch.setattr(api, "REAPPLY_LOG", str(tmp_path / "reapply.log"))
+    writes = []
+
+    def record_set(ctrl, val, **kwargs):
+        writes.append((ctrl, val))
+        return True, None
+
+    monkeypatch.setattr(api, "v4l2_set", record_set)
+    monkeypatch.setattr(api, "_v4l2_set_verified", record_set)
+    api._reapply_desired()
+
+    awb_lock_writes = [v for c, v in writes if c == "en_manual_awb"]
+    assert awb_lock_writes, "rebuild never touched the remembered lock"
+    assert awb_lock_writes[-1] == 1    # re-armed (a 0->1 kick may precede)
+
+
+# ── Arming a lock needs a 0->1 edge (volatile registers) ──────────────────────
+def test_arming_lock_via_api_kicks_zero_to_one(client, token, api, monkeypatch):
+    """Lock registers can read 1 while the algorithm actually runs again, and
+    writing 1 produces no edge — the user's toggle must go through the same
+    0->1 kick presets/reset use, or manual mode silently never engages."""
+    writes = []
+    monkeypatch.setattr(api, "v4l2_set",
+                        lambda c, v, **kw: writes.append((c, v)) or (True, None))
+
+    r = client.post("/api/set", json={"control": "en_manual_exposure", "value": 1},
+                    headers={"X-Auth-Token": token})
+
+    assert r.get_json()["ok"] is True
+    assert writes == [("en_manual_exposure", 0), ("en_manual_exposure", 1)]
+
+    # Releasing must stay a single plain write: a kick here would blip manual
+    # mode back on for a frame while the user is turning it off.
+    writes.clear()
+    r = client.post("/api/set", json={"control": "en_manual_exposure", "value": 0},
+                    headers={"X-Auth-Token": token})
+    assert r.get_json()["ok"] is True
+    assert writes == [("en_manual_exposure", 0)]
+
+
+# ── Readback settle grace (false "rejected by ISP" on frame-cadence lag) ──────
+def test_lagging_readback_settles_instead_of_false_rejection(api, monkeypatch):
+    """A write the ISP reflects one frame later must verify OK, not raise
+    "rejected by ISP (auto override)" — poll up to the grace, return early."""
+    monkeypatch.setattr(api, "VERIFY_READBACK_GRACE", 0.5)
+    monkeypatch.setattr(api, "VERIFY_READBACK_POLL", 0.01)
+    monkeypatch.setattr(api, "_v4l2_set_routed", lambda c, v, **kw: (True, None))
+    # First read returns the algorithm's old value, the register catches up next poll.
+    reads = iter([100, 100, 1000])
+    monkeypatch.setattr(api, "_v4l2_get_routed",
+                        lambda c, **kw: next(reads, 1000))
+
+    ok, err = api._do_set_verified("current_exposure", 1000)
+
+    assert ok is True
+    assert not err

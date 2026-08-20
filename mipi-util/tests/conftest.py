@@ -49,6 +49,9 @@ def _mock_hw(monkeypatch, tmp_path):
         camera_api._desired_by_camera.update({"imx477": {}, "imx568": {}})
     monkeypatch.setattr(camera_api.subprocess, "run", default_run)
     monkeypatch.setattr(camera_api.subprocess, "Popen", FakePopen)
+    # Fake readbacks legitimately mismatch, so the frame-cadence settle grace
+    # would add a real 1s poll per verified write — zero it on the host.
+    monkeypatch.setattr(camera_api, "VERIFY_READBACK_GRACE", 0)
     camera_api.state["camera_name"] = "imx477 test"
     yield
 
