@@ -245,7 +245,7 @@ button{cursor:pointer}
   height:100%;
   padding:10px 14px 12px;
   display:grid;
-  grid-template-columns:minmax(400px,560px) minmax(0,1fr);
+  grid-template-columns:minmax(420px,700px) minmax(0,1fr);
   grid-template-rows:minmax(0,1fr) auto;
   gap:10px;
   overflow:hidden;
@@ -273,12 +273,13 @@ button{cursor:pointer}
 .live-panel .section-title{position:absolute;inset:0 0 auto 0}
 .video{
   position:relative;
-  height:100%;
-  min-height:228px;
+  /* Width-driven sizing only: height:100% could resolve taller than the
+     panel's visible area, clipping the bottom-anchored LIVE chip and
+     fullscreen button to invisible slivers. */
+  width:100%;
+  height:auto;
+  min-height:260px;
   aspect-ratio:16 / 9;
-  /* Height-driven sizing can compute a width wider than the panel, pushing
-     the right edge (and the resolution badge) out of view — cap it. */
-  max-width:100%;
   margin:0 auto;
   border-radius:5px;
   overflow:hidden;
@@ -315,7 +316,9 @@ button{cursor:pointer}
 }
 .live-chip:before{content:"";display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:7px}
 .capture{
-  position:absolute;z-index:2;right:8px;bottom:8px;width:30px;height:30px;border:0;border-radius:6px;background:rgba(6,9,13,.86);color:white
+  /* Above the connect/error overlay (z3): a control must stay visible and
+     clickable even while the overlay covers the status badges. */
+  position:absolute;z-index:4;right:8px;bottom:8px;width:30px;height:30px;border:0;border-radius:6px;background:rgba(6,9,13,.86);color:white
 }
 .vid-overlay{
   position:absolute;inset:0;z-index:3;background:rgba(5,8,13,.88);
@@ -1464,7 +1467,9 @@ function liveFpsUpdate() {
 
 async function applyPreset(name) {
   try {
-    const r = await fetch(api(`/api/preset/${name}`), {method:"POST"});
+    const r = await fetch(api(`/api/preset/${name}`), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:streamDev})});
     const d = await r.json();
     if (d.ok) {
       toast(`Preset "${name}" applied`, "ok");
@@ -1534,7 +1539,9 @@ async function reloadControlValues() {
 async function resetAll() {
   if (!confirm("Set all controls back to their default values?")) return;
   try {
-    const r = await fetch(api("/api/reset"), {method:"POST"});
+    const r = await fetch(api("/api/reset"), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:streamDev})});
     const d = await r.json().catch(() => ({}));
     if (!r.ok || d.ok === false) {
       const failed = Object.keys(d.failed || {}).join(", ");

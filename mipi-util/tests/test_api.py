@@ -602,6 +602,7 @@ def test_ensure_producer_keeps_healthy_and_starting_producers(api):
                "latest_jpeg": {"seq": 5, "data": b"x",
                                "ts": api.time.monotonic()}}
     starting = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+                "started": api.time.monotonic(),
                 "latest_jpeg": {"seq": 0, "data": None, "ts": None}}
     for prod in (healthy, starting):
         api._producer = prod
@@ -739,3 +740,50 @@ def test_mixed_settings_request_applies_nothing(client, token, api):
     assert api.stream_config == before          # valid prefix did not apply
     import os as _os
     assert not _os.path.exists(api.STREAM_SETTINGS_FILE)   # nothing persisted
+
+
+# ── A producer that never publishes its first frame is rebuilt after grace ────
+def test_ensure_producer_replaces_never_publishing_producer(api, monkeypatch):
+    class AliveProc:
+        def poll(self):
+            return None
+    hung = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+            "started": api.time.monotonic() - 120,        # past the grace
+            "latest_jpeg": {"seq": 0, "data": None, "ts": None}}
+    fresh = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+             "started": api.time.monotonic(),
+             "latest_jpeg": {"seq": 0, "data": None, "ts": None}}
+    stopped = []
+
+    def fake_stop(**kw):
+        stopped.append(kw)
+        api._producer = None
+    api._producer = hung
+    try:
+        monkeypatch.setattr(api, "_stop_producer", fake_stop)
+        monkeypatch.setattr(api, "_start_producer", lambda: fresh)
+        monkeypatch.setattr(api, "reset_fps_session", lambda: None)
+
+        prod = api._ensure_producer()
+
+        assert prod is fresh
+        assert stopped and stopped[0]["expected"] is hung
+    finally:
+        api._producer = None
+        api._camera_controls_ready.set()
+
+
+# ── Preset and reset are camera-bound like /api/set ───────────────────────────
+def test_preset_and_reset_reject_stale_camera(client, token, api):
+    api.state["stream_device"] = "/dev/video0"
+    for path in ("/api/preset/daylight", "/api/reset"):
+        r = client.post(path, json={"camera": "/dev/video1"},
+                        headers={"X-Auth-Token": token})
+        assert r.status_code == 409, path
+
+
+def test_preset_and_reset_work_without_camera_field(client, token, api):
+    api.state["stream_device"] = "/dev/video0"
+    for path in ("/api/preset/daylight", "/api/reset"):
+        r = client.post(path, headers={"X-Auth-Token": token})
+        assert r.status_code == 200, path

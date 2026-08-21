@@ -943,6 +943,9 @@ PRODUCER_IDLE_TIMEOUT = 5.0
 # Close stream generators that see no fresh frames, so a stalled pipeline
 # can't pin waitress threads on dead sockets.
 STREAM_STALL_TIMEOUT = 5.0
+# How long a freshly started producer may run without its first frame before
+# it is judged hung and rebuilt (normal startup publishes within ~6s).
+PRODUCER_FIRST_FRAME_GRACE = 30.0
 
 
 def _cancel_idle_producer_stop():
@@ -1179,7 +1182,7 @@ def _start_producer(width=None, height=None):
 
     return {"proc": proc, "stop": stop, "shm_dir": shm_dir, "clients": 0,
             "jpeg_lock": jpeg_lock, "latest_jpeg": latest_jpeg,
-            "width": width, "height": height}
+            "width": width, "height": height, "started": time.monotonic()}
 
 def _stop_producer(expected=None, only_if_idle=False):
     """Tear the shared pipeline down. Used on device change and shutdown —
@@ -1217,11 +1220,16 @@ def _ensure_producer():
                 # Alive is not healthy: a process that published frames and
                 # then went silent past the stall timeout must be replaced,
                 # or every watchdog reconnect re-attaches to a dead stream.
-                # ts None = still starting up, never killed for that.
+                # A producer with no frame yet gets a startup grace instead
+                # of a free pass — a hung capture init must also be rebuilt.
                 ts = prod["latest_jpeg"].get("ts")
-                if ts is None or time.monotonic() - ts <= STREAM_STALL_TIMEOUT:
+                now = time.monotonic()
+                if ts is not None and now - ts <= STREAM_STALL_TIMEOUT:
                     return prod
-                log.info("stream: producer alive but stalled, rebuilding")
+                if ts is None and now - prod["started"] <= PRODUCER_FIRST_FRAME_GRACE:
+                    return prod
+                log.info("stream: producer alive but %s, rebuilding",
+                         "stalled" if ts is not None else "never published a frame")
             else:
                 log.info("stream: producer died, rebuilding")
     # Tear down only the exact producer observed above (expected=prod, so a
@@ -2383,6 +2391,11 @@ def api_capabilities():
 @app.route("/api/reset", methods=["POST"])
 @_serialized_hardware
 def api_reset():
+    # Same stale-camera guard as /api/preset — a reset must not sweep a
+    # camera the caller was not looking at.
+    context_error = _camera_context_error(request.get_json(silent=True) or {})
+    if context_error:
+        return context_error
     # Reset to the known Raw/Unprocessed baseline where it defines a value and
     # to CONTROLS defaults elsewhere. A locked control's value is written only
     # when its lock resets to manual, using the preset engage/write/kick/
@@ -2519,6 +2532,12 @@ _PRESET_LOCKS = {
 @app.route("/api/preset/<name>", methods=["POST"])
 @_serialized_hardware
 def api_preset(name):
+    # Bind to the caller's camera like /api/set: a preset from a stale tab
+    # must not sweep the newly selected camera. The field is optional, so
+    # scripts and older pages keep working unchanged.
+    context_error = _camera_context_error(request.get_json(silent=True) or {})
+    if context_error:
+        return context_error
     if name not in _PRESETS:
         return jsonify({"ok": False, "error": f"Unknown preset: {name}"}), 400
 
