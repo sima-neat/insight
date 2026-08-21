@@ -1367,10 +1367,18 @@ def api_set_device():
     if "camera" in data and (not isinstance(cam, str)
                              or not _STREAM_DEV_RE.match(cam)):
         return jsonify({"ok": False, "error": "invalid camera device"}), 400
+    # A well-formed but absent node (/dev/video999) must not switch state,
+    # clear caches, and stop a working producer either.
+    if "camera" in data and cam not in {c["device"] for c in discover_cameras()}:
+        return jsonify({"ok": False,
+                        "error": f"camera {cam} is not connected"}), 400
     cd = data.get("control_device")
     if "control_device" in data and (not isinstance(cd, str)
                                      or not _CONTROL_DEV_RE.match(cd)):
         return jsonify({"ok": False, "error": "invalid control device"}), 400
+    if "control_device" in data and cd not in list_out_devices():
+        return jsonify({"ok": False,
+                        "error": f"control device {cd} is not available"}), 400
     with _lock:
         if "camera" in data and cam != state["stream_device"]:
             state["stream_device"] = cam
@@ -2480,11 +2488,14 @@ def api_reset():
         ok, err = v4l2_set(lock, 0)
         lock_results[lock] = {"ok": ok, "error": err or None, "released": True}
 
-    # Drop remembered intent as well, or the next pipeline restart would
-    # re-assert the settings this reset just cleared.
-    forget_desired()
     failed = {c: r for c, r in results.items() if not r.get("ok")}
     failed.update({c: r for c, r in lock_results.items() if not r.get("ok")})
+    # Drop remembered intent as well, or the next pipeline restart would
+    # re-assert the settings this reset just cleared — but only when the
+    # reset fully landed: a failed reset must keep the recovery state it
+    # failed to replace.
+    if not failed:
+        forget_desired()
     return jsonify({"ok": not failed, "results": results,
                     "lock_writes": lock_results, "failed": failed})
 

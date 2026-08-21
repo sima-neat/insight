@@ -61,6 +61,10 @@ def test_camera_change_hides_controls_until_restore(client, token, api, monkeypa
     api.state["control_device"] = "/dev/video0out"
     api._camera_controls_ready.set()
     monkeypatch.setattr(api, "_stop_producer", lambda: None)
+    # The endpoint now rejects nodes that are not actually present, so the
+    # test must not depend on the host machine's /dev/video* inventory.
+    monkeypatch.setattr(api, "discover_cameras",
+                        lambda: [{"device": "/dev/video0"}, {"device": "/dev/video1"}])
 
     r = client.post(
         "/api/device", json={"camera": "/dev/video1"},
@@ -267,6 +271,8 @@ def test_camera_change_invalidates_capability_cache(client, token, api, monkeypa
     api.state["control_device"] = "/dev/video0out"
     api._capability_cache = {"old-camera": {"supported": True}}
     monkeypatch.setattr(api, "_stop_producer", lambda: None)
+    monkeypatch.setattr(api, "discover_cameras",
+                        lambda: [{"device": "/dev/video0"}, {"device": "/dev/video1"}])
     r = client.post("/api/device", json={"camera": "/dev/video1"},
                     headers={"X-Auth-Token": token})
     assert r.status_code == 200
@@ -662,3 +668,41 @@ def test_detection_probes_digital_gain_lock_aware(api, monkeypatch):
     calls["verified"].clear()
     api._detect_one("system_saturation_target")
     assert calls["raw"] and not calls["verified"]
+
+
+# ── Device switch rejects absent nodes before mutating anything ───────────────
+def test_absent_camera_node_is_rejected_without_mutation(client, token, api, monkeypatch):
+    api.state["stream_device"] = "/dev/video0"
+    api.state["control_device"] = "/dev/video0out"
+    monkeypatch.setattr(api, "discover_cameras",
+                        lambda: [{"device": "/dev/video0"}, {"device": "/dev/video1"}])
+    monkeypatch.setattr(api, "list_out_devices", lambda: ["/dev/video0out"])
+
+    r = client.post("/api/device", json={"camera": "/dev/video999"},
+                    headers={"X-Auth-Token": token})
+    assert r.status_code == 400
+    assert api.state["stream_device"] == "/dev/video0"
+
+    r = client.post("/api/device",
+                    json={"camera": "/dev/video1", "control_device": "/dev/video9out"},
+                    headers={"X-Auth-Token": token})
+    assert r.status_code == 400
+    assert api.state["stream_device"] == "/dev/video0"
+    assert api.state["control_device"] == "/dev/video0out"
+
+
+# ── Failed reset keeps the remembered recovery state ──────────────────────────
+def test_incomplete_reset_preserves_remembered_settings(client, token, api, monkeypatch):
+    api.state["stream_device"] = "/dev/video0"
+    api._remember("awb_red_gain", 777)
+    forgotten = []
+    monkeypatch.setattr(api, "forget_desired",
+                        lambda *a, **kw: forgotten.append(True))
+    # Make one reset write fail so the endpoint reports ok: false.
+    monkeypatch.setattr(api, "_v4l2_set_routed",
+                        lambda c, v, **kw: (False, "busy"))
+
+    r = client.post("/api/reset", headers={"X-Auth-Token": token})
+
+    assert r.get_json()["ok"] is False
+    assert not forgotten, "failed reset must not discard remembered settings"

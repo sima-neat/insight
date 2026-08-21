@@ -16,6 +16,7 @@ case "$1" in
     # Per-camera settings are durable across upgrades/removal, but purge means
     # the operator requested all application state to be deleted.
     rm -f /var/lib/sima-mipi-util/camera-settings.json
+    rm -f /var/lib/sima-mipi-util/stream-settings.json
     rmdir --ignore-fail-on-non-empty /var/lib/sima-mipi-util 2>/dev/null || true
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload || true
