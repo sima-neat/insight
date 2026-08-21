@@ -552,3 +552,113 @@ def test_lagging_readback_settles_instead_of_false_rejection(api, monkeypatch):
 
     assert ok is True
     assert not err
+
+
+# ── Stalled producer is replaced, not reused ──────────────────────────────────
+def test_ensure_producer_replaces_stalled_producer(api, monkeypatch):
+    """A gst process that published frames and then went silent must be
+    rebuilt — watchdog reconnects were re-attaching to the dead stream."""
+    class AliveProc:
+        def poll(self):
+            return None
+    stalled = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+               "latest_jpeg": {"seq": 5, "data": b"x",
+                               "ts": api.time.monotonic() - 60}}
+    fresh = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+             "latest_jpeg": {"seq": 0, "data": None, "ts": None}}
+    stopped = []
+
+    def fake_stop(**kw):
+        stopped.append(kw)
+        api._producer = None
+    api._producer = stalled
+    try:
+        monkeypatch.setattr(api, "_stop_producer", fake_stop)
+        monkeypatch.setattr(api, "_start_producer", lambda: fresh)
+        monkeypatch.setattr(api, "reset_fps_session", lambda: None)
+
+        prod = api._ensure_producer()
+
+        assert prod is fresh
+        assert stopped and stopped[0]["expected"] is stalled
+    finally:
+        api._producer = None
+        api._camera_controls_ready.set()
+
+
+def test_ensure_producer_keeps_healthy_and_starting_producers(api):
+    """Publishing recently, or never having published yet (still starting),
+    must not trigger a rebuild."""
+    class AliveProc:
+        def poll(self):
+            return None
+    healthy = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+               "latest_jpeg": {"seq": 5, "data": b"x",
+                               "ts": api.time.monotonic()}}
+    starting = {"stop": api.threading.Event(), "proc": AliveProc(), "clients": 0,
+                "latest_jpeg": {"seq": 0, "data": None, "ts": None}}
+    for prod in (healthy, starting):
+        api._producer = prod
+        try:
+            assert api._ensure_producer() is prod
+        finally:
+            api._producer = None
+
+
+# ── Controls gated on every rebuild, not only camera switches ─────────────────
+def test_rebuild_marks_controls_unready_before_start(api, monkeypatch):
+    seen = []
+    api._camera_controls_ready.set()
+    api._producer = None
+    monkeypatch.setattr(
+        api, "_start_producer",
+        lambda: seen.append(api._camera_controls_ready.is_set()) or
+        {"stop": api.threading.Event(), "proc": None, "clients": 0,
+         "latest_jpeg": {"seq": 0, "data": None, "ts": None}})
+    monkeypatch.setattr(api, "reset_fps_session", lambda: None)
+    try:
+        api._ensure_producer()
+        assert seen == [False]
+    finally:
+        api._producer = None
+        api._camera_controls_ready.set()
+
+
+# ── Stream settings persist across restarts ───────────────────────────────────
+def test_stream_settings_persist_and_reload(client, token, api):
+    r = client.post("/api/settings", json={"num_encoders": 3, "jpeg_quality": 70},
+                    headers={"X-Auth-Token": token})
+    assert r.get_json()["ok"] is True
+
+    # Simulate the restart: defaults back in memory, then load from disk.
+    api.stream_config.update({"num_encoders": 6, "jpeg_quality": 85})
+    api._load_stream_settings()
+
+    assert api.stream_config["num_encoders"] == 3
+    assert api.stream_config["jpeg_quality"] == 70
+
+
+def test_corrupt_stream_settings_fall_back_to_defaults(api):
+    with open(api.STREAM_SETTINGS_FILE, "w", encoding="utf-8") as fh:
+        fh.write('{"num_encoders": 9999, "jpeg_quality": "junk", not json')
+    before = dict(api.stream_config)
+    api._load_stream_settings()
+    assert api.stream_config == before
+
+
+# ── Detection probes digital gain lock-aware without persisting the probe ─────
+def test_detection_probes_digital_gain_lock_aware(api, monkeypatch):
+    calls = {"verified": [], "raw": []}
+    monkeypatch.setattr(api, "_get_with_retry", lambda c: 100)
+    monkeypatch.setattr(api, "_do_set_verified",
+                        lambda c, v: calls["verified"].append((c, v)) or (True, None))
+    monkeypatch.setattr(api, "_v4l2_set_routed",
+                        lambda c, v, **kw: calls["raw"].append((c, v)) or (True, None))
+
+    api._detect_one("sdev_digital_gain")
+    assert calls["verified"] and not calls["raw"]
+    assert api._desired_by_camera["imx477"] == {}
+
+    calls["verified"].clear()
+    api._detect_one("system_saturation_target")
+    assert calls["raw"] and not calls["verified"]

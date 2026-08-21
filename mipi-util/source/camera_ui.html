@@ -760,7 +760,7 @@ input[type=range]::-moz-range-thumb{
             </div>
 
             <div class="card">
-              <div class="card-head"><div class="card-title"><span class="card-icon">✣</span>Gain Control</div><label class="tog"><input type="checkbox" id="en_manual_sensor_analog_gain" onchange="onTog(this)" checked><span class="tog-sl"></span></label></div>
+              <div class="card-head"><div class="card-title"><span class="card-icon">✣</span>Gain Control</div><label class="tog"><input type="checkbox" id="en_manual_sensor_analog_gain" onchange="onGainControlTog(this)" checked><span class="tog-sl"></span></label></div>
               <div class="card-body">
                 <div class="ctrl" data-manual="en_manual_sensor_analog_gain"><label class="ctrl-lbl">Analog Gain</label><input type="range" id="sensor_analog_gain" min="0" max="255" value="0" oninput="sv(this)"><input class="num" type="number" id="sensor_analog_gain_v" value="0" oninput="ss(this,'sensor_analog_gain')"></div>
                 <!-- ISP-side Digital Gain (isp_digital_gain / sensor_digital_gain) removed: both confirmed non-functional on this firmware, see camera_api.py CONTROLS comment. This slider is a different, genuinely-working register on the sensor subdevice. It has no real hardware lock of its own, but shares the card's en_manual_sensor_analog_gain toggle for consistency with Analog Gain — the whole "Gain Control" section enables/disables together, matching how White Balance's three controls all share one toggle. -->
@@ -1376,6 +1376,17 @@ function onImageEnhancementTog(cb) {
   }
 }
 
+// On IMX568 the backend silently arms the internal digital-gain lock so ISP
+// writes stick; the card's off state must release it too (no-op on IMX477).
+function onGainControlTog(cb) {
+  onTog(cb);
+  if (!cb.checked) {
+    snapshotBaselineIfNeeded();
+    mark("en_manual_sensor_digital_gain", 0);
+    previewLive("en_manual_sensor_digital_gain", 0, true);
+  }
+}
+
 function setSettingValue(id, val) {
   const sl = document.getElementById(id);
   if (!sl) return;
@@ -1515,6 +1526,8 @@ async function reloadControlValues() {
   if (!r.ok) throw new Error("HTTP " + r.status);
   applyValuesToUI(await r.json());
   pending = {};
+  // Drop the pre-reset baseline too, or Undo restores the old tuning.
+  previewBaseline = null;
   updateCmd();
 }
 

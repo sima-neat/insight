@@ -1035,7 +1035,7 @@ def _start_producer(width=None, height=None):
     # oldest queued frame rather than allowing seconds of stale video to build.
     frame_queue = queue.Queue(maxsize=max(2, num_encoders))
     jpeg_lock = threading.Lock()
-    latest_jpeg = {"seq": 0, "data": None}
+    latest_jpeg = {"seq": 0, "data": None, "ts": None}
 
     def _enqueue_latest(item):
         try:
@@ -1141,6 +1141,7 @@ def _start_producer(width=None, height=None):
                 if seq > latest_jpeg["seq"]:
                     latest_jpeg["seq"] = seq
                     latest_jpeg["data"] = jpg.tobytes()
+                    latest_jpeg["ts"] = time.monotonic()
                     _record_frame()
 
     threads = [threading.Thread(target=reader, daemon=True)]
@@ -1213,8 +1214,16 @@ def _ensure_producer():
         prod = _producer
         if prod is not None:
             if not prod["stop"].is_set() and prod["proc"].poll() is None:
-                return prod
-            log.info("stream: producer died, rebuilding")
+                # Alive is not healthy: a process that published frames and
+                # then went silent past the stall timeout must be replaced,
+                # or every watchdog reconnect re-attaches to a dead stream.
+                # ts None = still starting up, never killed for that.
+                ts = prod["latest_jpeg"].get("ts")
+                if ts is None or time.monotonic() - ts <= STREAM_STALL_TIMEOUT:
+                    return prod
+                log.info("stream: producer alive but stalled, rebuilding")
+            else:
+                log.info("stream: producer died, rebuilding")
     # Tear down only the exact producer observed above (expected=prod, so a
     # genuinely stale producer is still reaped rather than leaked with its
     # exclusive camera lease). Concurrent requests can both see the same dead
@@ -1225,6 +1234,9 @@ def _ensure_producer():
         _stop_producer(expected=prod)
     with _producer_lock:
         if _producer is None:
+            # The post-start restore runs after every rebuild, not only
+            # camera switches — gate /api/controls until it finishes.
+            _camera_controls_ready.clear()
             _producer = _start_producer()
             reset_fps_session()
         return _producer
@@ -1895,6 +1907,60 @@ CAMERA_SETTINGS_FILE = os.environ.get(
     "SIMA_MIPI_UTIL_CAMERA_SETTINGS_FILE",
     "/var/lib/sima-mipi-util/camera-settings.json",
 )
+STREAM_SETTINGS_FILE = os.environ.get(
+    "SIMA_MIPI_UTIL_STREAM_SETTINGS_FILE",
+    "/var/lib/sima-mipi-util/stream-settings.json",
+)
+
+
+def _save_stream_settings():
+    """Persist the Settings panel across service restarts — the UI advertises
+    that a restart applies num_encoders, which is only true if it survives."""
+    try:
+        with _lock:
+            snapshot = dict(stream_config)
+        path = Path(STREAM_SETTINGS_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(snapshot, fh, sort_keys=True, indent=2)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except Exception as ex:
+        log.warning("could not persist stream settings to %s: %s",
+                    STREAM_SETTINGS_FILE, ex)
+
+
+def _load_stream_settings():
+    """Restore persisted stream settings, validating each value against the
+    same bounds /api/settings enforces; anything invalid keeps its default."""
+    try:
+        with open(STREAM_SETTINGS_FILE, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+    except FileNotFoundError:
+        return
+    except Exception as ex:
+        log.warning("ignoring unreadable stream settings file: %s", ex)
+        return
+    if not isinstance(loaded, dict):
+        return
+    for key, (lo, hi) in _STREAM_CONFIG_BOUNDS.items():
+        try:
+            val = int(loaded.get(key))
+        except (TypeError, ValueError):
+            continue
+        if lo <= val <= hi:
+            stream_config[key] = val
 
 def _save_desired_settings(snapshot=None):
     """Atomically persist camera-specific intent across service/device restarts."""
@@ -2015,6 +2081,7 @@ def forget_desired(camera=None):
     _save_desired_settings(snapshot)
 
 _load_desired_settings()
+_load_stream_settings()
 
 
 # ── Re-apply audit log ──────────────────────────────────────────────────────
@@ -2204,11 +2271,22 @@ def _detect_one(c):
         return {"supported": False, "reason": "unreadable"}
     test_val = _pick_test_value(meta, original)
     step = abs(test_val - original) or 1
-    ok, err = _v4l2_set_routed(c, test_val)
+    # sdev_digital_gain on imx568 is gated by an internal lock the raw routed
+    # write bypasses — probe through the same lock-aware setter /api/set uses.
+    # _do_set_verified never _remember()s, so the probe is not persisted.
+    if c == "sdev_digital_gain":
+        orig_lock = _get_with_retry("en_manual_sensor_digital_gain")
+        setter = _do_set_verified
+    else:
+        orig_lock = None
+        setter = _v4l2_set_routed
+    ok, err = setter(c, test_val)
     readback = _get_with_retry(c) if ok else None
     supported = bool(ok and readback is not None
                      and _values_roughly_match(meta, readback, test_val, cap=step / 2))
-    _v4l2_set_routed(c, original)
+    setter(c, original)
+    if c == "sdev_digital_gain" and orig_lock is not None and orig_lock != 1:
+        v4l2_set("en_manual_sensor_digital_gain", orig_lock)
     return {"supported": supported}
 
 @app.route("/api/detect_capabilities", methods=["POST"])
@@ -2543,6 +2621,8 @@ def api_settings():
                 return jsonify({"ok": False, "error": f"{key} must be between {lo} and {hi}"}), 400
             stream_config[key] = val
             updated[key] = val
+    if updated:
+        _save_stream_settings()
     log.info("settings updated: %s", updated)
     return jsonify({"ok": True, "settings": stream_config,
                      "note": "target_fps and jpeg_quality apply immediately; num_encoders applies on the next producer rebuild",

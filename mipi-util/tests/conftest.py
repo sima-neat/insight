@@ -44,6 +44,13 @@ def _mock_hw(monkeypatch, tmp_path):
         camera_api, "CAMERA_SETTINGS_FILE",
         str(tmp_path / "camera-settings.json"),
     )
+    monkeypatch.setattr(
+        camera_api, "STREAM_SETTINGS_FILE",
+        str(tmp_path / "stream-settings.json"),
+    )
+    camera_api.stream_config.update(
+        {"jpeg_quality": 85, "num_encoders": 6,
+         "diag_interval_ms": 4000, "target_fps": 30})
     with camera_api._desired_lock:
         camera_api._desired_by_camera.clear()
         camera_api._desired_by_camera.update({"imx477": {}, "imx568": {}})
