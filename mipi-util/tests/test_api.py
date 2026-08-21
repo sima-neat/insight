@@ -676,7 +676,10 @@ def test_absent_camera_node_is_rejected_without_mutation(client, token, api, mon
     api.state["control_device"] = "/dev/video0out"
     monkeypatch.setattr(api, "discover_cameras",
                         lambda: [{"device": "/dev/video0"}, {"device": "/dev/video1"}])
-    monkeypatch.setattr(api, "list_out_devices", lambda: ["/dev/video0out"])
+    # Real list_out_devices() returns dicts — the mock must match its shape,
+    # or the test validates an assumption instead of the code.
+    monkeypatch.setattr(api, "list_out_devices",
+                        lambda: [{"device": "/dev/video0out"}])
 
     r = client.post("/api/device", json={"camera": "/dev/video999"},
                     headers={"X-Auth-Token": token})
@@ -706,3 +709,33 @@ def test_incomplete_reset_preserves_remembered_settings(client, token, api, monk
 
     assert r.get_json()["ok"] is False
     assert not forgotten, "failed reset must not discard remembered settings"
+
+
+# ── A present control_device must be accepted (dict-vs-string regression) ─────
+def test_valid_control_device_is_accepted(client, token, api, monkeypatch):
+    api.state["stream_device"] = "/dev/video0"
+    api.state["control_device"] = "/dev/video0out"
+    monkeypatch.setattr(api, "discover_cameras",
+                        lambda: [{"device": "/dev/video0"}])
+    monkeypatch.setattr(api, "list_out_devices",
+                        lambda: [{"device": "/dev/video0out"}])
+
+    r = client.post("/api/device", json={"control_device": "/dev/video0out"},
+                    headers={"X-Auth-Token": token})
+
+    assert r.status_code == 200
+    assert r.get_json()["ok"] is True
+
+
+# ── Stream settings apply atomically ──────────────────────────────────────────
+def test_mixed_settings_request_applies_nothing(client, token, api):
+    before = dict(api.stream_config)
+
+    r = client.post("/api/settings",
+                    json={"jpeg_quality": 50, "num_encoders": "bad"},
+                    headers={"X-Auth-Token": token})
+
+    assert r.status_code == 400
+    assert api.stream_config == before          # valid prefix did not apply
+    import os as _os
+    assert not _os.path.exists(api.STREAM_SETTINGS_FILE)   # nothing persisted

@@ -1376,7 +1376,8 @@ def api_set_device():
     if "control_device" in data and (not isinstance(cd, str)
                                      or not _CONTROL_DEV_RE.match(cd)):
         return jsonify({"ok": False, "error": "invalid control device"}), 400
-    if "control_device" in data and cd not in list_out_devices():
+    if "control_device" in data and cd not in {d["device"]
+                                               for d in list_out_devices()}:
         return jsonify({"ok": False,
                         "error": f"control device {cd} is not available"}), 400
     with _lock:
@@ -2619,19 +2620,22 @@ def api_settings():
     data, error = _json_object()
     if error:
         return error
+    # Validate the complete request before mutating anything: a valid prefix
+    # must not take effect while a later invalid key makes the save report
+    # failure (applied in memory yet never persisted).
     updated = {}
+    for key, (lo, hi) in _STREAM_CONFIG_BOUNDS.items():
+        if key not in data:
+            continue
+        try:
+            val = int(data[key])
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": f"{key} must be an integer"}), 400
+        if not (lo <= val <= hi):
+            return jsonify({"ok": False, "error": f"{key} must be between {lo} and {hi}"}), 400
+        updated[key] = val
     with _lock:
-        for key, (lo, hi) in _STREAM_CONFIG_BOUNDS.items():
-            if key not in data:
-                continue
-            try:
-                val = int(data[key])
-            except (TypeError, ValueError):
-                return jsonify({"ok": False, "error": f"{key} must be an integer"}), 400
-            if not (lo <= val <= hi):
-                return jsonify({"ok": False, "error": f"{key} must be between {lo} and {hi}"}), 400
-            stream_config[key] = val
-            updated[key] = val
+        stream_config.update(updated)
     if updated:
         _save_stream_settings()
     log.info("settings updated: %s", updated)
