@@ -25,14 +25,10 @@ The Vulcan package bundles the .deb plus install_sima_mipi_util.py
 (from scripts/install-vulcan-sima-mipi-util.py), which installs it via apt so
 the runtime dependencies in DEBIAN/control are pulled in.
 
-Manual equivalent (no script), for reference
---------------------------------------------
-  VERSION=$(awk -F': ' '/^Version:/{print $2}' DEBIAN/control)
-  rm -rf build
-  mkdir -p build/usr/share/sima-mipi-util build/usr/bin build/lib/systemd/system
-  cp source/camera_api.py source/camera_ui.html build/usr/share/sima-mipi-util/
-  cp source/sima-mipi-util                       build/usr/bin/
-  cp source/sima-mipi-util.service               build/lib/systemd/system/
-  cp -r DEBIAN                                    build/
-  chmod 0755 build/DEBIAN/postinst build/DEBIAN/prerm build/DEBIAN/postrm build/usr/bin/sima-mipi-util
-  dpkg-deb --build build "sima-mipi-util_${VERSION}_arm64.deb"
+Manual builds
+-------------
+There is no maintained step-by-step recipe: postinst verifies the bundled
+wheel set (usr/share/sima-mipi-util/wheels/ with SHA256SUMS and PYTHON_TAG,
+plus requirements-runtime.txt) at install time, so a hand-rolled layout
+that skips them fails to configure. ./build-deb.sh stages everything —
+read it for the exact steps if you need them.

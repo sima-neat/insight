@@ -74,7 +74,9 @@ DEB="$OUT_DIR/sima-mipi-util_${VERSION}_arm64.deb"
 if command -v fakeroot >/dev/null 2>&1; then
   fakeroot dpkg-deb --build "$STAGE" "$DEB" >&2
 else
-  dpkg-deb --build "$STAGE" "$DEB" >&2
+  # Without fakeroot the archive would inherit the builder's UID/GID, leaving
+  # the root service's files writable by a matching non-root account.
+  dpkg-deb --root-owner-group --build "$STAGE" "$DEB" >&2
 fi
 
 echo "$DEB"

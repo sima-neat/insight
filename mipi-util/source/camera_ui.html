@@ -2143,6 +2143,10 @@ async function onFullscreenChange() {
     if (isFs) {
       const r = await fetch(api("/api/settings"));
       const d = await r.json();
+      // Fullscreen may have been exited while that GET was in flight — the
+      // exit handler already ran with nothing to restore, so bumping (and
+      // persisting) quality now would leave 95 stuck permanently.
+      if (!(document.fullscreenElement || document.webkitFullscreenElement)) return;
       _preFullscreenQuality = d.jpeg_quality;
       if (d.jpeg_quality < 95) {
         await fetch(api("/api/settings"), {
