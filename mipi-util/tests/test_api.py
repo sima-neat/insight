@@ -787,3 +787,19 @@ def test_preset_and_reset_work_without_camera_field(client, token, api):
     for path in ("/api/preset/daylight", "/api/reset"):
         r = client.post(path, headers={"X-Auth-Token": token})
         assert r.status_code == 200, path
+
+
+# ── HEAD /api/stream must not claim the camera lease (P1) ─────────────────────
+def test_head_stream_does_not_claim_camera_lease(client, api, token):
+    r = client.head("/api/stream?client_id=head-probe")
+    assert r.status_code == 200
+
+    with api._camera_access_lock:
+        assert api._camera_access_owner is None
+
+    # A different client can still write — nothing got pinned.
+    r = client.post("/api/set", json={"control": "system_saturation_target",
+                                      "value": 140},
+                    headers={"X-Auth-Token": token,
+                             "X-Camera-Client": "browser-a"})
+    assert r.status_code != 423

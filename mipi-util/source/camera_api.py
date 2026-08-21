@@ -1433,6 +1433,12 @@ def api_set_device():
 @app.route("/api/stream")
 def api_stream():
     global _camera_access_owner
+    # HEAD never consumes the response body, so the stream generator's
+    # finally-block lease release would never run — a proxy or health checker
+    # issuing HEAD would pin the camera lease until a service restart. Answer
+    # it before claiming anything.
+    if request.method == "HEAD":
+        return Response(mimetype="multipart/x-mixed-replace; boundary=frame")
     # The ?device= parameter is ADVISORY. It is still format-validated (reject a
     # malformed device string defensively rather than trusting client input),
     # but a value that merely disagrees with the currently selected camera is
