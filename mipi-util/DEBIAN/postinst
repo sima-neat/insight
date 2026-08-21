@@ -1,0 +1,117 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  configure)
+    APP_DIR=/usr/share/sima-mipi-util
+    VENV_DIR=/opt/sima-mipi-util/venv
+    WHEEL_DIR="$APP_DIR/wheels"
+
+    if [ ! -f "$APP_DIR/requirements-runtime.txt" ] || [ ! -f "$WHEEL_DIR/SHA256SUMS" ] \
+        || [ ! -f "$WHEEL_DIR/PYTHON_TAG" ]; then
+        echo "ERROR: bundled Python dependencies are missing." >&2
+        exit 1
+    fi
+    (cd "$WHEEL_DIR" && sha256sum -c SHA256SUMS >/dev/null)
+
+    # The wheelhouse targets one CPython ABI and installs offline; a
+    # mismatched device interpreter would fail deep inside pip instead.
+    WANT_PY=$(cat "$WHEEL_DIR/PYTHON_TAG")
+    HAVE_PY=$(python3 -c 'import sys; print("%d%d" % sys.version_info[:2])')
+    if [ "$WANT_PY" != "$HAVE_PY" ]; then
+        echo "ERROR: bundled wheels target CPython $WANT_PY but this device runs $HAVE_PY." >&2
+        echo "Rebuild with MIPI_PYTHON_VERSION=$HAVE_PY scripts/prepare-mipi-python-deps.sh" >&2
+        exit 1
+    fi
+
+    # Rebuild the package-owned environment on every install/upgrade. System
+    # site packages expose the Debian-provided OpenCV and NumPy modules, while
+    # Flask and Waitress are installed solely from the bundled wheelhouse.
+    install -d -m 0755 /opt/sima-mipi-util
+    python3 -m venv --clear --system-site-packages "$VENV_DIR"
+    "$VENV_DIR/bin/python" -m pip install \
+        --no-index \
+        --find-links "$WHEEL_DIR" \
+        --requirement "$APP_DIR/requirements-runtime.txt"
+    "$VENV_DIR/bin/python" -c 'import cv2, flask, numpy, waitress'
+
+    # Provision authentication before the systemd check so the documented
+    # manual launcher remains usable on hosts without service management.
+    install -d -m 0755 /etc/sima-mipi-util
+    if [ ! -s /etc/sima-mipi-util/token ]; then
+        ( umask 077; head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' > /etc/sima-mipi-util/token )
+        chmod 600 /etc/sima-mipi-util/token
+    fi
+    TOKEN=$(cat /etc/sima-mipi-util/token 2>/dev/null || echo "<unreadable>")
+
+    # systemd may be absent (containers/chroots/build hosts). Don't fail the
+    # install — just skip service management and say how to run it manually.
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo "systemd not detected; skipping service setup."
+        echo "Run manually with: sima-mipi-util"
+        echo "API token: ${TOKEN}"
+        exit 0
+    fi
+
+    systemctl daemon-reload
+    systemctl enable sima-mipi-util.service >/dev/null
+    systemctl restart sima-mipi-util.service
+    systemctl is-active --quiet sima-mipi-util.service
+
+    # Do not let dpkg/sima-cli report success until the application itself is
+    # healthy. The check is bounded so installation cannot hang indefinitely.
+    "$VENV_DIR/bin/python" - <<'PYEOF'
+import json
+import sys
+import time
+import urllib.request
+
+for _ in range(30):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:5000/api/health", timeout=2) as response:
+            payload = json.load(response)
+        if payload.get("status") == "ok":
+            break
+    except Exception:
+        pass
+    time.sleep(1)
+else:
+    sys.exit("sima-mipi-util health endpoint did not become ready")
+PYEOF
+
+    IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+    echo ""
+    echo "============================================="
+    # Ask the running service what camera it sees — /api/cameras is a read
+    # endpoint (no token needed) and reuses the same detection the UI does.
+    CAM_INFO=$("$VENV_DIR/bin/python" - <<'PYEOF'
+import json, urllib.request, time
+info = "Could not determine camera status (service did not respond)"
+for _ in range(5):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:5000/api/cameras", timeout=2) as r:
+            d = json.load(r)
+        cams = d.get("cameras", [])
+        if cams:
+            c = cams[0]
+            info = "Camera detected: {} ({})".format(c.get("name", "unknown"), c.get("device", "?"))
+        else:
+            info = "No camera detected - Live View will not work until a camera is connected"
+        break
+    except Exception:
+        time.sleep(1)
+print(info)
+PYEOF
+    )
+    echo "  SiMa.ai MIPI Camera Utility installed"
+    echo "  ${CAM_INFO}"
+    echo "  Open browser: http://${IP}:5000"
+    echo "  ---------------------------------------------"
+    echo "  API token (required to change settings from the UI):"
+    echo "    ${TOKEN}"
+    echo "============================================="
+    echo ""
+    ;;
+esac
+exit 0
