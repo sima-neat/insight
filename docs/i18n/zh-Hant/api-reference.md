@@ -48,7 +48,7 @@ curl -k -H "Content-Type: application/json" \
 ## 回應和串流協定
 
 - 大多數端點都會傳回 JSON。錯誤通常會使用 `{"error": "message"}`，並搭配 HTTP 錯誤狀態碼。
-- 上傳和匯入會傳回 `text/plain` 顯示即時進度，而非單一進度。 JSON 物件。
+- 上傳和匯入會以 `text/plain` 串流傳回處理進度，而不是傳回單一 JSON 物件。
 - `/api/neat-metrics` 是一種由伺服器推送的事件串流。
 - MJPEG 預覽和來源端點會傳回多部分影像串流。
 - 媒體和工作區的原始檔案端點會傳回所要求的二進位內容。
