@@ -1,0 +1,18 @@
+[Unit]
+Description=SiMa.ai MIPI Camera Utility — Modalix ISP Web UI
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/share/sima-mipi-util
+Environment=SIMA_MIPI_UTIL_REQUIRE_AUTH=1
+ExecStart=/opt/sima-mipi-util/venv/bin/python /usr/share/sima-mipi-util/camera_api.py
+KillMode=control-group
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/sima-mipi-util.log
+StandardError=append:/var/log/sima-mipi-util.log
+
+[Install]
+WantedBy=multi-user.target
