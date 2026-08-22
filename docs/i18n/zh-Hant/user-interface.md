@@ -21,7 +21,7 @@ Insight 的設計是以您在驗證視覺應用程式時所執行的開發任務
 
 工作區在應用程式產生多個建置輸出和日誌時特別有用。它提供一種可透過瀏覽器存取的檢視方式，讓您可以在相同的開發階段中檢查這些構件。
 
-![ Insight 工作區檢視，顯示流程序列圖和工作區構件。](images/insight-workspace-overview.png)
+![ Insight 工作區檢視，顯示流程序列圖和工作區構件。](../../images/insight-workspace-overview.png)
 
 ## 媒體來源
 
@@ -31,7 +31,7 @@ Insight 的設計是以您在驗證視覺應用程式時所執行的開發任務
 
 在設定串流傳輸來源之前，請使用「媒體來源」，這樣您就可以知道有哪些檔案可用、Insight 偵測到哪些編碼器，以及它們是否可讀。
 
-![ Insight 媒體來源檢視畫面，顯示選取的影片預覽和媒體中繼資料。](images/insight-media-library.png)
+![ Insight 媒體來源檢視畫面，顯示選取的影片預覽和媒體中繼資料。](../../images/insight-media-library.png)
 
 「媒體來源」將檔案選擇、預覽、中繼資料檢查、上傳和刪除操作整合在一個檢視畫面中。
 
@@ -73,7 +73,7 @@ Insight 會從已指派的媒體中選擇編解碼器和傳輸選項：
 
 當您需要針對物件偵測、分割、追蹤、分類或 GenAI 視覺應用程式，建立可重複的輸入串流時，這個檢視畫面會很有用。
 
-![ Insight 串流來源檢視畫面，顯示已指派的來源插槽和來源預覽。](images/insight-rtsp-source.png)
+![ Insight 串流來源檢視畫面，顯示已指派的來源插槽和來源預覽。](../../images/insight-rtsp-source.png)
 
 「串流來源」檢視畫面可讓您將媒體檔案指派給來源插槽，啟動或停止串流，複製作用中的串流 URL，並在將其連接到應用程式之前預覽所選的來源。
 
@@ -101,7 +101,7 @@ metadata: UDP 9100 + N
 - 疊圖會與影片畫面對齊。
 - 瀏覽器播放功能運作正常。
 
-![ Insight 影片檢視器顯示一個四通道 WebRTC 網格。](images/insight-video-viewer.png)
+![ Insight 影片檢視器顯示一個四通道 WebRTC 網格。](../../images/insight-video-viewer.png)
 
 影片檢視器可以一次顯示一個或多個通道，並提供分頁和通道選擇控制項，以便進行更大規模的多串流測試。
 

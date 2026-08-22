@@ -8,7 +8,7 @@ sidebar_position: 5
 
 Insightは、通常動作中に複数のポートを使用します。デフォルトのポートは、SDKコンテナー内または直接インストールされたDevKitで使用されるポートです。Neat開発環境では、SDKはこれらのサービスをホストポートに公開します。デフォルトのホストポートがすでに使用されている場合、`sima-cli`を使用して、別の利用可能なホストポートを割り当てることができます。
 
-![ブラウザクライアント、Modalix DevKit、SDKホストマシン、およびSDKコンテナー間のInsightポートとネットワークパス。](images/insight-ports-network.jpg)
+![ブラウザクライアント、Modalix DevKit、SDKホストマシン、およびSDKコンテナー間のInsightポートとネットワークパス。](../../images/insight-ports-network.jpg)
 
 | ポートマップ名 | デフォルトのポートまたはポート範囲 | プロトコル | 目的 |
 | --- | --- | --- | --- |

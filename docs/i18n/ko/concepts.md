@@ -10,7 +10,7 @@ Insight 애플리케이션을 구축하고 테스트하는 동안 애플리케�
 
 다음은 Neat 개발 환경, Insight 또한 테스트 미디어 서비스 역할도 합니다. 업로드된 미디어를 스트리밍 소스로 변환하고 애플리케이션 출력을 통해 렌더링할 수 있습니다. WebRTC 비디오 뷰어입니다. 애플리케이션이 SDK 컨테이너 외부에서 실행될 때, 예를 들어 다음과 같은 경우에 사용됩니다. DevKit다음에서 SDK 포트 맵을 사용하세요. `neat --json` 외부 클라이언트가 사용해야 하는 호스트 포트를 찾습니다.
 
-![Neat Insight 개발 루프는 작업 공간 검사, 스트리밍 소스 설정, 애플리케이션 출력, WebRTC 보기 및 런타임 진단을 보여줍니다.](images/insight-development-loop.jpg)
+![Neat Insight 개발 루프는 작업 공간 검사, 스트리밍 소스 설정, 애플리케이션 출력, WebRTC 보기 및 런타임 진단을 보여줍니다.](../../images/insight-development-loop.jpg)
 
 일반적인 루프는 다음과 같습니다.
 

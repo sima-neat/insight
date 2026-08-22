@@ -6,6 +6,8 @@ sidebar_position: 4
 
 # 常見工作流程
 
+<a id="import-standard-test-videos"></a>
+
 ## 匯入標準測試影片
 
 當您需要用於範例、煙霧測試或多串流驗證的可重複媒體時，請使用標準影片素材：

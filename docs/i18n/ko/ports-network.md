@@ -8,7 +8,7 @@ sidebar_position: 5
 
 Insight는 일반적인 작동 중에 여러 포트를 사용합니다. 기본 포트는 SDK 컨테이너 내부 또는 직접 설치된 DevKit에서 사용되는 포트입니다. Neat 개발 환경에서 SDK는 해당 서비스를 호스트 포트에 게시합니다. 기본 호스트 포트가 이미 사용 중인 경우, `sima-cli`는 다른 사용 가능한 호스트 포트를 할당할 수 있습니다.
 
-![ 브라우저 클라이언트, Modalix DevKit, SDK 호스트 머신, SDK 컨테이너 간의 Insight 포트 및 네트워크 경로.](images/insight-ports-network.jpg)
+![ 브라우저 클라이언트, Modalix DevKit, SDK 호스트 머신, SDK 컨테이너 간의 Insight 포트 및 네트워크 경로.](../../images/insight-ports-network.jpg)
 
 | 포트 맵 이름 | 기본 포트 또는 포트 범위 | 프로토콜 | 목적 |
 | --- | --- | --- | --- |

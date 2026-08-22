@@ -10,7 +10,7 @@ Insight 會在你建置和測試應用程式時，與你的應用程式並排運
 
 在 Neat 開發環境中，Insight 也會充當測試媒體服務。它可以將上傳的媒體轉換為串流來源，並透過 WebRTC 視訊檢視器來呈現應用程式的輸出。當應用程式在 SDK 容器外部執行時（例如在 DevKit 上），請使用來自 `neat --json` 的 SDK 埠對應，以找出外部用戶端應使用的主機埠。
 
-![ Neat Insight 開發迴圈，展示工作區檢視、串流來源設定、應用程式輸出、WebRTC 檢視和執行階段診斷功能。](images/insight-development-loop.jpg)
+![ Neat Insight 開發迴圈，展示工作區檢視、串流來源設定、應用程式輸出、WebRTC 檢視和執行階段診斷功能。](../../images/insight-development-loop.jpg)
 
 典型的迴圈如下：
 

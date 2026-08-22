@@ -8,7 +8,7 @@ sidebar_position: 5
 
 Insight 在正常運作期間會使用多個埠。預設埠是 SDK 容器內部或直接安裝的 DevKit 中使用的埠。在 Neat 開發環境中，SDK 會將這些服務發佈到主機埠。如果預設主機埠已經在使用中，`sima-cli` 可以分配另一個可用的主機埠。
 
-![ Insight 埠和網路路徑，連接瀏覽器客戶端、Modalix DevKit、SDK 主機機器和 SDK 容器。](images/insight-ports-network.jpg)
+![ Insight 埠和網路路徑，連接瀏覽器客戶端、Modalix DevKit、SDK 主機機器和 SDK 容器。](../../images/insight-ports-network.jpg)
 
 | 埠對應名稱 | 預設的連接埠或範圍 | 協定 | 目的 |
 | --- | --- | --- | --- |
