@@ -1,5 +1,7 @@
 # neat-insight
 
+**Documentation:** [English](docs/index.md) | [한국어](docs/i18n/ko/index.md) | [日本語](docs/i18n/ja/index.md) | [繁體中文](docs/i18n/zh-Hant/index.md) | [Українська](docs/i18n/uk/index.md)
+
 [![Vulcan CI](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml/badge.svg)](https://github.com/sima-neat/insight/actions/workflows/vulcan-ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 

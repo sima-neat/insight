@@ -1,0 +1,14 @@
+{
+  "sourceDir": "docs",
+  "translationDir": "docs/i18n/{locale}",
+  "manifest": "docs/i18n/translation-sources.json",
+  "excludedPrefixes": ["docs/i18n/"],
+  "canonicalTerms": ["SiMa.ai", "Insight", "Neat", "Neat SDK", "Modalix", "DevKit", "MLSoC", "WebRTC", "RTSP", "OpenAPI", "Swagger", "JSON", "UDP", "RTP", "Linux"],
+  "locales": {
+    "ko": {"name": "Korean", "code": "ko", "terms": {"workspace": "작업 공간", "runtime": "런타임", "media source": "미디어 소스"}},
+    "ja": {"name": "Japanese", "code": "ja", "terms": {"workspace": "ワークスペース", "runtime": "ランタイム", "media source": "メディアソース"}},
+    "zh-Hant": {"name": "Traditional Chinese (Taiwan)", "code": "zh-Hant-TW", "terms": {"workspace": "工作區", "runtime": "執行階段", "media source": "媒體來源"}},
+    "uk": {"name": "Ukrainian (Ukraine)", "code": "uk-UA", "terms": {"workspace": "робочий простір", "runtime": "середовище виконання", "media source": "джерело медіа"}}
+  },
+  "provider": {"type": "ollama", "model": "translategemma:27b", "endpoint": "http://127.0.0.1:11434/api/chat", "timeoutMs": 300000}
+}
