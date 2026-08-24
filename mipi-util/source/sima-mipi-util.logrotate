@@ -1,0 +1,14 @@
+# Rotate the sima-mipi-util application log so it can't fill the device's disk.
+# The service holds the file open (systemd StandardOutput=append:), so use
+# copytruncate — logrotate copies then truncates in place, no service restart
+# and no lost file handle.
+/var/log/sima-mipi-util.log {
+    weekly
+    rotate 4
+    size 10M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}

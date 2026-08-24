@@ -1,0 +1,2207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SiMa.ai MIPI Camera Utility</title>
+<script>
+(function(){
+  var saved = localStorage.getItem("sima-theme") || "light";
+  document.documentElement.setAttribute("data-theme", saved);
+})();
+</script>
+<style>
+:root{
+  --bg:#f5f7fa;
+  --panel:#ffffff;
+  --panel-2:#eef2f7;
+  --panel-3:#e3e9f0;
+  --line:#d7dfe8;
+  --line-soft:#e5eaf0;
+  --text:#12151a;
+  --muted:#5b6472;
+  --faint:#8b95a3;
+  --accent:#5998DD;
+  --accent-2:#1e3a5f;
+  --green:#1a9d4b;
+  --amber:#d98a1f;
+  --danger:#dc3545;
+  --sidebar:260px;
+}
+
+[data-theme="dark"]{
+  --bg:#0B1220;
+  --panel:#101a2c;
+  --panel-2:#152238;
+  --panel-3:#1b2b45;
+  --line:#26375a;
+  --line-soft:#1b2740;
+  --text:#f0f3f7;
+  --muted:#a3adba;
+  --faint:#687585;
+  --accent:#5998DD;
+  --accent-2:#1e3a5f;
+  --accent-light:#7ab8f0;
+  --green:#4ade80;
+  --amber:#ffa32b;
+  --danger:#ff5d66;
+}
+[data-theme="dark"] .sima-word{fill:var(--text)}
+[data-theme="dark"] .sima-watermark svg{opacity:.09}
+[data-theme="dark"] body{
+  background:
+    radial-gradient(circle at 74% 16%,rgba(89,152,221,.08),transparent 31%),
+    linear-gradient(135deg,#0B1220 0%,#0e1830 54%,#0a1320 100%);
+}
+[data-theme="dark"] .sidebar{background:linear-gradient(180deg,rgba(21,34,56,.93) 0%,rgba(11,18,32,.93) 100%)}
+[data-theme="dark"] .brand-sub{color:#c6ced9}
+[data-theme="dark"] .nav-item{color:#c6ced9}
+[data-theme="dark"] .nav-icon{color:#d7dce4}
+[data-theme="dark"] .side-btn{background:#0d141d;color:white}
+[data-theme="dark"] .version{color:#8b95a3}
+[data-theme="dark"] .main{background:rgba(8,12,18,.7)}
+[data-theme="dark"] .camera-select{background:#0d131b;color:#dce2ea}
+[data-theme="dark"] .stream-pill{color:#55d979}
+[data-theme="dark"] .metric-value{color:white}
+[data-theme="dark"] .bar{background:#252e3b}
+[data-theme="dark"] .icon-btn{color:#eef2f6}
+[data-theme="dark"] .panel{
+  background:linear-gradient(180deg,rgba(22,30,40,.9),rgba(11,17,24,.9));
+  box-shadow:0 18px 40px rgba(0,0,0,.18);
+}
+[data-theme="dark"] .section-title{color:#cbd3df}
+[data-theme="dark"] .info-box{background:#0d141d}
+[data-theme="dark"] .kv-value{color:white}
+[data-theme="dark"] .sensor-list{background:#0d141d}
+[data-theme="dark"] .hist-box{background:#0d141d}
+[data-theme="dark"] .mini-title{color:#cbd3df}
+[data-theme="dark"] .host-input,[data-theme="dark"] .cmd-box{background:#0b1118;color:#dce2ea}
+[data-theme="dark"] .tabs{background:#0d131b}
+[data-theme="dark"] .tab{color:#c5ced9}
+[data-theme="dark"] .card{background:linear-gradient(180deg,rgba(16,24,33,.9),rgba(11,17,24,.9))}
+[data-theme="dark"] .card-head{background:linear-gradient(180deg,rgba(29,38,50,.92),rgba(21,29,39,.92))}
+[data-theme="dark"] .card-title{color:white}
+[data-theme="dark"] .ctrl-lbl{color:#e0e5ec}
+[data-theme="dark"] input[type=range]{
+  background:linear-gradient(to right,var(--accent) 0%,var(--accent) var(--fill,50%),#29313d var(--fill,50%),#29313d 100%);
+}
+[data-theme="dark"] .num,[data-theme="dark"] .sel-ctrl{background:#0d141d;color:white}
+[data-theme="dark"] .tog-sl{background:#2a3340}
+[data-theme="dark"] .toast{background:#111923;color:white;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+[data-theme="dark"] .toast.ok{background:#10241a;border-color:#3d9b5d;color:#8ee6ac}
+[data-theme="dark"] .toast.err{background:#2b1317;border-color:#bd3a48;color:#ff9aa3}
+[data-theme="dark"] .toast.warn{background:#2c2110;border-color:#b97921;color:#ffcd85}
+[data-theme="dark"] .toast.info{background:#111923;border-color:var(--line)}
+[data-theme="dark"] .modal{background:#101821;color:white}
+[data-theme="dark"] .modal-close,[data-theme="dark"] .btn-cancel,[data-theme="dark"] .btn-confirm,[data-theme="dark"] .btn-reboot{background:#0b1118;color:white}
+[data-theme="dark"] .cam-item{background:#0b1118}
+[data-theme="dark"] .spin{border-color:#26313f}
+[data-theme="dark"] .cam-dropdown{background:#0d131b;box-shadow:0 10px 32px rgba(0,0,0,.55)}
+
+*{box-sizing:border-box}
+body,.sidebar,.panel,.card,.card-head,.tabs,.tab,.toast,.modal,.cam-dropdown,
+.num,.sel-ctrl,.host-input,.cmd-box,.side-btn,.icon-btn,
+.camera-select,.info-box,.sensor-list,.hist-box,.bar,.nav-item{
+  transition:background-color .25s ease,background .25s ease,color .2s ease,border-color .2s ease,box-shadow .2s ease;
+}
+html,body{height:100%}
+body{
+  margin:0;
+  overflow:auto;
+  background:
+    radial-gradient(circle at 74% 16%,rgba(89,152,221,.06),transparent 31%),
+    linear-gradient(135deg,#ffffff 0%,#f5f8fc 54%,#eef2f7 100%);
+  color:var(--text);
+  font-family:Inter,"Segoe UI",Arial,sans-serif;
+  font-size:14px;
+}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.app{min-height:100%;display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr);position:relative;z-index:1}
+.sima-watermark{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:0;overflow:hidden}
+.sima-watermark svg{width:min(85vw,1200px);height:auto;opacity:.07}
+.sidebar{
+  background:linear-gradient(180deg,rgba(255,255,255,.93) 0%,rgba(243,246,250,.93) 100%);
+  border-right:1px solid var(--line);
+  padding:22px 14px;
+  display:flex;
+  flex-direction:column;
+}
+.brand{margin:0 6px 24px}
+.brand-rule{height:1px;margin-top:18px;background:var(--line)}
+.brand-name{font-size:20px;letter-spacing:.5px;font-weight:800;line-height:1}
+.brand-sub{margin-top:8px;color:#4a5568;display:flex;gap:8px;align-items:center}
+.sima-badge{display:inline-flex;align-items:center;margin-bottom:12px;text-decoration:none;cursor:pointer;transition:transform .1s ease,opacity .1s ease;opacity:.92}
+.sima-badge:hover{transform:translateY(-1px);opacity:1}
+.sima-badge svg{display:block}
+.sima-word{fill:var(--text)}
+.pro{font-size:10px;font-weight:800;letter-spacing:.8px;padding:3px 6px;border-radius:4px;background:linear-gradient(135deg,#1e3a5f,#5998DD);color:white}
+.active-camera{
+  margin-bottom:14px;
+  padding:16px;
+  border:1px solid rgba(89,152,221,.3);
+  border-radius:7px;
+  background:linear-gradient(135deg,rgba(89,152,221,.14),rgba(89,152,221,.03));
+}
+.eyebrow{font-size:13px;color:var(--accent);font-weight:800;margin-bottom:10px}
+.camera-title{font-size:17px;margin-bottom:10px}
+.status-line{display:flex;align-items:center;gap:8px;color:var(--green)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--faint);display:inline-block}
+.dot.on{background:var(--green);box-shadow:0 0 14px rgba(99,217,130,.65)}
+.dot.err{background:var(--danger)}
+.dot.wait{background:var(--amber);animation:pulse .8s ease-in-out infinite alternate}
+@keyframes pulse{from{opacity:.35}to{opacity:1}}
+.nav{display:flex;flex-direction:column;gap:8px}
+.nav-item{
+  min-height:40px;
+  border:1px solid transparent;
+  border-radius:6px;
+  padding:0 14px;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  color:#4a5568;
+  user-select:none;
+}
+.nav-item:hover:not(.active){background:rgba(89,152,221,.08)}
+.nav-item.active{
+  color:#12151a;
+  border-color:rgba(89,152,221,.4);
+  background:linear-gradient(135deg,rgba(89,152,221,.22),rgba(89,152,221,.08));
+}
+.nav-icon{width:18px;text-align:center;font-size:17px;color:#4a5568}
+.quick{margin-top:24px}
+.quick-title{font-size:13px;color:var(--muted);margin:0 12px 10px}
+.quick-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:14px}
+.quick-grid .side-btn{margin-bottom:0}
+.side-btn{
+  width:100%;
+  min-height:40px;
+  margin-bottom:10px;
+  border-radius:5px;
+  border:1px solid var(--line);
+  color:#12151a;
+  background:#ffffff;
+  transition:background-color .2s ease,border-color .2s ease,transform .12s ease,box-shadow .2s ease;
+}
+.side-btn:hover:not(.primary){border-color:var(--accent)}
+.side-btn:hover{transform:translateY(-1px)}
+.side-btn:active{transform:translateY(0)}
+.side-btn.primary{background:linear-gradient(135deg,#5998DD,#1e3a5f);border-color:#5998DD;color:white}
+.sidebar-footer{margin-top:auto;padding-top:24px}
+.version{color:#6b7684;line-height:1.5;padding:0 6px}
+.version-credit{margin-top:10px;padding:10px 6px 0;border-top:1px solid var(--line);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+.main{min-width:0;min-height:100vh;display:grid;grid-template-rows:auto 1fr;background:rgba(245,247,250,.7)}
+.topbar{
+  border-bottom:1px solid var(--line-soft);
+  display:grid;
+  grid-template-columns:1fr auto;
+  align-items:center;
+  gap:16px;
+  padding:0 28px 0 18px;
+  min-height:74px;
+}
+.top-left{display:flex;align-items:center;gap:22px}
+.camera-select{
+  width:190px;
+  height:40px;
+  border-radius:5px;
+  border:1px solid var(--line);
+  background:#ffffff;
+  color:#12151a;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 14px;
+}
+.stream-pill{display:flex;align-items:center;gap:8px;color:#1a9d4b}
+.metrics{display:flex;align-items:center;gap:0;min-width:0}
+.metric{
+  min-width:112px;
+  height:42px;
+  border-left:1px solid var(--line-soft);
+  padding:0 20px;
+  display:grid;
+  align-content:center;
+  gap:5px;
+}
+.metric-label{font-size:12px;color:var(--muted)}
+.metric-value{font-size:14px;color:#12151a;font-weight:700}
+.metric-value.ok{color:var(--green)}
+.metric-value.warn{color:var(--amber)}
+.bar{width:58px;height:4px;border-radius:99px;background:#dfe4ea;display:inline-block;margin-left:7px;vertical-align:middle;overflow:hidden}
+.bar span{display:block;height:100%;border-radius:inherit;background:var(--green);width:45%}
+.bar.mem span{background:#5998DD}
+.bar.temp span{background:var(--amber)}
+.icon-btn{
+  width:44px;height:42px;padding:0;border:0;border-left:1px solid var(--line-soft);
+  background:transparent;color:#4a5568;font-size:22px;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.icon-btn svg{display:block}
+.icon-btn:hover{background:rgba(89,152,221,.1)}
+.content{
+  min-height:0;
+  height:100%;
+  padding:10px 14px 12px;
+  display:grid;
+  grid-template-columns:minmax(420px,700px) minmax(0,1fr);
+  grid-template-rows:minmax(0,1fr) auto;
+  gap:10px;
+  overflow:hidden;
+}
+.left-stack,.right-stack{min-height:0;display:flex;flex-direction:column;gap:10px}
+.left-stack{overflow:auto}
+.panel{
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(248,250,252,.9));
+  box-shadow:0 12px 32px rgba(15,35,70,.08);
+  overflow:hidden;
+}
+.section-title{
+  height:42px;
+  padding:0 14px;
+  display:flex;
+  align-items:center;
+  color:#3d4652;
+  font-size:13px;
+  font-weight:800;
+  letter-spacing:.02em;
+}
+.live-panel{height:auto;min-height:280px;padding:42px 10px 10px;position:relative}
+.live-panel .section-title{position:absolute;inset:0 0 auto 0}
+.video{
+  position:relative;
+  /* Width-driven sizing only: height:100% could resolve taller than the
+     panel's visible area, clipping the bottom-anchored LIVE chip and
+     fullscreen button to invisible slivers. */
+  width:100%;
+  height:auto;
+  min-height:260px;
+  aspect-ratio:16 / 9;
+  margin:0 auto;
+  border-radius:5px;
+  overflow:hidden;
+  background:#05080d url("live_preview.png") center/cover no-repeat;
+}
+.video img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.video:fullscreen,.video:-webkit-full-screen{background:#000;border-radius:0;aspect-ratio:auto}
+.video:fullscreen img,.video:-webkit-full-screen img{object-fit:contain}
+.video:fullscreen .video-badge,.video:-webkit-full-screen .video-badge{font-size:14px}
+.video:before{
+  content:"";
+  position:absolute;inset:0;
+  background:
+    linear-gradient(90deg,rgba(0,0,0,.22),transparent 18%,transparent 82%,rgba(0,0,0,.22)),
+    linear-gradient(0deg,rgba(0,0,0,.16),transparent 35%);
+  pointer-events:none;
+  z-index:1;
+}
+/* Badges share one flex row so they wrap on narrow panels instead of
+   overlapping (each used to be absolutely pinned to its own corner). */
+.video-topbar{
+  position:absolute;z-index:2;top:11px;left:9px;right:9px;
+  display:flex;flex-wrap:wrap;gap:6px;pointer-events:none;
+}
+.video-badge{
+  padding:7px 9px;border-radius:5px;background:rgba(8,11,16,.88);
+  color:white;font-size:12px;
+}
+.video-badge .hot{color:#5fa0ff;font-weight:800;margin-right:8px}
+.video-badge.res{margin-left:auto}
+.live-chip{
+  position:absolute;z-index:2;left:10px;bottom:10px;
+  background:rgba(6,9,13,.86);border-radius:5px;padding:7px 9px;font-weight:800;font-size:11px;
+}
+.live-chip:before{content:"";display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:7px}
+.capture{
+  /* Above the connect/error overlay (z3): a control must stay visible and
+     clickable even while the overlay covers the status badges. */
+  position:absolute;z-index:4;right:8px;bottom:8px;width:30px;height:30px;border:0;border-radius:6px;background:rgba(6,9,13,.86);color:white
+}
+.vid-overlay{
+  position:absolute;inset:0;z-index:3;background:rgba(5,8,13,.88);
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--muted);
+  opacity:1;visibility:visible;transition:opacity .2s ease,visibility .2s;
+}
+.vid-overlay.hidden{opacity:0;visibility:hidden}
+.ov-btn{border:0;border-radius:4px;background:var(--accent);color:white;padding:8px 14px;font-weight:800}
+.info-panel{padding-bottom:10px}
+.info-grid{display:grid;grid-template-columns:1fr 1.18fr;gap:12px;padding:0 10px}
+.info-box{border:1px solid var(--line);border-radius:6px;padding:12px;background:#f7f9fb}
+.kv{display:grid;grid-template-columns:1fr auto;gap:9px 14px;align-items:center}
+.kv.vertical{display:block}
+.kv.vertical .kv-row{margin-bottom:12px}
+.kv-label{color:var(--muted);font-size:12px;margin-bottom:5px}
+.kv-value{color:#12151a;font-weight:700}
+.kv-value.ok,.dv.ok{color:var(--green)}
+.dv.err{color:var(--danger)}
+.dv.warn{color:var(--amber)}
+.sensor{display:grid;grid-template-columns:1fr 1.25fr;gap:12px;padding:0 10px 10px}
+.sensor-list{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:#f7f9fb}
+.sensor-list .kv{font-size:12px;gap:8px}
+.hist-box{border:1px solid var(--line);border-radius:6px;background:#f7f9fb;padding:8px}
+.histogram{width:100%;height:118px;display:block}
+.axis{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}
+.hist-title{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px}
+.bottom-grid{display:grid;grid-template-columns:minmax(220px,.75fr) 1fr;gap:10px;grid-column:1 / -1}
+.mini-panel{min-height:86px;padding:12px}
+.mini-title{font-size:13px;color:#3d4652;font-weight:800;margin-bottom:12px}
+.host-row{display:flex;gap:10px}
+.host-input,.cmd-box{
+  min-width:0;border:1px solid var(--line);border-radius:5px;background:#ffffff;color:#12151a;padding:0 12px;height:38px
+}
+.host-input{width:100%}
+.cmd-box{height:38px;display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Consolas,"Courier New",monospace;font-size:12px}
+.tabs{height:42px;border-bottom:1px solid var(--line);display:flex;background:rgba(240,243,247,.9)}
+.tab{
+  border:0;border-right:1px solid var(--line-soft);border-bottom:2px solid transparent;
+  background:transparent;color:#5b6472;padding:0 16px;font-weight:800;
+}
+.tab:hover:not(.active){color:var(--accent)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-content{min-height:0;overflow:auto;padding:10px;flex:1;animation:tab-in .18s ease}
+@keyframes tab-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.right-stack.panel{position:relative}
+.tab-content.hidden{display:none}
+.control-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{
+  border:1px solid var(--line);
+  border-radius:6px;
+  overflow:hidden;
+  background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(247,249,251,.9));
+}
+.card-head{
+  min-height:48px;
+  padding:0 14px;
+  background:linear-gradient(180deg,rgba(240,243,247,.92),rgba(232,237,242,.92));
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.card-title{font-weight:850;color:#12151a;display:flex;align-items:center;gap:10px}
+.card-icon{color:var(--accent);font-size:17px}
+.card-body{padding:14px;display:flex;flex-direction:column;gap:13px}
+.ctrl{display:grid;grid-template-columns:110px minmax(90px,1fr) 86px;align-items:center;gap:12px}
+.ctrl.wide{grid-template-columns:110px 1fr}
+.ctrl-lbl{color:#3d4652}
+.ctrl-lbl small{display:block;color:var(--faint);font-size:11px;margin-top:2px}
+input[type=range]{
+  width:100%;height:3px;appearance:none;-webkit-appearance:none;border-radius:99px;outline:0;
+  background:linear-gradient(to right,var(--accent) 0%,var(--accent) var(--fill,50%),#dfe4ea var(--fill,50%),#dfe4ea 100%);
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#5998DD;border:1px solid white;box-shadow:0 0 0 1px rgba(89,152,221,.45)
+}
+input[type=range]::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;background:#5998DD;border:1px solid white
+}
+.num,.sel-ctrl{
+  width:100%;height:34px;border-radius:5px;border:1px solid var(--line);background:#ffffff;color:#12151a;padding:0 10px
+}
+.num{text-align:center;padding:0 4px;font-size:13px}
+.sel-ctrl{grid-column:auto}
+.ctrl .sel-ctrl{grid-column:2 / 4}
+.tog{position:relative;width:38px;height:20px;display:inline-block}
+.tog input{opacity:0;width:0;height:0}
+.tog-sl{position:absolute;inset:0;border-radius:99px;background:#cbd3df;transition:.18s}
+.tog-sl:before{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:white;transition:.18s}
+.tog input:checked + .tog-sl{background:linear-gradient(135deg,#1e3a5f,#5998DD)}
+.tog input:checked + .tog-sl:before{transform:translateX(18px)}
+.tog-wrap{display:flex;align-items:center;gap:10px;color:var(--muted)}
+.ctrl-off{opacity:.35}
+.trigger-btn{height:34px;border-radius:5px;border:1px solid #5998DD;background:linear-gradient(135deg,#5998DD,#1e3a5f);color:white}
+.toast-area{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:30}
+.toast{
+  padding:12px 18px;border-radius:7px;background:#ffffff;border:1px solid var(--line);
+  color:#12151a;box-shadow:0 12px 32px rgba(15,35,70,.15);
+  animation:toast-in .22s cubic-bezier(.2,.9,.3,1.2);
+  transition:opacity .18s ease,transform .18s ease,background-color .25s ease,color .2s ease;
+}
+.toast.leaving{opacity:0;transform:translateY(6px) scale(.98)}
+@keyframes toast-in{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+.toast.ok{background:#e6f7ec;border-color:#1a9d4b;color:#0f5c2c}
+.toast.err{background:#fdecee;border-color:#dc3545;color:#8a1c28}.toast.warn{background:#fdf3e3;border-color:#d98a1f;color:#7a4c0a}.toast.info{background:#eef2f7;border-color:var(--line)}
+.overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:20;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;visibility:hidden;pointer-events:none;
+  transition:opacity .2s ease,visibility .2s;
+}
+.overlay.open{opacity:1;visibility:visible;pointer-events:auto}
+.modal{
+  width:420px;max-width:92vw;border:1px solid var(--line);border-radius:8px;
+  background:#ffffff;color:#12151a;overflow:hidden;
+  transform:translateY(12px) scale(.97);
+  transition:transform .22s cubic-bezier(.2,.9,.3,1.2),background-color .25s ease,color .2s ease;
+}
+.overlay.open .modal{transform:translateY(0) scale(1)}
+.modal-hdr,.modal-foot{height:54px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+.modal-foot{border-top:1px solid var(--line);border-bottom:0;justify-content:flex-end;gap:10px}
+.modal-body{padding:16px;max-height:55vh;overflow:auto}
+.modal-close,.btn-cancel,.btn-confirm,.btn-reboot{border-radius:5px;border:1px solid var(--line);background:#ffffff;color:#12151a;height:34px;padding:0 13px}
+.btn-confirm,.btn-reboot{background:linear-gradient(135deg,#5998DD,#1e3a5f);border-color:#5998DD;color:white}
+.cam-item{padding:12px;border:1px solid var(--line);border-radius:6px;background:#ffffff;margin-top:8px;cursor:pointer;transition:background-color .2s ease,border-color .2s ease,transform .12s ease}
+.cam-item:hover{border-color:var(--accent);transform:translateX(2px)}
+.cam-item.sel{border-color:var(--accent);background:rgba(89,152,221,.1)}
+.cam-item-dev{font-family:Consolas,"Courier New",monospace;color:var(--muted);font-size:12px;margin-top:4px}
+.reboot-ov{position:fixed;inset:0;display:none;z-index:40;background:rgba(4,7,11,.93);align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.reboot-ov.open{display:flex}
+.spin{width:38px;height:38px;border:3px solid #dfe4ea;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (max-width:1280px){
+  .app{--sidebar:225px}
+  .icon-btn:hover{background:rgba(89,152,221,.1)}
+.content{grid-template-columns:minmax(360px,460px) minmax(0,1fr)}
+  .metric{min-width:108px;padding:0 14px}
+  .control-grid{grid-template-columns:1fr}
+}
+@media (min-width:1101px){
+  .app{min-width:1180px}
+}
+@media (max-width:1100px){
+  .app{min-width:900px}
+  .topbar{grid-template-columns:1fr;padding:14px 18px}
+  .metrics{width:100%;overflow-x:auto;padding-bottom:2px}
+  .metric:first-child{border-left:0;padding-left:0}
+  .icon-btn:hover{background:rgba(89,152,221,.1)}
+.content{grid-template-columns:1fr}
+  .left-stack{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.85fr);align-items:start}
+  .live-panel,.info-panel{height:auto}
+  .bottom-grid{grid-template-columns:minmax(220px,.9fr) 1fr}
+  .right-stack.panel{min-height:0}
+}
+@media (max-width:820px){
+  .app{display:block;min-width:0}
+  .sidebar{
+    position:relative;
+    border-right:0;
+    border-bottom:1px solid var(--line);
+    padding:16px;
+  }
+  .brand{margin:0 0 14px}
+  .active-camera{margin-bottom:12px}
+  .nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .nav-item{justify-content:center;padding:0 10px}
+  .quick{margin-top:14px}
+  .quick-title,.sidebar-footer{display:none}
+  .main{min-height:auto}
+  .top-left{flex-wrap:wrap;gap:12px}
+  .camera-select{width:min(100%,260px)}
+  .icon-btn:hover{background:rgba(89,152,221,.1)}
+.content{height:auto;overflow:visible;padding:10px;display:flex;flex-direction:column}
+  .left-stack{display:flex;overflow:visible}
+  .left-stack{order:1}
+  .bottom-grid{order:2}
+  .right-stack{order:3}
+  .info-grid,.sensor{grid-template-columns:1fr}
+  .bottom-grid{display:grid;grid-template-columns:1fr 1fr}
+  .tabs{overflow-x:auto}
+  .tab{white-space:nowrap;min-width:max-content}
+  .right-stack.panel{min-height:auto}
+}
+@media (max-width:560px){
+  body{font-size:13px}
+  .sidebar{padding:14px 10px}
+  .nav{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .nav-icon{display:none}
+  .topbar{padding:12px 10px}
+  .metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;overflow:visible}
+  .metric{min-width:0;height:auto;min-height:44px;border:1px solid var(--line-soft);border-radius:6px;padding:8px 10px}
+  .icon-btn{border:1px solid var(--line-soft);border-radius:6px;width:100%;height:40px}
+  .live-panel{min-height:0}
+  .video{min-height:180px}
+  .bottom-grid{grid-template-columns:1fr}
+  .ctrl,.ctrl.wide{grid-template-columns:1fr}
+  .ctrl .sel-ctrl,.sel-ctrl{grid-column:auto}
+  .num{height:32px}
+  .card-head{min-height:46px}
+  .card-body{padding:12px}
+  .toast-area{left:10px;right:10px;transform:none}
+}
+.cam-dd-wrap{position:relative;display:inline-block}
+.cam-dropdown{
+  position:absolute;top:calc(100% + 5px);left:0;
+  min-width:270px;border:1px solid var(--line);border-radius:7px;
+  background:#ffffff;z-index:25;box-shadow:0 10px 32px rgba(15,35,70,.2);
+  overflow:hidden;
+  opacity:0;visibility:hidden;transform:translateY(-6px);pointer-events:none;
+  transition:opacity .16s ease,transform .16s ease,visibility .16s,background-color .25s ease,border-color .2s ease;
+}
+.cam-dropdown.open{opacity:1;visibility:visible;transform:translateY(0);pointer-events:auto}
+.cam-dd-item{
+  padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line-soft);
+  display:grid;gap:3px;
+}
+.cam-dd-item:last-child{border-bottom:0}
+.cam-dd-item:hover:not(.busy){background:rgba(89,152,221,.08)}
+.cam-dd-item.sel{background:rgba(89,152,221,.1);border-left:2px solid var(--accent)}
+.cam-dd-item.busy{opacity:.55;cursor:not-allowed}
+.cam-dd-name{font-size:13px;color:white;font-weight:600}
+.cam-dd-dev{font-family:Consolas,"Courier New",monospace;font-size:11px;color:var(--muted)}
+.cam-dd-busy{font-size:11px;color:var(--danger);margin-top:2px}
+</style>
+</head>
+<body>
+<div class="sima-watermark" aria-hidden="true">
+  <svg viewBox="0 0 131 32" xmlns="http://www.w3.org/2000/svg">
+<path d="M26.332 25.8098L30.5896 21.5127V31.0749C30.5896 31.0749 28.8776 28.7278 26.332 25.8098Z" fill="#A4CC2D"/>
+<path d="M16.5 16.7412L30.5895 21.5129L26.3319 25.81C23.6406 22.7233 20.0163 18.9999 16.5 16.7412Z" fill="#D1CEE6"/>
+<path d="M16.5 16.7412C20.0163 18.9999 23.6406 22.7233 26.3319 25.81L21.1616 31.0282C21.1598 25.8807 19.5252 20.8707 16.5 16.7412Z" fill="#5998DD"/>
+<path d="M21.1621 31.0278L26.3324 25.8096C28.878 28.7276 30.59 31.0747 30.59 31.0747H21.1773L21.1621 31.0278Z" fill="#010F0E"/>
+<path d="M30.5898 0V9.56216L25.8848 4.78242L30.5898 0Z" fill="#2A9C4F"/>
+<path d="M30.5898 9.56197H21.1797L25.8847 4.78223L30.5898 9.56197Z" fill="#010F0E"/>
+<path d="M25.8847 4.78242L21.1797 9.56216V0L25.8847 4.78242Z" fill="#A4CC2D"/>
+<path d="M9.41275 21.5129L4.7077 26.2954L0 21.5129H9.41275Z" fill="#C0E8DB"/>
+<path d="M9.41209 21.5129V31.0751L4.70703 26.2954L9.41209 21.5129Z" fill="#D26728"/>
+<path d="M9.41275 31.0749H0L4.7077 26.2952L9.41275 31.0749Z" fill="#010F0E"/>
+<path d="M4.7077 26.2954L0 31.0751V21.5129L4.7077 26.2954Z" fill="#2A9C4F"/>
+<path d="M4.25762 5.26508L0 9.56216V0C0 0 1.71333 2.34703 4.25762 5.26508Z" fill="#D26728"/>
+<path d="M14.0895 14.3344L0 9.56197L4.25762 5.26489C6.94886 8.35231 10.5732 12.075 14.0895 14.3344Z" fill="#010F0E"/>
+<path d="M14.0897 14.3346C10.5734 12.0752 6.94905 8.35252 4.25781 5.2651L9.42811 0.046875C9.43017 5.19459 11.0648 10.2046 14.0897 14.3346Z" fill="#5998DD"/>
+<path d="M30.5898 0L25.8847 4.78242L21.1797 0H30.5898Z" fill="#C0E8DB"/>
+<path d="M9.42791 0.0468602L4.25762 5.26843C1.71333 2.34703 0 0 0 0H9.41276L9.42791 0.0468602Z" fill="#D1CEE6"/>
+<path d="M65.0449 8.82812V9.5404V10.4963V28.6828H68.2805V10.4963V8.82812H65.0449Z" fill="#12151a" class="sima-word"/>
+<path d="M114.898 14.3075V28.6748H111.664V22.7263L111.66 17.342C111.66 17.5525 111.619 17.7609 111.54 17.9554C111.461 18.1499 111.345 18.3267 111.199 18.4756C111.052 18.6245 110.878 18.7426 110.687 18.8232C110.496 18.9038 110.291 18.9453 110.083 18.9453H106.837C104.957 18.9453 102.924 19.9776 102.924 22.7283C102.924 24.6884 104.425 26.2763 106.837 26.2763C109.249 26.2763 111.664 24.6877 111.664 22.7283C111.664 27.9867 108.623 29.1361 106.611 29.1361C102.817 29.1361 99.6914 26.4583 99.6914 22.7283C99.6914 18.7739 102.926 16.3158 106.839 16.3158H109.715C110.802 16.3158 111.649 15.4455 111.662 14.3075C111.662 14.4286 111.662 14.5451 111.658 14.6583L111.662 14.6415V14.3068C111.662 14.2479 111.662 14.1897 111.658 14.1308C111.546 12.3045 109.97 11.6853 107.753 11.6853C106.197 11.6853 104.823 12.342 104.255 13.6836H100.876C102.144 9.54916 105.514 8.82617 107.753 8.82617C111.15 8.82684 114.898 10.5239 114.898 14.3075Z" fill="#12151a" class="sima-word"/>
+<path d="M65.0449 2.38794V5.81342H68.2805V4.99136V4.10102V2.38794H65.0449Z" fill="#12151a" class="sima-word"/>
+<path d="M61.6622 10.1224H58.4029C58.3746 9.93429 58.3469 9.75756 58.3205 9.58083C57.9831 7.27062 56.7186 5.71754 54.5327 5.02467C53.8553 4.80757 53.1507 4.6899 52.4405 4.67523C51.2847 4.65381 50.1433 4.91823 49.0376 5.44976C47.8705 6.01075 47.0297 6.90645 46.6811 8.20314C46.3173 9.55472 46.6383 10.7182 47.6735 11.6581C48.4801 12.3904 49.4461 12.8108 50.4847 13.0639C52.0392 13.4428 53.5977 13.8056 55.1568 14.1658C56.9136 14.5721 58.5643 15.2101 59.9818 16.3749C62.8879 18.7607 63.3089 22.8235 60.9459 25.765C59.6938 27.3208 58.0747 28.3182 56.1907 28.8625C53.2807 29.7019 50.3984 29.5855 47.6353 28.3062C44.8248 27.0041 43.0937 24.7749 42.4953 21.6788C42.4222 21.3026 42.4004 20.9157 42.3635 20.5334C42.3589 20.4278 42.3616 20.322 42.3714 20.2168H45.6162C45.659 20.5401 45.6821 20.8567 45.744 21.1633C46.1704 23.1951 47.2946 24.7234 49.1496 25.5769C51.5878 26.6969 54.0557 26.6393 56.4563 25.4156C57.5475 24.8586 58.4022 24.0265 58.8095 22.8202C59.2655 21.4679 59.0131 20.2455 58.049 19.1952C57.4465 18.5435 56.6887 18.0609 55.8487 17.7941C54.8787 17.4761 53.8837 17.2324 52.8932 16.9821C51.5015 16.6306 50.0952 16.3367 48.712 15.9558C47.4086 15.597 46.2205 14.9771 45.2195 14.0366C42.8551 11.8107 42.5177 8.19243 44.4287 5.49729C45.433 4.08345 46.7734 3.09604 48.3681 2.4882C51.3282 1.3582 54.2988 1.34548 57.1627 2.75597C59.9218 4.11224 61.3847 6.44588 61.6615 9.54066C61.6793 9.71739 61.6622 9.89948 61.6622 10.1224Z" fill="#12151a" class="sima-word"/>
+<path d="M97.291 2.38794V28.6819H94.0515V3.69132C92.9747 6.11935 87.1817 28.6819 87.1817 28.6819H81.6529C81.6529 28.6819 75.854 6.12203 74.7785 3.69132V28.6819H71.543V2.38794H77.6622L84.414 27.0558L91.1678 2.38794H97.291Z" fill="#12151a" class="sima-word"/>
+<path d="M123.364 5.96652V11.8977H121.462V10.6927C121.304 11.1693 120.717 12.0443 119.451 12.0845C117.523 12.146 116.52 10.7242 116.52 9.43953C116.52 7.80746 117.855 6.7926 119.47 6.7926H120.657C121.136 6.7926 121.48 6.51077 121.459 6.15865C121.422 5.55616 120.932 5.24621 120.129 5.24621C119.602 5.24621 119.1 5.57356 118.931 5.97455H117.026C117.378 4.31369 118.786 3.69849 120.129 3.69849C121.534 3.70384 123.364 4.40541 123.364 5.96652ZM121.462 8.04511C121.184 8.15242 120.889 8.20753 120.591 8.20778H119.783C119.284 8.20778 118.51 8.3584 118.421 9.18716C118.349 9.86262 118.897 10.4731 119.783 10.4731C120.623 10.4731 121.462 9.86262 121.462 9.17979V8.04511Z" fill="#12151a" class="sima-word"/>
+<path d="M126.523 3.91113H124.621V11.9135H126.523V3.91113Z" fill="#12151a" class="sima-word"/>
+<path d="M126.523 1.02148H124.621V2.95346H126.523V1.02148Z" fill="#12151a" class="sima-word"/>
+<path d="M127.615 10.4209H128.807V10.6679H128.346V11.9164H128.075V10.6679H127.613L127.615 10.4209ZM130.527 10.4209V11.9164H130.252V10.919L129.94 11.9164H129.652L129.34 10.919V11.9164H129.065V10.4236H129.421L129.794 11.6346L130.168 10.4236L130.527 10.4209Z" fill="#12151a" class="sima-word"/>
+  </svg>
+</div>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <a class="sima-badge" href="https://sima.ai/" target="_blank" rel="noopener noreferrer" title="Powered by SiMa.ai">
+        <svg width="100" height="24" viewBox="0 0 131 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<path d="M26.332 25.8098L30.5896 21.5127V31.0749C30.5896 31.0749 28.8776 28.7278 26.332 25.8098Z" fill="#A4CC2D"/>
+<path d="M16.5 16.7412L30.5895 21.5129L26.3319 25.81C23.6406 22.7233 20.0163 18.9999 16.5 16.7412Z" fill="#D1CEE6"/>
+<path d="M16.5 16.7412C20.0163 18.9999 23.6406 22.7233 26.3319 25.81L21.1616 31.0282C21.1598 25.8807 19.5252 20.8707 16.5 16.7412Z" fill="#5998DD"/>
+<path d="M21.1621 31.0278L26.3324 25.8096C28.878 28.7276 30.59 31.0747 30.59 31.0747H21.1773L21.1621 31.0278Z" fill="#010F0E"/>
+<path d="M30.5898 0V9.56216L25.8848 4.78242L30.5898 0Z" fill="#2A9C4F"/>
+<path d="M30.5898 9.56197H21.1797L25.8847 4.78223L30.5898 9.56197Z" fill="#010F0E"/>
+<path d="M25.8847 4.78242L21.1797 9.56216V0L25.8847 4.78242Z" fill="#A4CC2D"/>
+<path d="M9.41275 21.5129L4.7077 26.2954L0 21.5129H9.41275Z" fill="#C0E8DB"/>
+<path d="M9.41209 21.5129V31.0751L4.70703 26.2954L9.41209 21.5129Z" fill="#D26728"/>
+<path d="M9.41275 31.0749H0L4.7077 26.2952L9.41275 31.0749Z" fill="#010F0E"/>
+<path d="M4.7077 26.2954L0 31.0751V21.5129L4.7077 26.2954Z" fill="#2A9C4F"/>
+<path d="M4.25762 5.26508L0 9.56216V0C0 0 1.71333 2.34703 4.25762 5.26508Z" fill="#D26728"/>
+<path d="M14.0895 14.3344L0 9.56197L4.25762 5.26489C6.94886 8.35231 10.5732 12.075 14.0895 14.3344Z" fill="#010F0E"/>
+<path d="M14.0897 14.3346C10.5734 12.0752 6.94905 8.35252 4.25781 5.2651L9.42811 0.046875C9.43017 5.19459 11.0648 10.2046 14.0897 14.3346Z" fill="#5998DD"/>
+<path d="M30.5898 0L25.8847 4.78242L21.1797 0H30.5898Z" fill="#C0E8DB"/>
+<path d="M9.42791 0.0468602L4.25762 5.26843C1.71333 2.34703 0 0 0 0H9.41276L9.42791 0.0468602Z" fill="#D1CEE6"/>
+<path d="M65.0449 8.82812V9.5404V10.4963V28.6828H68.2805V10.4963V8.82812H65.0449Z" fill="#12151a" class="sima-word"/>
+<path d="M114.898 14.3075V28.6748H111.664V22.7263L111.66 17.342C111.66 17.5525 111.619 17.7609 111.54 17.9554C111.461 18.1499 111.345 18.3267 111.199 18.4756C111.052 18.6245 110.878 18.7426 110.687 18.8232C110.496 18.9038 110.291 18.9453 110.083 18.9453H106.837C104.957 18.9453 102.924 19.9776 102.924 22.7283C102.924 24.6884 104.425 26.2763 106.837 26.2763C109.249 26.2763 111.664 24.6877 111.664 22.7283C111.664 27.9867 108.623 29.1361 106.611 29.1361C102.817 29.1361 99.6914 26.4583 99.6914 22.7283C99.6914 18.7739 102.926 16.3158 106.839 16.3158H109.715C110.802 16.3158 111.649 15.4455 111.662 14.3075C111.662 14.4286 111.662 14.5451 111.658 14.6583L111.662 14.6415V14.3068C111.662 14.2479 111.662 14.1897 111.658 14.1308C111.546 12.3045 109.97 11.6853 107.753 11.6853C106.197 11.6853 104.823 12.342 104.255 13.6836H100.876C102.144 9.54916 105.514 8.82617 107.753 8.82617C111.15 8.82684 114.898 10.5239 114.898 14.3075Z" fill="#12151a" class="sima-word"/>
+<path d="M65.0449 2.38794V5.81342H68.2805V4.99136V4.10102V2.38794H65.0449Z" fill="#12151a" class="sima-word"/>
+<path d="M61.6622 10.1224H58.4029C58.3746 9.93429 58.3469 9.75756 58.3205 9.58083C57.9831 7.27062 56.7186 5.71754 54.5327 5.02467C53.8553 4.80757 53.1507 4.6899 52.4405 4.67523C51.2847 4.65381 50.1433 4.91823 49.0376 5.44976C47.8705 6.01075 47.0297 6.90645 46.6811 8.20314C46.3173 9.55472 46.6383 10.7182 47.6735 11.6581C48.4801 12.3904 49.4461 12.8108 50.4847 13.0639C52.0392 13.4428 53.5977 13.8056 55.1568 14.1658C56.9136 14.5721 58.5643 15.2101 59.9818 16.3749C62.8879 18.7607 63.3089 22.8235 60.9459 25.765C59.6938 27.3208 58.0747 28.3182 56.1907 28.8625C53.2807 29.7019 50.3984 29.5855 47.6353 28.3062C44.8248 27.0041 43.0937 24.7749 42.4953 21.6788C42.4222 21.3026 42.4004 20.9157 42.3635 20.5334C42.3589 20.4278 42.3616 20.322 42.3714 20.2168H45.6162C45.659 20.5401 45.6821 20.8567 45.744 21.1633C46.1704 23.1951 47.2946 24.7234 49.1496 25.5769C51.5878 26.6969 54.0557 26.6393 56.4563 25.4156C57.5475 24.8586 58.4022 24.0265 58.8095 22.8202C59.2655 21.4679 59.0131 20.2455 58.049 19.1952C57.4465 18.5435 56.6887 18.0609 55.8487 17.7941C54.8787 17.4761 53.8837 17.2324 52.8932 16.9821C51.5015 16.6306 50.0952 16.3367 48.712 15.9558C47.4086 15.597 46.2205 14.9771 45.2195 14.0366C42.8551 11.8107 42.5177 8.19243 44.4287 5.49729C45.433 4.08345 46.7734 3.09604 48.3681 2.4882C51.3282 1.3582 54.2988 1.34548 57.1627 2.75597C59.9218 4.11224 61.3847 6.44588 61.6615 9.54066C61.6793 9.71739 61.6622 9.89948 61.6622 10.1224Z" fill="#12151a" class="sima-word"/>
+<path d="M97.291 2.38794V28.6819H94.0515V3.69132C92.9747 6.11935 87.1817 28.6819 87.1817 28.6819H81.6529C81.6529 28.6819 75.854 6.12203 74.7785 3.69132V28.6819H71.543V2.38794H77.6622L84.414 27.0558L91.1678 2.38794H97.291Z" fill="#12151a" class="sima-word"/>
+<path d="M123.364 5.96652V11.8977H121.462V10.6927C121.304 11.1693 120.717 12.0443 119.451 12.0845C117.523 12.146 116.52 10.7242 116.52 9.43953C116.52 7.80746 117.855 6.7926 119.47 6.7926H120.657C121.136 6.7926 121.48 6.51077 121.459 6.15865C121.422 5.55616 120.932 5.24621 120.129 5.24621C119.602 5.24621 119.1 5.57356 118.931 5.97455H117.026C117.378 4.31369 118.786 3.69849 120.129 3.69849C121.534 3.70384 123.364 4.40541 123.364 5.96652ZM121.462 8.04511C121.184 8.15242 120.889 8.20753 120.591 8.20778H119.783C119.284 8.20778 118.51 8.3584 118.421 9.18716C118.349 9.86262 118.897 10.4731 119.783 10.4731C120.623 10.4731 121.462 9.86262 121.462 9.17979V8.04511Z" fill="#12151a" class="sima-word"/>
+<path d="M126.523 3.91113H124.621V11.9135H126.523V3.91113Z" fill="#12151a" class="sima-word"/>
+<path d="M126.523 1.02148H124.621V2.95346H126.523V1.02148Z" fill="#12151a" class="sima-word"/>
+<path d="M127.615 10.4209H128.807V10.6679H128.346V11.9164H128.075V10.6679H127.613L127.615 10.4209ZM130.527 10.4209V11.9164H130.252V10.919L129.94 11.9164H129.652L129.34 10.919V11.9164H129.065V10.4236H129.421L129.794 11.6346L130.168 10.4236L130.527 10.4209Z" fill="#12151a" class="sima-word"/>
+        </svg>
+      </a>
+      <div class="brand-text">
+        <div class="brand-name">SiMa.ai</div>
+        <div class="brand-sub">MIPI Camera <span class="pro">Utility</span></div>
+      </div>
+      <div class="brand-rule"></div>
+    </div>
+
+    <div class="active-camera">
+      <div class="eyebrow">Active</div>
+      <div class="camera-title" id="sb-cam-name">Detecting...</div>
+      <div class="status-line"><span class="dot on"></span><span>Connected</span></div>
+      <div id="sb-cam-sub" style="display:none">/dev/video0 -> /dev/video0out</div>
+    </div>
+
+    <div class="active-camera" style="margin-bottom:12px">
+      <div class="eyebrow">Live Stats</div>
+      <div class="kv" style="font-size:12px;gap:5px 10px">
+        <div class="kv-label">Resolution</div><div class="kv-value" id="sb-res">—</div>
+        <div class="kv-label">Sensor FPS</div><div class="kv-value" id="sb-sensor-fps">—</div>
+        <div class="kv-label">Display FPS</div><div class="kv-value ok" id="sb-fps">—</div>
+        <div class="kv-label">Avg FPS</div><div class="kv-value ok" id="sb-avg-fps">—</div>
+        <div class="kv-label">Exposure</div><div class="kv-value" id="sb-exp-val">—</div>
+        <div class="kv-label">Gain</div><div class="kv-value" id="sb-gain-val">—</div>
+        <div class="kv-label">AE Mean</div><div class="kv-value" id="sb-ae-val">—</div>
+        <div class="kv-label">Iridix</div><div class="kv-value" id="sb-ird-val">—</div>
+      </div>
+    </div>
+
+    <div class="quick">
+      <div class="quick-title">Quick Actions</div>
+      <div class="quick-grid">
+        <button class="side-btn" onclick="rejectPreview()" title="Discard the changes you're currently previewing and restore the picture from before you started editing">✕ &nbsp; Undo</button>
+        <button class="side-btn" onclick="resetAll()">↻ &nbsp; Set Default</button>
+      </div>
+      <div class="quick-title">Presets</div>
+      <div class="quick-grid">
+        <button class="side-btn" onclick="applyPreset('daylight')">☀ &nbsp; Daylight</button>
+        <button class="side-btn" onclick="applyPreset('indoor')">⌂ &nbsp; Indoor</button>
+        <button class="side-btn" onclick="applyPreset('night')">☽ &nbsp; Night</button>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="version">v1.0.0 © 2026 SiMa.ai</div>
+      <div class="version-credit">System AE Team</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left">
+        <div class="cam-dd-wrap">
+          <button class="camera-select" id="cam-select-btn" onclick="toggleCamDropdown()"><span id="cam-label">Select Camera</span><span>⌄</span></button>
+          <div class="cam-dropdown" id="cam-dropdown">
+            <div id="cam-dd-list"><div style="padding:12px;color:var(--muted);text-align:center;font-size:13px">Loading...</div></div>
+          </div>
+        </div>
+        <div class="stream-pill"><span class="dot on" id="dot"></span><span id="conn-txt">Streaming</span></div>
+      </div>
+      <div class="metrics">
+        <div class="metric"><span class="metric-label">System Status</span><span class="metric-value ok" id="sys-status">Online</span></div>
+        <div class="metric"><span class="metric-label">CPU</span><span class="metric-value" id="sys-cpu">32% <span class="bar"><span></span></span></span></div>
+        <div class="metric"><span class="metric-label">Memory</span><span class="metric-value" id="sys-mem">41% <span class="bar mem"><span></span></span></span></div>
+        <div class="metric"><span class="metric-label">Temp</span><span class="metric-value warn" id="sys-temp">52°C <span class="bar temp"><span></span></span></span></div>
+        <button class="icon-btn" id="theme-toggle-btn" title="Toggle dark mode" onclick="toggleTheme()">☼</button>
+        <button class="icon-btn" id="restart-btn" title="Restart Service" onclick="showRestartModal()"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="21.5 5 21.5 10.5 16 10.5"/><polyline points="2.5 19 2.5 13.5 8 13.5"/><path d="M4.8 9.2a8 8 0 0 1 13.2-3L21.5 10.5M2.5 13.5l3.5 4.3a8 8 0 0 0 13.2-3"/></svg></button>
+      </div>
+    </header>
+
+    <section class="content">
+      <div class="left-stack">
+        <section class="panel live-panel">
+          <div class="section-title">Live View</div>
+          <div style="color:var(--muted);font-size:12px;margin-bottom:8px">
+            While Live View is active, other applications cannot use this camera.
+            Close this browser and wait up to 5 seconds before starting another camera application.
+          </div>
+          <div class="video" id="video-box">
+            <img id="stream-img" style="display:none" onerror="onStreamErr()" onload="onStreamLoad()">
+            <div class="vid-overlay hidden" id="vid-overlay">
+              <div id="ov-msg">Connect to start preview</div>
+              <button class="ov-btn" id="ov-btn" style="display:none" onclick="startStream()">Start</button>
+            </div>
+            <div class="video-topbar">
+              <div class="video-badge fps"><span class="hot">FPS</span><span id="inf-fps">29.97</span></div>
+              <div class="video-badge res" id="s-res">1280x720</div>
+            </div>
+            <div class="live-chip">LIVE</div>
+            <button class="capture" id="fullscreen-btn" title="Fullscreen" onclick="toggleFullscreen()">⛶</button>
+          </div>
+        </section>
+
+        <section class="panel info-panel">
+          <div class="section-title">Stream &amp; Device Info</div>
+          <div class="info-grid">
+            <div class="info-box kv vertical">
+              <div class="kv-row"><div class="kv-label">Stream Device</div><div class="kv-value"><span id="inf-stream">/dev/video0</span></div></div>
+              <div class="kv-row"><div class="kv-label">Control Device</div><div class="kv-value"><span id="inf-ctrl-s">/dev/video0out</span></div></div>
+              <div class="kv-row"><div class="kv-label">Camera</div><div class="kv-value" id="inf-camera">—</div></div>
+              <div class="kv-row"><div class="kv-label">Driver</div><div class="kv-value" id="inf-driver">—</div></div>
+            </div>
+            <div class="info-box kv">
+              <div class="kv-label">Connection</div><div class="kv-value ok dv" id="inf-conn">Connected</div>
+              <div class="kv-label">Streaming</div><div class="kv-value ok dv" id="inf-streaming">Active</div>
+              <div class="kv-label">Frame Rate</div><div class="kv-value" id="inf-fps-side">29.97 FPS</div>
+              <div class="kv-label">Sensor / Display</div><div class="kv-value" id="inf-fps-compare">—</div>
+              <div class="kv-label">Resolution</div><div class="kv-value" id="s-res-lbl">1280 x 720</div>
+              <div class="kv-label">Format</div><div class="kv-value" id="inf-fmt">YUYV</div>
+              <div class="kv-label">Bit Depth</div><div class="kv-value" id="inf-bitdepth">10-bit</div>
+            </div>
+          </div>
+          <div class="section-title">Sensor Overview</div>
+          <div class="sensor">
+            <div class="sensor-list">
+              <div class="kv">
+                <div class="kv-label">Exposure</div><div class="kv-value" id="s-exp">—</div>
+                <div class="kv-label">Analog Gain</div><div class="kv-value" id="s-gain">—</div>
+                <div class="kv-label">Digital Gain</div><div class="kv-value" id="s-digain">—</div>
+                <div class="kv-label">VBlank</div><div class="kv-value" id="s-vblank">—</div>
+                <div class="kv-label">HBlank</div><div class="kv-value" id="s-hblank">—</div>
+                <div class="kv-label">Link Frequency</div><div class="kv-value" id="s-linkfreq">—</div>
+              </div>
+            </div>
+            <div class="hist-box">
+              <div class="hist-title">Histogram</div>
+              <canvas class="histogram" id="histogram-canvas"></canvas>
+              <div class="axis"><span>0</span><span>128</span><span>255</span></div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <div class="right-stack panel">
+        <div class="tabs">
+          <button class="tab active" id="tab-btn-daily" onclick="switchTab('daily')">Camera Controls</button>
+        </div>
+
+        <div class="tab-content" id="tab-daily">
+          <div class="control-grid">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="card-icon">▣</span>White Balance</div><label class="tog"><input type="checkbox" id="en_manual_awb" onchange="onTog(this)" checked><span class="tog-sl"></span></label></div>
+              <div class="card-body">
+                <div class="ctrl" data-manual="en_manual_awb"><label class="ctrl-lbl">R Gain</label><input type="range" id="awb_red_gain" min="0" max="65535" value="278" oninput="sv(this)"><input class="num" type="number" id="awb_red_gain_v" value="278" oninput="ss(this,'awb_red_gain')"></div>
+                <div class="ctrl" data-manual="en_manual_awb"><label class="ctrl-lbl">Colour Temp (K)</label><input type="range" id="system_awb_cct" min="0" max="65535" value="5000" oninput="sv(this)"><input class="num" type="number" id="system_awb_cct_v" value="5000" oninput="ss(this,'system_awb_cct')"></div>
+                <div class="ctrl" data-manual="en_manual_awb"><label class="ctrl-lbl">B Gain</label><input type="range" id="awb_blue_gain" min="0" max="65535" value="281" oninput="sv(this)"><input class="num" type="number" id="awb_blue_gain_v" value="281" oninput="ss(this,'awb_blue_gain')"></div>
+                <span id="en_manual_awb_l" style="display:none">On</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="card-icon">◌</span>Exposure</div><label class="tog"><input type="checkbox" id="en_manual_exposure" onchange="onTog(this)" checked><span class="tog-sl"></span></label></div>
+              <div class="card-body">
+                <div class="ctrl" data-manual="en_manual_exposure"><label class="ctrl-lbl">Current Exposure</label><input type="range" id="current_exposure" min="0" max="10000" value="5000" data-log="1" oninput="sv(this)"><input class="num" type="number" id="current_exposure_v" value="100000" oninput="ss(this,'current_exposure')"></div>
+                <input type="range" id="max_integration_time" min="0" max="1000000" value="5000" oninput="sv(this)" style="display:none"><input type="number" id="max_integration_time_v" value="5000" oninput="ss(this,'max_integration_time')" style="display:none">
+                <span id="en_manual_exposure_l" style="display:none">On</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="card-icon">✣</span>Gain Control</div><label class="tog"><input type="checkbox" id="en_manual_sensor_analog_gain" onchange="onGainControlTog(this)" checked><span class="tog-sl"></span></label></div>
+              <div class="card-body">
+                <div class="ctrl" data-manual="en_manual_sensor_analog_gain"><label class="ctrl-lbl">Analog Gain</label><input type="range" id="sensor_analog_gain" min="0" max="255" value="0" oninput="sv(this)"><input class="num" type="number" id="sensor_analog_gain_v" value="0" oninput="ss(this,'sensor_analog_gain')"></div>
+                <!-- ISP-side Digital Gain (isp_digital_gain / sensor_digital_gain) removed: both confirmed non-functional on this firmware, see camera_api.py CONTROLS comment. This slider is a different, genuinely-working register on the sensor subdevice. It has no real hardware lock of its own, but shares the card's en_manual_sensor_analog_gain toggle for consistency with Analog Gain — the whole "Gain Control" section enables/disables together, matching how White Balance's three controls all share one toggle. -->
+                <div class="ctrl" data-manual="en_manual_sensor_analog_gain"><label class="ctrl-lbl">Digital Gain</label><input type="range" id="sdev_digital_gain" min="256" max="65535" value="256" oninput="sv(this)"><input class="num" type="number" id="sdev_digital_gain_v" value="256" oninput="ss(this,'sdev_digital_gain')"></div>
+                <input type="range" id="max_sensor_analog_gain" min="0" max="255" value="160" oninput="sv(this)" style="display:none"><input type="number" id="max_sensor_analog_gain_v" value="160" oninput="ss(this,'max_sensor_analog_gain')" style="display:none">
+                <span id="en_manual_sensor_analog_gain_l" style="display:none">On</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="card-icon">▦</span>Image Enhancement</div><label class="tog"><input type="checkbox" id="syst_man_direct_sharpening" onchange="onImageEnhancementTog(this)" checked><span class="tog-sl"></span></label></div>
+              <div class="card-body">
+                <div class="ctrl" data-manual="syst_man_direct_sharpening"><label class="ctrl-lbl">Sharpness</label><input type="range" id="syst_direct_sharpening_target" min="0" max="255" value="32" oninput="sv(this)"><input class="num" type="number" id="syst_direct_sharpening_target_v" value="32" oninput="ss(this,'syst_direct_sharpening_target')"></div>
+                <div class="ctrl" data-manual="en_manual_saturation"><label class="ctrl-lbl">Saturation</label><input type="range" id="system_saturation_target" min="0" max="255" value="128" oninput="sv(this)"><input class="num" type="number" id="system_saturation_target_v" value="128" oninput="ss(this,'system_saturation_target')"></div>
+                <div class="ctrl" data-manual="en_manual_sinter"><label class="ctrl-lbl">Denoise (2D)</label><input type="range" id="system_sinter_threshold_target" min="0" max="255" value="25" oninput="sv(this)"><input class="num" type="number" id="system_sinter_threshold_target_v" value="25" oninput="ss(this,'system_sinter_threshold_target')"></div>
+                <input type="checkbox" id="syst_man_un_direct_sharpening" onchange="onTog(this)" checked style="display:none"><input type="range" id="syst_un_direct_sharp_target" min="0" max="255" value="0" oninput="sv(this)" style="display:none"><input type="number" id="syst_un_direct_sharp_target_v" value="0" oninput="ss(this,'syst_un_direct_sharp_target')" style="display:none">
+                <input type="checkbox" id="en_manual_saturation" onchange="onTog(this)" checked style="display:none"><input type="checkbox" id="en_manual_sinter" onchange="onTog(this)" checked style="display:none">
+                <span id="syst_man_direct_sharpening_l" style="display:none">On</span><span id="syst_man_un_direct_sharpening_l" style="display:none">On</span><span id="en_manual_saturation_l" style="display:none">On</span><span id="en_manual_sinter_l" style="display:none">On</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span class="card-icon">◒</span>Color &amp; Tone</div><label class="tog"><input type="checkbox" id="en_manual_iridix" onchange="onTog(this)" checked><span class="tog-sl"></span></label></div>
+              <div class="card-body">
+                <div class="ctrl" data-manual="en_manual_iridix"><label class="ctrl-lbl">Contrast</label><input type="range" id="system_iridix_strength_target" min="0" max="255" value="0" oninput="sv(this)"><input class="num" type="number" id="system_iridix_strength_target_v" value="0" oninput="ss(this,'system_iridix_strength_target')"></div>
+                <div class="ctrl" data-manual="en_manual_iridix"><label class="ctrl-lbl">Gamma</label><input type="range" id="system_maximum_iridix_strength" min="0" max="255" value="64" oninput="sv(this)"><input class="num" type="number" id="system_maximum_iridix_strength_v" value="64" oninput="ss(this,'system_maximum_iridix_strength')"></div>
+                <div class="ctrl" data-manual="en_manual_iridix"><label class="ctrl-lbl">Iridix Min</label><input type="range" id="system_minimum_iridix_strength" min="0" max="255" value="0" oninput="sv(this)"><input class="num" type="number" id="system_minimum_iridix_strength_v" value="0" oninput="ss(this,'system_minimum_iridix_strength')"></div>
+                <div class="ctrl wide" data-manual="en_manual_iridix"><label class="ctrl-lbl">Tone Mapping</label><select class="sel-ctrl" id="tone_mapping_select" onchange="var n=document.getElementById('system_iridix_strength_target_v'); n.value=this.value; ss(n,'system_iridix_strength_target')"><option value="128">Medium</option><option value="64">Low</option><option value="200">High</option></select></div>
+                <span id="en_manual_iridix_l" style="display:none">On</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+
+      </div>
+
+      <div class="bottom-grid">
+        <section class="panel mini-panel">
+          <div class="mini-title">Host</div>
+          <div class="host-row"><input class="host-input" id="host" value="http://localhost:5000"><button class="side-btn" style="width:48px;margin:0" onclick="connectAndLoad()">◎</button></div>
+        </section>
+        <section class="panel mini-panel">
+          <div class="mini-title">Device Command</div>
+          <div class="cmd-box" id="cmd-box">No pending changes</div>
+          <div style="display:none" id="inf-ctrl">/dev/video0out</div>
+        </section>
+      </div>
+    </section>
+  </main>
+</div>
+
+
+<div class="overlay" id="restart-modal">
+  <div class="modal">
+    <div class="modal-hdr"><h3>Restart Service</h3><button class="modal-close" onclick="closeRestart()">x</button></div>
+    <div class="modal-body">Restarts the <b>mipi-util service only</b>. (For a full device reboot, use an SSH/console session.)</div>
+    <div class="modal-foot"><button class="btn-cancel" onclick="closeRestart()">Later</button><button class="btn-reboot" onclick="doReboot()">Restart Service</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="settings-modal">
+  <div class="modal">
+    <div class="modal-hdr"><h3>Settings</h3><button class="modal-close" onclick="closeSettings()">x</button></div>
+    <div class="modal-body">
+      <div class="ctrl" style="margin-bottom:16px">
+        <label class="ctrl-lbl">Target FPS</label>
+        <input type="range" id="set-fps" min="1" max="30" value="30" oninput="syncSettingSlider('set-fps'); liveFpsUpdate()">
+        <input class="num" type="number" id="set-fps-v" value="30" oninput="syncSettingNum('set-fps'); liveFpsUpdate()">
+      </div>
+      <div class="ctrl" style="margin-bottom:16px">
+        <label class="ctrl-lbl">Stream Quality</label>
+        <input type="range" id="set-quality" min="30" max="95" value="85" oninput="syncSettingSlider('set-quality')">
+        <input class="num" type="number" id="set-quality-v" value="85" oninput="syncSettingNum('set-quality')">
+      </div>
+      <div class="ctrl" style="margin-bottom:16px">
+        <label class="ctrl-lbl">Encode Workers</label>
+        <input type="range" id="set-encoders" min="1" max="8" value="3" oninput="syncSettingSlider('set-encoders')">
+        <input class="num" type="number" id="set-encoders-v" value="3" oninput="syncSettingNum('set-encoders')">
+      </div>
+      <div class="ctrl">
+        <label class="ctrl-lbl">Diag Refresh (s)</label>
+        <input type="range" id="set-diag" min="1" max="15" value="4" oninput="syncSettingSlider('set-diag')">
+        <input class="num" type="number" id="set-diag-v" value="4" oninput="syncSettingNum('set-diag')">
+      </div>
+      <div style="color:var(--muted);font-size:12px;margin-top:14px;line-height:1.5">
+        Target FPS and Diag Refresh apply immediately. Stream Quality applies after reconnecting. Encode Workers applies after switching cameras or restarting the service.
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn-cancel" onclick="closeSettings()">Cancel</button><button class="btn-confirm" onclick="saveSettings()">Save</button></div>
+  </div>
+</div>
+
+<div class="reboot-ov" id="reboot-ov"><div class="spin"></div><div id="reboot-msg">Restarting service...</div><div id="reboot-sub">Please wait a few seconds.</div></div>
+<div class="toast-area" id="toasts"></div>
+
+<script>
+// ── API auth ──────────────────────────────────────────────────────────────
+// State-changing endpoints on the device require a per-install token (printed
+// by the installer). Reads stay open, so the page and live view load without
+// one; the token is only attached to write requests and prompted for when a
+// write is refused. Stored per-device (keyed by host) so pointing at another
+// board asks for that board's token instead of reusing the wrong one.
+function _tokKey() {
+  try { return "sima-auth-token:" + document.getElementById("host").value.trim(); }
+  catch(_) { return "sima-auth-token"; }
+}
+function getToken() { return localStorage.getItem(_tokKey()) || ""; }
+function setToken(t) {
+  if (t && t.trim()) localStorage.setItem(_tokKey(), t.trim());
+  else localStorage.removeItem(_tokKey());
+}
+function promptToken(msg) {
+  const t = window.prompt(msg || "Enter the device API token (shown by the installer):", getToken());
+  if (t !== null) setToken(t);
+  return t;
+}
+const _origFetch = window.fetch.bind(window);
+const CAMERA_CLIENT_ID = (() => {
+  let id = sessionStorage.getItem("sima-camera-client-id");
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() :
+      "client-" + Date.now() + "-" + Math.random().toString(16).slice(2));
+    sessionStorage.setItem("sima-camera-client-id", id);
+  }
+  return id;
+})();
+window.fetch = async (url, opts) => {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers, {"X-Camera-Client": CAMERA_CLIENT_ID});
+  const method = (opts.method || "GET").toUpperCase();
+  const guarded = method !== "GET" && method !== "HEAD";
+  if (guarded) {
+    const t = getToken();
+    if (t) opts.headers = Object.assign({}, opts.headers, {"X-Auth-Token": t});
+  }
+  let r = await _origFetch(url, opts);
+  if (r.status === 401 && guarded) {
+    // Token missing or rejected — ask once and retry the same request.
+    if (promptToken("This device rejected the request. Enter its API token:") !== null) {
+      opts.headers = Object.assign({}, opts.headers, {"X-Auth-Token": getToken()});
+      r = await _origFetch(url, opts);
+    }
+  }
+  return r;
+};
+
+let pending = {};
+let streamDev = "/dev/video0";
+let ctrlDev = "/dev/video0out";
+let cameraName = "—";
+let cameraDriver = "—";
+let diagTimer = null;
+// Last resolution we successfully read; survives a failed diagnostics poll so
+// the field doesn't flicker. Reset in selectCamera() — a different camera can
+// be running a different mode.
+let lastKnownRes = null;
+let diagIntervalMs = 4000;
+let histTimer = null;
+let healthTimer = null;
+let _streamRetry = null;
+let fpsTimer = null;
+
+function getBitDepth(fmt) {
+  const map = {
+    "MJPEG (from NV12)":"8-bit",
+    RAW8:"8-bit",Y8:"8-bit",Y8UV88:"8-bit",Y8U8V8:"8-bit",
+    RGB888:"8-bit",BGR888:"8-bit",BGRA32:"8-bit",ARGB32:"8-bit",
+    RAW10:"10-bit",RAW12:"12-bit",R14G14B14:"14-bit",Y14UV88:"14-bit",Y14VU88:"14-bit",
+    MANUAL:"-",DISABLE:"-"
+  };
+  return map[fmt] || "-";
+}
+
+function updateFormatInfo(fmtStr) {
+  const el = document.getElementById("inf-fmt");
+  if (el) el.textContent = fmtStr || "-";
+  const bd = document.getElementById("inf-bitdepth");
+  if (bd) bd.textContent = getBitDepth(fmtStr || "");
+}
+
+function api(path) {
+  const h = document.getElementById("host").value.trim().replace(/\/$/, "");
+  return (h.startsWith("http") ? h : `http://${h}:5000`) + path;
+}
+
+function toast(msg, type="info", ms=3500) {
+  const el = Object.assign(document.createElement("div"), {className:`toast ${type}`, textContent:msg});
+  document.getElementById("toasts").appendChild(el);
+  setTimeout(() => {
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 180);
+  }, ms);
+}
+
+function setConn(s) {
+  const dot = document.getElementById("dot");
+  dot.className = "dot" + (s === "on" ? " on" : s === "err" ? " err" : " wait");
+  document.getElementById("conn-txt").textContent = s === "on" ? "Streaming" : s === "err" ? "Disconnected" : "Connecting...";
+
+  const ic = document.getElementById("inf-conn");
+  ic.textContent = s === "on" ? "Connected" : s === "err" ? "Failed" : "Connecting...";
+  ic.className = "kv-value dv" + (s === "on" ? " ok" : s === "err" ? " err" : " warn");
+
+  const is = document.getElementById("inf-streaming");
+  is.textContent = s === "on" ? "Active" : s === "err" ? "Stopped" : "-";
+  is.className = "kv-value dv" + (s === "on" ? " ok" : s === "err" ? " err" : "");
+
+  const sv = document.getElementById("sys-status");
+  if (s === "on") { sv.textContent = "Online"; sv.className = "metric-value ok"; }
+  else if (s === "err") { sv.textContent = "Error"; sv.className = "metric-value err"; }
+  else { sv.textContent = "Wait"; sv.className = "metric-value warn"; }
+}
+
+function switchTab(name) {
+  // Frame Format was removed, leaving only the "daily" tab. Guarded lookups
+  // so this can't throw if a tab is dropped from the markup again.
+  ["daily"].forEach(t => {
+    const content = document.getElementById("tab-"+t);
+    const btn = document.getElementById("tab-btn-"+t);
+    if (content) content.classList.toggle("hidden", t !== name);
+    if (btn) btn.classList.toggle("active", t === name);
+  });
+}
+
+async function connectAndLoad() {
+  setConn("wait");
+  try {
+    // Starting the stream builds the selected camera's pipeline. The controls
+    // endpoint waits for its per-camera restore pass, so fetch controls only
+    // after requesting the stream instead of briefly showing the previous
+    // camera's values from the ISP's shared context.
+    startStream();
+    const r = await fetch(api("/api/controls"));
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    applyValuesToUI(d);
+    setConn("on");
+    toast("All parameters loaded successfully", "ok");
+    pending = {};
+    previewBaseline = null;
+    updateCmd();
+    const sr = await fetch(api("/api/status"));
+    if (sr.ok) {
+      const s = await sr.json();
+      streamDev = s.stream_device || streamDev;
+      ctrlDev = s.control_device || ctrlDev;
+    }
+    try {
+      const cr = await fetch(api("/api/cameras"));
+      if (cr.ok) {
+        const cd = await cr.json();
+        const cam = cd.cameras.find(c => c.device === streamDev);
+        if (cam) { cameraName = cam.name; cameraDriver = cam.driver || "—"; }
+      }
+    } catch(_) {}
+    updateDevInfo();
+    startDiag();
+    startHistogram();
+    startHealth();
+    startControlsSync();
+    loadCachedCapabilities();
+  } catch(e) {
+    setConn("err");
+    toast("Cannot connect: " + e.message, "err");
+    showOverlay("Cannot reach device", true);
+  }
+}
+
+// Stream-safe refresh: updates the displayed slider/control values from the
+// real hardware state without touching the video stream at all (no
+// startStream() call) — safe to call anywhere a reconnect would be risky.
+async function refreshControlsDisplay(skipIfEditing=false) {
+  // Previously this skipped whenever pending[] was non-empty, and only
+  // Apply/Reject ever emptied it. With Apply gone that would freeze this
+  // sync permanently after the first drag, so external changes (a v4l2-ctl
+  // write from a terminal, an auto algorithm) would never show again.
+  // Pause only while the user is actually still adjusting something.
+  if (skipIfEditing && Date.now() - lastInteractionTs < EDIT_QUIET_MS) return;
+  try {
+    const r = await fetch(api("/api/controls"));
+    if (!r.ok) return;
+    const d = await r.json();
+    applyValuesToUI(d);
+    if (!skipIfEditing) { pending = {}; updateCmd(); }
+  } catch(_) {}
+}
+
+let controlsSyncTimer = null;
+function startControlsSync() {
+  if (controlsSyncTimer) clearInterval(controlsSyncTimer);
+  // Keeps the Camera Controls panel (White Balance, Saturation, etc.) matching
+  // real hardware state continuously — previously it was only fetched once
+  // at specific moments (load, Reset All, Apply...), so any drift from
+  // elsewhere (auto algorithms, another client, direct hardware access)
+  // left the sliders showing stale numbers indefinitely.
+  controlsSyncTimer = setInterval(() => refreshControlsDisplay(true), 3000);
+}
+
+let lastControlsSnapshot = null;
+let previewBaseline = null;
+
+function applyValuesToUI(data) {
+  lastControlsSnapshot = data;
+  for (const [id, meta] of Object.entries(data)) {
+    const val = meta.value ?? meta.default;
+    if (val == null) continue;
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.tagName === "SELECT") {
+      el.value = String(val);
+    } else if (el.type === "checkbox") {
+      el.checked = val === 1;
+      onTog(el, true);
+    } else if (el.type === "range" && el.dataset.log) {
+      // Logarithmic slider (currently just Exposure Time): the real
+      // hardware range can be astronomically wide (current_exposure's real
+      // max is 2,147,483,647) — a LINEAR slider over that range is
+      // uncontrollable, a single pixel of drag can jump millions of units.
+      // The visible <input range> stays a fixed 0..LOG_SLIDER_MAX position;
+      // only the number box shows/accepts the real value. Store the real
+      // bounds so sv()/ss() can convert between position and real value.
+      el.dataset.realMin = meta.min;
+      el.dataset.realMax = meta.max;
+      el.value = realToLogSlider(val, meta.min, meta.max);
+      updateFill(el);
+      const vl = document.getElementById(id + "_v");
+      if (vl) vl.value = val;
+    } else if (el.type === "range") {
+      // The backend now reports each control's real, device-declared
+      // min/max (VIDIOC_QUERYCTRL via v4l2-ctl --list-ctrls) instead of a
+      // hand-typed guess in CONTROLS — apply it so every slider's range
+      // always matches what the hardware itself will actually accept,
+      // rather than an app-side approximation that's been wrong before
+      // (current_exposure's real max is 2,147,483,647; CONTROLS had
+      // guessed 2,000,000).
+      if (meta.min != null) el.min = meta.min;
+      if (meta.max != null) el.max = meta.max;
+      // Defensive fallback: a browser range input silently clamps its
+      // value to min/max on assignment, desyncing the thumb from the true
+      // value — widen further if a live value still falls outside the
+      // range above for any reason.
+      if (val > parseFloat(el.max)) el.max = val;
+      if (val < parseFloat(el.min)) el.min = val;
+      el.value = val;
+      updateFill(el);
+      const vl = document.getElementById(id + "_v");
+      if (vl) vl.value = val;
+    }
+  }
+  const irid = data.system_iridix_strength_target;
+  if (irid) {
+    const v = irid.value ?? irid.default;
+    const presets = [64, 128, 200];
+    const closest = presets.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a);
+    const tm = document.getElementById("tone_mapping_select");
+    if (tm) tm.value = String(closest);
+  }
+}
+
+function updateFill(sl) {
+  const mn = parseFloat(sl.min) || 0;
+  const mx = parseFloat(sl.max) || 100;
+  const pct = ((parseFloat(sl.value) - mn) / (mx - mn)) * 100;
+  sl.style.setProperty("--fill", pct.toFixed(2) + "%");
+}
+
+// Logarithmic slider mapping — see applyValuesToUI's data-log comment.
+// LOG_SLIDER_MAX is just the visible slider's internal resolution (how many
+// discrete drag steps it has), unrelated to the real control's own range.
+const LOG_SLIDER_MAX = 10000;
+function logSliderToReal(pos, realMin, realMax) {
+  const lo = Math.log(Math.max(parseFloat(realMin) || 0, 1));
+  const hi = Math.log(Math.max(parseFloat(realMax) || 1, 2));
+  return Math.round(Math.exp(lo + (pos / LOG_SLIDER_MAX) * (hi - lo)));
+}
+function realToLogSlider(val, realMin, realMax) {
+  const lo = Math.log(Math.max(parseFloat(realMin) || 0, 1));
+  const hi = Math.log(Math.max(parseFloat(realMax) || 1, 2));
+  const pos = LOG_SLIDER_MAX * (Math.log(Math.max(val, 1)) - lo) / (hi - lo);
+  return Math.max(0, Math.min(LOG_SLIDER_MAX, Math.round(pos)));
+}
+
+async function sv(sl) {
+  updateFill(sl);
+  // For a log slider, sl.value is just the drag POSITION (0..LOG_SLIDER_MAX)
+  // — convert to the real value before displaying/sending it anywhere else.
+  const realVal = sl.dataset.log
+    ? logSliderToReal(parseFloat(sl.value), sl.dataset.realMin, sl.dataset.realMax)
+    : sl.value;
+  const v = document.getElementById(sl.id + "_v");
+  if (v) v.value = realVal;
+  snapshotBaselineIfNeeded();
+  await autoEnableLock(sl);
+  mark(sl.id, realVal);
+  previewLive(sl.id, realVal);
+}
+
+async function ss(inp, id) {
+  const s = document.getElementById(id);
+  if (s) {
+    // inp.value here is already the real value the user typed — convert it
+    // to a slider position for a log slider instead of assigning it as-is.
+    s.value = s.dataset.log
+      ? realToLogSlider(parseFloat(inp.value), s.dataset.realMin, s.dataset.realMax)
+      : inp.value;
+    updateFill(s);
+  }
+  snapshotBaselineIfNeeded();
+  await autoEnableLock(s || inp);
+  mark(id, inp.value);
+  previewLive(id, inp.value);
+}
+
+function onMenu(sel) {
+  snapshotBaselineIfNeeded();
+  mark(sel.id, parseInt(sel.value, 10));
+  previewLive(sel.id, sel.value, true);
+}
+// Every slider/toggle writes to hardware immediately via previewLive(), so
+// there is no Apply step any more. pending[] is still tracked, but only so
+// Reject Changes knows what to roll back — it no longer means "unsent".
+let lastInteractionTs = 0;
+const EDIT_QUIET_MS = 1500;
+
+// Mirror of the backend's _CEILING_PAIRS: writing a target above its current
+// ceiling makes the backend implicitly raise the ceiling too (_ensure_ceiling),
+// so the ceiling must be part of the undo state or Reject Changes restores the
+// target while leaving the ceiling raised.
+const CEILING_PAIRS = {system_iridix_strength_target: "system_maximum_iridix_strength"};
+
+function mark(id, val) {
+  if (!id) return;
+  pending[id] = parseInt(val, 10);
+  const ceil = CEILING_PAIRS[id];
+  if (ceil && previewBaseline && pending[id] > previewBaseline[ceil]) {
+    // The backend just raised the ceiling to this value — record it so the
+    // rollback restores the ceiling to its baseline along with the target.
+    pending[ceil] = Math.max(pending[ceil] ?? 0, pending[id]);
+  }
+  lastInteractionTs = Date.now();
+  updateCmd();
+}
+
+// Live preview: push the value to the actual hardware as the user drags,
+// so Live View shows the real result immediately instead of only after
+// clicking Apply. Throttled (leading+trailing) so a fast drag doesn't fire
+// a v4l2-ctl subprocess call on every pixel of mouse movement.
+let _previewLast = 0;
+let _previewTimer = null;
+function previewLive(id, val, immediate=false) {
+  const v = parseInt(val, 10);
+  // Bind the write to the camera that was selected when the user made the
+  // change. A throttled trailing write may run after a camera switch; reading
+  // the global streamDev inside send() made an old IMX568 slider value arrive
+  // tagged as an IMX477 write (or vice versa), so the backend correctly but
+  // undesirably remembered it for the new camera.
+  const camera = streamDev;
+  const send = () => {
+    _previewLast = Date.now();
+    return fetch(api("/api/set"), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera, control:id, value:v})
+    }).then(async r => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) {
+        toast(d.error || "Control write failed (HTTP " + r.status + ")", "err");
+        throw new Error(d.error || "HTTP " + r.status);
+      }
+      return d;
+    }).catch(()=>{});
+  };
+  if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null; }
+  if (immediate || Date.now() - _previewLast >= 100) {
+    return send();
+  }
+  return new Promise(resolve => { _previewTimer = setTimeout(() => resolve(send()), 100); });
+}
+
+function cancelPendingPreview() {
+  if (_previewTimer) {
+    clearTimeout(_previewTimer);
+    _previewTimer = null;
+  }
+}
+
+// Snapshot hardware state the moment a fresh round of edits starts, so
+// Reject has something to restore.
+function snapshotBaselineIfNeeded() {
+  if (previewBaseline === null && lastControlsSnapshot) {
+    previewBaseline = {};
+    for (const [k, m] of Object.entries(lastControlsSnapshot)) {
+      previewBaseline[k] = m.value ?? m.default;
+    }
+  }
+}
+
+// Dragging a value slider only visibly does anything if its manual lock is
+// on — otherwise the ISP's auto algorithm just overwrites the preview.
+// Awaiting the lock write here (instead of firing it and moving on) matters:
+// this ISP can "pin" a register to whatever value gets written while the
+// lock hasn't actually landed as manual yet, silently ignoring every write
+// after that until the lock is toggled off and back on again. Sending the
+// value before the lock's write is confirmed applied risks exactly that —
+// the drag looks normal at first then stops updating entirely.
+async function autoEnableLock(el) {
+  if (!el) return;
+  const ctrlDiv = el.closest("[data-manual]");
+  if (!ctrlDiv) return;
+  const lockId = ctrlDiv.getAttribute("data-manual");
+  const lockEl = document.getElementById(lockId);
+  if (lockEl && lockEl.type === "checkbox" && !lockEl.checked) {
+    lockEl.checked = true;
+    onTog(lockEl);
+    await previewLive(lockId, 1, true);
+  }
+}
+
+async function rejectPreview() {
+  if (!previewBaseline || !Object.keys(pending).length) {
+    pending = {};
+    updateCmd();
+    toast("Nothing to discard", "info");
+    return;
+  }
+  const controls = {};
+  // Restore values before locks: releasing a lock first would make the
+  // value write fail (auto reclaims an unlocked control) on a discard
+  // that actually succeeded. Locks are checkbox toggles (en_manual_*,
+  // syst_man_*); identifying them structurally covers all naming schemes.
+  // Hidden locks with no DOM element (syst_man_un_direct_sharpening) fall
+  // back to the lock naming prefixes.
+  const isLock = id => {
+    const el = document.getElementById(id);
+    return el ? el.type === "checkbox" : /^(en_manual_|syst_man_)/.test(id);
+  };
+  const keys = Object.keys(pending).sort((a, b) => isLock(a) - isLock(b));
+  for (const k of keys) {
+    if (k in previewBaseline) controls[k] = previewBaseline[k];
+  }
+  try {
+    const r = await fetch(api("/api/set_many"), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:streamDev, controls})
+    });
+    const d = await r.json();
+    const failed = Object.entries(d.results || {})
+      .filter(([, result]) => !result.ok)
+      .map(([control]) => control);
+    if (!r.ok || failed.length) {
+      throw new Error(d.error || "Failed controls: " + failed.join(", "));
+    }
+    toast("Changes discarded", "info");
+    pending = {};
+    previewBaseline = null;
+    updateCmd();
+    await connectAndLoad();
+  } catch(e) {
+    toast("Discard failed: " + e.message, "err");
+  }
+}
+
+function updateCmd() {
+  const lines = Object.entries(pending).map(([k,v]) => `v4l2-ctl -d ${ctrlDev} --set-ctrl ${k}=${v}`);
+  document.getElementById("cmd-box").textContent = lines.length ? lines.join(" && ") : "No pending changes";
+}
+
+function onTog(cb, silent=false) {
+  const lbl = document.getElementById(cb.id + "_l");
+  if (lbl) {
+    lbl.textContent = cb.checked ? "On" : "Off";
+    lbl.style.color = cb.checked ? "var(--green)" : "var(--muted)";
+  }
+  document.querySelectorAll(`[data-manual="${cb.id}"]`).forEach(el => el.classList.toggle("ctrl-off", !cb.checked));
+  if (!silent) {
+    snapshotBaselineIfNeeded();
+    mark(cb.id, cb.checked ? 1 : 0);
+    previewLive(cb.id, cb.checked ? 1 : 0, true);
+  }
+}
+
+// The "Image Enhancement" card's header toggle is its own real lock
+// (syst_man_direct_sharpening, which only actually gates Sharpness), but
+// Saturation and Denoise each have their OWN separate real locks
+// (en_manual_saturation, en_manual_sinter) — unlike Gain Control's Digital
+// Gain, these three can't just share one data-manual attribute, since each
+// slider still needs its own correct lock engaged to actually apply in
+// hardware when dragged individually. Instead, flipping the header cascades
+// the same on/off state to the other two real locks — both their visual
+// gray-out (via onTog's own data-manual lookup) and their real v4l2 write —
+// so switching the whole card off genuinely disables all three, not just
+// Sharpness, while dragging one slider on its own still correctly engages
+// only the lock that control actually needs.
+function onImageEnhancementTog(cb) {
+  onTog(cb);
+  ["en_manual_saturation", "en_manual_sinter"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.checked !== cb.checked) {
+      el.checked = cb.checked;
+      onTog(el);
+    }
+  });
+  // Presets also arm the hidden indirect-sharpening lock, which has no
+  // toggle of its own — switching the card off must release it too, or its
+  // preset value stays manually pinned with no visible way to clear it.
+  // (Card ON deliberately leaves it alone: no slider drives that value, so
+  // arming it would pin the indirect strength for no reason.)
+  if (!cb.checked) {
+    snapshotBaselineIfNeeded();
+    mark("syst_man_un_direct_sharpening", 0);
+    previewLive("syst_man_un_direct_sharpening", 0, true);
+  }
+}
+
+// On IMX568 the backend silently arms the internal digital-gain lock so ISP
+// writes stick; the card's off state must release it too (no-op on IMX477).
+function onGainControlTog(cb) {
+  onTog(cb);
+  if (!cb.checked) {
+    snapshotBaselineIfNeeded();
+    mark("en_manual_sensor_digital_gain", 0);
+    previewLive("en_manual_sensor_digital_gain", 0, true);
+  }
+}
+
+function setSettingValue(id, val) {
+  const sl = document.getElementById(id);
+  if (!sl) return;
+  sl.value = val;
+  updateFill(sl);
+  const v = document.getElementById(id + "-v");
+  if (v) v.value = val;
+}
+function syncSettingSlider(id) {
+  const sl = document.getElementById(id);
+  updateFill(sl);
+  const v = document.getElementById(id + "-v");
+  if (v) v.value = sl.value;
+}
+function syncSettingNum(id) {
+  const v = document.getElementById(id + "-v");
+  const sl = document.getElementById(id);
+  sl.value = v.value;
+  updateFill(sl);
+}
+async function openSettings() {
+  try {
+    const r = await fetch(api("/api/settings"));
+    const d = await r.json();
+    setSettingValue("set-fps", d.target_fps);
+    setSettingValue("set-quality", d.jpeg_quality);
+    setSettingValue("set-encoders", d.num_encoders);
+    setSettingValue("set-diag", Math.round(d.diag_interval_ms / 1000));
+  } catch(e) {
+    toast("Could not load settings: " + e.message, "err");
+  }
+  document.getElementById("settings-modal").classList.add("open");
+}
+function closeSettings() {
+  document.getElementById("settings-modal").classList.remove("open");
+}
+async function saveSettings() {
+  const fps = parseInt(document.getElementById("set-fps").value, 10);
+  const quality = parseInt(document.getElementById("set-quality").value, 10);
+  const encoders = parseInt(document.getElementById("set-encoders").value, 10);
+  const diagSec = parseInt(document.getElementById("set-diag").value, 10);
+  try {
+    const r = await fetch(api("/api/settings"), {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({target_fps: fps, jpeg_quality: quality, num_encoders: encoders, diag_interval_ms: diagSec * 1000})
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || "save failed");
+    diagIntervalMs = diagSec * 1000;
+    startDiag();
+    toast("Settings saved", "ok");
+    closeSettings();
+  } catch(e) {
+    toast("Settings failed: " + e.message, "err");
+  }
+}
+
+// Target FPS is throttled server-side per-frame on the already-running
+// stream (see _libcamera_encoded_stream), so unlike Stream Quality/Encode
+// Workers it doesn't need Save + a reconnect to take effect — push it live
+// as the slider moves, throttled so a fast drag doesn't spam requests.
+let _fpsUpdateTimer = null;
+function liveFpsUpdate() {
+  if (_fpsUpdateTimer) clearTimeout(_fpsUpdateTimer);
+  _fpsUpdateTimer = setTimeout(() => {
+    const fps = parseInt(document.getElementById("set-fps").value, 10);
+    fetch(api("/api/settings"), {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({target_fps: fps})
+    }).catch(()=>{});
+  }, 150);
+}
+
+async function applyPreset(name) {
+  try {
+    const r = await fetch(api(`/api/preset/${name}`), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:streamDev})});
+    const d = await r.json();
+    if (d.ok) {
+      toast(`Preset "${name}" applied`, "ok");
+      // Only re-sync the displayed control values — NOT connectAndLoad(),
+      // which also calls startStream() and forces a video reconnect. The
+      // preset's writes take effect on the already-running stream
+      // immediately; reconnecting only reintroduces the ISP's brief AWB
+      // re-converge flash (the same issue fixed for fullscreen toggling),
+      // which looked like the preset applying and then reverting.
+      previewBaseline = null;
+      await refreshControlsDisplay();
+    } else {
+      toast(d.error || "Preset failed", "err");
+    }
+  } catch(e) {
+    toast("Preset failed: " + e.message, "err");
+  }
+}
+
+async function applyAll() {
+  if (!Object.keys(pending).length) { toast("No changes to apply", "info"); return; }
+  try {
+    const r = await fetch(api("/api/set_many"), {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:streamDev, controls:pending})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "HTTP " + r.status);
+    const bad = Object.values(d.results || {}).filter(v => !v.ok).length;
+    if (bad) toast(`${bad} control(s) failed`, "err");
+    else {
+      toast(`Applied ${Object.keys(pending).length} setting(s)`, "ok");
+      pending = {};
+      previewBaseline = null;
+      updateCmd();
+      // No refreshStream() here — the same bug just fixed for presets. Live
+      // preview already wrote these values to hardware in real time as the
+      // user dragged, so the running stream already shows them; forcing a
+      // reconnect only restarts the ISP's AWB convergence and produces a
+      // brief flash back toward auto/default-looking colors, which reads
+      // as "Apply reverted my changes."
+    }
+    if (d.restart_required) showRestartModal();
+  } catch(e) {
+    toast("Apply failed: " + e.message, "err");
+  }
+}
+
+// Re-read every control's current value and paint it into the UI, WITHOUT
+// touching the live view. connectAndLoad() also calls startStream(), which
+// reassigns the <img> src and so tears down and re-opens the video connection
+// — a visible black frame and, whenever the reconnect raced anything, the
+// "Stream unavailable — retrying..." overlay with a Start button. Set Default
+// changes ISP registers; it does not change which camera is streaming, so the
+// video never needs to be disturbed.
+async function reloadControlValues() {
+  const r = await fetch(api("/api/controls"));
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  applyValuesToUI(await r.json());
+  pending = {};
+  // Drop the pre-reset baseline too, or Undo restores the old tuning.
+  previewBaseline = null;
+  updateCmd();
+}
+
+async function resetAll() {
+  if (!confirm("Set all controls back to their default values?")) return;
+  try {
+    const r = await fetch(api("/api/reset"), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:streamDev})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) {
+      const failed = Object.keys(d.failed || {}).join(", ");
+      throw new Error(d.error || (failed ? "Failed controls: " + failed : "HTTP " + r.status));
+    }
+    // Reload values only — the stream keeps running untouched.
+    await reloadControlValues();
+    toast("Reset to defaults", "ok");
+  } catch(e) {
+    toast("Reset failed: " + e.message, "err");
+  }
+}
+
+// Grays out and disables any control the connected camera doesn't actually
+// support (confirmed by writing a real test value and reading it back — see
+// /api/detect_capabilities), with a tooltip explaining why. Reuses the same
+// .ctrl-off dimming already used for the manually-confirmed WDR Mode / DRC
+// Strength cases, just applied generically from live detection results
+// instead of being hardcoded for one specific camera.
+function applyCapabilities(results) {
+  // Disabled + a hover tooltip is enough to communicate "not supported" —
+  // deliberately not dimming/graying these out (no .ctrl-off) so the panel
+  // doesn't read as visually broken, just quietly non-interactive.
+  for (const [id, info] of Object.entries(results)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const unsupported = info.supported === false;
+    el.disabled = unsupported;
+    el.title = unsupported ? "Configuration is not supported" : "";
+    const numEl = document.getElementById(id + "_v");
+    if (numEl) {
+      numEl.disabled = unsupported;
+      numEl.title = unsupported ? "Configuration is not supported" : "";
+    }
+  }
+}
+
+// Re-enable controls disabled by applyCapabilities(); the tooltip string is
+// its marker, so manual-lock dimming (data-manual / .ctrl-off) is untouched.
+function clearCapabilities() {
+  document.querySelectorAll('[title="Configuration is not supported"]').forEach(el => {
+    el.disabled = false;
+    el.title = "";
+  });
+}
+
+async function loadCachedCapabilities() {
+  try {
+    const r = await fetch(api("/api/capabilities"));
+    if (!r.ok) return;
+    const d = await r.json();
+    // Empty cache (e.g. after a camera switch): clear the previous camera's
+    // stale disables instead of leaving them stuck.
+    if (Object.keys(d).length) applyCapabilities(d);
+    else clearCapabilities();
+  } catch(_) {}
+}
+
+async function detectCapabilities() {
+  const btn = document.getElementById("detect-caps-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "⌕   Detecting…"; }
+  toast("Testing every control against this camera — this takes about 10-15s", "info");
+  try {
+    const r = await fetch(api("/api/detect_capabilities"), {method:"POST"});
+    const d = await r.json();
+    if (d.ok) {
+      applyCapabilities(d.results);
+      const unsupported = Object.values(d.results).filter(v => v.supported === false).length;
+      toast(`Detection complete — ${unsupported} configuration(s) not supported on this camera`, unsupported ? "info" : "ok");
+    } else {
+      toast("Detection failed", "err");
+    }
+  } catch(e) {
+    toast("Detection failed: " + e.message, "err");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "⌕   Detect Supported Configs"; }
+  }
+}
+
+function startStream() {
+  const img = document.getElementById("stream-img");
+  document.getElementById("vid-overlay").classList.add("hidden");
+  img.style.display = "block";
+  img.src = api(`/api/stream?device=${encodeURIComponent(streamDev)}&client_id=${encodeURIComponent(CAMERA_CLIENT_ID)}&_t=${Date.now()}`);
+  startFpsPoll();
+}
+
+function refreshStream() {
+  const img = document.getElementById("stream-img");
+  img.src = api(`/api/stream?device=${encodeURIComponent(streamDev)}&client_id=${encodeURIComponent(CAMERA_CLIENT_ID)}&_t=${Date.now()}`);
+}
+
+let _staleFpsCount = 0;
+let _watchdogCooldown = false;
+function startFpsPoll() {
+  // sensor_fps from the hardware is unreliable (can report values far outside
+  // its own declared range) — poll the app's own frame-yield counter instead,
+  // which counts frames as they're actually produced by the capture pipeline.
+  if (fpsTimer) clearInterval(fpsTimer);
+  _staleFpsCount = 0;
+  fpsTimer = setInterval(async () => {
+    try {
+      const r = await fetch(api("/api/stream_fps"));
+      if (!r.ok) return;
+      const d = await r.json();
+      const fps = d.fps != null ? d.fps.toFixed(1) : "—";
+      set("inf-fps", fps);
+      set("inf-fps-side", fps === "—" ? "—" : fps + " FPS");
+      set("sb-fps", fps);
+      set("sb-avg-fps", d.avg_fps != null ? d.avg_fps.toFixed(1) : "—");
+      // Sensor rate comes from the sensor's timing registers, capture rate is
+      // counted before the target_fps throttle, display rate is what actually
+      // reaches this page. Showing all three makes it visible whether a low
+      // display rate is the sensor, the ISP, or our own encode/throttle.
+      const sensor = d.sensor_fps != null ? d.sensor_fps.toFixed(1) : "—";
+      set("sb-sensor-fps", sensor);
+      const cmp = (sensor === "—" && fps === "—")
+        ? "—"
+        : sensor + " / " + fps + " FPS";
+      set("inf-fps-compare", cmp);
+      // Watchdog: a stalled multipart stream doesn't fire the <img> error
+      // event (the connection stays technically open, just idle), so
+      // onStreamErr() never triggers its own retry. Only reconnect after
+      // several straight seconds of zero real frames — never on a single
+      // missed poll, and never proactively (e.g. on fullscreen toggle),
+      // since a reconnect briefly disrupts the ISP's white balance while it
+      // reconverges. This only steps in once the stream is truly dead.
+      if (d.fps == null) {
+        _staleFpsCount++;
+        if (_staleFpsCount >= 5 && !_watchdogCooldown) {
+          _watchdogCooldown = true;
+          refreshStream();
+          _staleFpsCount = 0;
+          setTimeout(() => { _watchdogCooldown = false; }, 8000);
+        }
+      } else {
+        _staleFpsCount = 0;
+      }
+    } catch(_) {}
+  }, 1000);
+}
+
+function onStreamLoad() {
+  document.getElementById("vid-overlay").classList.add("hidden");
+  if (_streamRetry) { clearTimeout(_streamRetry); _streamRetry = null; }
+}
+let _camOwnedByOther = false;
+function onStreamErr() {
+  // The <img> can't read the HTTP status, so distinguish the exclusive-owner
+  // case (423) using the ownership flag polled from /api/status.
+  if (_camOwnedByOther) {
+    showOverlay("Camera is in use by another browser/user — waiting for it to be released…", false);
+  } else {
+    showOverlay(`Stream unavailable (${streamDev}) — retrying...`, true);
+  }
+  if (_streamRetry) clearTimeout(_streamRetry);
+  _streamRetry = setTimeout(startStream, 6000);
+}
+
+// Poll camera ownership so a "someone else is using this camera" popup shows
+// even when the conflict starts after load — the <img> stream alone can't
+// report the 423. camera_owned_by_other is computed by the server relative to
+// this browser's X-Camera-Client id (added to every request).
+async function checkCameraOwnership() {
+  try {
+    const r = await fetch(api("/api/status"));
+    if (!r.ok) return;
+    const other = !!(await r.json()).camera_owned_by_other;
+    if (other) {
+      showOverlay("Camera is in use by another browser/user — waiting for it to be released…", false);
+    } else if (_camOwnedByOther) {
+      startStream();   // just released — reconnect our stream
+    }
+    _camOwnedByOther = other;
+  } catch(_) {}
+}
+function showOverlay(msg, showBtn) {
+  document.getElementById("ov-msg").textContent = msg;
+  document.getElementById("vid-overlay").classList.remove("hidden");
+  document.getElementById("stream-img").style.display = "none";
+  document.getElementById("ov-btn").style.display = showBtn ? "block" : "none";
+}
+
+function startDiag() {
+  if (diagTimer) clearInterval(diagTimer);
+  fetchDiag();
+  diagTimer = setInterval(fetchDiag, diagIntervalMs);
+}
+
+async function fetchDiag() {
+  checkCameraOwnership();
+  try {
+    const r = await fetch(api("/api/diagnostics"));
+    if (!r.ok) return;
+    const d = await r.json();
+    // Resolution only changes on a sensor mode change, so a poll that fails to
+    // read it means "could not ask this time", not "there is no resolution".
+    // Blanking on a single failed read is what made this field disappear for a
+    // few seconds and come back. Keep the last known value instead; it is
+    // cleared explicitly on a camera switch, where the mode really can differ.
+    if (d.sensor_width && d.sensor_height) {
+      lastKnownRes = `${d.sensor_width}x${d.sensor_height}`;
+    }
+    const res = lastKnownRes || "-";
+    set("s-res", res);
+    set("s-res-lbl", res);
+    set("s-ae", d.get_ae_hist_mean != null ? d.get_ae_hist_mean : "-");
+    // The ISP reports exposure and gain as log₂ values in Q18 fixed point
+    // (2^18 = 262144 counts per unit of log₂). Derived + verified on-device by
+    // sweeping current_exposure with manual lock on and watching
+    // get_expososure_log2 move by exactly 2^18 per doubling of the exposure:
+    //   exposure_µs = 64 · 2^(get_expososure_log2 / 2^18)   (64µs reference pivot)
+    //   gain_×      =      2^(get_gain_log2       / 2^18)   (unity reference)
+    // Gain reads ≈1.00× in a bright scene, which is correct — the sensor only
+    // applies gain it needs. If a future ISP build changes the fixed-point
+    // scale, LOG2_Q is the single knob (and EXP_PIVOT_US the exposure pivot).
+    const LOG2_Q = 262144;       // 2^18 fixed-point scale
+    const EXP_PIVOT_US = 64;     // exposure reference, microseconds
+    const fmtGain = v => v != null ? Math.pow(2, v / LOG2_Q).toFixed(2) + "×" : "—";
+    const fmtExp  = v => {
+      if (v == null) return "—";
+      const us = EXP_PIVOT_US * Math.pow(2, v / LOG2_Q);
+      return us >= 1000 ? (us / 1000).toFixed(2) + " ms" : us.toFixed(0) + " µs";
+    };
+    set("s-gain", fmtGain(d.get_gain_log2));
+    set("s-exp", fmtExp(d.get_expososure_log2));
+    set("s-ird", d.get_iridix_contrast != null ? d.get_iridix_contrast : "-");
+    // Sidebar live stats (FPS is measured client-side from real frame arrivals,
+    // not from the sensor_fps register — see onStreamLoad())
+    set("sb-res", res);
+    set("sb-exp-val", fmtExp(d.get_expososure_log2));
+    set("sb-gain-val", fmtGain(d.get_gain_log2));
+    set("sb-ae-val", d.get_ae_hist_mean != null ? d.get_ae_hist_mean : "—");
+    set("sb-ird-val", d.get_iridix_contrast != null ? d.get_iridix_contrast : "—");
+    // Real sensor-subdevice registers (vertical_blanking/horizontal_blanking/
+    // digital_gain/link_frequency) — previously these fields were hardcoded
+    // placeholder text that never updated.
+    // Digital gain: the sensor's raw register is a multiplier scaled to its
+    // own declared unity (imx477 unity is 256; imx568 declares 0..1048576 where
+    // 256 means nothing), so divide by the backend-reported unity rather than a
+    // hardcoded 256. When there is no unity to divide by, show the raw value.
+    set("s-digain", d.digital_gain_raw == null ? "—"
+        : (d.digital_gain_unity ? (d.digital_gain_raw / d.digital_gain_unity).toFixed(2) + " x"
+                                : String(d.digital_gain_raw)));
+    set("s-vblank", d.vertical_blanking != null ? d.vertical_blanking : "—");
+    set("s-hblank", d.horizontal_blanking != null ? d.horizontal_blanking : "—");
+    set("s-linkfreq", d.link_frequency_hz != null ? (d.link_frequency_hz / 1e6).toFixed(0) + " MHz" : "—");
+  } catch(_) {}
+}
+
+function set(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function startHealth() {
+  if (healthTimer) clearInterval(healthTimer);
+  fetchHealth();
+  healthTimer = setInterval(fetchHealth, 5000);
+}
+
+async function fetchHealth() {
+  try {
+    const r = await fetch(api("/api/health"));
+    if (!r.ok) return;
+    const d = await r.json();
+    const cpu = document.getElementById("sys-cpu");
+    const mem = document.getElementById("sys-mem");
+    const tmp = document.getElementById("sys-temp");
+    if (cpu && d.cpu_percent != null) cpu.innerHTML = `${d.cpu_percent.toFixed(1)}% <span class="bar"><span style="width:${Math.min(100,d.cpu_percent)}%"></span></span>`;
+    if (mem && d.memory_percent != null) mem.innerHTML = `${d.memory_percent.toFixed(1)}% <span class="bar mem"><span style="width:${Math.min(100,d.memory_percent)}%"></span></span>`;
+    if (tmp && d.temperature_c != null) tmp.innerHTML = `${d.temperature_c}°C <span class="bar temp"><span style="width:${Math.min(100,d.temperature_c)}%"></span></span>`;
+  } catch(_) {}
+}
+
+function startHistogram() {
+  if (histTimer) clearInterval(histTimer);
+  drawHistogram();
+  histTimer = setInterval(drawHistogram, 1200);
+}
+
+let _histCanvas = null;
+function computeLuminanceHistogram(bars) {
+  const img = document.getElementById("stream-img");
+  if (!img || !img.naturalWidth) return null;
+  if (!_histCanvas) _histCanvas = document.createElement("canvas");
+  // Downscale before reading pixels — a statistical sample is enough for a
+  // histogram and this runs every couple seconds, no need to walk every
+  // pixel of a 1080p frame.
+  const sw = 160, sh = Math.max(1, Math.round(sw * img.naturalHeight / img.naturalWidth)) || 90;
+  _histCanvas.width = sw;
+  _histCanvas.height = sh;
+  const hctx = _histCanvas.getContext("2d", {willReadFrequently:true});
+  try {
+    hctx.drawImage(img, 0, 0, sw, sh);
+    const data = hctx.getImageData(0, 0, sw, sh).data;
+    const counts = new Array(bars).fill(0);
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+      const bin = Math.min(bars - 1, Math.floor(lum / 256 * bars));
+      counts[bin]++;
+    }
+    return counts;
+  } catch(e) {
+    return null; // no frame yet, or a cross-origin stream host (tainted canvas)
+  }
+}
+
+function drawHistogram() {
+  const c = document.getElementById("histogram-canvas");
+  if (!c) return;
+  const W = c.clientWidth || 220;
+  const H = c.clientHeight || 118;
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(0,0,0,.08)";
+  for (let x = 0; x < W; x += W / 8) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += H / 4) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  const bars = 64;
+  const counts = computeLuminanceHistogram(bars);
+  if (!counts) return; // leave the empty grid until a real frame is available
+  const maxCount = Math.max(...counts, 1);
+  const bw = W / bars;
+  for (let i = 0; i < bars; i++) {
+    const h = Math.max(1, (counts[i] / maxCount) * (H - 4));
+    const g = ctx.createLinearGradient(0, H - h, 0, H);
+    g.addColorStop(0, "rgba(89,152,221,.9)");
+    g.addColorStop(1, "rgba(20,45,90,.35)");
+    ctx.fillStyle = g;
+    ctx.fillRect(i * bw, H - h, Math.max(1, bw - 1), h);
+  }
+}
+
+function toggleCamDropdown() {
+  const dd = document.getElementById("cam-dropdown");
+  if (dd.classList.contains("open")) {
+    dd.classList.remove("open");
+  } else {
+    dd.classList.add("open");
+    loadCamDropdown();
+  }
+}
+
+// Camera/device names come from external hardware (USB descriptor strings,
+// "cam -l"/v4l2-ctl output) — not something this app controls. A malicious
+// or malformed device could report a name containing HTML/script, so these
+// must never go into innerHTML unescaped; a plain string assigned via
+// textContent-equivalent escaping keeps it inert no matter what it contains.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+async function loadCamDropdown() {
+  const list = document.getElementById("cam-dd-list");
+  list.innerHTML = '<div style="padding:12px;color:var(--muted);text-align:center;font-size:13px">Scanning...</div>';
+  try {
+    const r = await fetch(api("/api/cameras"));
+    const d = await r.json();
+    list.innerHTML = "";
+    if (d.cameras.length) {
+      d.cameras.forEach(cam => {
+        const it = document.createElement("div");
+        it.className = "cam-dd-item" + (cam.device === streamDev ? " sel" : "") + (cam.busy ? " busy" : "");
+        it.innerHTML = `<div class="cam-dd-name">${escapeHtml(cam.name || cam.device)}</div>
+          <div class="cam-dd-dev">${escapeHtml(cam.device)} → ${escapeHtml(cam.device.replace(/video(\d+)$/, 'video$1out'))}</div>
+          ${cam.busy ? '<div class="cam-dd-busy">In use by another application</div>' : ''}`;
+        if (!cam.busy) it.onclick = () => selectCamera(cam);
+        list.appendChild(it);
+      });
+    }
+    try {
+      const cr = await fetch(api("/api/control_devices"));
+      if (cr.ok) {
+        const cdata = await cr.json();
+        // Each camera above already implies exactly one matching out channel
+        // (selectCamera() sets stream+control device together via ctrl_dev()),
+        // so only show a channel here if it ISN'T already covered by a camera
+        // row — otherwise this section is just a redundant duplicate of the
+        // list above, which is what made the dropdown look off with a
+        // single-item "ISP Output Channels" header repeating the one camera
+        // entry verbatim. With one camera and one real out channel (the
+        // normal case here), that means this section now simply stays empty.
+        const alreadyShown = new Set(d.cameras.map(cam => cam.device.replace(/video(\d+)$/, 'video$1out')));
+        const extra = cdata.control_devices.filter(cd => !alreadyShown.has(cd.device));
+        if (extra.length) {
+          const hdr = document.createElement("div");
+          hdr.style.cssText = "padding:8px 12px 4px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em";
+          hdr.textContent = "ISP Output Channels";
+          list.appendChild(hdr);
+          extra.forEach(cd => {
+            const it = document.createElement("div");
+            it.className = "cam-dd-item" + (cd.device === ctrlDev ? " sel" : "");
+            it.innerHTML = `<div class="cam-dd-name">${escapeHtml(cd.name || cd.device)}</div>
+              <div class="cam-dd-dev">${escapeHtml(streamDev)} → ${escapeHtml(cd.device)}</div>`;
+            it.onclick = () => selectControlDevice(cd.device);
+            list.appendChild(it);
+          });
+        }
+      }
+    } catch(_) {}
+    if (!list.children.length) {
+      list.innerHTML = '<div style="padding:12px;color:var(--muted);text-align:center;font-size:13px">No cameras found</div>';
+    }
+  } catch(e) {
+    list.innerHTML = `<div style="padding:12px;color:var(--danger);text-align:center;font-size:13px">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function selectControlDevice(dev) {
+  document.getElementById("cam-dropdown").classList.remove("open");
+  cancelPendingPreview();
+  try {
+    const r = await fetch(api("/api/device"), {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({control_device:dev})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "failed");
+    ctrlDev = d.control_device;
+    updateDevInfo();
+    toast(`Control channel: ${dev}`, "ok");
+    await connectAndLoad();
+  } catch(e) {
+    toast("Channel switch failed: " + e.message, "err");
+  }
+}
+
+async function selectCamera(cam) {
+  document.getElementById("cam-dropdown").classList.remove("open");
+  // Never let a trailing write from the previous camera cross this boundary.
+  cancelPendingPreview();
+  lastKnownRes = null;   // the new camera may run a different mode
+  try {
+    const r = await fetch(api("/api/device"), {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({camera:cam.device})
+    });
+    const d = await r.json();
+    // On failure (423 lease held, 401 auth) keep the current camera state.
+    if (!r.ok || !d.stream_device) {
+      toast("Camera switch failed: " + (d.error || "HTTP " + r.status), "err");
+      return;
+    }
+    streamDev = d.stream_device;
+    ctrlDev = d.control_device;
+    cameraName = cam.name;
+    cameraDriver = cam.driver || "—";
+    updateDevInfo();
+    toast(`Camera: ${cam.name}`, "ok");
+    await connectAndLoad();
+  } catch(e) {
+    toast("Camera switch failed: " + e.message, "err");
+  }
+}
+
+function onFormatMenu(sel) {
+  onMenu(sel);
+}
+
+function updateDevInfo() {
+  set("inf-stream", streamDev);
+  set("inf-ctrl", ctrlDev);
+  set("inf-ctrl-s", ctrlDev);
+  set("inf-camera", cameraName);
+  set("inf-driver", cameraDriver);
+  set("sb-cam-name", cameraName !== "-" && cameraName !== "—" ? cameraName : "IMX Camera");
+  set("sb-cam-sub", streamDev + " -> " + ctrlDev);
+  set("cam-label", streamDev.replace("/dev/","") + " -> " + ctrlDev.replace("/dev/",""));
+  updateCmd();
+}
+
+function showRestartModal() { document.getElementById("restart-modal").classList.add("open"); }
+function closeRestart() { document.getElementById("restart-modal").classList.remove("open"); }
+
+async function doReboot() {
+  closeRestart();
+  const ov = document.getElementById("reboot-ov");
+  const sub = document.getElementById("reboot-sub");
+  ov.classList.add("open");
+  try {
+    const r = await fetch(api("/api/restart"), {method:"POST", headers:{"Content-Type":"application/json"}, body:'{"type":"service"}'});
+    const d = await r.json().catch(() => ({}));
+    // A received error response means no restart happened — abort.
+    if (!r.ok || d.ok === false) {
+      ov.classList.remove("open");
+      toast("Restart failed: " + (d.error || "HTTP " + r.status), "err");
+      return;
+    }
+  } catch(_) {
+    // Dropped connection: the restart likely killed the service before the
+    // response flushed — fall through and let the poll confirm recovery.
+  }
+  sub.textContent = "Waiting for the service to come back...";
+  let tries = 0;
+  const poll = setInterval(async () => {
+    try {
+      const r = await fetch(api("/api/status"));
+      if (r.ok) {
+        clearInterval(poll);
+        ov.classList.remove("open");
+        toast("Service back online", "ok");
+        await connectAndLoad();
+      }
+    } catch(_) {
+      sub.textContent = `Waiting... (${++tries * 3}s)`;
+    }
+    if (tries > 60) {
+      clearInterval(poll);
+      ov.classList.remove("open");
+      toast("Device did not respond; check manually", "err");
+    }
+  }, 3000);
+}
+
+async function autoConnectCamera() {
+  try {
+    const r = await fetch(api("/api/cameras"));
+    if (r.ok) {
+      const d = await r.json();
+      const avail = d.cameras.filter(c => !c.busy);
+      if (!avail.length && d.cameras.length) {
+        toast("Camera device is in use by another application", "warn");
+        showOverlay("Device busy — another application is using the camera", false);
+        return;
+      }
+      // If the server already has a valid (non-busy) camera selected, ADOPT it
+      // as-is and do NOT re-POST /api/device. Re-selecting on every page load —
+      // especially a DIFFERENT camera on a multi-camera board, where the busy
+      // flag can momentarily make one look like the only choice — tears down and
+      // rebuilds the shared pipeline, which re-arms every manual lock 0->1 (the
+      // "controls toggle off/on by themselves" churn). Only auto-select when the
+      // server has no usable selection yet AND there is exactly one candidate.
+      const selected = d.cameras.find(c => c.device === d.stream_device && !c.busy);
+      if (selected) {
+        streamDev = d.stream_device;
+        ctrlDev = d.control_device || ctrlDev;
+        cameraName = selected.name;
+        cameraDriver = selected.driver || "—";
+        updateDevInfo();
+      } else if (avail.length === 1) {
+        const cam = avail[0];
+        const res = await fetch(api("/api/device"), {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({camera:cam.device})
+        });
+        if (res.ok) {
+          const s = await res.json();
+          streamDev = s.stream_device || streamDev;
+          ctrlDev = s.control_device || ctrlDev;
+          cameraName = cam.name;
+          cameraDriver = cam.driver || "—";
+          updateDevInfo();
+        }
+      }
+    }
+  } catch(_) {}
+  connectAndLoad();
+}
+
+let _preFullscreenQuality = null;
+
+function toggleFullscreen() {
+  const box = document.getElementById("video-box");
+  if (!box) return;
+  const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+  if (!isFs) {
+    (box.requestFullscreen || box.webkitRequestFullscreen)?.call(box);
+  } else {
+    (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+  }
+}
+
+// Bump JPEG quality to max while viewing fullscreen (a deliberate close-look
+// moment, worth the extra bandwidth), and restore whatever it was before
+// once the user backs out — however they exit (button, Esc, etc.).
+async function onFullscreenChange() {
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const btn = document.getElementById("fullscreen-btn");
+  if (btn) btn.textContent = isFs ? "⤢" : "⛶";
+  // Deliberately does NOT force a stream reconnect — that would restart the
+  // ISP's AWB convergence and briefly show the wrong colors before it
+  // settles back, which reads as "fullscreen resets my settings." The
+  // quality bump below is best-effort: it takes effect the next time the
+  // stream reconnects on its own (see startFpsPoll()'s watchdog), not
+  // immediately. Recovering a genuinely stalled stream is handled
+  // separately and only kicks in once frames actually stop, not on every
+  // fullscreen toggle.
+  try {
+    if (isFs) {
+      const r = await fetch(api("/api/settings"));
+      const d = await r.json();
+      // Fullscreen may have been exited while that GET was in flight — the
+      // exit handler already ran with nothing to restore, so bumping (and
+      // persisting) quality now would leave 95 stuck permanently.
+      if (!(document.fullscreenElement || document.webkitFullscreenElement)) return;
+      _preFullscreenQuality = d.jpeg_quality;
+      if (d.jpeg_quality < 95) {
+        await fetch(api("/api/settings"), {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({jpeg_quality: 95})
+        });
+      }
+    } else if (_preFullscreenQuality != null) {
+      await fetch(api("/api/settings"), {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({jpeg_quality: _preFullscreenQuality})
+      });
+      _preFullscreenQuality = null;
+    }
+  } catch(_) {}
+  refreshControlsDisplay();
+}
+document.addEventListener("fullscreenchange", onFullscreenChange);
+document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
+function toggleTheme() {
+  const root = document.documentElement;
+  const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  root.setAttribute("data-theme", next);
+  localStorage.setItem("sima-theme", next);
+  syncThemeIcon();
+}
+function syncThemeIcon() {
+  const btn = document.getElementById("theme-toggle-btn");
+  if (!btn) return;
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  btn.textContent = isDark ? "\u263E" : "\u263C";
+  btn.title = isDark ? "Switch to day mode" : "Switch to night mode";
+}
+
+window.addEventListener("load", () => {
+  syncThemeIcon();
+  if (window.location.port === "5000") {
+    document.getElementById("host").value = window.location.origin;
+  }
+  drawHistogram();
+  document.querySelectorAll("input[type=range]").forEach(updateFill);
+  // This is the actual capture pipeline's real wire format — always NV12
+  // capture -> MJPEG encode in this app — not the ISP "Output Format"
+  // dropdown, which is an unrelated register the live stream doesn't use.
+  updateFormatInfo("MJPEG (from NV12)");
+  updateDevInfo();
+  document.addEventListener("click", e => {
+    const btn = document.getElementById("cam-select-btn");
+    const dd = document.getElementById("cam-dropdown");
+    if (dd && dd.classList.contains("open") && !dd.contains(e.target) && btn && !btn.contains(e.target))
+      dd.classList.remove("open");
+  });
+  if (window.location.port === "5000") setTimeout(autoConnectCamera, 400);
+});
+</script>
+</body>
+</html>
