@@ -17,6 +17,30 @@ const TRACK_COLORS = [
   "#0f766e"
 ];
 const TRACK_FALLBACK_COLOR = "#f8fafc";
+const SEGMENT_CLASS_COLORS = new Map();
+
+function colorForSegmentClass(label) {
+  const key = String(label || "segment");
+  if (SEGMENT_CLASS_COLORS.has(key)) return SEGMENT_CLASS_COLORS.get(key);
+
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  }
+
+  const usedColors = new Set(SEGMENT_CLASS_COLORS.values());
+  for (let offset = 0; offset < TRACK_COLORS.length; offset += 1) {
+    const color = TRACK_COLORS[(hash + offset) % TRACK_COLORS.length];
+    if (!usedColors.has(color)) {
+      SEGMENT_CLASS_COLORS.set(key, color);
+      return color;
+    }
+  }
+
+  const color = `hsl(${hash % 360} 85% 55%)`;
+  SEGMENT_CLASS_COLORS.set(key, color);
+  return color;
+}
 
 const COCO_SKELETON = [
   ['nose', 'left_eye'], ['nose', 'right_eye'],
@@ -417,7 +441,7 @@ window.drawStrategies = {
 
     const defaultStyle = objectStyles["default"];
     const threshold = settings.type.confidenceThreshold ?? 0;
-    const opacity = settings.type.maskOpacity ?? 0.4;
+    const opacity = settings.type.maskOpacity ?? 0.15;
     const showRoi = settings.general.showRoi !== false;
     const applyRoiFiltering = settings.general.applyRoiFiltering !== false;
 
@@ -444,8 +468,9 @@ window.drawStrategies = {
       }
       if (!passesRoiFilter(bbox, roiPolygons, video, scale, applyRoiFiltering)) return;
 
-      const style = objectStyles[seg.label] || defaultStyle;
-      const color = style?.color || 'lime';
+      const classStyle = objectStyles[seg.label];
+      const style = classStyle || defaultStyle;
+      const color = classStyle?.color || colorForSegmentClass(seg.label);
 
       ctx.strokeStyle = color;
       ctx.lineWidth = style?.width || 2;
@@ -514,9 +539,17 @@ window.drawStrategies = {
         ctx.restore();
       }
 
-      ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
       const label = `${seg.label} (${Math.round((seg.confidence ?? 1) * 100)}%)`;
-      ctx.fillText(label, (bbox[0] + 2) * scaleX + offsetX, (bbox[1] - 6) * scaleY + offsetY);
+      if (seg.mask_format === "rle") {
+        ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
+      }
+      drawTrackLabel(
+        ctx,
+        label,
+        (bbox[0] + 2) * scaleX + offsetX,
+        (bbox[1] - 6) * scaleY + offsetY,
+        color,
+      );
     });
   },
 
@@ -585,3 +618,4 @@ window.drawStrategies = {
 
 // Exposed for frontend/src/viewer/rleMask.test.js.
 window.decodeRleMaskAlpha = decodeRleMaskAlpha;
+window.colorForSegmentClass = colorForSegmentClass;

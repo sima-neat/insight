@@ -202,6 +202,12 @@ type BrowserSynchronizationStats struct {
 	UntimestampedMetadataReceived uint64  `json:"untimestamped_metadata_received"`
 	TimestampedMetadataPending    uint64  `json:"timestamped_metadata_pending"`
 	ArrivalMetadataPending        uint64  `json:"arrival_metadata_pending"`
+	SegmentationHoldMaxFrames     uint64  `json:"segmentation_hold_max_frames"`
+	SegmentationHoldRemaining     uint64  `json:"segmentation_hold_remaining_frames"`
+	SegmentationHoldDraws         uint64  `json:"segmentation_hold_draws"`
+	SegmentationHoldExpirations   uint64  `json:"segmentation_hold_expirations"`
+	SegmentationConfidenceSmooth  uint64  `json:"segmentation_confidence_smoothed"`
+	SegmentationTrackHoldDraws    uint64  `json:"segmentation_track_hold_draws"`
 }
 
 func NewEgressStats(channel int) *EgressStats {

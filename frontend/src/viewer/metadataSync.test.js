@@ -43,6 +43,26 @@ test("timestamped metadata is selected only for its decoded RTP frame", () => {
   assert.equal(takeMetadataForFrame(queue, 1234, 0, 20), null);
 });
 
+test("realtime fallback takes the newest timestamp that the video has passed", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { value: "old", _insight: { rtp_timestamp: 1000 } }, 10);
+  enqueueMetadata(queue, { value: "latest-past", _insight: { rtp_timestamp: 1100 } }, 20);
+  enqueueMetadata(queue, { value: "future", _insight: { rtp_timestamp: 1300 } }, 30);
+
+  assert.equal(takeMetadataForFrame(queue, 1200, 0, 40, true)?.data.value, "latest-past");
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
+  assert.equal(takeMetadataForFrame(queue, 1300, 0, 50, true)?.data.value, "future");
+});
+
+test("realtime timestamp fallback handles RTP wraparound", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { value: "before-wrap", _insight: { rtp_timestamp: 0xfffffff0 } }, 10);
+  enqueueMetadata(queue, { value: "future", _insight: { rtp_timestamp: 0x00000100 } }, 20);
+
+  assert.equal(takeMetadataForFrame(queue, 0x00000020, 0, 30, true)?.data.value, "before-wrap");
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
+});
+
 test("metadata without a source timestamp falls back to the next video frame", () => {
   const queue = createMetadataQueue();
   const message = { type: "classification", data: { top_classes: [] } };
