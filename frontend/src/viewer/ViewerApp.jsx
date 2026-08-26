@@ -7,6 +7,11 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import {
+  createSegmentationHoldState,
+  segmentationHoldSnapshot,
+  selectOverlayMetadata,
+} from "./segmentationHold.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import {
@@ -96,6 +101,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const metadataQueueRef = useRef(createMetadataQueue());
   const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
+  const segmentationHoldRef = useRef(createSegmentationHoldState());
   const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
@@ -151,6 +157,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
       applySynchronizationSettings();
+      segmentationHoldRef.current = createSegmentationHoldState();
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -197,6 +204,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
+      segmentationHoldRef.current = createSegmentationHoldState();
       trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
@@ -309,9 +317,15 @@ function ChannelTile({ index, onActiveChange, debug }) {
               frameMetadata?.rtpTimestamp,
               synchronizationSettingsRef.current.metadataRetentionMs,
               now,
+              synchronizationSettingsRef.current.videoSyncBufferMs <= 50,
             );
-            if (candidate && hasDrawableMetadata(candidate.data, index)) {
-              const metadataType = candidate.data?.type;
+            const overlayMetadata = selectOverlayMetadata(
+              candidate,
+              segmentationHoldRef.current,
+              (item) => hasDrawableMetadata(item.data, index),
+            );
+            if (overlayMetadata) {
+              const metadataType = overlayMetadata.data?.type;
               const strategy = window.drawStrategies?.[metadataType];
               if (strategy) {
                 const resolvedSettings = getResolvedViewerSettings(index, metadataType);
@@ -320,12 +334,13 @@ function ChannelTile({ index, onActiveChange, debug }) {
                   trackHistory: trackHistoryRef.current,
                   now,
                 };
-                strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
+                strategy(ctx, canvas, overlayMetadata.data?.data, video, index, drawContext);
               }
             }
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          segmentationHoldRef.current = createSegmentationHoldState();
           trackHistoryRef.current.clear();
         }
       };
@@ -390,6 +405,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               setTileActive(false);
               const canvas = canvasRef.current;
               canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+              segmentationHoldRef.current = createSegmentationHoldState();
               trackHistoryRef.current.clear();
             }
             setBanner(
@@ -419,6 +435,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
             if (metadataChannel?.readyState === "open") {
               const video = videoRef.current;
               const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
+              const segmentationHold = segmentationHoldSnapshot(segmentationHoldRef.current);
               const videoSync = videoSyncStatusRef.current;
               const lastFrameAgeMs =
                 playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
@@ -477,6 +494,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
                     untimestamped_metadata_received: metadataSync.untimestampedReceived,
                     timestamped_metadata_pending: metadataSync.timestampedPending,
                     arrival_metadata_pending: metadataSync.arrivalPending,
+                    segmentation_hold_max_frames: segmentationHold.maxFrames,
+                    segmentation_hold_remaining_frames: segmentationHold.remainingFrames,
+                    segmentation_hold_draws: segmentationHold.heldFrameDraws,
+                    segmentation_hold_expirations: segmentationHold.expirations,
+                    segmentation_confidence_smoothed: segmentationHold.smoothedConfidenceUpdates,
+                    segmentation_track_hold_draws: segmentationHold.heldTrackDraws,
                   },
                 })
               );

@@ -67,7 +67,7 @@ that channel.
 
 Available metadata settings:
 - Object Detection: confidence threshold and per-label box style.
-- Segmentation: confidence threshold, mask opacity, and per-label mask color and outline style.
+- Segmentation: confidence threshold, mask opacity, and per-label mask color and outline style. Classes receive distinct stable colors by default; polygon masks use a 15% transparent fill, a full-color outline, and a `class (confidence%)` label.
 - Tracking: confidence threshold, track history visibility, trail length, and how
   long lost-track trails remain visible.
 - Other metadata types are rendered with defaults until type-specific settings
@@ -77,8 +77,10 @@ ROI settings are split into filtering and display:
 - Apply ROI Filtering controls whether ROI polygons filter box-like metadata.
 - Show ROI Overlay controls only whether ROI polygons are drawn over the video.
 
-General settings include Overlay Delay, which delays metadata selection so boxes
-and tracks can be aligned with the displayed WebRTC frame.
+General settings include the video synchronization buffer. At 0-50 ms, the
+Viewer prefers an exact RTP timestamp and otherwise draws the newest inference
+whose video frame has already passed, keeping overlays continuous without
+delaying live video.
 
 ## Build from source
 

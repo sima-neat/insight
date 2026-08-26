@@ -24,7 +24,7 @@
     "pose-estimation": {},
     segmentation: {
       confidenceThreshold: 0,
-      maskOpacity: 0.4,
+      maskOpacity: 0.15,
       objects: DEFAULT_OBJECTS
     },
     classification: {}

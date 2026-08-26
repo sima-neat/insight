@@ -100,9 +100,11 @@ func TestEgressStatsRecordsBrowserReport(t *testing.T) {
 			Active:     true,
 		},
 		Synchronization: BrowserSynchronizationStats{
-			VideoSyncBufferMS: 350,
-			TimestampMatches:  15,
-			FrameMisses:       1,
+			VideoSyncBufferMS:            350,
+			TimestampMatches:             15,
+			FrameMisses:                  1,
+			SegmentationHoldMaxFrames:    5,
+			SegmentationConfidenceSmooth: 42,
 		},
 	})
 	if err != nil {
@@ -122,6 +124,10 @@ func TestEgressStatsRecordsBrowserReport(t *testing.T) {
 	}
 	if report.Synchronization.VideoSyncBufferMS != 350 || report.Synchronization.TimestampMatches != 15 {
 		t.Fatalf("unexpected synchronization report: %#v", report.Synchronization)
+	}
+	if report.Synchronization.SegmentationHoldMaxFrames != 5 ||
+		report.Synchronization.SegmentationConfidenceSmooth != 42 {
+		t.Fatalf("segmentation stability counters were discarded: %#v", report.Synchronization)
 	}
 }
 

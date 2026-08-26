@@ -54,7 +54,13 @@ export function enqueueMetadata(queue, data, receivedAt) {
   }
 }
 
-export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, now) {
+export function takeMetadataForFrame(
+  queue,
+  rtpTimestamp,
+  metadataRetentionMs,
+  now,
+  allowPastTimestampFallback = false,
+) {
   pruneMetadataQueue(queue, metadataRetentionMs, now);
   const hasFrameTimestamp = Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0;
   if (hasFrameTimestamp) {
@@ -64,6 +70,13 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
       queue.timestamped.delete(key);
       queue.stats.timestampMatches += 1;
       return item;
+    }
+    if (allowPastTimestampFallback) {
+      const fallback = takeNewestPastTimestamped(queue, key);
+      if (fallback) {
+        queue.stats.arrivalFallbacks += 1;
+        return fallback;
+      }
     }
   }
 
@@ -88,6 +101,28 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
   }
   queue.stats.frameMisses += 1;
   return null;
+}
+
+function takeNewestPastTimestamped(queue, frameTimestamp) {
+  let selected = null;
+  let selectedDelta = -(2 ** 31);
+  const consumed = [];
+  for (const [timestamp, item] of queue.timestamped) {
+    const delta = signedRtpDelta(timestamp, frameTimestamp);
+    if (delta > 0) continue;
+    consumed.push(timestamp);
+    if (delta >= selectedDelta) {
+      selected = item;
+      selectedDelta = delta;
+    }
+  }
+  for (const timestamp of consumed) queue.timestamped.delete(timestamp);
+  return selected;
+}
+
+function signedRtpDelta(timestamp, reference) {
+  const difference = ((timestamp >>> 0) - (reference >>> 0)) >>> 0;
+  return difference >= 0x80000000 ? difference - 0x100000000 : difference;
 }
 
 export function metadataQueueSnapshot(queue) {

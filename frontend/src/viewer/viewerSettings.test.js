@@ -46,6 +46,12 @@ test("viewer synchronization settings preserve configured values", () => {
   assert.equal(settings.general.metadataRetentionMs, 2500);
 });
 
+test("segmentation masks default to a transparent fill", () => {
+  const api = loadSettingsApi();
+
+  assert.equal(api.defaults.types.segmentation.maskOpacity, 0.15);
+});
+
 test("version two settings migrate without retaining overlay delay", () => {
   const api = loadSettingsApi({
     viewerSettings_global: JSON.stringify({

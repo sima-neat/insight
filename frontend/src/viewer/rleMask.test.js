@@ -14,6 +14,12 @@ function loadDecoder() {
   return window.decodeRleMaskAlpha;
 }
 
+function loadSegmentColorResolver() {
+  const window = {};
+  vm.runInNewContext(drawingSource, { window });
+  return window.colorForSegmentClass;
+}
+
 // Alpha channel of the decoded RGBA buffer, as a row-major grid of 0/1.
 function decodeToGrid(counts, maskWidth, maskHeight) {
   const pixels = new Uint8ClampedArray(maskWidth * maskHeight * 4);
@@ -81,4 +87,14 @@ test("RLE counts that encode no foreground leave the buffer untouched", () => {
 
   assert.deepEqual(decodeToGrid([], 3, 4), blank);
   assert.deepEqual(decodeToGrid([12], 3, 4), blank);
+});
+
+test("segmentation classes keep distinct stable colors", () => {
+  const colorForClass = loadSegmentColorResolver();
+  const person = colorForClass("person");
+  const car = colorForClass("car");
+  const bottle = colorForClass("bottle");
+
+  assert.equal(colorForClass("person"), person);
+  assert.equal(new Set([person, car, bottle]).size, 3);
 });
