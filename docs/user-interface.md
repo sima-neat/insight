@@ -27,7 +27,7 @@ Workspace is especially useful when an application produces several build output
 
 Media Sources is where you add and manage media files used for application tests. Select **Import Media** to open the import dialog, then choose one of three sources:
 
-- **Local files**: Choose or drag and drop one or more files from your computer. H.264 MP4 uploads are normalized for low-latency playback with B-frames disabled while preserving the source frame rate.
+- **Local files**: Choose or drag and drop one or more files from your computer. When FFmpeg and ffprobe are available, H.264 MP4 uploads are normalized for low-latency playback with B-frames disabled while preserving the source frame rate. If either tool is unavailable, Insight keeps the original file unchanged.
 - **Catalog**: Import from SiMa's curated video catalog for repeatable tests with known assets. Browse by asset type or name, search the catalog, filter by resolution, frame rate, and codec, preview a video, then import one variant or select and import several matching assets.
 - **YouTube**: Paste a regular YouTube video URL, validate it to display a preview, and choose a start time, clip length, and output profile. Insight supports 1-, 3-, or 5-minute clips at `1080p30`, `720p30`, or `480p30`. The imported clip is converted to WebRTC-friendly H.264 with B-frames disabled. Active live streams are not supported; use a regular video or an archived live stream.
 
