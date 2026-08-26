@@ -25,29 +25,21 @@ Workspace is especially useful when an application produces several build output
 
 ## Media Sources
 
-Media Sources is where you manage media files used for application tests. You can upload videos or images, filter the file list, preview selected files, inspect basic media metadata, and delete files that are no longer needed.
+Media Sources is where you add and manage media files used for application tests. Select **Import Media** to open the import dialog, then choose one of three sources:
 
-Supported video formats include common container formats such as `mp4`, `mov`, `avi`, `mkv`, and `webm`. Insight also recognizes MJPEG assets and HEVC/H.265 media for codec-aware streaming. When supported tooling is available, uploaded H.264 MP4 files are optimized for low-latency streaming. MJPEG and HEVC media are preserved so they can be streamed with their original codec behavior.
+- **Local files**: Choose or drag and drop one or more files from your computer. H.264 MP4 uploads are normalized for low-latency playback with B-frames disabled while preserving the source frame rate.
+- **Catalog**: Import from SiMa's curated video catalog for repeatable tests with known assets. Browse by asset type or name, search the catalog, filter by resolution, frame rate, and codec, preview a video, then import one variant or select and import several matching assets.
+- **YouTube**: Paste a regular YouTube video URL, validate it to display a preview, and choose a start time, clip length, and output profile. Insight supports 1-, 3-, or 5-minute clips at `1080p30`, `720p30`, or `480p30`. The imported clip is converted to WebRTC-friendly H.264 with B-frames disabled. Active live streams are not supported; use a regular video or an archived live stream.
 
-Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
+Catalog and YouTube imports require network access. Insight displays progress while it downloads and prepares the media, then saves the result in the local media library.
+
+Supported video formats include common container formats such as `mp4`, `mov`, `avi`, `mkv`, and `webm`. Insight also recognizes MJPEG assets and HEVC/H.265 media for codec-aware streaming. MJPEG and HEVC media are preserved so they can be streamed with their original codec behavior.
+
+After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
-Media Sources combines file selection, preview, metadata inspection, upload, and delete actions in one view.
-
-SiMa provides curated videos for repeatable testing. Use these when you need a known media set:
-
-```text
-https://artifacts.sima-neat.com/assets/videos/720p16/video01.mp4
-...
-https://artifacts.sima-neat.com/assets/videos/720p16/video16.mp4
-
-https://artifacts.sima-neat.com/assets/videos/480p30/video01.mp4
-...
-https://artifacts.sima-neat.com/assets/videos/480p30/video16.mp4
-```
-
-Download the files you need, then import them with the Media Sources upload action.
+Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
 
 ## Streaming Sources
 
