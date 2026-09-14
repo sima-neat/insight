@@ -156,6 +156,11 @@ capture.
 | `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
 
+A frame may be described by several metadata types at once. Send one message per
+type, all carrying the same `timestamp`; the correlator matches each against the
+retained frame mapping, and the viewer draws every type it holds for that frame.
+A second message of the same type for the same frame replaces the first.
+
 Every timestamped message leaves through exactly one of matched, expired, or
 evicted, or is still counted in `pending_metadata`. The video fields describe
 the lifetime of reusable timestamp mappings, not match or loss outcomes.

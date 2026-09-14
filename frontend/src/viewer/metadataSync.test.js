@@ -38,9 +38,9 @@ test("timestamped metadata is selected only for its decoded RTP frame", () => {
 
   enqueueMetadata(queue, message, 10);
 
-  assert.equal(takeMetadataForFrame(queue, 4321, 0, 20), null);
-  assert.deepEqual(takeMetadataForFrame(queue, 1234, 0, 20)?.data, message);
-  assert.equal(takeMetadataForFrame(queue, 1234, 0, 20), null);
+  assert.deepEqual(takeMetadataForFrame(queue, 4321, 0, 20), []);
+  assert.deepEqual(takeMetadataForFrame(queue, 1234, 0, 20)[0]?.data, message);
+  assert.deepEqual(takeMetadataForFrame(queue, 1234, 0, 20), []);
 });
 
 test("metadata without a source timestamp falls back to the next video frame", () => {
@@ -49,7 +49,7 @@ test("metadata without a source timestamp falls back to the next video frame", (
 
   enqueueMetadata(queue, message, 10);
 
-  assert.deepEqual(takeMetadataForFrame(queue, 1234, 20, 0)?.data, message);
+  assert.deepEqual(takeMetadataForFrame(queue, 1234, 20, 0)[0]?.data, message);
 });
 
 test("timestamped metadata falls back when the decoded frame has no RTP timestamp", () => {
@@ -62,7 +62,7 @@ test("timestamped metadata falls back when the decoded frame has no RTP timestam
 
   enqueueMetadata(queue, message, 10);
 
-  assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 20)?.data, message);
+  assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 20)[0]?.data, message);
   assert.equal(metadataQueueSnapshot(queue).timestampedPending, 0);
 });
 
@@ -71,7 +71,7 @@ test("missing frame identity selects the newest arrival across metadata queues",
   enqueueMetadata(queue, { value: "timestamped", _insight: { rtp_timestamp: 1234 } }, 10);
   enqueueMetadata(queue, { value: "untimestamped" }, 20);
 
-  assert.equal(takeMetadataForFrame(queue, undefined, 0, 30)?.data.value, "untimestamped");
+  assert.equal(takeMetadataForFrame(queue, undefined, 0, 30)[0]?.data.value, "untimestamped");
   assert.deepEqual(metadataQueueSnapshot(queue), {
     timestampMatches: 0,
     arrivalFallbacks: 1,
@@ -91,22 +91,22 @@ test("timestamped metadata queue evicts its oldest entry at capacity", () => {
     enqueueMetadata(queue, { _insight: { rtp_timestamp: timestamp } }, timestamp);
   }
 
-  assert.equal(takeMetadataForFrame(queue, 0, 0, 300), null);
-  assert.equal(takeMetadataForFrame(queue, 1, 0, 300)?.data._insight.rtp_timestamp, 1);
+  assert.deepEqual(takeMetadataForFrame(queue, 0, 0, 300), []);
+  assert.equal(takeMetadataForFrame(queue, 1, 0, 300)[0]?.data._insight.rtp_timestamp, 1);
 });
 
 test("configured retention expires unmatched timestamped metadata", () => {
   const queue = createMetadataQueue();
   enqueueMetadata(queue, { _insight: { rtp_timestamp: 1234 } }, 10);
 
-  assert.equal(takeMetadataForFrame(queue, 1234, 5000, 5011), null);
+  assert.deepEqual(takeMetadataForFrame(queue, 1234, 5000, 5011), []);
 });
 
 test("zero retention keeps metadata until match or capacity eviction", () => {
   const queue = createMetadataQueue();
   enqueueMetadata(queue, { _insight: { rtp_timestamp: 1234 } }, 10);
 
-  assert.equal(takeMetadataForFrame(queue, 1234, 0, 500_000)?.data._insight.rtp_timestamp, 1234);
+  assert.equal(takeMetadataForFrame(queue, 1234, 0, 500_000)[0]?.data._insight.rtp_timestamp, 1234);
 });
 
 test("duplicate RTP timestamp keeps the newest metadata", () => {
@@ -114,7 +114,7 @@ test("duplicate RTP timestamp keeps the newest metadata", () => {
   enqueueMetadata(queue, { value: "old", _insight: { rtp_timestamp: 1234 } }, 10);
   enqueueMetadata(queue, { value: "new", _insight: { rtp_timestamp: 1234 } }, 20);
 
-  assert.equal(takeMetadataForFrame(queue, 1234, 0, 30)?.data.value, "new");
+  assert.equal(takeMetadataForFrame(queue, 1234, 0, 30)[0]?.data.value, "new");
 });
 
 test("replacing a timestamp keeps retention ordered by newest arrival", () => {
@@ -123,8 +123,8 @@ test("replacing a timestamp keeps retention ordered by newest arrival", () => {
   enqueueMetadata(queue, { value: "expired", _insight: { rtp_timestamp: 2 } }, 10);
   enqueueMetadata(queue, { value: "new", _insight: { rtp_timestamp: 1 } }, 20);
 
-  assert.equal(takeMetadataForFrame(queue, 2, 15, 30), null);
-  assert.equal(takeMetadataForFrame(queue, 1, 15, 30)?.data.value, "new");
+  assert.deepEqual(takeMetadataForFrame(queue, 2, 15, 30), []);
+  assert.equal(takeMetadataForFrame(queue, 1, 15, 30)[0]?.data.value, "new");
 });
 
 test("metadata queue reports exact timestamp matches", () => {
@@ -154,4 +154,27 @@ test("metadata queue reports fallback, misses, expiry, and capacity eviction", (
   assert.equal(snapshot.evicted, 1);
   assert.equal(snapshot.untimestampedReceived, 1);
   assert.equal(snapshot.timestampedPending, 300);
+});
+
+test("one frame keeps metadata of every type, not just the last to arrive", () => {
+  const queue = createMetadataQueue();
+  const pose = {
+    type: "pose-estimation",
+    data: { poses: [] },
+    _insight: { rtp_timestamp: 4242 },
+  };
+  const tracking = {
+    type: "tracking",
+    data: { tracks: [] },
+    _insight: { rtp_timestamp: 4242 },
+  };
+
+  enqueueMetadata(queue, pose, 10);
+  enqueueMetadata(queue, tracking, 11);
+
+  const items = takeMetadataForFrame(queue, 4242, 0, 12);
+  assert.deepEqual(
+    items.map((item) => item.data.type).sort(),
+    ["pose-estimation", "tracking"],
+  );
 });

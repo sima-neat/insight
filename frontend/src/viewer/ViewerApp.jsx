@@ -304,24 +304,26 @@ function ChannelTile({ index, onActiveChange, debug }) {
           if (ctx) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const candidate = takeMetadataForFrame(
+            const candidates = takeMetadataForFrame(
               metadataQueueRef.current,
               frameMetadata?.rtpTimestamp,
               synchronizationSettingsRef.current.metadataRetentionMs,
               now,
             );
-            if (candidate && hasDrawableMetadata(candidate.data, index)) {
+            // Every type for this frame draws onto the same overlay, already
+            // cleared above.
+            for (const candidate of candidates) {
+              if (!hasDrawableMetadata(candidate.data, index)) continue;
               const metadataType = candidate.data?.type;
               const strategy = window.drawStrategies?.[metadataType];
-              if (strategy) {
-                const resolvedSettings = getResolvedViewerSettings(index, metadataType);
-                const drawContext = {
-                  settings: resolvedSettings,
-                  trackHistory: trackHistoryRef.current,
-                  now,
-                };
-                strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
-              }
+              if (!strategy) continue;
+              const resolvedSettings = getResolvedViewerSettings(index, metadataType);
+              const drawContext = {
+                settings: resolvedSettings,
+                trackHistory: trackHistoryRef.current,
+                now,
+              };
+              strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
             }
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {

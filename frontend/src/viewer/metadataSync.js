@@ -1,4 +1,15 @@
 const METADATA_QUEUE_LIMIT = 300;
+const UNTYPED = "";
+
+function metadataTypeOf(data) {
+  return typeof data?.type === "string" ? data.type : UNTYPED;
+}
+
+function oldestReceivedAt(byType) {
+  let oldest = Infinity;
+  for (const item of byType.values()) oldest = Math.min(oldest, item.receivedAt);
+  return oldest;
+}
 
 export function applyVideoSyncBuffer(receiver, targetMs) {
   if (!receiver || !("jitterBufferTarget" in receiver)) {
@@ -36,11 +47,16 @@ export function enqueueMetadata(queue, data, receivedAt) {
   const item = { receivedAt, data };
   if (Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0) {
     const key = rtpTimestamp >>> 0;
+    // A producer may describe one frame with several metadata types, so a frame
+    // holds one entry per type. A repeat of the same type replaces it.
+    const byType = queue.timestamped.get(key) ?? new Map();
     queue.timestamped.delete(key);
-    queue.timestamped.set(key, item);
+    byType.set(metadataTypeOf(data), item);
+    queue.timestamped.set(key, byType);
     while (queue.timestamped.size > METADATA_QUEUE_LIMIT) {
-      queue.timestamped.delete(queue.timestamped.keys().next().value);
-      queue.stats.evicted += 1;
+      const oldest = queue.timestamped.keys().next().value;
+      queue.stats.evicted += queue.timestamped.get(oldest).size;
+      queue.timestamped.delete(oldest);
     }
     return;
   }
@@ -59,35 +75,44 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
   const hasFrameTimestamp = Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0;
   if (hasFrameTimestamp) {
     const key = rtpTimestamp >>> 0;
-    const item = queue.timestamped.get(key) ?? null;
-    if (item) {
+    const byType = queue.timestamped.get(key) ?? null;
+    if (byType && byType.size > 0) {
       queue.timestamped.delete(key);
       queue.stats.timestampMatches += 1;
-      return item;
+      return [...byType.values()];
     }
   }
 
   if (!hasFrameTimestamp) {
-    let item = queue.arrival.at(-1) ?? null;
-    for (const timestamped of queue.timestamped.values()) {
-      if (!item || timestamped.receivedAt >= item.receivedAt) item = timestamped;
+    const latest = new Map();
+    for (const byType of queue.timestamped.values()) {
+      for (const [type, item] of byType) {
+        const held = latest.get(type);
+        if (!held || item.receivedAt >= held.receivedAt) latest.set(type, item);
+      }
+    }
+    for (const item of queue.arrival) {
+      const type = metadataTypeOf(item.data);
+      const held = latest.get(type);
+      if (!held || item.receivedAt >= held.receivedAt) latest.set(type, item);
     }
     queue.timestamped.clear();
     queue.arrival.length = 0;
-    if (item) {
+    if (latest.size > 0) {
       queue.stats.arrivalFallbacks += 1;
-      return item;
+      return [...latest.values()];
     }
   }
 
   if (queue.arrival.length > 0) {
-    const item = queue.arrival[queue.arrival.length - 1];
+    const latest = new Map();
+    for (const item of queue.arrival) latest.set(metadataTypeOf(item.data), item);
     queue.arrival.length = 0;
     queue.stats.arrivalFallbacks += 1;
-    return item;
+    return [...latest.values()];
   }
   queue.stats.frameMisses += 1;
-  return null;
+  return [];
 }
 
 export function metadataQueueSnapshot(queue) {
@@ -101,9 +126,9 @@ export function metadataQueueSnapshot(queue) {
 function pruneMetadataQueue(queue, metadataRetentionMs, now) {
   if (metadataRetentionMs <= 0) return;
   for (const [timestamp, item] of queue.timestamped) {
-    if (now - item.receivedAt <= metadataRetentionMs) break;
+    if (now - oldestReceivedAt(item) <= metadataRetentionMs) break;
+    queue.stats.expired += item.size;
     queue.timestamped.delete(timestamp);
-    queue.stats.expired += 1;
   }
   while (queue.arrival.length && now - queue.arrival[0].receivedAt > metadataRetentionMs) {
     queue.arrival.shift();
