@@ -107,6 +107,25 @@ def _codec_args(codec: str, source_codec: Optional[str]) -> list[str]:
     ]
 
 
+# ffmpeg's RTSP muxer offers no way to disable Nagle on the socket it opens.
+_FFMPEG_PRELOAD_ENV = "NEAT_INSIGHT_FFMPEG_PRELOAD"
+_FFMPEG_PRELOAD_DEFAULT = "/usr/local/lib/ffmpeg_nodelay.so"
+
+
+def _ffmpeg_env() -> Optional[dict]:
+    """Return the publisher environment with the TCP_NODELAY shim preloaded.
+
+    Returns None when the shim is absent so a source checkout still runs.
+    """
+    shim = os.environ.get(_FFMPEG_PRELOAD_ENV, _FFMPEG_PRELOAD_DEFAULT)
+    if not shim or not os.path.isfile(shim):
+        return None
+    env = dict(os.environ)
+    existing = env.get("LD_PRELOAD")
+    env["LD_PRELOAD"] = f"{shim}:{existing}" if existing else shim
+    return env
+
+
 def rtsp_command(file_path: str, rtsp_url: str, codec: str, source_codec: Optional[str] = None) -> list[str]:
     codec = normalize_codec(codec)
     codec_args = _mjpeg_encode_args(rtp_compatible=True) if codec == "mjpeg" else _codec_args(codec, source_codec)
@@ -186,6 +205,7 @@ class MediaStream:
                 stderr=subprocess.PIPE,
                 text=True,
                 preexec_fn=os.setsid,
+                env=_ffmpeg_env(),
             )
             threading.Thread(target=self._drain_stderr, daemon=True).start()
             return True, None
