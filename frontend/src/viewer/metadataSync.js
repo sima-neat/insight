@@ -84,33 +84,37 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
   }
 
   if (!hasFrameTimestamp) {
-    const latest = new Map();
+    let latest = null;
+    let latestFrame = null;
+    // Arrival time selects a frame; only its shared timestamp can group types.
     for (const byType of queue.timestamped.values()) {
-      for (const [type, item] of byType) {
-        const held = latest.get(type);
-        if (!held || item.receivedAt >= held.receivedAt) latest.set(type, item);
+      for (const item of byType.values()) {
+        if (!latest || item.receivedAt >= latest.receivedAt) {
+          latest = item;
+          latestFrame = byType;
+        }
       }
     }
     for (const item of queue.arrival) {
-      const type = metadataTypeOf(item.data);
-      const held = latest.get(type);
-      if (!held || item.receivedAt >= held.receivedAt) latest.set(type, item);
+      if (!latest || item.receivedAt >= latest.receivedAt) {
+        latest = item;
+        latestFrame = null;
+      }
     }
     queue.timestamped.clear();
     queue.timestampedEntries = 0;
     queue.arrival.length = 0;
-    if (latest.size > 0) {
+    if (latest) {
       queue.stats.arrivalFallbacks += 1;
-      return [...latest.values()];
+      return latestFrame ? [...latestFrame.values()] : [latest];
     }
   }
 
   if (queue.arrival.length > 0) {
-    const latest = new Map();
-    for (const item of queue.arrival) latest.set(metadataTypeOf(item.data), item);
+    const latest = queue.arrival[queue.arrival.length - 1];
     queue.arrival.length = 0;
     queue.stats.arrivalFallbacks += 1;
-    return [...latest.values()];
+    return [latest];
   }
   queue.stats.frameMisses += 1;
   return [];

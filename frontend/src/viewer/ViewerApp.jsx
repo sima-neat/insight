@@ -9,6 +9,7 @@ import {
 } from "./metadataSync.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
+import { drawMetadata } from "./metadataDrawing.js";
 import {
   gridDimensions,
   normalizeMaxChannels,
@@ -315,15 +316,13 @@ function ChannelTile({ index, onActiveChange, debug }) {
             for (const candidate of candidates) {
               if (!hasDrawableMetadata(candidate.data, index)) continue;
               const metadataType = candidate.data?.type;
-              const strategy = window.drawStrategies?.[metadataType];
-              if (!strategy) continue;
               const resolvedSettings = getResolvedViewerSettings(index, metadataType);
               const drawContext = {
                 settings: resolvedSettings,
                 trackHistory: trackHistoryRef.current,
                 now,
               };
-              strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
+              drawMetadata(ctx, canvas, candidate.data, video, index, drawContext);
             }
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {

@@ -95,6 +95,80 @@ test("timestamped metadata queue evicts its oldest entry at capacity", () => {
   assert.equal(takeMetadataForFrame(queue, 1, 0, 300)[0]?.data._insight.rtp_timestamp, 1);
 });
 
+test("fallback keeps all types from only the most recently received frame", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 0xffffffff } }, 10);
+  const tracking = { type: "tracking", _insight: { rtp_timestamp: 0 } };
+  const detection = { type: "object-detection", _insight: { rtp_timestamp: 0 } };
+  enqueueMetadata(queue, tracking, 20);
+  enqueueMetadata(queue, detection, 21);
+
+  assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 30).map((item) => item.data), [tracking, detection]);
+  assert.equal(queue.timestampedEntries, 0);
+  assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 31), []);
+});
+
+test("fallback uses arrival time when a frame receives another metadata type", () => {
+  const queue = createMetadataQueue();
+  const pose = { type: "pose-estimation", _insight: { rtp_timestamp: 1 } };
+  const tracking = { type: "tracking", _insight: { rtp_timestamp: 1 } };
+  enqueueMetadata(queue, pose, 10);
+  enqueueMetadata(queue, { type: "classification", _insight: { rtp_timestamp: 2 } }, 20);
+  enqueueMetadata(queue, tracking, 30);
+
+  assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 40).map((item) => item.data), [pose, tracking]);
+});
+
+test("fallback never combines timestamped and untimestamped metadata", () => {
+  for (const arrivalTime of [10, 20, 30]) {
+    const queue = createMetadataQueue();
+    const timestamped = { type: "tracking", _insight: { rtp_timestamp: 1 } };
+    const untimestamped = { type: "pose-estimation" };
+    enqueueMetadata(queue, timestamped, 20);
+    enqueueMetadata(queue, untimestamped, arrivalTime);
+
+    const expected = arrivalTime >= 20 ? untimestamped : timestamped;
+    assert.deepEqual(takeMetadataForFrame(queue, undefined, 0, 40).map((item) => item.data), [expected]);
+    assert.equal(queue.timestampedEntries, 0);
+    assert.equal(queue.arrival.length, 0);
+  }
+});
+
+test("untimestamped fallback returns only the latest message without inferring a shared frame", () => {
+  for (const frameTimestamp of [undefined, 42]) {
+    const queue = createMetadataQueue();
+    enqueueMetadata(queue, { type: "pose-estimation" }, 10);
+    const latest = { type: "tracking" };
+    enqueueMetadata(queue, latest, 20);
+
+    assert.deepEqual(takeMetadataForFrame(queue, frameTimestamp, 0, 30).map((item) => item.data), [latest]);
+  }
+});
+
+test("an exact frame match takes precedence over newer fallback metadata", () => {
+  const queue = createMetadataQueue();
+  const exact = { type: "pose-estimation", _insight: { rtp_timestamp: 1 } };
+  enqueueMetadata(queue, exact, 10);
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 2 } }, 20);
+  enqueueMetadata(queue, { type: "classification" }, 30);
+
+  assert.deepEqual(takeMetadataForFrame(queue, 1, 0, 40).map((item) => item.data), [exact]);
+  assert.equal(queue.timestampedEntries, 1);
+  assert.equal(queue.arrival.length, 1);
+});
+
+test("fallback excludes expired types from its selected frame", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 1 } }, 0);
+  enqueueMetadata(queue, { type: "classification", _insight: { rtp_timestamp: 2 } }, 20);
+  const tracking = { type: "tracking", _insight: { rtp_timestamp: 1 } };
+  enqueueMetadata(queue, tracking, 40);
+
+  assert.deepEqual(takeMetadataForFrame(queue, undefined, 50, 60).map((item) => item.data), [tracking]);
+  assert.equal(queue.stats.expired, 1);
+  assert.equal(queue.timestampedEntries, 0);
+});
+
 test("configured retention expires unmatched timestamped metadata", () => {
   const queue = createMetadataQueue();
   enqueueMetadata(queue, { _insight: { rtp_timestamp: 1234 } }, 10);
