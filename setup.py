@@ -54,6 +54,7 @@ setup(
             "bin/mediamtx",
             "bin/mediamtx.exe",
             "bin/mediamtx.yml",
+            "bin/ffmpeg_nodelay.so",
             "bin/static/*",
             "bin/static/**/*",
             "frontend_dist/*",

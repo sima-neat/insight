@@ -341,6 +341,8 @@ esac
 popd > /dev/null
 
 for target in "${TARGETS_TO_BUILD[@]}"; do
+    SHIM_CC_CANDIDATES=()
+    SHIM_CC_PACKAGE=""
     VF_BIN_NAME="vf"
     MTX_BIN_NAME="mediamtx"
     MTX_ARCHIVE_EXT="tar.gz"
@@ -351,6 +353,9 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         PLATFORM="linux_arm64"
         TARGET="mediamtx_v${MTX_VERSION}_${PLATFORM}"
         WHEEL_PLAT_NAME="manylinux2014_aarch64"
+        SHIM_CC_CANDIDATES=("aarch64-linux-gnu-gcc")
+        [[ "$ARCH" == "aarch64" ]] && SHIM_CC_CANDIDATES=("gcc" "aarch64-linux-gnu-gcc")
+        SHIM_CC_PACKAGE="gcc-aarch64-linux-gnu"
         ;;
 
         linux-amd64)
@@ -359,6 +364,9 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         PLATFORM="linux_amd64"
         TARGET="mediamtx_v${MTX_VERSION}_${PLATFORM}"
         WHEEL_PLAT_NAME="manylinux2014_x86_64"
+        SHIM_CC_CANDIDATES=("x86_64-linux-gnu-gcc")
+        [[ "$ARCH" == "x86_64" ]] && SHIM_CC_CANDIDATES=("gcc" "x86_64-linux-gnu-gcc")
+        SHIM_CC_PACKAGE="gcc-x86-64-linux-gnu"
         ;;
 
         macos-arm64)
@@ -413,6 +421,26 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     chmod +x "$INSIGHT_BIN/$VF_BIN_NAME" || true
     cp -r webrtc/static "$INSIGHT_BIN/"
     cp webrtc/mediamtx.yml "$INSIGHT_BIN/"
+
+    # ==== TCP_NODELAY preload shim (Linux wheels only) ====
+    # LD_PRELOAD is a Linux mechanism, so macOS and Windows wheels ship without
+    # it and mediasrc falls back to spawning ffmpeg unmodified.
+    if [[ -n "$SHIM_CC_PACKAGE" ]]; then
+        SHIM_CC=""
+        for candidate in "${SHIM_CC_CANDIDATES[@]}"; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                SHIM_CC="$candidate"
+                break
+            fi
+        done
+        if [[ -z "$SHIM_CC" ]]; then
+            echo "❌ No C compiler for $target. Install $SHIM_CC_PACKAGE."
+            exit 1
+        fi
+        echo "🧱 Building ffmpeg_nodelay.so with $SHIM_CC"
+        "$SHIM_CC" -shared -fPIC -O2 -o "$INSIGHT_BIN/ffmpeg_nodelay.so" \
+            tools/ffmpeg_nodelay.c -ldl
+    fi
 
     # Bundle built React frontend into the Python package for wheel installs.
     if [[ -d "frontend/dist" ]]; then
