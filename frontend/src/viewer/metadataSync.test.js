@@ -203,3 +203,47 @@ test("a stale type does not hide behind a fresher frame", () => {
   assert.equal(metadataQueueSnapshot(queue).expired, 1);
   assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
 });
+
+test("distinct types on one unmatched frame cannot exceed queue capacity", () => {
+  const queue = createMetadataQueue();
+  for (let i = 0; i < 300; i += 1) {
+    enqueueMetadata(queue, { type: `type-${i}`, _insight: { rtp_timestamp: 7 } }, i);
+  }
+  assert.equal(metadataQueueSnapshot(queue).evicted, 0);
+
+  enqueueMetadata(queue, { type: "overflow", _insight: { rtp_timestamp: 7 } }, 300);
+  assert.equal(metadataQueueSnapshot(queue).evicted, 301);
+  assert.deepEqual(takeMetadataForFrame(queue, 7, 0, 301), []);
+});
+
+test("queue capacity counts types across frames and replaces duplicates", () => {
+  const queue = createMetadataQueue();
+  for (let timestamp = 0; timestamp < 150; timestamp += 1) {
+    for (const type of ["pose-estimation", "tracking"]) {
+      enqueueMetadata(queue, { type, _insight: { rtp_timestamp: timestamp } }, timestamp);
+    }
+  }
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 149 } }, 150);
+  assert.equal(metadataQueueSnapshot(queue).evicted, 0);
+
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 150 } }, 151);
+  assert.equal(metadataQueueSnapshot(queue).evicted, 2);
+  assert.deepEqual(takeMetadataForFrame(queue, 0, 0, 152), []);
+  assert.equal(takeMetadataForFrame(queue, 1, 0, 152).length, 2);
+});
+
+test("matching, fallback, and expiry release timestamped queue capacity", () => {
+  for (const release of ["match", "fallback", "expiry"]) {
+    const queue = createMetadataQueue();
+    enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 7 } }, 0);
+    if (release === "match") takeMetadataForFrame(queue, 7, 0, 10);
+    if (release === "fallback") takeMetadataForFrame(queue, undefined, 0, 10);
+    if (release === "expiry") takeMetadataForFrame(queue, 8, 5, 10);
+
+    for (let timestamp = 100; timestamp < 400; timestamp += 1) {
+      enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: timestamp } }, 20);
+    }
+    assert.equal(metadataQueueSnapshot(queue).evicted, 0, release);
+    assert.equal(takeMetadataForFrame(queue, 100, 0, 21).length, 1, release);
+  }
+});

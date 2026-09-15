@@ -24,6 +24,7 @@ export function applyVideoSyncBuffer(receiver, targetMs) {
 export function createMetadataQueue() {
   return {
     timestamped: new Map(),
+    timestampedEntries: 0,
     arrival: [],
     stats: {
       timestampMatches: 0,
@@ -44,12 +45,16 @@ export function enqueueMetadata(queue, data, receivedAt) {
     // A producer may describe one frame with several metadata types, so a frame
     // holds one entry per type. A repeat of the same type replaces it.
     const byType = queue.timestamped.get(key) ?? new Map();
+    const type = metadataTypeOf(data);
+    if (!byType.has(type)) queue.timestampedEntries += 1;
     queue.timestamped.delete(key);
-    byType.set(metadataTypeOf(data), item);
+    byType.set(type, item);
     queue.timestamped.set(key, byType);
-    while (queue.timestamped.size > METADATA_QUEUE_LIMIT) {
+    while (queue.timestampedEntries > METADATA_QUEUE_LIMIT) {
       const oldest = queue.timestamped.keys().next().value;
-      queue.stats.evicted += queue.timestamped.get(oldest).size;
+      const evicted = queue.timestamped.get(oldest).size;
+      queue.timestampedEntries -= evicted;
+      queue.stats.evicted += evicted;
       queue.timestamped.delete(oldest);
     }
     return;
@@ -72,6 +77,7 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
     const byType = queue.timestamped.get(key) ?? null;
     if (byType && byType.size > 0) {
       queue.timestamped.delete(key);
+      queue.timestampedEntries -= byType.size;
       queue.stats.timestampMatches += 1;
       return [...byType.values()];
     }
@@ -91,6 +97,7 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
       if (!held || item.receivedAt >= held.receivedAt) latest.set(type, item);
     }
     queue.timestamped.clear();
+    queue.timestampedEntries = 0;
     queue.arrival.length = 0;
     if (latest.size > 0) {
       queue.stats.arrivalFallbacks += 1;
@@ -126,6 +133,7 @@ function pruneMetadataQueue(queue, metadataRetentionMs, now) {
     for (const [type, item] of byType) {
       if (now - item.receivedAt <= metadataRetentionMs) continue;
       byType.delete(type);
+      queue.timestampedEntries -= 1;
       queue.stats.expired += 1;
     }
     if (byType.size === 0) queue.timestamped.delete(timestamp);
