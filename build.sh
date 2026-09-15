@@ -439,7 +439,22 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         fi
         echo "🧱 Building ffmpeg_nodelay.so with $SHIM_CC"
         "$SHIM_CC" -shared -fPIC -O2 -o "$INSIGHT_BIN/ffmpeg_nodelay.so" \
-            tools/ffmpeg_nodelay.c -ldl
+            tools/ffmpeg_nodelay.c
+
+        # The wheel is tagged manylinux2014, which promises glibc 2.17. The
+        # host toolchain will happily emit a newer requirement, so refuse to
+        # package a shim that would fail to preload on an older target.
+        if command -v readelf >/dev/null 2>&1; then
+            MAX_GLIBC=$(readelf -V "$INSIGHT_BIN/ffmpeg_nodelay.so" \
+                | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+            if [[ "$(printf '%s\n2.17\n' "$MAX_GLIBC" | sort -V | tail -1)" != "2.17" ]]; then
+                echo "❌ ffmpeg_nodelay.so requires glibc $MAX_GLIBC, above the manylinux2014 baseline of 2.17."
+                exit 1
+            fi
+            echo "✅ ffmpeg_nodelay.so needs glibc <= 2.17"
+        else
+            echo "⚠️  readelf not found; skipping the glibc baseline check."
+        fi
     fi
 
     # Bundle built React frontend into the Python package for wheel installs.
