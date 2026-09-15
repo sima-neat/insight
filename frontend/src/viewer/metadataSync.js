@@ -48,6 +48,7 @@ export function enqueueMetadata(queue, data, receivedAt) {
     const type = metadataTypeOf(data);
     if (!byType.has(type)) queue.timestampedEntries += 1;
     queue.timestamped.delete(key);
+    byType.delete(type);
     byType.set(type, item);
     queue.timestamped.set(key, byType);
     while (queue.timestampedEntries > METADATA_QUEUE_LIMIT) {

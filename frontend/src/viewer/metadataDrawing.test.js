@@ -83,3 +83,12 @@ test("drawing restores canvas state even when a strategy throws", (t) => {
   assert.deepEqual(ctx.lineDash, []);
   assert.equal(ctx.globalAlpha, 1);
 });
+
+test("unknown metadata cannot invoke inherited properties as drawing strategies", (t) => {
+  const strategies = loadStrategies(t);
+  Object.setPrototypeOf(strategies, { inherited: () => assert.fail("inherited strategy invoked") });
+  strategies.disabled = false;
+  for (const type of ["unknown", "__proto__", "constructor", "inherited", "disabled", null, { toString: null }]) {
+    assert.doesNotThrow(() => drawMetadata(recordingContext(), {}, { type }, {}, 0, {}));
+  }
+});

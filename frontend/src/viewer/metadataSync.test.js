@@ -264,6 +264,18 @@ test("metadata types for one frame expire independently", () => {
   assert.equal(metadataQueueSnapshot(queue).expired, 1);
 });
 
+test("replacing a type preserves the draw order of the retained arrivals", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "object-detection", _insight: { rtp_timestamp: 1 } }, 10);
+  const pose = { type: "pose-estimation", _insight: { rtp_timestamp: 1 } };
+  enqueueMetadata(queue, pose, 20);
+  const replacement = { type: "object-detection", value: "updated", _insight: { rtp_timestamp: 1 } };
+  enqueueMetadata(queue, replacement, 30);
+
+  assert.equal(queue.timestampedEntries, 2);
+  assert.deepEqual(takeMetadataForFrame(queue, 1, 0, 40).map((item) => item.data), [pose, replacement]);
+});
+
 test("a stale type does not hide behind a fresher frame", () => {
   const queue = createMetadataQueue();
   enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 1 } }, 0);

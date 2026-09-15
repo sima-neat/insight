@@ -157,9 +157,13 @@ capture.
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
 
 A frame may be described by several metadata types at once. Send one message per
-type, all carrying the same `timestamp`; the correlator matches each against the
-retained frame mapping, and the viewer draws every type it holds for that frame.
-A second message of the same type for the same frame replaces the first.
+type, all carrying the source frame's `timestamp` in integer milliseconds; the
+correlator matches each against the retained frame mapping, and the viewer draws
+every type it holds for that frame.
+A second message of the same type for the same frame replaces the first; retained
+messages draw in arrival order. Metadata without a correlated RTP timestamp uses
+the single-message arrival fallback, since types cannot safely be grouped without
+a shared frame identity.
 
 Every timestamped message leaves through exactly one of matched, expired, or
 evicted, or is still counted in `pending_metadata`. The video fields describe
