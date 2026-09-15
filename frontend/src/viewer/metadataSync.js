@@ -5,12 +5,6 @@ function metadataTypeOf(data) {
   return typeof data?.type === "string" ? data.type : UNTYPED;
 }
 
-function oldestReceivedAt(byType) {
-  let oldest = Infinity;
-  for (const item of byType.values()) oldest = Math.min(oldest, item.receivedAt);
-  return oldest;
-}
-
 export function applyVideoSyncBuffer(receiver, targetMs) {
   if (!receiver || !("jitterBufferTarget" in receiver)) {
     return { supported: false, applied: false, targetMs: null };
@@ -125,10 +119,16 @@ export function metadataQueueSnapshot(queue) {
 
 function pruneMetadataQueue(queue, metadataRetentionMs, now) {
   if (metadataRetentionMs <= 0) return;
-  for (const [timestamp, item] of queue.timestamped) {
-    if (now - oldestReceivedAt(item) <= metadataRetentionMs) break;
-    queue.stats.expired += item.size;
-    queue.timestamped.delete(timestamp);
+  // Types for one frame arrive at different times, and a frame moves to the
+  // end of the map on each arrival, so neither frames nor entries sit in age
+  // order. Every entry is checked; a frame goes only once it holds none.
+  for (const [timestamp, byType] of queue.timestamped) {
+    for (const [type, item] of byType) {
+      if (now - item.receivedAt <= metadataRetentionMs) continue;
+      byType.delete(type);
+      queue.stats.expired += 1;
+    }
+    if (byType.size === 0) queue.timestamped.delete(timestamp);
   }
   while (queue.arrival.length && now - queue.arrival[0].receivedAt > metadataRetentionMs) {
     queue.arrival.shift();

@@ -178,3 +178,28 @@ test("one frame keeps metadata of every type, not just the last to arrive", () =
     ["pose-estimation", "tracking"],
   );
 });
+
+test("metadata types for one frame expire independently", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 7 } }, 0);
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 7 } }, 40);
+
+  // Retention 50 at t=60: pose (age 60) is gone, tracking (age 20) is not.
+  const items = takeMetadataForFrame(queue, 7, 50, 60);
+  assert.deepEqual(items.map((item) => item.data.type), ["tracking"]);
+  assert.equal(metadataQueueSnapshot(queue).expired, 1);
+});
+
+test("a stale type does not hide behind a fresher frame", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 1 } }, 0);
+  enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 2 } }, 10);
+  // Frame 1 moves behind frame 2 on this arrival, so its stale pose sits
+  // after a frame whose entries are all fresh.
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 1 } }, 40);
+
+  const items = takeMetadataForFrame(queue, 1, 50, 55);
+  assert.deepEqual(items.map((item) => item.data.type), ["tracking"]);
+  assert.equal(metadataQueueSnapshot(queue).expired, 1);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
+});
