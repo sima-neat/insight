@@ -1,6 +1,7 @@
 import logging
 import os
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
@@ -109,19 +110,10 @@ def _codec_args(codec: str, source_codec: Optional[str]) -> list[str]:
 
 # ffmpeg's RTSP muxer offers no way to disable Nagle on the socket it opens.
 _FFMPEG_PRELOAD_ENV = "NEAT_INSIGHT_FFMPEG_PRELOAD"
-_FFMPEG_PRELOAD_NAME = "ffmpeg_nodelay.so"
-# Wheel installs carry the shim in the package; the container image puts it here.
-_FFMPEG_PRELOAD_PATHS = (
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", _FFMPEG_PRELOAD_NAME),
-    os.path.join("/usr/local/lib", _FFMPEG_PRELOAD_NAME),
+# Linux wheels carry the shim; other platforms have no LD_PRELOAD and ship without it.
+_FFMPEG_PRELOAD_DEFAULT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "bin", "ffmpeg_nodelay.so"
 )
-
-
-def _ffmpeg_preload_path() -> Optional[str]:
-    override = os.environ.get(_FFMPEG_PRELOAD_ENV)
-    if override:
-        return override if os.path.isfile(override) else None
-    return next((p for p in _FFMPEG_PRELOAD_PATHS if os.path.isfile(p)), None)
 
 
 def _ffmpeg_env() -> Optional[dict]:
@@ -129,8 +121,12 @@ def _ffmpeg_env() -> Optional[dict]:
 
     Returns None when the shim is absent so a source checkout still runs.
     """
-    shim = _ffmpeg_preload_path()
-    if not shim:
+    shim = os.environ.get(_FFMPEG_PRELOAD_ENV, _FFMPEG_PRELOAD_DEFAULT)
+    if not shim or not os.path.isfile(shim):
+        if sys.platform.startswith("linux"):
+            logging.warning(
+                "TCP_NODELAY shim not found at %s; RTSP publishers run with Nagle enabled", shim
+            )
         return None
     env = dict(os.environ)
     existing = env.get("LD_PRELOAD")
