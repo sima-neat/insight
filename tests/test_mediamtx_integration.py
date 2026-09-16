@@ -48,6 +48,7 @@ def _wait_port(port, timeout=5.0):
 class MediamtxIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
         self.rtsp_port, self.api_port = _free_port(), _free_port()
         base_cfg = (REPO / "webrtc" / "mediamtx.yml").read_text(encoding="utf-8")
         cfg = base_cfg.replace("rtspAddress: :8554", f"rtspAddress: :{self.rtsp_port}")
@@ -60,18 +61,18 @@ class MediamtxIntegrationTests(unittest.TestCase):
         cfg_path.write_text(cfg, encoding="utf-8")
         self.mtx = subprocess.Popen([MTX_BINARY, str(cfg_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.procs = [self.mtx]
+        self.addCleanup(self._terminate_all)
         self.assertTrue(_wait_port(self.api_port), "mediamtx API port never opened")
         self.client = mediamtx.MediamtxClient(base_url=f"http://127.0.0.1:{self.api_port}/v3", probe_async=False)
         self.assertTrue(_wait_until(lambda: self.client.snapshot() is not None), "mediamtx API did not come up")
 
-    def tearDown(self):
+    def _terminate_all(self):
         for proc in reversed(self.procs):
             proc.terminate()
             try:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 proc.kill()
-        self.tmp.cleanup()
 
     def _publish(self, query=""):
         url = f"rtsp://127.0.0.1:{self.rtsp_port}/src2" + (f"?{query}" if query else "")
