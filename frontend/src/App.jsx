@@ -1,4 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  PREVIEW_RATES, codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
+  previewUrl, protocolLabel, readPreviewRate, readersText, skippedExternalSuffix, writePreviewRate,
+} from './externalSource.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -694,6 +698,12 @@ export default function App() {
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [selectedSource, setSelectedSource] = useState(1)
+  const [previewRate, setPreviewRate] = useState(() => readPreviewRate(window.localStorage))
+  const [previewError, setPreviewError] = useState(false)
+  const [previewNonce, setPreviewNonce] = useState(0)
+  const [takeoverTarget, setTakeoverTarget] = useState(null)
+  const [takeoverBusy, setTakeoverBusy] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -838,7 +848,7 @@ export default function App() {
 
   async function loadSources() {
     const data = await fetchJson('/api/mediasrc')
-    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {} })
+    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {}, readers: [] })
     setSources(filled)
   }
 
@@ -996,6 +1006,21 @@ export default function App() {
       setCatalogSelectedAssetPaths(next)
     }
   }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
+
+  useEffect(() => {
+    if (tab !== 'rtsp') return undefined
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      setNow(Date.now())
+      loadSources().catch((e) => console.warn('Source poll failed:', e.message))
+    }
+    const timer = setInterval(tick, 2000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [tab])
 
   useEffect(() => {
     if (tab !== 'visualizer') return
@@ -1489,7 +1514,7 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
       await loadSources()
-      setUploadStatus(data.message || `Assigned ${data.assigned_count || 0} source(s).`)
+      setUploadStatus((data.message || `Assigned ${data.assigned_count || 0} source(s).`) + skippedExternalSuffix(data.skipped_external))
     } catch (e) {
       setError(e.message)
     }
@@ -1509,7 +1534,7 @@ export default function App() {
       })
       setBulkStartOpen(false)
       await loadSources()
-      setUploadStatus(data.message || `Requested ${count} stream(s) to start.`)
+      setUploadStatus((data.message || `Requested ${count} stream(s) to start.`) + skippedExternalSuffix(data.skipped_external))
       if (data.errors?.length) {
         setError(`Failed: ${data.errors.map((item) => `src${item.index}`).join(', ')}`)
       }
@@ -1522,7 +1547,7 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/stop-all', { method: 'POST' })
       await loadSources()
-      setUploadStatus(data.message || 'Stopped all sources.')
+      setUploadStatus((data.message || 'Stopped all sources.') + skippedExternalSuffix(data.skipped_external))
     } catch (e) {
       setError(e.message)
     }
@@ -1533,9 +1558,46 @@ export default function App() {
       const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
       await loadSources()
       setSelectedSource(1)
-      setUploadStatus(data.message || 'Reset all assignments.')
+      setUploadStatus((data.message || 'Reset all assignments.') + skippedExternalSuffix(data.skipped_external))
     } catch (e) {
       setError(e.message)
+    }
+  }
+
+  async function takeOverSource() {
+    const index = takeoverTarget?.index
+    if (!index) return
+    setTakeoverBusy(true)
+    try {
+      await fetchJson('/api/mediasrc/takeover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+      setTakeoverTarget(null)
+      await loadSources()
+      setUploadStatus(`Disconnected the external stream on src${index}.`)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setTakeoverBusy(false)
+    }
+  }
+
+  function changePreviewRate(value) {
+    setPreviewRate(value)
+    setPreviewError(false)
+    writePreviewRate(window.localStorage, value)
+  }
+
+  function onPreviewRateKeyDown(e) {
+    const i = PREVIEW_RATES.findIndex((r) => r.value === previewRate)
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      changePreviewRate(PREVIEW_RATES[(i + 1) % PREVIEW_RATES.length].value)
+      e.preventDefault()
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      changePreviewRate(PREVIEW_RATES[(i - 1 + PREVIEW_RATES.length) % PREVIEW_RATES.length].value)
+      e.preventDefault()
     }
   }
 
@@ -1927,8 +1989,47 @@ export default function App() {
 
               <div className="sources">
                 {sources.map((src) => (
-                  <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
+                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : ''].filter(Boolean).join(' ')} onClick={() => setSelectedSource(src.index)}>
                     {(() => {
+                      if (isExternal(src)) {
+                        const ext = src.external || {}
+                        const warning = codecWarningText(ext, codecLabel(src.codec))
+                        const chip = externalChipText(ext)
+                        return (
+                          <>
+                            <span className="src-label">src{src.index}</span>
+                            <span className="src-state external">External</span>
+                            <span className="external-chip" title={chip}>{chip}</span>
+                            <span className="codec-lock" title="External streams are read over RTSP">RTSP</span>
+                            <span
+                              className={warning ? 'codec-lock warn' : 'codec-lock'}
+                              title={warning || 'Codec of the external stream'}
+                              aria-label={warning ? `${codecLabel(src.codec)}: ${warning}` : undefined}
+                            >
+                              {codecLabel(src.codec)}{warning ? ' ⚠' : ''}
+                            </span>
+                            <button
+                              className="icon-action-btn takeover"
+                              onClick={(e) => { e.stopPropagation(); setTakeoverTarget(src) }}
+                              aria-label={`Take over src${src.index}`}
+                              title={`Disconnect the external publisher on src${src.index}`}
+                            >
+                              Take over
+                            </button>
+                            <button
+                              className="icon-action-btn copy"
+                              onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
+                              aria-label={`Copy stream URL for src${src.index}`}
+                              title={`Copy stream URL for src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9 9h10v12H9z" />
+                                <path d="M5 3h10v2H7v10H5z" />
+                              </svg>
+                            </button>
+                          </>
+                        )
+                      }
                       const isAssigned = Boolean(src.file)
                       const allowedTransports = Array.isArray(src.allowed_transports) ? src.allowed_transports : (isAssigned ? ['rtsp'] : [])
                       const transportLocked = !isAssigned || allowedTransports.length <= 1
@@ -2006,16 +2107,72 @@ export default function App() {
             </section>
 
             <section className="panel">
-              <h2>Source Preview: src{currentSource.index}</h2>
-              <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
-              <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
-
-              <div className="preview">
-                {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                {!currentSource.file && <p>Assign a media file to preview.</p>}
-              </div>
+              {(() => {
+                if (!isExternal(currentSource)) {
+                  return (
+                    <>
+                      <h2>Source Preview: src{currentSource.index}</h2>
+                      <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
+                      <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
+                      <div className="preview">
+                        {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
+                        {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
+                        {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
+                        {!currentSource.file && <p>Assign a media file to preview.</p>}
+                      </div>
+                    </>
+                  )
+                }
+                const ext = currentSource.external || {}
+                const warning = codecWarningText(ext, codecLabel(currentSource.codec))
+                const src = previewUrl(currentSource.index, previewRate)
+                return (
+                  <>
+                    <div className="panel-topbar">
+                      <div>
+                        <h2>Source Preview: src{currentSource.index} <span className="src-state external preview-badge">External</span></h2>
+                        <p className="hint"><code>{currentSource.urls?.rtsp || `${rtspBase}/src${currentSource.index}`}</code></p>
+                      </div>
+                      <div className="preview-rate" role="radiogroup" aria-label="Preview rate" onKeyDown={onPreviewRateKeyDown}>
+                        {PREVIEW_RATES.map((r) => (
+                          <button
+                            key={r.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={previewRate === r.value}
+                            tabIndex={previewRate === r.value ? 0 : -1}
+                            className={previewRate === r.value ? 'rate-segment on' : 'rate-segment'}
+                            onClick={() => changePreviewRate(r.value)}
+                          >
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="preview">
+                      {!src && <p>Preview is off. Nothing is decoded. Pick a rate above to watch this stream.</p>}
+                      {src && previewError && (
+                        <p>
+                          Preview unavailable.{' '}
+                          <button type="button" className="btn-ghost" onClick={() => { setPreviewError(false); setPreviewNonce((n) => n + 1) }}>Retry</button>
+                        </p>
+                      )}
+                      {src && !previewError && (
+                        <img src={`${src}&nonce=${previewNonce}`} alt={`Live preview of src${currentSource.index}`} onError={() => setPreviewError(true)} />
+                      )}
+                    </div>
+                    <table className="kv-table">
+                      <tbody>
+                        <tr><th>Publisher</th><td>{protocolLabel(ext.protocol)} · {ext.address || '-'}</td></tr>
+                        <tr><th>Video</th><td>{codecLabel(currentSource.codec)}{dimensionsText(ext) ? ` · ${dimensionsText(ext)}` : ''}{warning && <span className="warn-text"> ⚠ {warning}</span>}</td></tr>
+                        <tr><th>Live for</th><td>{liveFor(ext.since, now)}</td></tr>
+                        <tr><th>Bitrate</th><td>{formatBitrate(ext.bitrate_bps)}</td></tr>
+                        <tr><th>Readers</th><td>{readersText(currentSource.readers)}</td></tr>
+                      </tbody>
+                    </table>
+                  </>
+                )
+              })()}
             </section>
           </div>
         )}
@@ -2608,6 +2765,21 @@ export default function App() {
             <div className="modal-actions">
               <button onClick={() => setBulkStartOpen(false)}>Cancel</button>
               <button className="btn-tonal" onClick={startSourcesBulk}>Start</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {takeoverTarget && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Disconnect external stream">
+          <div className="modal-card">
+            <h3>Disconnect external stream on src{takeoverTarget.index}?</h3>
+            <p><code>{externalChipText(takeoverTarget.external || {})}</code></p>
+            <p>Readers: {readersText(takeoverTarget.readers)}</p>
+            <p>The publisher and all readers will be disconnected. src{takeoverTarget.index} becomes Idle and you can assign a file to it.</p>
+            <div className="modal-actions">
+              <button onClick={() => setTakeoverTarget(null)} disabled={takeoverBusy}>Cancel</button>
+              <button className="danger" onClick={takeOverSource} disabled={takeoverBusy}>Disconnect</button>
             </div>
           </div>
         </div>
