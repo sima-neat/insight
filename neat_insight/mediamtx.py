@@ -183,8 +183,11 @@ class MediamtxClient:
         self._bytes: dict = {}    # session id -> (bytes_received, monotonic seconds)
         self._bitrate: dict = {}  # session id -> bits per second
 
-    def _get_items(self, endpoint: str) -> list:
+    def _get_items(self, endpoint: str, missing_ok: bool = False) -> list:
         status, body = self._request("GET", f"{self._base_url}/{endpoint}?itemsPerPage={PAGE_SIZE}")
+        if status == 404 and missing_ok:
+            # mediamtx serves a session list only for enabled protocols; 404 means disabled.
+            return []
         if status != 200:
             raise MediamtxError(f"{endpoint} returned {status}")
         return json.loads(body)["items"]
@@ -200,7 +203,7 @@ class MediamtxClient:
                 return None
         try:
             paths = self._get_items("paths/list")
-            sessions = {endpoint: self._get_items(f"{endpoint}/list") for endpoint, _ in SESSION_KINDS.values()}
+            sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
         except (MediamtxError, OSError, ValueError, KeyError) as exc:
             warn = False
             with self._lock:
