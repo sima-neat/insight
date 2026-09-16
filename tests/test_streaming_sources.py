@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -355,6 +356,53 @@ class StreamingSourceTests(unittest.TestCase):
 
         self.assertNotIn("external", self.sources_file.read_text(encoding="utf-8"))
         self.assertNotIn("readers", self.sources_file.read_text(encoding="utf-8"))
+
+    def test_start_assign_stop_on_external_slot_return_409(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"x")
+        self.mtx.paths["src2"] = external_path(2)
+        for route, body in (("start", {"index": 2}), ("assign", {"index": 2, "file": "clip.mp4"}), ("stop", {"index": 2})):
+            with self.subTest(route=route):
+                response = self.client.post(f"/api/mediasrc/{route}", json=body)
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("Use Take over to disconnect it", response.get_json()["error"])
+        self.assertNotIn("clip.mp4", self.sources_file.read_text(encoding="utf-8"))
+
+    def test_start_bulk_skips_external_and_fills_requested_count(self):
+        for name in ("a.mp4", "b.mp4", "c.mp4"):
+            (self.media_dir / name).write_bytes(b"x")
+        self.sources_file.write_text(json.dumps([
+            {"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},
+            {"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},
+            {"index": 3, "file": "c.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},
+        ]), encoding="utf-8")
+        self.mtx.paths["src2"] = external_path(2)
+
+        with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
+            with mock.patch.object(app_module, "start_media_stream", return_value=(True, None)):
+                data = self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).get_json()
+
+        self.assertEqual(data["started"], [1, 3])
+        self.assertEqual(data["skipped_external"], [2])
+        self.assertIn("src2", data["message"])
+
+    def test_auto_assign_skips_external_slot_and_keeps_its_assignment(self):
+        for name in ("a.mp4", "b.mp4"):
+            (self.media_dir / name).write_bytes(b"x")
+        self.sources_file.write_text('[{"index": 2, "file": "keep.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self.mtx.paths["src2"] = external_path(2)
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            data = self.client.post("/api/mediasrc/auto-assign-all").get_json()
+
+        stored = {s["index"]: s["file"] for s in json.loads(self.sources_file.read_text(encoding="utf-8"))}
+        self.assertEqual((stored[1], stored[2], stored[3]), ("a.mp4", "keep.mp4", "b.mp4"))
+        self.assertEqual(data["skipped_external"], [2])
+
+    def test_stop_all_and_reset_report_skipped_external(self):
+        self.mtx.paths["src2"] = external_path(2)
+        self.assertEqual(self.client.post("/api/mediasrc/stop-all").get_json()["skipped_external"], [2])
+        self.assertEqual(self.client.post("/api/mediasrc/reset").get_json()["skipped_external"], [2])
+        self.assertEqual(self.mtx.kicked, [])
 
 
 if __name__ == "__main__":

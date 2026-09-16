@@ -2077,6 +2077,12 @@ def _external_conflict_error(index, path):
     )
 
 
+def _skipped_suffix(skipped_external):
+    if not skipped_external:
+        return ""
+    return " Skipped external: " + ", ".join(f"src{i}" for i in skipped_external) + "."
+
+
 def _source_with_urls(src, snapshot=None):
     enriched = dict(src)
     stored_codec = src.get("codec")
@@ -2148,6 +2154,9 @@ def assign_source():
     file_name = data.get("file") or ""
     if index is None:
         return _json_error("Missing index")
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
     requested_transport = data.get("transport")
 
     sources = load_sources()
@@ -2191,22 +2200,30 @@ def auto_assign_all_sources():
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
 
-    for idx, src in enumerate(sources):
+    snapshot = _path_snapshot()
+    skipped_external = []
+    remaining = iter(video_files)
+    assigned_count = 0
+    for src in sources:
         source_index = src.get("index")
+        if _external_holder(source_index, snapshot):
+            skipped_external.append(source_index)
+            continue
         if src.get("state") == "playing":
             stop_media_stream(source_index)
-        src["file"] = video_files[idx] if idx < len(video_files) else ""
+        src["file"] = next(remaining, "")
+        assigned_count += bool(src["file"])
         src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
         src["state"] = "stopped"
 
     save_sources(sources)
-    assigned_count = min(len(sources), len(video_files))
     return {
         "success": True,
         "assigned_count": assigned_count,
         "source_count": len(sources),
         "available_files": len(video_files),
-        "message": f"Assigned {assigned_count} source(s) with unique media file(s).",
+        "skipped_external": skipped_external,
+        "message": f"Assigned {assigned_count} source(s) with unique media file(s)." + _skipped_suffix(skipped_external),
     }
 
 
@@ -2218,6 +2235,9 @@ def start_source():
     index = data.get("index")
     if index is None:
         return _json_error("Missing index")
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
 
     sources = load_sources()
     for src in sources:
@@ -2264,7 +2284,9 @@ def start_sources_bulk():
         return _json_error("Count must be greater than 0")
 
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
-    assigned_sources = [src for src in sources if src.get("file")]
+    snapshot = _path_snapshot()
+    skipped_external = [src["index"] for src in sources if _external_holder(src["index"], snapshot)]
+    assigned_sources = [src for src in sources if src.get("file") and src["index"] not in skipped_external]
     if not assigned_sources:
         return _json_error("No assigned sources available to start")
 
@@ -2306,9 +2328,10 @@ def start_sources_bulk():
         "started": started,
         "already_running": already_running,
         "errors": errors,
+        "skipped_external": skipped_external,
         "message": (
             f"Started {len(started)} source(s), {len(already_running)} already running, "
-            f"{len(errors)} failed."
+            f"{len(errors)} failed." + _skipped_suffix(skipped_external)
         ),
         "started_or_running": started_or_running,
     }
@@ -2322,6 +2345,9 @@ def stop_source():
     index = data.get("index")
     if index is None:
         return _json_error("Missing index")
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
 
     sources = load_sources()
     for src in sources:
@@ -2339,27 +2365,41 @@ def stop_source():
 def stop_all_sources():
     """Stop all source processes, persist every source as stopped, and return how many were previously playing."""
     sources = load_sources()
+    snapshot = _path_snapshot()
+    skipped_external = []
     stopped_count = 0
     for src in sources:
         source_index = src.get("index")
+        if _external_holder(source_index, snapshot):
+            skipped_external.append(source_index)
+            continue
         if src.get("state") == "playing":
             stopped_count += 1
         stop_media_stream(source_index)
         src["state"] = "stopped"
 
     save_sources(sources)
-    return {"success": True, "stopped_count": stopped_count, "message": f"Stopped {stopped_count} source(s)."}
+    return {
+        "success": True,
+        "stopped_count": stopped_count,
+        "skipped_external": skipped_external,
+        "message": f"Stopped {stopped_count} source(s)." + _skipped_suffix(skipped_external),
+    }
 
 
 # API: reset media-source assignments to their default empty state.
 @app.post("/api/mediasrc/reset")
 def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
-    sources = load_sources()
-    for src in sources:
+    snapshot = _path_snapshot()
+    skipped_external = []
+    for src in load_sources():
+        if _external_holder(src.get("index"), snapshot):
+            skipped_external.append(src.get("index"))
+            continue
         stop_media_stream(src.get("index"))
     reset_sources()
-    return {"success": True, "message": "Reset all source assignments."}
+    return {"success": True, "skipped_external": skipped_external, "message": "Reset all source assignments." + _skipped_suffix(skipped_external)}
 
 
 def _http_mjpeg_source_or_error(index: int):
