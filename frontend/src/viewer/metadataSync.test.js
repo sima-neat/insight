@@ -210,6 +210,27 @@ test("metadata queue reports exact timestamp matches", () => {
   assert.equal(metadataQueueSnapshot(queue).timestampMatches, 1);
 });
 
+test("pending diagnostics count messages across types and frames", () => {
+  const queue = createMetadataQueue();
+  for (const type of ["pose-estimation", "tracking"]) {
+    enqueueMetadata(queue, { type, _insight: { rtp_timestamp: 1 } }, 10);
+  }
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 2);
+
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 1 } }, 20);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 2);
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 2 } }, 30);
+  enqueueMetadata(queue, { type: "classification" }, 40);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 3);
+  assert.equal(metadataQueueSnapshot(queue).arrivalPending, 1);
+
+  takeMetadataForFrame(queue, 1, 0, 50);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
+  takeMetadataForFrame(queue, undefined, 0, 60);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 0);
+  assert.equal(metadataQueueSnapshot(queue).arrivalPending, 0);
+});
+
 test("metadata queue reports fallback, misses, expiry, and capacity eviction", () => {
   const queue = createMetadataQueue();
   enqueueMetadata(queue, { type: "classification" }, 0);
@@ -259,9 +280,12 @@ test("metadata types for one frame expire independently", () => {
   enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 7 } }, 40);
 
   // Retention 50 at t=60: pose (age 60) is gone, tracking (age 20) is not.
+  takeMetadataForFrame(queue, 8, 50, 60);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
   const items = takeMetadataForFrame(queue, 7, 50, 60);
   assert.deepEqual(items.map((item) => item.data.type), ["tracking"]);
   assert.equal(metadataQueueSnapshot(queue).expired, 1);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 0);
 });
 
 test("replacing a type preserves the draw order of the retained arrivals", () => {
@@ -296,9 +320,11 @@ test("distinct types on one unmatched frame cannot exceed queue capacity", () =>
     enqueueMetadata(queue, { type: `type-${i}`, _insight: { rtp_timestamp: 7 } }, i);
   }
   assert.equal(metadataQueueSnapshot(queue).evicted, 0);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 300);
 
   enqueueMetadata(queue, { type: "overflow", _insight: { rtp_timestamp: 7 } }, 300);
   assert.equal(metadataQueueSnapshot(queue).evicted, 301);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 0);
   assert.deepEqual(takeMetadataForFrame(queue, 7, 0, 301), []);
 });
 
@@ -311,9 +337,11 @@ test("queue capacity counts types across frames and replaces duplicates", () => 
   }
   enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 149 } }, 150);
   assert.equal(metadataQueueSnapshot(queue).evicted, 0);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 300);
 
   enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 150 } }, 151);
   assert.equal(metadataQueueSnapshot(queue).evicted, 2);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 299);
   assert.deepEqual(takeMetadataForFrame(queue, 0, 0, 152), []);
   assert.equal(takeMetadataForFrame(queue, 1, 0, 152).length, 2);
 });

@@ -124,7 +124,7 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
 export function metadataQueueSnapshot(queue) {
   return {
     ...queue.stats,
-    timestampedPending: queue.timestamped.size,
+    timestampedPending: queue.timestampedEntries,
     arrivalPending: queue.arrival.length,
   };
 }

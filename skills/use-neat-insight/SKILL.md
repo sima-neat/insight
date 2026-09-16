@@ -221,6 +221,10 @@ Each channel includes a `metadata` summary with counts of metadata messages drop
 
 Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
 
+`synchronization.timestamped_metadata_pending` counts queued messages, including
+each metadata type for a shared frame. Both pending counts and the expiry/eviction
+counters use messages; `timestamp_matches` counts matched video-frame callbacks.
+
 Examples:
 
 ```bash
