@@ -132,9 +132,6 @@ def build_snapshot(paths_items, sessions_by_endpoint) -> dict:
     return snapshot
 
 
-_PENDING = object()
-
-
 def _parse_fps(value) -> Optional[float]:
     try:
         num, den = str(value).split("/")
@@ -182,7 +179,7 @@ class MediamtxClient:
         self._snapshot_at: Optional[float] = None
         self._unavailable_until = 0.0
         self._warned = False
-        self._probes: dict = {}   # session id -> dict | None | _PENDING
+        self._probes: dict = {}   # session id -> dict | None | pending-token (object())
         self._bytes: dict = {}    # session id -> (bytes_received, monotonic seconds)
         self._bitrate: dict = {}  # session id -> bits per second
 
@@ -193,22 +190,29 @@ class MediamtxClient:
         return json.loads(body)["items"]
 
     def snapshot(self) -> Optional[dict]:
+        # The lock protects cache state (_snapshot*/_unavailable_until/_warned) only;
+        # the HTTP calls below run unlocked so a slow/hung API doesn't block other callers.
         now = self._clock()
         with self._lock:
             if self._snapshot_at is not None and now - self._snapshot_at < SNAPSHOT_TTL_SECONDS:
                 return self._snapshot
             if now < self._unavailable_until:
                 return None
-            try:
-                paths = self._get_items("paths/list")
-                sessions = {endpoint: self._get_items(f"{endpoint}/list") for endpoint, _ in SESSION_KINDS.values()}
-            except (MediamtxError, OSError, ValueError, KeyError) as exc:
+        try:
+            paths = self._get_items("paths/list")
+            sessions = {endpoint: self._get_items(f"{endpoint}/list") for endpoint, _ in SESSION_KINDS.values()}
+        except (MediamtxError, OSError, ValueError, KeyError) as exc:
+            warn = False
+            with self._lock:
                 self._snapshot, self._snapshot_at = None, None
                 self._unavailable_until = now + UNAVAILABLE_BACKOFF_SECONDS
                 if not self._warned:
-                    logging.warning("mediamtx API unavailable (%s); external stream detection is off", exc)
                     self._warned = True
-                return None
+                    warn = True
+            if warn:
+                logging.warning("mediamtx API unavailable (%s); external stream detection is off", exc)
+            return None
+        with self._lock:
             self._warned = False
             self._snapshot, self._snapshot_at = build_snapshot(paths, sessions), now
             self._update_rates(now)
@@ -231,18 +235,17 @@ class MediamtxClient:
 
     def external_info(self, path: PathInfo) -> dict:
         session_id = path.source_id
+        token = None
         with self._lock:
             if session_id not in self._probes:
-                self._probes[session_id] = _PENDING
-                start_probe = True
-            else:
-                start_probe = False
+                token = object()  # per-attempt token: only this attempt may write its result back
+                self._probes[session_id] = token
             bitrate = self._bitrate.get(session_id)
-        if start_probe:
+        if token is not None:
             if self._probe_async:
-                threading.Thread(target=self._run_probe, args=(session_id, path.name), daemon=True).start()
+                threading.Thread(target=self._run_probe, args=(session_id, path.name, token), daemon=True).start()
             else:
-                self._run_probe(session_id, path.name)
+                self._run_probe(session_id, path.name, token)
         with self._lock:
             probe = self._probes.get(session_id)
         dims = probe if isinstance(probe, dict) else {}
@@ -257,10 +260,13 @@ class MediamtxClient:
             "bitrate_bps": None if bitrate is None else int(bitrate),
         }
 
-    def _run_probe(self, session_id: str, path_name: str) -> None:
+    def _run_probe(self, session_id: str, path_name: str, token: object) -> None:
         result = self._probe(f"{RTSP_BASE_URL}/{path_name}?{PROBE_READER_TAG}")
         with self._lock:
-            if session_id in self._probes:
+            # Only write back if this attempt's token is still the current one for the
+            # session: if the session was evicted and reissued while probing, or a newer
+            # probe attempt started, a stale in-flight result must not overwrite it.
+            if self._probes.get(session_id) is token:
                 self._probes[session_id] = result
 
     def kick(self, source_type: str, session_id: str) -> None:
