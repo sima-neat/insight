@@ -615,7 +615,7 @@
         "summary": "Disconnect the external publisher holding a slot",
         "description": "Kicks the non-Insight publisher currently holding one source slot through the mediamtx control API. Readers of that stream are disconnected too. Afterwards the slot reports its persisted state again and can be assigned and started. Idempotent when the publisher already left.",
         "operationId": "takeoverMediaSource",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 1}}}, "example": {"index": 2}}}},
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
         "responses": {
           "200": {"description": "Publisher disconnected.", "content": {"application/json": {"schema": {"type": "object", "required": ["success", "index"], "properties": {"success": {"type": "boolean"}, "index": {"type": "integer"}}}}}},
           "400": {"$ref": "#/components/responses/BadRequest"},
@@ -1084,7 +1084,7 @@
         "required": ["protocol", "address"],
         "properties": {
           "protocol": {"type": "string", "description": "Reader protocol, e.g. rtsp, webrtc, srt."},
-          "address": {"type": "string", "nullable": true, "description": "Reader IP address without port. Inside the SDK container, clients outside the container appear as the Docker bridge gateway."},
+          "address": {"type": ["string", "null"], "description": "Reader IP address without port. Inside the SDK container, clients outside the container appear as the Docker bridge gateway."},
           "label": {"type": "string", "description": "Present for Insight's own preview reader (`insight preview`)."}
         }
       },
@@ -1094,13 +1094,13 @@
         "required": ["protocol", "address", "since", "codec_supported", "width", "height", "fps", "bitrate_bps"],
         "properties": {
           "protocol": {"type": "string", "description": "Publish protocol: rtsp, rtsps, webrtc, srt, rtmp, rtmps, or the raw mediamtx source type."},
-          "address": {"type": "string", "nullable": true, "description": "Publisher IP address without port."},
-          "since": {"type": "string", "nullable": true, "description": "RFC 3339 time the path became ready."},
+          "address": {"type": ["string", "null"], "description": "Publisher IP address without port."},
+          "since": {"type": ["string", "null"], "description": "RFC 3339 time the path became ready."},
           "codec_supported": {"type": "boolean", "description": "False when the stream codec is not h264, h265 or mjpeg and Neat pipelines cannot decode it."},
-          "width": {"type": "integer", "nullable": true},
-          "height": {"type": "integer", "nullable": true},
-          "fps": {"type": "number", "nullable": true, "description": "Null until the one-time ffprobe completes, or when it failed."},
-          "bitrate_bps": {"type": "integer", "nullable": true, "description": "Ingress bit rate estimated between snapshots; null on first sighting."}
+          "width": {"type": ["integer", "null"]},
+          "height": {"type": ["integer", "null"]},
+          "fps": {"type": ["number", "null"], "description": "Null until the one-time ffprobe completes, or when it failed."},
+          "bitrate_bps": {"type": ["integer", "null"], "description": "Ingress bit rate estimated between snapshots; null on first sighting."}
         }
       },
       "BulkStartResult": {
