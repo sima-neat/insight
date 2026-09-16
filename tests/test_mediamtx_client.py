@@ -227,6 +227,31 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(mediamtx.MediamtxNotFound):
             client.kick("rtspSession", "gone")
 
+    def test_disabled_protocol_endpoints_404_do_not_break_snapshot(self):
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if endpoint == "paths/list":
+                return 200, json.dumps({"items": PATHS}).encode()
+            if endpoint.split("/")[0] == "rtspsessions":
+                return 200, json.dumps({"items": SESSIONS["rtspsessions"]}).encode()
+            return 404, b""
+
+        client = mediamtx.MediamtxClient(request=request, clock=FakeClock())
+        snap = client.snapshot()
+        self.assertIsNotNone(snap)
+        self.assertTrue(snap["src2"].external)
+        self.assertEqual(snap["src2"].protocol, "rtsp")
+
+    def test_paths_list_404_marks_unavailable(self):
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if endpoint == "paths/list":
+                return 404, b""
+            return 200, json.dumps({"items": []}).encode()
+
+        client = mediamtx.MediamtxClient(request=request, clock=FakeClock())
+        self.assertIsNone(client.snapshot())
+
     def test_parse_fps(self):
         self.assertEqual(mediamtx._parse_fps("30/1"), 30)
         self.assertEqual(mediamtx._parse_fps("30000/1001"), 29.97)
