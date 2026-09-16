@@ -46,6 +46,7 @@ from neat_insight.mediasrc import (
     start_media_stream,
     stop_media_stream,
 )
+from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
@@ -81,6 +82,7 @@ env = init_environment()
 MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
+mediamtx_client = MediamtxClient()
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
@@ -2058,7 +2060,24 @@ def _source_url(src, transport: Optional[str] = None):
     return f"rtsp://{host}:8554/src{index}"
 
 
-def _source_with_urls(src):
+def _path_snapshot():
+    return mediamtx_client.snapshot() or {}
+
+
+def _external_holder(index, snapshot=None):
+    snapshot = _path_snapshot() if snapshot is None else snapshot
+    path = snapshot.get(f"src{index}")
+    return path if path and path.external else None
+
+
+def _external_conflict_error(index, path):
+    return _json_error(
+        f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it.",
+        409,
+    )
+
+
+def _source_with_urls(src, snapshot=None):
     enriched = dict(src)
     stored_codec = src.get("codec")
     if stored_codec in {"h264", "h265", "mjpeg", UNKNOWN_CODEC}:
@@ -2078,6 +2097,15 @@ def _source_with_urls(src):
     if "http" in allowed_transports:
         urls["http_mjpeg"] = _source_url(src, "http")
     enriched["urls"] = urls
+    path = (snapshot if snapshot is not None else _path_snapshot()).get(f"src{src.get('index')}")
+    enriched["readers"] = list(path.readers) if path and path.ready else []
+    if path and path.external:
+        enriched["state"] = "external"
+        enriched["transport"] = "rtsp"
+        enriched["codec"] = path.codec
+        enriched["allowed_transports"] = ["rtsp"]
+        enriched["urls"] = {"rtsp": _source_url(src, "rtsp")}
+        enriched["external"] = mediamtx_client.external_info(path)
     return enriched
 
 
@@ -2107,7 +2135,8 @@ def _find_source(index: int):
 def get_sources():
     """Return persisted media-source objects, including index, assigned file path, and playback state."""
     sources = _sync_source_runtime_states(load_sources())
-    return jsonify([_source_with_urls(src) for src in sources])
+    snapshot = _path_snapshot()
+    return jsonify([_source_with_urls(src, snapshot) for src in sources])
 
 
 # API: assign or clear a media file for one RTSP source slot.

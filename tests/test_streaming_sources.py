@@ -8,6 +8,38 @@ os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55580")
 
 from neat_insight import app as app_module
 from neat_insight import mediasrc
+from neat_insight.mediamtx import PathInfo
+
+
+class FakeMediamtx:
+    def __init__(self):
+        self.paths = {}
+        self.available = True
+        self.kicked = []
+
+    def snapshot(self):
+        return dict(self.paths) if self.available else None
+
+    def external_info(self, path):
+        return {"protocol": path.protocol, "address": path.address, "since": path.since,
+                "codec_supported": path.codec in {"h264", "h265", "mjpeg"},
+                "width": None, "height": None, "fps": None, "bitrate_bps": None}
+
+    def kick(self, source_type, session_id):
+        self.kicked.append((source_type, session_id))
+        self.paths = {name: p for name, p in self.paths.items() if p.source_id != session_id}
+
+
+def external_path(index, codec="h264", protocol="rtsp", source_type="rtspSession", readers=None):
+    return PathInfo(name=f"src{index}", ready=True, since="2026-09-16T13:09:59Z", source_type=source_type,
+                    source_id=f"ext-{index}", protocol=protocol, address="172.19.0.1", query="",
+                    codec=codec, bytes_received=10, readers=readers or [])
+
+
+def insight_path(index, readers=None):
+    return PathInfo(name=f"src{index}", ready=True, since="2026-09-16T13:00:00Z", source_type="rtspSession",
+                    source_id=f"own-{index}", protocol="rtsp", address="127.0.0.1", query="publisher=insight",
+                    codec="h264", bytes_received=10, readers=readers or [])
 
 
 class StreamingSourceTests(unittest.TestCase):
@@ -26,8 +58,12 @@ class StreamingSourceTests(unittest.TestCase):
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
         mediasrc.pipeline_registry.clear()
+        self.mtx = FakeMediamtx()
+        self._mtx_patch = mock.patch.object(app_module, "mediamtx_client", self.mtx)
+        self._mtx_patch.start()
 
     def tearDown(self):
+        self._mtx_patch.stop()
         mediasrc.pipeline_registry.clear()
         app_module.MEDIA_DIR = self.old_media_dir
         app_module.MEDIA_SRC_DATA_FILE = self.old_sources_file
@@ -278,6 +314,47 @@ class StreamingSourceTests(unittest.TestCase):
 
         self.assertTrue(ok, err)
         self.assertEqual(popen.call_args.args[0][-1], "rtsp://127.0.0.1:8554/src1?publisher=insight")
+
+    def test_get_sources_reports_external_slot(self):
+        self.sources_file.write_text('[{"index": 2, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h265"}]', encoding="utf-8")
+        self.mtx.paths["src2"] = external_path(2, readers=[{"protocol": "rtsp", "address": "10.0.0.9"}])
+
+        src = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"}).get_json()[1]
+
+        self.assertEqual(src["state"], "external")
+        self.assertEqual(src["file"], "clip.mp4")
+        self.assertEqual((src["transport"], src["codec"], src["allowed_transports"]), ("rtsp", "h264", ["rtsp"]))
+        self.assertEqual(src["urls"], {"rtsp": "rtsp://localhost:8554/src2"})
+        self.assertEqual(src["external"]["protocol"], "rtsp")
+        self.assertEqual(src["external"]["address"], "172.19.0.1")
+        self.assertTrue(src["external"]["codec_supported"])
+        self.assertEqual(src["readers"], [{"protocol": "rtsp", "address": "10.0.0.9"}])
+
+    def test_get_sources_lists_readers_for_insight_owned_slot(self):
+        self.mtx.paths["src1"] = insight_path(1, readers=[{"protocol": "rtsp", "address": "10.0.0.9"}])
+        sources = self.client.get("/api/mediasrc").get_json()
+        self.assertEqual(sources[0]["state"], "stopped")
+        self.assertNotIn("external", sources[0])
+        self.assertEqual(sources[0]["readers"], [{"protocol": "rtsp", "address": "10.0.0.9"}])
+        self.assertEqual(sources[1]["readers"], [])
+
+    def test_get_sources_without_mediamtx_api_matches_legacy_shape(self):
+        self.mtx.available = False
+        src = self.client.get("/api/mediasrc").get_json()[0]
+        self.assertEqual(src["state"], "stopped")
+        self.assertEqual(src["readers"], [])
+        self.assertNotIn("external", src)
+
+    def test_external_state_is_never_persisted(self):
+        self.sources_file.write_text('[{"index": 2, "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self.mtx.paths["src2"] = external_path(2)
+
+        self.client.get("/api/mediasrc")
+        self.client.post("/api/mediasrc/stop-all")
+        self.client.post("/api/mediasrc/auto-assign-all")
+
+        self.assertNotIn("external", self.sources_file.read_text(encoding="utf-8"))
+        self.assertNotIn("readers", self.sources_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
