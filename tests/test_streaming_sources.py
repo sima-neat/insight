@@ -426,6 +426,22 @@ with socket.socket() as listener, socket.socket() as client:
                 env = mediasrc._ffmpeg_env()
         self.assertEqual(self.socket_option(env), 1)
 
+    def test_recreates_alias_after_temporary_file_cleanup(self):
+        install = self.root / "My Projects"
+        install.mkdir(exist_ok=True)
+        shim = install / self.shim.name
+        shutil.copyfile(self.shim, shim)
+        with mock.patch.dict(os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: str(shim)}):
+            os.environ.pop("LD_PRELOAD", None)
+            env = mediasrc._ffmpeg_env()
+            self.assertEqual(self.socket_option(env), 1)
+            Path(env["LD_PRELOAD"]).unlink()
+            env = mediasrc._ffmpeg_env()
+            self.assertEqual(self.socket_option(env), 1)
+            shutil.rmtree(Path(env["LD_PRELOAD"]).parent)
+            env = mediasrc._ffmpeg_env()
+            self.assertEqual(self.socket_option(env), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

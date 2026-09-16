@@ -472,7 +472,8 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
             fi
             echo "✅ ffmpeg_nodelay.so: $ELF_MACHINE, glibc <= 2.17"
         else
-            echo "⚠️  readelf not found; skipping the glibc baseline check."
+            echo "❌ readelf is required to validate the Linux shim; install binutils."
+            exit 1
         fi
     fi
 
