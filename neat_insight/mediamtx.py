@@ -130,3 +130,150 @@ def build_snapshot(paths_items, sessions_by_endpoint) -> dict:
             readers=readers,
         )
     return snapshot
+
+
+_PENDING = object()
+
+
+def _parse_fps(value) -> Optional[float]:
+    try:
+        num, den = str(value).split("/")
+        fps = int(num) / int(den)
+    except (AttributeError, ValueError, ZeroDivisionError):
+        return None
+    if fps <= 0:
+        return None
+    return int(fps) if fps == int(fps) else round(fps, 2)
+
+
+def _default_request(method: str, url: str):
+    req = urllib.request.Request(url, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
+
+def _default_probe(rtsp_url: str) -> Optional[dict]:
+    cmd = [
+        "ffprobe", "-v", "error", "-rtsp_transport", "tcp", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,avg_frame_rate", "-of", "json", rtsp_url,
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=PROBE_TIMEOUT_SECONDS, check=False)
+        stream = json.loads(result.stdout)["streams"][0]
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, KeyError, IndexError):
+        return None
+    return {"width": stream.get("width"), "height": stream.get("height"), "fps": _parse_fps(stream.get("avg_frame_rate"))}
+
+
+class MediamtxClient:
+    def __init__(self, base_url: str = API_BASE_URL, request: Optional[Callable] = None,
+                 probe: Optional[Callable] = None, clock: Callable[[], float] = time.monotonic,
+                 probe_async: bool = True):
+        self._base_url = base_url.rstrip("/")
+        self._request = request or _default_request
+        self._probe = probe or _default_probe
+        self._clock = clock
+        self._probe_async = probe_async
+        self._lock = threading.Lock()
+        self._snapshot: Optional[dict] = None
+        self._snapshot_at: Optional[float] = None
+        self._unavailable_until = 0.0
+        self._warned = False
+        self._probes: dict = {}   # session id -> dict | None | _PENDING
+        self._bytes: dict = {}    # session id -> (bytes_received, monotonic seconds)
+        self._bitrate: dict = {}  # session id -> bits per second
+
+    def _get_items(self, endpoint: str) -> list:
+        status, body = self._request("GET", f"{self._base_url}/{endpoint}?itemsPerPage={PAGE_SIZE}")
+        if status != 200:
+            raise MediamtxError(f"{endpoint} returned {status}")
+        return json.loads(body)["items"]
+
+    def snapshot(self) -> Optional[dict]:
+        now = self._clock()
+        with self._lock:
+            if self._snapshot_at is not None and now - self._snapshot_at < SNAPSHOT_TTL_SECONDS:
+                return self._snapshot
+            if now < self._unavailable_until:
+                return None
+            try:
+                paths = self._get_items("paths/list")
+                sessions = {endpoint: self._get_items(f"{endpoint}/list") for endpoint, _ in SESSION_KINDS.values()}
+            except (MediamtxError, OSError, ValueError, KeyError) as exc:
+                self._snapshot, self._snapshot_at = None, None
+                self._unavailable_until = now + UNAVAILABLE_BACKOFF_SECONDS
+                if not self._warned:
+                    logging.warning("mediamtx API unavailable (%s); external stream detection is off", exc)
+                    self._warned = True
+                return None
+            self._warned = False
+            self._snapshot, self._snapshot_at = build_snapshot(paths, sessions), now
+            self._update_rates(now)
+            return self._snapshot
+
+    def _update_rates(self, now: float) -> None:
+        live = {}
+        for path in self._snapshot.values():
+            if path.source_id:
+                live[path.source_id] = path.bytes_received
+        for session_id, received in live.items():
+            previous = self._bytes.get(session_id)
+            if previous and now > previous[1]:
+                self._bitrate[session_id] = (received - previous[0]) * 8 / (now - previous[1])
+            self._bytes[session_id] = (received, now)
+        for cache in (self._bytes, self._bitrate, self._probes):
+            for session_id in list(cache):
+                if session_id not in live:
+                    del cache[session_id]
+
+    def external_info(self, path: PathInfo) -> dict:
+        session_id = path.source_id
+        with self._lock:
+            if session_id not in self._probes:
+                self._probes[session_id] = _PENDING
+                start_probe = True
+            else:
+                start_probe = False
+            bitrate = self._bitrate.get(session_id)
+        if start_probe:
+            if self._probe_async:
+                threading.Thread(target=self._run_probe, args=(session_id, path.name), daemon=True).start()
+            else:
+                self._run_probe(session_id, path.name)
+        with self._lock:
+            probe = self._probes.get(session_id)
+        dims = probe if isinstance(probe, dict) else {}
+        return {
+            "protocol": path.protocol,
+            "address": path.address,
+            "since": path.since,
+            "codec_supported": path.codec in SUPPORTED_CODECS,
+            "width": dims.get("width"),
+            "height": dims.get("height"),
+            "fps": dims.get("fps"),
+            "bitrate_bps": None if bitrate is None else int(bitrate),
+        }
+
+    def _run_probe(self, session_id: str, path_name: str) -> None:
+        result = self._probe(f"{RTSP_BASE_URL}/{path_name}?{PROBE_READER_TAG}")
+        with self._lock:
+            if session_id in self._probes:
+                self._probes[session_id] = result
+
+    def kick(self, source_type: str, session_id: str) -> None:
+        kind = SESSION_KINDS.get(source_type)
+        if not kind:
+            raise MediamtxError(f"unsupported publisher type {source_type}")
+        with self._lock:
+            self._snapshot_at = None
+        try:
+            status, _ = self._request("POST", f"{self._base_url}/{kind[0]}/kick/{session_id}")
+        except OSError as exc:
+            raise MediamtxError(str(exc)) from exc
+        if status == 404:
+            raise MediamtxNotFound(session_id)
+        if status != 200:
+            raise MediamtxError(f"kick returned {status}")

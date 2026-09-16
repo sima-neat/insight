@@ -1,3 +1,4 @@
+import json
 import logging
 import unittest
 
@@ -81,6 +82,154 @@ class SnapshotParsingTests(unittest.TestCase):
         self.assertTrue(snap["src2"].external)
         self.assertEqual(snap["src2"].protocol, "futureConn")
         self.assertIsNone(snap["src2"].address)
+
+
+def _fake_request(paths=PATHS, sessions=SESSIONS, calls=None, kicks=None, fail=False, kick_status=200):
+    def request(method, url):
+        if calls is not None:
+            calls.append((method, url))
+        if fail:
+            raise OSError("connection refused")
+        endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+        if method == "POST" and "/kick/" in endpoint:
+            if kicks is not None:
+                kicks.append(endpoint)
+            return kick_status, b""
+        if endpoint == "paths/list":
+            return 200, json.dumps({"items": paths}).encode()
+        name = endpoint.split("/")[0]
+        return 200, json.dumps({"items": sessions.get(name, [])}).encode()
+    return request
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+class ClientTests(unittest.TestCase):
+    def test_snapshot_is_cached_for_one_second(self):
+        calls, clock = [], FakeClock()
+        client = mediamtx.MediamtxClient(request=_fake_request(calls=calls), clock=clock)
+        client.snapshot()
+        first = len(calls)
+        clock.now += 0.5
+        client.snapshot()
+        self.assertEqual(len(calls), first)
+        clock.now += 0.6
+        client.snapshot()
+        self.assertEqual(len(calls), first * 2)
+
+    def test_snapshot_makes_one_call_per_session_kind(self):
+        calls = []
+        mediamtx.MediamtxClient(request=_fake_request(calls=calls), clock=FakeClock()).snapshot()
+        self.assertEqual(len(calls), 1 + len(mediamtx.SESSION_KINDS))
+
+    def test_unavailable_api_backs_off_and_warns_once(self):
+        calls, clock = [], FakeClock()
+        client = mediamtx.MediamtxClient(request=_fake_request(calls=calls, fail=True), clock=clock)
+        with self.assertLogs(level=logging.WARNING) as logs:
+            self.assertIsNone(client.snapshot())
+            clock.now += 2
+            self.assertIsNone(client.snapshot())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len([m for m in logs.output if "mediamtx" in m]), 1)
+        clock.now += 10
+        client.snapshot()
+        self.assertEqual(len(calls), 2)
+
+    def test_bitrate_from_bytes_delta_between_snapshots(self):
+        clock = FakeClock()
+        first = [dict(PATHS[1], bytesReceived=1_000)]
+        second = [dict(PATHS[1], bytesReceived=251_000)]
+        calls = []
+        state = {"paths": first}
+        def request(method, url):
+            return _fake_request(paths=state["paths"], calls=calls)(method, url)
+        client = mediamtx.MediamtxClient(request=request, clock=clock, probe=lambda url: None, probe_async=False)
+        path = client.snapshot()["src2"]
+        self.assertIsNone(client.external_info(path)["bitrate_bps"])
+        state["paths"] = second
+        clock.now += 2
+        path = client.snapshot()["src2"]
+        self.assertEqual(client.external_info(path)["bitrate_bps"], 1_000_000)
+
+    def test_probe_runs_once_per_session_and_fills_dimensions(self):
+        probes = []
+        def probe(url):
+            probes.append(url)
+            return {"width": 640, "height": 480, "fps": 30}
+        client = mediamtx.MediamtxClient(request=_fake_request(), clock=FakeClock(), probe=probe, probe_async=False)
+        path = client.snapshot()["src2"]
+        info = client.external_info(path)
+        client.external_info(path)
+        self.assertEqual(probes, ["rtsp://127.0.0.1:8554/src2?reader=insight-probe"])
+        self.assertEqual((info["width"], info["height"], info["fps"]), (640, 480, 30))
+        self.assertTrue(info["codec_supported"])
+        self.assertEqual(info["protocol"], "rtsp")
+
+    def test_failed_probe_is_not_retried_for_same_session(self):
+        probes = []
+        def probe(url):
+            probes.append(url)
+            return None
+        client = mediamtx.MediamtxClient(request=_fake_request(), clock=FakeClock(), probe=probe, probe_async=False)
+        path = client.snapshot()["src2"]
+        self.assertIsNone(client.external_info(path)["width"])
+        client.external_info(path)
+        self.assertEqual(len(probes), 1)
+
+    def test_unsupported_codec_flagged(self):
+        client = mediamtx.MediamtxClient(request=_fake_request(), clock=FakeClock(), probe=lambda url: None, probe_async=False)
+        self.assertFalse(client.external_info(client.snapshot()["src4"])["codec_supported"])
+
+    def test_cache_entries_evicted_when_session_disappears(self):
+        clock = FakeClock()
+        state = {"paths": PATHS}
+        def request(method, url):
+            return _fake_request(paths=state["paths"])(method, url)
+        client = mediamtx.MediamtxClient(request=request, clock=clock, probe=lambda url: {"width": 1, "height": 1, "fps": 1}, probe_async=False)
+        client.external_info(client.snapshot()["src2"])
+        self.assertIn("pub-2", client._probes)
+        state["paths"] = [p for p in PATHS if p["name"] != "src2"]
+        clock.now += 2
+        client.snapshot()
+        self.assertNotIn("pub-2", client._probes)
+
+    def test_kick_routes_by_source_type(self):
+        kicks = []
+        client = mediamtx.MediamtxClient(request=_fake_request(kicks=kicks), clock=FakeClock())
+        client.kick("srtConn", "pub-3")
+        client.kick("webRTCSession", "pub-4")
+        self.assertEqual(kicks, ["srtconns/kick/pub-3", "webrtcsessions/kick/pub-4"])
+
+    def test_kick_invalidates_snapshot_cache(self):
+        calls = []
+        client = mediamtx.MediamtxClient(request=_fake_request(calls=calls), clock=FakeClock())
+        client.snapshot()
+        before = len(calls)
+        client.kick("rtspSession", "pub-2")
+        client.snapshot()
+        self.assertGreater(len(calls), before + 1)
+
+    def test_kick_unknown_type_raises(self):
+        client = mediamtx.MediamtxClient(request=_fake_request(), clock=FakeClock())
+        with self.assertRaises(mediamtx.MediamtxError):
+            client.kick("futureConn", "x")
+
+    def test_kick_404_raises_not_found(self):
+        client = mediamtx.MediamtxClient(request=_fake_request(kick_status=404), clock=FakeClock())
+        with self.assertRaises(mediamtx.MediamtxNotFound):
+            client.kick("rtspSession", "gone")
+
+    def test_parse_fps(self):
+        self.assertEqual(mediamtx._parse_fps("30/1"), 30)
+        self.assertEqual(mediamtx._parse_fps("30000/1001"), 29.97)
+        self.assertIsNone(mediamtx._parse_fps("0/0"))
+        self.assertIsNone(mediamtx._parse_fps(None))
 
 
 if __name__ == "__main__":
