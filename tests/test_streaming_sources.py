@@ -268,6 +268,17 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(app_module._media_codec_display_name("MJPG", "mjpeg"), "MJPEG")
         self.assertEqual(app_module._media_codec_display_name("hvc1", None), "H.265")
 
+    def test_insight_publish_url_carries_publisher_tag(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        process = mock.Mock()
+        process.poll.return_value = None
+        process.stderr = []
+        with mock.patch.object(mediasrc.subprocess, "Popen", return_value=process) as popen:
+            ok, err = mediasrc.start_media_stream(1, str(self.media_dir / "clip.mp4"), "rtsp", "h264", "h264")
+
+        self.assertTrue(ok, err)
+        self.assertEqual(popen.call_args.args[0][-1], "rtsp://127.0.0.1:8554/src1?publisher=insight")
+
 
 if __name__ == "__main__":
     unittest.main()

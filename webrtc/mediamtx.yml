@@ -3,7 +3,10 @@ hls: no
 rtmp: no
 rtspAddress: :8554
 logLevel: info
-
+api: yes
+apiAddress: 127.0.0.1:9997
+pathDefaults:
+  overridePublisher: no
 
 paths:
   src1: {}
