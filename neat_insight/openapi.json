@@ -478,7 +478,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign or clear one source slot",
-        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.",
+        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`. Returns 409 when an external publisher holds the slot; use `/api/mediasrc/takeover` first.",
         "operationId": "assignMediaSource",
         "x-codeSamples": [
           {
@@ -500,6 +500,7 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"}
         }
       }
@@ -508,7 +509,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign available videos to source slots",
-        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin. Slots held by an external publisher are skipped and listed in `skipped_external`.",
         "operationId": "autoAssignMediaSources",
         "responses": {
           "200": {
@@ -522,7 +523,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Start one source",
-        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources. Returns 409 when an external publisher holds the slot; use `/api/mediasrc/takeover` first.",
         "operationId": "startMediaSource",
         "x-codeSamples": [
           {
@@ -536,6 +537,7 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"}
         }
       }
@@ -568,13 +570,14 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop one source",
-        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.",
+        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment. Returns 409 when an external publisher holds the slot; use `/api/mediasrc/takeover` first.",
         "operationId": "stopMediaSource",
         "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
         "responses": {
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"}
         }
       }
     },
@@ -582,7 +585,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop every source",
-        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing. Slots held by an external publisher are skipped and listed in `skipped_external`.",
         "operationId": "stopAllMediaSources",
         "responses": {
           "200": {
@@ -596,13 +599,29 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Reset all source assignments",
-        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained.",
+        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained. Slots held by an external publisher are skipped and listed in `skipped_external`.",
         "operationId": "resetMediaSources",
         "responses": {
           "200": {
             "description": "Every source was stopped and default empty assignments were written.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SuccessMessage"}}}
           }
+        }
+      }
+    },
+    "/api/mediasrc/takeover": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Disconnect the external publisher holding a slot",
+        "description": "Kicks the non-Insight publisher currently holding one source slot through the mediamtx control API. Readers of that stream are disconnected too. Afterwards the slot reports its persisted state again and can be assigned and started. Idempotent when the publisher already left.",
+        "operationId": "takeoverMediaSource",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 1}}}, "example": {"index": 2}}}},
+        "responses": {
+          "200": {"description": "Publisher disconnected.", "content": {"application/json": {"schema": {"type": "object", "required": ["success", "index"], "properties": {"success": {"type": "boolean"}, "index": {"type": "integer"}}}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "502": {"description": "The mediamtx control API is unreachable or refused the kick.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
@@ -635,6 +654,26 @@
           "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "504": {"$ref": "#/components/responses/GatewayTimeout"}
+        }
+      }
+    },
+    "/stream/preview/src{index}.mjpg": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Throttled MJPEG preview of a live slot",
+        "description": "Multipart MJPEG rendering of whatever is currently published on one slot, external or Insight-owned, scaled to at most 640 px wide. `fps=5` decodes every frame; `fps=1` and `fps=0.5` decode keyframes only, so the effective refresh is bounded by the publisher's keyframe interval. The ffmpeg reader runs only while the HTTP connection is open. At most 4 previews run concurrently.",
+        "operationId": "previewMediaSource",
+        "parameters": [
+          {"name": "index", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}},
+          {"name": "fps", "in": "query", "required": true, "schema": {"type": "string", "enum": ["5", "1", "0.5"]}}
+        ],
+        "responses": {
+          "200": {"description": "Multipart MJPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "429": {"description": "Too many previews open.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "503": {"description": "ffmpeg is not installed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },
@@ -889,7 +928,7 @@
       "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The request conflicts with current runtime state, for example a slot that is not running or is held by an external publisher.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
@@ -1020,13 +1059,13 @@
       "MediaSource": {
         "type": "object",
         "description": "Persisted configuration and current runtime state for one streaming source slot.",
-        "required": ["index", "file", "state", "transport", "codec", "allowed_transports", "urls"],
+        "required": ["index", "file", "state", "transport", "codec", "allowed_transports", "urls", "readers"],
         "properties": {
           "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
           "file": {"type": "string", "description": "Assigned relative media-library path, or an empty string for an unassigned slot."},
-          "state": {"type": "string", "enum": ["playing", "stopped"], "description": "Persisted playback state; `playing` indicates a source process should be active."},
+          "state": {"type": "string", "enum": ["playing", "stopped", "external"], "description": "Persisted playback state, or `external` when a publisher other than Insight currently holds the slot's RTSP path. `external` is derived at request time and never persisted."},
           "transport": {"type": "string", "enum": ["rtsp", "http", ""], "description": "Selected output transport, or empty when the slot is unassigned."},
-          "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg", "unknown"], "description": "Codec detected from the assigned media."},
+          "codec": {"type": "string", "description": "Codec detected from the assigned media, or the codec on the wire while the slot is external (any mediamtx track name lower-cased, e.g. `vp8`)."},
           "allowed_transports": {"type": "array", "description": "Transports compatible with the detected codec and current backend capabilities.", "items": {"type": "string", "enum": ["rtsp", "http"]}},
           "urls": {
             "type": "object",
@@ -1035,13 +1074,39 @@
               "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
               "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."}
             }
-          }
+          },
+          "readers": {"type": "array", "description": "Clients currently reading this slot from mediamtx (Insight's own probe reader is hidden).", "items": {"$ref": "#/components/schemas/StreamReader"}},
+          "external": {"$ref": "#/components/schemas/ExternalStream"}
+        }
+      },
+      "StreamReader": {
+        "type": "object",
+        "required": ["protocol", "address"],
+        "properties": {
+          "protocol": {"type": "string", "description": "Reader protocol, e.g. rtsp, webrtc, srt."},
+          "address": {"type": "string", "nullable": true, "description": "Reader IP address without port. Inside the SDK container, clients outside the container appear as the Docker bridge gateway."},
+          "label": {"type": "string", "description": "Present for Insight's own preview reader (`insight preview`)."}
+        }
+      },
+      "ExternalStream": {
+        "type": "object",
+        "description": "Details of the non-Insight publisher holding a slot. Present only when `state` is `external`.",
+        "required": ["protocol", "address", "since", "codec_supported", "width", "height", "fps", "bitrate_bps"],
+        "properties": {
+          "protocol": {"type": "string", "description": "Publish protocol: rtsp, rtsps, webrtc, srt, rtmp, rtmps, or the raw mediamtx source type."},
+          "address": {"type": "string", "nullable": true, "description": "Publisher IP address without port."},
+          "since": {"type": "string", "nullable": true, "description": "RFC 3339 time the path became ready."},
+          "codec_supported": {"type": "boolean", "description": "False when the stream codec is not h264, h265 or mjpeg and Neat pipelines cannot decode it."},
+          "width": {"type": "integer", "nullable": true},
+          "height": {"type": "integer", "nullable": true},
+          "fps": {"type": "number", "nullable": true, "description": "Null until the one-time ffprobe completes, or when it failed."},
+          "bitrate_bps": {"type": "integer", "nullable": true, "description": "Ingress bit rate estimated between snapshots; null on first sighting."}
         }
       },
       "BulkStartResult": {
         "type": "object",
         "description": "Per-slot outcome summary for a bulk source-start request. Partial success is represented explicitly rather than converted to an HTTP error.",
-        "required": ["success", "requested", "targeted", "started", "already_running", "errors", "message", "started_or_running"],
+        "required": ["success", "requested", "targeted", "started", "already_running", "errors", "message", "started_or_running", "skipped_external"],
         "properties": {
           "success": {"type": "boolean", "description": "Whether every targeted slot ended in a usable started or already-running state."},
           "requested": {"type": "integer", "description": "Count requested by the caller."},
@@ -1050,7 +1115,8 @@
           "already_running": {"type": "array", "description": "Indexes that required no action because they were already playing.", "items": {"type": "integer"}},
           "errors": {"type": "array", "description": "Per-slot startup failures that did not prevent other targets from being attempted.", "items": {"type": "object", "required": ["index", "error"], "properties": {"index": {"type": "integer", "description": "One-based source slot index."}, "error": {"type": "string", "description": "Human-readable startup failure."}}}},
           "message": {"type": "string", "description": "Overall human-readable result summary."},
-          "started_or_running": {"type": "integer", "description": "Combined count of newly started and already-running targets."}
+          "started_or_running": {"type": "integer", "description": "Combined count of newly started and already-running targets."},
+          "skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}
         }
       },
       "ViewerUrl": {
