@@ -404,6 +404,38 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/mediasrc/reset").get_json()["skipped_external"], [2])
         self.assertEqual(self.mtx.kicked, [])
 
+    def test_takeover_kicks_external_publisher(self):
+        self.mtx.paths["src2"] = external_path(2)
+        response = self.client.post("/api/mediasrc/takeover", json={"index": 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"success": True, "index": 2})
+        self.assertEqual(self.mtx.kicked, [("rtspSession", "ext-2")])
+        self.assertEqual(self.client.get("/api/mediasrc").get_json()[1]["state"], "stopped")
+
+    def test_takeover_errors(self):
+        self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 999}).status_code, 404)
+        self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 2}).status_code, 409)
+        self.mtx.available = False
+        self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 2}).status_code, 502)
+
+    def test_takeover_is_idempotent_when_publisher_already_left(self):
+        self.mtx.paths["src2"] = external_path(2)
+        def kick(source_type, session_id):
+            self.mtx.paths.pop("src2")
+            raise app_module.MediamtxNotFound(session_id)
+        self.mtx.kick = kick
+        self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 2}).status_code, 200)
+
+    def test_takeover_reports_new_publisher(self):
+        self.mtx.paths["src2"] = external_path(2)
+        def kick(source_type, session_id):
+            self.mtx.paths["src2"] = PathInfo(name="src2", ready=True, source_type="srtConn", source_id="other",
+                                              protocol="srt", address="10.0.0.7", codec="h264")
+        self.mtx.kick = kick
+        response = self.client.post("/api/mediasrc/takeover", json={"index": 2})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("srt 10.0.0.7", response.get_json()["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
