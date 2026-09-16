@@ -719,7 +719,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 48px minmax(180px, 1fr) 100px 100px auto auto auto;
+  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -3332,7 +3332,7 @@ button:disabled {
   }
 
   .source-row {
-    grid-template-columns: 54px 48px minmax(0, 1fr) 96px 96px auto auto auto;
+    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px auto auto auto;
   }
 
   .masthead {

@@ -698,7 +698,13 @@ export default function App() {
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [selectedSource, setSelectedSource] = useState(1)
-  const [previewRate, setPreviewRate] = useState(() => readPreviewRate(window.localStorage))
+  const [previewRate, setPreviewRate] = useState(() => {
+    try {
+      return readPreviewRate(window.localStorage)
+    } catch {
+      return 'off'
+    }
+  })
   const [previewError, setPreviewError] = useState(false)
   const [previewNonce, setPreviewNonce] = useState(0)
   const [takeoverTarget, setTakeoverTarget] = useState(null)
@@ -750,6 +756,8 @@ export default function App() {
   const [error, setError] = useState('')
   const metricEs = useRef(null)
   const youtubeImportAbortRef = useRef(null)
+  const sourcesRef = useRef(sources)
+  sourcesRef.current = sources
 
   const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
   const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
@@ -825,6 +833,7 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+  const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
@@ -1008,12 +1017,17 @@ export default function App() {
   }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
 
   useEffect(() => {
+    setPreviewError(false)
+  }, [selectedSource])
+
+  useEffect(() => {
     if (tab !== 'rtsp') return undefined
     const tick = () => {
       if (document.visibilityState !== 'visible') return
-      setNow(Date.now())
+      if (sourcesRef.current.some(isExternal)) setNow(Date.now())
       loadSources().catch((e) => console.warn('Source poll failed:', e.message))
     }
+    tick()
     const timer = setInterval(tick, 2000)
     document.addEventListener('visibilitychange', tick)
     return () => {
@@ -1587,18 +1601,24 @@ export default function App() {
   function changePreviewRate(value) {
     setPreviewRate(value)
     setPreviewError(false)
-    writePreviewRate(window.localStorage, value)
+    try {
+      writePreviewRate(window.localStorage, value)
+    } catch {}
   }
 
   function onPreviewRateKeyDown(e) {
     const i = PREVIEW_RATES.findIndex((r) => r.value === previewRate)
+    let next = -1
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      changePreviewRate(PREVIEW_RATES[(i + 1) % PREVIEW_RATES.length].value)
-      e.preventDefault()
+      next = (i + 1) % PREVIEW_RATES.length
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      changePreviewRate(PREVIEW_RATES[(i - 1 + PREVIEW_RATES.length) % PREVIEW_RATES.length].value)
-      e.preventDefault()
+      next = (i - 1 + PREVIEW_RATES.length) % PREVIEW_RATES.length
     }
+    if (next < 0) return
+    changePreviewRate(PREVIEW_RATES[next].value)
+    // Roving tabindex: the selection moves the tab stop, so focus has to follow it.
+    e.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus()
+    e.preventDefault()
   }
 
   async function copyStreamUrl(src) {
@@ -2004,9 +2024,8 @@ export default function App() {
                             <span
                               className={warning ? 'codec-lock warn' : 'codec-lock'}
                               title={warning || 'Codec of the external stream'}
-                              aria-label={warning ? `${codecLabel(src.codec)}: ${warning}` : undefined}
                             >
-                              {codecLabel(src.codec)}{warning ? ' ⚠' : ''}
+                              {codecLabel(src.codec)}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
                             </span>
                             <button
                               className="icon-action-btn takeover"
@@ -2770,13 +2789,13 @@ export default function App() {
         </div>
       )}
 
-      {takeoverTarget && (
+      {takeoverSource && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Disconnect external stream">
           <div className="modal-card">
-            <h3>Disconnect external stream on src{takeoverTarget.index}?</h3>
-            <p><code>{externalChipText(takeoverTarget.external || {})}</code></p>
-            <p>Readers: {readersText(takeoverTarget.readers)}</p>
-            <p>The publisher and all readers will be disconnected. src{takeoverTarget.index} becomes Idle and you can assign a file to it.</p>
+            <h3>Disconnect external stream on src{takeoverSource.index}?</h3>
+            <p><code>{externalChipText(takeoverSource.external || {})}</code></p>
+            <p>Readers: {readersText(takeoverSource.readers)}</p>
+            <p>The publisher and all readers will be disconnected. src{takeoverSource.index} becomes Idle and you can assign a file to it.</p>
             <div className="modal-actions">
               <button onClick={() => setTakeoverTarget(null)} disabled={takeoverBusy}>Cancel</button>
               <button className="danger" onClick={takeOverSource} disabled={takeoverBusy}>Disconnect</button>
