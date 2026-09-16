@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+import time
 import unittest
 
 from neat_insight import mediamtx
@@ -230,6 +232,50 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(mediamtx._parse_fps("30000/1001"), 29.97)
         self.assertIsNone(mediamtx._parse_fps("0/0"))
         self.assertIsNone(mediamtx._parse_fps(None))
+
+    def test_async_probe_fills_dimensions_in_background(self):
+        calls = []
+        ran = threading.Event()
+
+        def probe(url):
+            calls.append(url)
+            ran.set()
+            return {"width": 1, "height": 2, "fps": 3}
+
+        client = mediamtx.MediamtxClient(request=_fake_request(), clock=FakeClock(), probe=probe)
+        path = client.snapshot()["src2"]
+        client.external_info(path)  # kicks off the background probe; may return nulls
+        self.assertTrue(ran.wait(2), "background probe did not run")
+        deadline = time.monotonic() + 1
+        width = None
+        while time.monotonic() < deadline:
+            width = client.external_info(path)["width"]
+            if width == 1:
+                break
+            time.sleep(0.01)
+        self.assertEqual(width, 1)
+        self.assertEqual(len(calls), 1)
+
+    def test_stale_probe_result_is_ignored_after_eviction(self):
+        client = mediamtx.MediamtxClient(
+            request=_fake_request(), clock=FakeClock(),
+            probe=lambda url: {"width": 640, "height": 480, "fps": 30}, probe_async=False,
+        )
+        path = client.snapshot()["src2"]
+        client.external_info(path)
+        stored = client._probes["pub-2"]
+        self.assertEqual(stored, {"width": 640, "height": 480, "fps": 30})
+
+        # A probe attempt whose token no longer matches the current entry (e.g. the
+        # session was evicted and reissued while it was in flight) must not overwrite it.
+        client._run_probe("pub-2", "src2", object())
+        self.assertEqual(client._probes["pub-2"], stored)
+
+        # An attempt using the token that is actually current does write its result back.
+        current_token = object()
+        client._probes["pub-2"] = current_token
+        client._run_probe("pub-2", "src2", current_token)
+        self.assertEqual(client._probes["pub-2"], {"width": 640, "height": 480, "fps": 30})
 
 
 if __name__ == "__main__":
