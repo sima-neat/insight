@@ -250,6 +250,39 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(response.data, b"")
         process.terminate.assert_called_once()
 
+    def test_preview_command_uses_keyframes_below_5fps(self):
+        slow = mediasrc.preview_command("rtsp://127.0.0.1:8554/src2?reader=insight-preview", 1.0)
+        fast = mediasrc.preview_command("rtsp://127.0.0.1:8554/src2?reader=insight-preview", 5.0)
+        self.assertIn("nokey", slow)
+        self.assertNotIn("nokey", fast)
+        self.assertEqual(slow[slow.index("-vf") + 1], "fps=1,scale=min(640\\,iw):-2")
+        self.assertEqual(fast[fast.index("-vf") + 1], "fps=5,scale=min(640\\,iw):-2")
+        self.assertIn("mpjpeg", fast)
+
+    def test_preview_route_validation(self):
+        self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=2").status_code, 400)
+        self.assertEqual(self.client.get("/stream/preview/src999.mjpg?fps=1").status_code, 404)
+        self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=1").status_code, 409)
+        self.mtx.paths["src2"] = external_path(2)
+        with mock.patch.object(app_module.shutil, "which", return_value=None):
+            self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=1").status_code, 503)
+        with mock.patch.object(app_module, "PREVIEW_MAX_STREAMS", 0):
+            self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=1").status_code, 429)
+
+    def test_preview_route_streams_and_releases_slot(self):
+        self.mtx.paths["src2"] = external_path(2)
+        process = mock.Mock()
+        process.stdout.read.side_effect = [b"--frame\r\njpeg", b""]
+        process.poll.return_value = 0
+        with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            with mock.patch.object(app_module.subprocess, "Popen", return_value=process) as popen:
+                response = self.client.get("/stream/preview/src2.mjpg?fps=0.5")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "multipart/x-mixed-replace")
+        self.assertIn(b"jpeg", response.data)
+        self.assertIn("rtsp://127.0.0.1:8554/src2?reader=insight-preview", popen.call_args.args[0])
+        self.assertEqual(app_module._preview_count, 0)
+
     def test_media_preview_mjpeg_streams_selected_file(self):
         (self.media_dir / "cam.avi").write_bytes(b"not-a-real-video")
         process = mock.Mock()
