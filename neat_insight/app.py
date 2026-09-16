@@ -2402,6 +2402,33 @@ def reset_all_sources():
     return {"success": True, "skipped_external": skipped_external, "message": "Reset all source assignments." + _skipped_suffix(skipped_external)}
 
 
+# API: disconnect an external publisher so the slot can be assigned again.
+@app.post("/api/mediasrc/takeover")
+def takeover_source():
+    """Accept JSON {'index': int}; kick the external publisher holding that slot via the mediamtx API."""
+    data = request.get_json() or {}
+    index = data.get("index")
+    if index is None:
+        return _json_error("Missing index")
+    if not _find_source(index):
+        return _json_error("Source not found", 404)
+    if mediamtx_client.snapshot() is None:
+        return _json_error("mediamtx API is unreachable; cannot disconnect the publisher", 502)
+    holder = _external_holder(index)
+    if not holder:
+        return _json_error(f"src{index} is not held by an external publisher", 409)
+    try:
+        mediamtx_client.kick(holder.source_type, holder.source_id)
+    except MediamtxNotFound:
+        pass
+    except MediamtxError as exc:
+        return _json_error(f"Could not disconnect src{index}: {exc}", 502)
+    current = _external_holder(index)
+    if current and current.source_id != holder.source_id:
+        return _json_error(f"A new external publisher took src{index} ({current.protocol} {current.address})", 409)
+    return {"success": True, "index": index}
+
+
 def _http_mjpeg_source_or_error(index: int):
     src = _find_source(index)
     if not src:
