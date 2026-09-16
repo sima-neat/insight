@@ -59,7 +59,7 @@ function hasDrawableMetadata(message, channelIndex) {
   switch (message?.type) {
     case "object-detection": {
       const threshold = getObjectConfidenceThreshold(channelIndex);
-      return Array.isArray(data?.objects) && data.objects.some((obj) => (obj.confidence ?? 1) >= threshold);
+      return Array.isArray(data?.objects) && data.objects.some((obj) => (obj?.confidence ?? 1) >= threshold);
     }
     case "classification":
       return Array.isArray(data?.top_classes) && data.top_classes.length > 0;
@@ -313,14 +313,16 @@ function ChannelTile({ index, onActiveChange, debug }) {
             );
             // Every type for this frame draws onto the same overlay, already
             // cleared above.
+            const frameState = {};
             for (const candidate of candidates) {
-              if (!hasDrawableMetadata(candidate.data, index)) continue;
               const metadataType = candidate.data?.type;
+              if (typeof metadataType !== "string" || !hasDrawableMetadata(candidate.data, index)) continue;
               const resolvedSettings = getResolvedViewerSettings(index, metadataType);
               const drawContext = {
                 settings: resolvedSettings,
                 trackHistory: trackHistoryRef.current,
                 now,
+                frameState,
               };
               drawMetadata(ctx, canvas, candidate.data, video, index, drawContext);
             }

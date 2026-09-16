@@ -165,6 +165,10 @@ messages draw in arrival order. Metadata without a correlated RTP timestamp uses
 the single-message arrival fallback, since types cannot safely be grouped without
 a shared frame identity.
 
+A failing drawing strategy does not stop other types or subsequent frames. Check
+the browser console for a warning, emitted once per channel and metadata type.
+Shared ROI polygons draw once per frame; each type still applies its ROI filter.
+
 Every timestamped message leaves through exactly one of matched, expired, or
 evicted, or is still counted in `pending_metadata`. The video fields describe
 the lifetime of reusable timestamp mappings, not match or loss outcomes.

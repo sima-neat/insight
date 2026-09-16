@@ -1,3 +1,5 @@
+const warnedStrategies = new Set();
+
 export function drawMetadata(ctx, canvas, message, video, channelIndex, drawContext) {
   const strategies = window.drawStrategies;
   const type = message?.type;
@@ -7,6 +9,12 @@ export function drawMetadata(ctx, canvas, message, video, channelIndex, drawCont
   ctx.save();
   try {
     strategy(ctx, canvas, message?.data, video, channelIndex, drawContext);
+  } catch (error) {
+    const key = `${channelIndex}:${type}`;
+    if (!warnedStrategies.has(key)) {
+      warnedStrategies.add(key);
+      console.warn(`metadata: channel ${channelIndex} failed to draw ${type}`, error);
+    }
   } finally {
     ctx.restore();
   }
