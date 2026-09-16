@@ -9,6 +9,7 @@ import {
 } from "./metadataSync.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
+import { drawMetadata } from "./metadataDrawing.js";
 import {
   gridDimensions,
   normalizeMaxChannels,
@@ -58,7 +59,7 @@ function hasDrawableMetadata(message, channelIndex) {
   switch (message?.type) {
     case "object-detection": {
       const threshold = getObjectConfidenceThreshold(channelIndex);
-      return Array.isArray(data?.objects) && data.objects.some((obj) => (obj.confidence ?? 1) >= threshold);
+      return Array.isArray(data?.objects) && data.objects.some((obj) => (obj?.confidence ?? 1) >= threshold);
     }
     case "classification":
       return Array.isArray(data?.top_classes) && data.top_classes.length > 0;
@@ -304,24 +305,26 @@ function ChannelTile({ index, onActiveChange, debug }) {
           if (ctx) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const candidate = takeMetadataForFrame(
+            const candidates = takeMetadataForFrame(
               metadataQueueRef.current,
               frameMetadata?.rtpTimestamp,
               synchronizationSettingsRef.current.metadataRetentionMs,
               now,
             );
-            if (candidate && hasDrawableMetadata(candidate.data, index)) {
+            // Every type for this frame draws onto the same overlay, already
+            // cleared above.
+            const frameState = {};
+            for (const candidate of candidates) {
               const metadataType = candidate.data?.type;
-              const strategy = window.drawStrategies?.[metadataType];
-              if (strategy) {
-                const resolvedSettings = getResolvedViewerSettings(index, metadataType);
-                const drawContext = {
-                  settings: resolvedSettings,
-                  trackHistory: trackHistoryRef.current,
-                  now,
-                };
-                strategy(ctx, canvas, candidate.data?.data, video, index, drawContext);
-              }
+              if (typeof metadataType !== "string" || !hasDrawableMetadata(candidate.data, index)) continue;
+              const resolvedSettings = getResolvedViewerSettings(index, metadataType);
+              const drawContext = {
+                settings: resolvedSettings,
+                trackHistory: trackHistoryRef.current,
+                now,
+                frameState,
+              };
+              drawMetadata(ctx, canvas, candidate.data, video, index, drawContext);
             }
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
