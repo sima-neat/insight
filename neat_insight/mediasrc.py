@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
@@ -114,6 +115,30 @@ _FFMPEG_PRELOAD_ENV = "NEAT_INSIGHT_FFMPEG_PRELOAD"
 _FFMPEG_PRELOAD_DEFAULT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "bin", "ffmpeg_nodelay.so"
 )
+_FFMPEG_PRELOAD_ALIASES: Dict[str, tempfile.TemporaryDirectory] = {}
+_FFMPEG_PRELOAD_LOCK = threading.Lock()
+
+
+def _loader_safe_shim(shim: str) -> str:
+    shim = os.path.abspath(shim)
+    if not any(char.isspace() or char in ":$" for char in shim):
+        return shim
+    # LD_PRELOAD cannot escape separators and expands $ORIGIN/$LIB/$PLATFORM.
+    # Keep private symlinks alive until exit, including across concurrent starts.
+    with _FFMPEG_PRELOAD_LOCK:
+        directory = _FFMPEG_PRELOAD_ALIASES.get(shim)
+        if directory is None:
+            root = tempfile.gettempdir()
+            if any(char.isspace() or char in ":$" for char in root):
+                root = "/tmp"
+            directory = tempfile.TemporaryDirectory(prefix="neat-insight-preload-", dir=root)
+            try:
+                os.symlink(shim, os.path.join(directory.name, "ffmpeg_nodelay.so"))
+            except OSError:
+                directory.cleanup()
+                raise
+            _FFMPEG_PRELOAD_ALIASES[shim] = directory
+        return os.path.join(directory.name, "ffmpeg_nodelay.so")
 
 
 def _ffmpeg_env() -> Optional[dict]:
@@ -127,6 +152,14 @@ def _ffmpeg_env() -> Optional[dict]:
             logging.warning(
                 "TCP_NODELAY shim not found at %s; RTSP publishers run with Nagle enabled", shim
             )
+        return None
+    try:
+        shim = _loader_safe_shim(shim)
+    except OSError as exc:
+        logging.warning(
+            "Cannot prepare TCP_NODELAY shim at %s: %s; RTSP publishers run with Nagle enabled",
+            shim, exc,
+        )
         return None
     env = dict(os.environ)
     existing = env.get("LD_PRELOAD")

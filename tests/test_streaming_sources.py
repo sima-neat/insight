@@ -1,7 +1,11 @@
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import unittest.mock as mock
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55580")
@@ -322,6 +326,105 @@ class FfmpegPreloadEnvTests(unittest.TestCase):
             ):
                 env = mediasrc._ffmpeg_env()
             self.assertEqual(env["LD_PRELOAD"], f"{shim}:/opt/other.so")
+
+    def test_concurrent_starts_reuse_a_private_alias(self):
+        with tempfile.TemporaryDirectory(prefix="shim path ") as tmp:
+            shim = Path(tmp) / "ffmpeg_nodelay.so"
+            shim.write_bytes(b"shim")
+            try:
+                with mock.patch.dict(os.environ, {
+                    mediasrc._FFMPEG_PRELOAD_ENV: str(shim), "LD_PRELOAD": "/opt/other.so",
+                }):
+                    with ThreadPoolExecutor(max_workers=8) as pool:
+                        envs = list(pool.map(lambda _: mediasrc._ffmpeg_env(), range(32)))
+                paths = {env["LD_PRELOAD"] for env in envs}
+                self.assertEqual(len(paths), 1)
+                alias, existing = paths.pop().split(":")
+                self.assertEqual(existing, "/opt/other.so")
+                self.assertFalse(any(char.isspace() for char in alias))
+                self.assertEqual(Path(alias).read_bytes(), b"shim")
+                self.assertEqual(Path(alias).parent.stat().st_mode & 0o777, 0o700)
+            finally:
+                directory = mediasrc._FFMPEG_PRELOAD_ALIASES.pop(str(shim), None)
+                if directory is not None:
+                    directory.cleanup()
+
+    def test_warns_if_a_loader_safe_path_cannot_be_created(self):
+        with tempfile.TemporaryDirectory(prefix="shim path ") as tmp:
+            shim = Path(tmp) / "ffmpeg_nodelay.so"
+            shim.touch()
+            with mock.patch.dict(os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: str(shim)}):
+                with mock.patch.object(tempfile, "TemporaryDirectory", side_effect=OSError("read-only")):
+                    with self.assertLogs(level="WARNING") as logs:
+                        self.assertIsNone(mediasrc._ffmpeg_env())
+            self.assertIn("Cannot prepare TCP_NODELAY shim", logs.output[0])
+
+
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("cc"), "requires Linux and cc")
+class FfmpegPreloadSocketTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmpdir = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmpdir.cleanup)
+        cls.root = Path(cls.tmpdir.name)
+        cls.shim = cls.root / "ffmpeg_nodelay.so"
+        source = Path(__file__).resolve().parents[1] / "tools" / "ffmpeg_nodelay.c"
+        subprocess.run(
+            ["cc", "-shared", "-fPIC", "-O2", "-o", str(cls.shim), str(source)],
+            check=True, capture_output=True, text=True,
+        )
+
+    def tearDown(self):
+        for shim in list(mediasrc._FFMPEG_PRELOAD_ALIASES):
+            if Path(shim).is_relative_to(self.root):
+                mediasrc._FFMPEG_PRELOAD_ALIASES.pop(shim).cleanup()
+
+    def socket_option(self, env):
+        probe = """
+import socket
+with socket.socket() as listener, socket.socket() as client:
+    listener.bind(('127.0.0.1', 0))
+    listener.listen(1)
+    client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 0)
+    client.connect(listener.getsockname())
+    print(client.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", probe], env=env,
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        self.assertNotIn("cannot be preloaded", result.stderr)
+        return int(result.stdout.strip())
+
+    def test_socket_control_without_shim(self):
+        env = dict(os.environ)
+        env.pop("LD_PRELOAD", None)
+        self.assertEqual(self.socket_option(env), 0)
+
+    def test_packaged_shim_sets_socket_option_from_unusual_paths(self):
+        for directory in ("normal", "My Projects", "colon:dir", "$ORIGIN", "tab\tdir"):
+            with self.subTest(directory=directory):
+                install = self.root / directory
+                install.mkdir(exist_ok=True)
+                shim = install / self.shim.name
+                shutil.copyfile(self.shim, shim)
+                with mock.patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("LD_PRELOAD", None)
+                    os.environ.pop(mediasrc._FFMPEG_PRELOAD_ENV, None)
+                    with mock.patch.object(mediasrc, "_FFMPEG_PRELOAD_DEFAULT", str(shim)):
+                        env = mediasrc._ffmpeg_env()
+                self.assertEqual(self.socket_option(env), 1)
+
+    def test_loader_path_is_safe_when_temp_directory_has_spaces(self):
+        tmp = self.root / "temp files"
+        tmp.mkdir(exist_ok=True)
+        shim = tmp / self.shim.name
+        shutil.copyfile(self.shim, shim)
+        with mock.patch.dict(os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: str(shim)}):
+            os.environ.pop("LD_PRELOAD", None)
+            with mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)):
+                env = mediasrc._ffmpeg_env()
+        self.assertEqual(self.socket_option(env), 1)
 
 
 if __name__ == "__main__":
