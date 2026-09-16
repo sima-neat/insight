@@ -13,6 +13,7 @@ DIST_DIR="dist"
 
 INSTALL_WHEEL=0
 SKIP_FRONTEND=0
+SKIP_SHIM=0
 WHEEL_PLAT_NAME=""
 PACKAGE_VERSION=""
 TARGET_PLATFORM="host"
@@ -25,6 +26,7 @@ Options:
   --release        Deprecated (no Docker installer artifacts are produced)
   --install        Install built neat-insight wheel into active virtualenv
   --skip-frontend  Skip npm frontend build step
+  --skip-shim      Skip the TCP_NODELAY shim; Linux wheels then run ffmpeg with Nagle enabled
   --target-platform  Build target platform:
                      host (default), all, linux-aarch64, linux-amd64, macos-arm64, windows-amd64
   -h, --help       Show this help
@@ -41,6 +43,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-frontend)
             SKIP_FRONTEND=1
+            ;;
+        --skip-shim)
+            SKIP_SHIM=1
             ;;
         --target-platform)
             TARGET_PLATFORM="${2:-}"
@@ -341,6 +346,9 @@ esac
 popd > /dev/null
 
 for target in "${TARGETS_TO_BUILD[@]}"; do
+    SHIM_CC_CANDIDATES=()
+    SHIM_CC_PACKAGE=""
+    SHIM_ELF_MACHINE=""
     VF_BIN_NAME="vf"
     MTX_BIN_NAME="mediamtx"
     MTX_ARCHIVE_EXT="tar.gz"
@@ -351,6 +359,10 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         PLATFORM="linux_arm64"
         TARGET="mediamtx_v${MTX_VERSION}_${PLATFORM}"
         WHEEL_PLAT_NAME="manylinux2014_aarch64"
+        SHIM_CC_CANDIDATES=("aarch64-linux-gnu-gcc")
+        [[ "$ARCH" == "aarch64" ]] && SHIM_CC_CANDIDATES=("gcc" "aarch64-linux-gnu-gcc")
+        SHIM_CC_PACKAGE="gcc-aarch64-linux-gnu"
+        SHIM_ELF_MACHINE="AArch64"
         ;;
 
         linux-amd64)
@@ -359,6 +371,10 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
         PLATFORM="linux_amd64"
         TARGET="mediamtx_v${MTX_VERSION}_${PLATFORM}"
         WHEEL_PLAT_NAME="manylinux2014_x86_64"
+        SHIM_CC_CANDIDATES=("x86_64-linux-gnu-gcc")
+        [[ "$ARCH" == "x86_64" ]] && SHIM_CC_CANDIDATES=("gcc" "x86_64-linux-gnu-gcc")
+        SHIM_CC_PACKAGE="gcc-x86-64-linux-gnu"
+        SHIM_ELF_MACHINE="Advanced Micro Devices X86-64"
         ;;
 
         macos-arm64)
@@ -413,6 +429,53 @@ for target in "${TARGETS_TO_BUILD[@]}"; do
     chmod +x "$INSIGHT_BIN/$VF_BIN_NAME" || true
     cp -r webrtc/static "$INSIGHT_BIN/"
     cp webrtc/mediamtx.yml "$INSIGHT_BIN/"
+
+    # ==== TCP_NODELAY preload shim (Linux wheels only) ====
+    # LD_PRELOAD is a Linux mechanism, so macOS and Windows wheels ship without
+    # it and mediasrc falls back to spawning ffmpeg unmodified.
+    if [[ -n "$SHIM_CC_PACKAGE" && "$SKIP_SHIM" == "1" ]]; then
+        echo "⏭️ Skipping TCP_NODELAY shim (--skip-shim); this $target wheel will run ffmpeg with Nagle enabled"
+    elif [[ -n "$SHIM_CC_PACKAGE" ]]; then
+        SHIM_CC=""
+        for candidate in "${SHIM_CC_CANDIDATES[@]}"; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                SHIM_CC="$candidate"
+                break
+            fi
+        done
+        if [[ -z "$SHIM_CC" ]]; then
+            echo "❌ No C compiler for $target. Install $SHIM_CC_PACKAGE."
+            exit 1
+        fi
+        echo "🧱 Building ffmpeg_nodelay.so with $SHIM_CC"
+        "$SHIM_CC" -shared -fPIC -O2 -o "$INSIGHT_BIN/ffmpeg_nodelay.so" \
+            tools/ffmpeg_nodelay.c
+
+        # The wheel is tagged manylinux2014, which promises glibc 2.17. The
+        # host toolchain will happily emit a newer requirement, so refuse to
+        # package a shim that would fail to preload on an older target.
+        if command -v readelf >/dev/null 2>&1; then
+            ELF_MACHINE=$(readelf -h "$INSIGHT_BIN/ffmpeg_nodelay.so" | sed -n 's/^ *Machine: *//p')
+            if [[ "$ELF_MACHINE" != "$SHIM_ELF_MACHINE" ]]; then
+                echo "❌ ffmpeg_nodelay.so is built for '$ELF_MACHINE', not '$SHIM_ELF_MACHINE' ($target)."
+                exit 1
+            fi
+            MAX_GLIBC=$(readelf -V "$INSIGHT_BIN/ffmpeg_nodelay.so" \
+                | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+            if [[ -z "$MAX_GLIBC" ]]; then
+                echo "❌ Could not read glibc symbol versions from ffmpeg_nodelay.so."
+                exit 1
+            fi
+            if [[ "$(printf '%s\n2.17\n' "$MAX_GLIBC" | sort -V | tail -1)" != "2.17" ]]; then
+                echo "❌ ffmpeg_nodelay.so requires glibc $MAX_GLIBC, above the manylinux2014 baseline of 2.17."
+                exit 1
+            fi
+            echo "✅ ffmpeg_nodelay.so: $ELF_MACHINE, glibc <= 2.17"
+        else
+            echo "❌ readelf is required to validate the Linux shim; install binutils."
+            exit 1
+        fi
+    fi
 
     # Bundle built React frontend into the Python package for wheel installs.
     if [[ -d "frontend/dist" ]]; then

@@ -1,6 +1,8 @@
 import logging
 import os
 import subprocess
+import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
@@ -107,6 +109,70 @@ def _codec_args(codec: str, source_codec: Optional[str]) -> list[str]:
     ]
 
 
+# ffmpeg's RTSP muxer offers no way to disable Nagle on the socket it opens.
+_FFMPEG_PRELOAD_ENV = "NEAT_INSIGHT_FFMPEG_PRELOAD"
+# Linux wheels carry the shim; other platforms have no LD_PRELOAD and ship without it.
+_FFMPEG_PRELOAD_DEFAULT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "bin", "ffmpeg_nodelay.so"
+)
+_FFMPEG_PRELOAD_ALIASES: Dict[str, tempfile.TemporaryDirectory] = {}
+_FFMPEG_PRELOAD_LOCK = threading.Lock()
+
+
+def _loader_safe_shim(shim: str) -> str:
+    shim = os.path.abspath(shim)
+    if not any(char.isspace() or char in ":$" for char in shim):
+        return shim
+    # LD_PRELOAD cannot escape separators and expands $ORIGIN/$LIB/$PLATFORM.
+    # Keep private symlinks alive until exit, including across concurrent starts.
+    with _FFMPEG_PRELOAD_LOCK:
+        directory = _FFMPEG_PRELOAD_ALIASES.get(shim)
+        if directory is not None:
+            alias = os.path.join(directory.name, "ffmpeg_nodelay.so")
+            if not os.path.isfile(alias):
+                _FFMPEG_PRELOAD_ALIASES.pop(shim)
+                directory.cleanup()
+                directory = None
+        if directory is None:
+            root = tempfile.gettempdir()
+            if any(char.isspace() or char in ":$" for char in root):
+                root = "/tmp"
+            directory = tempfile.TemporaryDirectory(prefix="neat-insight-preload-", dir=root)
+            try:
+                os.symlink(shim, os.path.join(directory.name, "ffmpeg_nodelay.so"))
+            except OSError:
+                directory.cleanup()
+                raise
+            _FFMPEG_PRELOAD_ALIASES[shim] = directory
+        return os.path.join(directory.name, "ffmpeg_nodelay.so")
+
+
+def _ffmpeg_env() -> Optional[dict]:
+    """Return the publisher environment with the TCP_NODELAY shim preloaded.
+
+    Returns None when the shim is absent so a source checkout still runs.
+    """
+    shim = os.environ.get(_FFMPEG_PRELOAD_ENV, _FFMPEG_PRELOAD_DEFAULT)
+    if not shim or not os.path.isfile(shim):
+        if sys.platform.startswith("linux"):
+            logging.warning(
+                "TCP_NODELAY shim not found at %s; RTSP publishers run with Nagle enabled", shim
+            )
+        return None
+    try:
+        shim = _loader_safe_shim(shim)
+    except OSError as exc:
+        logging.warning(
+            "Cannot prepare TCP_NODELAY shim at %s: %s; RTSP publishers run with Nagle enabled",
+            shim, exc,
+        )
+        return None
+    env = dict(os.environ)
+    existing = env.get("LD_PRELOAD")
+    env["LD_PRELOAD"] = f"{shim}:{existing}" if existing else shim
+    return env
+
+
 def rtsp_command(file_path: str, rtsp_url: str, codec: str, source_codec: Optional[str] = None) -> list[str]:
     codec = normalize_codec(codec)
     codec_args = _mjpeg_encode_args(rtp_compatible=True) if codec == "mjpeg" else _codec_args(codec, source_codec)
@@ -186,6 +252,7 @@ class MediaStream:
                 stderr=subprocess.PIPE,
                 text=True,
                 preexec_fn=os.setsid,
+                env=_ffmpeg_env(),
             )
             threading.Thread(target=self._drain_stderr, daemon=True).start()
             return True, None
