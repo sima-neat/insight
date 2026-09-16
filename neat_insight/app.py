@@ -2536,11 +2536,11 @@ def stream_preview_mjpeg(index):
         return _json_error("Source is not live", 409)
     if shutil.which("ffmpeg") is None:
         return _json_error("ffmpeg is not installed", 503)
+    cmd = preview_command(f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PREVIEW_READER_TAG}", PREVIEW_RATES[rate])
     with _preview_lock:
         if _preview_count >= PREVIEW_MAX_STREAMS:
             return _json_error("Too many previews open", 429)
         _preview_count += 1
-    cmd = preview_command(f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PREVIEW_READER_TAG}", PREVIEW_RATES[rate])
 
     def generate():
         global _preview_count

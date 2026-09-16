@@ -283,6 +283,19 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertIn("rtsp://127.0.0.1:8554/src2?reader=insight-preview", popen.call_args.args[0])
         self.assertEqual(app_module._preview_count, 0)
 
+    def test_preview_route_terminates_ffmpeg_when_client_stops_reading(self):
+        self.mtx.paths["src2"] = external_path(2)
+        process = mock.Mock()
+        process.stdout.read.side_effect = [b"--frame\r\njpeg", b""]
+        process.poll.return_value = None
+        with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            with mock.patch.object(app_module.subprocess, "Popen", return_value=process):
+                response = self.client.get("/stream/preview/src2.mjpg?fps=5")
+        _ = response.data  # drain the generator so the finally block runs
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once()
+        self.assertEqual(app_module._preview_count, 0)
+
     def test_media_preview_mjpeg_streams_selected_file(self):
         (self.media_dir / "cam.avi").write_bytes(b"not-a-real-video")
         process = mock.Mock()
