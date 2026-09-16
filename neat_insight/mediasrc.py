@@ -5,8 +5,9 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from neat_insight.mediamtx import PUBLISHER_TAG
+
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
-PUBLISHER_TAG = "publisher=insight"
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
 DEFAULT_TRANSPORT = "rtsp"
