@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
+PUBLISHER_TAG = "publisher=insight"
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
 DEFAULT_TRANSPORT = "rtsp"
@@ -230,7 +231,7 @@ def start_media_stream(
         return False, "No file assigned"
 
     slot = index - 1
-    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}"
+    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PUBLISHER_TAG}"
     transport = normalize_transport(transport)
     codec = normalize_codec(codec)
 
