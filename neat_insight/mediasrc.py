@@ -155,6 +155,16 @@ def http_snapshot_command(file_path: str, source_codec: Optional[str] = None) ->
     ]
 
 
+def preview_command(rtsp_url: str, fps: float) -> list[str]:
+    decode_args = [] if fps >= 5 else ["-skip_frame", "nokey"]
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
+        *decode_args, "-i", rtsp_url, "-an",
+        "-vf", f"fps={fps:g},scale=min(640\\,iw):-2",
+        "-c:v", "mjpeg", "-q:v", "7", "-f", "mpjpeg", "-boundary_tag", "frame", "pipe:1",
+    ]
+
+
 @dataclass
 class MediaStream:
     index: int

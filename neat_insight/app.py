@@ -43,10 +43,12 @@ from neat_insight.mediasrc import (
     media_stream_is_running,
     normalize_codec,
     normalize_transport,
+    preview_command,
+    RTSP_PUBLISH_BASE_URL,
     start_media_stream,
     stop_media_stream,
 )
-from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound
+from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound, PREVIEW_READER_TAG
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
@@ -83,6 +85,10 @@ MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
 mediamtx_client = MediamtxClient()
+PREVIEW_RATES = {"5": 5.0, "1": 1.0, "0.5": 0.5}
+PREVIEW_MAX_STREAMS = 4
+_preview_lock = threading.Lock()
+_preview_count = 0
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
@@ -2514,6 +2520,53 @@ def snapshot_http_mjpeg(index):
         detail = result.stderr.decode("utf-8", errors="replace").strip() or "Failed to read source frame"
         return _json_error(detail, 500)
     return Response(result.stdout, mimetype="image/jpeg", headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@app.get("/stream/preview/src<int:index>.mjpg")
+def stream_preview_mjpeg(index):
+    """Return a throttled multipart MJPEG preview of whatever is live on one source slot (fps=5|1|0.5)."""
+    global _preview_count
+    rate = request.args.get("fps", "")
+    if rate not in PREVIEW_RATES:
+        return _json_error("fps must be one of 5, 1, 0.5")
+    if not 1 <= index <= DEFAULT_SOURCE_COUNT:
+        return _json_error("Source not found", 404)
+    path = _path_snapshot().get(f"src{index}")
+    if not path or not path.ready:
+        return _json_error("Source is not live", 409)
+    if shutil.which("ffmpeg") is None:
+        return _json_error("ffmpeg is not installed", 503)
+    with _preview_lock:
+        if _preview_count >= PREVIEW_MAX_STREAMS:
+            return _json_error("Too many previews open", 429)
+        _preview_count += 1
+    cmd = preview_command(f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PREVIEW_READER_TAG}", PREVIEW_RATES[rate])
+
+    def generate():
+        global _preview_count
+        process = None
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+            while True:
+                chunk = process.stdout.read(64 * 1024) if process.stdout else b""
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except Exception:
+                    process.kill()
+            with _preview_lock:
+                _preview_count -= 1
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 # API: expose environment flags used by the frontend.
