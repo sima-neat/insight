@@ -2049,10 +2049,12 @@ export default function App() {
                             <button
                               className="icon-action-btn takeover"
                               onClick={(e) => { e.stopPropagation(); setTakeoverTarget(src) }}
-                              aria-label={`Take over src${src.index}`}
-                              title={`Disconnect the external publisher on src${src.index}`}
+                              aria-label={`Take over: disconnect the external publisher on src${src.index}`}
+                              title={`Take over: disconnect the external publisher on src${src.index}`}
                             >
-                              Take over
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                              </svg>
                             </button>
                             <button
                               className="icon-action-btn copy"
