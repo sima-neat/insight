@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
-  previewUrl, protocolLabel, readPreviewRate, readersText, skippedExternalSuffix, writePreviewRate,
+  previewSrc, previewUrl, protocolLabel, readPreviewRate, readersText, skippedExternalSuffix, writePreviewRate,
 } from './externalSource.js'
 
 const ext = { protocol: 'rtsp', address: '172.19.0.1', since: '2026-09-16T13:09:59Z', codec_supported: true, width: 640, height: 480, fps: 30, bitrate_bps: 1800000 }
@@ -47,6 +47,11 @@ test('preview rate persistence is safe and defaults to off', () => {
 test('preview url', () => {
   assert.equal(previewUrl(2, '0.5'), '/stream/preview/src2.mjpg?fps=0.5')
   assert.equal(previewUrl(2, 'off'), null)
+})
+
+test('preview src carries a remount token', () => {
+  assert.equal(previewSrc(2, '1', 1737000000000), '/stream/preview/src2.mjpg?fps=1&t=1737000000000')
+  assert.equal(previewSrc(2, 'off', 1737000000000), null)
 })
 
 test('bulk message suffix', () => {

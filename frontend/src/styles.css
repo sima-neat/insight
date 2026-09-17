@@ -756,6 +756,7 @@ button:hover:not(:disabled) {
 
 .codec-lock {
   min-height: 36px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #eef2f6;
