@@ -80,6 +80,10 @@ The Source Preview panel can render an External slot at **5 fps**, **1 fps** or 
 
 Auto Assign, Bulk Start, Stop All and Reset never touch External slots; the result message lists which slots were skipped.
 
+![Insight Streaming Sources view with two External slots, one of them flagged for an unsupported codec.](images/insight-external-source.png)
+
+External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
+
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
 ![Insight Streaming Sources view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
