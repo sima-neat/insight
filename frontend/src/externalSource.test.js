@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
-  previewSrc, previewUrl, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
+  latestOnly, previewSrc, previewUrl, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 
 const ext = { protocol: 'rtsp', address: '172.19.0.1', since: '2026-09-16T13:09:59Z', codec_supported: true, width: 640, height: 480, fps: 30, bitrate_bps: 1800000 }
@@ -55,6 +55,24 @@ test('preview url', () => {
 test('preview src carries a remount token', () => {
   assert.equal(previewSrc(2, true, 1737000000000), '/stream/preview/src2.mjpg?t=1737000000000')
   assert.equal(previewSrc(2, false, 1737000000000), null)
+})
+
+test('preview src changes with the publisher session so a reconnect remounts the image', () => {
+  const first = previewSrc(2, true, 1, '2026-09-16T13:10:00.000000000Z')
+  const second = previewSrc(2, true, 1, '2026-09-16T13:10:07.000000000Z')
+  assert.equal(first, '/stream/preview/src2.mjpg?t=1&s=2026-09-16T13%3A10%3A00.000000000Z')
+  assert.notEqual(first, second)
+})
+
+test('latestOnly lets only the most recently started request apply its result', () => {
+  const begin = latestOnly()
+  const poll = begin()
+  const action = begin()
+  assert.equal(poll(), false)
+  assert.equal(action(), true)
+  const nextPoll = begin()
+  assert.equal(action(), false)
+  assert.equal(nextPoll(), true)
 })
 
 test('live-for, bitrate and readers formatting', () => {

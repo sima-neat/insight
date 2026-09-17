@@ -50,9 +50,22 @@ export function previewUrl(index, enabled) {
   return `/stream/preview/src${index}.mjpg`
 }
 
-export function previewSrc(index, enabled, token) {
+// `since` identifies the publisher session: when a publisher reconnects between two polls
+// the slot never stops being external, and only the changed URL remounts the ended image.
+export function previewSrc(index, enabled, token, since) {
   const url = previewUrl(index, enabled)
-  return url === null ? null : `${url}?t=${token}`
+  if (url === null) return null
+  return `${url}?t=${token}${since ? `&s=${encodeURIComponent(since)}` : ''}`
+}
+
+// Responses can arrive out of order; begin() marks a request as started and returns a check
+// that stays true only while no later request has started.
+export function latestOnly() {
+  let started = 0
+  return () => {
+    const mine = ++started
+    return () => mine === started
+  }
 }
 
 export function liveFor(sinceIso, nowMs) {

@@ -20,6 +20,8 @@ Insight uses several ports during normal operation. The default ports are the po
 | `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
+Insight also runs the mediamtx control API on `127.0.0.1:9997` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself to detect external publishers, so it needs no port mapping. Like the ports above, it must be free when Insight starts.
+
 ## Find the actual SDK port map
 
 In the SDK, do not assume default host ports are available. Run:

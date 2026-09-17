@@ -87,6 +87,9 @@ MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
 mediamtx_client = MediamtxClient()
 PREVIEW_MAX_STREAMS = 4
+# Longest the preview ffmpeg may stay silent (connecting, waiting for a keyframe, or a
+# stalled publisher) before it is killed and its slot released.
+PREVIEW_IDLE_TIMEOUT_SECONDS = 15
 _preview_lock = threading.Lock()
 _preview_count = 0
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
@@ -2093,6 +2096,21 @@ def _external_holder(index, snapshot=None):
     return path if path and path.external and not _insight_publishes_rtsp(index) else None
 
 
+def _index_error(index):
+    """Error response for a request index that names no slot, or None when it is usable.
+
+    2.0 and true compare equal to a slot index yet build a different "src<index>" snapshot
+    key, which would slip past the external-publisher guard.
+    """
+    if index is None:
+        return _json_error("Missing index")
+    if isinstance(index, bool) or not isinstance(index, int):
+        return _json_error("index must be an integer")
+    if not 1 <= index <= DEFAULT_SOURCE_COUNT:
+        return _json_error("Source not found", 404)
+    return None
+
+
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
 
 
@@ -2179,8 +2197,9 @@ def assign_source():
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
     holder = _external_holder(index)
     if holder:
         return _external_conflict_error(index, holder)
@@ -2260,8 +2279,9 @@ def start_source():
     """Accept JSON {'index': int}; start the assigned file for that source and mark its state as playing."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
     holder = _external_holder(index)
     if holder:
         return _external_conflict_error(index, holder)
@@ -2370,10 +2390,13 @@ def stop_source():
     """Accept JSON {'index': int}; stop the source process and persist its state as stopped."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    # Insight's own HTTP/MJPEG stream can share an index with an external publisher; it
+    # stays stoppable, and only a slot holding nothing of ours is a conflict.
     holder = _external_holder(index)
-    if holder:
+    if holder and not media_stream_is_running(index):
         return _external_conflict_error(index, holder)
 
     sources = load_sources()
@@ -2405,7 +2428,6 @@ def stop_all_sources():
         stop_media_stream(source_index)
         if holder:
             skipped_external.append(source_index)
-            continue
         if src.get("state") == "playing":
             stopped_count += 1
         src["state"] = "stopped"
@@ -2425,11 +2447,16 @@ def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     snapshot = _path_snapshot()
     skipped_external = []
-    for src in load_sources():
+    sources = load_sources()
+    for position, src in enumerate(sources):
         if _external_holder(src.get("index"), snapshot):
+            # Keep the assignment, so the slot comes back as it was after a take over.
             skipped_external.append(src.get("index"))
+            src["state"] = "stopped"
+        else:
+            sources[position] = _default_source(src.get("index"))
         stop_media_stream(src.get("index"))
-    reset_sources()
+    save_sources(sources)
     return {"success": True, "skipped_external": skipped_external,
             "message": "Reset all source assignments." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)}
 
@@ -2440,8 +2467,9 @@ def takeover_source():
     """Accept JSON {'index': int}; kick the external publisher holding that slot via the mediamtx API."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
     if not _find_source(index):
         return _json_error("Source not found", 404)
     if mediamtx_client.snapshot() is None:
@@ -2578,20 +2606,35 @@ def stream_preview_mjpeg(index):
 
     def generate():
         process = None
+        finished = threading.Event()
+        last_output = [time.monotonic()]
+
+        def watch():
+            # A client disconnect only surfaces on the next yield, and a silent ffmpeg
+            # never gets there: killing it makes the blocked read return.
+            while not finished.wait(min(1.0, PREVIEW_IDLE_TIMEOUT_SECONDS)):
+                if time.monotonic() - last_output[0] > PREVIEW_IDLE_TIMEOUT_SECONDS:
+                    process.kill()
+                    return
+
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+            threading.Thread(target=watch, daemon=True).start()
             while True:
                 chunk = process.stdout.read(64 * 1024) if process.stdout else b""
                 if not chunk:
                     break
+                last_output[0] = time.monotonic()
                 yield chunk
         finally:
+            finished.set()
             if process and process.poll() is None:
                 process.terminate()
                 try:
                     process.wait(timeout=2)
                 except Exception:
                     process.kill()
+                    process.wait()
             release()
 
     response = Response(

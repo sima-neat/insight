@@ -38,6 +38,8 @@ import psutil
 import ipaddress
 import socket
 
+from neat_insight import mediamtx
+
 CERT_FILE = "cert.pem"
 KEY_FILE = "key.pem"
 CERT_HOST_ENV = "NFS_SERVER_HOST_IP"
@@ -197,6 +199,7 @@ def init_environment():
 
 processes = []
 process_logs = []
+runtime_files = []
 _cleanup_done = False
 webssh_proc = None
 
@@ -268,11 +271,13 @@ def _terminate_conflicting_port_specs(port_specs):
 
 
 def _terminate_conflicting_ports():
-    # mediamtx uses 8554/tcp and a default UDP helper port 8000.
+    # mediamtx uses 8554/tcp, a default UDP helper port 8000 and a loopback control API;
+    # it exits when it cannot bind the API port.
     # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
     port_specs = [
         (8554, "TCP"),
         (8000, "UDP"),
+        (mediamtx.API_PORT, "TCP"),
         (8081, "TCP"),
         *[(port, "UDP") for port in range(9000, 9080)],
         *[(port, "UDP") for port in range(9100, 9180)],
@@ -282,6 +287,17 @@ def _terminate_conflicting_ports():
         port_specs.append((get_webssh_port(), "TCP"))
 
     _terminate_conflicting_port_specs(port_specs)
+
+
+def _write_mediamtx_runtime_config(mtx_config):
+    # The shipped config holds an unusable API password; mediamtx runs from a private copy
+    # carrying this run's password (mkstemp creates the file readable by the owner only).
+    with open(mtx_config, encoding="utf-8") as handle:
+        rendered = mediamtx.render_config(handle.read(), mediamtx.API_PASSWORD)
+    fd, path = tempfile.mkstemp(prefix="neat-insight-mediamtx-", suffix=".yml")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(rendered)
+    return path
 
 
 def start_processes(ssl_context):
@@ -318,8 +334,10 @@ def start_processes(ssl_context):
     )
     processes.append(vf_proc)
 
+    mtx_runtime_config = _write_mediamtx_runtime_config(mtx_config)
+    runtime_files.append(mtx_runtime_config)
     mtx_proc = subprocess.Popen(
-        [mtx, mtx_config],
+        [mtx, mtx_runtime_config],
         stdout=mtx_log,
         stderr=subprocess.STDOUT
     )
@@ -476,6 +494,13 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
         except Exception:
             pass
     process_logs.clear()
+
+    for path in list(runtime_files):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    runtime_files.clear()
 
     if exit_process:
         sys.exit(0)
