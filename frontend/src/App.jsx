@@ -759,7 +759,8 @@ export default function App() {
   const metricEs = useRef(null)
   const youtubeImportAbortRef = useRef(null)
   const sourcesRef = useRef(sources)
-  const beginSourcesLoad = useRef(latestOnly())
+  const beginSourcesLoad = useRef(null)
+  if (!beginSourcesLoad.current) beginSourcesLoad.current = latestOnly()
   const sourcePollBusy = useRef(false)
   sourcesRef.current = sources
 
