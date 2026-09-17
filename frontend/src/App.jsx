@@ -707,6 +707,7 @@ export default function App() {
   })
   const [previewError, setPreviewError] = useState(false)
   const [previewToken, setPreviewToken] = useState(() => Date.now())
+  const [previewLoading, setPreviewLoading] = useState(false)
   const previewImgRef = useRef(null)
   const [takeoverTarget, setTakeoverTarget] = useState(null)
   const [takeoverBusy, setTakeoverBusy] = useState(false)
@@ -1037,6 +1038,25 @@ export default function App() {
       if (img && !img.isConnected) img.src = ''
     }
   }, [activePreviewSrc])
+
+  useEffect(() => {
+    if (!activePreviewSrc || previewError) {
+      setPreviewLoading(false)
+      return undefined
+    }
+    setPreviewLoading(true)
+    // A multipart mjpeg <img> fires load unreliably (Chrome only once the stream ends), so
+    // the first decoded frame is detected by the element gaining dimensions. The <img> is
+    // keyed on its URL, so a switch starts from a fresh element with naturalWidth 0.
+    const timer = window.setInterval(() => {
+      const img = previewImgRef.current
+      if (img && img.naturalWidth > 0) {
+        setPreviewLoading(false)
+        window.clearInterval(timer)
+      }
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [activePreviewSrc, previewError])
 
   useEffect(() => {
     if (tab !== 'rtsp') return undefined
@@ -2177,7 +2197,23 @@ export default function App() {
                         </p>
                       )}
                       {src && !previewError && (
-                        <img ref={previewImgRef} src={src} alt={`Live preview of src${currentSource.index}`} onError={() => setPreviewError(true)} />
+                        <>
+                          {previewLoading && (
+                            <div className="preview-loading" role="status">
+                              <div className="upload-progress-track"><div className="upload-progress-bar indeterminate" /></div>
+                              <span>Connecting to src{currentSource.index}...</span>
+                            </div>
+                          )}
+                          <img
+                            key={src}
+                            ref={previewImgRef}
+                            src={src}
+                            className={previewLoading ? 'loading' : undefined}
+                            alt={`Live preview of src${currentSource.index}`}
+                            onLoad={() => setPreviewLoading(false)}
+                            onError={() => setPreviewError(true)}
+                          />
+                        </>
                       )}
                     </div>
                     <table className="kv-table">
