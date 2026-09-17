@@ -484,15 +484,18 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(self.mtx.kicked, [])
         self.assertEqual(self.client.get("/api/mediasrc").get_json()[1]["state"], "external")
 
-    def test_mutating_routes_reject_a_non_integer_index(self):
+    def test_mutating_routes_reject_an_index_that_names_no_slot(self):
         # 2.0 and true compare equal to a slot index but miss the "src2" snapshot key,
         # which would skip the external-publisher guard.
         self.mtx.paths["src2"] = external_path(2)
+        # Anything that is not an integer is a malformed request; an integer outside the
+        # slot range names a source that does not exist.
+        expected = {2.0: 400, True: 400, "2": 400, None: 400, 0: 404, 999: 404}
         for route in ("assign", "start", "stop", "takeover"):
-            for index in (2.0, True, "2", 0, 999):
+            for index, status in expected.items():
                 with self.subTest(route=route, index=index):
                     response = self.client.post(f"/api/mediasrc/{route}", json={"index": index, "file": ""})
-                    self.assertIn(response.status_code, (400, 404))
+                    self.assertEqual(response.status_code, status)
         self.assertEqual(self.mtx.kicked, [])
 
     def test_get_sources_lists_readers_for_insight_owned_slot(self):

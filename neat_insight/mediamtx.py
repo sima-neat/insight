@@ -3,6 +3,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -19,7 +20,25 @@ API_BASE_URL = f"http://127.0.0.1:{API_PORT}/v3"
 # its CORS policy extends that to any web page open on this host. The password is per run;
 # set the env var to reach a mediamtx that was started separately with a known password.
 API_USER = "insight"
-API_PASSWORD = os.environ.get("NEAT_INSIGHT_MEDIAMTX_API_PASS") or secrets.token_urlsafe(24)
+API_PASSWORD_ENV = "NEAT_INSIGHT_MEDIAMTX_API_PASS"
+# The password is written into mediamtx.yml as a plain scalar, so it stays in the character
+# set of the generated default (secrets.token_urlsafe).
+API_PASSWORD_PATTERN = re.compile(r"[A-Za-z0-9_-]+\Z")
+
+
+def _configured_password() -> str:
+    value = os.environ.get(API_PASSWORD_ENV)
+    if not value:
+        return secrets.token_urlsafe(24)
+    if not API_PASSWORD_PATTERN.match(value):
+        raise RuntimeError(
+            f"{API_PASSWORD_ENV} may only contain letters, digits, '_' and '-'. "
+            "Unset it to have Insight generate a password for this run."
+        )
+    return value
+
+
+API_PASSWORD = _configured_password()
 # Unusable hash shipped in mediamtx.yml; render_config swaps in the real password at launch.
 API_PASSWORD_PLACEHOLDER = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 API_ENABLED_SETTING = "api: yes"
