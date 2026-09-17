@@ -2447,16 +2447,15 @@ def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     snapshot = _path_snapshot()
     skipped_external = []
-    sources = load_sources()
-    for position, src in enumerate(sources):
-        if _external_holder(src.get("index"), snapshot):
-            # Keep the assignment, so the slot comes back as it was after a take over.
-            skipped_external.append(src.get("index"))
-            src["state"] = "stopped"
-        else:
-            sources[position] = _default_source(src.get("index"))
-        stop_media_stream(src.get("index"))
-    save_sources(sources)
+    for src in load_sources():
+        source_index = src.get("index")
+        # Classify before stopping: _external_holder only discounts a path while our own
+        # publisher is alive, so stopping first would report our just-stopped slot as external.
+        if _external_holder(source_index, snapshot):
+            skipped_external.append(source_index)
+        # Reset clears every stored record; the external stream itself is never touched.
+        stop_media_stream(source_index)
+    reset_sources()
     return {"success": True, "skipped_external": skipped_external,
             "message": "Reset all source assignments." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)}
 

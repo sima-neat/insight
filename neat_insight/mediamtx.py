@@ -22,6 +22,8 @@ API_USER = "insight"
 API_PASSWORD = os.environ.get("NEAT_INSIGHT_MEDIAMTX_API_PASS") or secrets.token_urlsafe(24)
 # Unusable hash shipped in mediamtx.yml; render_config swaps in the real password at launch.
 API_PASSWORD_PLACEHOLDER = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+API_ENABLED_SETTING = "api: yes"
+API_DISABLED_SETTING = "api: no"
 RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
 # Per-process secret: only mediamtx's loopback API shows a publisher's query, so another
 # publisher cannot learn the value and pass for Insight's own stream.
@@ -162,10 +164,15 @@ def _parse_fps(value) -> Optional[float]:
     return int(fps) if fps == int(fps) else round(fps, 2)
 
 
-def render_config(text: str, password: str) -> str:
+def render_config(text: str, password: str, api_enabled: bool = True) -> str:
     if API_PASSWORD_PLACEHOLDER not in text:
         raise MediamtxError("mediamtx config has no API password placeholder")
-    return text.replace(API_PASSWORD_PLACEHOLDER, password)
+    rendered = text.replace(API_PASSWORD_PLACEHOLDER, password)
+    if api_enabled:
+        return rendered
+    if API_ENABLED_SETTING not in rendered:
+        raise MediamtxError("mediamtx config does not enable the API")
+    return rendered.replace(API_ENABLED_SETTING, API_DISABLED_SETTING, 1)
 
 
 def _default_request(method: str, url: str):
