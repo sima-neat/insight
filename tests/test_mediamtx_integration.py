@@ -32,8 +32,8 @@ def _wait_until(predicate, timeout=6.0):
 
 def _wait_port(port, timeout=5.0):
     # Wait for a raw TCP connect before the first snapshot() call: if that first call
-    # races mediamtx's listener and loses, MediamtxClient backs off for 10s (longer than
-    # our polling window), so we'd time out even though the API comes up moments later.
+    # races mediamtx's listener and loses, MediamtxClient backs off before retrying, so
+    # we'd waste part of our polling window even though the API comes up moments later.
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:

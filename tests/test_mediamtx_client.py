@@ -135,13 +135,41 @@ class ClientTests(unittest.TestCase):
         client = mediamtx.MediamtxClient(request=_fake_request(calls=calls, fail=True), clock=clock)
         with self.assertLogs(level=logging.WARNING) as logs:
             self.assertIsNone(client.snapshot())
-            clock.now += 2
+            clock.now += 0.5
             self.assertIsNone(client.snapshot())
         self.assertEqual(len(calls), 1)
         self.assertEqual(len([m for m in logs.output if "mediamtx" in m]), 1)
         clock.now += 10
         client.snapshot()
         self.assertEqual(len(calls), 2)
+
+    def test_backoff_is_short_until_the_first_successful_snapshot(self):
+        calls, clock = [], FakeClock()
+        client = mediamtx.MediamtxClient(request=_fake_request(calls=calls, fail=True), clock=clock)
+        self.assertIsNone(client.snapshot())
+        clock.now += 1.5
+        self.assertIsNone(client.snapshot())
+        self.assertEqual(len(calls), 2)
+
+    def test_backoff_is_long_after_a_successful_snapshot(self):
+        calls, clock, state = [], FakeClock(), {"fail": False}
+        inner = _fake_request(calls=calls)
+
+        def request(method, url):
+            if state["fail"]:
+                calls.append((method, url))
+                raise OSError("connection refused")
+            return inner(method, url)
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertIsNotNone(client.snapshot())
+        state["fail"] = True
+        clock.now += 1.5
+        self.assertIsNone(client.snapshot())
+        failed = len(calls)
+        clock.now += 1.5
+        self.assertIsNone(client.snapshot())
+        self.assertEqual(len(calls), failed)
 
     def test_bitrate_from_bytes_delta_between_snapshots(self):
         clock = FakeClock()

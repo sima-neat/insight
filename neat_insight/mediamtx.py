@@ -17,6 +17,7 @@ SUPPORTED_CODECS = {"h264", "h265", "mjpeg"}
 REQUEST_TIMEOUT_SECONDS = 0.5
 SNAPSHOT_TTL_SECONDS = 1.0
 UNAVAILABLE_BACKOFF_SECONDS = 10.0
+INITIAL_BACKOFF_SECONDS = 1.0
 PROBE_TIMEOUT_SECONDS = 5
 PAGE_SIZE = 1000
 
@@ -179,6 +180,7 @@ class MediamtxClient:
         self._snapshot_at: Optional[float] = None
         self._unavailable_until = 0.0
         self._warned = False
+        self._ever_succeeded = False
         self._probes: dict = {}   # session id -> dict | None | pending-token (object())
         self._bytes: dict = {}    # session id -> (bytes_received, monotonic seconds)
         self._bitrate: dict = {}  # session id -> bits per second
@@ -208,7 +210,10 @@ class MediamtxClient:
             warn = False
             with self._lock:
                 self._snapshot, self._snapshot_at = None, None
-                self._unavailable_until = now + UNAVAILABLE_BACKOFF_SECONDS
+                # Retry quickly until the API has answered once: at startup mediamtx may
+                # still be coming up, and a 10 s wait would blank several polls.
+                backoff = UNAVAILABLE_BACKOFF_SECONDS if self._ever_succeeded else INITIAL_BACKOFF_SECONDS
+                self._unavailable_until = now + backoff
                 if not self._warned:
                     self._warned = True
                     warn = True
@@ -217,6 +222,7 @@ class MediamtxClient:
             return None
         with self._lock:
             self._warned = False
+            self._ever_succeeded = True
             self._snapshot, self._snapshot_at = build_snapshot(paths, sessions), now
             self._update_rates(now)
             return self._snapshot
