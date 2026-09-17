@@ -377,6 +377,30 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertTrue(src["external"]["codec_supported"])
         self.assertEqual(src["readers"], [{"protocol": "rtsp", "address": "10.0.0.9"}])
 
+    def test_insight_owned_live_slot_is_not_classified_external(self):
+        # mediamtx may report a ready path before the publisher session (and its
+        # ?publisher=insight query) resolves; our own live process wins that race.
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+        process = mock.Mock()
+        process.poll.return_value = None
+        mediasrc.pipeline_registry[0] = mediasrc.MediaStream(
+            index=0,
+            file_path=str(self.media_dir / "clip.mp4"),
+            transport="rtsp",
+            codec="h264",
+            process=process,
+        )
+        self.mtx.paths["src1"] = external_path(1)
+
+        src = self.client.get("/api/mediasrc").get_json()[0]
+
+        self.assertEqual(src["state"], "playing")
+        self.assertNotIn("external", src)
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 1}).status_code, 200)
+
     def test_get_sources_lists_readers_for_insight_owned_slot(self):
         self.mtx.paths["src1"] = insight_path(1, readers=[{"protocol": "rtsp", "address": "10.0.0.9"}])
         sources = self.client.get("/api/mediasrc").get_json()
