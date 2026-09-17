@@ -470,9 +470,28 @@ class StreamingSourceTests(unittest.TestCase):
 
     def test_stop_all_and_reset_report_skipped_external(self):
         self.mtx.paths["src2"] = external_path(2)
-        self.assertEqual(self.client.post("/api/mediasrc/stop-all").get_json()["skipped_external"], [2])
-        self.assertEqual(self.client.post("/api/mediasrc/reset").get_json()["skipped_external"], [2])
+        with mock.patch.object(app_module, "stop_media_stream") as stop:
+            stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
+            reset = self.client.post("/api/mediasrc/reset").get_json()
+        self.assertEqual(stop_all["skipped_external"], [2])
+        self.assertEqual(reset["skipped_external"], [2])
+        self.assertIn("External stream(s) left running: src2.", stop_all["message"])
+        self.assertIn("External stream(s) left running: src2.", reset["message"])
+        # Every slot is stopped, including the externally held one, so no Insight
+        # process can be left running where the user can no longer stop it.
+        self.assertIn(2, [call.args[0] for call in stop.call_args_list])
         self.assertEqual(self.mtx.kicked, [])
+
+    def test_takeover_reports_kick_failure_as_502(self):
+        self.mtx.paths["src2"] = external_path(2, source_type="futureConn")
+
+        def kick(source_type, session_id):
+            raise app_module.MediamtxError("unsupported publisher type futureConn")
+
+        self.mtx.kick = kick
+        response = self.client.post("/api/mediasrc/takeover", json={"index": 2})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("src2", response.get_json()["error"])
 
     def test_takeover_kicks_external_publisher(self):
         self.mtx.paths["src2"] = external_path(2)

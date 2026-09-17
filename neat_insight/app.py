@@ -2078,6 +2078,9 @@ def _external_holder(index, snapshot=None):
     return path if path and path.external and not media_stream_is_running(index) else None
 
 
+EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
+
+
 def _external_conflict_error(index, path):
     return _json_error(
         f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it.",
@@ -2085,10 +2088,10 @@ def _external_conflict_error(index, path):
     )
 
 
-def _skipped_suffix(skipped_external):
+def _skipped_suffix(skipped_external, phrase="Skipped external"):
     if not skipped_external:
         return ""
-    return " Skipped external: " + ", ".join(f"src{i}" for i in skipped_external) + "."
+    return f" {phrase}: " + ", ".join(f"src{i}" for i in skipped_external) + "."
 
 
 def _source_with_urls(src, snapshot=None):
@@ -2379,12 +2382,14 @@ def stop_all_sources():
     stopped_count = 0
     for src in sources:
         source_index = src.get("index")
+        # Stop our own process for every slot: it is a no-op for an externally held slot
+        # and prevents an orphaned Insight process the user could no longer stop.
+        stop_media_stream(source_index)
         if _external_holder(source_index, snapshot):
             skipped_external.append(source_index)
             continue
         if src.get("state") == "playing":
             stopped_count += 1
-        stop_media_stream(source_index)
         src["state"] = "stopped"
 
     save_sources(sources)
@@ -2392,7 +2397,7 @@ def stop_all_sources():
         "success": True,
         "stopped_count": stopped_count,
         "skipped_external": skipped_external,
-        "message": f"Stopped {stopped_count} source(s)." + _skipped_suffix(skipped_external),
+        "message": f"Stopped {stopped_count} source(s)." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING),
     }
 
 
@@ -2405,10 +2410,10 @@ def reset_all_sources():
     for src in load_sources():
         if _external_holder(src.get("index"), snapshot):
             skipped_external.append(src.get("index"))
-            continue
         stop_media_stream(src.get("index"))
     reset_sources()
-    return {"success": True, "skipped_external": skipped_external, "message": "Reset all source assignments." + _skipped_suffix(skipped_external)}
+    return {"success": True, "skipped_external": skipped_external,
+            "message": "Reset all source assignments." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)}
 
 
 # API: disconnect an external publisher so the slot can be assigned again.
