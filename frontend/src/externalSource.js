@@ -62,11 +62,6 @@ export function previewSrc(index, rate, token) {
   return url === null ? null : `${url}&t=${token}`
 }
 
-export function skippedExternalSuffix(list) {
-  if (!Array.isArray(list) || list.length === 0) return ''
-  return ` · skipped ${list.map((i) => `src${i}`).join(', ')} (external)`
-}
-
 export function liveFor(sinceIso, nowMs) {
   const since = sinceIso ? Date.parse(sinceIso) : NaN
   if (!Number.isFinite(since)) return '-'

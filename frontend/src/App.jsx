@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
   PREVIEW_RATES, codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
-  previewSrc, protocolLabel, readPreviewRate, readersText, skippedExternalSuffix, writePreviewRate,
+  previewSrc, protocolLabel, readPreviewRate, readersText, writePreviewRate,
 } from './externalSource.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
@@ -1543,7 +1543,7 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
       await loadSources()
-      setUploadStatus((data.message || `Assigned ${data.assigned_count || 0} source(s).`) + skippedExternalSuffix(data.skipped_external))
+      setUploadStatus(data.message || `Assigned ${data.assigned_count || 0} source(s).`)
     } catch (e) {
       setError(e.message)
     }
@@ -1563,7 +1563,7 @@ export default function App() {
       })
       setBulkStartOpen(false)
       await loadSources()
-      setUploadStatus((data.message || `Requested ${count} stream(s) to start.`) + skippedExternalSuffix(data.skipped_external))
+      setUploadStatus(data.message || `Requested ${count} stream(s) to start.`)
       if (data.errors?.length) {
         setError(`Failed: ${data.errors.map((item) => `src${item.index}`).join(', ')}`)
       }
@@ -1576,7 +1576,7 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/stop-all', { method: 'POST' })
       await loadSources()
-      setUploadStatus((data.message || 'Stopped all sources.') + skippedExternalSuffix(data.skipped_external))
+      setUploadStatus(data.message || 'Stopped all sources.')
     } catch (e) {
       setError(e.message)
     }
@@ -1587,7 +1587,7 @@ export default function App() {
       const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
       await loadSources()
       setSelectedSource(1)
-      setUploadStatus((data.message || 'Reset all assignments.') + skippedExternalSuffix(data.skipped_external))
+      setUploadStatus(data.message || 'Reset all assignments.')
     } catch (e) {
       setError(e.message)
     }
