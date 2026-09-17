@@ -2544,9 +2544,19 @@ def stream_preview_mjpeg(index):
         if _preview_count >= PREVIEW_MAX_STREAMS:
             return _json_error("Too many previews open", 429)
         _preview_count += 1
+    released = False
+
+    def release():
+        # Idempotent: runs from the generator's finally and from call_on_close, and a
+        # response closed before its iterator starts only ever reaches the latter.
+        nonlocal released
+        global _preview_count
+        with _preview_lock:
+            if not released:
+                released = True
+                _preview_count -= 1
 
     def generate():
-        global _preview_count
         process = None
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
@@ -2562,14 +2572,15 @@ def stream_preview_mjpeg(index):
                     process.wait(timeout=2)
                 except Exception:
                     process.kill()
-            with _preview_lock:
-                _preview_count -= 1
+            release()
 
-    return Response(
+    response = Response(
         stream_with_context(generate()),
         mimetype="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+    response.call_on_close(release)
+    return response
 
 
 # API: expose environment flags used by the frontend.
