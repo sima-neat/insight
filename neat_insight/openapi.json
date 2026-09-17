@@ -514,7 +514,7 @@
         "responses": {
           "200": {
             "description": "Assignment counts and success message.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "properties": {"skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}}}}}
           }
         }
       }
@@ -590,7 +590,7 @@
         "responses": {
           "200": {
             "description": "Number of sources that were previously playing.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "message": "Stopped 4 source(s)."}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true, "properties": {"skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}}}, "example": {"success": true, "stopped_count": 4, "skipped_external": [2], "message": "Stopped 4 source(s). External stream(s) left running: src2."}}}
           }
         }
       }
@@ -604,7 +604,7 @@
         "responses": {
           "200": {
             "description": "Every source was stopped and default empty assignments were written.",
-            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SuccessMessage"}}}
+            "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessMessage"}, {"type": "object", "properties": {"skipped_external": {"type": "array", "description": "Slots left untouched because an external publisher holds them.", "items": {"type": "integer"}}}}]}}}
           }
         }
       }
