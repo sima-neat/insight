@@ -68,7 +68,7 @@ When the application runs outside the SDK container, resolve the RTSP, video UDP
 
 1. Open Streaming Sources and pick a slot that shows Idle.
 2. Publish to it from the host, e.g. `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`.
-3. The slot turns External. Select it and choose a preview rate to check the picture.
+3. The slot turns External. Select it and turn the preview on to check the picture; the first frame appears at the publisher's next keyframe, so keep the keyframe interval short (`-g 30` above).
 4. Run the application against the slot's RTSP URL as with any other source.
 5. To reuse the slot for a file, stop the external tool or press Take over.
 

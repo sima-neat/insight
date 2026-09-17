@@ -156,10 +156,14 @@ def http_snapshot_command(file_path: str, source_codec: Optional[str] = None) ->
 
 
 def preview_command(rtsp_url: str) -> list[str]:
-    # No rate filter at all, so ffmpeg follows the source frame rate.
+    # The SDP already carries the codec parameters, so stream probing only adds about a
+    # second before the first frame; skipping it leaves the frame rate unknown, hence
+    # passthrough timing (ffmpeg would otherwise guess H.264 at twice the rate and
+    # duplicate every frame). No rate filter, so the preview follows the source rate.
     return [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
-        "-i", rtsp_url, "-an",
+        "-analyzeduration", "0", "-probesize", "32",
+        "-i", rtsp_url, "-fps_mode", "passthrough", "-an",
         "-vf", "scale=min(640\\,iw):-2",
         "-c:v", "mjpeg", "-q:v", "7", "-f", "mpjpeg", "-boundary_tag", "frame", "pipe:1",
     ]
