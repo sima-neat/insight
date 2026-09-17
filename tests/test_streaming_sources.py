@@ -506,6 +506,28 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("srt 10.0.0.7", response.get_json()["error"])
 
+    def test_preview_route_serves_insight_owned_live_slot(self):
+        self.mtx.paths["src2"] = insight_path(2)
+        process = mock.Mock()
+        process.stdout.read.side_effect = [b"--frame\r\njpeg", b""]
+        process.poll.return_value = 0
+        with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            with mock.patch.object(app_module.subprocess, "Popen", return_value=process):
+                response = self.client.get("/stream/preview/src2.mjpg?fps=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "multipart/x-mixed-replace")
+        self.assertIn(b"jpeg", response.data)
+        self.assertEqual(app_module._preview_count, 0)
+
+    def test_preview_slot_released_when_response_closed_unstarted(self):
+        self.mtx.paths["src2"] = external_path(2)
+        with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            with app_module.app.test_request_context("/stream/preview/src2.mjpg?fps=1"):
+                response = app_module.stream_preview_mjpeg(2)
+                self.assertEqual(app_module._preview_count, 1)
+                response.close()
+        self.assertEqual(app_module._preview_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
