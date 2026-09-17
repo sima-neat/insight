@@ -91,8 +91,21 @@ class MediamtxIntegrationTests(unittest.TestCase):
         first = self._publish()
         self.assertTrue(_wait_until(lambda: self._fresh().get("src2", mediamtx.PathInfo("src2")).ready))
         second = self._publish()
-        self.assertIsNotNone(second.wait(timeout=6), "second publisher should be rejected")
+        self.assertNotEqual(second.wait(timeout=6), 0, "second publisher should be rejected")
         self.assertIsNone(first.poll(), "first publisher must keep running")
+
+    def test_insight_republish_after_stop_succeeds(self):
+        # overridePublisher: no must not lock Insight out of its own slot when a stream is
+        # restarted: mediamtx frees the path as soon as the old publisher's socket closes.
+        first = self._publish(PUBLISHER_TAG)
+        self.assertTrue(_wait_until(lambda: self._fresh().get("src2", mediamtx.PathInfo("src2")).ready))
+        first.terminate()
+        first.wait(timeout=6)
+        second = self._publish(PUBLISHER_TAG)
+        self.assertTrue(_wait_until(lambda: self._fresh().get("src2", mediamtx.PathInfo("src2")).ready),
+                        "path should become ready again for the re-published stream")
+        time.sleep(2)
+        self.assertIsNone(second.poll(), "re-publishing publisher must stay alive")
 
     def test_insight_tag_is_visible_and_untagged_publisher_is_external(self):
         self._publish(PUBLISHER_TAG)
@@ -110,7 +123,8 @@ class MediamtxIntegrationTests(unittest.TestCase):
             mediamtx.RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
         self.assertEqual((info["width"], info["height"]), (320, 240))
         self.client.kick(path.source_type, path.source_id)
-        self.assertIsNotNone(proc.wait(timeout=6))
+        proc.wait(timeout=6)
+        self.assertIsNotNone(proc.returncode)
         self.assertTrue(_wait_until(lambda: not self._fresh().get("src2", mediamtx.PathInfo("src2")).ready))
 
 
