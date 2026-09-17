@@ -707,7 +707,7 @@ export default function App() {
   })
   const [previewError, setPreviewError] = useState(false)
   const [previewToken, setPreviewToken] = useState(() => Date.now())
-  const [previewLoading, setPreviewLoading] = useState(false)
+  const [loadedPreviewSrc, setLoadedPreviewSrc] = useState(null)
   const previewImgRef = useRef(null)
   const [takeoverTarget, setTakeoverTarget] = useState(null)
   const [takeoverBusy, setTakeoverBusy] = useState(false)
@@ -839,6 +839,7 @@ export default function App() {
   // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
   // load must be keyed on the tab as well, not on the URL alone.
   const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
+  const previewLoading = Boolean(activePreviewSrc) && !previewError && loadedPreviewSrc !== activePreviewSrc
   const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
@@ -1025,37 +1026,33 @@ export default function App() {
   useEffect(() => {
     setPreviewError(false)
     setPreviewToken(Date.now())
-  }, [selectedSource, tab])
+  }, [tab])
 
   useEffect(() => {
     if (!activePreviewSrc) return undefined
     const img = previewImgRef.current
     return () => {
       // A browser keeps an mjpeg <img> load running after the element is dropped, so an
-      // unmounted preview would decode forever; clearing src aborts it. Swapping src
-      // aborts the previous load by itself, hence the isConnected guard (the ref is
-      // already detached by the time this cleanup runs on unmount).
+      // unmounted preview would decode forever; clearing src aborts it. The <img> is keyed
+      // on its URL, so every URL change detaches the element captured above (the ref
+      // already points at the replacement, or at null, when this cleanup runs).
       if (img && !img.isConnected) img.src = ''
     }
   }, [activePreviewSrc])
 
   useEffect(() => {
-    if (!activePreviewSrc || previewError) {
-      setPreviewLoading(false)
-      return undefined
-    }
-    setPreviewLoading(true)
+    if (!activePreviewSrc || previewError) return undefined
     // A multipart mjpeg <img> fires load unreliably (Chrome only once the stream ends), so
     // the first decoded frame is detected by the element gaining dimensions. The <img> is
     // keyed on its URL, so a switch starts from a fresh element with naturalWidth 0.
-    const timer = window.setInterval(() => {
+    const timer = setInterval(() => {
       const img = previewImgRef.current
       if (img && img.naturalWidth > 0) {
-        setPreviewLoading(false)
-        window.clearInterval(timer)
+        setLoadedPreviewSrc(activePreviewSrc)
+        clearInterval(timer)
       }
     }, 100)
-    return () => window.clearInterval(timer)
+    return () => clearInterval(timer)
   }, [activePreviewSrc, previewError])
 
   useEffect(() => {
@@ -1609,7 +1606,7 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
       await loadSources()
-      setSelectedSource(1)
+      selectSource(1)
       setUploadStatus(data.message || 'Reset all assignments.')
     } catch (e) {
       setError(e.message)
@@ -1634,6 +1631,14 @@ export default function App() {
     } finally {
       setTakeoverBusy(false)
     }
+  }
+
+  // Selecting a slot and refreshing the preview token in one render keeps a source switch
+  // to a single preview request instead of one aborted and one kept.
+  function selectSource(index) {
+    setSelectedSource(index)
+    setPreviewError(false)
+    setPreviewToken(Date.now())
   }
 
   function togglePreview() {
@@ -2034,7 +2039,7 @@ export default function App() {
 
               <div className="sources">
                 {sources.map((src) => (
-                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : ''].filter(Boolean).join(' ')} onClick={() => setSelectedSource(src.index)}>
+                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : ''].filter(Boolean).join(' ')} onClick={() => selectSource(src.index)}>
                     {(() => {
                       if (isExternal(src)) {
                         const ext = src.external || {}
@@ -2189,6 +2194,14 @@ export default function App() {
                       </button>
                     </div>
                     <div className="preview">
+                      <div className="preview-loading" role="status" aria-live="polite">
+                        {previewLoading && (
+                          <>
+                            <div className="upload-progress-track"><div className="upload-progress-bar indeterminate" /></div>
+                            <span>Connecting to src{currentSource.index}...</span>
+                          </>
+                        )}
+                      </div>
                       {!src && <p>Preview is off. Nothing is decoded. Turn it on to watch this stream.</p>}
                       {src && previewError && (
                         <p>
@@ -2197,23 +2210,15 @@ export default function App() {
                         </p>
                       )}
                       {src && !previewError && (
-                        <>
-                          {previewLoading && (
-                            <div className="preview-loading" role="status">
-                              <div className="upload-progress-track"><div className="upload-progress-bar indeterminate" /></div>
-                              <span>Connecting to src{currentSource.index}...</span>
-                            </div>
-                          )}
-                          <img
-                            key={src}
-                            ref={previewImgRef}
-                            src={src}
-                            className={previewLoading ? 'loading' : undefined}
-                            alt={`Live preview of src${currentSource.index}`}
-                            onLoad={() => setPreviewLoading(false)}
-                            onError={() => setPreviewError(true)}
-                          />
-                        </>
+                        <img
+                          key={src}
+                          ref={previewImgRef}
+                          src={src}
+                          className={previewLoading ? 'loading' : undefined}
+                          alt={`Live preview of src${currentSource.index}`}
+                          onLoad={() => setLoadedPreviewSrc(src)}
+                          onError={() => setPreviewError(true)}
+                        />
                       )}
                     </div>
                     <table className="kv-table">
