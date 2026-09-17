@@ -2073,7 +2073,9 @@ def _path_snapshot():
 def _external_holder(index, snapshot=None):
     snapshot = _path_snapshot() if snapshot is None else snapshot
     path = snapshot.get(f"src{index}")
-    return path if path and path.external else None
+    # A live process of our own always wins: mediamtx can report a ready path before the
+    # publisher session (and its ?publisher=insight query) is resolvable.
+    return path if path and path.external and not media_stream_is_running(index) else None
 
 
 def _external_conflict_error(index, path):
@@ -2111,7 +2113,8 @@ def _source_with_urls(src, snapshot=None):
     enriched["urls"] = urls
     path = (snapshot if snapshot is not None else _path_snapshot()).get(f"src{src.get('index')}")
     enriched["readers"] = list(path.readers) if path and path.ready else []
-    if path and path.external:
+    is_external = bool(path and path.external and not media_stream_is_running(src.get("index")))
+    if is_external:
         enriched["state"] = "external"
         enriched["transport"] = "rtsp"
         enriched["codec"] = path.codec
