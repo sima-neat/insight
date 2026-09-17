@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
   PREVIEW_RATES, codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
-  previewUrl, protocolLabel, readPreviewRate, readersText, skippedExternalSuffix, writePreviewRate,
+  previewSrc, protocolLabel, readPreviewRate, readersText, skippedExternalSuffix, writePreviewRate,
 } from './externalSource.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
@@ -706,7 +706,8 @@ export default function App() {
     }
   })
   const [previewError, setPreviewError] = useState(false)
-  const [previewNonce, setPreviewNonce] = useState(0)
+  const [previewToken, setPreviewToken] = useState(() => Date.now())
+  const previewImgRef = useRef(null)
   const [takeoverTarget, setTakeoverTarget] = useState(null)
   const [takeoverBusy, setTakeoverBusy] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -833,6 +834,7 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewRate, previewToken) : null
   const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
@@ -1018,7 +1020,20 @@ export default function App() {
 
   useEffect(() => {
     setPreviewError(false)
+    setPreviewToken(Date.now())
   }, [selectedSource])
+
+  useEffect(() => {
+    if (!previewImgSrc) return undefined
+    const img = previewImgRef.current
+    return () => {
+      // A browser keeps an mjpeg <img> load running after the element is dropped, so an
+      // unmounted preview would decode forever; clearing src aborts it. Swapping src
+      // aborts the previous load by itself, hence the isConnected guard (the ref is
+      // already detached by the time this cleanup runs on unmount).
+      if (img && !img.isConnected) img.src = ''
+    }
+  }, [previewImgSrc])
 
   useEffect(() => {
     if (tab !== 'rtsp') return undefined
@@ -1601,6 +1616,7 @@ export default function App() {
   function changePreviewRate(value) {
     setPreviewRate(value)
     setPreviewError(false)
+    setPreviewToken(Date.now())
     try {
       writePreviewRate(window.localStorage, value)
     } catch {}
@@ -2144,7 +2160,7 @@ export default function App() {
                 }
                 const ext = currentSource.external || {}
                 const warning = codecWarningText(ext, codecLabel(currentSource.codec))
-                const src = previewUrl(currentSource.index, previewRate)
+                const src = previewImgSrc
                 return (
                   <>
                     <div className="panel-topbar">
@@ -2173,11 +2189,11 @@ export default function App() {
                       {src && previewError && (
                         <p>
                           Preview unavailable.{' '}
-                          <button type="button" className="btn-ghost" onClick={() => { setPreviewError(false); setPreviewNonce((n) => n + 1) }}>Retry</button>
+                          <button type="button" className="btn-ghost" onClick={() => { setPreviewError(false); setPreviewToken(Date.now()) }}>Retry</button>
                         </p>
                       )}
                       {src && !previewError && (
-                        <img src={`${src}&nonce=${previewNonce}`} alt={`Live preview of src${currentSource.index}`} onError={() => setPreviewError(true)} />
+                        <img ref={previewImgRef} src={src} alt={`Live preview of src${currentSource.index}`} onError={() => setPreviewError(true)} />
                       )}
                     </div>
                     <table className="kv-table">

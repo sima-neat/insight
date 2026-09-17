@@ -57,6 +57,11 @@ export function previewUrl(index, rate) {
   return `/stream/preview/src${index}.mjpg?fps=${rate}`
 }
 
+export function previewSrc(index, rate, token) {
+  const url = previewUrl(index, rate)
+  return url === null ? null : `${url}&t=${token}`
+}
+
 export function skippedExternalSuffix(list) {
   if (!Array.isArray(list) || list.length === 0) return ''
   return ` · skipped ${list.map((i) => `src${i}`).join(', ')} (external)`
