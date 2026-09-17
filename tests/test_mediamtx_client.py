@@ -365,6 +365,29 @@ class ClientTests(unittest.TestCase):
         client.snapshot()
         self.assertGreater(len(calls), before + 1)
 
+    def test_kick_clears_the_back_off_of_a_failed_refresh(self):
+        # Takeover re-snapshots right after the kick: a back-off from an earlier failed
+        # refresh must not answer it with the publisher that was just disconnected.
+        clock, state = FakeClock(), {"fail": False, "kicked": False}
+
+        def request(method, url):
+            if method == "POST":
+                state["kicked"] = True
+                return 200, b""
+            if state["fail"]:
+                raise OSError("connection refused")
+            paths = [path for path in PATHS if path["name"] != "src2"] if state["kicked"] else PATHS
+            return _fake_request(paths=paths)(method, url)
+
+        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertIn("src2", client.snapshot())
+        state["fail"] = True
+        clock.now += mediamtx.SNAPSHOT_TTL_SECONDS
+        self.assertIn("src2", client.snapshot())  # one failure keeps the last snapshot
+        state["fail"] = False
+        client.kick("rtspSession", "pub-2")
+        self.assertNotIn("src2", client.snapshot())
+
     def test_kick_unknown_type_raises(self):
         client = mediamtx.MediamtxClient(request=_fake_request(), clock=FakeClock())
         with self.assertRaises(mediamtx.MediamtxError):

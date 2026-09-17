@@ -2606,6 +2606,7 @@ def stream_preview_mjpeg(index):
     def generate():
         process = None
         finished = threading.Event()
+        reaping = threading.Lock()
         last_output = [time.monotonic()]
 
         def watch():
@@ -2613,7 +2614,11 @@ def stream_preview_mjpeg(index):
             # never gets there: killing it makes the blocked read return.
             while not finished.wait(min(1.0, PREVIEW_IDLE_TIMEOUT_SECONDS)):
                 if time.monotonic() - last_output[0] > PREVIEW_IDLE_TIMEOUT_SECONDS:
-                    process.kill()
+                    # Never signal while the generator reaps: a kill after wait() would
+                    # land on whatever process inherited the pid.
+                    with reaping:
+                        if not finished.is_set() and process.poll() is None:
+                            process.kill()
                     return
 
         try:
@@ -2626,14 +2631,15 @@ def stream_preview_mjpeg(index):
                 last_output[0] = time.monotonic()
                 yield chunk
         finally:
-            finished.set()
-            if process and process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except Exception:
-                    process.kill()
-                    process.wait()
+            with reaping:
+                finished.set()
+                if process and process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except Exception:
+                        process.kill()
+                        process.wait()
             release()
 
     response = Response(

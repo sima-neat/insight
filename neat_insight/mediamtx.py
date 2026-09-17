@@ -373,4 +373,7 @@ class MediamtxClient:
     def _invalidate(self) -> None:
         with self._lock:
             self._snapshot_at = None
+            # Also drop a back-off from an earlier failed refresh: the next snapshot must
+            # be fetched, never the cached one that still holds the kicked publisher.
+            self._unavailable_until = 0.0
             self._generation += 1
