@@ -76,7 +76,7 @@ Insight shows such a slot as **External** within about two seconds: the row is r
 
 Whoever publishes first holds the slot. Starting a file on an External slot, or publishing to a slot Insight is already streaming, is rejected instead of silently replacing the running stream. **Take over** — the square stop glyph in the External row — disconnects the external publisher (and its readers) after a confirmation; the slot returns to Idle with its previous file assignment. A publisher that reconnects automatically may re-take an idle slot, so stop the external tool first when you want to reuse the slot for a file.
 
-The Source Preview panel can render an External slot at **Max** (the source's own frame rate) or **5 fps**, or stay **Off** (the default, remembered per browser). Off decodes nothing. Inside the SDK container, publishers and readers outside the container appear with the Docker bridge address rather than their real IP.
+The Source Preview panel can show an External slot live at the source's own frame rate; the preview is **off by default** (remembered per browser) and decodes nothing while off. Inside the SDK container, publishers and readers outside the container appear with the Docker bridge address rather than their real IP.
 
 Auto Assign, Bulk Start, Stop All and Reset never touch External slots; the result message lists which slots were skipped.
 

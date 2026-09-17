@@ -250,25 +250,21 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(response.data, b"")
         process.terminate.assert_called_once()
 
-    def test_preview_command_rate_filter(self):
-        top = mediasrc.preview_command("rtsp://127.0.0.1:8554/src2?reader=insight-preview", None)
-        throttled = mediasrc.preview_command("rtsp://127.0.0.1:8554/src2?reader=insight-preview", 5.0)
-        self.assertNotIn("nokey", top)
-        self.assertNotIn("nokey", throttled)
-        self.assertEqual(top[top.index("-vf") + 1], "scale=min(640\\,iw):-2")
-        self.assertEqual(throttled[throttled.index("-vf") + 1], "fps=5,scale=min(640\\,iw):-2")
-        self.assertIn("mpjpeg", top)
+    def test_preview_command_follows_the_source_rate(self):
+        cmd = mediasrc.preview_command("rtsp://127.0.0.1:8554/src2?reader=insight-preview")
+        self.assertNotIn("nokey", cmd)
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "scale=min(640\\,iw):-2")
+        self.assertNotIn("fps=", " ".join(cmd))
+        self.assertIn("mpjpeg", cmd)
 
     def test_preview_route_validation(self):
-        self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=2").status_code, 400)
-        self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=1").status_code, 400)
-        self.assertEqual(self.client.get("/stream/preview/src999.mjpg?fps=5").status_code, 404)
-        self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=max").status_code, 409)
+        self.assertEqual(self.client.get("/stream/preview/src999.mjpg").status_code, 404)
+        self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 409)
         self.mtx.paths["src2"] = external_path(2)
         with mock.patch.object(app_module.shutil, "which", return_value=None):
-            self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=max").status_code, 503)
+            self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 503)
         with mock.patch.object(app_module, "PREVIEW_MAX_STREAMS", 0):
-            self.assertEqual(self.client.get("/stream/preview/src2.mjpg?fps=max").status_code, 429)
+            self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 429)
 
     def test_preview_route_streams_and_releases_slot(self):
         self.mtx.paths["src2"] = external_path(2)
@@ -277,7 +273,7 @@ class StreamingSourceTests(unittest.TestCase):
         process.poll.return_value = 0
         with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
             with mock.patch.object(app_module.subprocess, "Popen", return_value=process) as popen:
-                response = self.client.get("/stream/preview/src2.mjpg?fps=max")
+                response = self.client.get("/stream/preview/src2.mjpg")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "multipart/x-mixed-replace")
         self.assertIn(b"jpeg", response.data)
@@ -291,7 +287,7 @@ class StreamingSourceTests(unittest.TestCase):
         process.poll.return_value = None
         with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
             with mock.patch.object(app_module.subprocess, "Popen", return_value=process):
-                response = self.client.get("/stream/preview/src2.mjpg?fps=5")
+                response = self.client.get("/stream/preview/src2.mjpg")
         _ = response.data  # drain the generator so the finally block runs
         process.terminate.assert_called_once()
         process.wait.assert_called_once()
@@ -574,7 +570,7 @@ class StreamingSourceTests(unittest.TestCase):
         process.poll.return_value = 0
         with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
             with mock.patch.object(app_module.subprocess, "Popen", return_value=process):
-                response = self.client.get("/stream/preview/src2.mjpg?fps=5")
+                response = self.client.get("/stream/preview/src2.mjpg")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "multipart/x-mixed-replace")
         self.assertIn(b"jpeg", response.data)
@@ -583,7 +579,7 @@ class StreamingSourceTests(unittest.TestCase):
     def test_preview_slot_released_when_response_closed_unstarted(self):
         self.mtx.paths["src2"] = external_path(2)
         with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
-            with app_module.app.test_request_context("/stream/preview/src2.mjpg?fps=5"):
+            with app_module.app.test_request_context("/stream/preview/src2.mjpg"):
                 response = app_module.stream_preview_mjpeg(2)
                 self.assertEqual(app_module._preview_count, 1)
                 response.close()

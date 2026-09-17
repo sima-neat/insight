@@ -1,9 +1,4 @@
-export const PREVIEW_RATES = [
-  { value: 'max', label: 'Max' },
-  { value: '5', label: '5 fps' },
-  { value: 'off', label: 'Off' },
-]
-export const PREVIEW_RATE_STORAGE_KEY = 'neatInsight.externalPreviewFps'
+export const PREVIEW_ENABLED_STORAGE_KEY = 'neatInsight.externalPreviewEnabled'
 
 const PROTOCOL_LABELS = { rtsp: 'RTSP', rtsps: 'RTSPS', webrtc: 'WebRTC', srt: 'SRT', rtmp: 'RTMP', rtmps: 'RTMPS' }
 
@@ -36,29 +31,28 @@ export function codecWarningText(ext, codecName) {
   return `${codecName} cannot be decoded by Neat video pipelines (expects H.264, H.265 or MJPEG). Readers can connect, but decoding will fail.`
 }
 
-export function readPreviewRate(storage) {
+export function readPreviewEnabled(storage) {
   try {
-    const value = storage.getItem(PREVIEW_RATE_STORAGE_KEY)
-    return PREVIEW_RATES.some((r) => r.value === value) ? value : 'off'
+    return storage.getItem(PREVIEW_ENABLED_STORAGE_KEY) === '1'
   } catch {
-    return 'off'
+    return false
   }
 }
 
-export function writePreviewRate(storage, value) {
+export function writePreviewEnabled(storage, enabled) {
   try {
-    storage.setItem(PREVIEW_RATE_STORAGE_KEY, value)
+    storage.setItem(PREVIEW_ENABLED_STORAGE_KEY, enabled ? '1' : '0')
   } catch {}
 }
 
-export function previewUrl(index, rate) {
-  if (rate === 'off') return null
-  return `/stream/preview/src${index}.mjpg?fps=${rate}`
+export function previewUrl(index, enabled) {
+  if (!enabled) return null
+  return `/stream/preview/src${index}.mjpg`
 }
 
-export function previewSrc(index, rate, token) {
-  const url = previewUrl(index, rate)
-  return url === null ? null : `${url}&t=${token}`
+export function previewSrc(index, enabled, token) {
+  const url = previewUrl(index, enabled)
+  return url === null ? null : `${url}?t=${token}`
 }
 
 export function liveFor(sinceIso, nowMs) {

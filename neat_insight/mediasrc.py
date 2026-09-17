@@ -155,13 +155,12 @@ def http_snapshot_command(file_path: str, source_codec: Optional[str] = None) ->
     ]
 
 
-def preview_command(rtsp_url: str, fps: Optional[float]) -> list[str]:
-    # fps=None means Max: no rate filter at all, so ffmpeg follows the source frame rate.
-    rate_filter = "" if fps is None else f"fps={fps:g},"
+def preview_command(rtsp_url: str) -> list[str]:
+    # No rate filter at all, so ffmpeg follows the source frame rate.
     return [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
         "-i", rtsp_url, "-an",
-        "-vf", f"{rate_filter}scale=min(640\\,iw):-2",
+        "-vf", "scale=min(640\\,iw):-2",
         "-c:v", "mjpeg", "-q:v", "7", "-f", "mpjpeg", "-boundary_tag", "frame", "pipe:1",
     ]
 
