@@ -357,7 +357,7 @@ Codec and transport are derived from the assigned media:
 | `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments. |
 | `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
 | `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
-| `GET` | `/stream/preview/src<int:index>.mjpg?fps=5\|1\|0.5` | Query string | Throttled multipart MJPEG preview of any live slot; below 5 fps only keyframes are decoded. Max 4 concurrent (429). |
+| `GET` | `/stream/preview/src<int:index>.mjpg?fps=max\|5` | Query string | Multipart MJPEG preview of any live slot; `max` follows the source frame rate, `5` emits 5 fps. Max 4 concurrent (429). |
 
 Common workflow:
 
