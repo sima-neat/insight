@@ -401,6 +401,22 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertNotIn("external", src)
         self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 1}).status_code, 200)
 
+    def test_http_slot_does_not_hide_an_external_publisher(self):
+        # An HTTP/MJPEG slot streams straight to the browser and publishes nothing to
+        # mediamtx, so an external publisher on that index stays visible and takeable.
+        (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")
+        self.client.post(
+            "/api/mediasrc/assign",
+            json={"index": 1, "file": "cam.mjpg", "transport": "http", "codec": "mjpeg"},
+        )
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.mtx.paths["src1"] = external_path(1)
+
+        src = self.client.get("/api/mediasrc").get_json()[0]
+
+        self.assertEqual(src["state"], "external")
+        self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 1}).status_code, 200)
+
     def test_get_sources_lists_readers_for_insight_owned_slot(self):
         self.mtx.paths["src1"] = insight_path(1, readers=[{"protocol": "rtsp", "address": "10.0.0.9"}])
         sources = self.client.get("/api/mediasrc").get_json()
@@ -481,6 +497,31 @@ class StreamingSourceTests(unittest.TestCase):
         # process can be left running where the user can no longer stop it.
         self.assertIn(2, [call.args[0] for call in stop.call_args_list])
         self.assertEqual(self.mtx.kicked, [])
+
+    def test_stop_all_stops_own_slot_whose_publisher_query_is_unresolved(self):
+        # mediamtx can report our own path without the ?publisher=insight query; stop-all
+        # must classify the slot before stopping the process that proves it is ours.
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+        process = mock.Mock()
+        process.poll.return_value = None
+        mediasrc.pipeline_registry[0] = mediasrc.MediaStream(
+            index=0,
+            file_path=str(self.media_dir / "clip.mp4"),
+            transport="rtsp",
+            codec="h264",
+            process=process,
+        )
+        self.mtx.paths["src1"] = external_path(1)
+
+        stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
+
+        self.assertEqual(stop_all["skipped_external"], [])
+        self.assertEqual(stop_all["stopped_count"], 1)
+        stored = json.loads(self.sources_file.read_text(encoding="utf-8"))
+        self.assertEqual(stored[0]["state"], "stopped")
 
     def test_takeover_reports_kick_failure_as_502(self):
         self.mtx.paths["src2"] = external_path(2, source_type="futureConn")

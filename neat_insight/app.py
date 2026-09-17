@@ -48,6 +48,7 @@ from neat_insight.mediasrc import (
     start_media_stream,
     stop_media_stream,
 )
+from neat_insight import mediasrc
 from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound, PREVIEW_READER_TAG
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
@@ -2070,12 +2071,27 @@ def _path_snapshot():
     return mediamtx_client.snapshot() or {}
 
 
+def _insight_publishes_rtsp(index):
+    """True while Insight itself has a live RTSP publisher on that slot.
+
+    Only an RTSP publisher of ours can own a mediamtx path; an HTTP/MJPEG slot streams
+    straight to the browser and must never mask an external publisher on the same index.
+    """
+    if index is None:
+        return False
+    with mediasrc.registry_lock:
+        stream = mediasrc.pipeline_registry.get(int(index) - 1)
+        if not stream or stream.transport != "rtsp":
+            return False
+        return bool(stream.process and stream.process.poll() is None)
+
+
 def _external_holder(index, snapshot=None):
     snapshot = _path_snapshot() if snapshot is None else snapshot
     path = snapshot.get(f"src{index}")
     # A live process of our own always wins: mediamtx can report a ready path before the
     # publisher session (and its ?publisher=insight query) is resolvable.
-    return path if path and path.external and not media_stream_is_running(index) else None
+    return path if path and path.external and not _insight_publishes_rtsp(index) else None
 
 
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
@@ -2116,7 +2132,7 @@ def _source_with_urls(src, snapshot=None):
     enriched["urls"] = urls
     path = (snapshot if snapshot is not None else _path_snapshot()).get(f"src{src.get('index')}")
     enriched["readers"] = list(path.readers) if path and path.ready else []
-    is_external = bool(path and path.external and not media_stream_is_running(src.get("index")))
+    is_external = bool(path and path.external and not _insight_publishes_rtsp(src.get("index")))
     if is_external:
         enriched["state"] = "external"
         enriched["transport"] = "rtsp"
@@ -2382,10 +2398,13 @@ def stop_all_sources():
     stopped_count = 0
     for src in sources:
         source_index = src.get("index")
+        # Classify before stopping: _external_holder only discounts a path while our own
+        # publisher is alive, so stopping first would report our just-stopped slot as external.
+        holder = _external_holder(source_index, snapshot)
         # Stop our own process for every slot: it is a no-op for an externally held slot
         # and prevents an orphaned Insight process the user could no longer stop.
         stop_media_stream(source_index)
-        if _external_holder(source_index, snapshot):
+        if holder:
             skipped_external.append(source_index)
             continue
         if src.get("state") == "playing":

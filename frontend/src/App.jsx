@@ -835,6 +835,9 @@ export default function App() {
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
   const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewRate, previewToken) : null
+  // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
+  // load must be keyed on the tab as well, not on the URL alone.
+  const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
   const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
@@ -1021,10 +1024,10 @@ export default function App() {
   useEffect(() => {
     setPreviewError(false)
     setPreviewToken(Date.now())
-  }, [selectedSource])
+  }, [selectedSource, tab])
 
   useEffect(() => {
-    if (!previewImgSrc) return undefined
+    if (!activePreviewSrc) return undefined
     const img = previewImgRef.current
     return () => {
       // A browser keeps an mjpeg <img> load running after the element is dropped, so an
@@ -1033,7 +1036,7 @@ export default function App() {
       // already detached by the time this cleanup runs on unmount).
       if (img && !img.isConnected) img.src = ''
     }
-  }, [previewImgSrc])
+  }, [activePreviewSrc])
 
   useEffect(() => {
     if (tab !== 'rtsp') return undefined
