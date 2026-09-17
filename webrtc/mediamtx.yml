@@ -5,6 +5,20 @@ rtspAddress: :8554
 logLevel: info
 api: yes
 apiAddress: 127.0.0.1:9997
+apiAllowOrigin: 'http://127.0.0.1'
+# Replaces mediamtx's default, which gives every loopback client the API without credentials.
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+  - user: insight
+    # Unusable placeholder: Insight writes a per-run password into its own copy at launch.
+    pass: sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    ips: ['127.0.0.1', '::1']
+    permissions:
+      - action: api
 pathDefaults:
   overridePublisher: no
 

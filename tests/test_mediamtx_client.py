@@ -23,7 +23,7 @@ PATHS = [
 ]
 SESSIONS = {
     "rtspsessions": [
-        {"id": "pub-1", "remoteAddr": "127.0.0.1:40968", "state": "publish", "path": "src1", "query": "publisher=insight", "transport": "TCP"},
+        {"id": "pub-1", "remoteAddr": "127.0.0.1:40968", "state": "publish", "path": "src1", "query": mediamtx.PUBLISHER_TAG, "transport": "TCP"},
         {"id": "read-1", "remoteAddr": "172.19.0.1:49878", "state": "read", "path": "src1", "query": "", "transport": "TCP"},
         {"id": "probe-1", "remoteAddr": "127.0.0.1:50001", "state": "read", "path": "src1", "query": "reader=insight-probe", "transport": "TCP"},
         {"id": "prev-1", "remoteAddr": "127.0.0.1:50002", "state": "read", "path": "src1", "query": "reader=insight-preview", "transport": "TCP"},
@@ -53,6 +53,14 @@ class SnapshotParsingTests(unittest.TestCase):
         self.assertTrue(self.snap["src1"].ready)
         self.assertTrue(self.snap["src1"].owned_by_insight)
         self.assertFalse(self.snap["src1"].external)
+
+    def test_lookalike_publisher_tags_stay_external(self):
+        # The tag carries a per-process secret and is matched exactly: neither the bare
+        # public prefix nor a query that merely contains it may pass for Insight's own.
+        for query in ("publisher=insight", "xpublisher=insightful", f"x{mediamtx.PUBLISHER_TAG}", f"{mediamtx.PUBLISHER_TAG}x"):
+            sessions = {**SESSIONS, "rtspsessions": [{"id": "pub-2", "remoteAddr": "10.0.0.9:4000", "query": query}]}
+            with self.subTest(query=query):
+                self.assertTrue(mediamtx.build_snapshot(PATHS, sessions)["src2"].external)
 
     def test_idle_path_is_neither_ready_nor_external(self):
         self.assertFalse(self.snap["src5"].ready)
@@ -84,6 +92,41 @@ class SnapshotParsingTests(unittest.TestCase):
         self.assertTrue(snap["src2"].external)
         self.assertEqual(snap["src2"].protocol, "futureConn")
         self.assertIsNone(snap["src2"].address)
+
+
+class ApiCredentialTests(unittest.TestCase):
+    def test_default_request_authenticates_as_the_api_user(self):
+        import base64
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.handle_request, daemon=True).start()
+        status, _ = mediamtx._default_request("GET", f"http://127.0.0.1:{server.server_address[1]}/v3/paths/list")
+        self.assertEqual(status, 200)
+        expected = base64.b64encode(f"{mediamtx.API_USER}:{mediamtx.API_PASSWORD}".encode()).decode()
+        self.assertEqual(seen, [f"Basic {expected}"])
+
+    def test_render_config_swaps_the_placeholder_for_the_password(self):
+        rendered = mediamtx.render_config(f"user: insight\npass: {mediamtx.API_PASSWORD_PLACEHOLDER}\n", "s3cret")
+        self.assertEqual(rendered, "user: insight\npass: s3cret\n")
+
+    def test_render_config_refuses_a_config_without_the_placeholder(self):
+        # Launching such a config would leave the API on mediamtx's passwordless default.
+        with self.assertRaises(mediamtx.MediamtxError):
+            mediamtx.render_config("api: yes\n", "s3cret")
 
 
 def _fake_request(paths=PATHS, sessions=SESSIONS, calls=None, kicks=None, fail=False, kick_status=200):
@@ -151,25 +194,82 @@ class ClientTests(unittest.TestCase):
         self.assertIsNone(client.snapshot())
         self.assertEqual(len(calls), 2)
 
-    def test_backoff_is_long_after_a_successful_snapshot(self):
+    def _flaky_client(self):
         calls, clock, state = [], FakeClock(), {"fail": False}
         inner = _fake_request(calls=calls)
 
         def request(method, url):
             if state["fail"]:
                 calls.append((method, url))
-                raise OSError("connection refused")
+                raise OSError("timed out")
             return inner(method, url)
 
-        client = mediamtx.MediamtxClient(request=request, clock=clock)
+        return mediamtx.MediamtxClient(request=request, clock=clock), calls, clock, state
+
+    def test_one_failed_refresh_keeps_the_last_snapshot(self):
+        # A single slow API call must not switch external detection (and every guard
+        # built on it) off: the last good snapshot stays in use and the retry is quick.
+        client, calls, clock, state = self._flaky_client()
+        self.assertTrue(client.snapshot()["src2"].external)
+        state["fail"] = True
+        clock.now += 1.5
+        self.assertTrue(client.snapshot()["src2"].external)
+        state["fail"] = False
+        clock.now += 1.5
+        before = len(calls)
+        self.assertTrue(client.snapshot()["src2"].external)
+        self.assertGreater(len(calls), before)
+
+    def test_sustained_outage_drops_the_snapshot_and_backs_off_long(self):
+        client, calls, clock, state = self._flaky_client()
         self.assertIsNotNone(client.snapshot())
         state["fail"] = True
         clock.now += 1.5
+        self.assertIsNotNone(client.snapshot())
+        clock.now += 6
         self.assertIsNone(client.snapshot())
         failed = len(calls)
         clock.now += 1.5
         self.assertIsNone(client.snapshot())
         self.assertEqual(len(calls), failed)
+
+    def test_unusable_responses_mark_the_api_unavailable_instead_of_raising(self):
+        import http.client
+
+        def garbled(method, url):
+            raise http.client.BadStatusLine("not http")
+
+        for request in (garbled, _fake_request(paths=None), _fake_request(paths=[{"no": "name"}]), _fake_request(paths=["x"])):
+            with self.subTest(request=request):
+                self.assertIsNone(mediamtx.MediamtxClient(request=request, clock=FakeClock()).snapshot())
+
+    def test_kick_reports_a_garbled_response_as_a_mediamtx_error(self):
+        import http.client
+
+        def garbled(method, url):
+            raise http.client.BadStatusLine("not http")
+
+        with self.assertRaises(mediamtx.MediamtxError):
+            mediamtx.MediamtxClient(request=garbled, clock=FakeClock()).kick("rtspSession", "pub-2")
+
+    def test_snapshot_fetched_across_a_kick_is_not_served(self):
+        # A fetch that was in flight while kick() ran holds pre-kick data; caching it
+        # would keep the slot "external" after a successful takeover.
+        clock, state = FakeClock(), {"kicked": False, "client": None}
+
+        def request(method, url):
+            endpoint = url.split("/v3/", 1)[1].split("?", 1)[0]
+            if method == "GET" and endpoint == "paths/list" and not state["kicked"]:
+                state["kicked"] = True
+                stale = _fake_request()(method, url)
+                state["client"].kick("rtspSession", "pub-2")
+                return stale
+            paths = [p for p in PATHS if p["name"] != "src2"] if state["kicked"] else PATHS
+            return _fake_request(paths=paths)(method, url)
+
+        state["client"] = client = mediamtx.MediamtxClient(request=request, clock=clock)
+        self.assertNotIn("src2", client.snapshot())
+        self.assertNotIn("src2", client.snapshot())
 
     def test_bitrate_from_bytes_delta_between_snapshots(self):
         clock = FakeClock()

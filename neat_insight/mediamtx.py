@@ -1,16 +1,33 @@
+import base64
+import http.client
 import json
 import logging
+import os
+import secrets
 import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-API_BASE_URL = "http://127.0.0.1:9997/v3"
+API_PORT = 9997
+API_BASE_URL = f"http://127.0.0.1:{API_PORT}/v3"
+# mediamtx would otherwise let any loopback client drive the API without credentials, and
+# its CORS policy extends that to any web page open on this host. The password is per run;
+# set the env var to reach a mediamtx that was started separately with a known password.
+API_USER = "insight"
+API_PASSWORD = os.environ.get("NEAT_INSIGHT_MEDIAMTX_API_PASS") or secrets.token_urlsafe(24)
+# Unusable hash shipped in mediamtx.yml; render_config swaps in the real password at launch.
+API_PASSWORD_PLACEHOLDER = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
-PUBLISHER_TAG = "publisher=insight"
+# Per-process secret: only mediamtx's loopback API shows a publisher's query, so another
+# publisher cannot learn the value and pass for Insight's own stream.
+PUBLISHER_KEY = "publisher"
+PUBLISHER_VALUE = f"insight-{secrets.token_hex(8)}"
+PUBLISHER_TAG = f"{PUBLISHER_KEY}={PUBLISHER_VALUE}"
 PROBE_READER_TAG = "reader=insight-probe"
 PREVIEW_READER_TAG = "reader=insight-preview"
 SUPPORTED_CODECS = {"h264", "h265", "mjpeg"}
@@ -18,6 +35,7 @@ REQUEST_TIMEOUT_SECONDS = 0.5
 SNAPSHOT_TTL_SECONDS = 1.0
 UNAVAILABLE_BACKOFF_SECONDS = 10.0
 INITIAL_BACKOFF_SECONDS = 1.0
+STALE_GRACE_SECONDS = 5.0
 PROBE_TIMEOUT_SECONDS = 5
 PAGE_SIZE = 1000
 
@@ -66,7 +84,7 @@ class PathInfo:
 
     @property
     def owned_by_insight(self) -> bool:
-        return PUBLISHER_TAG in self.query
+        return urllib.parse.parse_qs(self.query).get(PUBLISHER_KEY) == [PUBLISHER_VALUE]
 
     @property
     def external(self) -> bool:
@@ -144,8 +162,15 @@ def _parse_fps(value) -> Optional[float]:
     return int(fps) if fps == int(fps) else round(fps, 2)
 
 
+def render_config(text: str, password: str) -> str:
+    if API_PASSWORD_PLACEHOLDER not in text:
+        raise MediamtxError("mediamtx config has no API password placeholder")
+    return text.replace(API_PASSWORD_PLACEHOLDER, password)
+
+
 def _default_request(method: str, url: str):
-    req = urllib.request.Request(url, method=method)
+    credentials = base64.b64encode(f"{API_USER}:{API_PASSWORD}".encode()).decode()
+    req = urllib.request.Request(url, method=method, headers={"Authorization": f"Basic {credentials}"})
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
             return resp.status, resp.read()
@@ -181,6 +206,8 @@ class MediamtxClient:
         self._unavailable_until = 0.0
         self._warned = False
         self._ever_succeeded = False
+        self._failing_since: Optional[float] = None
+        self._generation = 0  # bumped by kick(); a fetch spanning a bump is pre-kick data
         self._probes: dict = {}   # session id -> dict | None | pending-token (object())
         self._bytes: dict = {}    # session id -> (bytes_received, monotonic seconds)
         self._bitrate: dict = {}  # session id -> bits per second
@@ -195,20 +222,48 @@ class MediamtxClient:
         return json.loads(body)["items"]
 
     def snapshot(self) -> Optional[dict]:
-        # The lock protects cache state (_snapshot*/_unavailable_until/_warned) only;
-        # the HTTP calls below run unlocked so a slow/hung API doesn't block other callers.
+        # The lock protects cache state only; the HTTP calls run unlocked so a slow/hung
+        # API doesn't block other callers.
         now = self._clock()
         with self._lock:
-            if self._snapshot_at is not None and now - self._snapshot_at < SNAPSHOT_TTL_SECONDS:
+            fresh = self._snapshot_at is not None and now - self._snapshot_at < SNAPSHOT_TTL_SECONDS
+            if fresh or now < self._unavailable_until:
                 return self._snapshot
-            if now < self._unavailable_until:
-                return None
-        try:
-            paths = self._get_items("paths/list")
-            sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
-        except (MediamtxError, OSError, ValueError, KeyError) as exc:
-            warn = False
+        # A fetch that overlaps a kick may hold pre-kick data: fetch once more instead.
+        for _ in range(2):
             with self._lock:
+                generation = self._generation
+            try:
+                paths = self._get_items("paths/list")
+                sessions = {endpoint: self._get_items(f"{endpoint}/list", missing_ok=True) for endpoint, _ in SESSION_KINDS.values()}
+                built = build_snapshot(paths, sessions)
+            except Exception as exc:  # any unusable answer means "API unavailable", never a 500
+                return self._fetch_failed(now, exc)
+            with self._lock:
+                if generation != self._generation:
+                    continue
+                self._warned = False
+                self._ever_succeeded = True
+                self._failing_since = None
+                self._unavailable_until = 0.0
+                # Concurrent fetches can finish out of order; never replace newer data.
+                if self._snapshot_at is None or now >= self._snapshot_at:
+                    self._snapshot, self._snapshot_at = built, now
+                    self._update_rates(now)
+                return self._snapshot
+        return built
+
+    def _fetch_failed(self, now: float, exc: Exception) -> Optional[dict]:
+        warn = False
+        with self._lock:
+            if self._failing_since is None:
+                self._failing_since = now
+            # One slow call must not switch detection off: keep the last good snapshot and
+            # retry soon, until the API has been failing for the whole grace period.
+            within_grace = self._snapshot is not None and now - self._failing_since < STALE_GRACE_SECONDS
+            if within_grace:
+                self._unavailable_until = now + INITIAL_BACKOFF_SECONDS
+            else:
                 self._snapshot, self._snapshot_at = None, None
                 # Retry quickly until the API has answered once: at startup mediamtx may
                 # still be coming up, and a 10 s wait would blank several polls.
@@ -217,15 +272,10 @@ class MediamtxClient:
                 if not self._warned:
                     self._warned = True
                     warn = True
-            if warn:
-                logging.warning("mediamtx API unavailable (%s); external stream detection is off", exc)
-            return None
-        with self._lock:
-            self._warned = False
-            self._ever_succeeded = True
-            self._snapshot, self._snapshot_at = build_snapshot(paths, sessions), now
-            self._update_rates(now)
-            return self._snapshot
+            result = self._snapshot
+        if warn:
+            logging.warning("mediamtx API unavailable (%s); external stream detection is off", exc)
+        return result
 
     def _update_rates(self, now: float) -> None:
         live = {}
@@ -282,13 +332,19 @@ class MediamtxClient:
         kind = SESSION_KINDS.get(source_type)
         if not kind:
             raise MediamtxError(f"unsupported publisher type {source_type}")
-        with self._lock:
-            self._snapshot_at = None
+        self._invalidate()
         try:
             status, _ = self._request("POST", f"{self._base_url}/{kind[0]}/kick/{session_id}")
-        except OSError as exc:
+        except (OSError, http.client.HTTPException) as exc:
             raise MediamtxError(str(exc)) from exc
+        finally:
+            self._invalidate()
         if status == 404:
             raise MediamtxNotFound(session_id)
         if status != 200:
             raise MediamtxError(f"kick returned {status}")
+
+    def _invalidate(self) -> None:
+        with self._lock:
+            self._snapshot_at = None
+            self._generation += 1

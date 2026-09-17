@@ -8,6 +8,7 @@ from pathlib import Path
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55580")
 
 from neat_insight import app as app_module
+from neat_insight import mediamtx
 from neat_insight import mediasrc
 from neat_insight.mediamtx import PathInfo
 
@@ -39,7 +40,7 @@ def external_path(index, codec="h264", protocol="rtsp", source_type="rtspSession
 
 def insight_path(index, readers=None):
     return PathInfo(name=f"src{index}", ready=True, since="2026-09-16T13:00:00Z", source_type="rtspSession",
-                    source_id=f"own-{index}", protocol="rtsp", address="127.0.0.1", query="publisher=insight",
+                    source_id=f"own-{index}", protocol="rtsp", address="127.0.0.1", query=mediamtx.PUBLISHER_TAG,
                     codec="h264", bytes_received=10, readers=readers or [])
 
 
@@ -302,6 +303,25 @@ class StreamingSourceTests(unittest.TestCase):
         process.wait.assert_called_once()
         self.assertEqual(app_module._preview_count, 0)
 
+    def test_preview_route_gives_up_on_a_silent_ffmpeg(self):
+        # A publisher that stalls leaves ffmpeg blocked without output; the blocked read
+        # never reaches a yield, so without a watchdog the slot and thread are held forever.
+        import subprocess
+        import sys
+        import time
+        self.mtx.paths["src2"] = external_path(2)
+        silent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], stdout=subprocess.PIPE)
+        self.addCleanup(silent.kill)
+        started = time.monotonic()
+        with mock.patch.object(app_module, "PREVIEW_IDLE_TIMEOUT_SECONDS", 0.3, create=True):
+            with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
+                with mock.patch.object(app_module.subprocess, "Popen", return_value=silent):
+                    response = self.client.get("/stream/preview/src2.mjpg")
+                    self.assertEqual(response.data, b"")
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertIsNotNone(silent.poll())
+        self.assertEqual(app_module._preview_count, 0)
+
     def test_media_preview_mjpeg_streams_selected_file(self):
         (self.media_dir / "cam.avi").write_bytes(b"not-a-real-video")
         process = mock.Mock()
@@ -366,7 +386,7 @@ class StreamingSourceTests(unittest.TestCase):
             ok, err = mediasrc.start_media_stream(1, str(self.media_dir / "clip.mp4"), "rtsp", "h264", "h264")
 
         self.assertTrue(ok, err)
-        self.assertEqual(popen.call_args.args[0][-1], "rtsp://127.0.0.1:8554/src1?publisher=insight")
+        self.assertEqual(popen.call_args.args[0][-1], f"rtsp://127.0.0.1:8554/src1?{mediamtx.PUBLISHER_TAG}")
 
     def test_get_sources_reports_external_slot(self):
         self.sources_file.write_text('[{"index": 2, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h265"}]', encoding="utf-8")
@@ -422,6 +442,55 @@ class StreamingSourceTests(unittest.TestCase):
 
         self.assertEqual(src["state"], "external")
         self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 1}).status_code, 200)
+
+    def _http_slot_with_external_publisher(self):
+        (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")
+        self.client.post(
+            "/api/mediasrc/assign",
+            json={"index": 1, "file": "cam.mjpg", "transport": "http", "codec": "mjpeg"},
+        )
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.mtx.paths["src1"] = external_path(1)
+
+    def _persisted(self, index):
+        return next(src for src in json.loads(self.sources_file.read_text(encoding="utf-8")) if src["index"] == index)
+
+    def test_stop_reaches_insights_own_http_stream_under_an_external_publisher(self):
+        self._http_slot_with_external_publisher()
+        response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(mediasrc.media_stream_is_running(1))
+        self.assertEqual(self._persisted(1)["state"], "stopped")
+        self.assertEqual(self.mtx.kicked, [])
+        # With nothing of Insight's left on the slot, stop is a conflict again.
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 1}).status_code, 409)
+
+    def test_stop_all_records_the_own_stream_it_stopped_on_an_external_slot(self):
+        self._http_slot_with_external_publisher()
+        body = self.client.post("/api/mediasrc/stop-all").get_json()
+        self.assertEqual(body["stopped_count"], 1)
+        self.assertEqual(body["skipped_external"], [1])
+        self.assertEqual(self._persisted(1)["state"], "stopped")
+
+    def test_reset_keeps_the_assignment_of_an_external_slot(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        for index in (1, 2):
+            self.client.post("/api/mediasrc/assign", json={"index": index, "file": "clip.mp4", "transport": "rtsp", "codec": "h264"})
+        self.mtx.paths["src2"] = external_path(2)
+        self.client.post("/api/mediasrc/reset")
+        self.assertEqual(self._persisted(1)["file"], "")
+        self.assertEqual(self._persisted(2)["file"], "clip.mp4")
+
+    def test_mutating_routes_reject_a_non_integer_index(self):
+        # 2.0 and true compare equal to a slot index but miss the "src2" snapshot key,
+        # which would skip the external-publisher guard.
+        self.mtx.paths["src2"] = external_path(2)
+        for route in ("assign", "start", "stop", "takeover"):
+            for index in (2.0, True, "2", 0, 999):
+                with self.subTest(route=route, index=index):
+                    response = self.client.post(f"/api/mediasrc/{route}", json={"index": index, "file": ""})
+                    self.assertIn(response.status_code, (400, 404))
+        self.assertEqual(self.mtx.kicked, [])
 
     def test_get_sources_lists_readers_for_insight_owned_slot(self):
         self.mtx.paths["src1"] = insight_path(1, readers=[{"protocol": "rtsp", "address": "10.0.0.9"}])

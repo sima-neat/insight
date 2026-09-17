@@ -63,16 +63,22 @@ The codec is determined by the selected media and is not manually changed in the
 
 You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
+This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
+
+![Insight Streaming Sources view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
+
+The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
+
 ### External streams
 
-Any RTSP, WebRTC (WHIP), SRT or RTMP tool can publish directly to a source slot, for example a webcam from the host:
+Any RTSP tool can publish directly to a source slot, for example a webcam from the host:
 
 ```bash
 ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p \
   -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2
 ```
 
-Insight shows such a slot as **External** within about two seconds: the row is read-only, the chip lists protocol, publisher address and, once probed, resolution and frame rate. The codec cell turns amber with a warning when the stream uses a codec Neat pipelines cannot decode (anything other than H.264, H.265 or MJPEG). Copy URL stays available; applications keep reading `rtsp://…/srcN` as usual regardless of the publish protocol.
+Insight shows such a slot as **External** within about two seconds: the row is read-only, the chip lists protocol, publisher address and, once probed, resolution and frame rate. The codec cell turns amber with a warning when the stream uses a codec Neat pipelines cannot decode (anything other than H.264, H.265 or MJPEG). Copy URL stays available; applications keep reading `rtsp://…/srcN` as usual.
 
 Whoever publishes first holds the slot. Starting a file on an External slot, or publishing to a slot Insight is already streaming, is rejected instead of silently replacing the running stream. **Take over** — the square stop glyph in the External row — disconnects the external publisher (and its readers) after a confirmation; the slot returns to Idle with its previous file assignment. A publisher that reconnects automatically may re-take an idle slot, so stop the external tool first when you want to reuse the slot for a file.
 
@@ -83,12 +89,6 @@ Auto Assign, Bulk Start, Stop All and Reset never touch External slots; the resu
 ![Insight Streaming Sources view with two External slots, one of them flagged for an unsupported codec.](images/insight-external-source.png)
 
 External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
-
-This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
-
-![Insight Streaming Sources view showing assigned source slots and source preview.](images/insight-rtsp-source.png)
-
-The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
 
 ## Video Viewer
 

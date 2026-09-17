@@ -351,7 +351,7 @@ Codec and transport are derived from the assigned media:
 | `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. |
 | `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot. |
 | `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
-| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot. |
+| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. |
 | `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
 | `POST` | `/api/mediasrc/takeover` | JSON `{"index": 2}` | Disconnect the external publisher holding a slot (409 when the slot is not external, 502 when the mediamtx API is unreachable). |
 | `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments. |

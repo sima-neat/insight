@@ -57,6 +57,7 @@ class MediamtxIntegrationTests(unittest.TestCase):
         # RTP port to be even; on some hosts ephemeral ports from _free_port() are always
         # odd, which would make mediamtx fail to start). The tests only publish over TCP.
         cfg = cfg.replace("api: yes", "api: yes\nrtspTransports: [tcp]\nwebrtc: no\nsrt: no")
+        cfg = mediamtx.render_config(cfg, mediamtx.API_PASSWORD)
         cfg_path = Path(self.tmp.name) / "mediamtx.yml"
         cfg_path.write_text(cfg, encoding="utf-8")
         self.mtx = subprocess.Popen([MTX_BINARY, str(cfg_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -86,6 +87,15 @@ class MediamtxIntegrationTests(unittest.TestCase):
     def _fresh(self):
         self.client._snapshot_at = None
         return self.client.snapshot()
+
+    def test_api_rejects_requests_without_credentials(self):
+        # mediamtx's default lets any loopback client (and, via CORS, any web page open on
+        # this host) drive the API, which can run commands through runOnInit.
+        import urllib.error
+        import urllib.request
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(f"http://127.0.0.1:{self.api_port}/v3/paths/list", timeout=2)
+        self.assertEqual(ctx.exception.code, 401)
 
     def test_first_publisher_holds_slot_and_second_is_rejected(self):
         first = self._publish()

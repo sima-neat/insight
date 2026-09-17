@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
+  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 
@@ -759,6 +759,8 @@ export default function App() {
   const metricEs = useRef(null)
   const youtubeImportAbortRef = useRef(null)
   const sourcesRef = useRef(sources)
+  const beginSourcesLoad = useRef(latestOnly())
+  const sourcePollBusy = useRef(false)
   sourcesRef.current = sources
 
   const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
@@ -835,7 +837,7 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
-  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewEnabled, previewToken) : null
+  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewEnabled, previewToken, currentSource.external?.since) : null
   // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
   // load must be keyed on the tab as well, not on the URL alone.
   const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
@@ -863,7 +865,11 @@ export default function App() {
   }
 
   async function loadSources() {
+    // A poll answered after a newer request (such as the reload that follows a user
+    // action) holds older data and must not overwrite it.
+    const isLatest = beginSourcesLoad.current()
     const data = await fetchJson('/api/mediasrc')
+    if (!isLatest()) return
     const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {}, readers: [] })
     setSources(filled)
   }
@@ -1025,7 +1031,6 @@ export default function App() {
 
   useEffect(() => {
     setPreviewError(false)
-    setPreviewToken(Date.now())
   }, [tab])
 
   useEffect(() => {
@@ -1037,6 +1042,9 @@ export default function App() {
       // on its URL, so every URL change detaches the element captured above (the ref
       // already points at the replacement, or at null, when this cleanup runs).
       if (img && !img.isConnected) img.src = ''
+      // Coming back to the tab mounts a new <img> on the same URL; forgetting the loaded
+      // URL brings the connecting indicator back without a second, aborted request.
+      setLoadedPreviewSrc(null)
     }
   }, [activePreviewSrc])
 
@@ -1060,7 +1068,12 @@ export default function App() {
     const tick = () => {
       if (document.visibilityState !== 'visible') return
       if (sourcesRef.current.some(isExternal)) setNow(Date.now())
-      loadSources().catch((e) => console.warn('Source poll failed:', e.message))
+      // One poll at a time: a slow server would otherwise have every response superseded.
+      if (sourcePollBusy.current) return
+      sourcePollBusy.current = true
+      loadSources()
+        .catch((e) => console.warn('Source poll failed:', e.message))
+        .finally(() => { sourcePollBusy.current = false })
     }
     tick()
     const timer = setInterval(tick, 2000)
@@ -1525,6 +1538,18 @@ export default function App() {
     }
   }
 
+  // A per-source action can be refused, e.g. with 409 when an external publisher took the
+  // slot since the last poll: show the reason and resync the list.
+  async function sourceAction(run) {
+    try {
+      await run()
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+      loadSources().catch(() => {})
+    }
+  }
+
   async function updateSource(index, patch) {
     const src = sources.find((item) => item.index === index) || {}
     const next = {
@@ -1533,30 +1558,27 @@ export default function App() {
       transport: src.transport || 'rtsp',
       ...patch
     }
-    await fetchJson('/api/mediasrc/assign', {
+    await sourceAction(() => fetchJson('/api/mediasrc/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(next)
-    })
-    await loadSources()
+    }))
   }
 
   async function startSource(index) {
-    await fetchJson('/api/mediasrc/start', {
+    await sourceAction(() => fetchJson('/api/mediasrc/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index })
-    })
-    await loadSources()
+    }))
   }
 
   async function stopSource(index) {
-    await fetchJson('/api/mediasrc/stop', {
+    await sourceAction(() => fetchJson('/api/mediasrc/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index })
-    })
-    await loadSources()
+    }))
   }
 
   async function autoAssignAllSources() {
