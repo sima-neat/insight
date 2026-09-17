@@ -257,6 +257,15 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertNotIn("fps=", " ".join(cmd))
         self.assertIn("mpjpeg", cmd)
 
+    def test_preview_command_skips_stream_probing_without_duplicating_frames(self):
+        cmd = mediasrc.preview_command("rtsp://127.0.0.1:8554/src2?reader=insight-preview")
+        input_index = cmd.index("-i")
+        input_options = cmd[:input_index]
+        output_options = cmd[input_index + 2:]
+        self.assertEqual(input_options[input_options.index("-analyzeduration") + 1], "0")
+        self.assertEqual(input_options[input_options.index("-probesize") + 1], "32")
+        self.assertEqual(output_options[output_options.index("-fps_mode") + 1], "passthrough")
+
     def test_preview_route_validation(self):
         self.assertEqual(self.client.get("/stream/preview/src999.mjpg").status_code, 404)
         self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 409)
