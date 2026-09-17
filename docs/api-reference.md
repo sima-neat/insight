@@ -45,7 +45,7 @@ curl -k -H "Content-Type: application/json" \
 
 Read `/api/mediasrc` before changing assignments or playback state. Stop active sources before deleting their media when possible.
 
-A slot published to by something other than Insight reports `state: "external"` with an `external` object (protocol, address, since, codec support, dimensions, bit rate); every slot also lists its current `readers`. `start`, `assign` and `stop` return `409` for such a slot; `POST /api/mediasrc/takeover` disconnects the publisher. Bulk operations skip external slots and list them in `skipped_external`. `GET /stream/preview/src<N>.mjpg` renders an MJPEG preview of any live slot at the source frame rate.
+A slot published to by something other than Insight reports `state: "external"` with an `external` object (protocol, address, since, codec support, dimensions, bit rate); every slot also lists its current `readers`. `start` and `assign` return `409` for such a slot, and so does `stop` once Insight has no stream of its own left on it; `POST /api/mediasrc/takeover` disconnects the publisher. Bulk operations leave the external stream running and list the slots in `skipped_external`; `reset` still clears the stored record of every slot. `GET /stream/preview/src<N>.mjpg` renders an MJPEG preview of any live slot at the source frame rate.
 
 ## Response and streaming conventions
 

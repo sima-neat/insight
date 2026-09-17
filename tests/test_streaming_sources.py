@@ -472,14 +472,17 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(body["skipped_external"], [1])
         self.assertEqual(self._persisted(1)["state"], "stopped")
 
-    def test_reset_keeps_the_assignment_of_an_external_slot(self):
+    def test_reset_clears_the_assignment_of_an_external_slot(self):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         for index in (1, 2):
             self.client.post("/api/mediasrc/assign", json={"index": index, "file": "clip.mp4", "transport": "rtsp", "codec": "h264"})
         self.mtx.paths["src2"] = external_path(2)
         self.client.post("/api/mediasrc/reset")
         self.assertEqual(self._persisted(1)["file"], "")
-        self.assertEqual(self._persisted(2)["file"], "clip.mp4")
+        self.assertEqual(self._persisted(2)["file"], "")
+        # The record is cleared, the external stream is not touched.
+        self.assertEqual(self.mtx.kicked, [])
+        self.assertEqual(self.client.get("/api/mediasrc").get_json()[1]["state"], "external")
 
     def test_mutating_routes_reject_a_non_integer_index(self):
         # 2.0 and true compare equal to a slot index but miss the "src2" snapshot key,
