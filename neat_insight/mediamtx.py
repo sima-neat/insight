@@ -56,6 +56,9 @@ REQUEST_TIMEOUT_SECONDS = 0.5
 SNAPSHOT_TTL_SECONDS = 1.0
 UNAVAILABLE_BACKOFF_SECONDS = 10.0
 INITIAL_BACKOFF_SECONDS = 1.0
+# Set by the launcher when the API port was already taken and mediamtx was started with the
+# API off: the client then never queries, since the port's owner is not this Insight's mediamtx.
+api_disabled_at_launch = False
 STALE_GRACE_SECONDS = 5.0
 PROBE_TIMEOUT_SECONDS = 5
 PAGE_SIZE = 1000
@@ -248,6 +251,8 @@ class MediamtxClient:
         return json.loads(body)["items"]
 
     def snapshot(self) -> Optional[dict]:
+        if api_disabled_at_launch:
+            return None
         # The lock protects cache state only; the HTTP calls run unlocked so a slow/hung
         # API doesn't block other callers.
         now = self._clock()

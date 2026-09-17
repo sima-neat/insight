@@ -291,6 +291,11 @@ def _terminate_conflicting_ports():
 
 def _tcp_port_is_bound(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # Like mediamtx's own listener (Go sets SO_REUSEADDR), so a socket the previous
+        # mediamtx left in TIME_WAIT does not count as a foreign owner of the port. On
+        # Windows the same option would let the bind succeed over a live listener.
+        if os.name == "posix":
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError:
@@ -310,6 +315,9 @@ def _write_mediamtx_runtime_config(mtx_config, api_port=mediamtx.API_PORT):
         logging.warning(
             "mediamtx API port %s is already in use; external publisher detection is disabled", api_port
         )
+        # Whatever owns the port may be another mediamtx with an open API; its paths must
+        # never be read as this Insight's slots.
+        mediamtx.api_disabled_at_launch = True
     try:
         rendered = mediamtx.render_config(text, mediamtx.API_PASSWORD, api_enabled=api_enabled)
     except mediamtx.MediamtxError as exc:
