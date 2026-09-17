@@ -36,8 +36,11 @@ test('preview rate persistence is safe and defaults to off', () => {
   const store = new Map()
   const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v) }
   assert.equal(readPreviewRate(storage), 'off')
+  writePreviewRate(storage, 'max')
+  assert.equal(readPreviewRate(storage), 'max')
+  // A rate stored by an older build (1 fps, 0.5 fps) is no longer offered.
   writePreviewRate(storage, '1')
-  assert.equal(readPreviewRate(storage), '1')
+  assert.equal(readPreviewRate(storage), 'off')
   writePreviewRate(storage, 'bogus')
   assert.equal(readPreviewRate(storage), 'off')
   assert.equal(readPreviewRate({ getItem() { throw new Error('blocked') } }), 'off')
@@ -45,12 +48,13 @@ test('preview rate persistence is safe and defaults to off', () => {
 })
 
 test('preview url', () => {
-  assert.equal(previewUrl(2, '0.5'), '/stream/preview/src2.mjpg?fps=0.5')
+  assert.equal(previewUrl(2, 'max'), '/stream/preview/src2.mjpg?fps=max')
+  assert.equal(previewUrl(2, '5'), '/stream/preview/src2.mjpg?fps=5')
   assert.equal(previewUrl(2, 'off'), null)
 })
 
 test('preview src carries a remount token', () => {
-  assert.equal(previewSrc(2, '1', 1737000000000), '/stream/preview/src2.mjpg?fps=1&t=1737000000000')
+  assert.equal(previewSrc(2, 'max', 1737000000000), '/stream/preview/src2.mjpg?fps=max&t=1737000000000')
   assert.equal(previewSrc(2, 'off', 1737000000000), null)
 })
 

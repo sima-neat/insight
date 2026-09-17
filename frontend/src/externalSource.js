@@ -1,7 +1,6 @@
 export const PREVIEW_RATES = [
+  { value: 'max', label: 'Max' },
   { value: '5', label: '5 fps' },
-  { value: '1', label: '1 fps' },
-  { value: '0.5', label: '0.5 fps' },
   { value: 'off', label: 'Off' },
 ]
 export const PREVIEW_RATE_STORAGE_KEY = 'neatInsight.externalPreviewFps'

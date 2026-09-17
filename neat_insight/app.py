@@ -86,7 +86,7 @@ MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
 mediamtx_client = MediamtxClient()
-PREVIEW_RATES = {"5": 5.0, "1": 1.0, "0.5": 0.5}
+PREVIEW_RATES = {"max": None, "5": 5.0}
 PREVIEW_MAX_STREAMS = 4
 _preview_lock = threading.Lock()
 _preview_count = 0
@@ -2551,11 +2551,11 @@ def snapshot_http_mjpeg(index):
 
 @app.get("/stream/preview/src<int:index>.mjpg")
 def stream_preview_mjpeg(index):
-    """Return a throttled multipart MJPEG preview of whatever is live on one source slot (fps=5|1|0.5)."""
+    """Return a multipart MJPEG preview of whatever is live on one source slot (fps=max|5)."""
     global _preview_count
     rate = request.args.get("fps", "")
     if rate not in PREVIEW_RATES:
-        return _json_error("fps must be one of 5, 1, 0.5")
+        return _json_error("fps must be one of max, 5")
     if not 1 <= index <= DEFAULT_SOURCE_COUNT:
         return _json_error("Source not found", 404)
     path = _path_snapshot().get(f"src{index}")

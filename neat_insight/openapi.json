@@ -660,12 +660,12 @@
     "/stream/preview/src{index}.mjpg": {
       "get": {
         "tags": ["Media sources"],
-        "summary": "Throttled MJPEG preview of a live slot",
-        "description": "Multipart MJPEG rendering of whatever is currently published on one slot, external or Insight-owned, scaled to at most 640 px wide. `fps=5` decodes every frame; `fps=1` and `fps=0.5` decode keyframes only, so the effective refresh is bounded by the publisher's keyframe interval. The ffmpeg reader runs only while the HTTP connection is open. At most 4 previews run concurrently.",
+        "summary": "MJPEG preview of a live slot",
+        "description": "Multipart MJPEG rendering of whatever is currently published on one slot, external or Insight-owned, scaled to at most 640 px wide. `fps=max` follows the source frame rate (full decode); `fps=5` decodes every frame and emits 5 fps. The ffmpeg reader runs only while the HTTP connection is open. At most 4 previews run concurrently.",
         "operationId": "previewMediaSource",
         "parameters": [
           {"name": "index", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}},
-          {"name": "fps", "in": "query", "required": true, "schema": {"type": "string", "enum": ["5", "1", "0.5"]}}
+          {"name": "fps", "in": "query", "required": true, "schema": {"type": "string", "enum": ["max", "5"]}}
         ],
         "responses": {
           "200": {"description": "Multipart MJPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
