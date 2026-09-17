@@ -598,6 +598,7 @@ input {
 }
 
 .preview {
+  position: relative;
   min-height: 190px;
   border: 1px dashed #c9d5e2;
   border-radius: var(--radius-md);
@@ -612,6 +613,25 @@ input {
   max-width: 100%;
   max-height: 280px;
   border-radius: 10px;
+}
+
+/* Keeps loading (hidden elements still fetch) without showing a stale or partial frame. */
+.preview img.loading {
+  visibility: hidden;
+  position: absolute;
+}
+
+.preview-loading {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  width: min(240px, 100%);
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.preview-loading .upload-progress-track {
+  width: 100%;
 }
 
 .actions {
