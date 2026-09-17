@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  PREVIEW_RATES, codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
-  previewSrc, protocolLabel, readPreviewRate, readersText, writePreviewRate,
+  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
+  previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
@@ -698,11 +698,11 @@ export default function App() {
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [selectedSource, setSelectedSource] = useState(1)
-  const [previewRate, setPreviewRate] = useState(() => {
+  const [previewEnabled, setPreviewEnabled] = useState(() => {
     try {
-      return readPreviewRate(window.localStorage)
+      return readPreviewEnabled(window.localStorage)
     } catch {
-      return 'off'
+      return false
     }
   })
   const [previewError, setPreviewError] = useState(false)
@@ -834,7 +834,7 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
-  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewRate, previewToken) : null
+  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewEnabled, previewToken) : null
   // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
   // load must be keyed on the tab as well, not on the URL alone.
   const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
@@ -1616,28 +1616,14 @@ export default function App() {
     }
   }
 
-  function changePreviewRate(value) {
-    setPreviewRate(value)
+  function togglePreview() {
+    const next = !previewEnabled
+    setPreviewEnabled(next)
     setPreviewError(false)
     setPreviewToken(Date.now())
     try {
-      writePreviewRate(window.localStorage, value)
+      writePreviewEnabled(window.localStorage, next)
     } catch {}
-  }
-
-  function onPreviewRateKeyDown(e) {
-    const i = PREVIEW_RATES.findIndex((r) => r.value === previewRate)
-    let next = -1
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      next = (i + 1) % PREVIEW_RATES.length
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      next = (i - 1 + PREVIEW_RATES.length) % PREVIEW_RATES.length
-    }
-    if (next < 0) return
-    changePreviewRate(PREVIEW_RATES[next].value)
-    // Roving tabindex: the selection moves the tab stop, so focus has to follow it.
-    e.currentTarget.querySelectorAll('[role="radio"]')[next]?.focus()
-    e.preventDefault()
   }
 
   async function copyStreamUrl(src) {
@@ -2173,24 +2159,17 @@ export default function App() {
                         <h2>Source Preview: src{currentSource.index} <span className="src-state external preview-badge">External</span></h2>
                         <p className="hint"><code>{currentSource.urls?.rtsp || `${rtspBase}/src${currentSource.index}`}</code></p>
                       </div>
-                      <div className="preview-rate" role="radiogroup" aria-label="Preview rate" onKeyDown={onPreviewRateKeyDown}>
-                        {PREVIEW_RATES.map((r) => (
-                          <button
-                            key={r.value}
-                            type="button"
-                            role="radio"
-                            aria-checked={previewRate === r.value}
-                            tabIndex={previewRate === r.value ? 0 : -1}
-                            className={previewRate === r.value ? 'rate-segment on' : 'rate-segment'}
-                            onClick={() => changePreviewRate(r.value)}
-                          >
-                            {r.label}
-                          </button>
-                        ))}
-                      </div>
+                      <button
+                        type="button"
+                        className={previewEnabled ? 'btn-tonal preview-toggle' : 'btn-ghost preview-toggle'}
+                        aria-pressed={previewEnabled}
+                        onClick={togglePreview}
+                      >
+                        {previewEnabled ? 'Preview on' : 'Preview off'}
+                      </button>
                     </div>
                     <div className="preview">
-                      {!src && <p>Preview is off. Nothing is decoded. Pick a rate above to watch this stream.</p>}
+                      {!src && <p>Preview is off. Nothing is decoded. Turn it on to watch this stream.</p>}
                       {src && previewError && (
                         <p>
                           Preview unavailable.{' '}

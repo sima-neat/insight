@@ -661,15 +661,13 @@
       "get": {
         "tags": ["Media sources"],
         "summary": "MJPEG preview of a live slot",
-        "description": "Multipart MJPEG rendering of whatever is currently published on one slot, external or Insight-owned, scaled to at most 640 px wide. `fps=max` follows the source frame rate (full decode); `fps=5` decodes every frame and emits 5 fps. The ffmpeg reader runs only while the HTTP connection is open. At most 4 previews run concurrently.",
+        "description": "Multipart MJPEG rendering of whatever is currently published on one slot, external or Insight-owned, scaled to at most 640 px wide and following the source frame rate. The ffmpeg reader runs only while the HTTP connection is open. At most 4 previews run concurrently.",
         "operationId": "previewMediaSource",
         "parameters": [
-          {"name": "index", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}},
-          {"name": "fps", "in": "query", "required": true, "schema": {"type": "string", "enum": ["max", "5"]}}
+          {"name": "index", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}}
         ],
         "responses": {
           "200": {"description": "Multipart MJPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
           "429": {"description": "Too many previews open.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},

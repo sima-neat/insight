@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
-  previewSrc, previewUrl, protocolLabel, readPreviewRate, readersText, writePreviewRate,
+  previewSrc, previewUrl, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 
 const ext = { protocol: 'rtsp', address: '172.19.0.1', since: '2026-09-16T13:09:59Z', codec_supported: true, width: 640, height: 480, fps: 30, bitrate_bps: 1800000 }
@@ -32,30 +32,29 @@ test('codec warning only when unsupported', () => {
   assert.match(codecWarningText({ codec_supported: false }, 'VP8'), /VP8 .*H\.264, H\.265 or MJPEG/)
 })
 
-test('preview rate persistence is safe and defaults to off', () => {
+test('preview toggle persistence is safe and defaults to off', () => {
   const store = new Map()
   const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v) }
-  assert.equal(readPreviewRate(storage), 'off')
-  writePreviewRate(storage, 'max')
-  assert.equal(readPreviewRate(storage), 'max')
-  // A rate stored by an older build (1 fps, 0.5 fps) is no longer offered.
-  writePreviewRate(storage, '1')
-  assert.equal(readPreviewRate(storage), 'off')
-  writePreviewRate(storage, 'bogus')
-  assert.equal(readPreviewRate(storage), 'off')
-  assert.equal(readPreviewRate({ getItem() { throw new Error('blocked') } }), 'off')
-  assert.doesNotThrow(() => writePreviewRate({ setItem() { throw new Error('blocked') } }, '5'))
+  assert.equal(readPreviewEnabled(storage), false)
+  writePreviewEnabled(storage, true)
+  assert.equal(readPreviewEnabled(storage), true)
+  writePreviewEnabled(storage, false)
+  assert.equal(readPreviewEnabled(storage), false)
+  // Anything but the literal '1' (including a rate left by an older build) means off.
+  store.set('neatInsight.externalPreviewEnabled', 'max')
+  assert.equal(readPreviewEnabled(storage), false)
+  assert.equal(readPreviewEnabled({ getItem() { throw new Error('blocked') } }), false)
+  assert.doesNotThrow(() => writePreviewEnabled({ setItem() { throw new Error('blocked') } }, true))
 })
 
 test('preview url', () => {
-  assert.equal(previewUrl(2, 'max'), '/stream/preview/src2.mjpg?fps=max')
-  assert.equal(previewUrl(2, '5'), '/stream/preview/src2.mjpg?fps=5')
-  assert.equal(previewUrl(2, 'off'), null)
+  assert.equal(previewUrl(2, true), '/stream/preview/src2.mjpg')
+  assert.equal(previewUrl(2, false), null)
 })
 
 test('preview src carries a remount token', () => {
-  assert.equal(previewSrc(2, 'max', 1737000000000), '/stream/preview/src2.mjpg?fps=max&t=1737000000000')
-  assert.equal(previewSrc(2, 'off', 1737000000000), null)
+  assert.equal(previewSrc(2, true, 1737000000000), '/stream/preview/src2.mjpg?t=1737000000000')
+  assert.equal(previewSrc(2, false, 1737000000000), null)
 })
 
 test('live-for, bitrate and readers formatting', () => {
