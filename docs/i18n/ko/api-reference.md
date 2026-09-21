@@ -43,6 +43,16 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
+다른 프레임 속도로 스트리밍하려면 할당에 `fps`를 포함하고, 필요하면 인코딩 과정을 확인하세요.
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare`는 `progress <seconds>/<total>` 줄을 스트리밍하고 `Rendition ready: …`, `Reusing rendition: …` 또는 `Error: …`로 끝납니다. `prepare`를 건너뛰면 `start`가 같은 준비 작업을 출력 없이 수행합니다. `GET /api/mediasrc/renditions`는 캐시된 렌디션의 디스크 사용량을 보고하고, `POST /api/mediasrc/renditions/clear`는 재생 중인 소스가 사용하지 않는 캐시된 렌디션을 삭제합니다.
+
 할당 또는 재생 상태를 변경하기 전에 `/api/mediasrc`를 읽어보세요. 가능하면 미디어를 삭제하기 전에 활성 상태의 소스를 중지하세요.
 
 Insight 이외의 주체가 게시하는 슬롯은 `state: "external"`과 `external` 객체(프로토콜, 주소, 게시 시작 시각, 코덱 지원 여부, 해상도, 비트레이트)를 보고하며, 모든 슬롯은 현재 `readers`도 나열합니다. 이러한 슬롯에 대해 `start`와 `assign`은 `409`를 반환하며, 슬롯에 Insight 자체 스트림이 더 이상 남아 있지 않으면 `stop`도 마찬가지입니다. `POST /api/mediasrc/takeover`는 게시자의 연결을 끊습니다. 일괄 작업은 외부 스트림을 계속 실행 상태로 두고 해당 슬롯을 `skipped_external`에 나열합니다. `reset`은 여전히 모든 슬롯의 저장된 기록을 지웁니다. `GET /stream/preview/src<N>.mjpg`는 라이브 상태인 모든 슬롯의 MJPEG 미리보기를 소스 프레임 속도로 렌더링합니다.
