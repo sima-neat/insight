@@ -337,11 +337,20 @@ function positionCaptionOverlay(video, canvas, root) {
   root.style.overflowY = "auto";
 }
 
+// A brief "waiting" event is normal, harmless jitter on a live stream --
+// only treat it as a real stale/reconnecting stream if it doesn't recover
+// within this window.
+const STALE_STREAM_CLEAR_DELAY_MS = 3000;
+
 function disposeCaptionOverlay(canvas) {
   const els = captionOverlaysByCanvas.get(canvas);
   if (!els) return;
+  if (els.staleTimer) clearTimeout(els.staleTimer);
   els.resizeObserver.disconnect();
   els.video.removeEventListener("loadedmetadata", els.reposition);
+  els.video.removeEventListener("emptied", els.handleStreamEmptied);
+  els.video.removeEventListener("waiting", els.handleStreamWaiting);
+  els.video.removeEventListener("playing", els.handleStreamRecovered);
   window.removeEventListener("resize", els.reposition);
   els.root.remove();
   captionOverlaysByCanvas.delete(canvas);
@@ -371,7 +380,7 @@ function ensureCaptionOverlay(video, canvas) {
     padding: 14px 40px 14px 14px;
     white-space: pre-wrap;
     word-break: break-word;
-    pointer-events: none;
+    pointer-events: auto;
     z-index: 20;
   `;
 
@@ -411,20 +420,62 @@ function ensureCaptionOverlay(video, canvas) {
 
   container.appendChild(root);
 
-  const reposition = () => {
+  // Declared once, mutated in place from here on -- lets the handlers below
+  // reference the one stable object instead of juggling several closures.
+  const els = { root, textEl, state, video, staleTimer: null };
+  captionOverlaysByCanvas.set(canvas, els);
+
+  els.reposition = () => {
     if (!document.body.contains(canvas)) {
       disposeCaptionOverlay(canvas);
       return;
     }
     positionCaptionOverlay(video, canvas, root);
   };
-  const resizeObserver = new ResizeObserver(reposition);
-  resizeObserver.observe(container);
-  video.addEventListener("loadedmetadata", reposition);
-  window.addEventListener("resize", reposition);
+  els.resizeObserver = new ResizeObserver(els.reposition);
+  els.resizeObserver.observe(container);
+  video.addEventListener("loadedmetadata", els.reposition);
+  window.addEventListener("resize", els.reposition);
 
-  const els = { root, textEl, state, resizeObserver, video, reposition };
-  captionOverlaysByCanvas.set(canvas, els);
+  // A caption belongs to whatever stream was live when it arrived. Nothing
+  // in the viewer's own reconnect/stale-stream handling knows this overlay
+  // exists, so without this it would keep showing a description of a
+  // channel that has since disconnected, reconnected, or gone stale.
+  const clearOverlayState = () => {
+    state.id = null;
+    state.text = "";
+    state.dismissed = false;
+    root.style.display = "none";
+  };
+  // "emptied" fires when the source is cleared -- an unambiguous reconnect,
+  // so clear right away.
+  els.handleStreamEmptied = () => {
+    if (els.staleTimer) {
+      clearTimeout(els.staleTimer);
+      els.staleTimer = null;
+    }
+    clearOverlayState();
+  };
+  // "waiting" fires on any playback stall, including brief, harmless jitter
+  // on a live stream -- debounce it instead of clearing on the first one,
+  // and cancel if "playing" shows it recovered within the window.
+  els.handleStreamWaiting = () => {
+    if (els.staleTimer) clearTimeout(els.staleTimer);
+    els.staleTimer = setTimeout(() => {
+      els.staleTimer = null;
+      clearOverlayState();
+    }, STALE_STREAM_CLEAR_DELAY_MS);
+  };
+  els.handleStreamRecovered = () => {
+    if (els.staleTimer) {
+      clearTimeout(els.staleTimer);
+      els.staleTimer = null;
+    }
+  };
+  video.addEventListener("emptied", els.handleStreamEmptied);
+  video.addEventListener("waiting", els.handleStreamWaiting);
+  video.addEventListener("playing", els.handleStreamRecovered);
+
   return els;
 }
 
