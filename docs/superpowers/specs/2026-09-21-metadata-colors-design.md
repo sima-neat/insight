@@ -42,8 +42,10 @@ before `drawing.js`, in the same style as `viewer-settings-resolver.js`
 (an IIFE that attaches an API to `window`). It exports on
 `window.metadataColors`:
 
-- `PALETTE`: about 20 hex colors chosen to stay distinguishable over
-  video. The current `TRACK_COLORS` list is the seed.
+- `PALETTE`: 40 hex colors. The first 20 are chosen to stay clearly
+  distinguishable over video, seeded by the current `TRACK_COLORS` list; the
+  remaining 20 are overflow colors for channels showing more than 20
+  identities at once, closer together but still better than a repeat.
 - `NEUTRAL_COLOR`: used when identity is missing. `#f8fafc`, the current
   track fallback.
 - `createColorAllocator()`: returns an allocator with

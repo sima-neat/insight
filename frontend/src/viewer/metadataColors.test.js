@@ -14,10 +14,10 @@ function loadColors() {
   return window.metadataColors;
 }
 
-test("palette has 20 distinct hex colors and a neutral color", () => {
+test("palette has 40 distinct hex colors and a neutral color", () => {
   const { PALETTE, NEUTRAL_COLOR } = loadColors();
-  assert.equal(PALETTE.length, 20);
-  assert.equal(new Set(PALETTE).size, 20);
+  assert.equal(PALETTE.length, 40);
+  assert.equal(new Set(PALETTE).size, 40);
   PALETTE.forEach((color) => assert.match(color, /^#[0-9a-f]{6}$/));
   assert.equal(NEUTRAL_COLOR, "#f8fafc");
   assert.equal(PALETTE.includes(NEUTRAL_COLOR), false);
@@ -36,15 +36,19 @@ test("palette entries stay perceptually separate, except the ten original, alrea
   const { PALETTE } = loadColors();
   // PALETTE[0..9] are the original track colors (kept exactly as-is; existing tests key on
   // PALETTE[0..5]) and already ship with a couple of pairs closer than 60 apart. Every pair
-  // that involves one of the ten colors added after them must stay at least 60 apart, on
-  // both sides and among themselves, so no two colors look alike on a crowded frame.
-  const MIN_DISTANCE = 60;
+  // that involves one of the ten colors added after them (10..19) must stay at least 60
+  // apart. The twenty overflow colors (20..39) are only handed out once a channel shows more
+  // than twenty identities at once; they stay at least 45 apart from every other entry, which
+  // is as far as forty colors can be pushed while staying readable over video.
+  const MIN_DISTANCE_CORE = 60;
+  const MIN_DISTANCE_OVERFLOW = 45;
   for (let i = 0; i < PALETTE.length; i += 1) {
     for (let j = i + 1; j < PALETTE.length; j += 1) {
       if (i < 10 && j < 10) continue;
+      const minDistance = j >= 20 ? MIN_DISTANCE_OVERFLOW : MIN_DISTANCE_CORE;
       const distance = hexDistance(PALETTE[i], PALETTE[j]);
       assert.ok(
-        distance >= MIN_DISTANCE,
+        distance >= minDistance,
         `PALETTE[${i}]=${PALETTE[i]} and PALETTE[${j}]=${PALETTE[j]} are only ${distance.toFixed(1)} apart`,
       );
     }
