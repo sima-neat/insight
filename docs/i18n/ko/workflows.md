@@ -66,6 +66,16 @@ curl -k -F "file=@${tmpdir}/video01.mp4" \
 
 애플리케이션이 SDK 컨테이너 외부에서 실행될 때, 테스트를 시작하기 전에 `neat --json`에서 RTSP, 비디오 UDP 및 메타데이터 UDP 호스트 포트를 확인합니다.
 
+## 외부 도구 또는 웹캠에서 스트리밍
+
+1. 스트리밍 소스를 열고 유휴 상태로 표시된 슬롯을 선택합니다.
+2. 호스트에서 해당 슬롯으로 게시합니다. 예: `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`
+3. 슬롯이 외부로 바뀝니다. 슬롯을 선택하고 미리보기를 켜서 화면을 확인합니다. 첫 프레임은 게시자의 다음 키프레임에서 나타나므로 키프레임 간격을 짧게 유지하십시오(위의 `-g 30`).
+4. 다른 소스와 마찬가지로 슬롯의 RTSP URL을 대상으로 애플리케이션을 실행합니다.
+5. 슬롯을 파일용으로 재사용하려면 외부 도구를 중지하거나 인수를 누릅니다.
+
+`sima-ai/tool-mediasources`(`mediasrc.sh`)는 같은 RTSP 포트에서 자체 MediaMTX를 시작하고 스트림 번호를 `src0`부터 매깁니다. 둘 다 실행하지 말고, 다른 포트에서 실행하거나 대신 Insight의 슬롯을 사용하십시오.
+
 ## SDK 포트 맵에서 애플리케이션 엔드포인트를 구성합니다.
 
 애플리케이션이 DevKit에서 실행되고 Insight이 SDK 내에서 실행될 때 이 워크플로를 사용하세요.
