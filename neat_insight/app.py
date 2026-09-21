@@ -2399,7 +2399,7 @@ def prepare_source():
                     yield f"Encoding {event['file']} at {event['fps']} fps ({event['encoder']})...\n"
                 elif kind == "progress":
                     total = event.get("total")
-                    if total:
+                    if total is not None:
                         yield f"progress {event['seconds']:.1f}/{total:.1f}\n"
                     else:
                         yield f"progress {event['seconds']:.1f}\n"
@@ -2410,7 +2410,8 @@ def prepare_source():
                         yield f"Reusing rendition: {event['rendition']}\n"
                     else:
                         yield f"Rendition ready: {event['rendition']}\n"
-        except renditions.RenditionError as exc:
+        except Exception as exc:
+            logging.warning("Rendition preparation failed for %s: %s", file_name, exc)
             yield f"Error: {exc}\n"
 
     return Response(stream_with_context(generate()), mimetype="text/plain")
