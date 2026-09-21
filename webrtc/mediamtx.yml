@@ -4,6 +4,23 @@ rtmp: no
 rtspAddress: :8554
 logLevel: info
 
+# Lets browsers publish a webcam straight into MediaMTX over WHIP; the
+# resulting stream is then available as RTSP on the same path, same as an
+# ffmpeg-pushed video file. webrtcServerCert/webrtcServerKey are supplied at
+# launch (see neat_insight/utils.py start_processes) via the MTX_WEBRTC*
+# environment overrides, so the WHIP endpoint reuses Insight's own trusted
+# mkcert/SDK certificate instead of shipping a second one here.
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+webrtcAllowOrigin: '*'
+
+# Backs the "is this webcam actually publishing" status Insight polls per
+# source (see neat_insight/mediasrc.py webcam_path_is_ready); loopback-only,
+# never exposed outside the container/host.
+api: yes
+apiAddress: 127.0.0.1:9997
+
 
 paths:
   src1: {}

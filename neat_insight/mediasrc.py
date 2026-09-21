@@ -1,17 +1,25 @@
+import json
 import logging
 import os
 import subprocess
 import threading
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
+MEDIAMTX_API_BASE_URL = "http://127.0.0.1:9997"
+WEBCAM_WHIP_PORT = 8889
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
 DEFAULT_TRANSPORT = "rtsp"
 DEFAULT_CODEC = "h264"
 SUPPORTED_TRANSPORTS = {"rtsp", "http"}
 SUPPORTED_CODECS = {"h264", "h265", "mjpeg"}
+SOURCE_TYPE_FILE = "file"
+SOURCE_TYPE_WEBCAM = "webcam"
+SUPPORTED_SOURCE_TYPES = {SOURCE_TYPE_FILE, SOURCE_TYPE_WEBCAM}
 
 
 def normalize_transport(value: Optional[str]) -> str:
@@ -285,3 +293,24 @@ def media_stream_identity(index: int) -> Optional[int]:
     with registry_lock:
         stream = pipeline_registry.get(slot)
         return id(stream) if stream else None
+
+
+def webcam_path_name(index: int) -> str:
+    return f"src{index}"
+
+
+def webcam_is_publishing(index: int) -> bool:
+    """Ask MediaMTX itself whether a browser is currently WHIP-publishing to this slot.
+
+    A webcam source has no Python-managed process to poll (unlike a file
+    source's ffmpeg push), so liveness must come from MediaMTX's own path
+    state rather than pipeline_registry.
+    """
+    path_name = webcam_path_name(index)
+    url = f"{MEDIAMTX_API_BASE_URL}/v3/paths/get/{path_name}"
+    try:
+        with urllib.request.urlopen(url, timeout=1.0) as response:
+            data = json.load(response)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return False
+    return bool(data.get("ready"))

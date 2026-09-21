@@ -37,6 +37,9 @@ if __name__ == "__main__" and (not globals().get("__package__")):
 from neat_insight.mediasrc import (
     DEFAULT_CODEC,
     DEFAULT_TRANSPORT,
+    SOURCE_TYPE_FILE,
+    SOURCE_TYPE_WEBCAM,
+    WEBCAM_WHIP_PORT,
     http_mjpeg_command,
     http_snapshot_command,
     media_stream_identity,
@@ -45,6 +48,8 @@ from neat_insight.mediasrc import (
     normalize_transport,
     start_media_stream,
     stop_media_stream,
+    webcam_is_publishing,
+    webcam_path_name,
 )
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
@@ -238,6 +243,7 @@ def _default_source(index: int):
         "state": "stopped",
         "transport": DEFAULT_TRANSPORT,
         "codec": DEFAULT_CODEC,
+        "type": SOURCE_TYPE_FILE,
     }
 
 
@@ -251,8 +257,21 @@ def _normalize_source(src, index: Optional[int] = None):
     if source_index <= 0:
         source_index = index or 1
 
+    source_type = src.get("type") if src.get("type") == SOURCE_TYPE_WEBCAM else SOURCE_TYPE_FILE
     state = src.get("state") if src.get("state") in {"playing", "stopped"} else "stopped"
     file_name = src.get("file") or ""
+
+    if source_type == SOURCE_TYPE_WEBCAM:
+        # A webcam slot has no file on disk; MediaMTX always exposes it as RTSP.
+        return {
+            "index": source_index,
+            "file": "",
+            "state": state,
+            "transport": DEFAULT_TRANSPORT,
+            "codec": DEFAULT_CODEC,
+            "type": SOURCE_TYPE_WEBCAM,
+        }
+
     raw_codec = src.get("codec")
     if file_name and raw_codec == UNKNOWN_CODEC:
         codec = UNKNOWN_CODEC
@@ -269,6 +288,7 @@ def _normalize_source(src, index: Optional[int] = None):
         "state": state,
         "transport": transport,
         "codec": codec,
+        "type": SOURCE_TYPE_FILE,
     }
 
 
@@ -2058,8 +2078,24 @@ def _source_url(src, transport: Optional[str] = None):
     return f"rtsp://{host}:8554/src{index}"
 
 
+def _webcam_whip_url(src):
+    index = int(src.get("index") or 0)
+    host = _request_host_name()
+    return f"https://{host}:{WEBCAM_WHIP_PORT}/{webcam_path_name(index)}/whip"
+
+
 def _source_with_urls(src):
     enriched = dict(src)
+    if src.get("type") == SOURCE_TYPE_WEBCAM:
+        enriched["transport"] = DEFAULT_TRANSPORT
+        enriched["codec"] = DEFAULT_CODEC
+        enriched["allowed_transports"] = ["rtsp"]
+        enriched["urls"] = {
+            "rtsp": _source_url(src, "rtsp"),
+            "whip": _webcam_whip_url(src),
+        }
+        return enriched
+
     stored_codec = src.get("codec")
     if stored_codec in {"h264", "h265", "mjpeg", UNKNOWN_CODEC}:
         codec = stored_codec
@@ -2081,13 +2117,21 @@ def _source_with_urls(src):
     return enriched
 
 
+def _source_is_live(src) -> bool:
+    index = src.get("index")
+    if index is None:
+        return False
+    if src.get("type") == SOURCE_TYPE_WEBCAM:
+        return webcam_is_publishing(index)
+    return media_stream_is_running(index)
+
+
 def _sync_source_runtime_states(sources):
     changed = False
     for src in sources:
         if src.get("state") != "playing":
             continue
-        index = src.get("index")
-        if index is None or not media_stream_is_running(index):
+        if not _source_is_live(src):
             src["state"] = "stopped"
             changed = True
     if changed:
@@ -2124,9 +2168,15 @@ def assign_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
-            was_playing = src.get("state") == "playing" and media_stream_is_running(index)
-            if was_playing:
-                stop_media_stream(index)
+            if src.get("type") == SOURCE_TYPE_WEBCAM:
+                # Reassigning a webcam slot to a file drops the webcam
+                # registration; MediaMTX has no ffmpeg process to stop here.
+                src["type"] = SOURCE_TYPE_FILE
+                was_playing = False
+            else:
+                was_playing = src.get("state") == "playing" and media_stream_is_running(index)
+                if was_playing:
+                    stop_media_stream(index)
             src["file"] = file_name
             transport, codec, _allowed_transports = _derive_source_stream_settings(file_name, requested_transport or src.get("transport"))
             src["transport"] = transport
@@ -2151,6 +2201,31 @@ def assign_source():
                 src["state"] = "stopped"
             save_sources(sources)
             return {"success": True}
+
+    return _json_error("Source not found", 404)
+
+
+# API: register one RTSP source slot to accept a browser-published webcam.
+@app.post("/api/mediasrc/assign-webcam")
+def assign_webcam_source():
+    """Accept JSON {'index': int}; mark the slot as a webcam source and return its WHIP publish URL."""
+    data = request.get_json() or {}
+    index = data.get("index")
+    if index is None:
+        return _json_error("Missing index")
+
+    sources = load_sources()
+    for src in sources:
+        if src["index"] == index:
+            if src.get("type") != SOURCE_TYPE_WEBCAM and src.get("state") == "playing":
+                stop_media_stream(index)
+            src["type"] = SOURCE_TYPE_WEBCAM
+            src["file"] = ""
+            src["transport"] = DEFAULT_TRANSPORT
+            src["codec"] = DEFAULT_CODEC
+            src["state"] = "stopped"
+            save_sources(sources)
+            return {"success": True, "source": _source_with_urls(src)}
 
     return _json_error("Source not found", 404)
 
@@ -2193,6 +2268,16 @@ def start_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
+            if src.get("type") == SOURCE_TYPE_WEBCAM:
+                # The browser is what actually publishes to MediaMTX (see
+                # /api/mediasrc/assign-webcam); this just confirms it landed
+                # before recording the slot as playing.
+                if not webcam_is_publishing(index):
+                    return _json_error("Webcam is not publishing yet", 409)
+                src["state"] = "playing"
+                save_sources(sources)
+                return {"success": True}
+
             filename = src.get("file")
             if not filename:
                 return _json_error("No file assigned to source")
@@ -2297,6 +2382,9 @@ def stop_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
+            # stop_media_stream() is a no-op for a webcam slot (nothing in
+            # pipeline_registry); actually ending the WHIP publish happens
+            # when the frontend closes its RTCPeerConnection.
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)

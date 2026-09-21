@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
 const SOURCE_COUNT = 48
+const WEBCAM_OPTION_PREFIX = '__webcam__:'
 const STREAMING_TRANSPORTS = [
   { value: 'rtsp', label: 'RTSP' },
   { value: 'http', label: 'HTTP' }
@@ -687,6 +688,11 @@ export default function App() {
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
   const [sources, setSources] = useState([])
+  const [webcamDevices, setWebcamDevices] = useState([])
+  const [webcamAssignments, setWebcamAssignments] = useState({})
+  const [webcamBusy, setWebcamBusy] = useState({})
+  const [webcamPreviewStream, setWebcamPreviewStream] = useState(null)
+  const webcamSessionsRef = useRef(new Map())
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
@@ -838,7 +844,7 @@ export default function App() {
 
   async function loadSources() {
     const data = await fetchJson('/api/mediasrc')
-    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {} })
+    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {} })
     setSources(filled)
   }
 
@@ -954,6 +960,28 @@ export default function App() {
     const t = setTimeout(() => setError(''), 4600)
     return () => clearTimeout(t)
   }, [error])
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) return
+    // Only reflects devices already permitted; a fresh grant still needs the
+    // explicit "Detect webcam" getUserMedia() prompt to populate labels.
+    refreshWebcamDevices()
+    navigator.mediaDevices.addEventListener('devicechange', refreshWebcamDevices)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', refreshWebcamDevices)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      for (const index of webcamSessionsRef.current.keys()) {
+        teardownWebcamSession(index)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const session = webcamSessionsRef.current.get(selectedSource)
+    setWebcamPreviewStream(session ? session.stream : null)
+  }, [selectedSource])
 
   useEffect(() => {
     loadMediaInfo(selectedFile)
@@ -1485,6 +1513,224 @@ export default function App() {
     await loadSources()
   }
 
+  function describeWebcamError(e) {
+    if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
+      return 'Camera permission was denied. Allow camera access for this site and try again.'
+    }
+    if (e?.name === 'NotFoundError' || e?.name === 'OverconstrainedError') {
+      return 'That camera is no longer available. Detect webcams again and reselect one.'
+    }
+    if (e?.name === 'NotReadableError') {
+      return 'The camera could not be started (it may be in use by another application).'
+    }
+    return e?.message || 'Webcam publishing failed.'
+  }
+
+  function waitForIceGatheringComplete(pc) {
+    if (pc.iceGatheringState === 'complete') return Promise.resolve()
+    return new Promise((resolve) => {
+      function check() {
+        if (pc.iceGatheringState === 'complete') {
+          pc.removeEventListener('icegatheringstatechange', check)
+          resolve()
+        }
+      }
+      pc.addEventListener('icegatheringstatechange', check)
+    })
+  }
+
+  function teardownWebcamSession(index) {
+    const session = webcamSessionsRef.current.get(index)
+    if (!session) return
+    webcamSessionsRef.current.delete(index)
+    session.stream.getTracks().forEach((track) => track.stop())
+    session.pc.close()
+    if (session.deleteUrl) {
+      // Best-effort: releases the MediaMTX path promptly, but pc.close()
+      // above already ends the media flow even if this request fails.
+      fetch(session.deleteUrl, { method: 'DELETE' }).catch(() => {})
+    }
+    setWebcamPreviewStream((prev) => (prev === session.stream ? null : prev))
+  }
+
+  async function refreshWebcamDevices() {
+    let devices
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices()
+    } catch {
+      return
+    }
+    const cameras = devices
+      .filter((device) => device.kind === 'videoinput' && device.deviceId)
+      .map((device, i) => ({ deviceId: device.deviceId, label: device.label || `Camera ${i + 1}` }))
+    setWebcamDevices(cameras)
+
+    const validIds = new Set(cameras.map((c) => c.deviceId))
+    let droppedAny = false
+    setWebcamAssignments((prev) => {
+      const next = {}
+      for (const [indexStr, assignment] of Object.entries(prev)) {
+        const index = Number(indexStr)
+        if (validIds.has(assignment.deviceId)) {
+          next[index] = assignment
+        } else {
+          droppedAny = true
+          teardownWebcamSession(index)
+        }
+      }
+      return next
+    })
+    if (droppedAny) await loadSources()
+  }
+
+  async function detectWebcams() {
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+      probe.getTracks().forEach((track) => track.stop())
+    } catch (e) {
+      setError(describeWebcamError(e))
+      return
+    }
+    await refreshWebcamDevices()
+  }
+
+  async function assignWebcamToSource(index, deviceId, label) {
+    try {
+      await fetchJson('/api/mediasrc/assign-webcam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+      setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label } }))
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  function handleSourceSelectChange(index, value) {
+    if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
+      const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
+      const device = webcamDevices.find((d) => d.deviceId === deviceId)
+      assignWebcamToSource(index, deviceId, device?.label || 'Webcam')
+      return
+    }
+    if (webcamAssignments[index]) {
+      teardownWebcamSession(index)
+      setWebcamAssignments((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+    updateSource(index, { file: value })
+  }
+
+  async function startWebcamSource(index) {
+    const assignment = webcamAssignments[index]
+    if (!assignment) {
+      setError('Select a webcam for this source before starting it.')
+      return
+    }
+    const src = sources.find((item) => item.index === index)
+    const whipUrl = src?.urls?.whip
+    if (!whipUrl) {
+      setError('No publish URL for this source; reassign the webcam and try again.')
+      return
+    }
+
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    let stream = null
+    let pc = null
+    try {
+      // Video-only for now, per the ticket's initial scope.
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: assignment.deviceId } }
+      })
+      pc = new RTCPeerConnection()
+      const videoTrack = stream.getVideoTracks()[0]
+      const sender = pc.addTrack(videoTrack, stream)
+      // Chrome's default offer prefers VP8; the rest of this app (codec
+      // badges, Core app expectations) assumes h264/h265/mjpeg only, and the
+      // ticket calls for H.264 specifically, so pin the transceiver to it
+      // rather than let the browser negotiate whatever it likes.
+      const transceiver = pc.getTransceivers().find((t) => t.sender === sender)
+      const h264Codecs = (RTCRtpSender.getCapabilities?.('video')?.codecs || [])
+        .filter((codec) => /^video\/H264$/i.test(codec.mimeType))
+      if (transceiver && typeof transceiver.setCodecPreferences === 'function' && h264Codecs.length) {
+        transceiver.setCodecPreferences(h264Codecs)
+      }
+      pc.addEventListener('connectionstatechange', () => {
+        if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+          teardownWebcamSession(index)
+          loadSources()
+        }
+      })
+
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      await waitForIceGatheringComplete(pc)
+
+      const response = await fetch(whipUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body: pc.localDescription.sdp
+      })
+      if (!response.ok) {
+        throw new Error(`Webcam publish was rejected (HTTP ${response.status}).`)
+      }
+      const answerSdp = await response.text()
+      const location = response.headers.get('Location')
+      let deleteUrl = null
+      if (location) {
+        try {
+          deleteUrl = new URL(location, whipUrl).toString()
+        } catch {
+          deleteUrl = null
+        }
+      }
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+
+      webcamSessionsRef.current.set(index, { pc, stream, deleteUrl })
+      if (index === selectedSource) setWebcamPreviewStream(stream)
+
+      // MediaMTX marks the path ready within ~1s of ICE completing; one
+      // retry absorbs that race instead of surfacing a spurious failure.
+      let confirmed = false
+      let lastError = null
+      for (let attempt = 0; attempt < 2 && !confirmed; attempt += 1) {
+        try {
+          await startSource(index)
+          confirmed = true
+        } catch (e) {
+          lastError = e
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700))
+        }
+      }
+      if (!confirmed) throw lastError || new Error('Webcam did not start publishing in time.')
+    } catch (e) {
+      teardownWebcamSession(index)
+      if (stream && !webcamSessionsRef.current.has(index)) stream.getTracks().forEach((track) => track.stop())
+      setError(describeWebcamError(e))
+      await loadSources()
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+  }
+
+  async function stopWebcamSource(index) {
+    teardownWebcamSession(index)
+    try {
+      await stopSource(index)
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   async function autoAssignAllSources() {
     try {
       const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
@@ -1909,6 +2155,13 @@ export default function App() {
                   <p className="section-note">Assign media, choose an available transport, and control source playback.</p>
                 </div>
                 <div className="rtsp-actions">
+                  <button
+                    className="btn-ghost"
+                    onClick={detectWebcams}
+                    title="Ask the browser for camera permission and list connected webcams in every source dropdown"
+                  >
+                    Detect webcam
+                  </button>
                   <button className="btn-ghost" onClick={autoAssignAllSources} title="Auto assign unique media files to all sources">
                     Auto Assign
                   </button>
@@ -1929,19 +2182,29 @@ export default function App() {
                 {sources.map((src) => (
                   <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
                     {(() => {
-                      const isAssigned = Boolean(src.file)
+                      const isWebcam = src.type === 'webcam'
+                      const webcamAssignment = webcamAssignments[src.index]
+                      const isAssigned = isWebcam || Boolean(src.file)
                       const allowedTransports = Array.isArray(src.allowed_transports) ? src.allowed_transports : (isAssigned ? ['rtsp'] : [])
                       const transportLocked = !isAssigned || allowedTransports.length <= 1
                       const transportValue = isAssigned && allowedTransports.includes(src.transport) ? src.transport : ''
                       const canStream = isAssigned && allowedTransports.length > 0
+                      const selectValue = isWebcam
+                        ? (webcamAssignment ? `${WEBCAM_OPTION_PREFIX}${webcamAssignment.deviceId}` : '')
+                        : (src.file || '')
                       return (
                         <>
                           <span className="src-label">src{src.index}</span>
                           <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
                             {src.state === 'playing' ? 'Live' : 'Idle'}
                           </span>
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
-                            <option value="">Not assigned</option>
+                          <select value={selectValue} onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}>
+                            <option value="">{isWebcam ? 'Webcam (reselect)' : 'Not assigned'}</option>
+                            {webcamDevices.map((device) => (
+                              <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
+                                {device.label} {'<webcam>'}
+                              </option>
+                            ))}
                             {videoFiles.map((file) => (
                               <option key={file} value={file}>{file}</option>
                             ))}
@@ -1964,7 +2227,7 @@ export default function App() {
                           {src.state === 'playing' ? (
                             <button
                               className="icon-action-btn stop"
-                              onClick={(e) => { e.stopPropagation(); stopSource(src.index) }}
+                              onClick={(e) => { e.stopPropagation(); isWebcam ? stopWebcamSource(src.index) : stopSource(src.index) }}
                               aria-label={`Stop src${src.index}`}
                               title={`Stop src${src.index}`}
                             >
@@ -1975,10 +2238,14 @@ export default function App() {
                           ) : (
                             <button
                               className="icon-action-btn play"
-                              onClick={(e) => { e.stopPropagation(); startSource(src.index) }}
-                              disabled={!canStream}
+                              onClick={(e) => { e.stopPropagation(); isWebcam ? startWebcamSource(src.index) : startSource(src.index) }}
+                              disabled={!canStream || (isWebcam && (!webcamAssignment || webcamBusy[src.index]))}
                               aria-label={`Start src${src.index}`}
-                              title={canStream ? `Start src${src.index}` : 'Codec must be detected before streaming'}
+                              title={
+                                isWebcam
+                                  ? (webcamAssignment ? `Start publishing ${webcamAssignment.label}` : 'Select a webcam first')
+                                  : (canStream ? `Start src${src.index}` : 'Codec must be detected before streaming')
+                              }
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M8 6v12l10-6-10-6z" />
@@ -2007,14 +2274,35 @@ export default function App() {
 
             <section className="panel">
               <h2>Source Preview: src{currentSource.index}</h2>
-              <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
+              <p className="hint">
+                {currentSource.type === 'webcam'
+                  ? `Webcam: ${webcamAssignments[currentSource.index]?.label || 'Not selected'}`
+                  : `File: ${currentSource.file || 'Not assigned'}`}
+              </p>
               <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
 
               <div className="preview">
-                {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                {!currentSource.file && <p>Assign a media file to preview.</p>}
+                {currentSource.type === 'webcam' ? (
+                  webcamPreviewStream ? (
+                    <video
+                      autoPlay
+                      muted
+                      playsInline
+                      ref={(el) => {
+                        if (el && el.srcObject !== webcamPreviewStream) el.srcObject = webcamPreviewStream
+                      }}
+                    />
+                  ) : (
+                    <p>Start this source to preview the live webcam.</p>
+                  )
+                ) : (
+                  <>
+                    {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
+                    {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
+                    {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
+                    {!currentSource.file && <p>Assign a media file to preview.</p>}
+                  </>
+                )}
               </div>
             </section>
           </div>
