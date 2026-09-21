@@ -751,7 +751,7 @@ class RenditionEncodeTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_native_fps_streams_the_source_without_encoding(self):
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
             events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 30, "h264"))
         self.assertEqual(done["event"], "done")
         self.assertTrue(done["native"])
@@ -791,7 +791,7 @@ class RenditionEncodeTests(unittest.TestCase):
 
     def test_second_call_reuses_without_running_the_encoder(self):
         _events, first = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
             events, second = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         self.assertTrue(second["reused"])
         self.assertEqual(second["path"], first["path"])
@@ -1437,11 +1437,10 @@ class StartWithRenditionTests(RenditionApiTestCase):
 
     def test_start_with_other_fps_encodes_then_streams_the_rendition(self):
         self.assign(fps=15)
-        real_popen = subprocess.Popen
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=real_popen) as popen:
+        with mock.patch.object(renditions, "encode_command", wraps=renditions.encode_command) as encode:
             response = self.client.post("/api/mediasrc/start", json={"index": 1})
         self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertEqual(popen.call_count, 1)
+        self.assertEqual(encode.call_count, 1)
         started = self.started_path()
         self.assertTrue(started.startswith(str(self.media_dir / ".renditions")), started)
         self.assertTrue(started.endswith("_15fps_h264.mp4"))
@@ -1454,7 +1453,7 @@ class StartWithRenditionTests(RenditionApiTestCase):
         self.client.post("/api/mediasrc/start", json={"index": 1})
         first = self.started_path()
         self.client.post("/api/mediasrc/stop", json={"index": 1})
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
             response = self.client.post("/api/mediasrc/start", json={"index": 1})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.started_path(), first)
@@ -1469,7 +1468,7 @@ class StartWithRenditionTests(RenditionApiTestCase):
         mediasrc.pipeline_registry.clear()
         renditions._key_locks.clear()
         fresh_client = app_module.app.test_client()
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
             response = fresh_client.post("/api/mediasrc/start", json={"index": 1})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.started_path(), first)
