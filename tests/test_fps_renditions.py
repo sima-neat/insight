@@ -9,6 +9,8 @@ from pathlib import Path
 
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55580")
 
+from neat_insight import app as app_module
+from neat_insight import mediasrc
 from neat_insight import renditions
 
 HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
@@ -377,6 +379,85 @@ class MediaStreamRenditionTests(unittest.TestCase):
         self.assertEqual(self.mediasrc.media_stream_file(3), "/m/.renditions/demo_15fps.mp4")
         self.assertEqual(self.mediasrc.pipeline_registry[2].rendition, ".renditions/demo_15fps.mp4")
         self.assertIsNone(self.mediasrc.media_stream_file(4))
+
+
+class RenditionApiTestCase(unittest.TestCase):
+    """Flask test client against a temp media dir; the stream process is mocked, ffmpeg encodes for real."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        self.media_dir = self.root / "media"
+        self.media_dir.mkdir()
+        self.sources_file = self.root / "media_sources.json"
+        self.sources_file.write_text("[]", encoding="utf-8")
+        self.index_path = self.root / "renditions.json"
+        self.old = (app_module.MEDIA_DIR, app_module.MEDIA_SRC_DATA_FILE, app_module.RENDITIONS_INDEX_FILE)
+        app_module.MEDIA_DIR = self.media_dir
+        app_module.MEDIA_SRC_DATA_FILE = self.sources_file
+        app_module.RENDITIONS_INDEX_FILE = self.index_path
+        app_module.app.config.update(TESTING=True)
+        self.client = app_module.app.test_client()
+        mediasrc.pipeline_registry.clear()
+
+    def tearDown(self):
+        mediasrc.pipeline_registry.clear()
+        app_module.MEDIA_DIR, app_module.MEDIA_SRC_DATA_FILE, app_module.RENDITIONS_INDEX_FILE = self.old
+        self.tmpdir.cleanup()
+
+    def assign(self, index=1, file="demo.mp4", **extra):
+        return self.client.post("/api/mediasrc/assign", json={"index": index, "file": file, **extra})
+
+    def source(self, index=1):
+        return next(s for s in self.client.get("/api/mediasrc").get_json() if s["index"] == index)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+class SlotFpsTests(RenditionApiTestCase):
+    def setUp(self):
+        super().setUp()
+        make_test_clip(self.media_dir / "demo.mp4", fps=30)
+
+    def test_default_slot_has_null_fps_and_reports_native_fps(self):
+        self.assertEqual(self.assign().status_code, 200)
+        src = self.source()
+        self.assertIsNone(src["fps"])
+        self.assertEqual(src["native_fps"], 30)
+        self.assertIsNone(src["active_file"])
+
+    def test_assign_accepts_valid_fps_and_persists_it(self):
+        self.assertEqual(self.assign(fps=15).status_code, 200)
+        self.assertEqual(self.source()["fps"], 15)
+        self.assertEqual(app_module.load_sources()[0]["fps"], 15)
+        self.assertEqual(json.loads(self.sources_file.read_text())[0]["fps"], 15)
+
+    def test_assign_rejects_invalid_fps(self):
+        for value in (0, -5, "abc", 2.5, 999):
+            with self.subTest(value=value):
+                response = self.assign(fps=value)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("between 1 and 240", response.get_json()["error"])
+
+    def test_changing_file_resets_fps_but_changing_transport_keeps_it(self):
+        make_test_clip(self.media_dir / "other.mp4", fps=25)
+        self.assign(fps=15)
+        self.assign(file="demo.mp4", transport="rtsp")
+        self.assertEqual(self.source()["fps"], 15)
+        self.assign(file="other.mp4")
+        src = self.source()
+        self.assertIsNone(src["fps"])
+        self.assertEqual(src["native_fps"], 25)
+
+    def test_normalize_source_drops_invalid_persisted_fps(self):
+        self.sources_file.write_text('[{"index": 1, "file": "demo.mp4", "state": "stopped", "fps": "bogus"}, {"index": 2, "file": "demo.mp4", "state": "stopped", "fps": 20}]', encoding="utf-8")
+        sources = app_module.load_sources()
+        self.assertIsNone(sources[0]["fps"])
+        self.assertEqual(sources[1]["fps"], 20)
+
+    def test_renditions_directory_is_hidden_from_video_lists(self):
+        (self.media_dir / ".renditions").mkdir()
+        make_test_clip(self.media_dir / ".renditions" / "demo_abc123_15fps_h264.mp4", fps=15, seconds=0.5)
+        self.assertEqual(self.client.get("/api/mediasrc/videos").get_json(), ["demo.mp4"])
 
 
 if __name__ == "__main__":
