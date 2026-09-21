@@ -121,7 +121,7 @@ Overlays pick colors from one shared palette so that different identities stay a
 | `tracking` | track `id` | box, label, history trail |
 | `pose-estimation` | pose `id` | keypoints, skeleton, keypoint names, box, label |
 
-Colors are allocated per channel the first time an identity appears and stay fixed for as long as the page is open. Class labels share one allocation on a channel, so `person` looks the same in detection, segmentation and classification. Tracks and poses are allocated separately. When more identities appear than the palette holds, the color of the identity seen longest ago is reused, so the identities currently on screen stay as distinct as possible.
+Colors are allocated per channel the first time an identity appears and stay fixed for as long as the channel stays connected. Class labels share one allocation on a channel, so `person` looks the same in detection, segmentation and classification. Overrides are per metadata type: an object-detection entry for `person` does not recolor `person` in segmentation or classification. Tracks and poses are allocated separately. When more identities appear than the palette holds, the color of the identity seen longest ago is reused, so the identities currently on screen stay as distinct as possible. With more identities on screen than the palette holds, colors above the palette size can change between frames.
 
 Tracks and poses without an `id` draw in one neutral color. Senders that want per-person or per-track colors must include `id`.
 
