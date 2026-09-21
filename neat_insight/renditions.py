@@ -157,7 +157,7 @@ def _codec_args(codec: str, height: int, fps: int) -> list[str]:
         *common,
         "-tag:v", "hvc1",
         "-x265-params",
-        f"level-idc={level}:high-tier=0:keyint={fps}:min-keyint={fps}:scenecut=0:bframes=0:ref=1:open-gop=0:log-level=error",
+        f"level-idc={level}:high-tier=0:keyint={fps}:min-keyint={fps}:scenecut=0:bframes=0:ref=1:open-gop=0:log-level=error:repeat-headers=1",
         "-bsf:v", f"hevc_metadata=aud=remove,hevc_metadata=aud=insert:tick_rate={fps}/1",
     ]
 
@@ -342,6 +342,201 @@ def add_rendition(index_path: Path, record: dict) -> None:
         index["renditions"] = [r for r in index["renditions"] if r.get("key") != record["key"]]
         index["renditions"].append(record)
         save_index(index_path, index)
+
+
+def probe_packets(path: Path) -> list[tuple[float, float, bool]]:
+    """(pts_time, dts_time, is_keyframe) per video packet."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise RenditionError("ffprobe is not installed; install FFmpeg and ensure ffprobe is on PATH.")
+    cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,dts_time,flags", "-of", "json", str(path)]
+    data = json.loads(subprocess.check_output(cmd, text=True, timeout=60))
+    try:
+        return [
+            (float(packet["pts_time"]), float(packet["dts_time"]), "K" in str(packet.get("flags", "")))
+            for packet in data.get("packets", [])
+        ]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RenditionError(f"{path.name} contains a packet without usable PTS/DTS timestamps") from exc
+
+
+def probe_reference_frames(path: Path) -> int:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RenditionError("ffmpeg is not installed; install FFmpeg and ensure ffmpeg is on PATH.")
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "verbose", "-i", str(path), "-map", "0:v:0", "-c", "copy", "-frames:v", "1", "-f", "null", "-"]
+    proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=60)
+    match = re.search(r"Video:.*?([0-9]+) reference frame", proc.stderr)
+    if not match:
+        raise RenditionError(f"Could not determine the reference-frame count for {path.name}")
+    return int(match.group(1))
+
+
+def _validate_timestamps(path: Path, fps: int, packets: list[tuple[float, float, bool]]) -> None:
+    tolerance = 1e-5
+    keyframe_times = [pts for pts, _dts, is_key in packets if is_key]
+    if not keyframe_times or any(abs(ts - i) > tolerance for i, ts in enumerate(keyframe_times)):
+        raise RenditionError(f"{path.name} does not have a closed one-second keyframe cadence starting at zero")
+    if abs(packets[0][0]) > tolerance or abs(packets[0][1]) > tolerance:
+        raise RenditionError(f"{path.name} packet timestamps do not start at zero")
+    interval = 1.0 / fps
+    previous = None
+    for pts, dts, _is_key in packets:
+        if abs(pts - dts) > tolerance or (previous is not None and abs(pts - previous - interval) > tolerance):
+            raise RenditionError(f"{path.name} packet timestamps are reordered or not constant frame rate")
+        previous = pts
+
+
+def validate_rendition(path: Path, fps: int, codec: str, height: int) -> None:
+    """Raise RenditionError unless `path` meets the catalog contract for `fps`/`codec`."""
+    stream = probe_video(path)
+    expected = {
+        "codec_name": FFMPEG_CODEC_NAMES[codec],
+        "profile": "Constrained Baseline" if codec == "h264" else "Main",
+        "pix_fmt": "yuv420p",
+        "has_b_frames": 0,
+        "level": expected_level_code(codec, height, fps),
+    }
+    mismatches = [f"{key}={stream.get(key)!r} (expected {value!r})" for key, value in expected.items() if stream.get(key) != value]
+    for key in ("r_frame_rate", "avg_frame_rate"):
+        if parse_rate(stream.get(key)) != fps:
+            mismatches.append(f"{key}={stream.get(key)!r} (expected {fps})")
+    reference_frames = probe_reference_frames(path)
+    if reference_frames != 1:
+        mismatches.append(f"reference_frames={reference_frames!r} (expected 1)")
+    if mismatches:
+        raise RenditionError(f"{path.name} violates the rendition contract: " + "; ".join(mismatches))
+    _validate_timestamps(path, fps, probe_packets(path))
+
+
+_key_locks: dict[str, threading.Lock] = {}
+_key_locks_guard = threading.Lock()
+
+
+def _lock_for(key: str) -> threading.Lock:
+    with _key_locks_guard:
+        return _key_locks.setdefault(key, threading.Lock())
+
+
+def _terminate(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=3)
+    except Exception:
+        process.kill()
+
+
+def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any, source_codec: Optional[str]) -> Iterator[dict]:
+    """Yield progress events and finally a 'done' event naming the file to stream.
+
+    Reuses a stored rendition when the source content, fps, codec and profile match;
+    otherwise encodes one. Encoding failures remove the temp file and leave the
+    index and the source untouched. Closing the generator terminates ffmpeg.
+    """
+    fps = validate_fps(fps)
+    source_path = media_dir / rel_path
+    if not source_path.is_file():
+        raise RenditionError(f"File not found: {rel_path}")
+    info = source_info(index_path, media_dir, rel_path)
+    if info.get("native_fps") == fps:
+        yield {"event": "done", "path": str(source_path), "rendition": None, "reused": False, "native": True}
+        return
+    if source_codec == "mjpeg":
+        raise UnsupportedRendition("FPS changes are not supported for MJPEG sources")
+    if source_codec not in PROFILES:
+        raise UnsupportedRendition(f"Cannot create a rendition for {rel_path}: the source codec is unknown or unsupported")
+    height = int(info.get("height") or 0)
+    if height <= 0:
+        raise RenditionError(f"Cannot determine the resolution of {rel_path}")
+
+    digest = source_hash(index_path, media_dir, rel_path)
+    key = rendition_key(digest, fps, source_codec)
+    with _lock_for(key):
+        existing = find_rendition(index_path, media_dir, key)
+        if existing:
+            yield {"event": "done", "path": str(media_dir / existing["path"]), "rendition": existing["path"], "reused": True, "native": False}
+            return
+
+        rel_out = rendition_rel_path(rel_path, digest, fps, source_codec)
+        output = media_dir / rel_out
+        output.parent.mkdir(parents=True, exist_ok=True)
+        tmp = output.with_name(f".{output.stem}.tmp{output.suffix}")
+        tmp.unlink(missing_ok=True)
+        total = _float_or_none(info.get("duration"))
+        yield {
+            "event": "encoding",
+            "file": rel_path,
+            "fps": fps,
+            "codec": source_codec,
+            "encoder": f"{ENCODER_NAMES[source_codec]} {PROFILES[source_codec]}",
+            "total": total,
+        }
+
+        cmd = encode_command(source_path, tmp, fps, source_codec, height)
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        except FileNotFoundError as exc:
+            raise RenditionError("ffmpeg is not installed; install FFmpeg and ensure ffmpeg is on PATH.") from exc
+
+        diagnostics: list[str] = []
+        last_progress_at = 0.0
+        try:
+            if process.stdout:
+                for raw_line in process.stdout:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if "=" not in line:
+                        diagnostics.append(line)
+                        diagnostics = diagnostics[-8:]
+                        continue
+                    key_name, value = line.split("=", 1)
+                    seconds = parse_progress_seconds(key_name, value)
+                    if seconds is None:
+                        continue
+                    now = time.monotonic()
+                    if now - last_progress_at < 1.0:
+                        continue
+                    last_progress_at = now
+                    yield {"event": "progress", "seconds": seconds, "total": total}
+            return_code = process.wait()
+        except BaseException:
+            # GeneratorExit when the client disconnects, or any other interruption.
+            _terminate(process)
+            tmp.unlink(missing_ok=True)
+            raise
+        finally:
+            if process.stdout:
+                process.stdout.close()
+
+        if return_code != 0:
+            tmp.unlink(missing_ok=True)
+            raise RenditionError("; ".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}")
+        try:
+            validate_rendition(tmp, fps, source_codec, height)
+        except RenditionError:
+            tmp.unlink(missing_ok=True)
+            raise
+
+        tmp.replace(output)
+        record = {
+            "key": key,
+            "source_file": rel_path,
+            "source_sha256": digest,
+            "fps": fps,
+            "codec": source_codec,
+            "profile": PROFILES[source_codec],
+            "path": rel_out,
+            "sha256": sha256_file(output),
+            "bytes": output.stat().st_size,
+            "width": info.get("width"),
+            "height": height,
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        add_rendition(index_path, record)
+        yield {"event": "done", "path": str(output), "rendition": rel_out, "reused": False, "native": False}
 
 
 def remove_source(index_path: Path, media_dir: Path, rel_path: str) -> list[str]:

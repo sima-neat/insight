@@ -205,5 +205,158 @@ class RenditionIndexTests(unittest.TestCase):
         self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k2"])
 
 
+def make_test_clip(path: Path, fps: int = 30, seconds: float = 2.0, codec: str = "libx264") -> None:
+    """Generate a small synthetic H.264 (or other) clip with ffmpeg's testsrc."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"testsrc=size=320x240:rate={fps}",
+            "-t", str(seconds), "-c:v", codec, "-pix_fmt", "yuv420p", "-g", str(fps),
+            str(path),
+        ],
+        check=True,
+    )
+
+
+def ffprobe_stream(path: Path) -> dict:
+    out = subprocess.check_output(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,profile,pix_fmt,has_b_frames,r_frame_rate,avg_frame_rate,width,height",
+            "-of", "json", str(path),
+        ],
+        text=True,
+    )
+    return json.loads(out)["streams"][0]
+
+
+def drain(generator):
+    events = list(generator)
+    return events, events[-1]
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+class RenditionEncodeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        self.media_dir = self.root / "media"
+        self.media_dir.mkdir()
+        self.index_path = self.root / "renditions.json"
+        self.source = self.media_dir / "demo.mp4"
+        make_test_clip(self.source, fps=30, seconds=2.0)
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_native_fps_streams_the_source_without_encoding(self):
+        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+            events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 30, "h264"))
+        self.assertEqual(done["event"], "done")
+        self.assertTrue(done["native"])
+        self.assertIsNone(done["rendition"])
+        self.assertEqual(Path(done["path"]), self.source)
+
+    def test_encodes_rendition_that_meets_the_catalog_contract(self):
+        events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+
+        self.assertEqual([e["event"] for e in events][0], "encoding")
+        self.assertEqual(events[0]["encoder"], "libx264 baseline")
+        self.assertFalse(done["reused"])
+        self.assertEqual(done["rendition"], ".renditions/demo_" + renditions.sha256_file(self.source)[:6] + "_15fps_h264.mp4")
+        output = Path(done["path"])
+        self.assertTrue(output.is_file())
+        self.assertFalse(any(p.name.startswith(".") and p.name.endswith(".tmp.mp4") for p in output.parent.iterdir()))
+
+        stream = ffprobe_stream(output)
+        self.assertEqual(stream["codec_name"], "h264")
+        self.assertEqual(stream["profile"], "Constrained Baseline")
+        self.assertEqual(stream["pix_fmt"], "yuv420p")
+        self.assertEqual(stream["has_b_frames"], 0)
+        self.assertEqual(stream["r_frame_rate"], "15/1")
+        self.assertEqual(stream["avg_frame_rate"], "15/1")
+        self.assertEqual(renditions.probe_reference_frames(output), 1)
+        keyframes = [i for i, (_pts, _dts, key) in enumerate(renditions.probe_packets(output)) if key]
+        self.assertEqual(keyframes, [0, 15])
+
+        record = renditions.load_index(self.index_path)["renditions"][0]
+        self.assertEqual(record["fps"], 15)
+        self.assertEqual(record["codec"], "h264")
+        self.assertEqual(record["profile"], "baseline")
+        self.assertEqual(record["source_file"], "demo.mp4")
+        self.assertEqual(record["source_sha256"], renditions.sha256_file(self.source))
+        self.assertEqual(record["path"], done["rendition"])
+        self.assertEqual(record["height"], 240)
+
+    def test_second_call_reuses_without_running_the_encoder(self):
+        _events, first = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+            events, second = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        self.assertTrue(second["reused"])
+        self.assertEqual(second["path"], first["path"])
+        self.assertEqual(len(events), 1)
+
+    def test_replacing_source_content_creates_a_new_rendition(self):
+        _events, first = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        make_test_clip(self.source, fps=30, seconds=3.0)  # same name, new content
+
+        _events, second = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+
+        self.assertFalse(second["reused"])
+        self.assertNotEqual(first["path"], second["path"])
+
+    def test_upsampling_duplicates_frames(self):
+        _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 60, "h264"))
+        stream = ffprobe_stream(Path(done["path"]))
+        self.assertEqual(stream["avg_frame_rate"], "60/1")
+
+    def test_mjpeg_and_unknown_codecs_are_unsupported(self):
+        with self.assertRaises(renditions.UnsupportedRendition):
+            drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "mjpeg"))
+        with self.assertRaises(renditions.UnsupportedRendition):
+            drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, None))
+
+    def test_encoder_failure_cleans_up_and_leaves_source_and_index_untouched(self):
+        source_bytes = self.source.read_bytes()
+
+        def broken_command(source, output, fps, codec, height):
+            return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
+
+        with mock.patch.object(renditions, "encode_command", side_effect=broken_command):
+            with self.assertRaises(renditions.RenditionError):
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+
+        self.assertEqual(self.source.read_bytes(), source_bytes)
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+
+    def test_validation_failure_removes_output(self):
+        with mock.patch.object(renditions, "validate_rendition", side_effect=renditions.RenditionError("bad")):
+            with self.assertRaises(renditions.RenditionError):
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
+    def test_closing_the_generator_terminates_ffmpeg_and_removes_temp(self):
+        gen = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264")
+        first = next(gen)
+        self.assertEqual(first["event"], "encoding")
+        second = next(gen)  # ffmpeg is running now; the first progress block is not throttled
+        self.assertEqual(second["event"], "progress")
+        gen.close()
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
+    def test_validate_rendition_rejects_wrong_fps(self):
+        _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        with self.assertRaises(renditions.RenditionError) as ctx:
+            renditions.validate_rendition(Path(done["path"]), 20, "h264", 240)
+        self.assertIn("r_frame_rate", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
