@@ -306,7 +306,108 @@ function decodeRleMaskAlpha(pixels, counts, maskWidth, maskHeight) {
   return pixels;
 }
 
+// --- Caption overlay (persists until dismissed or replaced) ---
+// Insight's own canvas draw loop is a single-slot, consume-once queue shared
+// by every metadata type on this channel: whichever message the viewer's
+// internal lookup returns for a given tick is drawn, and everything else
+// (including a caption sitting untouched) gets wiped by the unconditional
+// clearRect() before the next tick's lookup. Drawing the caption straight
+// onto ctx therefore can't outlive a single frame. So this strategy is used
+// only as a one-shot "new caption arrived" notification -- the actual
+// caption lives in a plain DOM element we own, layered over the video, which
+// keeps showing on screen independent of Insight's per-tick canvas clearing.
+let captionState = { id: null, text: "", dismissed: false };
+const captionOverlaysByCanvas = new WeakMap();
+
+function positionCaptionOverlay(video, canvas, root) {
+  const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+  const videoW = video.videoWidth * scaleX;
+  const videoH = video.videoHeight * scaleY;
+  root.style.left = `${offsetX}px`;
+  root.style.width = `${videoW}px`;
+  root.style.bottom = `${canvas.clientHeight - (offsetY + videoH)}px`;
+}
+
+function ensureCaptionOverlay(video, canvas) {
+  let els = captionOverlaysByCanvas.get(canvas);
+  if (els && document.body.contains(els.root)) return els;
+
+  const container = canvas.parentElement || canvas;
+
+  const root = document.createElement("div");
+  root.style.cssText = `
+    position: absolute;
+    display: none;
+    box-sizing: border-box;
+    background: rgba(0,0,0,0.65);
+    color: #ffffff;
+    font: 16px sans-serif;
+    line-height: 1.4;
+    padding: 14px 40px 14px 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    pointer-events: none;
+    z-index: 20;
+  `;
+
+  const textEl = document.createElement("span");
+  root.appendChild(textEl);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "×";
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Dismiss caption");
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.18);
+    color: #ffffff;
+    font-size: 15px;
+    cursor: pointer;
+    pointer-events: auto;
+  `;
+  closeBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    captionState.dismissed = true;
+    root.style.display = "none";
+  });
+  root.appendChild(closeBtn);
+
+  container.appendChild(root);
+
+  const reposition = () => positionCaptionOverlay(video, canvas, root);
+  const resizeObserver = new ResizeObserver(reposition);
+  resizeObserver.observe(container);
+  video.addEventListener("loadedmetadata", reposition);
+  window.addEventListener("resize", reposition);
+
+  els = { root, textEl, resizeObserver };
+  captionOverlaysByCanvas.set(canvas, els);
+  return els;
+}
+
 window.drawStrategies = {
+  "caption": (ctx, canvas, data, video, index, drawContext = {}) => {
+    if (!data?.text) return;
+
+    const els = ensureCaptionOverlay(video, canvas);
+    const id = data.id ?? data.text;
+    if (id !== captionState.id) {
+      captionState = { id, text: String(data.text), dismissed: false };
+    }
+
+    els.textEl.textContent = captionState.text;
+    positionCaptionOverlay(video, canvas, els.root);
+    els.root.style.display = captionState.dismissed ? "none" : "block";
+  },
+
   "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.objects) return;
 
