@@ -198,6 +198,12 @@ class RenditionIndexTests(unittest.TestCase):
         self.assertNotIn("demo.mp4", index["sources"])
         self.assertEqual([r["key"] for r in index["renditions"]], ["k2"])
 
+    def test_remove_source_drops_records_without_a_path(self):
+        renditions.add_rendition(self.index_path, {"key": "k1", "source_file": "demo.mp4"})
+        renditions.add_rendition(self.index_path, {"key": "k2", "source_file": "other.mp4", "path": ".renditions/other.mp4"})
+        self.assertEqual(renditions.remove_source(self.index_path, self.media_dir, "demo.mp4"), [])
+        self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k2"])
+
 
 if __name__ == "__main__":
     unittest.main()
