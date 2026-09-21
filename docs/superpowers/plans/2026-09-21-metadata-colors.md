@@ -110,15 +110,16 @@ test("allocator evicts the least recently seen identity when the palette is exha
   const { createColorAllocator, PALETTE } = loadColors();
   const allocator = createColorAllocator();
   const size = PALETTE.length;
+  const colors = [];
   for (let i = 0; i < size; i += 1) {
-    allocator.colorFor(0, "track", `t${i}`, 100 + i);
+    colors.push(allocator.colorFor(0, "track", `t${i}`, 100 + i));
   }
   // Refresh t0 so t1 becomes the oldest.
   allocator.colorFor(0, "track", "t0", 500);
-  const evictedColor = allocator.colorFor(0, "track", "t1", 200);
   const newcomer = allocator.colorFor(0, "track", "new", 600);
-  assert.equal(newcomer, evictedColor, "newcomer takes the slot of the oldest identity");
-  assert.equal(allocator.colorFor(0, "track", "t0", 601), PALETTE[0], "refreshed identity keeps its color");
+  assert.equal(newcomer, colors[1], "newcomer takes the slot of the oldest identity, t1");
+  assert.equal(allocator.colorFor(0, "track", "t0", 601), colors[0], "refreshed identity keeps its color");
+  assert.equal(allocator.colorFor(0, "track", "t1", 602), colors[2], "evicted t1 returns as a newcomer and takes t2's slot");
   assert.equal(allocator.size(0, "track"), size);
 });
 
@@ -254,7 +255,7 @@ Create `webrtc/static/js/metadata-colors.js`:
     }
 
     function size(channelIndex, namespace) {
-      return mapFor(channelIndex, namespace).size;
+      return maps.get(`${channelIndex}:${namespace}`)?.size ?? 0;
     }
 
     return { colorFor, clear, size };
