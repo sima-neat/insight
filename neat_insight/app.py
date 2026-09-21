@@ -664,9 +664,10 @@ def _sysinfo_port_map_candidates():
 
 def _iter_neat_port_maps():
     for path in _sysinfo_port_map_candidates():
-        if not path.is_file():
-            continue
+        # Candidates include other users' home directories, which may not be readable.
         try:
+            if not path.is_file():
+                continue
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
             logging.debug("Failed to read neat port map %s: %s", path, exc)
