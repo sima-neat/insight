@@ -638,6 +638,14 @@ class PrepareEndpointTests(RenditionApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(lines[-1].startswith("Error: "))
 
+    def test_prepare_reports_unexpected_failures_in_stream(self):
+        self.assign(fps=15)
+        with mock.patch.object(renditions, "source_info", side_effect=FileNotFoundError("demo.mp4")):
+            response = self.client.post("/api/mediasrc/prepare", json={"index": 1})
+            lines = self.lines(response)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(lines[-1].startswith("Error: "), lines)
+
     def test_delete_media_removes_renditions_and_records(self):
         self.assign(fps=15)
         self.client.post("/api/mediasrc/prepare", json={"index": 1}).get_data()
