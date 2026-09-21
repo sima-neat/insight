@@ -330,6 +330,11 @@ function positionCaptionOverlay(video, canvas, root) {
   root.style.left = `${offsetX}px`;
   root.style.width = `${videoW}px`;
   root.style.bottom = `${canvas.clientHeight - (offsetY + videoH)}px`;
+  // The video tile clips overflow, so an unbounded overlay can grow taller
+  // than the video and get clipped -- including the close button. Cap the
+  // height and let long captions scroll internally instead.
+  root.style.maxHeight = `${videoH}px`;
+  root.style.overflowY = "auto";
 }
 
 function disposeCaptionOverlay(canvas) {
@@ -428,9 +433,15 @@ window.drawStrategies = {
     if (!data?.text) return;
 
     const els = ensureCaptionOverlay(video, canvas);
-    const id = data.id ?? data.text;
-    if (id !== els.state.id) {
-      els.state.id = id;
+    // A caption's text is not a reliable identity: a producer may legitimately
+    // repeat the same text (e.g. after a reconnect), and if that got treated
+    // as "the same caption" it would stay dismissed forever. Only compare by
+    // id when the producer actually supplies one; without one, always treat
+    // the arrival as new rather than risk silently suppressing it.
+    const hasId = data.id !== undefined && data.id !== null;
+    const isNew = hasId ? data.id !== els.state.id : true;
+    if (isNew) {
+      els.state.id = hasId ? data.id : null;
       els.state.text = String(data.text);
       els.state.dismissed = false;
     }
