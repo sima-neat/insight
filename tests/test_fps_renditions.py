@@ -206,6 +206,47 @@ class RenditionIndexTests(unittest.TestCase):
         self.assertEqual(renditions.remove_source(self.index_path, self.media_dir, "demo.mp4"), [])
         self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k2"])
 
+    def test_rendition_usage_counts_existing_files(self):
+        (self.media_dir / ".renditions").mkdir()
+        present = self.media_dir / ".renditions" / "a.mp4"
+        present.write_bytes(b"hello world")
+        # k1 has no "bytes" field, so rendition_usage must fall back to stat().st_size.
+        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/a.mp4", "source_file": "a.mp4"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/missing.mp4", "source_file": "b.mp4", "bytes": 999}, self.media_dir)
+
+        count, total_bytes = renditions.rendition_usage(self.index_path, self.media_dir)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(total_bytes, present.stat().st_size)
+        # The record for the missing file is pruned, same as find_rendition.
+        self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k1"])
+
+    def test_clear_renditions_deletes_all_but_kept(self):
+        rend_dir = self.media_dir / ".renditions"
+        rend_dir.mkdir()
+        a = rend_dir / "a.mp4"
+        a.write_bytes(b"aaaa")
+        b = rend_dir / "b.mp4"
+        b.write_bytes(b"bbbbbb")
+        c = rend_dir / "c.mp4"
+        c.write_bytes(b"cccccccc")
+        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/a.mp4", "source_file": "x.mp4"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/b.mp4", "source_file": "x.mp4"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k3", "path": ".renditions/c.mp4", "source_file": "y.mp4"}, self.media_dir)
+        (self.media_dir / "x.mp4").write_bytes(b"src")
+        renditions.source_hash(self.index_path, self.media_dir, "x.mp4")  # populate the sources cache
+
+        removed, freed = renditions.clear_renditions(self.index_path, self.media_dir, keep={".renditions/b.mp4"})
+
+        self.assertEqual(removed, [".renditions/a.mp4", ".renditions/c.mp4"])
+        self.assertEqual(freed, len(b"aaaa") + len(b"cccccccc"))
+        self.assertFalse(a.exists())
+        self.assertTrue(b.exists())
+        self.assertFalse(c.exists())
+        index = renditions.load_index(self.index_path)
+        self.assertEqual([r["key"] for r in index["renditions"]], ["k2"])
+        self.assertIn("x.mp4", index["sources"])  # the sources probe/hash cache is left untouched
+
 
 def make_test_clip(path: Path, fps: int = 30, seconds: float = 2.0, codec: str = "libx264") -> None:
     """Generate a small synthetic H.264 (or other) clip with ffmpeg's testsrc."""
@@ -718,6 +759,43 @@ class PrepareEndpointTests(RenditionApiTestCase):
         index = renditions.load_index(self.index_path)
         self.assertEqual(index["renditions"], [])
         self.assertNotIn("demo.mp4", index["sources"])
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+class ClearRenditionsApiTests(RenditionApiTestCase):
+    def setUp(self):
+        super().setUp()
+        make_test_clip(self.media_dir / "demo.mp4", fps=30)
+
+    def test_clear_renditions_keeps_the_playing_rendition(self):
+        self.assign(index=1, file="demo.mp4", fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 1}).get_data()
+        fifteen_fps_path = renditions.load_index(self.index_path)["renditions"][0]["path"]
+
+        usage = self.client.get("/api/mediasrc/renditions").get_json()
+        self.assertEqual(usage["count"], 1)
+        self.assertGreater(usage["bytes"], 0)
+
+        self.assign(index=2, file="demo.mp4", fps=20)
+        self.client.post("/api/mediasrc/prepare", json={"index": 2}).get_data()
+        self.assertEqual(len(renditions.load_index(self.index_path)["renditions"]), 2)
+
+        with mock.patch.object(app_module, "start_media_stream", return_value=(True, None)), \
+                mock.patch.object(app_module, "media_stream_is_running", return_value=True), \
+                mock.patch.object(app_module, "_active_stream_file", side_effect=lambda index: fifteen_fps_path if index == 1 else None):
+            self.assertEqual(self.client.post("/api/mediasrc/start", json={"index": 1}).status_code, 200)
+
+            clear_payload = self.client.post("/api/mediasrc/renditions/clear").get_json()
+            self.assertEqual(clear_payload["removed"], 1)
+            self.assertEqual(clear_payload["kept"], [fifteen_fps_path])
+            self.assertGreater(clear_payload["freed_bytes"], 0)
+            self.assertEqual(self.client.get("/api/mediasrc/renditions").get_json()["count"], 1)
+
+            self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+            clear_payload = self.client.post("/api/mediasrc/renditions/clear").get_json()
+            self.assertEqual(clear_payload["removed"], 1)
+            self.assertEqual(self.client.get("/api/mediasrc/renditions").get_json()["count"], 0)
 
 
 if __name__ == "__main__":

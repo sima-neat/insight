@@ -622,6 +622,53 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
         yield {"event": "done", "path": str(output), "rendition": rel_out, "reused": False, "native": False}
 
 
+def rendition_usage(index_path: Path, media_dir: Path) -> tuple[int, int]:
+    """(count, total bytes) of stored renditions; records whose file is gone are pruned first."""
+    with _index_lock:
+        index = load_index(index_path)
+        kept = []
+        total_bytes = 0
+        for record in index["renditions"]:
+            rel = record.get("path") if isinstance(record, dict) else None
+            if not rel or not (media_dir / rel).is_file():
+                continue
+            kept.append(record)
+            size = record.get("bytes")
+            total_bytes += size if isinstance(size, int) else (media_dir / rel).stat().st_size
+        if len(kept) != len(index["renditions"]):
+            index["renditions"] = kept
+            save_index(index_path, index)
+        return len(kept), total_bytes
+
+
+def clear_renditions(index_path: Path, media_dir: Path, keep: Optional[set[str]] = None) -> tuple[list[str], int]:
+    """Delete every rendition file and record except the relative paths in `keep`.
+    Returns (removed relative paths, freed bytes). The `sources` probe/hash cache is left untouched."""
+    keep = keep or set()
+    with _index_lock:
+        index = load_index(index_path)
+        kept = []
+        removed = []
+        freed_bytes = 0
+        for record in index["renditions"]:
+            rel = record.get("path") if isinstance(record, dict) else None
+            if not rel:
+                continue
+            if rel in keep:
+                kept.append(record)
+                continue
+            output = media_dir / rel
+            try:
+                freed_bytes += output.stat().st_size
+            except OSError:
+                pass
+            output.unlink(missing_ok=True)
+            removed.append(rel)
+        index["renditions"] = kept
+        save_index(index_path, index)
+        return removed, freed_bytes
+
+
 def remove_source(index_path: Path, media_dir: Path, rel_path: str) -> list[str]:
     """Forget a source: drop its cache entry and delete its rendition files and records. Returns removed rendition paths."""
     with _index_lock:
