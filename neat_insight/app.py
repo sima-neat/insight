@@ -2443,6 +2443,34 @@ def prepare_source():
     return Response(stream_with_context(generate()), mimetype="text/plain")
 
 
+# API: report cached FPS rendition disk usage.
+@app.get("/api/mediasrc/renditions")
+def get_rendition_usage():
+    """Return {'count': int, 'bytes': int} for every currently stored FPS rendition."""
+    count, total_bytes = renditions.rendition_usage(RENDITIONS_INDEX_FILE, MEDIA_DIR)
+    return jsonify({"count": count, "bytes": total_bytes})
+
+
+# API: delete cached FPS renditions that no playing source is using.
+@app.post("/api/mediasrc/renditions/clear")
+def clear_rendition_cache():
+    """Delete every rendition file and record except ones a playing source is currently streaming.
+    Returns {'removed': int, 'freed_bytes': int, 'kept': [rel paths]}."""
+    try:
+        sources = _sync_source_runtime_states(load_sources())
+        keep = set()
+        for src in sources:
+            if src.get("state") != "playing":
+                continue
+            active_file = _active_stream_file(src.get("index"))
+            if active_file and active_file.startswith(f"{renditions.RENDITIONS_DIRNAME}/"):
+                keep.add(active_file)
+        removed, freed_bytes = renditions.clear_renditions(RENDITIONS_INDEX_FILE, MEDIA_DIR, keep)
+        return jsonify({"removed": len(removed), "freed_bytes": freed_bytes, "kept": sorted(keep)})
+    except Exception as exc:
+        return _json_error(str(exc), 500)
+
+
 # API: start streaming one assigned media source.
 @app.post("/api/mediasrc/start")
 def start_source():

@@ -100,6 +100,8 @@ When the value differs from the file's native frame rate, starting the source fi
 
 MJPEG sources cannot change frame rate; the control is disabled for them.
 
+**Clear renditions** in the Streaming Sources toolbar deletes every cached rendition (except ones a playing source is using); they are re-created on the next start.
+
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.

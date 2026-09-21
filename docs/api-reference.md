@@ -51,7 +51,7 @@ curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhos
 curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
 ```
 
-`prepare` streams `progress <seconds>/<total>` lines and ends with `Rendition ready: …`, `Reusing rendition: …`, or `Error: …`. `start` performs the same preparation silently when `prepare` is skipped.
+`prepare` streams `progress <seconds>/<total>` lines and ends with `Rendition ready: …`, `Reusing rendition: …`, or `Error: …`. `start` performs the same preparation silently when `prepare` is skipped. `GET /api/mediasrc/renditions` reports cached rendition disk usage; `POST /api/mediasrc/renditions/clear` deletes cached renditions not in use by a playing source.
 
 Read `/api/mediasrc` before changing assignments or playback state. Stop active sources before deleting their media when possible.
 

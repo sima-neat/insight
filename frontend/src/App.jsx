@@ -762,6 +762,8 @@ export default function App() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
   const [bulkStartCount, setBulkStartCount] = useState('1')
+  const [renditionUsage, setRenditionUsage] = useState({ count: 0, bytes: 0 })
+  const [clearRenditionsOpen, setClearRenditionsOpen] = useState(false)
   const [selectedSource, setSelectedSource] = useState(1)
   const [previewEnabled, setPreviewEnabled] = useState(() => {
     try {
@@ -941,6 +943,16 @@ export default function App() {
     if (!isLatest()) return
     const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {}, readers: [] })
     setSources(filled)
+    try {
+      await loadRenditionUsage()
+    } catch {
+      // A failed usage refresh must never break source loading.
+    }
+  }
+
+  async function loadRenditionUsage() {
+    const data = await fetchJson('/api/mediasrc/renditions')
+    setRenditionUsage(data)
   }
 
   async function loadViewerUrl() {
@@ -1845,6 +1857,18 @@ export default function App() {
     } catch {}
   }
 
+  async function clearRenditions() {
+    try {
+      const data = await fetchJson('/api/mediasrc/renditions/clear', { method: 'POST' })
+      setUploadStatus(`Removed ${data.removed} rendition(s), freed ${formatBytes(data.freed_bytes)}.` + (data.kept.length ? ` ${data.kept.length} kept: in use by a playing source.` : ''))
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setClearRenditionsOpen(false)
+    }
+  }
+
   async function copyStreamUrl(src) {
     const text = src?.transport === 'http'
       ? (src.urls?.http_mjpeg || `/stream/http/src${src.index}.mjpg`)
@@ -2226,6 +2250,9 @@ export default function App() {
                   </button>
                   <button className="btn-ghost" onClick={resetAllSources}>
                     Reset
+                  </button>
+                  <button className="btn-ghost" onClick={() => setClearRenditionsOpen(true)} disabled={!renditionUsage.count} title="Delete cached FPS renditions; they are re-created on the next start">
+                    Clear renditions{renditionUsage.count ? ` (${renditionUsage.count} · ${formatBytes(renditionUsage.bytes)})` : ''}
                   </button>
                 </div>
               </div>
@@ -3070,6 +3097,19 @@ export default function App() {
             <div className="modal-actions">
               <button onClick={() => setTakeoverTarget(null)} disabled={takeoverBusy}>Cancel</button>
               <button className="danger" onClick={takeOverSource} disabled={takeoverBusy}>Disconnect</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clearRenditionsOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Clear cached renditions">
+          <div className="modal-card">
+            <h3>Clear cached renditions</h3>
+            <p>Delete {renditionUsage.count} cached rendition(s) ({formatBytes(renditionUsage.bytes)})? They are re-created on the next start. Renditions in use by a playing source are kept.</p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setClearRenditionsOpen(false)}>Cancel</button>
+              <button className="btn-ghost danger" onClick={clearRenditions}>Clear</button>
             </div>
           </div>
         </div>

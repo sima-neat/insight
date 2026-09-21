@@ -563,6 +563,74 @@
         }
       }
     },
+    "/api/mediasrc/renditions": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Get cached FPS rendition disk usage",
+        "description": "Returns how many FPS renditions are currently stored under `.renditions/` in the media directory and how many bytes they occupy. Rendition records whose file is missing are pruned before counting.",
+        "operationId": "getMediaSourceRenditions",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k https://<INSIGHT_HOST>:9900/api/mediasrc/renditions"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count and total size of stored renditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {"type": "integer"},
+                    "bytes": {"type": "integer"}
+                  },
+                  "required": ["count", "bytes"]
+                },
+                "example": {"count": 3, "bytes": 15728640}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mediasrc/renditions/clear": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Delete cached FPS renditions",
+        "description": "Deletes every stored FPS rendition file and record, except a rendition that a currently playing source is streaming. Renditions are re-created on the next start that needs them.",
+        "operationId": "clearMediaSourceRenditions",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -X POST https://<INSIGHT_HOST>:9900/api/mediasrc/renditions/clear"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed and kept renditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {"type": "integer"},
+                    "freed_bytes": {"type": "integer"},
+                    "kept": {"type": "array", "items": {"type": "string"}}
+                  },
+                  "required": ["removed", "freed_bytes", "kept"]
+                },
+                "example": {"removed": 2, "freed_bytes": 10485760, "kept": [".renditions/demo_3a9fc2_15fps_h264.mp4"]}
+              }
+            }
+          },
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
     "/api/mediasrc/start-bulk": {
       "post": {
         "tags": ["Media sources"],

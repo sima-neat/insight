@@ -352,6 +352,8 @@ Codec and transport are derived from the assigned media:
 | `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. |
 | `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot. |
 | `POST` | `/api/mediasrc/prepare` | JSON `{"index": 1}` | Create or reuse the FPS rendition `start` will stream when the slot's `fps` differs from the media's native rate; streams `text/plain` progress ending in `Rendition ready:`, `Reusing rendition:`, `Source frame rate matches`, or `Error:`. `start` does the same silently when `prepare` is skipped. |
+| `GET` | `/api/mediasrc/renditions` | None | Return `{"count": int, "bytes": int}` for all currently stored FPS renditions. |
+| `POST` | `/api/mediasrc/renditions/clear` | None | Delete every cached FPS rendition except one a playing source is currently streaming; returns `{"removed": int, "freed_bytes": int, "kept": [rel paths]}`. |
 | `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
 | `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. |
 | `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
