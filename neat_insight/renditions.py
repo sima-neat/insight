@@ -352,11 +352,13 @@ def remove_source(index_path: Path, media_dir: Path, rel_path: str) -> list[str]
         removed = []
         kept = []
         for record in index["renditions"]:
-            if record.get("source_file") == rel_path and record.get("path"):
-                (media_dir / record["path"]).unlink(missing_ok=True)
-                removed.append(record["path"])
-            else:
+            if record.get("source_file") != rel_path:
                 kept.append(record)
+                continue
+            rel_out = record.get("path")
+            if rel_out:
+                (media_dir / rel_out).unlink(missing_ok=True)
+                removed.append(rel_out)
         index["renditions"] = kept
         save_index(index_path, index)
         return removed
