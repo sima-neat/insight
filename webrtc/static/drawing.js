@@ -514,7 +514,12 @@ window.drawStrategies = {
         ctx.restore();
       }
 
-      ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
+      // A polygon has already stroked its own outline above, so the upright
+      // box around it is a second, larger outline of the same object. An RLE
+      // mask still needs it: the mask is painted into that rectangle.
+      if (seg.mask_format !== "polygon") {
+        ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
+      }
       const label = `${seg.label} (${Math.round((seg.confidence ?? 1) * 100)}%)`;
       ctx.fillText(label, (bbox[0] + 2) * scaleX + offsetX, (bbox[1] - 6) * scaleY + offsetY);
     });
