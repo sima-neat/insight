@@ -148,6 +148,12 @@
   margin-bottom: 0.5rem;
 }
 
+.object-list-hint {
+  margin: 0 8px 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
 #viewerObjectList {
   display: flex;
   flex-direction: column;
