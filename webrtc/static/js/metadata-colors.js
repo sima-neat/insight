@@ -2,12 +2,19 @@
 // One palette and one identity-to-color mapping for every metadata overlay.
 // Loaded before drawing.js; exposes window.metadataColors.
 (() => {
-  // Hand-picked to stay apart on dark and bright video. Keep 20 entries.
+  // The first 20 are hand-picked to stay apart on dark and bright video; the last 20 are
+  // overflow. Keep 40 entries; metadataColors.test.js checks their separation.
   const PALETTE = [
     "#2563eb", "#dc2626", "#16a34a", "#ca8a04", "#9333ea",
     "#0891b2", "#ea580c", "#4f46e5", "#be123c", "#0f766e",
     "#f472b6", "#84cc16", "#fbbf24", "#38bdf8", "#92400e",
-    "#d946ef", "#14532d", "#fdba74", "#f43f5e", "#5eead4"
+    "#d946ef", "#14532d", "#fdba74", "#f43f5e", "#5eead4",
+    // Overflow colors, used only when a channel shows more than twenty identities at once.
+    // They sit closer together than the first twenty, but still beat repeating a color.
+    "#989900", "#ff96d3", "#e1a0fe", "#b6b4ff", "#e2684a",
+    "#267d30", "#4d7800", "#e06285", "#78c7fd", "#786900",
+    "#bc6ece", "#10d8d8", "#927eec", "#2bdda4", "#66da85",
+    "#ab413e", "#5590f3", "#8fd465", "#1899ec", "#b1cc46"
   ];
   const NEUTRAL_COLOR = "#f8fafc";
 

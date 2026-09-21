@@ -111,7 +111,7 @@ The viewer can render metadata overlays for common vision outputs, including obj
 
 ### Metadata colors
 
-Overlays pick colors from one shared palette so that different identities stay apart on a crowded frame. Each metadata type defines what identity means:
+Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when a channel shows more than 20 identities at once. Each metadata type defines what identity means:
 
 | Metadata type | Colored by | Parts that share the color |
 |---|---|---|
