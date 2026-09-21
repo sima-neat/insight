@@ -348,6 +348,7 @@ function disposeCaptionOverlay(canvas) {
   if (els.staleTimer) clearTimeout(els.staleTimer);
   els.resizeObserver.disconnect();
   els.video.removeEventListener("loadedmetadata", els.reposition);
+  els.video.removeEventListener("resize", els.reposition);
   els.video.removeEventListener("emptied", els.handleStreamEmptied);
   els.video.removeEventListener("waiting", els.handleStreamWaiting);
   els.video.removeEventListener("playing", els.handleStreamRecovered);
@@ -435,6 +436,10 @@ function ensureCaptionOverlay(video, canvas) {
   els.resizeObserver = new ResizeObserver(els.reposition);
   els.resizeObserver.observe(container);
   video.addEventListener("loadedmetadata", els.reposition);
+  // Fires when the video's own intrinsic width/height change mid-stream
+  // (e.g. adaptive resolution) -- distinct from "loadedmetadata" (fires once)
+  // and from window's resize (fires on browser window changes, not this).
+  video.addEventListener("resize", els.reposition);
   window.addEventListener("resize", els.reposition);
 
   // A caption belongs to whatever stream was live when it arrived. Nothing
