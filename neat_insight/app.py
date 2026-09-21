@@ -2263,21 +2263,11 @@ def assign_source():
             src["transport"] = transport
             src["codec"] = codec
             if was_playing and file_name:
-                if not _allowed_transports:
+                ok, err, status = _start_source_slot(src)
+                if not ok:
                     src["state"] = "stopped"
                     save_sources(sources)
-                    return _json_error(_codec_detection_error(file_name), 400)
-                file_path = MEDIA_DIR / file_name
-                ok, err = start_media_stream(
-                    index,
-                    str(file_path),
-                    src.get("transport"),
-                    src.get("codec"),
-                    _source_media_codec(file_name),
-                )
-                if not ok:
-                    return _json_error(err, 500)
-                src["state"] = "playing"
+                    return _json_error(err, status)
             elif not file_name:
                 src["state"] = "stopped"
             save_sources(sources)
@@ -2324,10 +2314,55 @@ def auto_assign_all_sources():
     }
 
 
+def _resolve_stream_input(src) -> tuple[Optional[Path], Optional[str], Optional[str], int]:
+    """Return (input path, rendition rel path or None, error, http status). Encodes a missing rendition synchronously."""
+    file_name = src.get("file") or ""
+    fps = renditions.coerce_fps(src.get("fps"))
+    if fps is None:
+        return MEDIA_DIR / file_name, None, None, 200
+    result = None
+    try:
+        for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, _source_media_codec(file_name)):
+            if event.get("event") == "done":
+                result = event
+    except renditions.UnsupportedRendition as exc:
+        return None, None, str(exc), 400
+    except renditions.RenditionError as exc:
+        return None, None, f"Encoding {file_name} at {fps} fps failed: {exc}", 500
+    if not result:
+        return None, None, "Rendition preparation ended unexpectedly", 500
+    return Path(result["path"]), result.get("rendition"), None, 200
+
+
+def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
+    """Derive stream settings, prepare the input (source or FPS rendition), start the slot. Mutates src; returns (ok, error, http status)."""
+    file_name = src.get("file") or ""
+    transport, codec, allowed_transports = _derive_source_stream_settings(file_name, src.get("transport"))
+    src["transport"] = transport
+    src["codec"] = codec
+    if not allowed_transports:
+        return False, _codec_detection_error(file_name), 400
+    input_path, rendition, error, status = _resolve_stream_input(src)
+    if error:
+        return False, error, status
+    ok, err = start_media_stream(
+        src["index"],
+        str(input_path),
+        src.get("transport"),
+        src.get("codec"),
+        _source_media_codec(file_name),
+        rendition=rendition,
+    )
+    if not ok:
+        return False, err, 500
+    src["state"] = "playing"
+    return True, None, 200
+
+
 # API: start streaming one assigned media source.
 @app.post("/api/mediasrc/start")
 def start_source():
-    """Accept JSON {'index': int}; start the assigned file for that source and mark its state as playing."""
+    """Accept JSON {'index': int}; start the assigned file (or the slot's FPS rendition, encoding it first if missing) and mark the state as playing."""
     data = request.get_json() or {}
     index = data.get("index")
     index_error = _index_error(index)
@@ -2340,26 +2375,12 @@ def start_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
-            filename = src.get("file")
-            if not filename:
+            if not src.get("file"):
                 return _json_error("No file assigned to source")
-            transport, codec, allowed_transports = _derive_source_stream_settings(filename, src.get("transport"))
-            src["transport"] = transport
-            src["codec"] = codec
-            if not allowed_transports:
-                save_sources(sources)
-                return _json_error(_codec_detection_error(filename), 400)
-            ok, err = start_media_stream(
-                index,
-                str(MEDIA_DIR / filename),
-                src.get("transport"),
-                src.get("codec"),
-                _source_media_codec(filename),
-            )
-            if not ok:
-                return _json_error(err, 500)
-            src["state"] = "playing"
+            ok, err, status = _start_source_slot(src)
             save_sources(sources)
+            if not ok:
+                return _json_error(err, status)
             return {"success": True}
 
     return _json_error("Source not found", 404)
@@ -2403,21 +2424,8 @@ def start_sources_bulk():
         if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
             continue
-        transport, codec, allowed_transports = _derive_source_stream_settings(src["file"], src.get("transport"))
-        src["transport"] = transport
-        src["codec"] = codec
-        if not allowed_transports:
-            errors.append({"index": source_index, "error": _codec_detection_error(src["file"])})
-            continue
-        ok, err = start_media_stream(
-            source_index,
-            str(MEDIA_DIR / src["file"]),
-            src.get("transport"),
-            src.get("codec"),
-            _source_media_codec(src["file"]),
-        )
+        ok, err, _status = _start_source_slot(src)
         if ok:
-            src["state"] = "playing"
             started.append(source_index)
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})

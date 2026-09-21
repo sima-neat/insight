@@ -372,6 +372,7 @@ class MediaStreamRenditionTests(unittest.TestCase):
     def test_media_stream_file_reports_running_input_and_rendition(self):
         process = mock.Mock()
         process.poll.return_value = None
+        process.stderr = None
         with mock.patch.object(self.mediasrc.os.path, "isfile", return_value=True):
             with mock.patch.object(self.mediasrc.subprocess, "Popen", return_value=process):
                 ok, err = self.mediasrc.start_media_stream(3, "/m/.renditions/demo_15fps.mp4", "rtsp", "h264", "h264", rendition=".renditions/demo_15fps.mp4")
@@ -458,6 +459,129 @@ class SlotFpsTests(RenditionApiTestCase):
         (self.media_dir / ".renditions").mkdir()
         make_test_clip(self.media_dir / ".renditions" / "demo_abc123_15fps_h264.mp4", fps=15, seconds=0.5)
         self.assertEqual(self.client.get("/api/mediasrc/videos").get_json(), ["demo.mp4"])
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+class StartWithRenditionTests(RenditionApiTestCase):
+    def setUp(self):
+        super().setUp()
+        make_test_clip(self.media_dir / "demo.mp4", fps=30)
+        self.start_patch = mock.patch.object(app_module, "start_media_stream", return_value=(True, None))
+        self.start_mock = self.start_patch.start()
+        self.running_patch = mock.patch.object(app_module, "media_stream_is_running", return_value=True)
+        self.running_patch.start()
+
+    def tearDown(self):
+        self.running_patch.stop()
+        self.start_patch.stop()
+        super().tearDown()
+
+    def started_path(self):
+        return self.start_mock.call_args.args[1]
+
+    def test_start_without_fps_streams_the_source(self):
+        self.assign()
+        self.assertEqual(self.client.post("/api/mediasrc/start", json={"index": 1}).status_code, 200)
+        self.assertEqual(self.started_path(), str(self.media_dir / "demo.mp4"))
+        self.assertIsNone(self.start_mock.call_args.kwargs.get("rendition"))
+
+    def test_start_with_native_fps_streams_the_source(self):
+        self.assign(fps=30)
+        self.assertEqual(self.client.post("/api/mediasrc/start", json={"index": 1}).status_code, 200)
+        self.assertEqual(self.started_path(), str(self.media_dir / "demo.mp4"))
+
+    def test_start_with_other_fps_encodes_then_streams_the_rendition(self):
+        self.assign(fps=15)
+        with mock.patch.object(renditions, "encode_command", wraps=renditions.encode_command) as encode:
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(encode.call_count, 1)
+        started = self.started_path()
+        self.assertTrue(started.startswith(str(self.media_dir / ".renditions")), started)
+        self.assertTrue(started.endswith("_15fps_h264.mp4"))
+        self.assertEqual(self.start_mock.call_args.kwargs["rendition"], os.path.relpath(started, self.media_dir))
+        self.assertEqual(ffprobe_stream(Path(started))["avg_frame_rate"], "15/1")
+        self.assertEqual(self.source()["state"], "playing")
+
+    def test_second_start_reuses_the_rendition_without_encoding(self):
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        first = self.started_path()
+        self.client.post("/api/mediasrc/stop", json={"index": 1})
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.started_path(), first)
+
+    def test_rendition_is_reused_after_a_restart(self):
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        first = self.started_path()
+        self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        # Simulate a restart: forget every in-process state; only the JSON files survive.
+        mediasrc.pipeline_registry.clear()
+        renditions._key_locks.clear()
+        fresh_client = app_module.app.test_client()
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
+            response = fresh_client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.started_path(), first)
+
+    def test_replacing_the_source_invalidates_the_old_rendition(self):
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        first = self.started_path()
+        self.client.post("/api/mediasrc/stop", json={"index": 1})
+        make_test_clip(self.media_dir / "demo.mp4", fps=30, seconds=3.0)
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertNotEqual(self.started_path(), first)
+
+    def test_mjpeg_source_with_other_fps_is_rejected(self):
+        (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")
+        with mock.patch.object(app_module, "_media_video_codec", return_value="mjpeg"):
+            with mock.patch.object(app_module, "_source_native_fps", return_value=25):
+                self.assign(file="cam.mjpg", fps=10)
+                with mock.patch.object(renditions, "source_info", return_value={"native_fps": 25, "height": 240}):
+                    response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MJPEG", response.get_json()["error"])
+        self.start_mock.assert_not_called()
+
+    def test_encode_failure_returns_500_and_cleans_up(self):
+        self.assign(fps=15)
+        source_bytes = (self.media_dir / "demo.mp4").read_bytes()
+
+        def broken_command(source, output, fps, codec, height):
+            return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
+
+        with mock.patch.object(renditions, "encode_command", side_effect=broken_command):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 500)
+        self.start_mock.assert_not_called()
+        self.assertEqual((self.media_dir / "demo.mp4").read_bytes(), source_bytes)
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+        self.assertEqual(self.source()["state"], "stopped")
+
+    def test_bulk_start_uses_each_slots_fps(self):
+        self.assign(index=1, fps=15)
+        self.assign(index=2, fps=30)
+        response = self.client.post("/api/mediasrc/start-bulk", json={"count": 2})
+        self.assertEqual(response.get_json()["started"], [1, 2])
+        paths = [call.args[1] for call in self.start_mock.call_args_list]
+        self.assertTrue(paths[0].endswith("_15fps_h264.mp4"))
+        self.assertEqual(paths[1], str(self.media_dir / "demo.mp4"))
+
+    def test_assign_while_playing_restarts_with_the_new_fps(self):
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/start", json={"index": 1})
+        response = self.assign(fps=20)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.started_path().endswith("_20fps_h264.mp4"))
 
 
 if __name__ == "__main__":
