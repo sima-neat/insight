@@ -316,7 +316,11 @@ function decodeRleMaskAlpha(pixels, counts, maskWidth, maskHeight) {
 // only as a one-shot "new caption arrived" notification -- the actual
 // caption lives in a plain DOM element we own, layered over the video, which
 // keeps showing on screen independent of Insight's per-tick canvas clearing.
-let captionState = { id: null, text: "", dismissed: false };
+//
+// Everything (state, DOM node, listeners) is stored per canvas in this map,
+// not in a shared variable -- Insight can render many channels at once, and
+// a single global would let one tile's caption or dismissal leak into
+// another's.
 const captionOverlaysByCanvas = new WeakMap();
 
 function positionCaptionOverlay(video, canvas, root) {
@@ -328,9 +332,25 @@ function positionCaptionOverlay(video, canvas, root) {
   root.style.bottom = `${canvas.clientHeight - (offsetY + videoH)}px`;
 }
 
+function disposeCaptionOverlay(canvas) {
+  const els = captionOverlaysByCanvas.get(canvas);
+  if (!els) return;
+  els.resizeObserver.disconnect();
+  els.video.removeEventListener("loadedmetadata", els.reposition);
+  window.removeEventListener("resize", els.reposition);
+  els.root.remove();
+  captionOverlaysByCanvas.delete(canvas);
+}
+
 function ensureCaptionOverlay(video, canvas) {
-  let els = captionOverlaysByCanvas.get(canvas);
-  if (els && document.body.contains(els.root)) return els;
+  const existing = captionOverlaysByCanvas.get(canvas);
+  if (existing) {
+    if (document.body.contains(existing.root)) return existing;
+    // Tile was torn down and rebuilt on the same canvas object -- the old
+    // overlay's listeners are still live, so tear them down before making
+    // a fresh one instead of leaking the old set.
+    disposeCaptionOverlay(canvas);
+  }
 
   const container = canvas.parentElement || canvas;
 
@@ -352,6 +372,10 @@ function ensureCaptionOverlay(video, canvas) {
 
   const textEl = document.createElement("span");
   root.appendChild(textEl);
+
+  // Mutated in place (never replaced) so the close button's closure below
+  // always stays in sync with whatever the "caption" strategy last wrote.
+  const state = { id: null, text: "", dismissed: false };
 
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "×";
@@ -375,20 +399,26 @@ function ensureCaptionOverlay(video, canvas) {
   `;
   closeBtn.addEventListener("click", (evt) => {
     evt.stopPropagation();
-    captionState.dismissed = true;
+    state.dismissed = true;
     root.style.display = "none";
   });
   root.appendChild(closeBtn);
 
   container.appendChild(root);
 
-  const reposition = () => positionCaptionOverlay(video, canvas, root);
+  const reposition = () => {
+    if (!document.body.contains(canvas)) {
+      disposeCaptionOverlay(canvas);
+      return;
+    }
+    positionCaptionOverlay(video, canvas, root);
+  };
   const resizeObserver = new ResizeObserver(reposition);
   resizeObserver.observe(container);
   video.addEventListener("loadedmetadata", reposition);
   window.addEventListener("resize", reposition);
 
-  els = { root, textEl, resizeObserver };
+  const els = { root, textEl, state, resizeObserver, video, reposition };
   captionOverlaysByCanvas.set(canvas, els);
   return els;
 }
@@ -399,13 +429,15 @@ window.drawStrategies = {
 
     const els = ensureCaptionOverlay(video, canvas);
     const id = data.id ?? data.text;
-    if (id !== captionState.id) {
-      captionState = { id, text: String(data.text), dismissed: false };
+    if (id !== els.state.id) {
+      els.state.id = id;
+      els.state.text = String(data.text);
+      els.state.dismissed = false;
     }
 
-    els.textEl.textContent = captionState.text;
+    els.textEl.textContent = els.state.text;
     positionCaptionOverlay(video, canvas, els.root);
-    els.root.style.display = captionState.dismissed ? "none" : "block";
+    els.root.style.display = els.state.dismissed ? "none" : "block";
   },
 
   "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
