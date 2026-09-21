@@ -20,10 +20,10 @@
   // One map per (channel, namespace): identity -> { slot, lastSeen, order }.
   // A new identity takes the lowest free slot. When every slot is taken, the
   // identity seen longest ago is evicted; ties go to the one inserted first.
+  // Each map is independent; timestamps on one channel/namespace do not affect eviction on another.
   function createColorAllocator() {
     const maps = new Map();
     let insertCounter = 0;
-    let maxTimeSeen = 0;
 
     function mapFor(channelIndex, namespace) {
       const key = `${channelIndex}:${namespace}`;
@@ -67,16 +67,9 @@
       const map = mapFor(channelIndex, namespace);
       const existing = map.get(key);
       if (existing) {
-        // Only update lastSeen if this time is at least as recent as the max time seen
-        // (handles out-of-order frame processing)
-        if (now >= maxTimeSeen) {
-          existing.lastSeen = now;
-          maxTimeSeen = now;
-        }
+        existing.lastSeen = now;
         return PALETTE[existing.slot];
       }
-      // Update maxTimeSeen for new allocations
-      maxTimeSeen = Math.max(maxTimeSeen, now);
       let slot = freeSlot(map);
       if (slot < 0) slot = evictOldest(map);
       insertCounter += 1;
@@ -86,11 +79,12 @@
 
     function clear() {
       maps.clear();
-      maxTimeSeen = 0;
     }
 
     function size(channelIndex, namespace) {
-      return mapFor(channelIndex, namespace).size;
+      const key = `${channelIndex}:${namespace}`;
+      const map = maps.get(key);
+      return map ? map.size : 0;
     }
 
     return { colorFor, clear, size };
