@@ -1677,7 +1677,7 @@ export default function App() {
     return text
   }
 
-  async function prepareSource(index) {
+  async function prepareSource(index, fps) {
     const controller = new AbortController()
     encodeAbortRef.current[index] = controller
     setEncodeProgress((prev) => ({ ...prev, [index]: { label: 'Preparing rendition…', percent: null, seconds: 0, total: null } }))
@@ -1699,16 +1699,11 @@ export default function App() {
       const text = await readPrepareProgress(response, index)
       const errorLine = text.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith('Error:'))
       if (errorLine) {
-        const src = sources.find((s) => s.index === index) || {}
-        throw new Error(`Encoding src${index} at ${src.fps} fps failed. Partial output was removed; the source file is unchanged. ${errorLine.replace(/^Error:\s*/, '')}`)
+        throw new Error(`Encoding src${index} at ${fps} fps failed. Partial output was removed; the source file is unchanged. ${errorLine.replace(/^Error:\s*/, '')}`)
       }
+      setEncodeProgress((prev) => ({ ...prev, [index]: { ...(prev[index] || {}), label: 'Starting stream…', percent: 99 } }))
     } finally {
       delete encodeAbortRef.current[index]
-      setEncodeProgress((prev) => {
-        const next = { ...prev }
-        delete next[index]
-        return next
-      })
     }
   }
 
@@ -1720,22 +1715,28 @@ export default function App() {
   async function startSource(index) {
     const src = sources.find((s) => s.index === index)
     const needsRendition = Boolean(src) && src.fps != null && src.native_fps != null && src.fps !== src.native_fps
-    await sourceAction(async () => {
-      if (needsRendition) {
-        try {
-          await prepareSource(index)
-        } catch (e) {
-          if (e.name !== 'AbortError') throw e
-          setUploadStatus(`Cancelled encoding for src${index}.`)
-          return
-        }
-      }
+    try {
+      if (needsRendition) await prepareSource(index, src.fps)
       await fetchJson('/api/mediasrc/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ index })
       })
-    })
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        setUploadStatus(`Cancelled encoding for src${index}.`)
+      } else {
+        setError(e.message)
+      }
+    } finally {
+      await loadSources()
+      setEncodeProgress((prev) => {
+        if (!(index in prev)) return prev
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
   }
 
   async function stopSource(index) {
