@@ -250,7 +250,7 @@ class RenditionEncodeTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_native_fps_streams_the_source_without_encoding(self):
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
             events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 30, "h264"))
         self.assertEqual(done["event"], "done")
         self.assertTrue(done["native"])
@@ -290,7 +290,7 @@ class RenditionEncodeTests(unittest.TestCase):
 
     def test_second_call_reuses_without_running_the_encoder(self):
         _events, first = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
-        with mock.patch.object(renditions.subprocess, "Popen", side_effect=AssertionError("must not encode")):
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
             events, second = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         self.assertTrue(second["reused"])
         self.assertEqual(second["path"], first["path"])
