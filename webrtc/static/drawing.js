@@ -4,19 +4,50 @@
 const CANVAS_FONT_FAMILY = '"Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif';
 const FONT = `14px ${CANVAS_FONT_FAMILY}`;
 const FONT_LARGE = `16px ${CANVAS_FONT_FAMILY}`;
-const TRACK_COLORS = [
-  "#2563eb",
-  "#dc2626",
-  "#16a34a",
-  "#ca8a04",
-  "#9333ea",
-  "#0891b2",
-  "#ea580c",
-  "#4f46e5",
-  "#be123c",
-  "#0f766e"
-];
-const TRACK_FALLBACK_COLOR = "#f8fafc";
+// Colors come from metadata-colors.js, loaded before this file. The fallback allocator
+// serves callers that pass no drawContext.colorAllocator, such as tests. It is created
+// lazily so this file still loads on its own (rleMask.test.js does that).
+let fallbackColorAllocator = null;
+
+function colorAllocatorFrom(drawContext) {
+  if (drawContext.colorAllocator) return drawContext.colorAllocator;
+  if (!fallbackColorAllocator) fallbackColorAllocator = window.metadataColors.createColorAllocator();
+  return fallbackColorAllocator;
+}
+
+// Style entries come from the settings object lists; keyed by label, `default` covers
+// every unlisted label.
+function styleLookup(entries) {
+  const byLabel = {};
+  (entries || []).forEach((entry) => {
+    if (entry && typeof entry.label === "string") byLabel[entry.label] = entry;
+  });
+  return byLabel;
+}
+
+function overridesFrom(styles) {
+  const overrides = {};
+  Object.keys(styles).forEach((label) => {
+    if (typeof styles[label].color === "string") overrides[label] = styles[label].color;
+  });
+  return overrides;
+}
+
+function applyLineStyle(ctx, style) {
+  ctx.lineWidth = style?.width || 2;
+  ctx.setLineDash(style?.style === "dashed" ? [6, 4] : style?.style === "dotted" ? [2, 2] : []);
+}
+
+function identityColor(drawContext, index, namespace, identity, overrides) {
+  return window.metadataColors.resolveColor({
+    allocator: colorAllocatorFrom(drawContext),
+    channelIndex: index,
+    namespace,
+    identity,
+    overrides,
+    now: drawContext.now ?? performance.now()
+  });
+}
 
 const COCO_SKELETON = [
   ['nose', 'left_eye'], ['nose', 'right_eye'],
@@ -62,17 +93,6 @@ function computeScaleAndOffset(video, canvas) {
   const scaleY = drawHeight / videoHeight;
 
   return { scaleX, scaleY, offsetX, offsetY };
-}
-
-function colorForTrackId(id) {
-  if (id === null || id === undefined || id === "") return TRACK_FALLBACK_COLOR;
-
-  const text = String(id);
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-  return TRACK_COLORS[hash % TRACK_COLORS.length];
 }
 
 function drawTrackLabel(ctx, text, x, y, color) {
@@ -311,12 +331,8 @@ window.drawStrategies = {
     if (!data?.objects) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "object-detection");
-    const objectStyles = {};
-    (settings.type.objects || []).forEach(entry => {
-      objectStyles[entry.label] = entry;
-    });
-
-    const defaultStyle = objectStyles["default"];
+    const objectStyles = styleLookup(settings.type.objects);
+    const overrides = overridesFrom(objectStyles);
     const threshold = settings.type.confidenceThreshold ?? 0;
     const showRoi = settings.general.showRoi !== false;
     const applyRoiFiltering = settings.general.applyRoiFiltering !== false;
@@ -334,14 +350,13 @@ window.drawStrategies = {
       const [x, y, w, h] = obj.bbox;
       if (!passesRoiFilter([x, y, w, h], roiPolygons, video, scale, applyRoiFiltering)) return;
 
-      const style = objectStyles[obj.label] || defaultStyle;
+      const style = objectStyles[obj.label] || objectStyles.default;
+      const color = identityColor(drawContext, index, "class", obj.label, overrides);
 
-      ctx.strokeStyle = style?.color || 'lime';
-      ctx.lineWidth = style?.width || 2;
-      ctx.setLineDash(style?.style === "dashed" ? [6, 4] :
-        style?.style === "dotted" ? [2, 2] : []);
+      ctx.strokeStyle = color;
+      applyLineStyle(ctx, style);
       ctx.font = "14px sans-serif";
-      ctx.fillStyle = style?.color || 'lime';
+      ctx.fillStyle = color;
 
       ctx.strokeRect(x * scaleX + offsetX, y * scaleY + offsetY, w * scaleX, h * scaleY);
       const label = `${obj.label} (${Math.round(obj.confidence * 100)}%)`;
@@ -353,16 +368,12 @@ window.drawStrategies = {
   "classification": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.top_classes) return;
 
-    const settings = drawContext.settings || resolveViewerDrawSettings(index, "classification");
-    const labelColor = settings.type.classificationColor || 'yellow';
-    const font = settings.type.classificationFont || FONT_LARGE;
-
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
-    ctx.font = font;
-    ctx.fillStyle = labelColor;
+    ctx.font = FONT_LARGE;
 
     data.top_classes.slice(0, 3).forEach((cls, i) => {
+      ctx.fillStyle = identityColor(drawContext, index, "class", cls.label);
       ctx.fillText(`${cls.label} (${Math.round(cls.confidence * 100)}%)`, 10 * scaleX + offsetX, (20 + i * 20) * scaleY + offsetY);
     });
   },
@@ -410,12 +421,8 @@ window.drawStrategies = {
     if (!Array.isArray(data?.segments)) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "segmentation");
-    const objectStyles = {};
-    (settings.type.objects || []).forEach(entry => {
-      objectStyles[entry.label] = entry;
-    });
-
-    const defaultStyle = objectStyles["default"];
+    const objectStyles = styleLookup(settings.type.objects);
+    const overrides = overridesFrom(objectStyles);
     const threshold = settings.type.confidenceThreshold ?? 0;
     const opacity = settings.type.maskOpacity ?? 0.4;
     const showRoi = settings.general.showRoi !== false;
@@ -444,13 +451,11 @@ window.drawStrategies = {
       }
       if (!passesRoiFilter(bbox, roiPolygons, video, scale, applyRoiFiltering)) return;
 
-      const style = objectStyles[seg.label] || defaultStyle;
-      const color = style?.color || 'lime';
+      const style = objectStyles[seg.label] || objectStyles.default;
+      const color = identityColor(drawContext, index, "class", seg.label, overrides);
 
       ctx.strokeStyle = color;
-      ctx.lineWidth = style?.width || 2;
-      ctx.setLineDash(style?.style === "dashed" ? [6, 4] :
-        style?.style === "dotted" ? [2, 2] : []);
+      applyLineStyle(ctx, style);
       ctx.font = "14px sans-serif";
       ctx.fillStyle = color;
 
