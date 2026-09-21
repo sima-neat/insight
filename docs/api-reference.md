@@ -43,6 +43,16 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
+To stream at a different frame rate, include `fps` in the assignment and optionally watch the encode:
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare` streams `progress <seconds>/<total>` lines and ends with `Rendition ready: …`, `Reusing rendition: …`, or `Error: …`. `start` performs the same preparation silently when `prepare` is skipped.
+
 Read `/api/mediasrc` before changing assignments or playback state. Stop active sources before deleting their media when possible.
 
 A slot published to by something other than Insight reports `state: "external"` with an `external` object (protocol, address, since, codec support, dimensions, bit rate); every slot also lists its current `readers`. `start` and `assign` return `409` for such a slot, and so does `stop` once Insight has no stream of its own left on it; `POST /api/mediasrc/takeover` disconnects the publisher. Bulk operations leave the external stream running and list the slots in `skipped_external`; `reset` still clears the stored record of every slot. `GET /stream/preview/src<N>.mjpg` renders an MJPEG preview of any live slot at the source frame rate.
