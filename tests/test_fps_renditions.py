@@ -358,5 +358,26 @@ class RenditionEncodeTests(unittest.TestCase):
         self.assertIn("r_frame_rate", str(ctx.exception))
 
 
+class MediaStreamRenditionTests(unittest.TestCase):
+    def setUp(self):
+        from neat_insight import mediasrc
+        self.mediasrc = mediasrc
+        mediasrc.pipeline_registry.clear()
+
+    def tearDown(self):
+        self.mediasrc.pipeline_registry.clear()
+
+    def test_media_stream_file_reports_running_input_and_rendition(self):
+        process = mock.Mock()
+        process.poll.return_value = None
+        with mock.patch.object(self.mediasrc.os.path, "isfile", return_value=True):
+            with mock.patch.object(self.mediasrc.subprocess, "Popen", return_value=process):
+                ok, err = self.mediasrc.start_media_stream(3, "/m/.renditions/demo_15fps.mp4", "rtsp", "h264", "h264", rendition=".renditions/demo_15fps.mp4")
+        self.assertTrue(ok, err)
+        self.assertEqual(self.mediasrc.media_stream_file(3), "/m/.renditions/demo_15fps.mp4")
+        self.assertEqual(self.mediasrc.pipeline_registry[2].rendition, ".renditions/demo_15fps.mp4")
+        self.assertIsNone(self.mediasrc.media_stream_file(4))
+
+
 if __name__ == "__main__":
     unittest.main()
