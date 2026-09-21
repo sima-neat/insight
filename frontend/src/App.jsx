@@ -1714,7 +1714,7 @@ export default function App() {
 
   async function startSource(index) {
     const src = sources.find((s) => s.index === index)
-    const needsRendition = Boolean(src) && src.fps != null && src.native_fps != null && src.fps !== src.native_fps
+    const needsRendition = Boolean(src) && src.fps != null && src.fps !== src.native_fps
     try {
       if (needsRendition) await prepareSource(index, src.fps)
       await fetchJson('/api/mediasrc/start', {
@@ -1729,13 +1729,19 @@ export default function App() {
         setError(e.message)
       }
     } finally {
-      await loadSources()
-      setEncodeProgress((prev) => {
-        if (!(index in prev)) return prev
-        const next = { ...prev }
-        delete next[index]
-        return next
-      })
+      // Refresh first so the row goes Encoding -> Live without an Idle flash, but always clear the progress.
+      try {
+        await loadSources()
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setEncodeProgress((prev) => {
+          if (!(index in prev)) return prev
+          const next = { ...prev }
+          delete next[index]
+          return next
+        })
+      }
     }
   }
 
