@@ -1891,6 +1891,10 @@ def delete_media():
                     modified = True
             if modified:
                 save_sources(sources)
+            try:
+                renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name.replace(os.path.sep, "/"))
+            except Exception as exc:
+                logging.warning("Failed to remove renditions for %s: %s", file_name, exc)
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
@@ -2357,6 +2361,59 @@ def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
         return False, err, 500
     src["state"] = "playing"
     return True, None, 200
+
+
+# API: create or reuse the FPS rendition for one source slot, streaming progress.
+@app.post("/api/mediasrc/prepare")
+def prepare_source():
+    """Accept JSON {'index': int}; stream plain-text progress while the slot's FPS rendition is created or reused."""
+    data = request.get_json() or {}
+    index = data.get("index")
+    if index is None:
+        return _json_error("Missing index")
+
+    src = next((s for s in load_sources() if s["index"] == index), None)
+    if src is None:
+        return _json_error("Source not found", 404)
+    file_name = src.get("file") or ""
+    if not file_name:
+        return _json_error("No file assigned to source")
+
+    fps = renditions.coerce_fps(src.get("fps"))
+    source_codec = _source_media_codec(file_name)
+    native_fps = _source_native_fps(file_name)
+    needs_rendition = fps is not None and fps != native_fps
+    if needs_rendition and source_codec == "mjpeg":
+        return _json_error("FPS changes are not supported for MJPEG sources")
+    if needs_rendition and source_codec not in renditions.PROFILES:
+        return _json_error(_codec_detection_error(file_name))
+
+    def generate():
+        if fps is None:
+            yield "Source frame rate matches; no rendition needed.\n"
+            return
+        try:
+            for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, source_codec):
+                kind = event.get("event")
+                if kind == "encoding":
+                    yield f"Encoding {event['file']} at {event['fps']} fps ({event['encoder']})...\n"
+                elif kind == "progress":
+                    total = event.get("total")
+                    if total:
+                        yield f"progress {event['seconds']:.1f}/{total:.1f}\n"
+                    else:
+                        yield f"progress {event['seconds']:.1f}\n"
+                elif kind == "done":
+                    if event.get("native"):
+                        yield "Source frame rate matches; no rendition needed.\n"
+                    elif event.get("reused"):
+                        yield f"Reusing rendition: {event['rendition']}\n"
+                    else:
+                        yield f"Rendition ready: {event['rendition']}\n"
+        except renditions.RenditionError as exc:
+            yield f"Error: {exc}\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
 
 
 # API: start streaming one assigned media source.

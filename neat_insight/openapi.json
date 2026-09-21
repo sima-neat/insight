@@ -523,7 +523,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Start one source",
-        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first.",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first. When the slot has an `fps` that differs from the media's native frame rate, the matching rendition is created (synchronously, without progress output) or reused before the stream starts; use `/api/mediasrc/prepare` first to observe progress.",
         "operationId": "startMediaSource",
         "x-codeSamples": [
           {
@@ -539,6 +539,27 @@
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/mediasrc/prepare": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Prepare the FPS rendition for one source",
+        "description": "Creates or reuses the constant-frame-rate rendition that `/api/mediasrc/start` will stream when the slot's `fps` differs from the media's native frame rate. Streams plain-text progress: `Encoding <file> at <fps> fps (<encoder>)...`, `progress <seconds>/<total>` lines, then one of `Rendition ready: <path>`, `Reusing rendition: <path>`, `Source frame rate matches; no rendition needed.` or `Error: <message>`. Renditions are keyed by source content hash, fps, codec and profile, so replacing a source file never reuses an old rendition. `/api/mediasrc/start` performs the same preparation without progress output when it is skipped.",
+        "operationId": "prepareMediaSourceRendition",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -N -H \"Content-Type: application/json\" -d '{\"index\":1}' https://<INSIGHT_HOST>:9900/api/mediasrc/prepare"
+          }
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/ProgressStream"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"}
         }
       }
     },
@@ -1049,7 +1070,13 @@
             "properties": {
               "file": {"type": "string", "description": "Relative media-library path, or an empty string to clear the slot."},
               "transport": {"type": "string", "enum": ["rtsp", "http"], "description": "Requested transport. Insight normalizes this to one supported by the detected codec."},
-              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."}
+              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."},
+              "fps": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "maximum": 240,
+                "description": "Output frame rate for the slot. Omit to keep the current value; send null to stream at the source frame rate. Changing `file` without `fps` resets it to null."
+              }
             }
           }
         ]
@@ -1074,7 +1101,21 @@
             }
           },
           "readers": {"type": "array", "description": "Clients currently reading this slot from mediamtx (Insight's own probe reader is hidden).", "items": {"$ref": "#/components/schemas/StreamReader"}},
-          "external": {"$ref": "#/components/schemas/ExternalStream"}
+          "external": {"$ref": "#/components/schemas/ExternalStream"},
+          "fps": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Requested output frame rate for this slot, or null to stream at the source frame rate."
+          },
+          "native_fps": {
+            "type": ["integer", "null"],
+            "description": "Frame rate detected in the assigned media, rounded to a whole number; null when unassigned or undetectable."
+          },
+          "active_file": {
+            "type": ["string", "null"],
+            "description": "Relative media-library path the running stream reads: the source, or a `.renditions/` file when an FPS rendition is in use. Null when stopped."
+          }
         }
       },
       "StreamReader": {

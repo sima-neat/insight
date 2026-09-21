@@ -584,5 +584,74 @@ class StartWithRenditionTests(RenditionApiTestCase):
         self.assertTrue(self.started_path().endswith("_20fps_h264.mp4"))
 
 
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+class PrepareEndpointTests(RenditionApiTestCase):
+    def setUp(self):
+        super().setUp()
+        make_test_clip(self.media_dir / "demo.mp4", fps=30)
+
+    def lines(self, response):
+        return [line for line in response.get_data(as_text=True).splitlines() if line.strip()]
+
+    def test_prepare_streams_progress_and_ready_line(self):
+        self.assign(fps=15)
+        response = self.client.post("/api/mediasrc/prepare", json={"index": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.mimetype.startswith("text/plain"))
+        lines = self.lines(response)
+        self.assertTrue(lines[0].startswith("Encoding demo.mp4 at 15 fps (libx264 baseline)"), lines)
+        self.assertTrue(any(line.startswith("progress ") for line in lines), lines)
+        self.assertTrue(lines[-1].startswith("Rendition ready: .renditions/demo_"), lines)
+        self.assertTrue(lines[-1].endswith("_15fps_h264.mp4"))
+
+    def test_prepare_reports_reuse_and_native(self):
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 1}).get_data()
+        self.assertTrue(self.lines(self.client.post("/api/mediasrc/prepare", json={"index": 1}))[-1].startswith("Reusing rendition:"))
+        self.assign(fps=30)
+        self.assertEqual(self.lines(self.client.post("/api/mediasrc/prepare", json={"index": 1}))[-1], "Source frame rate matches; no rendition needed.")
+
+    def test_prepare_validation_errors(self):
+        self.assertEqual(self.client.post("/api/mediasrc/prepare", json={}).status_code, 400)
+        self.assertEqual(self.client.post("/api/mediasrc/prepare", json={"index": 99}).status_code, 404)
+        self.assertEqual(self.client.post("/api/mediasrc/prepare", json={"index": 1}).status_code, 400)  # unassigned
+
+    def test_prepare_rejects_mjpeg_before_streaming(self):
+        (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")
+        with mock.patch.object(app_module, "_media_video_codec", return_value="mjpeg"):
+            with mock.patch.object(app_module, "_source_native_fps", return_value=25):
+                self.assign(file="cam.mjpg", fps=10)
+                response = self.client.post("/api/mediasrc/prepare", json={"index": 1})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MJPEG", response.get_json()["error"])
+
+    def test_prepare_reports_encode_errors_in_stream(self):
+        self.assign(fps=15)
+
+        def broken_command(source, output, fps, codec, height):
+            return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
+
+        with mock.patch.object(renditions, "encode_command", side_effect=broken_command):
+            response = self.client.post("/api/mediasrc/prepare", json={"index": 1})
+            lines = self.lines(response)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(lines[-1].startswith("Error: "))
+
+    def test_delete_media_removes_renditions_and_records(self):
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 1}).get_data()
+        record = renditions.load_index(self.index_path)["renditions"][0]
+        self.assertTrue((self.media_dir / record["path"]).exists())
+
+        response = self.client.post("/api/delete-media", json={"path": "demo.mp4"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse((self.media_dir / record["path"]).exists())
+        index = renditions.load_index(self.index_path)
+        self.assertEqual(index["renditions"], [])
+        self.assertNotIn("demo.mp4", index["sources"])
+
+
 if __name__ == "__main__":
     unittest.main()
