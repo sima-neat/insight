@@ -625,9 +625,10 @@ input {
   display: grid;
   gap: 10px;
   justify-items: center;
-  width: min(240px, 100%);
+  width: min(260px, 100%);
   color: var(--ink-soft);
   font-size: 13px;
+  text-align: center;
 }
 
 .preview-loading .upload-progress-track {
@@ -637,6 +638,19 @@ input {
 /* The live region stays mounted so screen readers announce it; keep it out of the grid while idle. */
 .preview-loading:empty {
   display: none;
+}
+
+.ok-text {
+  color: var(--ok);
+}
+
+.muted-text {
+  color: #7b8c9c;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .actions {
