@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
+const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
 
 const SOURCE_COUNT = 48
 const STREAMING_TRANSPORTS = [
@@ -17,6 +18,7 @@ const TABS = [
   { id: 'media', label: 'Media Sources', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
+  { id: 'peripherals', label: 'Peripherals', icon: '/icons/peripherals.svg' },
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const YOUTUBE_IMPORT_TARGETS = [
@@ -36,6 +38,7 @@ const ROUTE_TO_TAB = {
   streaming: 'rtsp',
   rtsp: 'rtsp',
   viewer: 'viewer',
+  peripherals: 'peripherals',
   stats: 'visualizer',
   visualizer: 'visualizer'
 }
@@ -44,6 +47,7 @@ const TAB_TO_ROUTE = {
   media: '/media',
   rtsp: '/streaming',
   viewer: '/viewer',
+  peripherals: '/peripherals',
   visualizer: '/stats'
 }
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
@@ -2063,6 +2067,12 @@ export default function App() {
             </div>
             {viewerUrl ? <iframe title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
           </section>
+        )}
+
+        {tab === 'peripherals' && (
+          <Suspense fallback={<section className="panel"><p className="hint">Loading peripherals...</p></section>}>
+            <PeripheralsView onError={setError} onStatus={setUploadStatus} />
+          </Suspense>
         )}
 
         {tab === 'visualizer' && (
