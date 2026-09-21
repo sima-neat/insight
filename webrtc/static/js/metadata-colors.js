@@ -6,8 +6,8 @@
   const PALETTE = [
     "#2563eb", "#dc2626", "#16a34a", "#ca8a04", "#9333ea",
     "#0891b2", "#ea580c", "#4f46e5", "#be123c", "#0f766e",
-    "#f472b6", "#84cc16", "#f59e0b", "#38bdf8", "#a855f7",
-    "#fb7185", "#22d3ee", "#a3e635", "#fbbf24", "#c084fc"
+    "#f472b6", "#84cc16", "#fbbf24", "#38bdf8", "#92400e",
+    "#d946ef", "#14532d", "#fdba74", "#f43f5e", "#5eead4"
   ];
   const NEUTRAL_COLOR = "#f8fafc";
 

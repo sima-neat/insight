@@ -11,14 +11,17 @@ let fallbackColorAllocator = null;
 
 function colorAllocatorFrom(drawContext) {
   if (drawContext.colorAllocator) return drawContext.colorAllocator;
-  if (!fallbackColorAllocator) fallbackColorAllocator = window.metadataColors.createColorAllocator();
+  const api = window.metadataColors;
+  if (!api) return null;
+  if (!fallbackColorAllocator) fallbackColorAllocator = api.createColorAllocator();
   return fallbackColorAllocator;
 }
 
 // Style entries come from the settings object lists; keyed by label, `default` covers
-// every unlisted label.
+// every unlisted label. Object.create(null) keeps a label like "__proto__" from touching
+// the prototype; Object.keys/`in` behave the same as on a plain object either way.
 function styleLookup(entries) {
-  const byLabel = {};
+  const byLabel = Object.create(null);
   (entries || []).forEach((entry) => {
     if (entry && typeof entry.label === "string") byLabel[entry.label] = entry;
   });
@@ -26,7 +29,7 @@ function styleLookup(entries) {
 }
 
 function overridesFrom(styles) {
-  const overrides = {};
+  const overrides = Object.create(null);
   Object.keys(styles).forEach((label) => {
     if (typeof styles[label].color === "string") overrides[label] = styles[label].color;
   });
@@ -39,7 +42,9 @@ function applyLineStyle(ctx, style) {
 }
 
 function identityColor(drawContext, index, namespace, identity, overrides) {
-  return window.metadataColors.resolveColor({
+  const api = window.metadataColors;
+  if (!api) return "#f8fafc";
+  return api.resolveColor({
     allocator: colorAllocatorFrom(drawContext),
     channelIndex: index,
     namespace,
@@ -596,7 +601,7 @@ window.drawStrategies = {
 
       const confidence =
         typeof track.confidence === "number" ? ` (${Math.round(track.confidence * 100)}%)` : "";
-      const idText = track.id === null || track.id === undefined ? "" : ` #${track.id}`;
+      const idText = track.id === null || track.id === undefined || track.id === "" ? "" : ` #${track.id}`;
       const label = `${track.label || "track"}${idText}${confidence}`;
       drawTrackLabel(ctx, label, left, top - 6, color);
     });

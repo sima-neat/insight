@@ -151,7 +151,7 @@
 .object-list-hint {
   margin: 0 8px 0.5rem;
   font-size: 0.8rem;
-  opacity: 0.75;
+  color: #999;
 }
 
 #viewerObjectList {
