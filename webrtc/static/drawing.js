@@ -514,10 +514,8 @@ window.drawStrategies = {
         ctx.restore();
       }
 
-      // A polygon has already stroked its own outline above, so the upright
-      // box around it is a second, larger outline of the same object. An RLE
-      // mask still needs it: the mask is painted into that rectangle.
-      if (seg.mask_format !== "polygon") {
+      // Only explicitly marked oriented boxes replace their bounding rectangle.
+      if (seg.mask_format !== "polygon" || seg.is_oriented_box !== true) {
         ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
       }
       const label = `${seg.label} (${Math.round((seg.confidence ?? 1) * 100)}%)`;
