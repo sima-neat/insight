@@ -496,6 +496,16 @@ class SlotFpsTests(RenditionApiTestCase):
         self.assertIsNone(sources[0]["fps"])
         self.assertEqual(sources[1]["fps"], 20)
 
+    def test_sources_probe_each_file_once_per_request(self):
+        self.assign(index=1)
+        self.assign(index=2)
+        with mock.patch.object(renditions, "probe_video", wraps=renditions.probe_video) as probe:
+            # The per-slot helper must not be used: GET /api/mediasrc resolves every file in one pass.
+            with mock.patch.object(renditions, "source_info", side_effect=AssertionError("must not probe per slot")):
+                payload = self.client.get("/api/mediasrc").get_json()
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual([s["native_fps"] for s in payload if s["index"] in (1, 2)], [30, 30])
+
     def test_renditions_directory_is_hidden_from_video_lists(self):
         (self.media_dir / ".renditions").mkdir()
         make_test_clip(self.media_dir / ".renditions" / "demo_abc123_15fps_h264.mp4", fps=15, seconds=0.5)
@@ -607,6 +617,14 @@ class StartWithRenditionTests(RenditionApiTestCase):
         self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
         self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
         self.assertEqual(self.source()["state"], "stopped")
+
+    def test_start_reports_filesystem_errors_as_an_encode_failure(self):
+        self.assign(fps=15)
+        with mock.patch.object(renditions, "source_hash", side_effect=OSError("disk full")):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("disk full", response.get_json()["error"])
+        self.start_mock.assert_not_called()
 
     def test_bulk_start_uses_each_slots_fps(self):
         self.assign(index=1, fps=15)

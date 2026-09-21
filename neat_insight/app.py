@@ -2163,7 +2163,26 @@ def _active_stream_file(index: Optional[int]) -> Optional[str]:
         return file_path
 
 
-def _source_with_urls(src, snapshot=None):
+def _native_fps_by_file(sources) -> dict[str, dict]:
+    """One cached probe pass for every assigned file in `sources`; {} when the index cannot be read."""
+    files = []
+    for src in sources:
+        file_name = src.get("file") or ""
+        if not file_name:
+            continue
+        try:
+            _safe_media_path(file_name)
+        except ValueError:
+            continue
+        files.append(file_name)
+    try:
+        return renditions.source_infos(RENDITIONS_INDEX_FILE, MEDIA_DIR, files)
+    except Exception as exc:
+        logging.debug("Failed to detect the frame rates of the assigned media sources: %s", exc)
+        return {}
+
+
+def _source_with_urls(src, snapshot=None, native_fps_by_file: Optional[dict] = None):
     enriched = dict(src)
     stored_codec = src.get("codec")
     if stored_codec in {"h264", "h265", "mjpeg", UNKNOWN_CODEC}:
@@ -2178,7 +2197,11 @@ def _source_with_urls(src, snapshot=None):
     enriched["codec"] = codec
     enriched["allowed_transports"] = allowed_transports
     enriched["fps"] = renditions.coerce_fps(src.get("fps"))
-    enriched["native_fps"] = _source_native_fps(src.get("file") or "")
+    file_name = src.get("file") or ""
+    if native_fps_by_file is None:
+        enriched["native_fps"] = _source_native_fps(file_name)
+    else:
+        enriched["native_fps"] = native_fps_by_file.get(file_name, {}).get("native_fps")
     enriched["active_file"] = _active_stream_file(src.get("index"))
     urls = {}
     if "rtsp" in allowed_transports:
@@ -2226,7 +2249,8 @@ def get_sources():
     """Return persisted media-source objects, including index, assigned file path, and playback state."""
     sources = _sync_source_runtime_states(load_sources())
     snapshot = _path_snapshot()
-    return jsonify([_source_with_urls(src, snapshot) for src in sources])
+    native = _native_fps_by_file(sources)
+    return jsonify([_source_with_urls(src, snapshot, native_fps_by_file=native) for src in sources])
 
 
 # API: assign or clear a media file for one RTSP source slot.
@@ -2331,7 +2355,8 @@ def _resolve_stream_input(src) -> tuple[Optional[Path], Optional[str], Optional[
                 result = event
     except renditions.UnsupportedRendition as exc:
         return None, None, str(exc), 400
-    except renditions.RenditionError as exc:
+    except (renditions.RenditionError, OSError) as exc:
+        # OSError covers a failing stat/read of the source or the rendition directory.
         return None, None, f"Encoding {file_name} at {fps} fps failed: {exc}", 500
     if not result:
         return None, None, "Rendition preparation ended unexpectedly", 500
@@ -2349,6 +2374,7 @@ def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
     input_path, rendition, error, status = _resolve_stream_input(src)
     if error:
         return False, error, status
+    # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
     ok, err = start_media_stream(
         src["index"],
         str(input_path),
