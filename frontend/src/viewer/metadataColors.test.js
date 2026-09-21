@@ -23,6 +23,34 @@ test("palette has 20 distinct hex colors and a neutral color", () => {
   assert.equal(PALETTE.includes(NEUTRAL_COLOR), false);
 });
 
+// A simple RGB Euclidean distance on the 0-255 scale. Used as a cheap proxy for perceptual
+// separation between palette colors so nearby slots don't look alike on screen.
+function hexDistance(a, b) {
+  const parse = (hex) => [0, 2, 4].map((i) => parseInt(hex.slice(1 + i, 3 + i), 16));
+  const [r1, g1, b1] = parse(a);
+  const [r2, g2, b2] = parse(b);
+  return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2);
+}
+
+test("palette entries stay perceptually separate, except the ten original, already-shipped track colors", () => {
+  const { PALETTE } = loadColors();
+  // PALETTE[0..9] are the original track colors (kept exactly as-is; existing tests key on
+  // PALETTE[0..5]) and already ship with a couple of pairs closer than 60 apart. Every pair
+  // that involves one of the ten colors added after them must stay at least 60 apart, on
+  // both sides and among themselves, so no two colors look alike on a crowded frame.
+  const MIN_DISTANCE = 60;
+  for (let i = 0; i < PALETTE.length; i += 1) {
+    for (let j = i + 1; j < PALETTE.length; j += 1) {
+      if (i < 10 && j < 10) continue;
+      const distance = hexDistance(PALETTE[i], PALETTE[j]);
+      assert.ok(
+        distance >= MIN_DISTANCE,
+        `PALETTE[${i}]=${PALETTE[i]} and PALETTE[${j}]=${PALETTE[j]} are only ${distance.toFixed(1)} apart`,
+      );
+    }
+  }
+});
+
 test("allocator keeps the same color for the same identity and differs across identities", () => {
   const { createColorAllocator } = loadColors();
   const allocator = createColorAllocator();
@@ -397,6 +425,18 @@ test("a pose without an id draws in the neutral color with a plain label", () =>
   const label = textCalls(calls).find((call) => String(call.args[0]).startsWith("person"));
   assert.equal(label.args[0], "person");
   assert.equal(label.fillStyle, window.metadataColors.NEUTRAL_COLOR);
+});
+
+test("drawing.js draws in the neutral color without throwing when metadata-colors.js is not loaded", () => {
+  // Guards against a stale cached viewer.html missing the metadata-colors.js script tag next
+  // to a fresh drawing.js: window.metadataColors is undefined, and a throw here must not
+  // happen, since a throw inside drawFrame stops the video frame callback from re-registering
+  // and overlays die permanently.
+  const window = {};
+  const context = { window, console, performance: { now: () => 0 } };
+  vm.runInNewContext(drawingSource, context);
+  const calls = draw(window, "object-detection", { objects: [detection("car")] });
+  assert.equal(colorOfText(calls, "car"), "#f8fafc");
 });
 
 test("pose bounding box covers the confident keypoints with padding", () => {
