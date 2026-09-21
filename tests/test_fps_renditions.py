@@ -105,5 +105,99 @@ class FpsRuleTests(unittest.TestCase):
         self.assertIsNone(renditions.parse_progress_seconds("out_time", "garbage"))
 
 
+class RenditionIndexTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        self.media_dir = self.root / "media"
+        self.media_dir.mkdir()
+        self.index_path = self.root / "renditions.json"
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_load_index_returns_empty_index_for_missing_or_corrupt_file(self):
+        self.assertEqual(renditions.load_index(self.index_path), {"schema": renditions.INDEX_SCHEMA, "sources": {}, "renditions": []})
+        self.index_path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+        self.index_path.write_text(json.dumps({"schema": "other", "renditions": [{"key": "x"}]}), encoding="utf-8")
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
+    def test_save_index_writes_atomically_with_trailing_newline(self):
+        renditions.save_index(self.index_path, {"schema": renditions.INDEX_SCHEMA, "sources": {}, "renditions": []})
+        text = self.index_path.read_text(encoding="utf-8")
+        self.assertTrue(text.endswith("\n"))
+        self.assertEqual(json.loads(text)["schema"], renditions.INDEX_SCHEMA)
+        self.assertFalse(self.index_path.with_name(".renditions.json.tmp").exists())
+
+    def test_source_hash_is_cached_by_size_and_mtime(self):
+        source = self.media_dir / "demo.mp4"
+        source.write_bytes(b"first content")
+        first = renditions.source_hash(self.index_path, self.media_dir, "demo.mp4")
+        self.assertEqual(first, renditions.sha256_file(source))
+
+        with mock.patch.object(renditions, "sha256_file", side_effect=AssertionError("must not re-hash")):
+            self.assertEqual(renditions.source_hash(self.index_path, self.media_dir, "demo.mp4"), first)
+
+        source.write_bytes(b"second content!")  # different size and mtime
+        second = renditions.source_hash(self.index_path, self.media_dir, "demo.mp4")
+        self.assertNotEqual(first, second)
+        entry = renditions.load_index(self.index_path)["sources"]["demo.mp4"]
+        self.assertEqual(entry["sha256"], second)
+        self.assertEqual(entry["size"], source.stat().st_size)
+        self.assertEqual(entry["mtime_ns"], source.stat().st_mtime_ns)
+
+    def test_source_info_probes_once_and_caches_native_fps(self):
+        source = self.media_dir / "demo.mp4"
+        source.write_bytes(b"x")
+        stream = {"avg_frame_rate": "30/1", "r_frame_rate": "30/1", "width": 320, "height": 240, "duration": "2.000000"}
+        with mock.patch.object(renditions, "probe_video", return_value=stream) as probe:
+            info = renditions.source_info(self.index_path, self.media_dir, "demo.mp4")
+            again = renditions.source_info(self.index_path, self.media_dir, "demo.mp4")
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(info["native_fps"], 30)
+        self.assertEqual(info["height"], 240)
+        self.assertEqual(info["duration"], 2.0)
+        self.assertEqual(again, info)
+
+    def test_find_rendition_prunes_records_whose_file_is_gone(self):
+        (self.media_dir / ".renditions").mkdir()
+        present = self.media_dir / ".renditions" / "a.mp4"
+        present.write_bytes(b"a")
+        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/a.mp4", "source_file": "a.mp4"})
+        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/missing.mp4", "source_file": "b.mp4"})
+
+        self.assertEqual(renditions.find_rendition(self.index_path, self.media_dir, "k1")["path"], ".renditions/a.mp4")
+        self.assertIsNone(renditions.find_rendition(self.index_path, self.media_dir, "k2"))
+        self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k1"])
+
+    def test_add_rendition_replaces_same_key(self):
+        renditions.add_rendition(self.index_path, {"key": "k", "path": "old"})
+        renditions.add_rendition(self.index_path, {"key": "k", "path": "new"})
+        records = renditions.load_index(self.index_path)["renditions"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["path"], "new")
+
+    def test_remove_source_deletes_rendition_files_and_records(self):
+        (self.media_dir / ".renditions").mkdir()
+        target = self.media_dir / ".renditions" / "demo_15.mp4"
+        target.write_bytes(b"r")
+        other = self.media_dir / ".renditions" / "other.mp4"
+        other.write_bytes(b"o")
+        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/demo_15.mp4", "source_file": "demo.mp4"})
+        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/other.mp4", "source_file": "other.mp4"})
+        (self.media_dir / "demo.mp4").write_bytes(b"d")
+        renditions.source_hash(self.index_path, self.media_dir, "demo.mp4")
+
+        removed = renditions.remove_source(self.index_path, self.media_dir, "demo.mp4")
+
+        self.assertEqual(removed, [".renditions/demo_15.mp4"])
+        self.assertFalse(target.exists())
+        self.assertTrue(other.exists())
+        index = renditions.load_index(self.index_path)
+        self.assertNotIn("demo.mp4", index["sources"])
+        self.assertEqual([r["key"] for r in index["renditions"]], ["k2"])
+
+
 if __name__ == "__main__":
     unittest.main()
