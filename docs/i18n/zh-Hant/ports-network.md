@@ -20,6 +20,8 @@ Insight 在正常運作期間會使用多個埠。預設埠是 SDK 容器內部�
 | `webRTC` | `40000-40199` | UDP | WebRTC 媒體和中繼資料 DataChannel 從虛擬顯示器傳輸到瀏覽器。 |
 | `webSSH` | `8022` | HTTPS/TCP | 如果有的話，將瀏覽器外殼與配對的 DevKit 連接。 |
 
+Insight 也會在 `127.0.0.1:9997`（TCP）上執行 mediamtx 控制 API。此 API 僅限迴路介面存取，以每次啟動時產生的密碼保護，且只供 Insight 本身偵測外部發布端使用，因此不需要連接埠對應，也絕不會被強制釋放。如果該連接埠已被佔用，Insight 會在不啟用 API 的情況下啟動 mediamtx 並記錄警告：串流功能照常運作，只有外部發布端偵測會關閉。若要連線到另外啟動且已知 API 密碼的 mediamtx，請設定 `NEAT_INSIGHT_MEDIAMTX_API_PASS`（僅限字母、數字、`_` 和 `-`）。
+
 ## 找到實際的 SDK 連接埠對應表。
 
 在 SDK 中，請勿假設預設主機連接埠可用。請執行：
