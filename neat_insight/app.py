@@ -39,6 +39,7 @@ from neat_insight.mediasrc import (
     DEFAULT_TRANSPORT,
     http_mjpeg_command,
     http_snapshot_command,
+    media_stream_file,
     media_stream_identity,
     media_stream_is_running,
     normalize_codec,
@@ -51,6 +52,7 @@ from neat_insight.mediasrc import (
 from neat_insight import mediasrc
 from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound, PREVIEW_READER_TAG
 from neat_insight.api_docs import api_docs_bp
+from neat_insight import renditions
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_metrics,
@@ -92,6 +94,7 @@ PREVIEW_MAX_STREAMS = 4
 PREVIEW_IDLE_TIMEOUT_SECONDS = 15
 _preview_lock = threading.Lock()
 _preview_count = 0
+RENDITIONS_INDEX_FILE = Path(env["NEAT_INSIGHT_DATA"]) / "renditions.json"
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
@@ -249,6 +252,7 @@ def _default_source(index: int):
         "state": "stopped",
         "transport": DEFAULT_TRANSPORT,
         "codec": DEFAULT_CODEC,
+        "fps": None,
     }
 
 
@@ -280,6 +284,7 @@ def _normalize_source(src, index: Optional[int] = None):
         "state": state,
         "transport": transport,
         "codec": codec,
+        "fps": renditions.coerce_fps(src.get("fps")),
     }
 
 
@@ -2010,8 +2015,11 @@ def list_video_files():
 
 def _collect_video_files():
     video_files = []
-    for root, _, files in os.walk(MEDIA_DIR):
+    for root, dirs, files in os.walk(MEDIA_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         for fname in files:
+            if fname.startswith("."):
+                continue
             if Path(fname).suffix.lower() in ALLOWED_EXTENSIONS:
                 full_path = Path(root) / fname
                 rel = os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")
@@ -2128,6 +2136,29 @@ def _skipped_suffix(skipped_external, phrase="Skipped external"):
     return f" {phrase}: " + ", ".join(f"src{i}" for i in skipped_external) + "."
 
 
+def _source_native_fps(file_name: str) -> Optional[int]:
+    if not file_name:
+        return None
+    try:
+        _safe_media_path(file_name)
+        return renditions.source_info(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name).get("native_fps")
+    except Exception as exc:
+        logging.debug("Failed to detect the frame rate of %s: %s", file_name, exc)
+        return None
+
+
+def _active_stream_file(index: Optional[int]) -> Optional[str]:
+    if index is None:
+        return None
+    file_path = media_stream_file(index)
+    if not file_path:
+        return None
+    try:
+        return os.path.relpath(file_path, MEDIA_DIR).replace(os.path.sep, "/")
+    except ValueError:
+        return file_path
+
+
 def _source_with_urls(src, snapshot=None):
     enriched = dict(src)
     stored_codec = src.get("codec")
@@ -2142,6 +2173,9 @@ def _source_with_urls(src, snapshot=None):
     enriched["transport"] = transport
     enriched["codec"] = codec
     enriched["allowed_transports"] = allowed_transports
+    enriched["fps"] = renditions.coerce_fps(src.get("fps"))
+    enriched["native_fps"] = _source_native_fps(src.get("file") or "")
+    enriched["active_file"] = _active_stream_file(src.get("index"))
     urls = {}
     if "rtsp" in allowed_transports:
         urls["rtsp"] = _source_url(src, "rtsp")
@@ -2194,7 +2228,7 @@ def get_sources():
 # API: assign or clear a media file for one RTSP source slot.
 @app.post("/api/mediasrc/assign")
 def assign_source():
-    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str}; update and restart if already playing."""
+    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str, 'fps': int|null}; update and restart if already playing. Changing the file resets fps."""
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
@@ -2205,6 +2239,13 @@ def assign_source():
     if holder:
         return _external_conflict_error(index, holder)
     requested_transport = data.get("transport")
+    fps_requested = "fps" in data
+    requested_fps = None
+    if fps_requested and data.get("fps") not in (None, ""):
+        try:
+            requested_fps = renditions.validate_fps(data.get("fps"))
+        except ValueError as exc:
+            return _json_error(str(exc))
 
     sources = load_sources()
     for src in sources:
@@ -2212,7 +2253,12 @@ def assign_source():
             was_playing = src.get("state") == "playing" and media_stream_is_running(index)
             if was_playing:
                 stop_media_stream(index)
+            file_changed = file_name != (src.get("file") or "")
             src["file"] = file_name
+            if fps_requested:
+                src["fps"] = requested_fps
+            elif file_changed:
+                src["fps"] = None
             transport, codec, _allowed_transports = _derive_source_stream_settings(file_name, requested_transport or src.get("transport"))
             src["transport"] = transport
             src["codec"] = codec
