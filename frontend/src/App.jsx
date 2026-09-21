@@ -3,6 +3,7 @@ import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
+import { formatFpsProgress, parseFps, stepFps } from './fps.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -677,6 +678,70 @@ function UploadProgressCard({ progress, className = '' }) {
   )
 }
 
+function FpsStepper({ value, nativeFps, disabled = false, locked = false, title, onCommit, onInvalidChange }) {
+  const effective = value ?? nativeFps ?? null
+  const [draft, setDraft] = useState(effective == null ? '' : String(effective))
+  const [invalid, setInvalid] = useState(false)
+  const inert = disabled || locked
+  const changed = value != null && nativeFps != null && value !== nativeFps
+
+  useEffect(() => {
+    setDraft(effective == null ? '' : String(effective))
+    setInvalid(false)
+    if (onInvalidChange) onInvalidChange(false)
+  }, [effective])
+
+  function markInvalid(next) {
+    setInvalid(next)
+    if (onInvalidChange) onInvalidChange(next)
+  }
+
+  function commit(next) {
+    markInvalid(false)
+    if (next !== effective) onCommit(next)
+  }
+
+  function commitDraft() {
+    if (draft.trim() === '') {
+      setDraft(effective == null ? '' : String(effective))
+      markInvalid(false)
+      return
+    }
+    const parsed = parseFps(draft)
+    if (parsed == null) {
+      setDraft(effective == null ? '' : String(effective))
+      markInvalid(false)
+      return
+    }
+    commit(parsed)
+  }
+
+  const className = ['fps-stepper', changed ? 'changed' : '', invalid ? 'invalid' : '', locked ? 'locked' : ''].filter(Boolean).join(' ')
+  return (
+    <div className={className} title={title} onClick={(e) => e.stopPropagation()}>
+      <button type="button" aria-label="Decrease FPS by 5" disabled={inert || effective == null} onClick={() => commit(stepFps(effective, -1))}>−</button>
+      <span className="fps-field">
+        <input
+          inputMode="numeric"
+          aria-label="Frames per second"
+          aria-invalid={invalid || undefined}
+          placeholder="—"
+          value={draft}
+          disabled={inert}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            markInvalid(e.target.value.trim() !== '' && parseFps(e.target.value) == null)
+          }}
+          onBlur={commitDraft}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+        />
+        <small>fps</small>
+      </span>
+      <button type="button" aria-label="Increase FPS by 5" disabled={inert || effective == null} onClick={() => commit(stepFps(effective, 1))}>+</button>
+    </div>
+  )
+}
+
 export default function App() {
   const initialRoute = routeStateFromLocation()
   const [tab, setTab] = useState(() => {
@@ -712,6 +777,9 @@ export default function App() {
   const [takeoverTarget, setTakeoverTarget] = useState(null)
   const [takeoverBusy, setTakeoverBusy] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [fpsInvalid, setFpsInvalid] = useState({})
+  const [encodeProgress, setEncodeProgress] = useState({})
+  const encodeAbortRef = useRef({})
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -2118,7 +2186,7 @@ export default function App() {
                           <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
                             {src.state === 'playing' ? 'Live' : 'Idle'}
                           </span>
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
+                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })} disabled={Boolean(encodeProgress[src.index])}>
                             <option value="">Not assigned</option>
                             {videoFiles.map((file) => (
                               <option key={file} value={file}>{file}</option>
@@ -2139,6 +2207,15 @@ export default function App() {
                           <span className={isAssigned && canStream ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? (canStream ? 'Codec is determined by the selected media format' : 'Codec could not be detected for this media') : 'Assign media before selecting a codec'}>
                             {isAssigned ? codecLabel(src.codec) : '-'}
                           </span>
+                          <FpsStepper
+                            value={src.fps ?? null}
+                            nativeFps={src.native_fps ?? null}
+                            disabled={!isAssigned || !canStream || src.codec === 'mjpeg'}
+                            locked={src.state === 'playing' || Boolean(encodeProgress[src.index])}
+                            title={!isAssigned ? 'Assign media before choosing a frame rate' : (src.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (src.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${src.index} (source ${src.native_fps ?? '?'} fps)`))}
+                            onCommit={(fps) => updateSource(src.index, { fps }).catch((e) => setError(e.message))}
+                            onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[src.index] === bad ? prev : { ...prev, [src.index]: bad }))}
+                          />
                           {src.state === 'playing' ? (
                             <button
                               className="icon-action-btn stop"
@@ -2154,9 +2231,9 @@ export default function App() {
                             <button
                               className="icon-action-btn play"
                               onClick={(e) => { e.stopPropagation(); startSource(src.index) }}
-                              disabled={!canStream}
+                              disabled={!canStream || Boolean(fpsInvalid[src.index])}
                               aria-label={`Start src${src.index}`}
-                              title={canStream ? `Start src${src.index}` : 'Codec must be detected before streaming'}
+                              title={!canStream ? 'Codec must be detected before streaming' : (fpsInvalid[src.index] ? 'FPS must be a whole number between 1 and 240' : `Start src${src.index}`)}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M8 6v12l10-6-10-6z" />

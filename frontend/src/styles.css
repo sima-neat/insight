@@ -744,7 +744,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px auto auto auto;
+  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px 112px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -850,6 +850,89 @@ button:hover:not(:disabled) {
 .warn-text {
   color: var(--warn);
   font-weight: 600;
+}
+
+.fps-stepper {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.fps-stepper button {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: var(--surface-soft);
+  color: #405f72;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.fps-stepper button:first-child {
+  border-right: 1px solid var(--line);
+}
+
+.fps-stepper button:last-child {
+  border-left: 1px solid var(--line);
+}
+
+.fps-stepper button:hover:not(:disabled) {
+  transform: none;
+  background: var(--accent-soft);
+}
+
+.fps-field {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.fps-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: transparent;
+}
+
+.fps-field input:focus-visible {
+  box-shadow: none;
+}
+
+.fps-field small {
+  color: #7b8c9c;
+  font-size: 10px;
+}
+
+.fps-stepper.changed {
+  border-color: rgba(14, 90, 184, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(14, 90, 184, 0.12);
+}
+
+.fps-stepper.invalid {
+  border-color: #edb1be;
+  box-shadow: inset 0 0 0 1px rgba(179, 66, 90, 0.2);
+}
+
+.fps-stepper.locked {
+  opacity: 0.55;
+}
+
+.src-state.encoding {
+  background: var(--accent-soft);
+  color: #174f4c;
 }
 
 .icon-action-btn svg {
@@ -3331,7 +3414,7 @@ button:disabled {
   }
 
   .source-row {
-    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px auto auto auto;
+    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px 112px auto auto auto;
   }
 
   .masthead {
@@ -3373,6 +3456,10 @@ button:disabled {
   }
 
   .source-row select {
+    grid-column: 1 / -1;
+  }
+
+  .source-row .fps-stepper {
     grid-column: 1 / -1;
   }
 
