@@ -381,24 +381,26 @@ window.drawStrategies = {
   "pose-estimation": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.poses) return;
 
-    const settings = drawContext.settings || resolveViewerDrawSettings(index, "pose-estimation");
-    const strokeColor = settings.type.poseStrokeColor || 'aqua';
-    const fillColor = settings.type.poseFillColor || 'aqua';
-    const font = settings.type.poseFont || FONT;
-
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+    const KEYPOINT_MIN_CONFIDENCE = 0.3;
+    const BOX_PADDING = 8;
 
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
     ctx.lineWidth = 2;
-    ctx.font = font;
+    ctx.setLineDash([]);
+    ctx.font = FONT;
 
     data.poses.forEach(pose => {
+      if (!Array.isArray(pose?.keypoints)) return;
+      const color = identityColor(drawContext, index, "pose", pose.id);
       const kpMap = Object.fromEntries(pose.keypoints.map(kp => [kp.name, kp]));
+      const confident = pose.keypoints.filter(kp => kp.confidence > KEYPOINT_MIN_CONFIDENCE);
+
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
 
       COCO_SKELETON.forEach(([a, b]) => {
         const kpA = kpMap[a], kpB = kpMap[b];
-        if (kpA && kpB && kpA.confidence > 0.3 && kpB.confidence > 0.3) {
+        if (kpA && kpB && kpA.confidence > KEYPOINT_MIN_CONFIDENCE && kpB.confidence > KEYPOINT_MIN_CONFIDENCE) {
           ctx.beginPath();
           ctx.moveTo(kpA.x * scaleX + offsetX, kpA.y * scaleY + offsetY);
           ctx.lineTo(kpB.x * scaleX + offsetX, kpB.y * scaleY + offsetY);
@@ -406,14 +408,26 @@ window.drawStrategies = {
         }
       });
 
-      pose.keypoints.forEach(kp => {
-        if (kp.confidence > 0.3) {
-          ctx.beginPath();
-          ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
-        }
+      confident.forEach(kp => {
+        ctx.beginPath();
+        ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
       });
+
+      if (confident.length < 2) return;
+      const xs = confident.map(kp => kp.x);
+      const ys = confident.map(kp => kp.y);
+      const left = Math.min(...xs) - BOX_PADDING;
+      const top = Math.min(...ys) - BOX_PADDING;
+      const width = Math.max(...xs) - Math.min(...xs) + BOX_PADDING * 2;
+      const height = Math.max(...ys) - Math.min(...ys) + BOX_PADDING * 2;
+      const boxLeft = left * scaleX + offsetX;
+      const boxTop = top * scaleY + offsetY;
+      ctx.strokeRect(boxLeft, boxTop, width * scaleX, height * scaleY);
+
+      const idText = pose.id === null || pose.id === undefined || pose.id === "" ? "" : ` #${pose.id}`;
+      drawTrackLabel(ctx, `${pose.label || "pose"}${idText}`, boxLeft, boxTop - 6, color);
     });
   },
 
@@ -562,13 +576,14 @@ window.drawStrategies = {
       trackHistory.forEach((entry, key) => {
         if (Number(key.split(":")[0]) !== index) return;
         const trackId = key.substring(key.indexOf(":") + 1);
-        drawTrackHistoryPath(ctx, entry.points, scale, colorForTrackId(trackId), activeKeys.has(key) ? 0.72 : 0.35);
+        const trailColor = identityColor(drawContext, index, "track", trackId);
+        drawTrackHistoryPath(ctx, entry.points, scale, trailColor, activeKeys.has(key) ? 0.72 : 0.35);
       });
     }
 
     visibleTracks.forEach((track) => {
       const [x, y, w, h] = track.bbox;
-      const color = colorForTrackId(track.id);
+      const color = identityColor(drawContext, index, "track", track.id);
       const left = x * scaleX + offsetX;
       const top = y * scaleY + offsetY;
       const width = w * scaleX;
