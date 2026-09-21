@@ -306,7 +306,207 @@ function decodeRleMaskAlpha(pixels, counts, maskWidth, maskHeight) {
   return pixels;
 }
 
+// --- Caption overlay (persists until dismissed or replaced) ---
+// Insight's own canvas draw loop is a single-slot, consume-once queue shared
+// by every metadata type on this channel: whichever message the viewer's
+// internal lookup returns for a given tick is drawn, and everything else
+// (including a caption sitting untouched) gets wiped by the unconditional
+// clearRect() before the next tick's lookup. Drawing the caption straight
+// onto ctx therefore can't outlive a single frame. So this strategy is used
+// only as a one-shot "new caption arrived" notification -- the actual
+// caption lives in a plain DOM element we own, layered over the video, which
+// keeps showing on screen independent of Insight's per-tick canvas clearing.
+//
+// Everything (state, DOM node, listeners) is stored per canvas in this map,
+// not in a shared variable -- Insight can render many channels at once, and
+// a single global would let one tile's caption or dismissal leak into
+// another's.
+const captionOverlaysByCanvas = new WeakMap();
+
+function positionCaptionOverlay(video, canvas, root) {
+  const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+  const videoW = video.videoWidth * scaleX;
+  const videoH = video.videoHeight * scaleY;
+  root.style.left = `${offsetX}px`;
+  root.style.width = `${videoW}px`;
+  root.style.bottom = `${canvas.clientHeight - (offsetY + videoH)}px`;
+  // The video tile clips overflow, so an unbounded overlay can grow taller
+  // than the video and get clipped -- including the close button. Cap the
+  // height and let long captions scroll internally instead.
+  root.style.maxHeight = `${videoH}px`;
+  root.style.overflowY = "auto";
+}
+
+// A brief "waiting" event is normal, harmless jitter on a live stream --
+// only treat it as a real stale/reconnecting stream if it doesn't recover
+// within this window.
+const STALE_STREAM_CLEAR_DELAY_MS = 3000;
+
+function disposeCaptionOverlay(canvas) {
+  const els = captionOverlaysByCanvas.get(canvas);
+  if (!els) return;
+  if (els.staleTimer) clearTimeout(els.staleTimer);
+  els.resizeObserver.disconnect();
+  els.video.removeEventListener("loadedmetadata", els.reposition);
+  els.video.removeEventListener("resize", els.reposition);
+  els.video.removeEventListener("emptied", els.handleStreamEmptied);
+  els.video.removeEventListener("waiting", els.handleStreamWaiting);
+  els.video.removeEventListener("playing", els.handleStreamRecovered);
+  window.removeEventListener("resize", els.reposition);
+  els.root.remove();
+  captionOverlaysByCanvas.delete(canvas);
+}
+
+function ensureCaptionOverlay(video, canvas) {
+  const existing = captionOverlaysByCanvas.get(canvas);
+  if (existing) {
+    if (document.body.contains(existing.root)) return existing;
+    // Tile was torn down and rebuilt on the same canvas object -- the old
+    // overlay's listeners are still live, so tear them down before making
+    // a fresh one instead of leaking the old set.
+    disposeCaptionOverlay(canvas);
+  }
+
+  const container = canvas.parentElement || canvas;
+
+  const root = document.createElement("div");
+  root.style.cssText = `
+    position: absolute;
+    display: none;
+    box-sizing: border-box;
+    background: rgba(0,0,0,0.65);
+    color: #ffffff;
+    font: 16px sans-serif;
+    line-height: 1.4;
+    padding: 14px 40px 14px 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    pointer-events: auto;
+    z-index: 20;
+  `;
+
+  const textEl = document.createElement("span");
+  root.appendChild(textEl);
+
+  // Mutated in place (never replaced) so the close button's closure below
+  // always stays in sync with whatever the "caption" strategy last wrote.
+  const state = { id: null, text: "", dismissed: false };
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "×";
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Dismiss caption");
+  closeBtn.style.cssText = `
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    line-height: 20px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.18);
+    color: #ffffff;
+    font-size: 15px;
+    cursor: pointer;
+    pointer-events: auto;
+  `;
+  closeBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    state.dismissed = true;
+    root.style.display = "none";
+  });
+  root.appendChild(closeBtn);
+
+  container.appendChild(root);
+
+  // Declared once, mutated in place from here on -- lets the handlers below
+  // reference the one stable object instead of juggling several closures.
+  const els = { root, textEl, state, video, staleTimer: null };
+  captionOverlaysByCanvas.set(canvas, els);
+
+  els.reposition = () => {
+    if (!document.body.contains(canvas)) {
+      disposeCaptionOverlay(canvas);
+      return;
+    }
+    positionCaptionOverlay(video, canvas, root);
+  };
+  els.resizeObserver = new ResizeObserver(els.reposition);
+  els.resizeObserver.observe(container);
+  video.addEventListener("loadedmetadata", els.reposition);
+  // Fires when the video's own intrinsic width/height change mid-stream
+  // (e.g. adaptive resolution) -- distinct from "loadedmetadata" (fires once)
+  // and from window's resize (fires on browser window changes, not this).
+  video.addEventListener("resize", els.reposition);
+  window.addEventListener("resize", els.reposition);
+
+  // A caption belongs to whatever stream was live when it arrived. Nothing
+  // in the viewer's own reconnect/stale-stream handling knows this overlay
+  // exists, so without this it would keep showing a description of a
+  // channel that has since disconnected, reconnected, or gone stale.
+  const clearOverlayState = () => {
+    state.id = null;
+    state.text = "";
+    state.dismissed = false;
+    root.style.display = "none";
+  };
+  // "emptied" fires when the source is cleared -- an unambiguous reconnect,
+  // so clear right away.
+  els.handleStreamEmptied = () => {
+    if (els.staleTimer) {
+      clearTimeout(els.staleTimer);
+      els.staleTimer = null;
+    }
+    clearOverlayState();
+  };
+  // "waiting" fires on any playback stall, including brief, harmless jitter
+  // on a live stream -- debounce it instead of clearing on the first one,
+  // and cancel if "playing" shows it recovered within the window.
+  els.handleStreamWaiting = () => {
+    if (els.staleTimer) clearTimeout(els.staleTimer);
+    els.staleTimer = setTimeout(() => {
+      els.staleTimer = null;
+      clearOverlayState();
+    }, STALE_STREAM_CLEAR_DELAY_MS);
+  };
+  els.handleStreamRecovered = () => {
+    if (els.staleTimer) {
+      clearTimeout(els.staleTimer);
+      els.staleTimer = null;
+    }
+  };
+  video.addEventListener("emptied", els.handleStreamEmptied);
+  video.addEventListener("waiting", els.handleStreamWaiting);
+  video.addEventListener("playing", els.handleStreamRecovered);
+
+  return els;
+}
+
 window.drawStrategies = {
+  "caption": (ctx, canvas, data, video, index, drawContext = {}) => {
+    if (!data?.text) return;
+
+    const els = ensureCaptionOverlay(video, canvas);
+    // A caption's text is not a reliable identity: a producer may legitimately
+    // repeat the same text (e.g. after a reconnect), and if that got treated
+    // as "the same caption" it would stay dismissed forever. Only compare by
+    // id when the producer actually supplies one; without one, always treat
+    // the arrival as new rather than risk silently suppressing it.
+    const hasId = data.id !== undefined && data.id !== null;
+    const isNew = hasId ? data.id !== els.state.id : true;
+    if (isNew) {
+      els.state.id = hasId ? data.id : null;
+      els.state.text = String(data.text);
+      els.state.dismissed = false;
+    }
+
+    els.textEl.textContent = els.state.text;
+    positionCaptionOverlay(video, canvas, els.root);
+    els.root.style.display = els.state.dismissed ? "none" : "block";
+  },
+
   "object-detection": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.objects) return;
 
