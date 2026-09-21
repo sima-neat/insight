@@ -61,8 +61,17 @@ jobs:
       - name: Run FPS rendition tests
         run: scripts/test-fps-renditions.sh
 
-      - name: Run the full unit-test suite
-        run: python -m unittest discover tests -v
+      - name: Run the remaining unit tests
+        run: >
+          python -m unittest
+          tests.test_api_docs
+          tests.test_environment
+          tests.test_media_asset_builder
+          tests.test_streaming_sources
+          tests.test_viewer_url
+          tests.test_workspace
+          tests.test_youtube_import
+          -v
 
   build:
     name: Build ${{ matrix.target_platform }}
