@@ -7,6 +7,7 @@ catalog assets and stream through mediasrc with ``-c:v copy``.
 """
 import hashlib
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -274,47 +275,106 @@ def _stat_matches(entry: Any, stat) -> bool:
     return isinstance(entry, dict) and entry.get("size") == stat.st_size and entry.get("mtime_ns") == stat.st_mtime_ns
 
 
+def _cached_entry(index_path: Path, rel_path: str) -> Optional[dict]:
+    with _index_lock:
+        entry = load_index(index_path)["sources"].get(rel_path)
+    return entry if isinstance(entry, dict) else None
+
+
+def _for_current_stat(source_path: Path, stat, compute):
+    """Run `compute` outside the index lock; redo it once if the file changed while it ran."""
+    value = compute()
+    current = source_path.stat()
+    if (current.st_size, current.st_mtime_ns) != (stat.st_size, stat.st_mtime_ns):
+        return compute(), current
+    return value, stat
+
+
+def _source_entry(stat, stream: dict) -> dict:
+    return {
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "native_fps": detect_fps(stream),
+        "width": stream.get("width"),
+        "height": stream.get("height"),
+        "duration": _float_or_none(stream.get("duration")),
+    }
+
+
 def source_info(index_path: Path, media_dir: Path, rel_path: str) -> dict:
     """Cached probe of a source: {size, mtime_ns, native_fps, width, height, duration[, sha256]}; re-probes when size or mtime change."""
     source_path = media_dir / rel_path
     stat = source_path.stat()
+    entry = _cached_entry(index_path, rel_path)
+    if _stat_matches(entry, stat) and "native_fps" in entry:
+        return dict(entry)
+    stream, stat = _for_current_stat(source_path, stat, lambda: probe_video(source_path))
+    fresh = _source_entry(stat, stream)
     with _index_lock:
         index = load_index(index_path)
         entry = index["sources"].get(rel_path)
-        if _stat_matches(entry, stat) and "native_fps" in entry:
-            return dict(entry)
-        stream = probe_video(source_path)
-        fresh = {
-            "size": stat.st_size,
-            "mtime_ns": stat.st_mtime_ns,
-            "native_fps": detect_fps(stream),
-            "width": stream.get("width"),
-            "height": stream.get("height"),
-            "duration": _float_or_none(stream.get("duration")),
-        }
         if _stat_matches(entry, stat) and entry.get("sha256"):
             fresh["sha256"] = entry["sha256"]
         index["sources"][rel_path] = fresh
         save_index(index_path, index)
-        return dict(fresh)
+    return dict(fresh)
+
+
+def source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> dict[str, dict]:
+    """source_info for many files with one index load and at most one save; files that fail to stat/probe are omitted."""
+    stats = {}
+    for rel_path in dict.fromkeys(rel_paths):
+        try:
+            stats[rel_path] = (media_dir / rel_path).stat()
+        except OSError as exc:
+            logging.debug("Cannot stat the media source %s: %s", rel_path, exc)
+    if not stats:
+        return {}
+    with _index_lock:
+        cached = load_index(index_path)["sources"]
+    infos: dict[str, dict] = {}
+    probed: dict[str, tuple[Any, dict]] = {}
+    for rel_path, stat in stats.items():
+        entry = cached.get(rel_path)
+        if _stat_matches(entry, stat) and "native_fps" in entry:
+            infos[rel_path] = dict(entry)
+            continue
+        source_path = media_dir / rel_path
+        try:
+            stream, stat = _for_current_stat(source_path, stat, lambda: probe_video(source_path))
+        except (OSError, RenditionError, subprocess.SubprocessError) as exc:
+            logging.debug("Cannot probe the media source %s: %s", rel_path, exc)
+            continue
+        probed[rel_path] = (stat, _source_entry(stat, stream))
+    if probed:
+        with _index_lock:
+            index = load_index(index_path)
+            for rel_path, (stat, fresh) in probed.items():
+                entry = index["sources"].get(rel_path)
+                if _stat_matches(entry, stat) and entry.get("sha256"):
+                    fresh["sha256"] = entry["sha256"]
+                index["sources"][rel_path] = fresh
+            save_index(index_path, index)
+        infos.update({rel_path: dict(fresh) for rel_path, (_stat, fresh) in probed.items()})
+    return infos
 
 
 def source_hash(index_path: Path, media_dir: Path, rel_path: str) -> str:
     """SHA-256 of the source content, cached in the index and validated by size + mtime_ns."""
     source_path = media_dir / rel_path
     stat = source_path.stat()
+    entry = _cached_entry(index_path, rel_path)
+    if _stat_matches(entry, stat) and entry.get("sha256"):
+        return entry["sha256"]
+    digest, stat = _for_current_stat(source_path, stat, lambda: sha256_file(source_path))
     with _index_lock:
         index = load_index(index_path)
         entry = index["sources"].get(rel_path)
-        if _stat_matches(entry, stat) and entry.get("sha256"):
-            return entry["sha256"]
-        digest = sha256_file(source_path)
-        if not _stat_matches(entry, stat):
-            entry = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+        entry = dict(entry) if _stat_matches(entry, stat) else {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
         entry["sha256"] = digest
         index["sources"][rel_path] = entry
         save_index(index_path, index)
-        return digest
+    return digest
 
 
 def find_rendition(index_path: Path, media_dir: Path, key: str) -> Optional[dict]:
@@ -336,11 +396,24 @@ def find_rendition(index_path: Path, media_dir: Path, key: str) -> Optional[dict
         return dict(found) if found else None
 
 
-def add_rendition(index_path: Path, record: dict) -> None:
+def add_rendition(index_path: Path, record: dict, media_dir: Path) -> None:
+    """Store `record`, replacing the same key and pruning renditions orphaned by a replaced source."""
+    source_file = record.get("source_file")
+    digest = record.get("source_sha256")
     with _index_lock:
         index = load_index(index_path)
-        index["renditions"] = [r for r in index["renditions"] if r.get("key") != record["key"]]
-        index["renditions"].append(record)
+        kept = []
+        for existing in index["renditions"]:
+            if existing.get("key") == record["key"]:
+                continue
+            if existing.get("source_file") == source_file and existing.get("source_sha256") != digest:
+                rel_out = existing.get("path")
+                if rel_out:
+                    (media_dir / rel_out).unlink(missing_ok=True)
+                continue
+            kept.append(existing)
+        kept.append(record)
+        index["renditions"] = kept
         save_index(index_path, index)
 
 
@@ -350,7 +423,10 @@ def probe_packets(path: Path) -> list[tuple[float, float, bool]]:
     if not ffprobe:
         raise RenditionError("ffprobe is not installed; install FFmpeg and ensure ffprobe is on PATH.")
     cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,dts_time,flags", "-of", "json", str(path)]
-    data = json.loads(subprocess.check_output(cmd, text=True, timeout=60))
+    try:
+        data = json.loads(subprocess.check_output(cmd, text=True, timeout=60))
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise RenditionError(f"ffprobe failed for {path.name}: {exc}") from exc
     try:
         return [
             (float(packet["pts_time"]), float(packet["dts_time"]), "K" in str(packet.get("flags", "")))
@@ -365,7 +441,10 @@ def probe_reference_frames(path: Path) -> int:
     if not ffmpeg:
         raise RenditionError("ffmpeg is not installed; install FFmpeg and ensure ffmpeg is on PATH.")
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "verbose", "-i", str(path), "-map", "0:v:0", "-c", "copy", "-frames:v", "1", "-f", "null", "-"]
-    proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=60)
+    try:
+        proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=60)
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise RenditionError(f"ffmpeg failed for {path.name}: {exc}") from exc
     match = re.search(r"Video:.*?([0-9]+) reference frame", proc.stderr)
     if not match:
         raise RenditionError(f"Could not determine the reference-frame count for {path.name}")
@@ -408,6 +487,10 @@ def validate_rendition(path: Path, fps: int, codec: str, height: int) -> None:
         raise RenditionError(f"{path.name} violates the rendition contract: " + "; ".join(mismatches))
     _validate_timestamps(path, fps, probe_packets(path))
 
+
+# An ffmpeg -progress line is "key=value" with a lower-case key (frame, out_time_us, stream_0_0_q, …);
+# anything else on the merged stdout/stderr is a diagnostic, even when it contains "=".
+_PROGRESS_LINE = re.compile(r"[a-z_][a-z0-9_]*=")
 
 _key_locks: dict[str, threading.Lock] = {}
 _key_locks_guard = threading.Lock()
@@ -488,7 +571,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
                     line = raw_line.strip()
                     if not line:
                         continue
-                    if "=" not in line:
+                    if not _PROGRESS_LINE.match(line):
                         diagnostics.append(line)
                         diagnostics = diagnostics[-8:]
                         continue
@@ -516,7 +599,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             raise RenditionError("; ".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}")
         try:
             validate_rendition(tmp, fps, source_codec, height)
-        except RenditionError:
+        except BaseException:
             tmp.unlink(missing_ok=True)
             raise
 
@@ -535,7 +618,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             "height": height,
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        add_rendition(index_path, record)
+        add_rendition(index_path, record, media_dir)
         yield {"event": "done", "path": str(output), "rendition": rel_out, "reused": False, "native": False}
 
 
