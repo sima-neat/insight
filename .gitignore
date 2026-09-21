@@ -19,3 +19,6 @@ cfg.json
 *_mpk.tar.gz
 mipi-sweep-*.log
 mipi-util/vendor/
+
+# Superpowers brainstorming sessions
+.superpowers/
