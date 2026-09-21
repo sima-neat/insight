@@ -1637,12 +1637,105 @@ export default function App() {
     }))
   }
 
+  function prepareProgressForLine(line, prev) {
+    const progress = /^progress (\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/.exec(line)
+    if (progress) {
+      const seconds = Number(progress[1])
+      const total = progress[2] ? Number(progress[2]) : null
+      const percent = total ? Math.min(99, Math.floor((seconds / total) * 100)) : null
+      return { ...prev, seconds, total, percent }
+    }
+    const encoding = /^Encoding .+ at (\d+) fps \((.+)\)\.\.\.$/.exec(line)
+    if (encoding) return { ...prev, fps: Number(encoding[1]), encoder: encoding[2], label: `Encoding ${encoding[1]} fps rendition…` }
+    return { ...prev, label: line }
+  }
+
+  async function readPrepareProgress(response, index) {
+    const apply = (line) => setEncodeProgress((prev) => ({ ...prev, [index]: prepareProgressForLine(line, prev[index] || {}) }))
+    if (!response.body) {
+      const text = await response.text()
+      text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach(apply)
+      return text
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        lines.map((line) => line.trim()).filter(Boolean).forEach(apply)
+      }
+      if (done) break
+    }
+    if (pending.trim()) apply(pending.trim())
+    return text
+  }
+
+  async function prepareSource(index) {
+    const controller = new AbortController()
+    encodeAbortRef.current[index] = controller
+    setEncodeProgress((prev) => ({ ...prev, [index]: { label: 'Preparing rendition…', percent: null, seconds: 0, total: null } }))
+    try {
+      const response = await fetch('/api/mediasrc/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index }),
+        signal: controller.signal
+      })
+      if (!response.ok) {
+        let message = `Prepare failed (${response.status})`
+        try {
+          const body = await response.json()
+          message = body.error || body.message || message
+        } catch {}
+        throw new Error(message)
+      }
+      const text = await readPrepareProgress(response, index)
+      const errorLine = text.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith('Error:'))
+      if (errorLine) {
+        const src = sources.find((s) => s.index === index) || {}
+        throw new Error(`Encoding src${index} at ${src.fps} fps failed. Partial output was removed; the source file is unchanged. ${errorLine.replace(/^Error:\s*/, '')}`)
+      }
+    } finally {
+      delete encodeAbortRef.current[index]
+      setEncodeProgress((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+  }
+
+  function cancelPrepare(index) {
+    const controller = encodeAbortRef.current[index]
+    if (controller) controller.abort()
+  }
+
   async function startSource(index) {
-    await sourceAction(() => fetchJson('/api/mediasrc/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
-    }))
+    const src = sources.find((s) => s.index === index)
+    const needsRendition = Boolean(src) && src.fps != null && src.native_fps != null && src.fps !== src.native_fps
+    await sourceAction(async () => {
+      if (needsRendition) {
+        try {
+          await prepareSource(index)
+        } catch (e) {
+          if (e.name !== 'AbortError') throw e
+          setUploadStatus(`Cancelled encoding for src${index}.`)
+          return
+        }
+      }
+      await fetchJson('/api/mediasrc/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+    })
   }
 
   async function stopSource(index) {
@@ -2183,8 +2276,8 @@ export default function App() {
                       return (
                         <>
                           <span className="src-label">src{src.index}</span>
-                          <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
-                            {src.state === 'playing' ? 'Live' : 'Idle'}
+                          <span className={encodeProgress[src.index] ? 'src-state encoding' : (src.state === 'playing' ? 'src-state playing' : 'src-state stopped')}>
+                            {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
                           <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })} disabled={Boolean(encodeProgress[src.index])}>
                             <option value="">Not assigned</option>
@@ -2216,12 +2309,12 @@ export default function App() {
                             onCommit={(fps) => updateSource(src.index, { fps }).catch((e) => setError(e.message))}
                             onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[src.index] === bad ? prev : { ...prev, [src.index]: bad }))}
                           />
-                          {src.state === 'playing' ? (
+                          {(src.state === 'playing' || encodeProgress[src.index]) ? (
                             <button
                               className="icon-action-btn stop"
-                              onClick={(e) => { e.stopPropagation(); stopSource(src.index) }}
-                              aria-label={`Stop src${src.index}`}
-                              title={`Stop src${src.index}`}
+                              onClick={(e) => { e.stopPropagation(); if (encodeProgress[src.index]) cancelPrepare(src.index); else stopSource(src.index) }}
+                              aria-label={encodeProgress[src.index] ? `Cancel encoding for src${src.index}` : `Stop src${src.index}`}
+                              title={encodeProgress[src.index] ? `Cancel encoding for src${src.index}` : `Stop src${src.index}`}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -2263,16 +2356,42 @@ export default function App() {
             <section className="panel">
               {(() => {
                 if (!isExternal(currentSource)) {
+                  const info = currentSource
+                  const progress = encodeProgress[info.index]
+                  const effectiveFps = info.fps ?? info.native_fps ?? null
+                  const customFps = info.fps != null && info.native_fps != null && info.fps !== info.native_fps
+                  const streamingRendition = info.state === 'playing' && info.active_file && info.active_file !== info.file
+                  const fileDetail = info.file ? [info.file, info.native_fps != null ? `${info.native_fps} fps` : null].filter(Boolean).join(' · ') : 'Not assigned'
+                  let outputDetail = `${info.transport ? info.transport.toUpperCase() : '-'} / ${codecLabel(info.codec)}`
+                  if (effectiveFps != null) outputDetail += ` · ${effectiveFps} fps`
                   return (
                     <>
                       <h2>Source Preview: src{currentSource.index}</h2>
-                      <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
-                      <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
+                      <p className="hint">File: {fileDetail}</p>
+                      <p className="hint">
+                        Output: {outputDetail}
+                        {streamingRendition && <span className="ok-text"> · streaming rendition <code>{info.active_file}</code></span>}
+                        {!streamingRendition && customFps && info.state !== 'playing' && !progress && <span className="muted-text"> (rendition will be created on start)</span>}
+                      </p>
                       <div className="preview">
-                        {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                        {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                        {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                        {!currentSource.file && <p>Assign a media file to preview.</p>}
+                        <div className="preview-loading" role="status" aria-live="polite">
+                          {progress && (
+                            <>
+                              <div className="upload-progress-track">
+                                <div
+                                  className={Number.isFinite(progress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
+                                  style={Number.isFinite(progress.percent) ? { width: `${progress.percent}%` } : undefined}
+                                />
+                              </div>
+                              <span>{progress.label}{Number.isFinite(progress.percent) ? ` ${progress.percent}%` : ''}</span>
+                              <span className="muted-text mono">{formatFpsProgress(progress)}{progress.encoder ? ` · ${progress.encoder}` : ''}</span>
+                            </>
+                          )}
+                        </div>
+                        {!progress && info.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(info.file)} alt={info.file} />}
+                        {!progress && info.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${info.file}`} />}
+                        {!progress && info.file && sourcePreviewIsImage && <img src={`/media/${info.file}`} alt={info.file} />}
+                        {!info.file && <p>Assign a media file to preview.</p>}
                       </div>
                     </>
                   )
@@ -2914,6 +3033,7 @@ export default function App() {
           <div className="modal-card">
             <h3>Bulk Start Streams</h3>
             <p>How many streams do you want to start?</p>
+            <p className="hint">Slots with a custom FPS may take longer to start while renditions are created.</p>
             <div className="bulk-slider-row">
               <input
                 className="bulk-slider"
