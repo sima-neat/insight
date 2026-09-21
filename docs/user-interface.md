@@ -109,6 +109,24 @@ If the sender runs on a DevKit or another external machine, use the mapped `vide
 
 The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and synchronization buffering. Metadata timestamps use source PTS milliseconds and are omitted when unavailable.
 
+### Metadata colors
+
+Overlays pick colors from one shared palette so that different identities stay apart on a crowded frame. Each metadata type defines what identity means:
+
+| Metadata type | Colored by | Parts that share the color |
+|---|---|---|
+| `object-detection` | class `label` | box, label, confidence |
+| `segmentation` | class `label` | mask, outline, box, label |
+| `classification` | class `label` | each label line |
+| `tracking` | track `id` | box, label, history trail |
+| `pose-estimation` | pose `id` | keypoints, skeleton, keypoint names, box, label |
+
+Colors are allocated per channel the first time an identity appears and stay fixed for as long as the page is open. Class labels share one allocation on a channel, so `person` looks the same in detection, segmentation and classification. Tracks and poses are allocated separately. When more identities appear than the palette holds, the color of the identity seen longest ago is reused, so the identities currently on screen stay as distinct as possible.
+
+Tracks and poses without an `id` draw in one neutral color. Senders that want per-person or per-track colors must include `id`.
+
+Object detection and segmentation settings hold optional per-class overrides. An entry for a label fixes that class's color and line style. An entry labelled `default` fixes the color of every class without its own entry. Without any entries, all classes are colored automatically.
+
 Use the Video Viewer to confirm:
 
 - The application is sending video to the expected channel.
