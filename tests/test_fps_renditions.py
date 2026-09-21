@@ -166,16 +166,16 @@ class RenditionIndexTests(unittest.TestCase):
         (self.media_dir / ".renditions").mkdir()
         present = self.media_dir / ".renditions" / "a.mp4"
         present.write_bytes(b"a")
-        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/a.mp4", "source_file": "a.mp4"})
-        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/missing.mp4", "source_file": "b.mp4"})
+        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/a.mp4", "source_file": "a.mp4"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/missing.mp4", "source_file": "b.mp4"}, self.media_dir)
 
         self.assertEqual(renditions.find_rendition(self.index_path, self.media_dir, "k1")["path"], ".renditions/a.mp4")
         self.assertIsNone(renditions.find_rendition(self.index_path, self.media_dir, "k2"))
         self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k1"])
 
     def test_add_rendition_replaces_same_key(self):
-        renditions.add_rendition(self.index_path, {"key": "k", "path": "old"})
-        renditions.add_rendition(self.index_path, {"key": "k", "path": "new"})
+        renditions.add_rendition(self.index_path, {"key": "k", "path": "old"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k", "path": "new"}, self.media_dir)
         records = renditions.load_index(self.index_path)["renditions"]
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["path"], "new")
@@ -186,8 +186,8 @@ class RenditionIndexTests(unittest.TestCase):
         target.write_bytes(b"r")
         other = self.media_dir / ".renditions" / "other.mp4"
         other.write_bytes(b"o")
-        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/demo_15.mp4", "source_file": "demo.mp4"})
-        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/other.mp4", "source_file": "other.mp4"})
+        renditions.add_rendition(self.index_path, {"key": "k1", "path": ".renditions/demo_15.mp4", "source_file": "demo.mp4"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k2", "path": ".renditions/other.mp4", "source_file": "other.mp4"}, self.media_dir)
         (self.media_dir / "demo.mp4").write_bytes(b"d")
         renditions.source_hash(self.index_path, self.media_dir, "demo.mp4")
 
@@ -201,8 +201,8 @@ class RenditionIndexTests(unittest.TestCase):
         self.assertEqual([r["key"] for r in index["renditions"]], ["k2"])
 
     def test_remove_source_drops_records_without_a_path(self):
-        renditions.add_rendition(self.index_path, {"key": "k1", "source_file": "demo.mp4"})
-        renditions.add_rendition(self.index_path, {"key": "k2", "source_file": "other.mp4", "path": ".renditions/other.mp4"})
+        renditions.add_rendition(self.index_path, {"key": "k1", "source_file": "demo.mp4"}, self.media_dir)
+        renditions.add_rendition(self.index_path, {"key": "k2", "source_file": "other.mp4", "path": ".renditions/other.mp4"}, self.media_dir)
         self.assertEqual(renditions.remove_source(self.index_path, self.media_dir, "demo.mp4"), [])
         self.assertEqual([r["key"] for r in renditions.load_index(self.index_path)["renditions"]], ["k2"])
 
@@ -306,6 +306,28 @@ class RenditionEncodeTests(unittest.TestCase):
 
         self.assertFalse(second["reused"])
         self.assertNotEqual(first["path"], second["path"])
+        # The orphaned rendition of the replaced source is pruned with its file.
+        self.assertFalse(Path(first["path"]).exists())
+        records = renditions.load_index(self.index_path)["renditions"]
+        self.assertEqual([r["path"] for r in records if r["source_file"] == "demo.mp4"], [second["rendition"]])
+        self.assertEqual(len(records), 1)
+
+    def test_encodes_h265_rendition_that_meets_the_catalog_contract(self):
+        make_test_clip(self.media_dir / "hevc.mp4", fps=30, seconds=2.0, codec="libx265")
+
+        _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "hevc.mp4", 15, "h265"))
+
+        output = Path(done["path"])
+        stream = ffprobe_stream(output)
+        self.assertEqual(stream["codec_name"], "hevc")
+        self.assertEqual(stream["profile"], "Main")
+        self.assertEqual(stream["pix_fmt"], "yuv420p")
+        self.assertEqual(stream["has_b_frames"], 0)
+        self.assertEqual(stream["avg_frame_rate"], "15/1")
+        self.assertEqual(renditions.probe_reference_frames(output), 1)
+        record = next(r for r in renditions.load_index(self.index_path)["renditions"] if r["source_file"] == "hevc.mp4")
+        self.assertEqual(record["codec"], "h265")
+        self.assertEqual(record["profile"], "main")
 
     def test_upsampling_duplicates_frames(self):
         _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 60, "h264"))
@@ -326,9 +348,10 @@ class RenditionEncodeTests(unittest.TestCase):
                     "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
 
         with mock.patch.object(renditions, "encode_command", side_effect=broken_command):
-            with self.assertRaises(renditions.RenditionError):
+            with self.assertRaises(renditions.RenditionError) as ctx:
                 drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
 
+        self.assertIn("missing.mp4", str(ctx.exception))  # ffmpeg's diagnostics reach the error message
         self.assertEqual(self.source.read_bytes(), source_bytes)
         self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
         rend_dir = self.media_dir / ".renditions"
@@ -337,6 +360,24 @@ class RenditionEncodeTests(unittest.TestCase):
     def test_validation_failure_removes_output(self):
         with mock.patch.object(renditions, "validate_rendition", side_effect=renditions.RenditionError("bad")):
             with self.assertRaises(renditions.RenditionError):
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
+    def test_failing_ffprobe_during_validation_raises_rendition_error_and_cleans_up(self):
+        # probe_packets shells out to ffprobe last; a subprocess failure must surface as a RenditionError.
+        with mock.patch.object(renditions.subprocess, "check_output", side_effect=subprocess.CalledProcessError(1, "ffprobe")):
+            with self.assertRaises(renditions.RenditionError) as ctx:
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        self.assertIn("ffprobe failed", str(ctx.exception))
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
+    def test_unexpected_validation_failure_also_removes_the_temp_file(self):
+        with mock.patch.object(renditions, "validate_rendition", side_effect=KeyboardInterrupt()):
+            with self.assertRaises(KeyboardInterrupt):
                 drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         rend_dir = self.media_dir / ".renditions"
         self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
