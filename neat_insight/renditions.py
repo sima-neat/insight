@@ -191,3 +191,172 @@ def parse_progress_seconds(key: str, value: str) -> Optional[float]:
         return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
     except (ValueError, TypeError):
         return None
+
+
+_index_lock = threading.RLock()
+
+
+def _empty_index() -> dict:
+    return {"schema": INDEX_SCHEMA, "sources": {}, "renditions": []}
+
+
+def load_index(index_path: Path) -> dict:
+    try:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict) or data.get("schema") != INDEX_SCHEMA:
+        return _empty_index()
+    sources = data.get("sources")
+    records = data.get("renditions")
+    return {
+        "schema": INDEX_SCHEMA,
+        "sources": sources if isinstance(sources, dict) else {},
+        "renditions": records if isinstance(records, list) else [],
+    }
+
+
+def save_index(index_path: Path, data: dict) -> None:
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = index_path.with_name(f".{index_path.name}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(index_path)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _float_or_none(value: Any) -> Optional[float]:
+    if value in (None, "", "N/A"):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
+def probe_video(path: Path) -> dict:
+    """Return the first video stream's ffprobe fields (with the container duration as fallback)."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise RenditionError("ffprobe is not installed; install FFmpeg and ensure ffprobe is on PATH.")
+    cmd = [
+        ffprobe, "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name,profile,pix_fmt,level,has_b_frames,width,height,r_frame_rate,avg_frame_rate,duration",
+        "-show_entries", "format=duration",
+        "-of", "json", str(path),
+    ]
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RenditionError(f"ffprobe failed for {path.name}: {detail or result.returncode}")
+    try:
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise RenditionError(f"ffprobe returned invalid JSON for {path.name}: {exc}") from exc
+    streams = data.get("streams") or []
+    if not streams or not isinstance(streams[0], dict):
+        raise RenditionError(f"{path.name} has no video stream")
+    stream = dict(streams[0])
+    container = data.get("format") if isinstance(data.get("format"), dict) else {}
+    if _float_or_none(stream.get("duration")) is None:
+        stream["duration"] = container.get("duration")
+    return stream
+
+
+def _stat_matches(entry: Any, stat) -> bool:
+    return isinstance(entry, dict) and entry.get("size") == stat.st_size and entry.get("mtime_ns") == stat.st_mtime_ns
+
+
+def source_info(index_path: Path, media_dir: Path, rel_path: str) -> dict:
+    """Cached probe of a source: {size, mtime_ns, native_fps, width, height, duration[, sha256]}; re-probes when size or mtime change."""
+    source_path = media_dir / rel_path
+    stat = source_path.stat()
+    with _index_lock:
+        index = load_index(index_path)
+        entry = index["sources"].get(rel_path)
+        if _stat_matches(entry, stat) and "native_fps" in entry:
+            return dict(entry)
+        stream = probe_video(source_path)
+        fresh = {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "native_fps": detect_fps(stream),
+            "width": stream.get("width"),
+            "height": stream.get("height"),
+            "duration": _float_or_none(stream.get("duration")),
+        }
+        if _stat_matches(entry, stat) and entry.get("sha256"):
+            fresh["sha256"] = entry["sha256"]
+        index["sources"][rel_path] = fresh
+        save_index(index_path, index)
+        return dict(fresh)
+
+
+def source_hash(index_path: Path, media_dir: Path, rel_path: str) -> str:
+    """SHA-256 of the source content, cached in the index and validated by size + mtime_ns."""
+    source_path = media_dir / rel_path
+    stat = source_path.stat()
+    with _index_lock:
+        index = load_index(index_path)
+        entry = index["sources"].get(rel_path)
+        if _stat_matches(entry, stat) and entry.get("sha256"):
+            return entry["sha256"]
+        digest = sha256_file(source_path)
+        if not _stat_matches(entry, stat):
+            entry = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+        entry["sha256"] = digest
+        index["sources"][rel_path] = entry
+        save_index(index_path, index)
+        return digest
+
+
+def find_rendition(index_path: Path, media_dir: Path, key: str) -> Optional[dict]:
+    """Return the record for `key` if its file exists; drop records whose files are gone."""
+    with _index_lock:
+        index = load_index(index_path)
+        kept = []
+        found = None
+        for record in index["renditions"]:
+            rel = record.get("path") if isinstance(record, dict) else None
+            if not rel or not (media_dir / rel).is_file():
+                continue
+            kept.append(record)
+            if record.get("key") == key:
+                found = record
+        if len(kept) != len(index["renditions"]):
+            index["renditions"] = kept
+            save_index(index_path, index)
+        return dict(found) if found else None
+
+
+def add_rendition(index_path: Path, record: dict) -> None:
+    with _index_lock:
+        index = load_index(index_path)
+        index["renditions"] = [r for r in index["renditions"] if r.get("key") != record["key"]]
+        index["renditions"].append(record)
+        save_index(index_path, index)
+
+
+def remove_source(index_path: Path, media_dir: Path, rel_path: str) -> list[str]:
+    """Forget a source: drop its cache entry and delete its rendition files and records. Returns removed rendition paths."""
+    with _index_lock:
+        index = load_index(index_path)
+        index["sources"].pop(rel_path, None)
+        removed = []
+        kept = []
+        for record in index["renditions"]:
+            if record.get("source_file") == rel_path and record.get("path"):
+                (media_dir / record["path"]).unlink(missing_ok=True)
+                removed.append(record["path"])
+            else:
+                kept.append(record)
+        index["renditions"] = kept
+        save_index(index_path, index)
+        return removed
