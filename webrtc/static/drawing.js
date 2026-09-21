@@ -514,7 +514,10 @@ window.drawStrategies = {
         ctx.restore();
       }
 
-      ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
+      // Only explicitly marked oriented boxes replace their bounding rectangle.
+      if (seg.mask_format !== "polygon" || seg.is_oriented_box !== true) {
+        ctx.strokeRect(bbox[0] * scaleX + offsetX, bbox[1] * scaleY + offsetY, bbox[2] * scaleX, bbox[3] * scaleY);
+      }
       const label = `${seg.label} (${Math.round((seg.confidence ?? 1) * 100)}%)`;
       ctx.fillText(label, (bbox[0] + 2) * scaleX + offsetX, (bbox[1] - 6) * scaleY + offsetY);
     });

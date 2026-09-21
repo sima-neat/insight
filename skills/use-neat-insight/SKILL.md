@@ -278,6 +278,13 @@ The two mask formats use different coordinate frames:
 | `polygon` | `[[x, y], ...]`, at least three points | Frame-absolute. `bbox` optional, derived from the extent when absent. |
 | `rle` | `{"size": [h, w], "counts": [...]}` | Bbox-local: `size` covers the `bbox` rectangle, not the image. `bbox` required. |
 
+For an oriented bounding box carried as a polygon, set `is_oriented_box: true`
+on that segment to suppress the extra axis-aligned rectangle. Polygon fill,
+outline, bbox-based label placement and ROI filtering remain unchanged. Ordinary
+polygons (including four-corner polygons) retain their rectangle unless explicitly
+marked; RLE masks always retain theirs. The producer must emit the boolean marker;
+omitting `bbox` alone does not opt in.
+
 RLE runs are column-major, the first run is background, and `counts` is a JSON array of integers — not the compressed byte string `pycocotools.mask.encode()` returns. Send the mask at mask-head resolution; the viewer stretches it onto `bbox` with interpolation.
 
 Dropped segments warn once per channel and id in the browser console. Check there first when segments do not render.
