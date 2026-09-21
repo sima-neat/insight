@@ -97,7 +97,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
   const trackHistoryRef = useRef(new Map());
-  const colorAllocatorRef = useRef(window.metadataColors?.createColorAllocator() ?? null);
+  const colorAllocatorRef = useRef(null);
+  if (colorAllocatorRef.current === null) {
+    colorAllocatorRef.current = window.metadataColors?.createColorAllocator() ?? null;
+  }
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
