@@ -190,14 +190,20 @@ def _request_host_name() -> str:
     return host or "127.0.0.1"
 
 
+def _bracket_ipv6(host):
+    """Wrap an IPv6 literal in brackets so it can carry a :port suffix."""
+    try:
+        if ipaddress.ip_address(host).version == 6:
+            return f"[{host}]"
+    except ValueError:
+        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
+    return host
+
+
 def _format_browser_https_url(host, port, path="", query=""):
     if not host or not port:
         return None
-    try:
-        if ipaddress.ip_address(host).version == 6:
-            host = f"[{host}]"
-    except ValueError:
-        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
+    host = _bracket_ipv6(host)
 
     url = f"https://{host}:{port}{path}"
     return f"{url}?{query}" if query else url
@@ -2087,13 +2093,16 @@ def _source_url(src, transport: Optional[str] = None):
     host = _request_host_name()
     if selected_transport == "http":
         return f"{request.scheme}://{request.host}/stream/http/src{index}.mjpg"
-    return f"rtsp://{host}:8554/src{index}"
+    return f"rtsp://{_bracket_ipv6(host)}:8554/src{index}"
 
 
 def _webcam_whip_url(src):
     index = int(src.get("index") or 0)
-    host = _request_host_name()
-    return f"https://{host}:{_resolve_webcam_whip_port()}/{webcam_path_name(index)}/whip"
+    return _format_browser_https_url(
+        _request_host_name(),
+        _resolve_webcam_whip_port(),
+        f"/{webcam_path_name(index)}/whip",
+    )
 
 
 def _source_with_urls(src):
@@ -2253,6 +2262,11 @@ def auto_assign_all_sources():
         source_index = src.get("index")
         if src.get("state") == "playing":
             stop_media_stream(source_index)
+        # Writing a file assignment makes this a file slot again. Without this
+        # the retained webcam type would make _normalize_source() clear the
+        # filename on the next load, leaving a slot that reports success but
+        # has nothing assigned.
+        src["type"] = SOURCE_TYPE_FILE
         src["file"] = video_files[idx] if idx < len(video_files) else ""
         src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
         src["state"] = "stopped"

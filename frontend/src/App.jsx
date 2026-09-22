@@ -1,6 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  closeAllWebcamSessions,
+  closeWebcamSession,
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
@@ -700,6 +702,9 @@ export default function App() {
   const [webcamBusy, setWebcamBusy] = useState({})
   const [webcamPreviewStream, setWebcamPreviewStream] = useState(null)
   const webcamSessionsRef = useRef(new Map())
+  // The devicechange listener below is registered once and would otherwise
+  // close over the first render's assignments forever.
+  const webcamAssignmentsRef = useRef({})
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
@@ -978,12 +983,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    return () => {
-      for (const index of webcamSessionsRef.current.keys()) {
-        teardownWebcamSession(index)
-      }
-    }
+    return () => closeAllWebcamSessions(webcamSessionsRef.current)
   }, [])
+
+  useEffect(() => {
+    webcamAssignmentsRef.current = webcamAssignments
+  }, [webcamAssignments])
 
   useEffect(() => {
     const session = webcamSessionsRef.current.get(selectedSource)
@@ -1524,14 +1529,18 @@ export default function App() {
     const session = webcamSessionsRef.current.get(index)
     if (!session) return
     webcamSessionsRef.current.delete(index)
-    session.stream.getTracks().forEach((track) => track.stop())
-    session.pc.close()
-    if (session.deleteUrl) {
-      // Best-effort: releases the MediaMTX path promptly, but pc.close()
-      // above already ends the media flow even if this request fails.
-      fetch(session.deleteUrl, { method: 'DELETE' }).catch(() => {})
-    }
+    closeWebcamSession(session)
     setWebcamPreviewStream((prev) => (prev === session.stream ? null : prev))
+  }
+
+  // Insight can stop a file source by killing its ffmpeg process, but a webcam
+  // is published by this browser — only we can end it. Any bulk action that
+  // stops or clears sources has to close these too, or the camera keeps
+  // publishing to MediaMTX while the UI reports everything stopped.
+  function teardownAllWebcamSessions({ clearAssignments = false } = {}) {
+    closeAllWebcamSessions(webcamSessionsRef.current)
+    setWebcamPreviewStream(null)
+    if (clearAssignments) setWebcamAssignments({})
   }
 
   async function refreshWebcamDevices() {
@@ -1547,21 +1556,19 @@ export default function App() {
     setWebcamDevices(cameras)
 
     const validIds = new Set(cameras.map((c) => c.deviceId))
-    let droppedAny = false
+    const dropped = Object.entries(webcamAssignmentsRef.current)
+      .filter(([, assignment]) => !validIds.has(assignment.deviceId))
+      .map(([indexStr]) => Number(indexStr))
+
+    if (!dropped.length) return
+
+    for (const index of dropped) teardownWebcamSession(index)
     setWebcamAssignments((prev) => {
-      const next = {}
-      for (const [indexStr, assignment] of Object.entries(prev)) {
-        const index = Number(indexStr)
-        if (validIds.has(assignment.deviceId)) {
-          next[index] = assignment
-        } else {
-          droppedAny = true
-          teardownWebcamSession(index)
-        }
-      }
+      const next = { ...prev }
+      for (const index of dropped) delete next[index]
       return next
     })
-    if (droppedAny) await loadSources()
+    await loadSources()
   }
 
   async function detectWebcams() {
@@ -1593,6 +1600,10 @@ export default function App() {
     if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
       const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
       const device = webcamDevices.find((d) => d.deviceId === deviceId)
+      // Switching cameras on a publishing slot: end the current session first.
+      // Otherwise the old track keeps publishing to the same MediaMTX path and
+      // the replacement is rejected because the path already has a publisher.
+      teardownWebcamSession(index)
       assignWebcamToSource(index, deviceId, device?.label || 'Webcam')
       return
     }
@@ -1677,6 +1688,9 @@ export default function App() {
 
   async function autoAssignAllSources() {
     try {
+      // The backend rewrites every slot to a file source; the browser has to
+      // release the cameras those slots were using.
+      teardownAllWebcamSessions({ clearAssignments: true })
       const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
       await loadSources()
       setUploadStatus(data.message || `Assigned ${data.assigned_count || 0} source(s).`)
@@ -1710,6 +1724,9 @@ export default function App() {
 
   async function stopAllSources() {
     try {
+      // Stop leaves the slot assigned, so the camera choice is kept and only
+      // the publishing session ends.
+      teardownAllWebcamSessions()
       const data = await fetchJson('/api/mediasrc/stop-all', { method: 'POST' })
       await loadSources()
       setUploadStatus(data.message || 'Stopped all sources.')
@@ -1720,6 +1737,9 @@ export default function App() {
 
   async function resetAllSources() {
     try {
+      // Reset returns every slot to an unassigned file source, so the camera
+      // choices go with it.
+      teardownAllWebcamSessions({ clearAssignments: true })
       const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
       await loadSources()
       setSelectedSource(1)

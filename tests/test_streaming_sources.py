@@ -470,6 +470,37 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(source["type"], "file")
         self.assertEqual(source["file"], "clip.mp4")
 
+    def test_auto_assign_turns_webcam_slots_back_into_file_slots(self):
+        """A file assignment that kept type=webcam would be cleared on the next load."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            response = self.client.post("/api/mediasrc/auto-assign-all")
+
+        self.assertEqual(response.status_code, 200)
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["type"], "file")
+        self.assertEqual(source["file"], "clip.mp4", "the assignment must survive a reload")
+
+    def test_the_whip_url_brackets_an_ipv6_host(self):
+        self.client.post("/api/mediasrc/assign-webcam", json={"index": 1},
+                         headers={"Host": "[fd00::23]:9900"})
+        response = self.client.get("/api/mediasrc", headers={"Host": "[fd00::23]:9900"})
+
+        urls = response.get_json()[0]["urls"]
+        self.assertEqual(urls["whip"], "https://[fd00::23]:8889/src1/whip")
+        self.assertEqual(urls["rtsp"], "rtsp://[fd00::23]:8554/src1")
+
+    def test_a_named_host_is_left_alone(self):
+        self.client.post("/api/mediasrc/assign-webcam", json={"index": 1},
+                         headers={"Host": "insight.local:9900"})
+        response = self.client.get("/api/mediasrc", headers={"Host": "insight.local:9900"})
+
+        urls = response.get_json()[0]["urls"]
+        self.assertEqual(urls["whip"], "https://insight.local:8889/src1/whip")
+        self.assertEqual(urls["rtsp"], "rtsp://insight.local:8554/src1")
+
     def test_assigning_a_webcam_over_a_playing_file_stops_its_stream(self):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self.sources_file.write_text(

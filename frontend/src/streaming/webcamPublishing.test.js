@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  closeAllWebcamSessions,
+  closeWebcamSession,
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
@@ -227,4 +229,58 @@ test("an unrecognized failure keeps its own message", () => {
     "Webcam publish was rejected (HTTP 500).",
   );
   assert.equal(describeWebcamError(undefined), "Webcam publishing failed.");
+});
+
+function fakeSession({ deleteUrl = null } = {}) {
+  const stopped = [];
+  return {
+    stopped,
+    closed: { pc: false },
+    deleteUrl,
+    stream: { getTracks: () => [{ stop: () => stopped.push("a") }, { stop: () => stopped.push("b") }] },
+    pc: { close() { this._closed = true; } },
+  };
+}
+
+test("closing a session stops the camera and closes the peer connection", () => {
+  const s = fakeSession();
+  assert.equal(closeWebcamSession(s, async () => ({})), true);
+  assert.deepEqual(s.stopped, ["a", "b"], "every track released, so the OS frees the camera");
+  assert.equal(s.pc._closed, true);
+});
+
+test("closing a session tells MediaMTX to drop the path", () => {
+  const calls = [];
+  const s = fakeSession({ deleteUrl: "https://insight.local:8889/src1/whip/session/a" });
+
+  closeWebcamSession(s, async (url, opts) => { calls.push([url, opts.method]); return {}; });
+
+  assert.deepEqual(calls, [["https://insight.local:8889/src1/whip/session/a", "DELETE"]]);
+});
+
+test("a failing DELETE does not break teardown", () => {
+  const s = fakeSession({ deleteUrl: "https://insight.local:8889/x" });
+  assert.doesNotThrow(() => closeWebcamSession(s, () => { throw new Error("offline"); }));
+  assert.equal(s.pc._closed, true, "the peer connection still closed, which is what ends the media");
+});
+
+test("closing nothing is harmless", () => {
+  assert.equal(closeWebcamSession(null, async () => ({})), false);
+  assert.deepEqual(closeAllWebcamSessions(null, async () => ({})), []);
+});
+
+test("a bulk action releases every camera and empties the registry", () => {
+  // Stop All / Reset / Auto Assign: Insight cannot end these publishes itself,
+  // so anything left here keeps streaming while the UI says stopped.
+  const sessions = new Map([[1, fakeSession()], [3, fakeSession()], [7, fakeSession()]]);
+  const all = Array.from(sessions.values());
+
+  const closed = closeAllWebcamSessions(sessions, async () => ({}));
+
+  assert.deepEqual(closed, [1, 3, 7]);
+  assert.equal(sessions.size, 0, "registry emptied, so nothing is left publishing");
+  for (const s of all) {
+    assert.deepEqual(s.stopped, ["a", "b"]);
+    assert.equal(s.pc._closed, true);
+  }
 });

@@ -101,3 +101,48 @@ export async function confirmWebcamPublishing(attempt, options = {}) {
     await sleep(intervalMs)
   }
 }
+
+// Releasing a webcam session means three things, and the DELETE is the only
+// optional one: stop the camera tracks so the OS releases the device, close
+// the peer connection so MediaMTX sees the publisher go away, and best-effort
+// tell MediaMTX to drop the path now rather than waiting for the WebRTC
+// timeout. Kept here, out of the component, so the bulk paths that have to do
+// this for every session can be tested without React.
+export function closeWebcamSession(session, fetchRequest = globalThis.fetch) {
+  if (!session) return false
+
+  try {
+    session.stream?.getTracks?.().forEach((track) => track.stop())
+  } catch {
+    // A track already ended is not worth failing the teardown over.
+  }
+  try {
+    session.pc?.close?.()
+  } catch {
+    // Same for an already-closed peer connection.
+  }
+
+  if (session.deleteUrl && fetchRequest) {
+    try {
+      fetchRequest(session.deleteUrl, { method: 'DELETE' })?.catch?.(() => {})
+    } catch {
+      // Closing the peer connection above already ended the media flow.
+    }
+  }
+  return true
+}
+
+// Stop All, Reset and Auto Assign each invalidate every live webcam slot at
+// once. Insight can kill a file source's ffmpeg process itself, but only this
+// browser can end a webcam publish, so a bulk action that skips this leaves
+// cameras publishing while the UI reports everything stopped.
+export function closeAllWebcamSessions(sessions, fetchRequest = globalThis.fetch) {
+  const closed = []
+  if (!sessions) return closed
+  for (const index of Array.from(sessions.keys())) {
+    closeWebcamSession(sessions.get(index), fetchRequest)
+    sessions.delete(index)
+    closed.push(index)
+  }
+  return closed
+}

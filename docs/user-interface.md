@@ -88,7 +88,9 @@ A webcam attached to the computer running your browser can be used as a live sou
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
 
-Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
+The preview beside the source list shows your camera directly, so it keeps working even when publishing fails. It is not the video the board received, and it does not show the delay that a receiving application sees.
+
+Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
 
 If starting a webcam fails, the message names the cause:
 
