@@ -494,6 +494,17 @@ class RenditionEncodeTests(unittest.TestCase):
             drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         self.assertEqual(held, [True])
 
+    def test_failed_index_write_removes_the_published_file(self):
+        # Codex review: a rendition renamed into place but never recorded would be invisible to
+        # usage and clear, so a failing index write must take the file with it.
+        # The probe cache also writes the index earlier, so only the record insertion is broken here.
+        with mock.patch.object(renditions, "add_rendition", side_effect=OSError("No space left on device")):
+            with self.assertRaises(OSError):
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
     def test_source_deleted_during_encoding_is_not_published(self):
         # Codex review: on POSIX ffmpeg keeps reading an unlinked source, so the
         # encode succeeds; the result must not be recorded for a source that is gone.

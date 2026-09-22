@@ -743,22 +743,29 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
                 raise RenditionError(f"{rel_path} was removed or replaced while its rendition was being encoded")
 
             tmp.replace(output)
-            record = {
-                "key": key,
-                "source_file": rel_path,
-                "source_files": [rel_path],
-                "source_sha256": digest,
-                "fps": fps,
-                "codec": source_codec,
-                "profile": PROFILES[source_codec],
-                "path": rel_out,
-                "sha256": digest_of_output,
-                "bytes": output.stat().st_size,
-                "width": info.get("width"),
-                "height": height,
-                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            }
-            add_rendition(index_path, record, media_dir)
+            try:
+                record = {
+                    "key": key,
+                    "source_file": rel_path,
+                    "source_files": [rel_path],
+                    "source_sha256": digest,
+                    "fps": fps,
+                    "codec": source_codec,
+                    "profile": PROFILES[source_codec],
+                    "path": rel_out,
+                    "sha256": digest_of_output,
+                    "bytes": output.stat().st_size,
+                    "width": info.get("width"),
+                    "height": height,
+                    "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                }
+                add_rendition(index_path, record, media_dir)
+            except BaseException:
+                # Usage and Clear renditions only see indexed files, so a rendition that was
+                # renamed into place but never recorded (e.g. the volume filled while writing
+                # renditions.json) would be unreclaimable. Take the file down with the failure.
+                output.unlink(missing_ok=True)
+                raise
         yield {"event": "done", "path": str(output), "rendition": rel_out, "reused": False, "native": False}
 
 
