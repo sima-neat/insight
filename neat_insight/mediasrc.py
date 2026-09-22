@@ -309,12 +309,19 @@ def webcam_path_name(index: int) -> str:
     return f"src{index}"
 
 
-def _mediamtx_request(path: str, method: str = "GET") -> Optional[Dict]:
-    """Call the MediaMTX control API, treating any failure as "no answer".
+# A 404 from MediaMTX is an answer, not a failure: the path or session is not
+# there. Collapsing it into "no answer" would make callers treat a definite
+# "nothing is publishing" as "cannot tell".
+MEDIAMTX_NOT_FOUND = object()
 
-    The API is loopback-only and may not be up yet, so every caller here has a
-    sensible answer for None and none of them should fail because MediaMTX is
-    unreachable.
+
+def _mediamtx_request(path: str, method: str = "GET"):
+    """Call the MediaMTX control API.
+
+    Returns the decoded body, MEDIAMTX_NOT_FOUND when MediaMTX answered 404, or
+    None when it could not be reached or answered with anything else. The API is
+    loopback-only and may not be up yet, so no caller may treat None as a fact
+    about the stream.
     """
     request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method)
     try:
@@ -323,19 +330,29 @@ def _mediamtx_request(path: str, method: str = "GET") -> Optional[Dict]:
             if not body:
                 return {}
             return json.loads(body)
+    except urllib.error.HTTPError as exc:
+        return MEDIAMTX_NOT_FOUND if exc.code == 404 else None
     except (urllib.error.URLError, TimeoutError, ValueError, OSError):
         return None
 
 
-def webcam_is_publishing(index: int) -> bool:
-    """Ask MediaMTX itself whether a browser is currently WHIP-publishing to this slot.
+def webcam_is_publishing(index: int) -> Optional[bool]:
+    """Ask MediaMTX whether a browser is currently WHIP-publishing to this slot.
 
     A webcam source has no Python-managed process to poll (unlike a file
-    source's ffmpeg push), so liveness must come from MediaMTX's own path
-    state rather than pipeline_registry.
+    source's ffmpeg push), so liveness must come from MediaMTX's own path state
+    rather than pipeline_registry.
+
+    ``None`` means the status API could not be reached, which is not evidence
+    that nothing is publishing — a caller that treats it as such will mark a
+    live camera idle over a momentary blip, and nothing promotes a slot back.
     """
     data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
-    return bool(data and data.get("ready"))
+    if data is MEDIAMTX_NOT_FOUND:
+        return False
+    if data is None:
+        return None
+    return bool(data.get("ready"))
 
 
 def kick_webcam_publisher(index: int) -> Optional[bool]:
@@ -355,6 +372,8 @@ def kick_webcam_publisher(index: int) -> Optional[bool]:
       about the publisher, so a caller must not report the slot as stopped.
     """
     data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
+    if data is MEDIAMTX_NOT_FOUND:
+        return False
     if data is None:
         return None
     source = data.get("source") or {}
@@ -363,6 +382,11 @@ def kick_webcam_publisher(index: int) -> Optional[bool]:
     session_id = source.get("id")
     if not session_id:
         return False
-    if _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST") is None:
+    kicked = _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST")
+    if kicked is MEDIAMTX_NOT_FOUND:
+        # The session ended between the lookup and the kick — usually the owning
+        # tab's own teardown finishing first. Already idle, not a failure.
+        return False
+    if kicked is None:
         return None
     return True

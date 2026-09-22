@@ -2163,7 +2163,8 @@ def _source_with_urls(src):
     return enriched
 
 
-def _source_is_live(src) -> bool:
+def _source_is_live(src) -> Optional[bool]:
+    """True, False, or None when liveness could not be determined."""
     index = src.get("index")
     if index is None:
         return False
@@ -2177,7 +2178,10 @@ def _sync_source_runtime_states(sources):
     for src in sources:
         if src.get("state") != "playing":
             continue
-        if not _source_is_live(src):
+        # Only demote on a definite answer. Nothing ever promotes a slot back to
+        # playing, so treating "could not tell" as "stopped" would leave a live
+        # camera showing Idle for good.
+        if _source_is_live(src) is False:
             src["state"] = "stopped"
             changed = True
     if changed:
@@ -2288,30 +2292,50 @@ def auto_assign_all_sources():
     """Stop active sources, assign each slot a unique video when available, persist the stopped assignments."""
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
+    unconfirmed = []
 
-    for idx, src in enumerate(sources):
+    # Slots are consumed in index order, but a slot skipped below must not
+    # consume a video with it, so the file cursor advances only on assignment.
+    next_file = 0
+    for src in sources:
         source_index = src.get("index")
-        if src.get("type") == SOURCE_TYPE_WEBCAM:
-            kick_webcam_publisher(source_index)
         if src.get("state") == "playing":
             stop_media_stream(source_index)
+
+        if src.get("type") == SOURCE_TYPE_WEBCAM and kick_webcam_publisher(source_index) is None:
+            # Same reasoning as reset: keep the slot marked as a webcam rather
+            # than losing the only record that a browser may still be
+            # publishing to it, which is what a later stop needs to retry.
+            unconfirmed.append(source_index)
+            src["state"] = "stopped"
+            continue
+
         # Writing a file assignment makes this a file slot again. Without this
         # the retained webcam type would make _normalize_source() clear the
         # filename on the next load, leaving a slot that reports success but
         # has nothing assigned.
         src["type"] = SOURCE_TYPE_FILE
-        src["file"] = video_files[idx] if idx < len(video_files) else ""
+        src["file"] = video_files[next_file] if next_file < len(video_files) else ""
+        if src["file"]:
+            next_file += 1
         src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
         src["state"] = "stopped"
 
     save_sources(sources)
-    assigned_count = min(len(sources), len(video_files))
+    message = f"Assigned {next_file} source(s) with unique media file(s)."
+    if unconfirmed:
+        message += (
+            " Could not confirm the webcam publisher stopped for source(s) "
+            + ", ".join(str(i) for i in unconfirmed)
+            + "; those slots stay marked as webcams and were left unassigned."
+        )
     return {
         "success": True,
-        "assigned_count": assigned_count,
+        "assigned_count": next_file,
         "source_count": len(sources),
         "available_files": len(video_files),
-        "message": f"Assigned {assigned_count} source(s) with unique media file(s).",
+        "unconfirmed_webcams": unconfirmed,
+        "message": message,
     }
 
 
@@ -2331,7 +2355,13 @@ def start_source():
                 # The browser is what actually publishes to MediaMTX (see
                 # /api/mediasrc/assign-webcam); this just confirms it landed
                 # before recording the slot as playing.
-                if not webcam_is_publishing(index):
+                publishing = webcam_is_publishing(index)
+                if publishing is None:
+                    return _json_error(
+                        "Could not reach MediaMTX to confirm the webcam is publishing.",
+                        502,
+                    )
+                if not publishing:
                     return _json_error("Webcam is not publishing yet", 409)
                 src["state"] = "playing"
                 save_sources(sources)
@@ -2518,13 +2548,38 @@ def stop_all_sources():
 @app.post("/api/mediasrc/reset")
 def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
+    data = request.get_json(silent=True) or {}
+    released = {i for i in data.get("released_webcams") or [] if isinstance(i, int)}
+
     sources = load_sources()
+    unconfirmed = []
     for src in sources:
-        if src.get("type") == SOURCE_TYPE_WEBCAM:
-            kick_webcam_publisher(src.get("index"))
-        stop_media_stream(src.get("index"))
-    reset_sources()
-    return {"success": True, "message": "Reset all source assignments."}
+        source_index = src.get("index")
+        if (
+            src.get("type") == SOURCE_TYPE_WEBCAM
+            and source_index not in released
+            and kick_webcam_publisher(source_index) is None
+        ):
+            unconfirmed.append(source_index)
+        stop_media_stream(source_index)
+
+    defaults = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
+    for source_index in unconfirmed:
+        # Resetting the slot to a file source would erase the only record that
+        # a browser may still be publishing to it, and with it any chance of a
+        # later stop identifying the slot and retrying the kick.
+        if 1 <= source_index <= len(defaults):
+            defaults[source_index - 1]["type"] = SOURCE_TYPE_WEBCAM
+    save_sources(defaults)
+
+    message = "Reset all source assignments."
+    if unconfirmed:
+        message += (
+            " Could not confirm the webcam publisher stopped for source(s) "
+            + ", ".join(str(i) for i in unconfirmed)
+            + "; those slots stay marked as webcams so they can be stopped again."
+        )
+    return {"success": True, "unconfirmed_webcams": unconfirmed, "message": message}
 
 
 def _http_mjpeg_source_or_error(index: int):

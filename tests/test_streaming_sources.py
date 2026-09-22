@@ -422,6 +422,28 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.get_json()[0]["state"], "stopped")
         self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
 
+    def test_an_unreachable_status_api_leaves_a_playing_webcam_alone(self):
+        """Nothing promotes a slot back, so a blip must not demote it."""
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=None):
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(response.get_json()[0]["state"], "playing")
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing")
+
+    def test_starting_a_webcam_reports_an_unreachable_media_server(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=None):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("Could not reach MediaMTX", response.get_json()["error"])
+
     def test_a_still_publishing_webcam_stays_live_across_a_reload(self):
         self.sources_file.write_text(
             '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
@@ -475,13 +497,49 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
-            response = self.client.post("/api/mediasrc/auto-assign-all")
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=False):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post("/api/mediasrc/auto-assign-all")
 
         self.assertEqual(response.status_code, 200)
         source = app_module.load_sources()[0]
         self.assertEqual(source["type"], "file")
         self.assertEqual(source["file"], "clip.mp4", "the assignment must survive a reload")
+
+    def test_auto_assign_keeps_a_webcam_slot_it_could_not_confirm(self):
+        """Overwriting it would lose the only record that a camera may still be live."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post("/api/mediasrc/auto-assign-all")
+
+        body = response.get_json()
+        self.assertEqual(body["unconfirmed_webcams"], [1])
+        sources = app_module.load_sources()
+        self.assertEqual(sources[0]["type"], "webcam", "still identifiable for a retry")
+        self.assertEqual(sources[1]["file"], "clip.mp4",
+                         "the skipped slot must not consume the video")
+
+    def test_reset_keeps_a_webcam_slot_it_could_not_confirm(self):
+        self._assign_webcam(3)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            response = self.client.post("/api/mediasrc/reset")
+
+        body = response.get_json()
+        self.assertEqual(body["unconfirmed_webcams"], [3])
+        self.assertEqual(app_module.load_sources()[2]["type"], "webcam")
+
+    def test_reset_clears_a_webcam_slot_it_did_confirm(self):
+        self._assign_webcam(3)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=True):
+            response = self.client.post("/api/mediasrc/reset")
+
+        self.assertEqual(response.get_json()["unconfirmed_webcams"], [])
+        self.assertEqual(app_module.load_sources()[2]["type"], "file")
 
     def test_stop_kicks_the_browser_publishing_to_the_slot(self):
         """Stop must mean stopped for any caller, not just the tab that owns the peer connection."""
@@ -703,6 +761,38 @@ class WebcamPublishStateTests(unittest.TestCase):
             self.assertFalse(mediasrc.kick_webcam_publisher(1))
 
         self.assertEqual(urlopen.call_count, 1)
+
+    def _http_error(self, code):
+        return mediasrc.urllib.error.HTTPError(
+            "http://127.0.0.1:9997/x", code, "err", {}, None)
+
+    def test_a_missing_path_reads_as_not_publishing_not_unknown(self):
+        """404 is an answer: the path is not there."""
+        urlopen = mock.Mock(side_effect=self._http_error(404))
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertIs(mediasrc.webcam_is_publishing(1), False)
+
+    def test_a_broken_status_api_reads_as_unknown_not_idle(self):
+        """A blip must not be evidence that a live camera stopped."""
+        urlopen = mock.Mock(side_effect=self._http_error(500))
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertIsNone(mediasrc.webcam_is_publishing(1))
+
+    def test_a_session_that_vanished_before_the_kick_counts_as_idle(self):
+        """The owning tab's own teardown commonly wins this race."""
+        def fake_urlopen(request, timeout=None):
+            if "/v3/paths/get/" in request.full_url:
+                payload = {"name": "src1", "ready": True,
+                           "source": {"type": "webRTCSession", "id": "abc-123"}}
+                response = mock.MagicMock()
+                response.__enter__.return_value = io.BytesIO(json.dumps(payload).encode("utf-8"))
+                return response
+            raise mediasrc.urllib.error.HTTPError(request.full_url, 404, "gone", {}, None)
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake_urlopen):
+            self.assertIs(mediasrc.kick_webcam_publisher(1), False)
 
     def test_kick_reports_an_unreachable_api_as_unknown_not_idle(self):
         """None and False mean different things: "could not tell" vs "nothing there"."""
