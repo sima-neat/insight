@@ -353,6 +353,22 @@ test("tracking colors by track id, stable across frames, with trails matching bo
   );
 });
 
+test("trail and box of a track share a color even past the palette size", () => {
+  const window = loadViewer();
+  const trackHistory = new Map();
+  const count = window.metadataColors.PALETTE.length + 1;
+  const tracks = [];
+  for (let i = 0; i < count; i += 1) tracks.push(track(String(i + 1), "person", i * 20));
+  draw(window, "tracking", { tracks }, { drawContext: { trackHistory } });
+  const moved = tracks.map((entry) => ({ ...entry, bbox: [entry.bbox[0] + 5, 10, 80, 130] }));
+  const calls = draw(window, "tracking", { tracks: moved }, { now: 33, drawContext: { trackHistory } });
+  // History entries and visible tracks are both walked in first-seen order.
+  const trails = calls.filter((call) => call.op === "stroke").map((call) => call.strokeStyle);
+  const boxes = calls.filter((call) => call.op === "strokeRect").map((call) => call.strokeStyle);
+  assert.equal(trails.length, count);
+  assert.deepEqual(trails, boxes);
+});
+
 test("tracking keeps colors stable across frames", () => {
   const window = loadViewer();
   const trackHistory = new Map();

@@ -577,18 +577,28 @@ window.drawStrategies = {
         .map(track => `${index}:${track.id}`)
     );
 
+    // Resolve each id once per frame. Past the palette size the allocator evicts on
+    // every miss, so asking again for the box pass could hand a trail and its box
+    // different colors.
+    const frameColors = new Map();
+    const trackColor = (trackId) => {
+      if (trackId === null || trackId === undefined) return identityColor(drawContext, index, "track", trackId);
+      const key = String(trackId);
+      if (!frameColors.has(key)) frameColors.set(key, identityColor(drawContext, index, "track", trackId));
+      return frameColors.get(key);
+    };
+
     if (showTrackHistory && trackHistory) {
       trackHistory.forEach((entry, key) => {
         if (Number(key.split(":")[0]) !== index) return;
         const trackId = key.substring(key.indexOf(":") + 1);
-        const trailColor = identityColor(drawContext, index, "track", trackId);
-        drawTrackHistoryPath(ctx, entry.points, scale, trailColor, activeKeys.has(key) ? 0.72 : 0.35);
+        drawTrackHistoryPath(ctx, entry.points, scale, trackColor(trackId), activeKeys.has(key) ? 0.72 : 0.35);
       });
     }
 
     visibleTracks.forEach((track) => {
       const [x, y, w, h] = track.bbox;
-      const color = identityColor(drawContext, index, "track", track.id);
+      const color = trackColor(track.id);
       const left = x * scaleX + offsetX;
       const top = y * scaleY + offsetY;
       const width = w * scaleX;
