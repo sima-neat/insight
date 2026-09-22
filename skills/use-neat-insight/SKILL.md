@@ -288,7 +288,7 @@ Dropped segments warn once per channel and id in the browser console. Check ther
 
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
-| `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. |
+| `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. File nodes carry `streamable` (accepted by the media-source streamer), folder nodes carry `streamable_count`; the UI hides files with `streamable: false`. |
 | `POST` | `/api/upload/media` | Multipart form field `file` | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives. |
 | `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments and cached FPS renditions for deleted files (directories included). |
 | `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from ffprobe, including detected codec when available. |
