@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   closeAllWebcamSessions,
+  sessionIdFromDeleteUrl,
   pinH264,
   createDisconnectWatcher,
   closeWebcamSession,
@@ -430,4 +431,29 @@ test("an ordinary failure still retries to the deadline", async () => {
   );
 
   assert.equal(calls, 3, "retried as before");
+});
+
+test("the session id is the last segment of the WHIP resource", () => {
+  assert.equal(
+    sessionIdFromDeleteUrl("https://insight.local:8889/src1/whip/b5840975-9d5b-4948-bcab-070af869bb50"),
+    "b5840975-9d5b-4948-bcab-070af869bb50",
+  );
+  assert.equal(sessionIdFromDeleteUrl("https://insight.local:8889/src1/whip/abc/"), "abc");
+});
+
+test("no session id without a delete url", () => {
+  assert.equal(sessionIdFromDeleteUrl(null), null);
+  assert.equal(sessionIdFromDeleteUrl(""), null);
+  assert.equal(sessionIdFromDeleteUrl("not a url"), null);
+});
+
+test("publishing returns the session id alongside the delete url", async () => {
+  const { deleteUrl, sessionId } = await publishWebcamOffer(
+    fakePeerConnection(),
+    "https://insight.local:8889/src1/whip",
+    async () => response({ location: "/src1/whip/session-9" }),
+  );
+
+  assert.equal(deleteUrl, "https://insight.local:8889/src1/whip/session-9");
+  assert.equal(sessionId, "session-9");
 });

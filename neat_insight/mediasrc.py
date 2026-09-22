@@ -366,6 +366,24 @@ def webcam_is_publishing(index: int) -> bool:
     return bool(data.get("ready"))
 
 
+def webcam_publisher_session(index: int) -> Optional[str]:
+    """The id of the WebRTC session currently publishing to this slot, or None.
+
+    This is the identity a stop has to be bound to. Two browsers can hold the
+    same slot in quick succession — one reassigns it, the other's connection
+    drops a few seconds later — and a stop that only names the slot would act
+    on whichever session is there by then. Raises MediaServerUnreachable when
+    MediaMTX cannot say.
+    """
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return None
+    source = data.get("source") or {}
+    if source.get("type") != "webRTCSession":
+        return None
+    return source.get("id") or None
+
+
 def kick_webcam_publisher(index: int) -> bool:
     """Drop whatever browser is publishing to this slot; True if one was.
 
@@ -378,14 +396,7 @@ def kick_webcam_publisher(index: int) -> bool:
     Returns False when there was nothing to kick, and raises
     MediaServerUnreachable when that could not be established.
     """
-    data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
-    if data is _MEDIAMTX_NOT_FOUND:
-        return False
-
-    source = data.get("source") or {}
-    if source.get("type") != "webRTCSession":
-        return False
-    session_id = source.get("id")
+    session_id = webcam_publisher_session(index)
     if not session_id:
         return False
 

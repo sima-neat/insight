@@ -1526,13 +1526,15 @@ export default function App() {
     await loadSources()
   }
 
-  async function stopSource(index, { publisherReleased = false } = {}) {
+  async function stopSource(index, { publisherReleased = false, publisherSession = null } = {}) {
     await fetchJson('/api/mediasrc/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // Closing our own peer connection released the camera regardless of what
-      // MediaMTX reports, so this slot needs no confirmation from it.
-      body: JSON.stringify({ index, publisher_released: publisherReleased })
+      // MediaMTX reports, so this slot needs no confirmation from it. The
+      // session id lets the backend refuse this stop if the slot has since been
+      // taken over by another browser.
+      body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
     })
     await loadSources()
   }
@@ -1589,16 +1591,18 @@ export default function App() {
 
     if (!dropped.length) return
 
+    const lostSessions = dropped.map((index) => [index, webcamSessionsRef.current.get(index)?.sessionId ?? null])
     for (const index of dropped) teardownWebcamSession(index)
     setWebcamAssignments((prev) => {
       const next = { ...prev }
       for (const index of dropped) delete next[index]
       return next
     })
-    // Same reasoning as a lost connection: record each stop rather than reload.
-    for (const index of dropped) {
+    // Same reasoning as a lost connection: record each stop rather than reload,
+    // naming the session so a slot that has moved on is left alone.
+    for (const [index, publisherSession] of lostSessions) {
       try {
-        await stopSource(index, { publisherReleased: true })
+        await stopSource(index, { publisherReleased: true, publisherSession })
       } catch (e) {
         setError(e.message)
       }
@@ -1691,22 +1695,27 @@ export default function App() {
       )
       watcher = createDisconnectWatcher({
         onLost: () => {
+          // Capture our identity before teardown: this stop can arrive after
+          // another browser has taken the slot, and must name the session it
+          // is about so the backend can refuse to act on theirs.
+          const lost = webcamSessionsRef.current.get(index)
           teardownWebcamSession(index)
           // Record the stop explicitly rather than reloading: MediaMTX may
           // still report the path ready while the teardown is in flight, and
           // a reload that sees that would leave the row Live with no session.
-          stopSource(index, { publisherReleased: true }).catch((e) => setError(e.message))
+          stopSource(index, { publisherReleased: true, publisherSession: lost?.sessionId ?? null })
+            .catch((e) => setError(e.message))
         },
       })
       pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
 
-      const { answerSdp, deleteUrl } = await publishWebcamOffer(pc, whipUrl)
+      const { answerSdp, deleteUrl, sessionId } = await publishWebcamOffer(pc, whipUrl)
       if (superseded()) throw WEBCAM_START_SUPERSEDED
       // MediaMTX holds a session for this path from the POST onward, so the
       // session is registered before the answer is applied: if
       // setRemoteDescription() rejects, teardown can still close the peer
       // connection and release the path instead of leaving it occupied.
-      webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, watcher })
+      webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, sessionId, watcher })
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
 
       if (index === selectedSource) setWebcamPreviewStream(stream)
@@ -1746,10 +1755,10 @@ export default function App() {
   }
 
   async function stopWebcamSource(index) {
-    const owned = webcamSessionsRef.current.has(index)
+    const session = webcamSessionsRef.current.get(index)
     teardownWebcamSession(index)
     try {
-      await stopSource(index, { publisherReleased: owned })
+      await stopSource(index, { publisherReleased: Boolean(session), publisherSession: session?.sessionId ?? null })
     } catch (e) {
       setError(e.message)
     }

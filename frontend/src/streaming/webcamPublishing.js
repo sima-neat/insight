@@ -26,6 +26,20 @@ export function describeWebcamError(error) {
 // path immediately instead of waiting for the peer connection to time out. A
 // malformed or absent value is not worth failing the publish over — closing the
 // RTCPeerConnection already ends the media flow.
+// MediaMTX names the WHIP resource after the session it created, so the last
+// path segment of the Location is the session id — the same id its status API
+// reports as the path's source. A stop sent later carries it so the backend
+// can tell "my old session" from "whoever holds the slot now".
+export function sessionIdFromDeleteUrl(deleteUrl) {
+  if (!deleteUrl) return null
+  try {
+    const segments = new URL(deleteUrl).pathname.split('/').filter(Boolean)
+    return segments.length ? segments[segments.length - 1] : null
+  } catch {
+    return null
+  }
+}
+
 export function resolveDeleteUrl(location, whipUrl) {
   if (!location) return null
   try {
@@ -67,9 +81,11 @@ export async function publishWebcamOffer(peerConnection, whipUrl, fetchRequest =
     throw error
   }
 
+  const deleteUrl = resolveDeleteUrl(response.headers?.get('Location'), whipUrl)
   return {
     answerSdp: await response.text(),
-    deleteUrl: resolveDeleteUrl(response.headers?.get('Location'), whipUrl),
+    deleteUrl,
+    sessionId: sessionIdFromDeleteUrl(deleteUrl),
   }
 }
 

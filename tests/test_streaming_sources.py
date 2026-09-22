@@ -633,6 +633,56 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(source["state"], "playing", "state untouched")
         self.assertEqual(source["type"], "webcam", "still identifiable for a retry")
 
+    def test_a_stale_released_stop_does_not_touch_a_slot_someone_else_now_publishes(self):
+        """Tab A's dropped connection reports in after tab B took the slot over."""
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value="tab-b"):
+            with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                response = self.client.post("/api/mediasrc/stop", json={
+                    "index": 1, "publisher_released": True, "publisher_session": "tab-a"})
+
+        self.assertEqual(response.status_code, 409)
+        kick.assert_not_called()
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing", "B's camera untouched")
+
+    def test_a_released_stop_for_its_own_draining_session_is_honoured(self):
+        """The owning tab's DELETE may still be in flight, so its id can still be on the path."""
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value="tab-a"):
+            with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                response = self.client.post("/api/mediasrc/stop", json={
+                    "index": 1, "publisher_released": True, "publisher_session": "tab-a"})
+
+        self.assertEqual(response.status_code, 200)
+        kick.assert_not_called()
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_a_released_stop_never_kicks(self):
+        """The caller closed its own publisher; kicking would only ever hit someone else's."""
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
+            with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                response = self.client.post("/api/mediasrc/stop", json={
+                    "index": 1, "publisher_released": True, "publisher_session": "tab-a"})
+
+        self.assertEqual(response.status_code, 200)
+        kick.assert_not_called()
+
+    def test_webcam_rtsp_url_uses_the_sdk_mapped_port(self):
+        remapped = [{"hostPortEnd": None, "hostPortStart": 18554, "name": "rtsp.tcp", "protocol": "tcp"}]
+
+        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=remapped):
+            response = self._assign_webcam(1)
+
+        self.assertEqual(response.get_json()["source"]["urls"]["rtsp"], "rtsp://localhost:18554/src1")
+
     def test_stop_succeeds_when_there_was_nothing_publishing(self):
         self._assign_webcam(1)
 
@@ -839,6 +889,22 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             with self.assertRaises(mediasrc.MediaServerUnreachable):
                 mediasrc.webcam_is_publishing(1)
+
+    def test_publisher_session_reports_the_current_webrtc_session_id(self):
+        urlopen = self._urlopen_returning(
+            {"name": "src1", "ready": True, "source": {"type": "webRTCSession", "id": "abc-123"}})
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertEqual(mediasrc.webcam_publisher_session(1), "abc-123")
+
+    def test_publisher_session_is_none_for_an_idle_or_non_webrtc_path(self):
+        for payload in (
+            {"name": "src1", "ready": False, "source": None},
+            {"name": "src1", "ready": True, "source": {"type": "rtspSession", "id": "x"}},
+        ):
+            urlopen = self._urlopen_returning(payload)
+            with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+                self.assertIsNone(mediasrc.webcam_publisher_session(1))
 
     def test_kick_closes_the_session_publishing_to_the_path(self):
         calls = []

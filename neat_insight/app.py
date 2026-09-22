@@ -54,6 +54,7 @@ from neat_insight.mediasrc import (
     MediaServerUnreachable,
     kick_webcam_publisher,
     webcam_is_publishing,
+    webcam_publisher_session,
     webcam_path_name,
 )
 from neat_insight.api_docs import api_docs_bp
@@ -806,6 +807,11 @@ def _resolve_video_ui_port():
 
 def _resolve_webssh_host_port():
     return _find_exposed_port(_read_exposed_ports_from_port_map(), "webSSH", "tcp") or get_webssh_port()
+
+
+def _resolve_rtsp_port():
+    """Host port for the RTSP output, from the SDK port map when it is remapped."""
+    return _find_exposed_port(_read_exposed_ports_from_port_map(), "rtsp", "tcp") or 8554
 
 
 def _resolve_webcam_ice_port():
@@ -2119,7 +2125,7 @@ def _source_url(src, transport: Optional[str] = None):
     host = _request_host_name()
     if selected_transport == "http":
         return f"{request.scheme}://{request.host}/stream/http/src{index}.mjpg"
-    return f"rtsp://{_bracket_ipv6(host)}:8554/src{index}"
+    return f"rtsp://{_bracket_ipv6(host)}:{_resolve_rtsp_port()}/src{index}"
 
 
 def _webcam_whip_url(src):
@@ -2528,9 +2534,32 @@ def stop_source():
             # connection, so the camera is released whatever MediaMTX says. Only
             # a caller that did not own it depends on the kick to be sure.
             if src.get("type") == SOURCE_TYPE_WEBCAM:
-                # Persisting "stopped" without confirming would be a success
-                # response for a camera that may well still be streaming.
-                _release_webcam_publisher(index, bool(data.get("publisher_released")))
+                if bool(data.get("publisher_released")):
+                    # The caller closed its own publisher, so there is nothing
+                    # to kick — and kicking would be wrong: if another browser
+                    # has taken the slot since (reassigned it, then this tab's
+                    # dropped connection reports in a few seconds later), the
+                    # session on the path now is theirs. Compare identities and
+                    # refuse to touch a slot that has moved on.
+                    released_session = data.get("publisher_session")
+                    if released_session:
+                        try:
+                            current = webcam_publisher_session(index)
+                        except MediaServerUnreachable:
+                            # Cannot check; the caller did release its own,
+                            # and refusing here reintroduces the false alarm
+                            # for the tab that genuinely stopped its camera.
+                            current = None
+                        if current and current != released_session:
+                            return _json_error(
+                                "This source is now published by a different session; "
+                                "nothing was changed.",
+                                409,
+                            )
+                else:
+                    # Persisting "stopped" without confirming would be a success
+                    # response for a camera that may well still be streaming.
+                    _release_webcam_publisher(index)
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)
