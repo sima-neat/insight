@@ -275,6 +275,7 @@ def _terminate_conflicting_ports():
         (8554, "TCP"),
         (8000, "UDP"),
         (8889, "TCP"),
+        (8189, "UDP"),
         (9997, "TCP"),
         (8081, "TCP"),
         *[(port, "UDP") for port in range(9000, 9080)],

@@ -16,6 +16,11 @@ WEBCAM_WHIP_PORT = 8889
 # resolved through this name (see app._resolve_webcam_whip_port) rather than
 # assuming the container-internal port is reachable.
 WEBCAM_WHIP_PORT_MAP_NAME = "webrtcWhip"
+# ICE media port for the WHIP listener. Insight never builds a URL from it,
+# but it must be published alongside 8889 or the browser completes
+# signalling and then fails to connect.
+WEBCAM_WHIP_ICE_PORT = 8189
+WEBCAM_WHIP_ICE_PORT_MAP_NAME = "webrtcWhipIce"
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
 DEFAULT_TRANSPORT = "rtsp"
@@ -304,6 +309,24 @@ def webcam_path_name(index: int) -> str:
     return f"src{index}"
 
 
+def _mediamtx_request(path: str, method: str = "GET") -> Optional[Dict]:
+    """Call the MediaMTX control API, treating any failure as "no answer".
+
+    The API is loopback-only and may not be up yet, so every caller here has a
+    sensible answer for None and none of them should fail because MediaMTX is
+    unreachable.
+    """
+    request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=1.0) as response:
+            body = response.read()
+            if not body:
+                return {}
+            return json.loads(body)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+
+
 def webcam_is_publishing(index: int) -> bool:
     """Ask MediaMTX itself whether a browser is currently WHIP-publishing to this slot.
 
@@ -311,11 +334,24 @@ def webcam_is_publishing(index: int) -> bool:
     source's ffmpeg push), so liveness must come from MediaMTX's own path
     state rather than pipeline_registry.
     """
-    path_name = webcam_path_name(index)
-    url = f"{MEDIAMTX_API_BASE_URL}/v3/paths/get/{path_name}"
-    try:
-        with urllib.request.urlopen(url, timeout=1.0) as response:
-            data = json.load(response)
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
+    return bool(data and data.get("ready"))
+
+
+def kick_webcam_publisher(index: int) -> bool:
+    """Drop whatever browser is publishing to this slot. Returns True if one was.
+
+    Stopping a file source kills an ffmpeg process Insight owns. A webcam is
+    published by a browser Insight has no handle on, so the only way to make
+    /api/mediasrc/stop mean the same thing for both is to have MediaMTX close
+    the session. Without this, a caller in another tab — or any API client —
+    gets a success response while the camera keeps streaming.
+    """
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
+    source = (data or {}).get("source") or {}
+    if source.get("type") != "webRTCSession":
         return False
-    return bool(data.get("ready"))
+    session_id = source.get("id")
+    if not session_id:
+        return False
+    return _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST") is not None

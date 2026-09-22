@@ -483,6 +483,51 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(source["type"], "file")
         self.assertEqual(source["file"], "clip.mp4", "the assignment must survive a reload")
 
+    def test_stop_kicks_the_browser_publishing_to_the_slot(self):
+        """Stop must mean stopped for any caller, not just the tab that owns the peer connection."""
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+            response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 200)
+        kick.assert_called_once_with(1)
+
+    def test_stopping_a_file_source_does_not_call_the_kick_api(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
+
+        with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+            self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        kick.assert_not_called()
+
+    def test_bulk_paths_kick_webcam_publishers(self):
+        for endpoint, payload in (
+            ("/api/mediasrc/stop-all", None),
+            ("/api/mediasrc/reset", None),
+            ("/api/mediasrc/auto-assign-all", None),
+        ):
+            with self.subTest(endpoint=endpoint):
+                self.sources_file.write_text("[]", encoding="utf-8")
+                self._assign_webcam(2)
+
+                with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                    with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                        response = self.client.post(endpoint, json=payload)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(2, [call.args[0] for call in kick.call_args_list])
+
+    def test_switching_cameras_kicks_the_previous_publisher(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+            self._assign_webcam(1)
+
+        kick.assert_called_once_with(1)
+
     def test_the_whip_url_brackets_an_ipv6_host(self):
         self.client.post("/api/mediasrc/assign-webcam", json={"index": 1},
                          headers={"Host": "[fd00::23]:9900"})
@@ -530,7 +575,9 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             self.assertTrue(mediasrc.webcam_is_publishing(1))
 
-        self.assertIn("/v3/paths/get/src1", urlopen.call_args[0][0])
+        request = urlopen.call_args[0][0]
+        self.assertIn("/v3/paths/get/src1", request.full_url)
+        self.assertEqual(request.get_method(), "GET")
 
     def test_reports_not_publishing_when_the_path_is_not_ready(self):
         urlopen = self._urlopen_returning({"name": "src1", "ready": False})
@@ -544,6 +591,50 @@ class WebcamPublishStateTests(unittest.TestCase):
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             self.assertFalse(mediasrc.webcam_is_publishing(1))
+
+    def test_kick_closes_the_session_publishing_to_the_path(self):
+        calls = []
+
+        def fake_urlopen(request, timeout=None):
+            calls.append((request.full_url, request.get_method()))
+            if "/v3/paths/get/" in request.full_url:
+                payload = {"name": "src1", "ready": True,
+                           "source": {"type": "webRTCSession", "id": "abc-123"}}
+            else:
+                payload = {}
+            response = mock.MagicMock()
+            response.__enter__.return_value = io.BytesIO(json.dumps(payload).encode("utf-8"))
+            return response
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake_urlopen):
+            self.assertTrue(mediasrc.kick_webcam_publisher(1))
+
+        self.assertEqual(calls[1], (
+            "http://127.0.0.1:9997/v3/webrtcsessions/kick/abc-123", "POST"))
+
+    def test_kick_is_a_no_op_when_nothing_is_publishing(self):
+        urlopen = self._urlopen_returning({"name": "src1", "ready": False, "source": None})
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertFalse(mediasrc.kick_webcam_publisher(1))
+
+        self.assertEqual(urlopen.call_count, 1, "no kick issued when there is no session")
+
+    def test_kick_does_not_touch_a_non_webrtc_publisher(self):
+        """A file source pushed by ffmpeg must never be kicked through this path."""
+        urlopen = self._urlopen_returning(
+            {"name": "src1", "ready": True, "source": {"type": "rtspSession", "id": "x"}})
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertFalse(mediasrc.kick_webcam_publisher(1))
+
+        self.assertEqual(urlopen.call_count, 1)
+
+    def test_kick_survives_an_unreachable_api(self):
+        urlopen = mock.Mock(side_effect=mediasrc.urllib.error.URLError("refused"))
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertFalse(mediasrc.kick_webcam_publisher(1))
 
     def test_reports_not_publishing_when_the_api_returns_garbage(self):
         response = mock.MagicMock()

@@ -49,6 +49,7 @@ from neat_insight.mediasrc import (
     normalize_transport,
     start_media_stream,
     stop_media_stream,
+    kick_webcam_publisher,
     webcam_is_publishing,
     webcam_path_name,
 )
@@ -587,6 +588,7 @@ def _fake_sysinfo_payload():
             {"hostPortEnd": None, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
             {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
             {"hostPortEnd": None, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+            {"hostPortEnd": None, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
             {"hostPortEnd": None, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"},
         ],
         "insight": {
@@ -2191,7 +2193,9 @@ def assign_source():
         if src["index"] == index:
             if src.get("type") == SOURCE_TYPE_WEBCAM:
                 # Reassigning a webcam slot to a file drops the webcam
-                # registration; MediaMTX has no ffmpeg process to stop here.
+                # registration, and the browser publishing to it has to be
+                # closed by MediaMTX — there is no ffmpeg process to stop.
+                kick_webcam_publisher(index)
                 src["type"] = SOURCE_TYPE_FILE
                 was_playing = False
             else:
@@ -2238,7 +2242,11 @@ def assign_webcam_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
-            if src.get("type") != SOURCE_TYPE_WEBCAM and src.get("state") == "playing":
+            if src.get("type") == SOURCE_TYPE_WEBCAM:
+                # Switching cameras: the previous publisher still owns the
+                # MediaMTX path and would reject the replacement.
+                kick_webcam_publisher(index)
+            elif src.get("state") == "playing":
                 stop_media_stream(index)
             src["type"] = SOURCE_TYPE_WEBCAM
             src["file"] = ""
@@ -2260,6 +2268,8 @@ def auto_assign_all_sources():
 
     for idx, src in enumerate(sources):
         source_index = src.get("index")
+        if src.get("type") == SOURCE_TYPE_WEBCAM:
+            kick_webcam_publisher(source_index)
         if src.get("state") == "playing":
             stop_media_stream(source_index)
         # Writing a file assignment makes this a file slot again. Without this
@@ -2408,9 +2418,12 @@ def stop_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
-            # stop_media_stream() is a no-op for a webcam slot (nothing in
-            # pipeline_registry); actually ending the WHIP publish happens
-            # when the frontend closes its RTCPeerConnection.
+            # stop_media_stream() is a no-op for a webcam slot: there is no
+            # ffmpeg process, the browser is the publisher. Ask MediaMTX to
+            # close the session so this means "stopped" for any caller, not
+            # just the tab that happens to own the RTCPeerConnection.
+            if src.get("type") == SOURCE_TYPE_WEBCAM:
+                kick_webcam_publisher(index)
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)
@@ -2429,6 +2442,8 @@ def stop_all_sources():
         source_index = src.get("index")
         if src.get("state") == "playing":
             stopped_count += 1
+        if src.get("type") == SOURCE_TYPE_WEBCAM:
+            kick_webcam_publisher(source_index)
         stop_media_stream(source_index)
         src["state"] = "stopped"
 
@@ -2442,6 +2457,8 @@ def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     sources = load_sources()
     for src in sources:
+        if src.get("type") == SOURCE_TYPE_WEBCAM:
+            kick_webcam_publisher(src.get("index"))
         stop_media_stream(src.get("index"))
     reset_sources()
     return {"success": True, "message": "Reset all source assignments."}

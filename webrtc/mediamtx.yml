@@ -19,6 +19,10 @@ webrtc: yes
 webrtcAddress: :8889
 webrtcEncryption: no
 webrtcAllowOrigin: '*'
+# Signalling happens on 8889, but the media arrives here. Pinned rather
+# than left to the default so the port published by the container and the
+# ICE candidate MediaMTX advertises cannot drift apart.
+webrtcLocalUDPAddress: :8189
 
 # Backs the "is this webcam actually publishing" status Insight polls per
 # source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,
