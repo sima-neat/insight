@@ -74,34 +74,43 @@ def detect_fps(stream: dict) -> Optional[int]:
     return int(round(rate))
 
 
-# Level limits from the codec specs, lowest first: (level, max picture size, max pictures-per-second throughput).
-# H.264 (ITU-T H.264 Annex A, table A-1) counts 16x16 macroblocks: MaxFS and MaxMBPS.
+# Level limits from the codec specs, lowest first:
+# (level, max picture size, max pictures-per-second throughput, max bitrate in bit/s).
+# H.264 (ITU-T H.264 Annex A, table A-1) counts 16x16 macroblocks: MaxFS, MaxMBPS and MaxBR for the
+# Baseline/Main/Extended profiles (1000 bit/s units).
 H264_LEVELS = (
-    ("3.0", 1620, 40500),
-    ("3.1", 3600, 108000),
-    ("3.2", 5120, 216000),
-    ("4.0", 8192, 245760),
-    ("4.2", 8704, 522240),
-    ("5.0", 22080, 589824),
-    ("5.1", 36864, 983040),
-    ("5.2", 36864, 2073600),
-    ("6.0", 139264, 4177920),
-    ("6.1", 139264, 8355840),
-    ("6.2", 139264, 16711680),
+    ("3.0", 1620, 40500, 10_000_000),
+    ("3.1", 3600, 108000, 14_000_000),
+    ("3.2", 5120, 216000, 20_000_000),
+    ("4.0", 8192, 245760, 20_000_000),
+    ("4.2", 8704, 522240, 50_000_000),
+    ("5.0", 22080, 589824, 135_000_000),
+    ("5.1", 36864, 983040, 240_000_000),
+    ("5.2", 36864, 2073600, 240_000_000),
+    ("6.0", 139264, 4177920, 240_000_000),
+    ("6.1", 139264, 8355840, 480_000_000),
+    ("6.2", 139264, 16711680, 800_000_000),
 )
-# H.265 (ITU-T H.265 Annex A, table A-8, Main tier) counts luma samples: MaxLumaPs and MaxLumaSr.
+# H.265 (ITU-T H.265 Annex A, tables A-8 and A-9, Main tier) counts luma samples: MaxLumaPs, MaxLumaSr
+# and the Main-tier MaxBR (the encoder is pinned to high-tier=0).
 H265_LEVELS = (
-    ("3.0", 552960, 16588800),
-    ("3.1", 983040, 33177600),
-    ("4.0", 2228224, 66846720),
-    ("4.1", 2228224, 133693440),
-    ("5.0", 8912896, 267386880),
-    ("5.1", 8912896, 534773760),
-    ("5.2", 8912896, 1069547520),
-    ("6.0", 35651584, 1069547520),
-    ("6.1", 35651584, 2139095040),
-    ("6.2", 35651584, 4278190080),
+    ("3.0", 552960, 16588800, 6_000_000),
+    ("3.1", 983040, 33177600, 10_000_000),
+    ("4.0", 2228224, 66846720, 12_000_000),
+    ("4.1", 2228224, 133693440, 20_000_000),
+    ("5.0", 8912896, 267386880, 25_000_000),
+    ("5.1", 8912896, 534773760, 40_000_000),
+    ("5.2", 8912896, 1069547520, 60_000_000),
+    ("6.0", 35651584, 1069547520, 60_000_000),
+    ("6.1", 35651584, 2139095040, 120_000_000),
+    ("6.2", 35651584, 4278190080, 240_000_000),
 )
+
+
+def _bitrate_bits(value: str) -> int:
+    """'35M' -> 35_000_000, '500k' -> 500_000."""
+    units = {"k": 1_000, "m": 1_000_000}
+    return int(float(value[:-1]) * units[value[-1].lower()]) if value[-1].lower() in units else int(value)
 
 
 def video_level(codec: str, width: int, height: int, fps: int) -> str:
@@ -121,10 +130,12 @@ def video_level(codec: str, width: int, height: int, fps: int) -> str:
         raise ValueError(f"unsupported rendition codec: {codec}")
     picture = axes[0] * axes[1]
     rate = picture * fps
-    for level, max_picture, max_rate in table:
+    bitrate = _bitrate_bits(video_bitrate(height, fps))  # the rendition is encoded at exactly this rate
+    for level, max_picture, max_rate, max_bitrate in table:
         # Both specs also bound each axis on its own: width and height may each be at most
         # sqrt(8 * max picture size), which is what catches very wide or very tall pictures.
-        if picture <= max_picture and rate <= max_rate and max(axes) ** 2 <= 8 * max_picture:
+        # The bitrate cap matters for HEVC Main tier (4K at 35 Mbps needs 5.1, not 5.0).
+        if picture <= max_picture and rate <= max_rate and max(axes) ** 2 <= 8 * max_picture and bitrate <= max_bitrate:
             return level
     raise UnsupportedRendition(f"{width}x{height} at {fps} fps exceeds the highest {codec} level ({table[-1][0]})")
 

@@ -53,6 +53,10 @@ class FpsRuleTests(unittest.TestCase):
         self.assertEqual(renditions.video_level("h264", 1920, 1080, 120), "5.1")
         self.assertEqual(renditions.video_level("h265", 1920, 1080, 120), "5.0")
         self.assertEqual(renditions.video_level("h264", 3840, 2160, 30), "5.1")
+        # Codex review: HEVC Main tier level 5.0 caps the bitrate at 25 Mbps; a 4K rendition is
+        # encoded at 35 Mbps, so it needs 5.1 like the catalog builder always assigned.
+        self.assertEqual(renditions.video_level("h265", 3840, 2160, 30), "5.1")
+        self.assertEqual(renditions.video_level("h265", 1920, 1080, 30), "4.0")  # 12 Mbps fits 4.0 exactly
         self.assertEqual(renditions.video_level("h264", 854, 480, 30), "3.1")
         self.assertEqual(renditions.video_level("h265", 854, 480, 30), "3.0")
         self.assertEqual(renditions.video_level("h264", 426, 240, 15), "3.0")
@@ -690,6 +694,14 @@ class StartPersistenceTests(RenditionApiTestCase):
         response, _stream = self.start_slot_for_real(lambda: None, on_stream=on_stream)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(held, [True])
+
+    def test_reset_holds_the_slot_lock_while_stopping_streams(self):
+        # Codex review: a launch between reset's stop loop and its save would leave an orphan process.
+        held = []
+        with mock.patch.object(app_module, "stop_media_stream", side_effect=lambda _i: held.append(lock_is_held(app_module._slot_lock))):
+            self.assertEqual(self.client.post("/api/mediasrc/reset").status_code, 200)
+        self.assertGreaterEqual(len(held), 2)
+        self.assertTrue(all(held), held)
 
     def test_slot_lock_is_held_while_a_slot_is_stopped(self):
         held = []
