@@ -393,8 +393,16 @@ def source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> dic
         source_path = media_dir / rel_path
         try:
             stream, stat = _for_current_stat(source_path, stat, lambda: probe_video(source_path))
-        except (OSError, RenditionError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
+            logging.debug("Cannot stat the media source %s: %s", rel_path, exc)
+            continue
+        except (RenditionError, subprocess.SubprocessError) as exc:
+            # Cache the failure under the same size/mtime key as a success: this listing backs a
+            # 2 s UI poll, and re-running a probe that can take up to its 30 s timeout on every
+            # poll would stall the Streaming tab for as long as the broken file stays assigned.
+            # The file is probed again once it changes; start/prepare still raise for it.
             logging.debug("Cannot probe the media source %s: %s", rel_path, exc)
+            probed[rel_path] = (stat, {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "native_fps": None, "width": None, "height": None, "duration": None, "probe_error": str(exc)[:200]})
             continue
         probed[rel_path] = (stat, _source_entry(stat, stream))
     if probed:
