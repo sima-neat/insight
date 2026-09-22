@@ -112,16 +112,19 @@ def video_level(codec: str, width: int, height: int, fps: int) -> str:
     limits. Levels below 3.0 are never used, matching the catalog.
     """
     if codec == "h264":
-        picture = -(-width // 16) * -(-height // 16)
+        axes = (-(-width // 16), -(-height // 16))
         table = H264_LEVELS
     elif codec == "h265":
-        picture = width * height
+        axes = (width, height)
         table = H265_LEVELS
     else:
         raise ValueError(f"unsupported rendition codec: {codec}")
+    picture = axes[0] * axes[1]
     rate = picture * fps
     for level, max_picture, max_rate in table:
-        if picture <= max_picture and rate <= max_rate:
+        # Both specs also bound each axis on its own: width and height may each be at most
+        # sqrt(8 * max picture size), which is what catches very wide or very tall pictures.
+        if picture <= max_picture and rate <= max_rate and max(axes) ** 2 <= 8 * max_picture:
             return level
     raise UnsupportedRendition(f"{width}x{height} at {fps} fps exceeds the highest {codec} level ({table[-1][0]})")
 

@@ -72,6 +72,11 @@ class FpsRuleTests(unittest.TestCase):
         self.assertEqual(renditions.video_level("h265", 3840, 2160, 240), "6.1")
         # 4:3 content is judged by its real width, not a 16:9 assumption.
         self.assertEqual(renditions.video_level("h264", 640, 480, 60), "3.1")
+        # Per-axis bound (Annex A: width and height each <= sqrt(8 * max picture size)).
+        # 7680x432 fits level 5.0 by area and throughput but is 480 macroblocks wide; 5.0 allows 420.
+        self.assertEqual(renditions.video_level("h264", 7680, 432, 30), "5.1")
+        # 8448x432 fits H.265 level 5.0 by area but exceeds its 8444-sample width bound.
+        self.assertEqual(renditions.video_level("h265", 8448, 432, 30), "6.0")
         with self.assertRaises(renditions.UnsupportedRendition):
             renditions.video_level("h264", 7680, 4320, 240)
         with self.assertRaises(renditions.UnsupportedRendition):
@@ -543,6 +548,7 @@ class StartPersistenceTests(RenditionApiTestCase):
             other["fps"] = 20
             app_module.save_sources(sources)
         src["state"] = "playing"
+        app_module._persist_slot(src)  # the real starter persists its own slot
         return True, None, 200
 
     def persisted(self):
@@ -559,6 +565,43 @@ class StartPersistenceTests(RenditionApiTestCase):
         self.assertEqual((after[2]["file"], after[2]["fps"], after[2]["state"]), ("c.mp4", 20, "playing"))
         # Slot 2 was started from its current assignment, not the pre-encode snapshot.
         self.assertEqual(self.seen, [(1, "a.mp4", None), (2, "c.mp4", 20)])
+
+    def start_slot_for_real(self, mutate):
+        """Run the real _start_source_slot with the encode step replaced by `mutate` (which edits the persisted slot)."""
+        def fake_resolve(src):
+            mutate()
+            return self.media_dir / (src.get("file") or ""), None, None, 200
+        stream = mock.Mock(return_value=(True, None))
+        with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_source_media_codec", return_value="h264"), \
+             mock.patch.object(app_module, "_resolve_stream_input", side_effect=fake_resolve), \
+             mock.patch.object(app_module, "start_media_stream", stream):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        return response, stream
+
+    def edit_slot_one(self, **changes):
+        sources = app_module.load_sources()
+        next(s for s in sources if s["index"] == 1).update(changes)
+        app_module.save_sources(sources)
+
+    def test_start_abandons_a_slot_reassigned_while_encoding(self):
+        response, stream = self.start_slot_for_real(lambda: self.edit_slot_one(file="z.mp4", fps=20))
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("changed", response.get_json()["error"])
+        stream.assert_not_called()
+        self.assertEqual((self.persisted()[1]["file"], self.persisted()[1]["fps"], self.persisted()[1]["state"]), ("z.mp4", 20, "stopped"))
+
+    def test_start_abandons_a_slot_whose_file_was_deleted_while_encoding(self):
+        response, stream = self.start_slot_for_real(lambda: self.edit_slot_one(file=""))
+        self.assertEqual(response.status_code, 409)
+        stream.assert_not_called()
+        self.assertEqual(self.persisted()[1]["file"], "")
+
+    def test_start_proceeds_when_the_slot_is_unchanged(self):
+        response, stream = self.start_slot_for_real(lambda: None)
+        self.assertEqual(response.status_code, 200)
+        stream.assert_called_once()
+        self.assertEqual(self.persisted()[1]["state"], "playing")
 
     def test_single_start_keeps_edits_made_to_other_slots_while_encoding(self):
         with mock.patch.object(app_module, "_start_source_slot", side_effect=self.fake_start):

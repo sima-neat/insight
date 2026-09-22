@@ -2298,14 +2298,17 @@ def assign_source():
             src["transport"] = transport
             src["codec"] = codec
             if was_playing and file_name:
+                # Persist the new assignment first: the restart re-reads the slot after
+                # preparing its input and abandons the start if it no longer matches.
+                src["state"] = "stopped"
+                _persist_slot(src)
                 ok, err, status = _start_source_slot(src)
                 if not ok:
-                    src["state"] = "stopped"
-                    save_sources(sources)
                     return _json_error(err, status)
-            elif not file_name:
+                return {"success": True}
+            if not file_name:
                 src["state"] = "stopped"
-            save_sources(sources)
+            _persist_slot(src)
             return {"success": True}
 
     return _json_error("Source not found", 404)
@@ -2394,17 +2397,34 @@ def _persist_slot(src) -> None:
         save_sources(sources)
 
 
+def _slot_changed_since(src) -> bool:
+    """True when the persisted slot no longer has the file and fps that `src` was started with."""
+    current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
+    if current is None:
+        return True
+    return (current.get("file") or "") != (src.get("file") or "") or renditions.coerce_fps(current.get("fps")) != renditions.coerce_fps(src.get("fps"))
+
+
 def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
-    """Derive stream settings, prepare the input (source or FPS rendition), start the slot. Mutates src; returns (ok, error, http status)."""
+    """Derive stream settings, prepare the input (source or FPS rendition), start the slot and persist it.
+
+    Mutates src; returns (ok, error, http status). Preparing the input can encode for
+    minutes, so the slot is re-read afterwards: if another request reassigned, reset or
+    unassigned it meanwhile, the start is abandoned (409) and nothing is persisted.
+    """
     file_name = src.get("file") or ""
     transport, codec, allowed_transports = _derive_source_stream_settings(file_name, src.get("transport"))
     src["transport"] = transport
     src["codec"] = codec
     if not allowed_transports:
+        _persist_slot(src)
         return False, _codec_detection_error(file_name), 400
     input_path, rendition, error, status = _resolve_stream_input(src)
     if error:
+        _persist_slot(src)
         return False, error, status
+    if _slot_changed_since(src):
+        return False, "Source changed while its rendition was being prepared; start it again", 409
     # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
     ok, err = start_media_stream(
         src["index"],
@@ -2415,8 +2435,10 @@ def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
         rendition=rendition,
     )
     if not ok:
+        _persist_slot(src)
         return False, err, 500
     src["state"] = "playing"
+    _persist_slot(src)
     return True, None, 200
 
 
@@ -2521,7 +2543,6 @@ def start_source():
     if not src.get("file"):
         return _json_error("No file assigned to source")
     ok, err, status = _start_source_slot(src)
-    _persist_slot(src)
     if not ok:
         return _json_error(err, status)
     return {"success": True}
@@ -2572,7 +2593,6 @@ def start_sources_bulk():
             already_running.append(source_index)
             continue
         ok, err, _status = _start_source_slot(src)
-        _persist_slot(src)
         if ok:
             started.append(source_index)
         else:
