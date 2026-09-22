@@ -1639,12 +1639,14 @@ export default function App() {
   // act on the committed fps, otherwise it skips the prepare step and races /assign on the server.
   function commitFps(index, fps) {
     const commit = updateSource(index, { fps })
-      .then(() => ({ ok: true, fps }), (e) => { setError(e.message); return { ok: false } })
+      .then(() => ({ ok: true, fps }), () => ({ ok: false })) // updateSource already showed the error
       .finally(() => { if (pendingFpsCommits.current.get(index) === commit) pendingFpsCommits.current.delete(index) })
     pendingFpsCommits.current.set(index, commit)
     return commit
   }
 
+  // Rejects when the assign is refused, so a caller (commitFps) can tell a committed value from a
+  // rejected one; the list is refreshed either way and the error is shown once, here.
   async function updateSource(index, patch) {
     const src = sources.find((item) => item.index === index) || {}
     const next = {
@@ -1653,11 +1655,18 @@ export default function App() {
       transport: src.transport || 'rtsp',
       ...patch
     }
-    await sourceAction(() => fetchJson('/api/mediasrc/assign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next)
-    }))
+    try {
+      await fetchJson('/api/mediasrc/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next)
+      })
+    } catch (e) {
+      setError(e.message)
+      loadSources().catch(() => {})
+      throw e
+    }
+    await loadSources()
   }
 
   function prepareProgressForLine(line, prev) {
@@ -2327,7 +2336,7 @@ export default function App() {
                           <span className={encodeProgress[src.index] ? 'src-state encoding' : (src.state === 'playing' ? 'src-state playing' : 'src-state stopped')}>
                             {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })} disabled={Boolean(encodeProgress[src.index])}>
+                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value }).catch(() => {})} disabled={Boolean(encodeProgress[src.index])}>
                             <option value="">Not assigned</option>
                             {videoFiles.map((file) => (
                               <option key={file} value={file}>{file}</option>
@@ -2335,7 +2344,7 @@ export default function App() {
                           </select>
                           <select
                             value={transportValue}
-                            onChange={(e) => updateSource(src.index, { transport: e.target.value })}
+                            onChange={(e) => updateSource(src.index, { transport: e.target.value }).catch(() => {})}
                             disabled={transportLocked}
                             aria-label={`Transport for src${src.index}`}
                             title={!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`))}
