@@ -944,7 +944,7 @@
         "content": {
           "application/json": {
             "schema": {"$ref": "#/components/schemas/WebcamStopRequest"},
-            "example": {"index": 1, "publisher_released": true, "publisher_session": "b5840975-9d5b-4948-bcab-070af869bb50"}
+            "example": {"index": 1, "publisher_released": true, "publisher_session": "52304a1c-28cc-41d7-8234-164aa9ebd9bb"}
           }
         }
       },
@@ -1094,7 +1094,7 @@
             "type": "object",
             "properties": {
               "publisher_released": {"type": "boolean", "default": false, "description": "True when the caller has already closed its own WebRTC peer connection for this slot. Requires `publisher_session`; a claim that names no session is rejected with `400`. Insight then verifies that session is still the one on the slot (or that the slot is idle) rather than asking MediaMTX to close anything: a different session answers `409`, and an unreachable MediaMTX answers `502`, in both cases changing nothing."},
-              "publisher_session": {"type": "string", "description": "The WHIP session id the caller released — the last path segment of the WHIP resource returned in `Location`, which MediaMTX also reports as the path's source id. Required with `publisher_released`."}
+              "publisher_session": {"type": "string", "description": "The WHIP session id the caller released: the value of the `Id` response header from the WHIP POST, which MediaMTX also reports in `/v3/webrtcsessions` and as the path's `source.id`. Note this is not the last segment of `Location`, which is a separate resource secret. Required with `publisher_released`."}
             }
           }
         ]
@@ -1103,7 +1103,7 @@
         "type": "object",
         "description": "Bulk-operation hint from a browser that has already closed its own webcam publishers.",
         "properties": {
-          "released_webcams": {"type": "array", "description": "Sessions the caller closed itself, one per slot. Each is honoured only if that session is still the one on its slot (or the slot is idle); a stale entry falls back to an ordinary confirmed stop of whatever is there. A bare index is not a claim and is ignored.", "items": {"type": "object", "required": ["index", "session"], "properties": {"index": {"type": "integer", "minimum": 1, "description": "One-based slot index."}, "session": {"type": "string", "description": "The WHIP session id that was closed."}}}}
+          "released_webcams": {"type": "array", "description": "Sessions the caller closed itself, one per slot. Each is honoured only if that session is still the one on its slot (or the slot is idle); a stale entry falls back to an ordinary confirmed stop of whatever is there. A bare index is not a claim and is ignored.", "items": {"type": "object", "required": ["index", "session"], "properties": {"index": {"type": "integer", "minimum": 1, "description": "One-based slot index."}, "session": {"type": "string", "description": "The WHIP session id that was closed — the `Id` response header from the WHIP POST, not the `Location` segment."}}}}
         }
       },
       "MediaSourceAssignment": {
@@ -1118,7 +1118,7 @@
               "transport": {"type": "string", "enum": ["rtsp", "http"], "description": "Requested transport. Insight normalizes this to one supported by the detected codec."},
               "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."},
           "publisher_released": {"type": "boolean", "default": false, "description": "When assigning a file over a webcam slot: true if the caller has already closed its own publisher. Requires `publisher_session` and is verified the same way as for `/api/mediasrc/stop`."},
-          "publisher_session": {"type": "string", "description": "The WHIP session id the caller closed. Required with `publisher_released`."}
+          "publisher_session": {"type": "string", "description": "The WHIP session id the caller closed — the `Id` response header from the WHIP POST. Required with `publisher_released`."}
             }
           }
         ]

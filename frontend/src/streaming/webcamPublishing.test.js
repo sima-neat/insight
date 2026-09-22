@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   closeAllWebcamSessions,
-  sessionIdFromDeleteUrl,
+  sessionIdFromResponse,
   pinH264,
   createDisconnectWatcher,
   closeWebcamSession,
@@ -32,11 +32,11 @@ function fakePeerConnection(overrides = {}) {
   };
 }
 
-function response({ ok = true, status = 201, body = "v=0\r\n", location = null } = {}) {
+function response({ ok = true, status = 201, body = "v=0\r\n", location = null, id = null } = {}) {
   return {
     ok,
     status,
-    headers: { get: (name) => (name === "Location" ? location : null) },
+    headers: { get: (name) => (name === "Location" ? location : name === "Id" ? id : null) },
     async text() {
       return body;
     },
@@ -433,29 +433,32 @@ test("an ordinary failure still retries to the deadline", async () => {
   assert.equal(calls, 3, "retried as before");
 });
 
-test("the session id is the last segment of the WHIP resource", () => {
-  assert.equal(
-    sessionIdFromDeleteUrl("https://insight.local:8889/src1/whip/b5840975-9d5b-4948-bcab-070af869bb50"),
-    "b5840975-9d5b-4948-bcab-070af869bb50",
-  );
-  assert.equal(sessionIdFromDeleteUrl("https://insight.local:8889/src1/whip/abc/"), "abc");
-});
-
-test("no session id without a delete url", () => {
-  assert.equal(sessionIdFromDeleteUrl(null), null);
-  assert.equal(sessionIdFromDeleteUrl(""), null);
-  assert.equal(sessionIdFromDeleteUrl("not a url"), null);
-});
-
-test("publishing returns the session id alongside the delete url", async () => {
+test("the session id comes from the Id header, not the Location", async () => {
+  // Verified on MediaMTX v1.12.1: Location carries a separate resource
+  // secret; Id carries the session id the status API reports.
   const { deleteUrl, sessionId } = await publishWebcamOffer(
     fakePeerConnection(),
     "https://insight.local:8889/src1/whip",
-    async () => response({ location: "/src1/whip/session-9" }),
+    async () => response({
+      location: "/src1/whip/5fdd8139-d213-48c1-bef7-f95884810d15",
+      id: "52304a1c-28cc-41d7-8234-164aa9ebd9bb",
+    }),
   );
 
-  assert.equal(deleteUrl, "https://insight.local:8889/src1/whip/session-9");
-  assert.equal(sessionId, "session-9");
+  assert.equal(deleteUrl, "https://insight.local:8889/src1/whip/5fdd8139-d213-48c1-bef7-f95884810d15");
+  assert.equal(sessionId, "52304a1c-28cc-41d7-8234-164aa9ebd9bb");
+});
+
+test("no Id header means no session id, so no release claim can be made", async () => {
+  const { sessionId } = await publishWebcamOffer(
+    fakePeerConnection(),
+    "https://insight.local:8889/src1/whip",
+    async () => response({ location: "/src1/whip/secret" }),
+  );
+
+  assert.equal(sessionId, null);
+  assert.equal(sessionIdFromResponse(undefined), null);
+  assert.equal(sessionIdFromResponse({ get: () => "  " }), null);
 });
 
 test("a cancelled watcher ignores the close it caused", () => {

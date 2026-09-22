@@ -26,18 +26,16 @@ export function describeWebcamError(error) {
 // path immediately instead of waiting for the peer connection to time out. A
 // malformed or absent value is not worth failing the publish over — closing the
 // RTCPeerConnection already ends the media flow.
-// MediaMTX names the WHIP resource after the session it created, so the last
-// path segment of the Location is the session id — the same id its status API
-// reports as the path's source. A stop sent later carries it so the backend
-// can tell "my old session" from "whoever holds the slot now".
-export function sessionIdFromDeleteUrl(deleteUrl) {
-  if (!deleteUrl) return null
-  try {
-    const segments = new URL(deleteUrl).pathname.split('/').filter(Boolean)
-    return segments.length ? segments[segments.length - 1] : null
-  } catch {
-    return null
-  }
+// The session id is NOT the last segment of Location. MediaMTX names the WHIP
+// resource with a separate secret, so that knowing a session id does not let
+// anyone delete it; the session id itself — the one its status API reports as
+// the path's source, and the one a stop must name — comes back in the `Id`
+// response header, which MediaMTX exposes to cross-origin callers. Verified
+// against v1.12.1 on a DevKit: Location carried 5fdd8139-…, Id and the API
+// both carried 52304a1c-….
+export function sessionIdFromResponse(headers) {
+  const id = headers?.get?.('Id')
+  return typeof id === 'string' && id.trim() ? id.trim() : null
 }
 
 export function resolveDeleteUrl(location, whipUrl) {
@@ -81,11 +79,10 @@ export async function publishWebcamOffer(peerConnection, whipUrl, fetchRequest =
     throw error
   }
 
-  const deleteUrl = resolveDeleteUrl(response.headers?.get('Location'), whipUrl)
   return {
     answerSdp: await response.text(),
-    deleteUrl,
-    sessionId: sessionIdFromDeleteUrl(deleteUrl),
+    deleteUrl: resolveDeleteUrl(response.headers?.get('Location'), whipUrl),
+    sessionId: sessionIdFromResponse(response.headers),
   }
 }
 
