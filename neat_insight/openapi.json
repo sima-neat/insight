@@ -546,7 +546,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Prepare the FPS rendition for one source",
-        "description": "Creates or reuses the constant-frame-rate rendition that `/api/mediasrc/start` will stream when the slot's `fps` differs from the media's native frame rate. Streams plain-text progress: `Encoding <file> at <fps> fps (<encoder>)...`, `progress <seconds>/<total>` lines, then one of `Rendition ready: <path>`, `Reusing rendition: <path>`, `Source frame rate matches; no rendition needed.` or `Error: <message>`. Renditions are keyed by source content hash, fps, codec and profile, so replacing a source file never reuses an old rendition. `/api/mediasrc/start` performs the same preparation without progress output when it is skipped.",
+        "description": "Creates or reuses the constant-frame-rate rendition that `/api/mediasrc/start` will stream when the slot's `fps` differs from the media's native frame rate. Streams plain-text progress: `Encoding <file> at <fps> fps (<encoder>)...`, `progress <seconds>/<total>` lines, then one of `Rendition ready: <path>`, `Reusing rendition: <path>`, `Source frame rate matches; no rendition needed.` or `Error: <message>`. Renditions are keyed by source content hash, fps, codec and profile, so replacing a source file never reuses an old rendition, while byte-identical files share one rendition that survives until the last of them is deleted or replaced. `/api/mediasrc/start` performs the same preparation without progress output when it is skipped.",
         "operationId": "prepareMediaSourceRendition",
         "x-codeSamples": [
           {
