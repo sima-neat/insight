@@ -4,6 +4,8 @@ import {
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import FolderBrowser from './media/FolderBrowser.jsx'
+import { nearestExistingFolder, streamableFiles } from './media/mediaTree.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -108,14 +110,6 @@ const ONBOARDING_STEPS = [
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
   }
 ]
-
-function flattenFiles(tree, acc = []) {
-  for (const node of tree || []) {
-    if (node.type === 'file') acc.push(node.path)
-    if (node.type === 'folder') flattenFiles(node.children || [], acc)
-  }
-  return acc
-}
 
 function prettyKey(key) {
   if (key === 'duration_ms') return 'Duration'
@@ -755,6 +749,7 @@ export default function App() {
   const [routeWorkspacePath, setRouteWorkspacePath] = useState(() => initialRoute.workspacePath)
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
+  const [mediaFolder, setMediaFolder] = useState('')
   const [sources, setSources] = useState([])
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
@@ -835,13 +830,9 @@ export default function App() {
   const sourcePollBusy = useRef(false)
   sourcesRef.current = sources
 
-  const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
-  const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
-  const filteredFiles = useMemo(() => {
-    const q = mediaFilter.trim().toLowerCase()
-    if (!q) return allFiles
-    return allFiles.filter((f) => f.toLowerCase().includes(q))
-  }, [allFiles, mediaFilter])
+  // Only streamable files are listed anywhere (issue #113); the server marks them.
+  const allFiles = useMemo(() => streamableFiles(mediaTree), [mediaTree])
+  const videoFiles = allFiles
   const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
   const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
   const catalogSourcesById = useMemo(() => {
@@ -926,7 +917,9 @@ export default function App() {
   async function loadMedia(forceSelectFirst = false) {
     const data = await fetchJson('/api/media-files')
     setMediaTree(data)
-    const flat = flattenFiles(data)
+    // A folder can vanish between loads (its last file deleted); fall back to the nearest ancestor.
+    setMediaFolder((current) => nearestExistingFolder(data, current))
+    const flat = streamableFiles(data)
     if (forceSelectFirst) {
       setSelectedFile(flat[0] || '')
       return
@@ -934,6 +927,11 @@ export default function App() {
     if (!selectedFile && flat.length > 0) {
       setSelectedFile(flat[0])
     }
+  }
+
+  function navigateMediaFolder(path) {
+    setMediaFolder(path)
+    setMediaFilter('') // a scoped search never silently carries over to another folder
   }
 
   async function loadSources() {
@@ -2183,37 +2181,25 @@ export default function App() {
                   <span className="sr-only">Import Media</span>
                 </button>
               </div>
-              <p className="meta-count">{filteredFiles.length} files</p>
-
-              <div className="media-toolbar">
-                <input className="search-input" placeholder="Filter files..." value={mediaFilter} onChange={(e) => setMediaFilter(e.target.value)} />
-              </div>
-
-              <div className="media-list">
-                {filteredFiles.map((path) => {
-                  const checked = selectedMediaPaths.includes(path)
-                  const className = [
-                    'media-row',
-                    path === selectedFile ? 'active' : '',
-                    checked ? 'selected' : ''
-                  ].filter(Boolean).join(' ')
-                  return (
-                    <div key={path} className={className}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelectedMediaPath(path)}
-                        aria-label={`Select ${path} for deletion`}
-                      />
-                      <button type="button" className="media-row-preview" onClick={() => setSelectedFile(path)}>
-                        <span className="media-name">{path}</span>
-                        <span className="media-ext">{path.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                      </button>
-                    </div>
-                  )
-                })}
-                {filteredFiles.length === 0 && <p className="empty">No files match the filter.</p>}
-              </div>
+              <FolderBrowser
+                tree={mediaTree}
+                folder={mediaFolder}
+                onNavigate={navigateMediaFolder}
+                filter={mediaFilter}
+                onFilterChange={setMediaFilter}
+                selectedPath={selectedFile}
+                onSelect={setSelectedFile}
+                fileRowClass={(path) => (selectedMediaPaths.includes(path) ? 'selected' : '')}
+                renderFileLead={(path) => (
+                  <input
+                    type="checkbox"
+                    checked={selectedMediaPaths.includes(path)}
+                    onChange={() => toggleSelectedMediaPath(path)}
+                    aria-label={`Select ${path} for deletion`}
+                  />
+                )}
+                idPrefix="library"
+              />
             </section>
 
             <section className="panel">
