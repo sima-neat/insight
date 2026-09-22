@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -467,6 +468,19 @@ class RenditionEncodeTests(unittest.TestCase):
         self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
         self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
 
+    def test_rendition_is_published_under_the_index_lock(self):
+        # Codex review: the final source check, the rename and the record insertion must be
+        # one step under the index lock so remove_source cannot slip between them.
+        held = []
+        real_add = renditions.add_rendition
+
+        def spy(index_path, record, media_dir):
+            held.append(lock_is_held(renditions._index_lock))
+            return real_add(index_path, record, media_dir)
+        with mock.patch.object(renditions, "add_rendition", side_effect=spy):
+            drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        self.assertEqual(held, [True])
+
     def test_source_deleted_during_encoding_is_not_published(self):
         # Codex review: on POSIX ffmpeg keeps reading an unlinked source, so the
         # encode succeeds; the result must not be recorded for a source that is gone.
@@ -542,6 +556,22 @@ class RenditionApiTestCase(unittest.TestCase):
         return next(s for s in self.client.get("/api/mediasrc").get_json() if s["index"] == index)
 
 
+def lock_is_held(lock) -> bool:
+    """True when another thread holds `lock` (probed from a helper thread so RLock re-entrancy cannot mask it)."""
+    result = []
+
+    def probe():
+        got = lock.acquire(blocking=False)
+        result.append(not got)
+        if got:
+            lock.release()
+
+    t = threading.Thread(target=probe)
+    t.start()
+    t.join()
+    return result[0]
+
+
 class StartPersistenceTests(RenditionApiTestCase):
     """Codex review: a start that encodes for minutes must not save a stale copy of the other slots."""
 
@@ -581,12 +611,14 @@ class StartPersistenceTests(RenditionApiTestCase):
         # Slot 2 was started from its current assignment, not the pre-encode snapshot.
         self.assertEqual(self.seen, [(1, "a.mp4", None), (2, "c.mp4", 20)])
 
-    def start_slot_for_real(self, mutate):
+    def start_slot_for_real(self, mutate, resolve_error=None, on_stream=None):
         """Run the real _start_source_slot with the encode step replaced by `mutate` (which edits the persisted slot)."""
         def fake_resolve(src):
             mutate()
+            if resolve_error:
+                return None, None, resolve_error, 500
             return self.media_dir / (src.get("file") or ""), None, None, 200
-        stream = mock.Mock(return_value=(True, None))
+        stream = mock.Mock(side_effect=on_stream) if on_stream else mock.Mock(return_value=(True, None))
         with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
              mock.patch.object(app_module, "_source_media_codec", return_value="h264"), \
              mock.patch.object(app_module, "_resolve_stream_input", side_effect=fake_resolve), \
@@ -624,6 +656,41 @@ class StartPersistenceTests(RenditionApiTestCase):
         self.assertEqual(response.status_code, 409)
         stream.assert_not_called()
         self.assertEqual(self.persisted()[1]["state"], "stopped")
+
+    def test_failed_start_does_not_restore_a_slot_deleted_while_encoding(self):
+        # Codex review: delete-media clears the slot and makes the encode fail; the
+        # failure path must not write the pre-encode snapshot (old file name) back.
+        def deleted():
+            self.edit_slot_one(file="")
+            app_module._bump_slot(1)
+        response, stream = self.start_slot_for_real(deleted, resolve_error="File not found: a.mp4")
+        self.assertEqual(response.status_code, 409)
+        stream.assert_not_called()
+        self.assertEqual(self.persisted()[1]["file"], "")
+
+    def test_failed_start_still_persists_an_unchanged_slot(self):
+        response, _stream = self.start_slot_for_real(lambda: None, resolve_error="ffmpeg exploded")
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(self.persisted()[1]["state"], "stopped")
+
+    def test_slot_lock_is_held_while_the_stream_starts(self):
+        # Codex review: the staleness check and the launch must be atomic against stop/assign/delete.
+        held = []
+
+        def on_stream(*_args, **_kwargs):
+            held.append(lock_is_held(app_module._slot_lock))
+            return True, None
+        response, _stream = self.start_slot_for_real(lambda: None, on_stream=on_stream)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(held, [True])
+
+    def test_slot_lock_is_held_while_a_slot_is_stopped(self):
+        held = []
+        with mock.patch.object(app_module, "stop_media_stream", side_effect=lambda _i: held.append(lock_is_held(app_module._slot_lock))):
+            self.client.post("/api/mediasrc/stop", json={"index": 1})
+            self.client.post("/api/mediasrc/stop-all")  # stops every slot, not just the two in the fixture
+        self.assertGreaterEqual(len(held), 3)
+        self.assertTrue(all(held), held)
 
     def test_start_proceeds_when_the_slot_is_unchanged(self):
         response, stream = self.start_slot_for_real(lambda: None)
@@ -920,6 +987,23 @@ class PrepareEndpointTests(RenditionApiTestCase):
         index = renditions.load_index(self.index_path)
         self.assertEqual(index["renditions"], [])
         self.assertNotIn("demo.mp4", index["sources"])
+
+    def test_delete_media_unlinks_before_forgetting_renditions(self):
+        # Codex review: a publish racing the delete must be cleaned up by the record removal
+        # that follows, which only works if the file is already gone when records are removed.
+        self.assign(fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 1}).get_data()
+        seen = []
+        real_remove = renditions.remove_source
+
+        def spy(index_path, media_dir, rel_path):
+            seen.append((self.media_dir / rel_path).exists())
+            return real_remove(index_path, media_dir, rel_path)
+        with mock.patch.object(renditions, "remove_source", side_effect=spy):
+            response = self.client.post("/api/delete-media", json={"path": "demo.mp4"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, [False])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
 
     def test_delete_directory_removes_renditions_and_unassigns_slots(self):
         (self.media_dir / "clips").mkdir()
