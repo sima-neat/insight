@@ -160,7 +160,17 @@ A frame may be described by several metadata types at once. Send one message per
 type, all carrying the source frame's `timestamp` in integer milliseconds; the
 correlator matches each against the retained frame mapping, and the viewer draws
 every type it holds for that frame.
-A second message of the same type for the same frame replaces the first; retained
+A separate panel accepts `type: "auxiliary-visualization"` for data that should
+not cover the video. Its `data` object requires `schema_version: 1`, a stable
+`id`, a registered `renderer`, and an object `payload`. Unlike ordinary overlays,
+auxiliary views require the exact correlated RTP timestamp and clear on missing,
+late, or expired data. Multiple IDs for one frame become tabs; keep their channel
+and source PTS identical to the corresponding video and overlay messages. The
+built-in `blazepose-3d` renderer expects `payload.poses[].keypoints[]` with named
+finite `x`, `y`, and `z` world coordinates. Unknown versions/renderers are
+ignored and warned once in the browser console.
+A second ordinary message of the same type for the same frame replaces the first;
+auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses
 the single-message arrival fallback, since types cannot safely be grouped without
 a shared frame identity.
