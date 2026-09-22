@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test'
+import path from 'node:path'
+import os from 'node:os'
+import fs from 'node:fs'
 
-import { deleteViaApi, openTab, releaseTestSources } from './insightApi.js'
-import { seedTree } from './mediaFixture.js'
+import { deleteViaApi, openTab, releaseTestSources, sourceByIndex } from './insightApi.js'
+import { seedTree, makeVideo } from './mediaFixture.js'
 
 let tree
 
@@ -113,4 +116,88 @@ test('10. an empty folder says so, and a folder with only unsupported files expl
   await lib.folder(page, `${tree.name}/30FPS`).click()
   await lib.folder(page, `${tree.name}/30FPS/indoor`).click()
   await expect(page.getByTestId('library-hidden-note')).toHaveText('1 file hidden because Insight cannot stream it.')
+})
+
+const SLOT = Number(process.env.INSIGHT_TEST_SLOT || 48) // a high slot, unlikely to be in use on a dev instance
+
+const assign = {
+  folder: (page, p) => page.locator(`[data-testid="assign-folder"][data-path="${p}"]`),
+  file: (page, p) => page.locator(`[data-testid="assign-file"][data-path="${p}"]`),
+}
+
+async function assignViaDialog(page, filePath) {
+  await page.getByTestId(`source-file-${SLOT}`).click()
+  const dialog = page.getByTestId('assign-dialog')
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Go to Media Root' }).click()
+  for (const segment of filePath.split('/').slice(0, -1).reduce((acc, seg) => [...acc, acc.length ? `${acc.at(-1)}/${seg}` : seg], [])) {
+    await assign.folder(page, segment).click()
+  }
+  await assign.file(page, filePath).locator('.media-row-preview').click()
+  await expect(page.getByTestId('assign-picked')).toHaveText(filePath)
+  await dialog.getByRole('button', { name: 'Assign' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByTestId(`source-file-${SLOT}`)).toHaveText(filePath)
+}
+
+test('6. an upload through the import dialog lands at the media root', async ({ page }) => {
+  const uploadName = `${tree.name}-upload.mp4`
+  const local = path.join(os.tmpdir(), uploadName)
+  makeVideo(local)
+  try {
+    await openTab(page, '/media')
+    await page.getByRole('button', { name: 'Import Media' }).click()
+    await page.locator('input[type="file"]').setInputFiles(local)
+    await expect(page.getByText(/Uploaded and prepared 1 file/)).toBeVisible({ timeout: 90_000 })
+    await expect(lib.browser(page)).toHaveAttribute('data-folder', '')
+    await expect(lib.file(page, uploadName)).toBeVisible()
+  } finally {
+    fs.rmSync(local, { force: true })
+    await page.request.post('/api/delete-media', { data: { path: uploadName } })
+  }
+})
+
+test('7. the assign dialog navigates folders and stores the nested relative path', async ({ page, request }) => {
+  await openTab(page, '/streaming')
+  const deep = `${tree.name}/30FPS/indoor/cam-a/deep.mp4`
+  await assignViaDialog(page, deep)
+  expect((await sourceByIndex(request, SLOT)).file).toBe(deep)
+})
+
+test('8. start, stop, start again, then reassign while playing keeps the source live on the new file', async ({ page, request }) => {
+  await openTab(page, '/streaming')
+  const deep = `${tree.name}/30FPS/indoor/cam-a/deep.mp4`
+  const drone = `${tree.name}/120FPS-720p-h264/drone.mp4`
+  if ((await sourceByIndex(request, SLOT)).file !== deep) await assignViaDialog(page, deep)
+
+  await page.getByRole('button', { name: `Start src${SLOT}` }).click()
+  await expect.poll(async () => (await sourceByIndex(request, SLOT)).state, { timeout: 60_000 }).toBe('playing')
+  await page.getByRole('button', { name: `Stop src${SLOT}` }).click()
+  await expect.poll(async () => (await sourceByIndex(request, SLOT)).state, { timeout: 30_000 }).toBe('stopped')
+  await page.getByRole('button', { name: `Start src${SLOT}` }).click()
+  await expect.poll(async () => (await sourceByIndex(request, SLOT)).state, { timeout: 60_000 }).toBe('playing')
+
+  await assignViaDialog(page, drone) // the assign endpoint restarts a playing source
+  await expect.poll(async () => {
+    const src = await sourceByIndex(request, SLOT)
+    return `${src.state}:${src.file}`
+  }, { timeout: 60_000 }).toBe(`playing:${drone}`)
+
+  await page.getByRole('button', { name: `Stop src${SLOT}` }).click()
+  await expect.poll(async () => (await sourceByIndex(request, SLOT)).state, { timeout: 30_000 }).toBe('stopped')
+})
+
+test('9. deleting a nested file removes it from the list and decrements the folder count', async ({ page }) => {
+  await openTab(page, '/media')
+  const target = `${tree.name}/30FPS/highway.mp4`
+  await lib.folder(page, tree.name).click()
+  await expect(lib.folder(page, `${tree.name}/30FPS`).locator('.folder-count')).toHaveText('3')
+  await lib.folder(page, `${tree.name}/30FPS`).click()
+  await lib.file(page, target).locator('.media-row-preview').click()
+  await page.getByRole('button', { name: 'Delete Selected' }).click()
+  await page.getByRole('dialog', { name: 'Confirm deletion' }).getByRole('button', { name: 'Delete' }).click()
+  await expect(lib.file(page, target)).toHaveCount(0)
+  await expect(lib.browser(page)).toHaveAttribute('data-folder', `${tree.name}/30FPS`)
+  await page.getByRole('button', { name: 'Back to parent folder' }).click()
+  await expect(lib.folder(page, `${tree.name}/30FPS`).locator('.folder-count')).toHaveText('2')
 })
