@@ -74,21 +74,56 @@ def detect_fps(stream: dict) -> Optional[int]:
     return int(round(rate))
 
 
-# Ported from media-assets/build_media_assets.py:video_level.
-def video_level(codec: str, height: int, fps: int) -> str:
-    if height >= 2160:
-        return "5.1"
-    if height >= 1080 and fps >= 100:
-        return "5.1" if codec == "h264" else "5.0"
-    if height >= 1080:
-        return "4.0"
-    if height >= 720 and fps >= 60:
-        return "3.2" if codec == "h264" else "4.0"
-    if height >= 720:
-        return "3.1"
-    if height >= 480:
-        return "3.1" if codec == "h264" else "3.0"
-    return "3.0"
+# Level limits from the codec specs, lowest first: (level, max picture size, max pictures-per-second throughput).
+# H.264 (ITU-T H.264 Annex A, table A-1) counts 16x16 macroblocks: MaxFS and MaxMBPS.
+H264_LEVELS = (
+    ("3.0", 1620, 40500),
+    ("3.1", 3600, 108000),
+    ("3.2", 5120, 216000),
+    ("4.0", 8192, 245760),
+    ("4.2", 8704, 522240),
+    ("5.0", 22080, 589824),
+    ("5.1", 36864, 983040),
+    ("5.2", 36864, 2073600),
+    ("6.0", 139264, 4177920),
+    ("6.1", 139264, 8355840),
+    ("6.2", 139264, 16711680),
+)
+# H.265 (ITU-T H.265 Annex A, table A-8, Main tier) counts luma samples: MaxLumaPs and MaxLumaSr.
+H265_LEVELS = (
+    ("3.0", 552960, 16588800),
+    ("3.1", 983040, 33177600),
+    ("4.0", 2228224, 66846720),
+    ("4.1", 2228224, 133693440),
+    ("5.0", 8912896, 267386880),
+    ("5.1", 8912896, 534773760),
+    ("5.2", 8912896, 1069547520),
+    ("6.0", 35651584, 1069547520),
+    ("6.1", 35651584, 2139095040),
+    ("6.2", 35651584, 4278190080),
+)
+
+
+def video_level(codec: str, width: int, height: int, fps: int) -> str:
+    """Lowest level whose picture-size and throughput limits cover `width`x`height` at `fps`.
+
+    The catalog builder keyed the level on the resolution tier alone, which was
+    enough for its fixed fps grid; any fps from FPS_MIN..FPS_MAX needs the real
+    limits. Levels below 3.0 are never used, matching the catalog.
+    """
+    if codec == "h264":
+        picture = -(-width // 16) * -(-height // 16)
+        table = H264_LEVELS
+    elif codec == "h265":
+        picture = width * height
+        table = H265_LEVELS
+    else:
+        raise ValueError(f"unsupported rendition codec: {codec}")
+    rate = picture * fps
+    for level, max_picture, max_rate in table:
+        if picture <= max_picture and rate <= max_rate:
+            return level
+    raise UnsupportedRendition(f"{width}x{height} at {fps} fps exceeds the highest {codec} level ({table[-1][0]})")
 
 
 # Ported from media-assets/build_media_assets.py:video_bitrate (no preview tier).
@@ -108,9 +143,9 @@ def video_bitrate(height: int, fps: int) -> str:
     return "3M"
 
 
-def expected_level_code(codec: str, height: int, fps: int) -> int:
+def expected_level_code(codec: str, width: int, height: int, fps: int) -> int:
     multiplier = 10 if codec == "h264" else 30
-    return round(float(video_level(codec, height, fps)) * multiplier)
+    return round(float(video_level(codec, width, height, fps)) * multiplier)
 
 
 def rendition_key(sha: str, fps: int, codec: str) -> str:
@@ -121,10 +156,10 @@ def rendition_rel_path(rel_path: str, sha: str, fps: int, codec: str) -> str:
     return f"{RENDITIONS_DIRNAME}/{Path(rel_path).stem}_{sha[:6]}_{fps}fps_{codec}.mp4"
 
 
-def _codec_args(codec: str, height: int, fps: int) -> list[str]:
+def _codec_args(codec: str, width: int, height: int, fps: int) -> list[str]:
     if codec not in PROFILES:
         raise ValueError(f"unsupported rendition codec: {codec}")
-    level = video_level(codec, height, fps)
+    level = video_level(codec, width, height, fps)
     bitrate = video_bitrate(height, fps)
     common = [
         "-pix_fmt", "yuv420p",
@@ -163,7 +198,7 @@ def _codec_args(codec: str, height: int, fps: int) -> list[str]:
     ]
 
 
-def encode_command(source: Path, output: Path, fps: int, codec: str, height: int) -> list[str]:
+def encode_command(source: Path, output: Path, fps: int, codec: str, width: int, height: int) -> list[str]:
     """ffmpeg argv that writes a constant-frame-rate rendition of `source` to `output`."""
     return [
         "ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
@@ -171,7 +206,7 @@ def encode_command(source: Path, output: Path, fps: int, codec: str, height: int
         "-map", "0:v:0", "-an",
         "-vf", f"setpts=PTS-STARTPTS,fps={fps}",
         "-fps_mode", "cfr",
-        *_codec_args(codec, height, fps),
+        *_codec_args(codec, width, height, fps),
         "-movflags", "+faststart",
         "-avoid_negative_ts", "make_zero",
         "-progress", "pipe:1", "-nostats",
@@ -466,7 +501,7 @@ def _validate_timestamps(path: Path, fps: int, packets: list[tuple[float, float,
         previous = pts
 
 
-def validate_rendition(path: Path, fps: int, codec: str, height: int) -> None:
+def validate_rendition(path: Path, fps: int, codec: str, width: int, height: int) -> None:
     """Raise RenditionError unless `path` meets the catalog contract for `fps`/`codec`."""
     stream = probe_video(path)
     expected = {
@@ -474,7 +509,7 @@ def validate_rendition(path: Path, fps: int, codec: str, height: int) -> None:
         "profile": "Constrained Baseline" if codec == "h264" else "Main",
         "pix_fmt": "yuv420p",
         "has_b_frames": 0,
-        "level": expected_level_code(codec, height, fps),
+        "level": expected_level_code(codec, width, height, fps),
     }
     mismatches = [f"{key}={stream.get(key)!r} (expected {value!r})" for key, value in expected.items() if stream.get(key) != value]
     for key in ("r_frame_rate", "avg_frame_rate"):
@@ -530,9 +565,11 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
         raise UnsupportedRendition("FPS changes are not supported for MJPEG sources")
     if source_codec not in PROFILES:
         raise UnsupportedRendition(f"Cannot create a rendition for {rel_path}: the source codec is unknown or unsupported")
+    width = int(info.get("width") or 0)
     height = int(info.get("height") or 0)
-    if height <= 0:
+    if width <= 0 or height <= 0:
         raise RenditionError(f"Cannot determine the resolution of {rel_path}")
+    video_level(source_codec, width, height, fps)  # reject impossible fps/size combinations before any work
 
     digest = source_hash(index_path, media_dir, rel_path)
     key = rendition_key(digest, fps, source_codec)
@@ -557,7 +594,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             "total": total,
         }
 
-        cmd = encode_command(source_path, tmp, fps, source_codec, height)
+        cmd = encode_command(source_path, tmp, fps, source_codec, width, height)
         try:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         except FileNotFoundError as exc:
@@ -598,7 +635,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             tmp.unlink(missing_ok=True)
             raise RenditionError("; ".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}")
         try:
-            validate_rendition(tmp, fps, source_codec, height)
+            validate_rendition(tmp, fps, source_codec, width, height)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
