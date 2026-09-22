@@ -14,6 +14,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+if [[ "${1:-}" == http://* || "${1:-}" == https://* ]]; then
+  echo "error: pass the target as INSIGHT_BASE_URL=$1 (plus INSIGHT_MEDIA_ROOT=...), not as an argument; remaining arguments go to Playwright" >&2
+  exit 1
+fi
+
 for tool in ffmpeg node npx curl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: $tool is required on PATH" >&2
@@ -47,7 +52,10 @@ if [[ -z "${INSIGHT_BASE_URL:-}" ]]; then
   export INSIGHT_MEDIA_ROOT="${TMP_HOME}/.simaai/neat-insight/media"
   LOG="${INSIGHT_LOG:-${PWD}/folder-navigation-insight.log}"
   echo "== Starting ${CMD} on :${PORT} with HOME=${TMP_HOME} (log: ${LOG})"
-  HOME="$TMP_HOME" NEAT_METRICS_ZMQ_ENDPOINT="${NEAT_METRICS_ZMQ_ENDPOINT:-tcp://127.0.0.1:55580}" \
+  # Reuse the CA mkcert already installed for this user; a fresh HOME would otherwise create and
+  # try to install a new one, which needs sudo and fails on laptops, containers and the SDK.
+  CAROOT_DIR="$(mkcert -CAROOT 2>/dev/null || true)"
+  HOME="$TMP_HOME" CAROOT="${CAROOT_DIR:-$TMP_HOME/.local/share/mkcert}" NEAT_METRICS_ZMQ_ENDPOINT="${NEAT_METRICS_ZMQ_ENDPOINT:-tcp://127.0.0.1:55580}" \
     "$CMD" --port "$PORT" > "$LOG" 2>&1 &
   APP_PID=$!
   for attempt in $(seq 1 90); do

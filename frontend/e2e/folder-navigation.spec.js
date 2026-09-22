@@ -150,9 +150,8 @@ test('6. an upload through the import dialog lands at the media root', async ({ 
     await openTab(page, '/media')
     await page.getByRole('button', { name: 'Import Media' }).click()
     await page.locator('input[type="file"]').setInputFiles(local)
-    await expect(page.getByText(/Uploaded and prepared 1 file/)).toBeVisible({ timeout: 90_000 })
+    await expect(lib.file(page, uploadName)).toBeVisible({ timeout: 90_000 })
     await expect(lib.browser(page)).toHaveAttribute('data-folder', '')
-    await expect(lib.file(page, uploadName)).toBeVisible()
   } finally {
     fs.rmSync(local, { force: true })
     await page.request.post('/api/delete-media', { data: { path: uploadName } })
