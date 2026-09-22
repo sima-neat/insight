@@ -20,7 +20,8 @@ export async function releaseTestSources(request, folderName) {
 
 // Removes the test folder through the API so assignments and renditions are cleaned up too.
 export async function deleteViaApi(request, relPath) {
-  await request.post('/api/delete-media', { data: { path: relPath } })
+  const response = await request.post('/api/delete-media', { data: { path: relPath } })
+  if (!response.ok()) throw new Error(`POST /api/delete-media failed: ${response.status()}`)
 }
 
 export async function openTab(page, route) {

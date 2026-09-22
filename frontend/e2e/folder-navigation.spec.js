@@ -10,9 +10,16 @@ test.beforeAll(() => {
 })
 
 test.afterAll(async ({ request }) => {
-  await releaseTestSources(request, tree.name)
-  await deleteViaApi(request, tree.name)
-  tree.cleanup()
+  if (!tree) return
+  try {
+    try {
+      await releaseTestSources(request, tree.name)
+    } finally {
+      await deleteViaApi(request, tree.name)
+    }
+  } finally {
+    tree.cleanup()
+  }
 })
 
 const lib = {
