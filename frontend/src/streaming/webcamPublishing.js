@@ -146,3 +146,47 @@ export function closeAllWebcamSessions(sessions, fetchRequest = globalThis.fetch
   }
   return closed
 }
+
+// `disconnected` is not the same as gone. ICE reports it for a transient
+// interruption — a Wi-Fi blip, a roam between APs — and recovers to
+// `connected` on its own without renegotiation. Tearing down on sight turns a
+// momentary disturbance into a source the user has to set up again, so only
+// `failed` and `closed` are acted on immediately; `disconnected` gets a grace
+// period to come back.
+export function createDisconnectWatcher({
+  onLost,
+  graceMs = 10000,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+} = {}) {
+  let timer = null
+
+  function cancel() {
+    if (timer !== null) {
+      clearTimer(timer)
+      timer = null
+    }
+  }
+
+  return {
+    cancel,
+    update(state) {
+      if (state === 'failed' || state === 'closed') {
+        cancel()
+        onLost?.(state)
+        return
+      }
+      if (state === 'disconnected') {
+        if (timer === null) {
+          timer = setTimer(() => {
+            timer = null
+            onLost?.('disconnected')
+          }, graceMs)
+        }
+        return
+      }
+      // connecting / connected / new: whatever interruption there was is over.
+      cancel()
+    },
+  }
+}

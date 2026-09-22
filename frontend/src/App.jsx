@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
   closeAllWebcamSessions,
   closeWebcamSession,
+  createDisconnectWatcher,
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
@@ -1529,6 +1530,7 @@ export default function App() {
     const session = webcamSessionsRef.current.get(index)
     if (!session) return
     webcamSessionsRef.current.delete(index)
+    session.watcher?.cancel()
     closeWebcamSession(session)
     setWebcamPreviewStream((prev) => (prev === session.stream ? null : prev))
   }
@@ -1634,6 +1636,7 @@ export default function App() {
     setWebcamBusy((prev) => ({ ...prev, [index]: true }))
     let stream = null
     let pc = null
+    let watcher = null
     try {
       // Video-only for now, per the ticket's initial scope.
       stream = await navigator.mediaDevices.getUserMedia({
@@ -1647,25 +1650,38 @@ export default function App() {
       if (transceiver && typeof transceiver.setCodecPreferences === 'function' && h264Codecs.length) {
         transceiver.setCodecPreferences(h264Codecs)
       }
-      pc.addEventListener('connectionstatechange', () => {
-        if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+      watcher = createDisconnectWatcher({
+        onLost: () => {
           teardownWebcamSession(index)
           loadSources()
-        }
+        },
       })
+      pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
 
       const { answerSdp, deleteUrl } = await publishWebcamOffer(pc, whipUrl)
+      // MediaMTX holds a session for this path from the POST onward, so the
+      // session is registered before the answer is applied: if
+      // setRemoteDescription() rejects, teardown can still close the peer
+      // connection and release the path instead of leaving it occupied.
+      webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, watcher })
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
 
-      webcamSessionsRef.current.set(index, { pc, stream, deleteUrl })
       if (index === selectedSource) setWebcamPreviewStream(stream)
 
       // Insight only records the slot as playing once MediaMTX sees the path,
       // which lags the WHIP exchange by the ICE handshake.
       await confirmWebcamPublishing(() => startSource(index))
     } catch (e) {
-      teardownWebcamSession(index)
-      if (stream && !webcamSessionsRef.current.has(index)) stream.getTracks().forEach((track) => track.stop())
+      if (webcamSessionsRef.current.has(index)) {
+        teardownWebcamSession(index)
+      } else {
+        // Failed before the session was registered — getUserMedia succeeded but
+        // the publish was rejected, say. Nothing is tracking pc or stream yet,
+        // so release them here rather than leaking a camera and an open peer
+        // connection.
+        watcher?.cancel()
+        closeWebcamSession({ pc, stream, deleteUrl: null })
+      }
       setError(describeWebcamError(e))
       await loadSources()
     } finally {

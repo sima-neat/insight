@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   closeAllWebcamSessions,
+  createDisconnectWatcher,
   closeWebcamSession,
   confirmWebcamPublishing,
   describeWebcamError,
@@ -283,4 +284,79 @@ test("a bulk action releases every camera and empties the registry", () => {
     assert.deepEqual(s.stopped, ["a", "b"]);
     assert.equal(s.pc._closed, true);
   }
+});
+
+function watcherHarness(opts = {}) {
+  const lost = [];
+  let seq = 0;
+  const timers = new Map();
+  const w = createDisconnectWatcher({
+    onLost: (reason) => lost.push(reason),
+    graceMs: 10000,
+    setTimer: (fn) => { const id = ++seq; timers.set(id, fn); return id; },
+    clearTimer: (id) => timers.delete(id),
+    ...opts,
+  });
+  return { w, lost, timers, fire: () => { for (const [id, fn] of timers) { timers.delete(id); fn(); } } };
+}
+
+test("a brief disconnect that recovers does not stop the source", () => {
+  const { w, lost, timers } = watcherHarness();
+
+  w.update("disconnected");
+  assert.equal(timers.size, 1, "a grace period is pending, not an immediate teardown");
+  assert.deepEqual(lost, []);
+
+  w.update("connected");
+  assert.equal(timers.size, 0, "grace period cancelled on recovery");
+  assert.deepEqual(lost, [], "the source survived the blip");
+});
+
+test("a disconnect that never recovers ends the session", () => {
+  const { w, lost, fire } = watcherHarness();
+
+  w.update("disconnected");
+  fire();
+
+  assert.deepEqual(lost, ["disconnected"]);
+});
+
+test("failed and closed are acted on immediately", () => {
+  for (const state of ["failed", "closed"]) {
+    const { w, lost, timers } = watcherHarness();
+    w.update(state);
+    assert.deepEqual(lost, [state]);
+    assert.equal(timers.size, 0, "no point waiting out a terminal state");
+  }
+});
+
+test("repeated disconnect events do not stack grace periods", () => {
+  const { w, timers } = watcherHarness();
+
+  w.update("disconnected");
+  w.update("disconnected");
+  w.update("disconnected");
+
+  assert.equal(timers.size, 1);
+});
+
+test("a disconnect followed by failure ends it at once", () => {
+  const { w, lost, timers } = watcherHarness();
+
+  w.update("disconnected");
+  w.update("failed");
+
+  assert.deepEqual(lost, ["failed"]);
+  assert.equal(timers.size, 0, "the pending grace period was cancelled");
+});
+
+test("cancelling the watcher drops a pending grace period", () => {
+  const { w, lost, timers, fire } = watcherHarness();
+
+  w.update("disconnected");
+  w.cancel();
+  fire();
+
+  assert.equal(timers.size, 0);
+  assert.deepEqual(lost, [], "a teardown already under way must not fire it again");
 });
