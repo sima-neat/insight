@@ -493,6 +493,36 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         kick.assert_called_once_with(1)
 
+    def test_stop_refuses_when_the_publisher_cannot_be_confirmed_stopped(self):
+        """Reporting "stopped" for a camera that may still be live is the bug being avoided."""
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("may still be publishing", response.get_json()["error"])
+
+    def test_stop_succeeds_when_there_was_nothing_publishing(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=False):
+            response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_stop_all_names_the_slots_it_could_not_confirm(self):
+        self._assign_webcam(2)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            response = self.client.post("/api/mediasrc/stop-all")
+
+        body = response.get_json()
+        self.assertEqual(response.status_code, 200, "the other sources still stopped")
+        self.assertEqual(body["unconfirmed_webcams"], [2])
+        self.assertIn("Could not confirm", body["message"])
+
     def test_stopping_a_file_source_does_not_call_the_kick_api(self):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
@@ -527,6 +557,15 @@ class WebcamSourceTests(unittest.TestCase):
             self._assign_webcam(1)
 
         kick.assert_called_once_with(1)
+
+    def test_an_unreadable_port_map_candidate_is_skipped(self):
+        """The candidate list walks /home, so another user's directory must not be fatal."""
+        denied = Path("/home/someone-else/.insight-config/neat-port-map.json")
+
+        with mock.patch.object(app_module, "_sysinfo_port_map_candidates", return_value=iter([denied])):
+            with mock.patch.object(app_module.Path, "is_file", side_effect=PermissionError(13, "denied")):
+                self.assertEqual(app_module._read_exposed_ports_from_port_map(), [])
+                self.assertEqual(app_module._resolve_webcam_ice_port(), 8189)
 
     def test_the_ice_port_follows_the_sdk_port_map(self):
         """MediaMTX must bind the port the SDK published, since SDP carries it."""
@@ -643,11 +682,25 @@ class WebcamPublishStateTests(unittest.TestCase):
 
         self.assertEqual(urlopen.call_count, 1)
 
-    def test_kick_survives_an_unreachable_api(self):
+    def test_kick_reports_an_unreachable_api_as_unknown_not_idle(self):
+        """None and False mean different things: "could not tell" vs "nothing there"."""
         urlopen = mock.Mock(side_effect=mediasrc.urllib.error.URLError("refused"))
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
-            self.assertFalse(mediasrc.kick_webcam_publisher(1))
+            self.assertIsNone(mediasrc.kick_webcam_publisher(1))
+
+    def test_kick_reports_a_refused_kick_as_unknown(self):
+        def fake_urlopen(request, timeout=None):
+            if "/v3/paths/get/" in request.full_url:
+                payload = {"name": "src1", "ready": True,
+                           "source": {"type": "webRTCSession", "id": "abc-123"}}
+                response = mock.MagicMock()
+                response.__enter__.return_value = io.BytesIO(json.dumps(payload).encode("utf-8"))
+                return response
+            raise mediasrc.urllib.error.URLError("kick refused")
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake_urlopen):
+            self.assertIsNone(mediasrc.kick_webcam_publisher(1))
 
     def test_reports_not_publishing_when_the_api_returns_garbage(self):
         response = mock.MagicMock()

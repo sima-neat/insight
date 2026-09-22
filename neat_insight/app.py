@@ -685,7 +685,14 @@ def _sysinfo_port_map_candidates():
 
 def _iter_neat_port_maps():
     for path in _sysinfo_port_map_candidates():
-        if not path.is_file():
+        # The candidate list walks /home and /Users, so most of these belong to
+        # other users and stat() raises rather than returning False. Startup
+        # reads the port map, so an unreadable neighbour must not be fatal.
+        try:
+            if not path.is_file():
+                continue
+        except OSError as exc:
+            logging.debug("Skipping unreadable port map candidate %s: %s", path, exc)
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -2438,8 +2445,16 @@ def stop_source():
             # ffmpeg process, the browser is the publisher. Ask MediaMTX to
             # close the session so this means "stopped" for any caller, not
             # just the tab that happens to own the RTCPeerConnection.
-            if src.get("type") == SOURCE_TYPE_WEBCAM:
-                kick_webcam_publisher(index)
+            if src.get("type") == SOURCE_TYPE_WEBCAM and kick_webcam_publisher(index) is None:
+                # Nothing is known about the publisher, so persisting "stopped"
+                # here would be a success response for a camera that may well
+                # still be streaming.
+                return _json_error(
+                    "Could not reach MediaMTX to stop the webcam publisher. "
+                    "The camera may still be publishing; retry once Insight's "
+                    "media server is reachable.",
+                    502,
+                )
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)
@@ -2454,17 +2469,32 @@ def stop_all_sources():
     """Stop all source processes, persist every source as stopped, and return how many were previously playing."""
     sources = load_sources()
     stopped_count = 0
+    unconfirmed = []
     for src in sources:
         source_index = src.get("index")
         if src.get("state") == "playing":
             stopped_count += 1
-        if src.get("type") == SOURCE_TYPE_WEBCAM:
-            kick_webcam_publisher(source_index)
+        if src.get("type") == SOURCE_TYPE_WEBCAM and kick_webcam_publisher(source_index) is None:
+            unconfirmed.append(source_index)
         stop_media_stream(source_index)
         src["state"] = "stopped"
 
     save_sources(sources)
-    return {"success": True, "stopped_count": stopped_count, "message": f"Stopped {stopped_count} source(s)."}
+    message = f"Stopped {stopped_count} source(s)."
+    if unconfirmed:
+        # Stopping the rest still happened, so this is not an error; the caller
+        # just needs to know which cameras were not confirmed as released.
+        message += (
+            " Could not confirm the webcam publisher stopped for source(s) "
+            + ", ".join(str(i) for i in unconfirmed)
+            + "."
+        )
+    return {
+        "success": True,
+        "stopped_count": stopped_count,
+        "unconfirmed_webcams": unconfirmed,
+        "message": message,
+    }
 
 
 # API: reset media-source assignments to their default empty state.

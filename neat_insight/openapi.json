@@ -627,7 +627,8 @@
         "responses": {
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
       }
     },
@@ -635,7 +636,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop every source",
-        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop.",
         "operationId": "stopAllMediaSources",
         "responses": {
           "200": {
@@ -944,6 +945,7 @@
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "WebcamNotConfirmedStopped": {"description": "Insight could not reach MediaMTX to close the webcam publisher, so the slot is not reported as stopped. The camera may still be publishing.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}

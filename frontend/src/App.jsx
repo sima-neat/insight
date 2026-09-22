@@ -1556,6 +1556,13 @@ export default function App() {
   // stops or clears sources has to close these too, or the camera keeps
   // publishing to MediaMTX while the UI reports everything stopped.
   function teardownAllWebcamSessions({ clearAssignments = false } = {}) {
+    // A start that has not finished yet owns no session, so closing the
+    // registry alone would let it complete after the bulk action and publish a
+    // camera the user just stopped. Invalidate every slot that has ever started
+    // one; a stale generation is harmless, a missed one is not.
+    for (const index of Object.keys(webcamGenerationRef.current)) {
+      invalidateWebcamStart(Number(index))
+    }
     closeAllWebcamSessions(webcamSessionsRef.current)
     setWebcamPreviewStream(null)
     if (clearAssignments) setWebcamAssignments({})

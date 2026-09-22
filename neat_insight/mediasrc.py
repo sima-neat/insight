@@ -338,20 +338,31 @@ def webcam_is_publishing(index: int) -> bool:
     return bool(data and data.get("ready"))
 
 
-def kick_webcam_publisher(index: int) -> bool:
-    """Drop whatever browser is publishing to this slot. Returns True if one was.
+def kick_webcam_publisher(index: int) -> Optional[bool]:
+    """Drop whatever browser is publishing to this slot.
 
     Stopping a file source kills an ffmpeg process Insight owns. A webcam is
     published by a browser Insight has no handle on, so the only way to make
     /api/mediasrc/stop mean the same thing for both is to have MediaMTX close
     the session. Without this, a caller in another tab — or any API client —
     gets a success response while the camera keeps streaming.
+
+    Three outcomes, which callers must tell apart:
+
+    - ``True``  a publisher was found and kicked.
+    - ``False`` there was nothing publishing; the slot is already idle.
+    - ``None``  MediaMTX could not be reached or refused. Nothing is known
+      about the publisher, so a caller must not report the slot as stopped.
     """
     data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
-    source = (data or {}).get("source") or {}
+    if data is None:
+        return None
+    source = data.get("source") or {}
     if source.get("type") != "webRTCSession":
         return False
     session_id = source.get("id")
     if not session_id:
         return False
-    return _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST") is not None
+    if _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST") is None:
+        return None
+    return True
