@@ -129,7 +129,9 @@ async function assignViaDialog(page, filePath) {
   await page.getByTestId(`source-file-${SLOT}`).click()
   const dialog = page.getByTestId('assign-dialog')
   await expect(dialog).toBeVisible()
-  await dialog.getByRole('button', { name: 'Go to Media Root' }).click()
+  const root = dialog.getByRole('button', { name: 'Go to Media Root' })
+  if (await root.isEnabled()) await root.click()
+  await expect(dialog.getByTestId('assign-browser')).toHaveAttribute('data-folder', '')
   for (const segment of filePath.split('/').slice(0, -1).reduce((acc, seg) => [...acc, acc.length ? `${acc.at(-1)}/${seg}` : seg], [])) {
     await assign.folder(page, segment).click()
   }
