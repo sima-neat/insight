@@ -401,8 +401,15 @@ class WebcamSourceTests(unittest.TestCase):
         # A webcam is published by the browser; Insight must not spawn ffmpeg.
         start_media_stream.assert_not_called()
 
-    def test_restarting_insight_does_not_restore_a_dead_webcam_as_live(self):
-        """AC: "Restarting Insight does not falsely restore a webcam as live"."""
+    def test_a_persisted_playing_webcam_reads_as_stopped_when_nothing_publishes(self):
+        """A webcam slot is only live while a browser is actually publishing to it.
+
+        This is what keeps the AC's "restarting Insight does not falsely restore
+        a webcam as live" true for every case Insight stays up through: the
+        browser tab closing, the camera being unplugged, the connection
+        dropping. A full process restart is additionally covered by the
+        reset_sources() call in main(), which clears every slot on startup.
+        """
         self.sources_file.write_text(
             '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
             encoding="utf-8",
