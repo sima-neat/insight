@@ -920,7 +920,11 @@ export default function App() {
     const data = await fetchJson('/api/media-files')
     setMediaTree(data)
     // A folder can vanish between loads (its last file deleted); fall back to the nearest ancestor.
-    setMediaFolder((current) => nearestExistingFolder(data, current))
+    setMediaFolder((current) => {
+      const next = nearestExistingFolder(data, current)
+      if (next !== current) setMediaFilter('')
+      return next
+    })
     const flat = streamableFiles(data)
     if (forceSelectFirst) {
       setSelectedFile(flat[0] || '')

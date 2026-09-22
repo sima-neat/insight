@@ -170,7 +170,6 @@ server_ssl_context = None
 DEFAULT_DEVKIT_SSH_USERNAME = "sima"
 DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
 
-ALLOWED_EXTENSIONS = STREAMABLE_MEDIA_EXTENSIONS
 ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
 LOG_DIR = "/var/log"
 
@@ -504,7 +503,7 @@ def build_media_tree(base_path: Path, rel_path: str = "") -> list:
     for entry in entries:
         abs_entry_path = full_path / entry
         rel_entry_path = os.path.join(rel_path, entry).replace(os.path.sep, "/")
-        if abs_entry_path.is_dir():
+        if abs_entry_path.is_dir() and not abs_entry_path.is_symlink():
             children = build_media_tree(base_path, rel_entry_path)
             count = sum(
                 child["streamable_count"] if child["type"] == "folder" else int(child["streamable"])

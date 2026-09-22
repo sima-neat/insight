@@ -108,6 +108,15 @@ class MediaTreeTests(unittest.TestCase):
 
         self.assertEqual(walk(app_module.build_media_tree(self.root), set()), listed)
 
+    def test_symlinked_directories_are_not_descended(self):
+        touch(self.root / "real" / "clip.mp4")
+        (self.root / "real" / "loop").symlink_to(self.root / "real", target_is_directory=True)
+        tree = app_module.build_media_tree(self.root)
+        real = self.by_name(tree, "/real")
+        self.assertEqual(real["streamable_count"], 1)
+        names = [node["name"] for node in real["children"]]
+        self.assertNotIn("/loop", names)
+
 
 if __name__ == "__main__":
     unittest.main()

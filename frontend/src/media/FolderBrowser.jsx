@@ -8,8 +8,8 @@ function FolderIcon() {
   )
 }
 
-function plural(count, word) {
-  return `${count} ${word}${count === 1 ? '' : 's'}`
+function plural(count, word, plural = `${word}s`) {
+  return `${count} ${count === 1 ? word : plural}`
 }
 
 // Folder browser over the /api/media-files tree (issue #113). Rendered by the library panel and
@@ -34,7 +34,7 @@ export default function FolderBrowser({
   const matches = query ? searchFolder(tree, folder, query) : []
   const folderLabel = folder ? folder.split('/').pop() : 'Media Root'
   const countText = query
-    ? `${plural(matches.length, 'match')} in ${folderLabel}`
+    ? `${plural(matches.length, 'match', 'matches')} in ${folderLabel}`
     : `${plural(listing.folders.length, 'folder')} · ${plural(listing.files.length, 'file')}`
 
   function fileRow(item, label) {
