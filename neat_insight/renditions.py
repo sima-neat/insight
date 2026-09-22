@@ -644,32 +644,36 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             raise
 
         # On POSIX an unlinked source stays readable through ffmpeg's open descriptor, so the
-        # encode succeeds even if delete-media (or a replacement upload) ran meanwhile. Publish
-        # only if the source is still the one that was hashed.
-        try:
-            current = source_path.stat()
-        except OSError:
-            current = None
-        if current is None or (current.st_size, current.st_mtime_ns) != (info.get("size"), info.get("mtime_ns")):
-            tmp.unlink(missing_ok=True)
-            raise RenditionError(f"{rel_path} was removed or replaced while its rendition was being encoded")
+        # encode succeeds even if delete-media (or a replacement upload) ran meanwhile. The final
+        # source check, the rename and the record insertion happen as one step under the index
+        # lock: delete-media unlinks first and then takes the same lock to remove records, so a
+        # publish that wins the race is cleaned up by that removal and one that loses sees no file.
+        digest_of_output = sha256_file(tmp)
+        with _index_lock:
+            try:
+                current = source_path.stat()
+            except OSError:
+                current = None
+            if current is None or (current.st_size, current.st_mtime_ns) != (info.get("size"), info.get("mtime_ns")):
+                tmp.unlink(missing_ok=True)
+                raise RenditionError(f"{rel_path} was removed or replaced while its rendition was being encoded")
 
-        tmp.replace(output)
-        record = {
-            "key": key,
-            "source_file": rel_path,
-            "source_sha256": digest,
-            "fps": fps,
-            "codec": source_codec,
-            "profile": PROFILES[source_codec],
-            "path": rel_out,
-            "sha256": sha256_file(output),
-            "bytes": output.stat().st_size,
-            "width": info.get("width"),
-            "height": height,
-            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-        add_rendition(index_path, record, media_dir)
+            tmp.replace(output)
+            record = {
+                "key": key,
+                "source_file": rel_path,
+                "source_sha256": digest,
+                "fps": fps,
+                "codec": source_codec,
+                "profile": PROFILES[source_codec],
+                "path": rel_out,
+                "sha256": digest_of_output,
+                "bytes": output.stat().st_size,
+                "width": info.get("width"),
+                "height": height,
+                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            add_rendition(index_path, record, media_dir)
         yield {"event": "done", "path": str(output), "rendition": rel_out, "reused": False, "native": False}
 
 
