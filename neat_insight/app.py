@@ -40,6 +40,8 @@ from neat_insight.mediasrc import (
     SOURCE_TYPE_FILE,
     SOURCE_TYPE_WEBCAM,
     WEBCAM_WHIP_PORT,
+    WEBCAM_WHIP_ICE_PORT,
+    WEBCAM_WHIP_ICE_PORT_MAP_NAME,
     WEBCAM_WHIP_PORT_MAP_NAME,
     http_mjpeg_command,
     http_snapshot_command,
@@ -796,6 +798,20 @@ def _resolve_video_ui_port():
 
 def _resolve_webssh_host_port():
     return _find_exposed_port(_read_exposed_ports_from_port_map(), "webSSH", "tcp") or get_webssh_port()
+
+
+def _resolve_webcam_ice_port():
+    """UDP port MediaMTX binds and advertises for webcam ICE media.
+
+    Unlike the WHIP listener, this port is embedded in the ICE candidate
+    MediaMTX puts in its SDP answer, and Docker forwards a mapped port without
+    rewriting it. The SDK therefore publishes this one identity-mapped, the way
+    it already does for vf's WebRTC range, and Insight binds whatever the port
+    map says so the advertised port and the open host port agree.
+    """
+    return _find_exposed_port(
+        _read_exposed_ports_from_port_map(), WEBCAM_WHIP_ICE_PORT_MAP_NAME, "udp"
+    ) or WEBCAM_WHIP_ICE_PORT
 
 
 def _resolve_webcam_whip_port():
@@ -2687,7 +2703,7 @@ def main():
 
     ssl_context = check_and_generate_mkcert_certificate(args.port)
     server_ssl_context = ssl_context
-    start_processes(ssl_context)
+    start_processes(ssl_context, webcam_ice_port=_resolve_webcam_ice_port())
 
     def _shutdown(signum=None, frame=None):
         if sys_metrics_publisher:

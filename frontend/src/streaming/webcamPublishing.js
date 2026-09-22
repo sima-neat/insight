@@ -190,3 +190,23 @@ export function createDisconnectWatcher({
     },
   }
 }
+
+// Insight advertises every webcam source as H.264 — the codec badge, the RTSP
+// output, and what a Core application is configured to decode. If the browser
+// cannot actually offer H.264, MediaMTX will happily accept VP8 and the source
+// then lies about its codec, failing downstream instead of here. Fail here.
+export function pinH264(transceiver, capabilities) {
+  const codecs = selectH264Codecs(capabilities)
+  if (!codecs.length) {
+    throw new Error(
+      'This browser cannot publish H.264 video, which webcam sources require. Try Chrome, Edge or Safari.',
+    )
+  }
+  if (!transceiver || typeof transceiver.setCodecPreferences !== 'function') {
+    throw new Error(
+      'This browser cannot choose a video codec, so H.264 publishing cannot be guaranteed. Try Chrome, Edge or Safari.',
+    )
+  }
+  transceiver.setCodecPreferences(codecs)
+  return codecs
+}

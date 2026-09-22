@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   closeAllWebcamSessions,
+  pinH264,
   createDisconnectWatcher,
   closeWebcamSession,
   confirmWebcamPublishing,
@@ -359,4 +360,31 @@ test("cancelling the watcher drops a pending grace period", () => {
 
   assert.equal(timers.size, 0);
   assert.deepEqual(lost, [], "a teardown already under way must not fire it again");
+});
+
+test("H.264 is pinned on the transceiver when the browser offers it", () => {
+  let pinned = null;
+  const transceiver = { setCodecPreferences: (c) => { pinned = c; } };
+  const caps = { codecs: [{ mimeType: "video/VP8" }, { mimeType: "video/H264" }] };
+
+  const chosen = pinH264(transceiver, caps);
+
+  assert.deepEqual(pinned.map((c) => c.mimeType), ["video/H264"]);
+  assert.deepEqual(chosen.map((c) => c.mimeType), ["video/H264"]);
+});
+
+test("a browser with no H.264 is rejected rather than publishing VP8 as H.264", () => {
+  const transceiver = { setCodecPreferences: () => {} };
+
+  assert.throws(
+    () => pinH264(transceiver, { codecs: [{ mimeType: "video/VP8" }] }),
+    /cannot publish H\.264/,
+  );
+});
+
+test("a browser without setCodecPreferences is rejected", () => {
+  const caps = { codecs: [{ mimeType: "video/H264" }] };
+
+  assert.throws(() => pinH264(undefined, caps), /cannot choose a video codec/);
+  assert.throws(() => pinH264({}, caps), /cannot choose a video codec/);
 });

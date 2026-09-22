@@ -528,6 +528,19 @@ class WebcamSourceTests(unittest.TestCase):
 
         kick.assert_called_once_with(1)
 
+    def test_the_ice_port_follows_the_sdk_port_map(self):
+        """MediaMTX must bind the port the SDK published, since SDP carries it."""
+        remapped = [
+            {"hostPortEnd": None, "hostPortStart": 18259, "name": "webrtcWhipIce", "protocol": "udp"},
+        ]
+
+        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=remapped):
+            self.assertEqual(app_module._resolve_webcam_ice_port(), 18259)
+
+    def test_the_ice_port_falls_back_to_the_default(self):
+        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=[]):
+            self.assertEqual(app_module._resolve_webcam_ice_port(), 8189)
+
     def test_the_whip_url_brackets_an_ipv6_host(self):
         self.client.post("/api/mediasrc/assign-webcam", json={"index": 1},
                          headers={"Host": "[fd00::23]:9900"})

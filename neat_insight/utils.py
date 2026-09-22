@@ -267,15 +267,16 @@ def _terminate_conflicting_port_specs(port_specs):
         time.sleep(0.2)
 
 
-def _terminate_conflicting_ports():
+def _terminate_conflicting_ports(webcam_ice_port=None):
     # mediamtx uses 8554/tcp, a default UDP helper port 8000, 8889/tcp for
-    # webcam WHIP publishing, and 9997/tcp (loopback) for its status API.
+    # webcam WHIP signalling, its ICE media port for the video itself, and
+    # 9997/tcp (loopback) for its status API.
     # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
     port_specs = [
         (8554, "TCP"),
         (8000, "UDP"),
         (8889, "TCP"),
-        (8189, "UDP"),
+        (webcam_ice_port or 8189, "UDP"),
         (9997, "TCP"),
         (8081, "TCP"),
         *[(port, "UDP") for port in range(9000, 9080)],
@@ -288,8 +289,8 @@ def _terminate_conflicting_ports():
     _terminate_conflicting_port_specs(port_specs)
 
 
-def start_processes(ssl_context):
-    _terminate_conflicting_ports()
+def start_processes(ssl_context, webcam_ice_port=None):
+    _terminate_conflicting_ports(webcam_ice_port)
     bin_dir = os.path.join(os.path.dirname(__file__), "bin")
     is_windows = os.name == "nt"
     vf = os.path.join(bin_dir, "vf.exe" if is_windows else "vf")
@@ -330,6 +331,13 @@ def start_processes(ssl_context):
     mtx_env["MTX_WEBRTCENCRYPTION"] = "yes"
     mtx_env["MTX_WEBRTCSERVERCERT"] = cert_file
     mtx_env["MTX_WEBRTCSERVERKEY"] = key_file
+
+    # The ICE port ends up inside MediaMTX's SDP answer, and Docker forwards a
+    # mapped port without rewriting what is written there. The SDK publishes it
+    # identity-mapped and reports it in the port map; binding that same number
+    # keeps the advertised port and the open host port in agreement.
+    if webcam_ice_port:
+        mtx_env["MTX_WEBRTCLOCALUDPADDRESS"] = f":{webcam_ice_port}"
 
     # Inside an SDK container, MediaMTX's own network view only has the
     # container-internal address to offer as an ICE host candidate, which the

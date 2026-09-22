@@ -4,6 +4,7 @@ import {
   closeAllWebcamSessions,
   closeWebcamSession,
   createDisconnectWatcher,
+  pinH264,
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
@@ -14,6 +15,10 @@ const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
 const SOURCE_COUNT = 48
 const WEBCAM_OPTION_PREFIX = '__webcam__:'
+// Thrown to abandon a start whose slot was reassigned or stopped while it was
+// in flight. Raised rather than returned so the catch releases the camera and
+// peer connection it had already created.
+const WEBCAM_START_SUPERSEDED = { superseded: true }
 const STREAMING_TRANSPORTS = [
   { value: 'rtsp', label: 'RTSP' },
   { value: 'http', label: 'HTTP' }
@@ -706,6 +711,10 @@ export default function App() {
   // The devicechange listener below is registered once and would otherwise
   // close over the first render's assignments forever.
   const webcamAssignmentsRef = useRef({})
+  // Starting a webcam spans getUserMedia and the WHIP exchange. Anything that
+  // reassigns or stops the slot in between bumps this, and the in-flight start
+  // abandons itself rather than publishing a camera the user already replaced.
+  const webcamGenerationRef = useRef({})
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
@@ -1526,7 +1535,14 @@ export default function App() {
     await loadSources()
   }
 
+  function invalidateWebcamStart(index) {
+    const next = (webcamGenerationRef.current[index] || 0) + 1
+    webcamGenerationRef.current[index] = next
+    return next
+  }
+
   function teardownWebcamSession(index) {
+    invalidateWebcamStart(index)
     const session = webcamSessionsRef.current.get(index)
     if (!session) return
     webcamSessionsRef.current.delete(index)
@@ -1634,6 +1650,8 @@ export default function App() {
     }
 
     setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    const generation = invalidateWebcamStart(index)
+    const superseded = () => webcamGenerationRef.current[index] !== generation
     let stream = null
     let pc = null
     let watcher = null
@@ -1642,14 +1660,15 @@ export default function App() {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { deviceId: { exact: assignment.deviceId } }
       })
+      if (superseded()) throw WEBCAM_START_SUPERSEDED
       pc = new RTCPeerConnection()
       const videoTrack = stream.getVideoTracks()[0]
       const sender = pc.addTrack(videoTrack, stream)
-      const transceiver = pc.getTransceivers().find((t) => t.sender === sender)
-      const h264Codecs = selectH264Codecs(RTCRtpSender.getCapabilities?.('video'))
-      if (transceiver && typeof transceiver.setCodecPreferences === 'function' && h264Codecs.length) {
-        transceiver.setCodecPreferences(h264Codecs)
-      }
+      // Refuse rather than silently publishing VP8 while the slot advertises H.264.
+      pinH264(
+        pc.getTransceivers().find((t) => t.sender === sender),
+        RTCRtpSender.getCapabilities?.('video'),
+      )
       watcher = createDisconnectWatcher({
         onLost: () => {
           teardownWebcamSession(index)
@@ -1659,6 +1678,7 @@ export default function App() {
       pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
 
       const { answerSdp, deleteUrl } = await publishWebcamOffer(pc, whipUrl)
+      if (superseded()) throw WEBCAM_START_SUPERSEDED
       // MediaMTX holds a session for this path from the POST onward, so the
       // session is registered before the answer is applied: if
       // setRemoteDescription() rejects, teardown can still close the peer
@@ -1682,7 +1702,8 @@ export default function App() {
         watcher?.cancel()
         closeWebcamSession({ pc, stream, deleteUrl: null })
       }
-      setError(describeWebcamError(e))
+      // A superseded start is the user changing their mind, not a failure.
+      if (!e?.superseded) setError(describeWebcamError(e))
       await loadSources()
     } finally {
       setWebcamBusy((prev) => {
@@ -2178,7 +2199,11 @@ export default function App() {
                           <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
                             {src.state === 'playing' ? 'Live' : 'Idle'}
                           </span>
-                          <select value={selectValue} onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}>
+                          <select
+                            value={selectValue}
+                            disabled={Boolean(webcamBusy[src.index])}
+                            onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
+                          >
                             <option value="">{isWebcam ? 'Webcam (reselect)' : 'Not assigned'}</option>
                             {webcamDevices.map((device) => (
                               <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
