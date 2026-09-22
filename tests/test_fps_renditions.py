@@ -440,8 +440,15 @@ class RenditionEncodeTests(unittest.TestCase):
         self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
 
     def test_failing_ffprobe_during_validation_raises_rendition_error_and_cleans_up(self):
-        # probe_packets shells out to ffprobe last; a subprocess failure must surface as a RenditionError.
-        with mock.patch.object(renditions.subprocess, "check_output", side_effect=subprocess.CalledProcessError(1, "ffprobe")):
+        # The packet probe is the last validation step; a failure to launch it must surface as a
+        # RenditionError. Only that ffprobe invocation is broken; ffmpeg and the stream probe run for real.
+        real_popen = subprocess.Popen
+
+        def popen(cmd, *args, **kwargs):
+            if Path(cmd[0]).name == "ffprobe" and "packet=pts_time,dts_time,flags" in cmd:
+                raise OSError("ffprobe crashed")
+            return real_popen(cmd, *args, **kwargs)
+        with mock.patch.object(renditions.subprocess, "Popen", side_effect=popen):
             with self.assertRaises(renditions.RenditionError) as ctx:
                 drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         self.assertIn("ffprobe failed", str(ctx.exception))
@@ -1047,9 +1054,11 @@ class ClearRenditionsApiTests(RenditionApiTestCase):
         self.client.post("/api/mediasrc/prepare", json={"index": 2}).get_data()
         self.assertEqual(len(renditions.load_index(self.index_path)["renditions"]), 2)
 
+        running = {1: fifteen_fps_path}  # models the process registry: a stopped slot has no file
         with mock.patch.object(app_module, "start_media_stream", return_value=(True, None)), \
                 mock.patch.object(app_module, "media_stream_is_running", return_value=True), \
-                mock.patch.object(app_module, "_active_stream_file", side_effect=lambda index: fifteen_fps_path if index == 1 else None):
+                mock.patch.object(app_module, "stop_media_stream", side_effect=lambda index: running.pop(index, None)), \
+                mock.patch.object(app_module, "_active_stream_file", side_effect=running.get):
             self.assertEqual(self.client.post("/api/mediasrc/start", json={"index": 1}).status_code, 200)
 
             clear_payload = self.client.post("/api/mediasrc/renditions/clear").get_json()
@@ -1063,6 +1072,71 @@ class ClearRenditionsApiTests(RenditionApiTestCase):
             clear_payload = self.client.post("/api/mediasrc/renditions/clear").get_json()
             self.assertEqual(clear_payload["removed"], 1)
             self.assertEqual(self.client.get("/api/mediasrc/renditions").get_json()["count"], 0)
+
+    def test_clear_renditions_trusts_the_registry_not_the_persisted_state(self):
+        # Codex review: between launch and persist the slot still reads "stopped" on disk
+        # while its process is already registered; the keep set must come from the registry.
+        self.assign(index=1, file="demo.mp4", fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 1}).get_data()
+        path = renditions.load_index(self.index_path)["renditions"][0]["path"]
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+        with mock.patch.object(app_module, "_active_stream_file", side_effect=lambda index: path if index == 1 else None):
+            payload = self.client.post("/api/mediasrc/renditions/clear").get_json()
+        self.assertEqual(payload["kept"], [path])
+        self.assertEqual(payload["removed"], 0)
+        self.assertTrue((self.media_dir / path).exists())
+
+    def test_clear_renditions_holds_the_slot_lock(self):
+        held = []
+        with mock.patch.object(renditions, "clear_renditions", side_effect=lambda *a, **k: (held.append(lock_is_held(app_module._slot_lock)), ([], 0))[1]):
+            self.assertEqual(self.client.post("/api/mediasrc/renditions/clear").status_code, 200)
+        self.assertEqual(held, [True])
+
+
+class IncrementalTimestampValidationTests(unittest.TestCase):
+    """Codex review: validation must stream packets, not buffer a whole multi-hour probe."""
+
+    def packets(self, count, bad_at=None, consumed=None):
+        for i in range(count):
+            if consumed is not None:
+                consumed.append(i)
+            pts = i / 10
+            if bad_at is not None and i == bad_at:
+                pts += 0.5  # jump: not constant frame rate
+            yield (pts, pts, i % 10 == 0)
+
+    def test_valid_stream_passes_without_materializing(self):
+        renditions._validate_timestamps(Path("x.mp4"), 10, self.packets(1000))
+
+    def test_stops_at_the_first_bad_packet(self):
+        consumed = []
+        with self.assertRaises(renditions.RenditionError):
+            renditions._validate_timestamps(Path("x.mp4"), 10, self.packets(1_000_000, bad_at=25, consumed=consumed))
+        self.assertLessEqual(len(consumed), 26)
+
+    def test_keyframe_cadence_is_checked_incrementally(self):
+        def packets():
+            for i in range(40):
+                yield (i / 10, i / 10, i in (0, 10, 25))  # third keyframe is early
+        with self.assertRaises(renditions.RenditionError) as ctx:
+            renditions._validate_timestamps(Path("x.mp4"), 10, packets())
+        self.assertIn("keyframe", str(ctx.exception))
+
+    def test_empty_stream_is_rejected(self):
+        with self.assertRaises(renditions.RenditionError):
+            renditions._validate_timestamps(Path("x.mp4"), 10, iter(()))
+
+    @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+    def test_iter_packets_streams_ffprobe_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clip = Path(directory) / "clip.mp4"
+            make_test_clip(clip, fps=10, seconds=1.0)
+            gen = renditions.iter_packets(clip)
+            first = next(gen)  # a plain test clip has B-frames, so only pts and the keyframe flag are fixed
+            self.assertEqual((first[0], first[2]), (0.0, True))
+            rest = list(gen)
+            self.assertEqual(len(rest), 9)
+            self.assertEqual(renditions.probe_packets(clip), [first, *rest])
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 FPS_MIN = 1
 FPS_MAX = 240
@@ -455,23 +455,45 @@ def add_rendition(index_path: Path, record: dict, media_dir: Path) -> None:
         save_index(index_path, index)
 
 
-def probe_packets(path: Path) -> list[tuple[float, float, bool]]:
-    """(pts_time, dts_time, is_keyframe) per video packet."""
+def iter_packets(path: Path) -> Iterator[tuple[float, float, bool]]:
+    """Yield (pts_time, dts_time, is_keyframe) per video packet, streaming ffprobe's CSV output.
+
+    A multi-hour high-fps rendition has millions of packets; reading them line by line keeps
+    memory constant and needs no overall timeout, so a long validation cannot fail after the
+    (much longer) encode already succeeded.
+    """
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
         raise RenditionError("ffprobe is not installed; install FFmpeg and ensure ffprobe is on PATH.")
-    cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,dts_time,flags", "-of", "json", str(path)]
+    cmd = [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time,dts_time,flags", "-of", "csv=p=0", str(path)]
     try:
-        data = json.loads(subprocess.check_output(cmd, text=True, timeout=60))
-    except (subprocess.SubprocessError, ValueError) as exc:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as exc:
         raise RenditionError(f"ffprobe failed for {path.name}: {exc}") from exc
     try:
-        return [
-            (float(packet["pts_time"]), float(packet["dts_time"]), "K" in str(packet.get("flags", "")))
-            for packet in data.get("packets", [])
-        ]
-    except (KeyError, TypeError, ValueError) as exc:
-        raise RenditionError(f"{path.name} contains a packet without usable PTS/DTS timestamps") from exc
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            fields = line.split(",")
+            try:
+                yield float(fields[0]), float(fields[1]), "K" in (fields[2] if len(fields) > 2 else "")
+            except (IndexError, ValueError) as exc:
+                raise RenditionError(f"{path.name} contains a packet without usable PTS/DTS timestamps") from exc
+        stderr = proc.stderr.read()
+        if proc.wait() != 0:
+            raise RenditionError(f"ffprobe failed for {path.name}: {stderr.strip() or proc.returncode}")
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
+
+
+def probe_packets(path: Path) -> list[tuple[float, float, bool]]:
+    """(pts_time, dts_time, is_keyframe) per video packet, fully materialised; use iter_packets for long files."""
+    return list(iter_packets(path))
 
 
 def probe_reference_frames(path: Path) -> int:
@@ -489,19 +511,24 @@ def probe_reference_frames(path: Path) -> int:
     return int(match.group(1))
 
 
-def _validate_timestamps(path: Path, fps: int, packets: list[tuple[float, float, bool]]) -> None:
+def _validate_timestamps(path: Path, fps: int, packets: Iterable[tuple[float, float, bool]]) -> None:
+    """Check the CFR/keyframe contract one packet at a time; `packets` may be a lazy iterator of any length."""
     tolerance = 1e-5
-    keyframe_times = [pts for pts, _dts, is_key in packets if is_key]
-    if not keyframe_times or any(abs(ts - i) > tolerance for i, ts in enumerate(keyframe_times)):
-        raise RenditionError(f"{path.name} does not have a closed one-second keyframe cadence starting at zero")
-    if abs(packets[0][0]) > tolerance or abs(packets[0][1]) > tolerance:
-        raise RenditionError(f"{path.name} packet timestamps do not start at zero")
     interval = 1.0 / fps
     previous = None
-    for pts, dts, _is_key in packets:
+    keyframes = 0
+    for pts, dts, is_key in packets:
+        if previous is None and (abs(pts) > tolerance or abs(dts) > tolerance):
+            raise RenditionError(f"{path.name} packet timestamps do not start at zero")
         if abs(pts - dts) > tolerance or (previous is not None and abs(pts - previous - interval) > tolerance):
             raise RenditionError(f"{path.name} packet timestamps are reordered or not constant frame rate")
+        if is_key:
+            if abs(pts - keyframes) > tolerance:
+                raise RenditionError(f"{path.name} does not have a closed one-second keyframe cadence starting at zero")
+            keyframes += 1
         previous = pts
+    if keyframes == 0:
+        raise RenditionError(f"{path.name} does not have a closed one-second keyframe cadence starting at zero")
 
 
 def validate_rendition(path: Path, fps: int, codec: str, width: int, height: int) -> None:
@@ -523,7 +550,7 @@ def validate_rendition(path: Path, fps: int, codec: str, width: int, height: int
         mismatches.append(f"reference_frames={reference_frames!r} (expected 1)")
     if mismatches:
         raise RenditionError(f"{path.name} violates the rendition contract: " + "; ".join(mismatches))
-    _validate_timestamps(path, fps, probe_packets(path))
+    _validate_timestamps(path, fps, iter_packets(path))
 
 
 # An ffmpeg -progress line is "key=value" with a lower-case key (frame, out_time_us, stream_0_0_q, …);
