@@ -1030,9 +1030,12 @@ export default function App() {
     }
   }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
 
+  // A preview that failed (e.g. its publisher dropped) gets a fresh start whenever its URL
+  // changes: a replacement publisher yields a new URL, and the image only mounts while
+  // there is no error.
   useEffect(() => {
     setPreviewError(false)
-  }, [tab])
+  }, [activePreviewSrc])
 
   useEffect(() => {
     if (!activePreviewSrc) return undefined

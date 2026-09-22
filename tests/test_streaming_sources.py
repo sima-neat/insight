@@ -565,6 +565,29 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual((stored[1], stored[2], stored[3]), ("a.mp4", "keep.mp4", "b.mp4"))
         self.assertEqual(data["skipped_external"], [2])
 
+    def test_auto_assign_does_not_hand_out_a_file_kept_by_an_external_slot(self):
+        for name in ("a.mp4", "b.mp4", "c.mp4"):
+            (self.media_dir / name).write_bytes(b"x")
+        self.sources_file.write_text('[{"index": 2, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self.mtx.paths["src2"] = external_path(2)
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            self.client.post("/api/mediasrc/auto-assign-all")
+
+        stored = {s["index"]: s["file"] for s in json.loads(self.sources_file.read_text(encoding="utf-8"))}
+        self.assertEqual((stored[1], stored[2], stored[3]), ("b.mp4", "a.mp4", "c.mp4"))
+
+    def test_auto_assign_stops_insights_own_http_stream_on_an_external_slot(self):
+        self._http_slot_with_external_publisher()
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            self.client.post("/api/mediasrc/auto-assign-all")
+
+        self.assertFalse(mediasrc.media_stream_is_running(1))
+        self.assertEqual(self._persisted(1)["state"], "stopped")
+        self.assertEqual(self._persisted(1)["file"], "cam.mjpg")
+
     def test_stop_all_and_reset_report_skipped_external(self):
         self.mtx.paths["src2"] = external_path(2)
         with mock.patch.object(app_module, "stop_media_stream") as stop:
