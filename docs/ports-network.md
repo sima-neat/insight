@@ -20,7 +20,7 @@ Insight uses several ports during normal operation. The default ports are the po
 | `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
-Insight also runs the mediamtx control API on `127.0.0.1:9997` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself to detect external publishers, so it needs no port mapping and is never freed by force. If the port is already taken, Insight starts mediamtx without the API and logs a warning: streaming works as usual, only external-publisher detection is off. Set `NEAT_INSIGHT_MEDIAMTX_API_PASS` (letters, digits, `_` and `-` only) to reach a mediamtx that was started separately with a known API password.
+Insight also runs the mediamtx control API on `127.0.0.1:9997` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself to detect external publishers, so it needs no port mapping and is never freed by force. If the port is already taken, Insight starts mediamtx without the API and logs a warning: streaming works as usual, only external-publisher detection is off.
 
 ## Find the actual SDK port map
 
