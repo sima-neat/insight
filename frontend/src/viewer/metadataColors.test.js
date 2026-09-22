@@ -120,10 +120,13 @@ test("allocator does not recolor a full frame when one identity is swapped for a
   const frame = ["new", ...Array.from({ length: size - 1 }, (_, i) => `c${i}`)];
   const seen = frame.map((id) => allocator.colorFor(0, "track", id, 33));
   assert.deepEqual(seen.slice(1), colors.slice(0, size - 1), "no visible identity changes color");
-  // Once c39 has been absent long enough, the next newcomer gets its slot.
-  const later = RELEASE_AFTER_MS + 100;
-  frame.forEach((id) => allocator.colorFor(0, "track", id, later));
-  assert.equal(allocator.colorFor(0, "track", "new2", later), colors[size - 1]);
+  // Frames keep coming; once c39 has been absent long enough, the next newcomer gets its slot.
+  let now = 33;
+  while (now < RELEASE_AFTER_MS + 100) {
+    now += 33;
+    frame.forEach((id) => allocator.colorFor(0, "track", id, now));
+  }
+  assert.equal(allocator.colorFor(0, "track", "new2", now), colors[size - 1]);
 });
 
 test("allocator drops stale identities that share a slot, so the map stays bounded", () => {
@@ -137,6 +140,35 @@ test("allocator drops stale identities that share a slot, so the map stays bound
   for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, later);
   allocator.colorFor(0, "track", "x", later);
   assert.equal(allocator.size(0, "track"), size + 1, "the ten stale sharers are gone, x shares a slot");
+});
+
+test("allocator separates two stale identities that shared a slot when they return", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
+  const allocator = createColorAllocator();
+  const size = PALETTE.length;
+  for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, 0);
+  const shared = allocator.colorFor(0, "track", "s", 1);
+  assert.equal(shared, PALETTE[0], "s shares t0's slot");
+  const later = RELEASE_AFTER_MS + 100;
+  assert.equal(allocator.colorFor(0, "track", "t0", later), PALETTE[0], "the first to return keeps the slot");
+  const returned = allocator.colorFor(0, "track", "s", later + 1);
+  assert.notEqual(returned, PALETTE[0], "s is allocated afresh");
+  assert.equal(returned, PALETTE[1], "and takes the slot of the stale identity absent longest");
+});
+
+test("allocator reallocates a stale identity returning to a slot a live identity holds", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
+  const allocator = createColorAllocator();
+  const size = PALETTE.length;
+  for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, 0);
+  allocator.colorFor(0, "track", "s", 1);
+  const later = RELEASE_AFTER_MS + 100;
+  for (let i = 1; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, later);
+  assert.equal(allocator.colorFor(0, "track", "s", later), PALETTE[0], "s is live and keeps slot 0");
+  const t0 = allocator.colorFor(0, "track", "t0", later + 1);
+  assert.ok(PALETTE.includes(t0), "t0 is allocated afresh");
+  assert.equal(allocator.colorFor(0, "track", "s", later + 2), PALETTE[0], "s keeps slot 0");
+  assert.equal(allocator.size(0, "track"), size + 1, "t0 shares a slot since none is free or stale");
 });
 
 test("allocator lastSeen updates are independent per channel and namespace", () => {
