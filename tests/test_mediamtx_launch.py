@@ -17,7 +17,7 @@ class RuntimeConfigTests(unittest.TestCase):
         path = utils._write_mediamtx_runtime_config(CONFIG)
         self.addCleanup(os.unlink, path)
         text = Path(path).read_text(encoding="utf-8")
-        self.assertIn(f"pass: {mediamtx.API_PASSWORD}", text)
+        self.assertIn(f'pass: "{mediamtx.API_PASSWORD}"', text)
         self.assertNotIn(mediamtx.API_PASSWORD_PLACEHOLDER, text)
         self.assertIn("api: yes", text)
         if os.name == "posix":
