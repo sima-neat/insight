@@ -467,6 +467,21 @@ class RenditionEncodeTests(unittest.TestCase):
         self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
         self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
 
+    def test_source_deleted_during_encoding_is_not_published(self):
+        # Codex review: on POSIX ffmpeg keeps reading an unlinked source, so the
+        # encode succeeds; the result must not be recorded for a source that is gone.
+        gen = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264")
+        self.assertEqual(next(gen)["event"], "encoding")
+        self.assertEqual(next(gen)["event"], "progress")  # ffmpeg is running and has the source open
+        self.source.unlink()
+        with self.assertRaises(renditions.RenditionError) as ctx:
+            for _event in gen:
+                pass
+        self.assertIn("removed", str(ctx.exception))
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
+
     def test_validate_rendition_rejects_wrong_fps(self):
         _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         with self.assertRaises(renditions.RenditionError) as ctx:
@@ -596,6 +611,19 @@ class StartPersistenceTests(RenditionApiTestCase):
         self.assertEqual(response.status_code, 409)
         stream.assert_not_called()
         self.assertEqual(self.persisted()[1]["file"], "")
+
+    def test_start_abandons_a_slot_stopped_while_encoding(self):
+        # Codex review: stop keeps file and fps, so it must be detected another way.
+        response, stream = self.start_slot_for_real(lambda: self.client.post("/api/mediasrc/stop", json={"index": 1}))
+        self.assertEqual(response.status_code, 409)
+        stream.assert_not_called()
+        self.assertEqual(self.persisted()[1]["state"], "stopped")
+
+    def test_start_abandons_a_slot_after_stop_all_while_encoding(self):
+        response, stream = self.start_slot_for_real(lambda: self.client.post("/api/mediasrc/stop-all"))
+        self.assertEqual(response.status_code, 409)
+        stream.assert_not_called()
+        self.assertEqual(self.persisted()[1]["state"], "stopped")
 
     def test_start_proceeds_when_the_slot_is_unchanged(self):
         response, stream = self.start_slot_for_real(lambda: None)

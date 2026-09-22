@@ -643,6 +643,17 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             tmp.unlink(missing_ok=True)
             raise
 
+        # On POSIX an unlinked source stays readable through ffmpeg's open descriptor, so the
+        # encode succeeds even if delete-media (or a replacement upload) ran meanwhile. Publish
+        # only if the source is still the one that was hashed.
+        try:
+            current = source_path.stat()
+        except OSError:
+            current = None
+        if current is None or (current.st_size, current.st_mtime_ns) != (info.get("size"), info.get("mtime_ns")):
+            tmp.unlink(missing_ok=True)
+            raise RenditionError(f"{rel_path} was removed or replaced while its rendition was being encoded")
+
         tmp.replace(output)
         record = {
             "key": key,
