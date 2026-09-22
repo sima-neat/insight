@@ -123,7 +123,15 @@ class ApiCredentialTests(unittest.TestCase):
 
     def test_render_config_swaps_the_placeholder_for_the_password(self):
         rendered = mediamtx.render_config(f"user: insight\npass: {mediamtx.API_PASSWORD_PLACEHOLDER}\n", "s3cret")
-        self.assertEqual(rendered, "user: insight\npass: s3cret\n")
+        self.assertEqual(rendered, 'user: insight\npass: "s3cret"\n')
+
+    def test_rendered_password_is_a_quoted_yaml_string(self):
+        # A bare `pass: null` would read as no password at all, opening the API; the
+        # allowed character set needs no escaping inside double quotes.
+        for password in ("null", "NULL", "true", "yes", "off", "0123"):
+            with self.subTest(password=password):
+                rendered = mediamtx.render_config(f"pass: {mediamtx.API_PASSWORD_PLACEHOLDER}\n", password)
+                self.assertEqual(rendered, f'pass: "{password}"\n')
 
     def test_render_config_refuses_a_config_without_the_placeholder(self):
         # Launching such a config would leave the API on mediamtx's passwordless default.
@@ -132,7 +140,7 @@ class ApiCredentialTests(unittest.TestCase):
 
     def test_render_config_turns_the_api_off(self):
         rendered = mediamtx.render_config(f"api: yes\npass: {mediamtx.API_PASSWORD_PLACEHOLDER}\n", "s3cret", api_enabled=False)
-        self.assertEqual(rendered, "api: no\npass: s3cret\n")
+        self.assertEqual(rendered, 'api: no\npass: "s3cret"\n')
 
     def test_configured_password_refuses_values_that_would_break_the_yaml(self):
         # The password is spliced into mediamtx.yml as a plain scalar.

@@ -192,7 +192,10 @@ def _parse_fps(value) -> Optional[float]:
 def render_config(text: str, password: str, api_enabled: bool = True) -> str:
     if API_PASSWORD_PLACEHOLDER not in text:
         raise MediamtxError("mediamtx config has no API password placeholder")
-    rendered = text.replace(API_PASSWORD_PLACEHOLDER, password)
+    # Quoted, so a password such as "null" or "true" stays a string instead of turning
+    # into a YAML null (no password at all) or boolean. The allowed character set
+    # (API_PASSWORD_PATTERN) contains nothing that needs escaping inside double quotes.
+    rendered = text.replace(API_PASSWORD_PLACEHOLDER, f'"{password}"')
     if api_enabled:
         return rendered
     if API_ENABLED_SETTING not in rendered:
