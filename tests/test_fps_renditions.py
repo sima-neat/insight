@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -942,6 +943,31 @@ class SlotFpsTests(RenditionApiTestCase):
             third = renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
         self.assertEqual(probe.call_count, 1)
         self.assertEqual(third["broken.mp4"]["native_fps"], 25)
+
+    def test_cached_probe_failure_expires_and_is_retried(self):
+        # Codex review: a timeout under load is transient; the listing must retry after a while.
+        bad = self.media_dir / "broken.mp4"
+        bad.write_bytes(b"not a video")
+        with mock.patch.object(renditions, "probe_video", wraps=renditions.probe_video) as probe:
+            renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
+            renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
+            self.assertEqual(probe.call_count, 1)
+            with mock.patch.object(renditions.time, "time", return_value=time.time() + renditions.PROBE_RETRY_SECONDS + 1):
+                renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
+            self.assertEqual(probe.call_count, 2)
+
+    def test_explicit_probe_ignores_a_cached_failure(self):
+        # Codex review: start/prepare use source_info; a failure cached by the listing (e.g. a
+        # one-off timeout on a valid file) must not stop them from probing for real.
+        with mock.patch.object(renditions, "probe_video", side_effect=subprocess.TimeoutExpired("ffprobe", 30)):
+            listing = renditions.source_infos(self.index_path, self.media_dir, ["demo.mp4"])
+        self.assertIsNone(listing["demo.mp4"]["native_fps"])
+        info = renditions.source_info(self.index_path, self.media_dir, "demo.mp4")
+        self.assertEqual(info["native_fps"], 30)
+        self.assertEqual(info["width"], 320)
+        # The real probe repairs the cache for the listing too.
+        with mock.patch.object(renditions, "probe_video", side_effect=AssertionError("must use the cache")):
+            self.assertEqual(renditions.source_infos(self.index_path, self.media_dir, ["demo.mp4"])["demo.mp4"]["native_fps"], 30)
 
     def test_sources_probe_each_file_once_per_request(self):
         self.assign(index=1)

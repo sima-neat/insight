@@ -326,6 +326,21 @@ def _stat_matches(entry: Any, stat) -> bool:
     return isinstance(entry, dict) and entry.get("size") == stat.st_size and entry.get("mtime_ns") == stat.st_mtime_ns
 
 
+# How long the sources listing trusts a cached probe failure before probing the file again. A
+# corrupt file costs one probe per this interval instead of one per 2 s poll; a transient failure
+# (e.g. a timeout under load) clears itself after it.
+PROBE_RETRY_SECONDS = 60
+
+
+def _is_failed_probe(entry: Optional[dict]) -> bool:
+    return isinstance(entry, dict) and "probe_failed_at" in entry
+
+
+def _failed_probe_usable(entry: Optional[dict], stat) -> bool:
+    """A cached failure the listing may still trust: same file and not yet due for a retry."""
+    return _stat_matches(entry, stat) and _is_failed_probe(entry) and time.time() - float(entry.get("probe_failed_at") or 0) < PROBE_RETRY_SECONDS
+
+
 def _cached_entry(index_path: Path, rel_path: str) -> Optional[dict]:
     with _index_lock:
         entry = load_index(index_path)["sources"].get(rel_path)
@@ -357,8 +372,10 @@ def source_info(index_path: Path, media_dir: Path, rel_path: str) -> dict:
     source_path = media_dir / rel_path
     stat = source_path.stat()
     entry = _cached_entry(index_path, rel_path)
-    if _stat_matches(entry, stat) and "native_fps" in entry:
+    if _stat_matches(entry, stat) and "native_fps" in entry and not _is_failed_probe(entry):
         return dict(entry)
+    # An explicit start/prepare always probes for real, so a failure cached by the listing
+    # (possibly a one-off timeout) never blocks it; a real result repairs the cache.
     stream, stat = _for_current_stat(source_path, stat, lambda: probe_video(source_path))
     fresh = _source_entry(stat, stream)
     with _index_lock:
@@ -387,7 +404,7 @@ def source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> dic
     probed: dict[str, tuple[Any, dict]] = {}
     for rel_path, stat in stats.items():
         entry = cached.get(rel_path)
-        if _stat_matches(entry, stat) and "native_fps" in entry:
+        if _stat_matches(entry, stat) and "native_fps" in entry and (not _is_failed_probe(entry) or _failed_probe_usable(entry, stat)):
             infos[rel_path] = dict(entry)
             continue
         source_path = media_dir / rel_path
@@ -402,7 +419,7 @@ def source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> dic
             # poll would stall the Streaming tab for as long as the broken file stays assigned.
             # The file is probed again once it changes; start/prepare still raise for it.
             logging.debug("Cannot probe the media source %s: %s", rel_path, exc)
-            probed[rel_path] = (stat, {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "native_fps": None, "width": None, "height": None, "duration": None, "probe_error": str(exc)[:200]})
+            probed[rel_path] = (stat, {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "native_fps": None, "width": None, "height": None, "duration": None, "probe_error": str(exc)[:200], "probe_failed_at": time.time()})
             continue
         probed[rel_path] = (stat, _source_entry(stat, stream))
     if probed:
