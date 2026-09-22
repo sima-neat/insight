@@ -5,6 +5,7 @@ import {
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
+import AssignMediaDialog from './media/AssignMediaDialog.jsx'
 import { nearestExistingFolder, streamableFiles } from './media/mediaTree.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
@@ -756,6 +757,7 @@ export default function App() {
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
+  const [assignTarget, setAssignTarget] = useState(null) // slot index while the assign dialog is open
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [renditionUsage, setRenditionUsage] = useState({ count: 0, bytes: 0 })
   const [clearRenditionsOpen, setClearRenditionsOpen] = useState(false)
@@ -2327,12 +2329,17 @@ export default function App() {
                             {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
                           <span className="src-file-cell">
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value }).catch(() => {})} disabled={Boolean(encodeProgress[src.index])}>
-                            <option value="">Not assigned</option>
-                            {videoFiles.map((file) => (
-                              <option key={file} value={file}>{file}</option>
-                            ))}
-                          </select>
+                            <button
+                              type="button"
+                              className={src.file ? 'source-file-btn' : 'source-file-btn unassigned'}
+                              onClick={(e) => { e.stopPropagation(); setAssignTarget(src.index) }}
+                              disabled={Boolean(encodeProgress[src.index])}
+                              aria-label={`Assign media to src${src.index}`}
+                              title={src.file || 'Not assigned'}
+                              data-testid={`source-file-${src.index}`}
+                            >
+                              {src.file || 'Not assigned'}
+                            </button>
                             {src.fps != null && (
                               <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
                             )}
@@ -3084,6 +3091,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {assignTarget != null && (
+        <AssignMediaDialog
+          sourceIndex={assignTarget}
+          currentFile={(sources.find((s) => s.index === assignTarget) || {}).file || ''}
+          tree={mediaTree}
+          onAssign={(file) => updateSource(assignTarget, { file })}
+          onClose={() => setAssignTarget(null)}
+        />
       )}
 
       {bulkStartOpen && (
