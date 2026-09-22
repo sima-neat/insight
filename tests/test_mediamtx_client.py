@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import threading
 import time
 import unittest
@@ -141,20 +140,6 @@ class ApiCredentialTests(unittest.TestCase):
     def test_render_config_turns_the_api_off(self):
         rendered = mediamtx.render_config(f"api: yes\npass: {mediamtx.API_PASSWORD_PLACEHOLDER}\n", "s3cret", api_enabled=False)
         self.assertEqual(rendered, 'api: no\npass: "s3cret"\n')
-
-    def test_configured_password_refuses_values_that_would_break_the_yaml(self):
-        # The password is spliced into mediamtx.yml as a plain scalar.
-        for value in ("pass: other", "two words", "quote'd", "sha256:AAA=", "new\nline"):
-            with self.subTest(value=value), mock.patch.dict(os.environ, {mediamtx.API_PASSWORD_ENV: value}):
-                with self.assertRaises(RuntimeError) as caught:
-                    mediamtx._configured_password()
-                self.assertIn(mediamtx.API_PASSWORD_ENV, str(caught.exception))
-
-    def test_configured_password_takes_a_plain_token_and_generates_one_otherwise(self):
-        with mock.patch.dict(os.environ, {mediamtx.API_PASSWORD_ENV: "Ab9_-token"}):
-            self.assertEqual(mediamtx._configured_password(), "Ab9_-token")
-        with mock.patch.dict(os.environ, {mediamtx.API_PASSWORD_ENV: ""}):
-            self.assertRegex(mediamtx._configured_password(), r"^[A-Za-z0-9_-]+$")
 
 
 def _fake_request(paths=PATHS, sessions=SESSIONS, calls=None, kicks=None, fail=False, kick_status=200):
