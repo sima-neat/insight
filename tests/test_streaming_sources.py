@@ -552,6 +552,26 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(data["skipped_external"], [2])
         self.assertIn("src2", data["message"])
 
+    def test_start_bulk_reports_skipped_slots_when_every_assigned_slot_is_external(self):
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+        self.sources_file.write_text(json.dumps([
+            {"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},
+        ]), encoding="utf-8")
+        self.mtx.paths["src1"] = external_path(1)
+
+        with mock.patch.object(app_module, "start_media_stream") as start:
+            response = self.client.post("/api/mediasrc/start-bulk", json={"count": 2})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual((data["started"], data["targeted"], data["skipped_external"]), ([], 0, [1]))
+        self.assertIn("src1", data["message"])
+        start.assert_not_called()
+
+    def test_start_bulk_without_any_assigned_slot_is_a_bad_request(self):
+        response = self.client.post("/api/mediasrc/start-bulk", json={"count": 2})
+        self.assertEqual(response.status_code, 400)
+
     def test_auto_assign_skips_external_slot_and_keeps_its_assignment(self):
         for name in ("a.mp4", "b.mp4"):
             (self.media_dir / name).write_bytes(b"x")

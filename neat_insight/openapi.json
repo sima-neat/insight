@@ -559,7 +559,7 @@
         },
         "responses": {
           "200": {
-            "description": "Start results including started, already-running, and failed source indexes.",
+            "description": "Start results including started, already-running, and failed source indexes. Returned as well when every assigned slot is held by an external publisher: `started` is then empty and `skipped_external` lists those slots.",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BulkStartResult"}}}
           },
           "400": {"$ref": "#/components/responses/BadRequest"}
