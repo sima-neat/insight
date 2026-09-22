@@ -1595,7 +1595,14 @@ export default function App() {
       for (const index of dropped) delete next[index]
       return next
     })
-    await loadSources()
+    // Same reasoning as a lost connection: record each stop rather than reload.
+    for (const index of dropped) {
+      try {
+        await stopSource(index, { publisherReleased: true })
+      } catch (e) {
+        setError(e.message)
+      }
+    }
   }
 
   async function detectWebcams() {
@@ -1609,12 +1616,12 @@ export default function App() {
     await refreshWebcamDevices()
   }
 
-  async function assignWebcamToSource(index, deviceId, label) {
+  async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false } = {}) {
     try {
       await fetchJson('/api/mediasrc/assign-webcam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index })
+        body: JSON.stringify({ index, publisher_released: publisherReleased })
       })
       setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label } }))
       await loadSources()
@@ -1630,8 +1637,9 @@ export default function App() {
       // Switching cameras on a publishing slot: end the current session first.
       // Otherwise the old track keeps publishing to the same MediaMTX path and
       // the replacement is rejected because the path already has a publisher.
+      const owned = webcamSessionsRef.current.has(index)
       teardownWebcamSession(index)
-      assignWebcamToSource(index, deviceId, device?.label || 'Webcam')
+      assignWebcamToSource(index, deviceId, device?.label || 'Webcam', { publisherReleased: owned })
       return
     }
     const owned = webcamSessionsRef.current.has(index)
@@ -1684,7 +1692,10 @@ export default function App() {
       watcher = createDisconnectWatcher({
         onLost: () => {
           teardownWebcamSession(index)
-          loadSources()
+          // Record the stop explicitly rather than reloading: MediaMTX may
+          // still report the path ready while the teardown is in flight, and
+          // a reload that sees that would leave the row Live with no session.
+          stopSource(index, { publisherReleased: true }).catch((e) => setError(e.message))
         },
       })
       pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))

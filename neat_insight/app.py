@@ -2318,11 +2318,11 @@ def assign_webcam_source():
         if src["index"] == index:
             if src.get("type") == SOURCE_TYPE_WEBCAM:
                 # Switching cameras: the previous publisher still owns the
-                # MediaMTX path and would reject the replacement. This is the
-                # one mutating path that tolerates an unknown, because it leaves
-                # the slot marked as a webcam — nothing is lost, and the
-                # replacement publish reports the conflict itself.
-                _try_release_webcam_publisher(index)
+                # MediaMTX path. Persisting "stopped" below without confirming
+                # it is gone would hide the Stop control for a camera that may
+                # still be live, and nothing promotes a slot back to playing —
+                # so an unconfirmed release raises and leaves the slot as it was.
+                _release_webcam_publisher(index, bool(data.get("publisher_released")))
             elif src.get("state") == "playing":
                 stop_media_stream(index)
             src["type"] = SOURCE_TYPE_WEBCAM

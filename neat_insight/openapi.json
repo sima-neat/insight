@@ -509,7 +509,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Register one source slot for a browser webcam",
-        "description": "Marks one one-based source slot as a browser-published webcam and returns the WHIP URL the browser posts its WebRTC offer to. Unlike `/api/mediasrc/assign`, Insight does not start a publisher itself: the browser publishes the camera over WHIP, MediaMTX republishes it as RTSP, and `/api/mediasrc/start` only confirms that the stream arrived. Any file assignment on the slot is cleared, and a playing file source is stopped first. The returned `urls.whip` host and port already account for SDK port remapping, so use it exactly as returned.",
+        "description": "Marks one one-based source slot as a browser-published webcam and returns the WHIP URL the browser posts its WebRTC offer to. Unlike `/api/mediasrc/assign`, Insight does not start a publisher itself: the browser publishes the camera over WHIP, MediaMTX republishes it as RTSP, and `/api/mediasrc/start` only confirms that the stream arrived. Any file assignment on the slot is cleared, and a playing file source is stopped first. The returned `urls.whip` host and port already account for SDK port remapping, so use it exactly as returned.\n\nOn a slot that is already a webcam this switches cameras, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, so the previous camera stays stoppable. A caller that already closed its own publisher may send `publisher_released: true`.",
         "operationId": "assignWebcamMediaSource",
         "x-codeSamples": [
           {
@@ -553,7 +553,8 @@
           },
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
       }
     },

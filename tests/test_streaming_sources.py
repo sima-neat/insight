@@ -685,6 +685,34 @@ class WebcamSourceTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn(2, [call.args[0] for call in kick.call_args_list])
 
+    def test_switching_cameras_refuses_when_the_old_publisher_is_unconfirmed(self):
+        """Persisting stopped would hide the Stop control for a camera still live."""
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
+            response = self._assign_webcam(1)
+
+        self.assertEqual(response.status_code, 502)
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["type"], "webcam")
+        self.assertEqual(source["state"], "playing", "still stoppable")
+
+    def test_switching_cameras_is_allowed_when_the_caller_released_its_publisher(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
+            response = self.client.post(
+                "/api/mediasrc/assign-webcam",
+                json={"index": 1, "publisher_released": True},
+                headers={"Host": "localhost:9900"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
     def test_switching_cameras_kicks_the_previous_publisher(self):
         self._assign_webcam(1)
 
