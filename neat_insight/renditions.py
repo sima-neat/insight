@@ -470,20 +470,30 @@ def _release_source(record: dict, rel_path: str, media_dir: Path) -> bool:
     return False
 
 
-def claim_rendition(index_path: Path, key: str, rel_path: str) -> None:
-    """Record that `rel_path` (a byte-identical file) also relies on the rendition stored under `key`."""
+def claim_rendition(index_path: Path, media_dir: Path, key: str, rel_path: str, digest: str) -> None:
+    """Record that `rel_path` (a byte-identical file) also relies on the rendition stored under `key`.
+
+    Like add_rendition, this also releases `rel_path`'s claims on renditions of its previous
+    content (a different source digest), unlinking any it was the last claimant of.
+    """
     with _index_lock:
         index = load_index(index_path)
         changed = False
+        kept = []
         for record in index["renditions"]:
-            if record.get("key") != key:
-                continue
-            sources = record_sources(record)
-            if rel_path not in sources:
-                record["source_files"] = [*sources, rel_path]
-                record.setdefault("source_file", sources[0] if sources else rel_path)
+            if record.get("key") == key:
+                sources = record_sources(record)
+                if rel_path not in sources:
+                    record["source_files"] = [*sources, rel_path]
+                    record.setdefault("source_file", sources[0] if sources else rel_path)
+                    changed = True
+            elif rel_path in record_sources(record) and record.get("source_sha256") != digest:
                 changed = True
+                if not _release_source(record, rel_path, media_dir):
+                    continue
+            kept.append(record)
         if changed:
+            index["renditions"] = kept
             save_index(index_path, index)
 
 
@@ -578,10 +588,15 @@ def _validate_timestamps(path: Path, fps: int, packets: Iterable[tuple[float, fl
             raise RenditionError(f"{path.name} packet timestamps do not start at zero")
         if abs(pts - dts) > tolerance or (previous is not None and abs(pts - previous - interval) > tolerance):
             raise RenditionError(f"{path.name} packet timestamps are reordered or not constant frame rate")
+        at_whole_second = abs(pts - round(pts)) <= tolerance
         if is_key:
             if abs(pts - keyframes) > tolerance:
                 raise RenditionError(f"{path.name} does not have a closed one-second keyframe cadence starting at zero")
             keyframes += 1
+        elif at_whole_second or pts > keyframes + tolerance:
+            # The packet at each whole second must itself be a keyframe; passing the next expected
+            # keyframe time without one means the encoder ignored the GOP settings.
+            raise RenditionError(f"{path.name} is missing the keyframe expected at {keyframes} s")
         previous = pts
     if keyframes == 0:
         raise RenditionError(f"{path.name} does not have a closed one-second keyframe cadence starting at zero")
@@ -662,7 +677,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
     with _lock_for(key):
         existing = find_rendition(index_path, media_dir, key)
         if existing:
-            claim_rendition(index_path, key, rel_path)  # a byte-identical file under another name shares it
+            claim_rendition(index_path, media_dir, key, rel_path, digest)  # a byte-identical file under another name shares it
             yield {"event": "done", "path": str(media_dir / existing["path"]), "rendition": existing["path"], "reused": True, "native": False}
             return
 

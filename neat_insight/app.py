@@ -2589,12 +2589,14 @@ def start_source():
     if holder:
         return _external_conflict_error(index, holder)
 
-    src = next((s for s in load_sources() if s["index"] == index), None)
+    with _slot_lock:  # snapshot and generation belong together; a stop after this is detected
+        src = next((s for s in load_sources() if s["index"] == index), None)
+        generation = _slot_generation(index)
     if src is None:
         return _json_error("Source not found", 404)
     if not src.get("file"):
         return _json_error("No file assigned to source")
-    ok, err, status = _start_source_slot(src)
+    ok, err, status = _start_source_slot(src, generation=generation)
     if not ok:
         return _json_error(err, status)
     return {"success": True}
@@ -2637,14 +2639,16 @@ def start_sources_bulk():
         source_index = target["index"]
         # Re-read the slot: an earlier target may have encoded for minutes, and the
         # slot's file or fps may have changed in the meantime.
-        src = next((s for s in load_sources() if s.get("index") == source_index), None)
+        with _slot_lock:  # snapshot and generation belong together; a stop after this is detected
+            src = next((s for s in load_sources() if s.get("index") == source_index), None)
+            generation = _slot_generation(source_index)
         if src is None or not src.get("file"):
             errors.append({"index": source_index, "error": "No file assigned to source"})
             continue
         if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
             continue
-        ok, err, _status = _start_source_slot(src)
+        ok, err, _status = _start_source_slot(src, generation=generation)
         if ok:
             started.append(source_index)
         else:
