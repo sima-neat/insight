@@ -2141,11 +2141,12 @@ def _index_error(index):
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
 
 
+def _external_conflict_message(index, path) -> str:
+    return f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it."
+
+
 def _external_conflict_error(index, path):
-    return _json_error(
-        f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it.",
-        409,
-    )
+    return _json_error(_external_conflict_message(index, path), 409)
 
 
 def _skipped_suffix(skipped_external, phrase="Skipped external"):
@@ -2467,8 +2468,18 @@ def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Opt
         # The final check, the launch and the persist are one step under the slot lock, so a stop or
         # reassignment cannot slip in between the check and the process being registered.
         with _slot_lock:
+            current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
+            if current and current.get("state") == "playing" and media_stream_is_running(src["index"]):
+                # A concurrent start already launched this slot and persisted it as playing.
+                # Repeated starts are idempotent; do not write this request's older snapshot back.
+                return True, None, 200
             if _slot_changed_since(src, generation):
                 return stale
+            holder = _external_holder(src["index"])
+            if holder:
+                # An external publisher took the slot while the input was being prepared; mediamtx
+                # is first-publisher-wins and would reject our process only after launch.
+                return False, _external_conflict_message(src["index"], holder), 409
             if rendition and not input_path.is_file():
                 # Clear renditions ran between the cache lookup and this launch; prepare again.
                 if attempt == 0:
@@ -2488,6 +2499,7 @@ def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Opt
                 _persist_slot(src)
                 return False, err, 500
             src["state"] = "playing"
+            _bump_slot(src["index"])  # invalidate any other request's pre-launch snapshot of this slot
             _persist_slot(src)
         return True, None, 200
     return False, "Rendition preparation did not settle", 500  # unreachable: the loop returns on every path

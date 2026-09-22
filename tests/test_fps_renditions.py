@@ -792,6 +792,44 @@ class StartPersistenceTests(RenditionApiTestCase):
         self.assertEqual(stream.call_args.args[1], str(fresh))
         self.assertEqual(self.persisted()[1]["state"], "playing")
 
+    def test_start_rechecks_external_ownership_before_launching(self):
+        # Codex review: an external publisher that takes the slot during the encode must turn
+        # the start into a conflict, not a launch that mediamtx rejects asynchronously.
+        holder = mock.Mock(protocol="rtsp", address="10.0.0.5")
+        taken = []
+
+        def external_holder(index, snapshot=None):
+            return holder if taken and index == 1 else None
+        with mock.patch.object(app_module, "_external_holder", side_effect=external_holder):
+            response, stream = self.start_slot_for_real(lambda: taken.append(True))
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("external publisher", response.get_json()["error"])
+        stream.assert_not_called()
+        self.assertEqual(self.persisted()[1]["state"], "stopped")
+
+    def test_duplicate_start_does_not_overwrite_a_live_slot(self):
+        # Codex review: two overlapping starts share a snapshot; the loser's "Already running"
+        # must not persist its stale stopped snapshot over the winner's playing slot.
+        first, stream = self.start_slot_for_real(lambda: None)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(self.persisted()[1]["state"], "playing")
+        stale = dict(self.persisted()[1], state="stopped")  # the second request's pre-launch snapshot
+        stale_generation = app_module._slot_generation(1) - 1  # captured before the first launch bumped it
+        with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_resolve_stream_input", return_value=(self.media_dir / "a.mp4", None, None, 200)), \
+             mock.patch.object(app_module, "media_stream_is_running", return_value=True), \
+             mock.patch.object(app_module, "start_media_stream", return_value=(False, "Already running")) as second_stream:
+            ok, _err, status = app_module._start_source_slot(stale, generation=stale_generation)
+        self.assertEqual((ok, status), (True, 200))
+        second_stream.assert_not_called()
+        self.assertEqual(self.persisted()[1]["state"], "playing")
+
+    def test_successful_start_bumps_the_generation(self):
+        before = app_module._slot_generation(1)
+        response, _stream = self.start_slot_for_real(lambda: None)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app_module._slot_generation(1), before + 1)
+
     def test_start_proceeds_when_the_slot_is_unchanged(self):
         response, stream = self.start_slot_for_real(lambda: None)
         self.assertEqual(response.status_code, 200)
