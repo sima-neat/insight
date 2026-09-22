@@ -513,6 +513,8 @@ class WebcamSourceTests(unittest.TestCase):
         """Overwriting it would lose the only record that a camera may still be live."""
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
 
         with mock.patch.object(app_module, "kick_webcam_publisher",
                                side_effect=app_module.MediaServerUnreachable("down")):
@@ -523,11 +525,28 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(body["unconfirmed_webcams"], [1])
         sources = app_module.load_sources()
         self.assertEqual(sources[0]["type"], "webcam", "still identifiable for a retry")
+        self.assertEqual(sources[0]["state"], "playing", "Stop must remain available")
         self.assertEqual(sources[1]["file"], "clip.mp4",
                          "the skipped slot must not consume the video")
 
+    def test_auto_assign_believes_a_caller_that_released_its_own_publisher(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post(
+                    "/api/mediasrc/auto-assign-all", json={"released_webcams": [1]})
+
+        body = response.get_json()
+        self.assertEqual(body["unconfirmed_webcams"], [])
+        self.assertEqual(app_module.load_sources()[0]["file"], "clip.mp4")
+
     def test_reset_keeps_a_webcam_slot_it_could_not_confirm(self):
         self._assign_webcam(3)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 3})
 
         with mock.patch.object(app_module, "kick_webcam_publisher",
                                side_effect=app_module.MediaServerUnreachable("down")):
@@ -535,7 +554,9 @@ class WebcamSourceTests(unittest.TestCase):
 
         body = response.get_json()
         self.assertEqual(body["unconfirmed_webcams"], [3])
-        self.assertEqual(app_module.load_sources()[2]["type"], "webcam")
+        source = app_module.load_sources()[2]
+        self.assertEqual(source["type"], "webcam")
+        self.assertEqual(source["state"], "playing", "Stop must remain available")
 
     def test_reset_clears_a_webcam_slot_it_did_confirm(self):
         self._assign_webcam(3)
@@ -623,6 +644,8 @@ class WebcamSourceTests(unittest.TestCase):
 
     def test_stop_all_names_the_slots_it_could_not_confirm(self):
         self._assign_webcam(2)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 2})
 
         with mock.patch.object(app_module, "kick_webcam_publisher",
                                side_effect=app_module.MediaServerUnreachable("down")):
@@ -632,6 +655,8 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, "the other sources still stopped")
         self.assertEqual(body["unconfirmed_webcams"], [2])
         self.assertIn("Could not confirm", body["message"])
+        self.assertEqual(app_module.load_sources()[1]["state"], "playing",
+                         "still playing, so the Stop control stays available to retry")
 
     def test_stopping_a_file_source_does_not_call_the_kick_api(self):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")

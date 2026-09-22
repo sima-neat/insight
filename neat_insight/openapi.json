@@ -561,7 +561,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign available videos to source slots",
-        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions before rewriting the slot. A slot whose publisher could not be confirmed closed keeps its webcam marking and playing state, is left unassigned, and is listed in `unconfirmed_webcams`; the remaining slots are assigned as usual. A caller that already closed its own publishers may list them in `released_webcams`.",
         "operationId": "autoAssignMediaSources",
         "responses": {
           "200": {

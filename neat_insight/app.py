@@ -2340,6 +2340,9 @@ def assign_webcam_source():
 @app.post("/api/mediasrc/auto-assign-all")
 def auto_assign_all_sources():
     """Stop active sources, assign each slot a unique video when available, persist the stopped assignments."""
+    data = request.get_json(silent=True) or {}
+    released = {i for i in data.get("released_webcams") or [] if isinstance(i, int)}
+
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
     unconfirmed = []
@@ -2352,12 +2355,13 @@ def auto_assign_all_sources():
         if src.get("state") == "playing":
             stop_media_stream(source_index)
 
-        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(source_index):
-            # Same reasoning as reset: keep the slot marked as a webcam rather
-            # than losing the only record that a browser may still be
-            # publishing to it, which is what a later stop needs to retry.
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
+            source_index, source_index in released
+        ):
+            # Same reasoning as reset: keep the slot marked as a webcam, and
+            # playing, rather than losing the only record that a browser may
+            # still be publishing to it and the control needed to stop it.
             unconfirmed.append(source_index)
-            src["state"] = "stopped"
             continue
 
         # Writing a file assignment makes this a file slot again. Without this
@@ -2554,7 +2558,10 @@ def stop_all_sources():
         if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
             source_index, source_index in released
         ):
+            # Persisting "stopped" would hide the Stop control for a camera that
+            # may still be live, and nothing promotes a slot back to playing.
             unconfirmed.append(source_index)
+            continue
         stop_media_stream(source_index)
         src["state"] = "stopped"
 
@@ -2597,9 +2604,11 @@ def reset_all_sources():
     for source_index in unconfirmed:
         # Resetting the slot to a file source would erase the only record that
         # a browser may still be publishing to it, and with it any chance of a
-        # later stop identifying the slot and retrying the kick.
+        # later stop identifying the slot and retrying the kick. It stays
+        # playing too, so the Stop control remains available to retry with.
         if 1 <= source_index <= len(defaults):
             defaults[source_index - 1]["type"] = SOURCE_TYPE_WEBCAM
+            defaults[source_index - 1]["state"] = "playing"
     save_sources(defaults)
 
     message = "Reset all source assignments."

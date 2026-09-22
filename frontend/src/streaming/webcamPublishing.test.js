@@ -388,3 +388,46 @@ test("a browser without setCodecPreferences is rejected", () => {
   assert.throws(() => pinH264(undefined, caps), /cannot choose a video codec/);
   assert.throws(() => pinH264({}, caps), /cannot choose a video codec/);
 });
+
+test("a terminal failure stops the retry loop immediately", () => {
+  // A slot reassigned mid-start will never become what we are waiting for.
+  let calls = 0;
+  const slept = [];
+  const superseded = { superseded: true };
+
+  return assert.rejects(
+    confirmWebcamPublishing(
+      async () => { calls += 1; throw superseded; },
+      {
+        isTerminal: (e) => Boolean(e?.superseded),
+        sleep: async (ms) => slept.push(ms),
+        now: () => 0,
+      },
+    ),
+    (e) => e === superseded,
+  ).then(() => {
+    assert.equal(calls, 1, "no retry after a terminal failure");
+    assert.deepEqual(slept, [], "and no waiting either");
+  });
+});
+
+test("an ordinary failure still retries to the deadline", async () => {
+  let clock = 0;
+  let calls = 0;
+
+  await assert.rejects(
+    confirmWebcamPublishing(
+      async () => { calls += 1; throw new Error("not publishing yet"); },
+      {
+        isTerminal: (e) => Boolean(e?.superseded),
+        timeoutMs: 500,
+        intervalMs: 250,
+        sleep: async (ms) => { clock += ms; },
+        now: () => clock,
+      },
+    ),
+    /not publishing yet/,
+  );
+
+  assert.equal(calls, 3, "retried as before");
+});

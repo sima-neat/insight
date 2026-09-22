@@ -1701,8 +1701,16 @@ export default function App() {
       if (index === selectedSource) setWebcamPreviewStream(stream)
 
       // Insight only records the slot as playing once MediaMTX sees the path,
-      // which lags the WHIP exchange by the ICE handshake.
-      await confirmWebcamPublishing(() => startSource(index))
+      // which lags the WHIP exchange by the ICE handshake. The slot can still be
+      // reassigned during that wait, so check on every attempt — starting a slot
+      // that is now a file source would leave that file unexpectedly playing.
+      await confirmWebcamPublishing(
+        () => {
+          if (superseded()) throw WEBCAM_START_SUPERSEDED
+          return startSource(index)
+        },
+        { isTerminal: (e) => Boolean(e?.superseded) },
+      )
     } catch (e) {
       if (webcamSessionsRef.current.has(index)) {
         teardownWebcamSession(index)
@@ -1740,8 +1748,13 @@ export default function App() {
     try {
       // The backend rewrites every slot to a file source; the browser has to
       // release the cameras those slots were using.
+      const released = Array.from(webcamSessionsRef.current.keys())
       teardownAllWebcamSessions({ clearAssignments: true })
-      const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
+      const data = await fetchJson('/api/mediasrc/auto-assign-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_webcams: released })
+      })
       await loadSources()
       setUploadStatus(data.message || `Assigned ${data.assigned_count || 0} source(s).`)
     } catch (e) {
@@ -1794,8 +1807,13 @@ export default function App() {
     try {
       // Reset returns every slot to an unassigned file source, so the camera
       // choices go with it.
+      const released = Array.from(webcamSessionsRef.current.keys())
       teardownAllWebcamSessions({ clearAssignments: true })
-      const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
+      const data = await fetchJson('/api/mediasrc/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_webcams: released })
+      })
       await loadSources()
       setSelectedSource(1)
       setUploadStatus(data.message || 'Reset all assignments.')

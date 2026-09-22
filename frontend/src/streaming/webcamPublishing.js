@@ -84,6 +84,10 @@ export async function confirmWebcamPublishing(attempt, options = {}) {
     intervalMs = 250,
     sleep = defaultSleep,
     now = () => Date.now(),
+    // Not every failure is worth retrying. A slot reassigned out from under the
+    // start will never become the thing we are waiting for, so retrying until
+    // the deadline would both waste the wait and risk acting on the new slot.
+    isTerminal = () => false,
   } = options
 
   const deadline = now() + timeoutMs
@@ -94,6 +98,7 @@ export async function confirmWebcamPublishing(attempt, options = {}) {
       return await attempt()
     } catch (error) {
       lastError = error
+      if (isTerminal(error)) throw error
     }
     if (now() >= deadline) {
       throw lastError || new Error('Webcam did not start publishing in time.')
