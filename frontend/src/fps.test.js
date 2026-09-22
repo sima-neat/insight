@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { FPS_MAX, FPS_MIN, FPS_STEP, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import { FPS_MAX, FPS_MIN, FPS_STEP, allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 
 test('constants match the backend range', () => {
   assert.equal(FPS_MIN, 1)
@@ -50,4 +50,11 @@ test('withCommittedFps applies a settled commit and leaves the row alone otherwi
   assert.equal(withCommittedFps(row, undefined), row)
   assert.equal(withCommittedFps(row, { ok: false }), null)
   assert.equal(withCommittedFps(null, { ok: true, fps: 15 }), null)
+})
+
+test('allCommitsSucceeded is false as soon as one pending commit failed', () => {
+  // Codex review: Bulk Start must not post when any awaited FPS commit was refused.
+  assert.equal(allCommitsSucceeded([]), true)
+  assert.equal(allCommitsSucceeded([{ ok: true, fps: 15 }, { ok: true, fps: 20 }]), true)
+  assert.equal(allCommitsSucceeded([{ ok: true, fps: 15 }, { ok: false }]), false)
 })

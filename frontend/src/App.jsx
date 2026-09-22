@@ -3,7 +3,7 @@ import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
-import { formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -1803,8 +1803,10 @@ export default function App() {
       return
     }
     try {
-      // Like Play, wait for any in-flight FPS commit so the server starts the committed rates.
-      await Promise.all([...pendingFpsCommits.current.values()])
+      // Like Play, wait for any in-flight FPS commit so the server starts the committed rates,
+      // and do nothing if one was refused (the commit already showed its error).
+      const commits = await Promise.all([...pendingFpsCommits.current.values()])
+      if (!allCommitsSucceeded(commits)) return
       const data = await fetchJson('/api/mediasrc/start-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

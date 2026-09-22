@@ -45,3 +45,8 @@ export function withCommittedFps(src, result) {
   if (!result.ok) return null
   return { ...src, fps: result.fps }
 }
+
+// Bulk Start awaits the pending FPS commits of every slot; it must not post if any was refused.
+export function allCommitsSucceeded(results) {
+  return results.every((result) => result && result.ok)
+}
