@@ -452,6 +452,34 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(width, 1)
         self.assertEqual(len(calls), 1)
 
+    def test_no_more_probes_run_at_once_than_the_limit(self):
+        # One request can discover many external publishers; their probes must not all
+        # spawn an ffprobe at the same time.
+        running, peak, release = [0], [0], threading.Event()
+        counter = threading.Lock()
+
+        def probe(url):
+            with counter:
+                running[0] += 1
+                peak[0] = max(peak[0], running[0])
+            release.wait(2)
+            with counter:
+                running[0] -= 1
+            return {"width": 1, "height": 2, "fps": 3}
+
+        paths = [dict(PATHS[1], name=f"src{i}", source={"type": "rtspSession", "id": f"pub-{i}"}) for i in range(10, 20)]
+        sessions = {**SESSIONS, "rtspsessions": [{"id": f"pub-{i}", "remoteAddr": "10.0.0.1:1", "query": ""} for i in range(10, 20)]}
+        client = mediamtx.MediamtxClient(request=_fake_request(paths=paths, sessions=sessions), clock=FakeClock(), probe=probe)
+        for path in client.snapshot().values():
+            client.external_info(path)
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline and running[0] < mediamtx.MAX_CONCURRENT_PROBES:
+            time.sleep(0.01)
+        time.sleep(0.05)
+        release.set()
+        self.assertEqual(peak[0], mediamtx.MAX_CONCURRENT_PROBES)
+        self.assertLess(mediamtx.MAX_CONCURRENT_PROBES, 10)
+
     def test_stale_probe_result_is_ignored_after_eviction(self):
         client = mediamtx.MediamtxClient(
             request=_fake_request(), clock=FakeClock(),
