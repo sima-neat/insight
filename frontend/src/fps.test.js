@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { FPS_MAX, FPS_MIN, FPS_STEP, formatFpsProgress, parseFps, stepFps } from './fps.js'
+import { FPS_MAX, FPS_MIN, FPS_STEP, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 
 test('constants match the backend range', () => {
   assert.equal(FPS_MIN, 1)
@@ -33,4 +33,21 @@ test('parseFps rejects invalid input', () => {
 test('formatFpsProgress renders m:ss pairs', () => {
   assert.equal(formatFpsProgress({ seconds: 25, total: 60 }), '0:25 / 1:00')
   assert.equal(formatFpsProgress({ seconds: 3725.4, total: null }), '1:02:05')
+})
+
+test('needsRendition is true only for an fps that differs from the native rate', () => {
+  assert.equal(needsRendition(null), false)
+  assert.equal(needsRendition({ fps: null, native_fps: 30 }), false)
+  assert.equal(needsRendition({ fps: 30, native_fps: 30 }), false)
+  assert.equal(needsRendition({ fps: 15, native_fps: 30 }), true)
+  assert.equal(needsRendition({ fps: 15, native_fps: null }), true)
+})
+
+test('withCommittedFps applies a settled commit and leaves the row alone otherwise', () => {
+  // Codex review: Play must see the fps the stepper just committed, not the stale row.
+  const row = { index: 1, fps: 30, native_fps: 30 }
+  assert.deepEqual(withCommittedFps(row, { ok: true, fps: 15 }), { index: 1, fps: 15, native_fps: 30 })
+  assert.equal(withCommittedFps(row, undefined), row)
+  assert.equal(withCommittedFps(row, { ok: false }), null)
+  assert.equal(withCommittedFps(null, { ok: true, fps: 15 }), null)
 })

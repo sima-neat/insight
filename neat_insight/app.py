@@ -2469,9 +2469,12 @@ def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Opt
         # reassignment cannot slip in between the check and the process being registered.
         with _slot_lock:
             current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
-            if current and current.get("state") == "playing" and media_stream_is_running(src["index"]):
-                # A concurrent start already launched this slot and persisted it as playing.
+            same_input = current is not None and (current.get("file") or "") == file_name \
+                and renditions.coerce_fps(current.get("fps")) == renditions.coerce_fps(src.get("fps"))
+            if same_input and current.get("state") == "playing" and media_stream_is_running(src["index"]):
+                # A concurrent start already launched this same file/fps and persisted it as playing.
                 # Repeated starts are idempotent; do not write this request's older snapshot back.
+                # A different file or fps running here means this request was superseded (409 below).
                 return True, None, 200
             if _slot_changed_since(src, generation):
                 return stale

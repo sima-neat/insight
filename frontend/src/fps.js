@@ -30,3 +30,18 @@ export function formatFpsProgress({ seconds, total }) {
   const done = clock(Number(seconds) || 0)
   return Number.isFinite(total) && total > 0 ? `${done} / ${clock(total)}` : done
 }
+
+// True when starting `src` needs an FPS rendition (an override that differs from the native rate).
+export function needsRendition(src) {
+  return Boolean(src) && src.fps != null && src.fps !== src.native_fps
+}
+
+// The row Play should act on once a pending FPS commit has settled: `result` is undefined when
+// nothing was pending, `{ ok: true, fps }` when the commit landed, `{ ok: false }` when it failed
+// (Play then does nothing; the commit already reported its error).
+export function withCommittedFps(src, result) {
+  if (!src) return null
+  if (result === undefined) return src
+  if (!result.ok) return null
+  return { ...src, fps: result.fps }
+}

@@ -3,7 +3,7 @@ import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
-import { formatFpsProgress, parseFps, stepFps } from './fps.js'
+import { formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -776,6 +776,7 @@ export default function App() {
   const [previewToken, setPreviewToken] = useState(() => Date.now())
   const [loadedPreviewSrc, setLoadedPreviewSrc] = useState(null)
   const previewImgRef = useRef(null)
+  const pendingFpsCommits = useRef(new Map()) // slot index -> promise of the in-flight FPS assign
   const [takeoverTarget, setTakeoverTarget] = useState(null)
   const [takeoverBusy, setTakeoverBusy] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -1634,6 +1635,16 @@ export default function App() {
     }
   }
 
+  // The stepper commits on blur; a Play click in the same motion must wait for that assign and
+  // act on the committed fps, otherwise it skips the prepare step and races /assign on the server.
+  function commitFps(index, fps) {
+    const commit = updateSource(index, { fps })
+      .then(() => ({ ok: true, fps }), (e) => { setError(e.message); return { ok: false } })
+      .finally(() => { if (pendingFpsCommits.current.get(index) === commit) pendingFpsCommits.current.delete(index) })
+    pendingFpsCommits.current.set(index, commit)
+    return commit
+  }
+
   async function updateSource(index, patch) {
     const src = sources.find((item) => item.index === index) || {}
     const next = {
@@ -1725,10 +1736,11 @@ export default function App() {
   }
 
   async function startSource(index) {
-    const src = sources.find((s) => s.index === index)
-    const needsRendition = Boolean(src) && src.fps != null && src.fps !== src.native_fps
+    const pending = pendingFpsCommits.current.get(index)
+    const src = withCommittedFps(sources.find((s) => s.index === index), pending ? await pending : undefined)
+    if (!src) return // the fps commit failed and already reported; nothing to start
     try {
-      if (needsRendition) await prepareSource(index, src.fps)
+      if (needsRendition(src)) await prepareSource(index, src.fps)
       await fetchJson('/api/mediasrc/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2342,7 +2354,7 @@ export default function App() {
                             disabled={!isAssigned || !canStream || src.codec === 'mjpeg'}
                             locked={src.state === 'playing' || Boolean(encodeProgress[src.index])}
                             title={!isAssigned ? 'Assign media before choosing a frame rate' : (src.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (src.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${src.index} (source ${src.native_fps ?? '?'} fps)`))}
-                            onCommit={(fps) => updateSource(src.index, { fps }).catch((e) => setError(e.message))}
+                            onCommit={(fps) => commitFps(src.index, fps)}
                             onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[src.index] === bad ? prev : { ...prev, [src.index]: bad }))}
                           />
                           {(src.state === 'playing' || encodeProgress[src.index]) ? (

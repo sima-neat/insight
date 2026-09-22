@@ -824,6 +824,23 @@ class StartPersistenceTests(RenditionApiTestCase):
         second_stream.assert_not_called()
         self.assertEqual(self.persisted()[1]["state"], "playing")
 
+    def test_superseded_start_is_not_treated_as_a_duplicate(self):
+        # Codex review: a live slot only counts as "already started" for a request whose
+        # snapshot still matches the persisted file and fps; otherwise it is stale (409).
+        first, _stream = self.start_slot_for_real(lambda: None)
+        self.assertEqual(first.status_code, 200)
+        self.edit_slot_one(file="b.mp4", fps=20)  # reassigned and (re)started as b.mp4 meanwhile
+        app_module._bump_slot(1)
+        stale = dict(self.persisted()[1], file="a.mp4", fps=None, state="stopped")
+        with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_resolve_stream_input", return_value=(self.media_dir / "a.mp4", None, None, 200)), \
+             mock.patch.object(app_module, "media_stream_is_running", return_value=True), \
+             mock.patch.object(app_module, "start_media_stream") as stream:
+            ok, err, status = app_module._start_source_slot(stale, generation=0)
+        self.assertEqual((ok, status), (False, 409), err)
+        stream.assert_not_called()
+        self.assertEqual((self.persisted()[1]["file"], self.persisted()[1]["fps"]), ("b.mp4", 20))
+
     def test_successful_start_bumps_the_generation(self):
         before = app_module._slot_generation(1)
         response, _stream = self.start_slot_for_real(lambda: None)
