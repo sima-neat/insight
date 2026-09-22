@@ -1634,6 +1634,7 @@ export default function App() {
       assignWebcamToSource(index, deviceId, device?.label || 'Webcam')
       return
     }
+    const owned = webcamSessionsRef.current.has(index)
     if (webcamAssignments[index]) {
       teardownWebcamSession(index)
       setWebcamAssignments((prev) => {
@@ -1642,7 +1643,9 @@ export default function App() {
         return next
       })
     }
-    updateSource(index, { file: value })
+    // Closing our own publisher above released the camera, so the backend does
+    // not need MediaMTX to confirm it before converting the slot to a file.
+    updateSource(index, { file: value, publisher_released: owned })
   }
 
   async function startWebcamSource(index) {

@@ -480,12 +480,13 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
-            response = self.client.post(
-                "/api/mediasrc/assign",
-                json={"index": 1, "file": "clip.mp4"},
-                headers={"Host": "localhost:9900"},
-            )
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=True):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post(
+                    "/api/mediasrc/assign",
+                    json={"index": 1, "file": "clip.mp4"},
+                    headers={"Host": "localhost:9900"},
+                )
 
         self.assertEqual(response.status_code, 200)
         source = app_module.load_sources()[0]
@@ -677,6 +678,36 @@ class WebcamSourceTests(unittest.TestCase):
         urls = response.get_json()[0]["urls"]
         self.assertEqual(urls["whip"], "https://insight.local:8889/src1/whip")
         self.assertEqual(urls["rtsp"], "rtsp://insight.local:8554/src1")
+
+    def test_assigning_a_file_refuses_when_the_publisher_cannot_be_confirmed(self):
+        """Converting the slot would erase the only record that a camera may be live."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post(
+                    "/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
+
+        self.assertEqual(response.status_code, 502)
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["type"], "webcam", "left unchanged so it can be retried")
+        self.assertEqual(source["file"], "")
+
+    def test_assigning_a_file_is_allowed_when_the_caller_released_the_publisher(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post(
+                    "/api/mediasrc/assign",
+                    json={"index": 1, "file": "clip.mp4", "publisher_released": True})
+
+        self.assertEqual(response.status_code, 200)
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["type"], "file")
+        self.assertEqual(source["file"], "clip.mp4")
 
     def test_assigning_a_webcam_over_a_playing_file_stops_its_stream(self):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")

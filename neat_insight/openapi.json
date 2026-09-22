@@ -478,7 +478,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign or clear one source slot",
-        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.",
+        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.\n\nAssigning a file to a webcam slot converts it back to a file source, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, because converting it would erase the only record that a camera may still be publishing. A caller that already closed its own publisher may send `publisher_released: true`.",
         "operationId": "assignMediaSource",
         "x-codeSamples": [
           {
@@ -500,7 +500,8 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
       }
     },

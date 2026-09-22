@@ -2222,7 +2222,20 @@ def assign_source():
                 # Reassigning a webcam slot to a file drops the webcam
                 # registration, and the browser publishing to it has to be
                 # closed by MediaMTX — there is no ffmpeg process to stop.
-                kick_webcam_publisher(index)
+                if (
+                    kick_webcam_publisher(index) is None
+                    and not bool(data.get("publisher_released"))
+                ):
+                    # Writing the file assignment here would erase the webcam
+                    # marking, and with it the only record that a browser may
+                    # still be publishing to this path — leaving nothing able
+                    # to identify the slot and retry the kick.
+                    return _json_error(
+                        "Could not reach MediaMTX to stop the webcam publisher, so this "
+                        "source was left unchanged. Retry once Insight's media server is "
+                        "reachable.",
+                        502,
+                    )
                 src["type"] = SOURCE_TYPE_FILE
                 was_playing = False
             else:
@@ -2271,7 +2284,11 @@ def assign_webcam_source():
         if src["index"] == index:
             if src.get("type") == SOURCE_TYPE_WEBCAM:
                 # Switching cameras: the previous publisher still owns the
-                # MediaMTX path and would reject the replacement.
+                # MediaMTX path and would reject the replacement. The result is
+                # deliberately not checked here — unlike the paths that convert
+                # or clear the slot, this one leaves it marked as a webcam, so
+                # nothing is lost if the kick fails and the replacement publish
+                # reports the conflict itself.
                 kick_webcam_publisher(index)
             elif src.get("state") == "playing":
                 stop_media_stream(index)
