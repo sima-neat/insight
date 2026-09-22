@@ -429,7 +429,8 @@ class WebcamSourceTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with mock.patch.object(app_module, "webcam_is_publishing", return_value=None):
+        with mock.patch.object(app_module, "webcam_is_publishing",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(response.get_json()[0]["state"], "playing")
@@ -438,7 +439,8 @@ class WebcamSourceTests(unittest.TestCase):
     def test_starting_a_webcam_reports_an_unreachable_media_server(self):
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "webcam_is_publishing", return_value=None):
+        with mock.patch.object(app_module, "webcam_is_publishing",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.post("/api/mediasrc/start", json={"index": 1})
 
         self.assertEqual(response.status_code, 502)
@@ -512,7 +514,8 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
                 response = self.client.post("/api/mediasrc/auto-assign-all")
 
@@ -526,7 +529,8 @@ class WebcamSourceTests(unittest.TestCase):
     def test_reset_keeps_a_webcam_slot_it_could_not_confirm(self):
         self._assign_webcam(3)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.post("/api/mediasrc/reset")
 
         body = response.get_json()
@@ -556,7 +560,8 @@ class WebcamSourceTests(unittest.TestCase):
         """Reporting "stopped" for a camera that may still be live is the bug being avoided."""
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.post("/api/mediasrc/stop", json={"index": 1})
 
         self.assertEqual(response.status_code, 502)
@@ -566,7 +571,8 @@ class WebcamSourceTests(unittest.TestCase):
         """The tab that owned the publish closed it itself; MediaMTX's opinion is moot."""
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.post(
                 "/api/mediasrc/stop", json={"index": 1, "publisher_released": True})
 
@@ -576,13 +582,35 @@ class WebcamSourceTests(unittest.TestCase):
     def test_stop_all_does_not_flag_slots_the_caller_released(self):
         self._assign_webcam(2)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.post(
                 "/api/mediasrc/stop-all", json={"released_webcams": [2]})
 
         body = response.get_json()
         self.assertEqual(body["unconfirmed_webcams"], [])
         self.assertNotIn("Could not confirm", body["message"])
+
+    def test_an_unhandled_unknown_answers_502_without_changing_anything(self):
+        """The point of raising: a route that does not handle it fails safe.
+
+        Every previous bug in this area was a caller reading "could not reach
+        MediaMTX" as "nothing is publishing" and then mutating on it. With an
+        exception the default is to abort before the mutation.
+        """
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
+            response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 502)
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["state"], "playing", "state untouched")
+        self.assertEqual(source["type"], "webcam", "still identifiable for a retry")
 
     def test_stop_succeeds_when_there_was_nothing_publishing(self):
         self._assign_webcam(1)
@@ -596,7 +624,8 @@ class WebcamSourceTests(unittest.TestCase):
     def test_stop_all_names_the_slots_it_could_not_confirm(self):
         self._assign_webcam(2)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.post("/api/mediasrc/stop-all")
 
         body = response.get_json()
@@ -684,7 +713,8 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
                 response = self.client.post(
                     "/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
@@ -698,7 +728,8 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
             with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
                 response = self.client.post(
                     "/api/mediasrc/assign",
@@ -748,12 +779,13 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             self.assertFalse(mediasrc.webcam_is_publishing(1))
 
-    def test_reports_not_publishing_when_the_api_is_unreachable(self):
-        """MediaMTX may not be up yet; that must read as "not live", not crash."""
+    def test_raises_when_the_api_is_unreachable(self):
+        """MediaMTX may not be up yet, and "not up" is not "not publishing"."""
         urlopen = mock.Mock(side_effect=mediasrc.urllib.error.URLError("refused"))
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
-            self.assertFalse(mediasrc.webcam_is_publishing(1))
+            with self.assertRaises(mediasrc.MediaServerUnreachable):
+                mediasrc.webcam_is_publishing(1)
 
     def test_kick_closes_the_session_publishing_to_the_path(self):
         calls = []
@@ -804,12 +836,13 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             self.assertIs(mediasrc.webcam_is_publishing(1), False)
 
-    def test_a_broken_status_api_reads_as_unknown_not_idle(self):
+    def test_a_broken_status_api_raises_rather_than_reading_as_idle(self):
         """A blip must not be evidence that a live camera stopped."""
         urlopen = mock.Mock(side_effect=self._http_error(500))
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
-            self.assertIsNone(mediasrc.webcam_is_publishing(1))
+            with self.assertRaises(mediasrc.MediaServerUnreachable):
+                mediasrc.webcam_is_publishing(1)
 
     def test_a_session_that_vanished_before_the_kick_counts_as_idle(self):
         """The owning tab's own teardown commonly wins this race."""
@@ -825,14 +858,15 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", fake_urlopen):
             self.assertIs(mediasrc.kick_webcam_publisher(1), False)
 
-    def test_kick_reports_an_unreachable_api_as_unknown_not_idle(self):
-        """None and False mean different things: "could not tell" vs "nothing there"."""
+    def test_kick_raises_on_an_unreachable_api_rather_than_reading_as_idle(self):
+        """Raising is what stops a caller mistaking "could not tell" for "nothing there"."""
         urlopen = mock.Mock(side_effect=mediasrc.urllib.error.URLError("refused"))
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
-            self.assertIsNone(mediasrc.kick_webcam_publisher(1))
+            with self.assertRaises(mediasrc.MediaServerUnreachable):
+                mediasrc.kick_webcam_publisher(1)
 
-    def test_kick_reports_a_refused_kick_as_unknown(self):
+    def test_kick_raises_when_the_kick_itself_is_refused(self):
         def fake_urlopen(request, timeout=None):
             if "/v3/paths/get/" in request.full_url:
                 payload = {"name": "src1", "ready": True,
@@ -843,15 +877,17 @@ class WebcamPublishStateTests(unittest.TestCase):
             raise mediasrc.urllib.error.URLError("kick refused")
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", fake_urlopen):
-            self.assertIsNone(mediasrc.kick_webcam_publisher(1))
+            with self.assertRaises(mediasrc.MediaServerUnreachable):
+                mediasrc.kick_webcam_publisher(1)
 
-    def test_reports_not_publishing_when_the_api_returns_garbage(self):
+    def test_raises_when_the_api_returns_garbage(self):
         response = mock.MagicMock()
         response.__enter__.return_value = io.BytesIO(b"not json")
         urlopen = mock.Mock(return_value=response)
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
-            self.assertFalse(mediasrc.webcam_is_publishing(1))
+            with self.assertRaises(mediasrc.MediaServerUnreachable):
+                mediasrc.webcam_is_publishing(1)
 
 
 if __name__ == "__main__":

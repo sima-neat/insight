@@ -312,51 +312,62 @@ def webcam_path_name(index: int) -> str:
 # A 404 from MediaMTX is an answer, not a failure: the path or session is not
 # there. Collapsing it into "no answer" would make callers treat a definite
 # "nothing is publishing" as "cannot tell".
-MEDIAMTX_NOT_FOUND = object()
+# A 404 from MediaMTX is an answer, not a failure: the path or session is not
+# there. Collapsing it into "no answer" would make callers treat a definite
+# "nothing is publishing" as "cannot tell".
+_MEDIAMTX_NOT_FOUND = object()
+
+
+class MediaServerUnreachable(RuntimeError):
+    """MediaMTX's control API could not be reached, so nothing is known.
+
+    Raised rather than returned deliberately. Insight has no handle on a browser
+    publishing a webcam, so every question about one is answered by MediaMTX;
+    when it cannot answer, the honest result is "unknown", and a caller that
+    quietly reads that as "nothing is publishing" marks a live camera stopped or
+    erases the record needed to stop it later. Both have happened here. An
+    exception makes the unknown case impossible to ignore by accident: a caller
+    that does not handle it aborts before changing anything, which is the safe
+    default, and the API layer turns it into a 502.
+    """
 
 
 def _mediamtx_request(path: str, method: str = "GET"):
     """Call the MediaMTX control API.
 
-    Returns the decoded body, MEDIAMTX_NOT_FOUND when MediaMTX answered 404, or
-    None when it could not be reached or answered with anything else. The API is
-    loopback-only and may not be up yet, so no caller may treat None as a fact
-    about the stream.
+    Returns the decoded body, or _MEDIAMTX_NOT_FOUND when MediaMTX answered 404.
+    Raises MediaServerUnreachable for anything else.
     """
     request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method)
     try:
         with urllib.request.urlopen(request, timeout=1.0) as response:
             body = response.read()
-            if not body:
-                return {}
-            return json.loads(body)
+            return json.loads(body) if body else {}
     except urllib.error.HTTPError as exc:
-        return MEDIAMTX_NOT_FOUND if exc.code == 404 else None
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-        return None
+        if exc.code == 404:
+            return _MEDIAMTX_NOT_FOUND
+        raise MediaServerUnreachable(f"MediaMTX answered {exc.code} for {path}") from exc
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        raise MediaServerUnreachable(f"MediaMTX did not answer {path}") from exc
 
 
-def webcam_is_publishing(index: int) -> Optional[bool]:
-    """Ask MediaMTX whether a browser is currently WHIP-publishing to this slot.
+def webcam_is_publishing(index: int) -> bool:
+    """Whether a browser is currently WHIP-publishing to this slot.
 
     A webcam source has no Python-managed process to poll (unlike a file
-    source's ffmpeg push), so liveness must come from MediaMTX's own path state
+    source's ffmpeg push), so liveness comes from MediaMTX's own path state
     rather than pipeline_registry.
 
-    ``None`` means the status API could not be reached, which is not evidence
-    that nothing is publishing — a caller that treats it as such will mark a
-    live camera idle over a momentary blip, and nothing promotes a slot back.
+    Raises MediaServerUnreachable when that cannot be established.
     """
     data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
-    if data is MEDIAMTX_NOT_FOUND:
+    if data is _MEDIAMTX_NOT_FOUND:
         return False
-    if data is None:
-        return None
     return bool(data.get("ready"))
 
 
-def kick_webcam_publisher(index: int) -> Optional[bool]:
-    """Drop whatever browser is publishing to this slot.
+def kick_webcam_publisher(index: int) -> bool:
+    """Drop whatever browser is publishing to this slot; True if one was.
 
     Stopping a file source kills an ffmpeg process Insight owns. A webcam is
     published by a browser Insight has no handle on, so the only way to make
@@ -364,29 +375,22 @@ def kick_webcam_publisher(index: int) -> Optional[bool]:
     the session. Without this, a caller in another tab — or any API client —
     gets a success response while the camera keeps streaming.
 
-    Three outcomes, which callers must tell apart:
-
-    - ``True``  a publisher was found and kicked.
-    - ``False`` there was nothing publishing; the slot is already idle.
-    - ``None``  MediaMTX could not be reached or refused. Nothing is known
-      about the publisher, so a caller must not report the slot as stopped.
+    Returns False when there was nothing to kick, and raises
+    MediaServerUnreachable when that could not be established.
     """
     data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
-    if data is MEDIAMTX_NOT_FOUND:
+    if data is _MEDIAMTX_NOT_FOUND:
         return False
-    if data is None:
-        return None
+
     source = data.get("source") or {}
     if source.get("type") != "webRTCSession":
         return False
     session_id = source.get("id")
     if not session_id:
         return False
+
+    # The session ending between the lookup and the kick is the common case,
+    # not an edge one: the owning tab closes its peer connection and deletes the
+    # WHIP resource before asking Insight to stop. Already idle, not a failure.
     kicked = _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST")
-    if kicked is MEDIAMTX_NOT_FOUND:
-        # The session ended between the lookup and the kick — usually the owning
-        # tab's own teardown finishing first. Already idle, not a failure.
-        return False
-    if kicked is None:
-        return None
-    return True
+    return kicked is not _MEDIAMTX_NOT_FOUND

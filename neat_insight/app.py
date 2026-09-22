@@ -51,6 +51,7 @@ from neat_insight.mediasrc import (
     normalize_transport,
     start_media_stream,
     stop_media_stream,
+    MediaServerUnreachable,
     kick_webcam_publisher,
     webcam_is_publishing,
     webcam_path_name,
@@ -2164,13 +2165,56 @@ def _source_with_urls(src):
 
 
 def _source_is_live(src) -> Optional[bool]:
-    """True, False, or None when liveness could not be determined."""
+    """True, False, or None when liveness could not be determined.
+
+    The one place an unknown is swallowed rather than raised: this runs on every
+    source listing, and a momentary MediaMTX blip must not fail the request.
+    Callers must distinguish None from False — see _sync_source_runtime_states.
+    """
     index = src.get("index")
     if index is None:
         return False
     if src.get("type") == SOURCE_TYPE_WEBCAM:
-        return webcam_is_publishing(index)
+        try:
+            return webcam_is_publishing(index)
+        except MediaServerUnreachable:
+            return None
     return media_stream_is_running(index)
+
+
+@app.errorhandler(MediaServerUnreachable)
+def _handle_media_server_unreachable(exc):
+    """A route that did not handle an unknown answers 502 without having changed anything."""
+    logging.warning("MediaMTX control API unavailable: %s", exc)
+    return _json_error(
+        "Could not reach MediaMTX to manage the webcam publisher, so nothing was "
+        "changed. The camera may still be publishing; retry once Insight's media "
+        "server is reachable.",
+        502,
+    )
+
+
+def _release_webcam_publisher(index, released=False):
+    """Close the browser publishing to a slot, or raise if that cannot be confirmed.
+
+    `released` is for a caller that already closed its own peer connection: the
+    camera is off whatever MediaMTX says, so an unreachable control API is not a
+    reason to refuse.
+    """
+    try:
+        kick_webcam_publisher(index)
+    except MediaServerUnreachable:
+        if not released:
+            raise
+
+
+def _try_release_webcam_publisher(index, released=False) -> bool:
+    """_release_webcam_publisher for bulk routes; False when it could not be confirmed."""
+    try:
+        _release_webcam_publisher(index, released)
+        return True
+    except MediaServerUnreachable:
+        return False
 
 
 def _sync_source_runtime_states(sources):
@@ -2222,20 +2266,10 @@ def assign_source():
                 # Reassigning a webcam slot to a file drops the webcam
                 # registration, and the browser publishing to it has to be
                 # closed by MediaMTX — there is no ffmpeg process to stop.
-                if (
-                    kick_webcam_publisher(index) is None
-                    and not bool(data.get("publisher_released"))
-                ):
-                    # Writing the file assignment here would erase the webcam
-                    # marking, and with it the only record that a browser may
-                    # still be publishing to this path — leaving nothing able
-                    # to identify the slot and retry the kick.
-                    return _json_error(
-                        "Could not reach MediaMTX to stop the webcam publisher, so this "
-                        "source was left unchanged. Retry once Insight's media server is "
-                        "reachable.",
-                        502,
-                    )
+                # Writing the file assignment erases the webcam marking, and
+                # with it the only record that a browser may still be publishing
+                # to this path. Raises rather than erasing it unconfirmed.
+                _release_webcam_publisher(index, bool(data.get("publisher_released")))
                 src["type"] = SOURCE_TYPE_FILE
                 was_playing = False
             else:
@@ -2284,12 +2318,11 @@ def assign_webcam_source():
         if src["index"] == index:
             if src.get("type") == SOURCE_TYPE_WEBCAM:
                 # Switching cameras: the previous publisher still owns the
-                # MediaMTX path and would reject the replacement. The result is
-                # deliberately not checked here — unlike the paths that convert
-                # or clear the slot, this one leaves it marked as a webcam, so
-                # nothing is lost if the kick fails and the replacement publish
-                # reports the conflict itself.
-                kick_webcam_publisher(index)
+                # MediaMTX path and would reject the replacement. This is the
+                # one mutating path that tolerates an unknown, because it leaves
+                # the slot marked as a webcam — nothing is lost, and the
+                # replacement publish reports the conflict itself.
+                _try_release_webcam_publisher(index)
             elif src.get("state") == "playing":
                 stop_media_stream(index)
             src["type"] = SOURCE_TYPE_WEBCAM
@@ -2319,7 +2352,7 @@ def auto_assign_all_sources():
         if src.get("state") == "playing":
             stop_media_stream(source_index)
 
-        if src.get("type") == SOURCE_TYPE_WEBCAM and kick_webcam_publisher(source_index) is None:
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(source_index):
             # Same reasoning as reset: keep the slot marked as a webcam rather
             # than losing the only record that a browser may still be
             # publishing to it, which is what a later stop needs to retry.
@@ -2372,13 +2405,8 @@ def start_source():
                 # The browser is what actually publishes to MediaMTX (see
                 # /api/mediasrc/assign-webcam); this just confirms it landed
                 # before recording the slot as playing.
-                publishing = webcam_is_publishing(index)
-                if publishing is None:
-                    return _json_error(
-                        "Could not reach MediaMTX to confirm the webcam is publishing.",
-                        502,
-                    )
-                if not publishing:
+                # An unreachable MediaMTX raises through to the 502 handler.
+                if not webcam_is_publishing(index):
                     return _json_error("Webcam is not publishing yet", 409)
                 src["state"] = "playing"
                 save_sources(sources)
@@ -2495,21 +2523,10 @@ def stop_source():
             # A caller that owned the publish has already closed its own peer
             # connection, so the camera is released whatever MediaMTX says. Only
             # a caller that did not own it depends on the kick to be sure.
-            publisher_released = bool(data.get("publisher_released"))
-            if (
-                src.get("type") == SOURCE_TYPE_WEBCAM
-                and kick_webcam_publisher(index) is None
-                and not publisher_released
-            ):
-                # Nothing is known about the publisher, so persisting "stopped"
-                # here would be a success response for a camera that may well
-                # still be streaming.
-                return _json_error(
-                    "Could not reach MediaMTX to stop the webcam publisher. "
-                    "The camera may still be publishing; retry once Insight's "
-                    "media server is reachable.",
-                    502,
-                )
+            if src.get("type") == SOURCE_TYPE_WEBCAM:
+                # Persisting "stopped" without confirming would be a success
+                # response for a camera that may well still be streaming.
+                _release_webcam_publisher(index, bool(data.get("publisher_released")))
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)
@@ -2534,10 +2551,8 @@ def stop_all_sources():
         source_index = src.get("index")
         if src.get("state") == "playing":
             stopped_count += 1
-        if (
-            src.get("type") == SOURCE_TYPE_WEBCAM
-            and kick_webcam_publisher(source_index) is None
-            and source_index not in released
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
+            source_index, source_index in released
         ):
             unconfirmed.append(source_index)
         stop_media_stream(source_index)
@@ -2572,10 +2587,8 @@ def reset_all_sources():
     unconfirmed = []
     for src in sources:
         source_index = src.get("index")
-        if (
-            src.get("type") == SOURCE_TYPE_WEBCAM
-            and source_index not in released
-            and kick_webcam_publisher(source_index) is None
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
+            source_index, source_index in released
         ):
             unconfirmed.append(source_index)
         stop_media_stream(source_index)
