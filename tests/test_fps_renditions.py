@@ -607,7 +607,7 @@ class StartPersistenceTests(RenditionApiTestCase):
         ]), encoding="utf-8")
         self.seen = []
 
-    def fake_start(self, src):
+    def fake_start(self, src, generation=None):
         # While slot 1 "encodes", another request changes slot 2.
         self.seen.append((src["index"], src.get("file"), src.get("fps")))
         if src["index"] == 1:
@@ -743,6 +743,24 @@ class StartPersistenceTests(RenditionApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(seen, [app_module._slot_generation(1)])
         self.assertIsNotNone(seen[0])
+
+    def test_start_and_bulk_start_pass_the_generation_captured_with_the_snapshot(self):
+        # Codex review: like the assign restart, the direct and bulk paths must not let the
+        # helper read a generation that a stop may already have bumped after the snapshot.
+        seen = []
+
+        def spy(src, generation=None):
+            seen.append((src["index"], generation))
+            src["state"] = "playing"
+            app_module._persist_slot(src)
+            return True, None, 200
+        with mock.patch.object(app_module, "_start_source_slot", side_effect=spy), \
+             mock.patch.object(app_module, "media_stream_is_running", return_value=False):
+            self.assertEqual(self.client.post("/api/mediasrc/start", json={"index": 1}).status_code, 200)
+            self.assertEqual(self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).status_code, 200)
+        self.assertEqual(len(seen), 3)
+        for index, generation in seen:
+            self.assertEqual(generation, app_module._slot_generation(index), seen)
 
     def test_start_with_a_stale_generation_is_abandoned(self):
         src = self.persisted()[1]
@@ -1218,6 +1236,20 @@ class SharedRenditionTests(RenditionApiTestCase):
         self.assertEqual(paths[shared["path"]]["source_files"], ["copy.mp4"])
         self.assertEqual(len(paths), 2)
 
+    def test_reuse_releases_the_paths_claim_on_its_previous_content(self):
+        # Codex review: a path replaced with bytes identical to another source must drop its
+        # claim on renditions of its old content, as the encode branch already does.
+        make_test_clip(self.media_dir / "other.mp4", fps=30, seconds=1.5)  # different content
+        self.assertIn("Rendition ready", self.prepare(1, "other.mp4"))
+        self.assertIn("Rendition ready", self.prepare(2, "demo.mp4"))
+        old = next(r for r in self.records() if r["source_files"] == ["other.mp4"])
+        shutil.copyfile(self.media_dir / "demo.mp4", self.media_dir / "other.mp4")  # now identical to demo
+        os.utime(self.media_dir / "other.mp4", ns=(1, 1))
+        self.assertIn("Reusing rendition", self.prepare(1, "other.mp4"))
+        self.assertFalse((self.media_dir / old["path"]).exists())
+        (shared,) = self.records()
+        self.assertEqual(shared["source_files"], ["demo.mp4", "other.mp4"])
+
     def test_legacy_record_without_source_files_still_removes(self):
         self.prepare(1, "demo.mp4")
         index = renditions.load_index(self.index_path)
@@ -1254,6 +1286,16 @@ class IncrementalTimestampValidationTests(unittest.TestCase):
         def packets():
             for i in range(40):
                 yield (i / 10, i / 10, i in (0, 10, 25))  # third keyframe is early
+        with self.assertRaises(renditions.RenditionError) as ctx:
+            renditions._validate_timestamps(Path("x.mp4"), 10, packets())
+        self.assertIn("keyframe", str(ctx.exception))
+
+    def test_missing_periodic_keyframes_are_rejected(self):
+        # Codex review: a keyframe only at zero passed because cadence was checked only when a
+        # keyframe appeared; the packet at each whole second must itself be a keyframe.
+        def packets():
+            for i in range(30):
+                yield (i / 10, i / 10, i == 0)
         with self.assertRaises(renditions.RenditionError) as ctx:
             renditions._validate_timestamps(Path("x.mp4"), 10, packets())
         self.assertIn("keyframe", str(ctx.exception))
