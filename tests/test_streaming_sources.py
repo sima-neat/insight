@@ -273,8 +273,9 @@ class StreamingSourceTests(unittest.TestCase):
         self.mtx.paths["src2"] = external_path(2)
         with mock.patch.object(app_module.shutil, "which", return_value=None):
             self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 503)
-        with mock.patch.object(app_module, "PREVIEW_MAX_STREAMS", 0):
-            self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 429)
+        with mock.patch.object(app_module.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            with mock.patch.object(app_module, "PREVIEW_MAX_STREAMS", 0):
+                self.assertEqual(self.client.get("/stream/preview/src2.mjpg").status_code, 429)
 
     def test_preview_route_streams_and_releases_slot(self):
         self.mtx.paths["src2"] = external_path(2)
