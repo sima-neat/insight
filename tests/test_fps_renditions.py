@@ -531,6 +531,22 @@ class SlotFpsTests(RenditionApiTestCase):
         self.assertIsNone(src["fps"])
         self.assertEqual(src["native_fps"], 25)
 
+    def test_auto_assign_resets_fps_like_a_manual_file_change(self):
+        # Auto Assign replaces every slot's file; a frame-rate override chosen
+        # for the previous clip must not carry over to the new one.
+        make_test_clip(self.media_dir / "other.mp4", fps=25)
+        self.assign(index=1, file="other.mp4", fps=15)  # auto-assign will move slot 1 to demo.mp4
+        self.assign(index=2, file="other.mp4", fps=20)  # auto-assign keeps slot 2 on other.mp4
+        response = self.client.post("/api/mediasrc/auto-assign-all")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.source(1)["file"], "demo.mp4")
+        self.assertIsNone(self.source(1)["fps"])
+        self.assertEqual(self.source(2)["file"], "other.mp4")
+        self.assertEqual(self.source(2)["fps"], 20)
+        persisted = {s["index"]: s["fps"] for s in app_module.load_sources()}
+        self.assertIsNone(persisted[1])
+        self.assertEqual(persisted[2], 20)
+
     def test_normalize_source_drops_invalid_persisted_fps(self):
         self.sources_file.write_text('[{"index": 1, "file": "demo.mp4", "state": "stopped", "fps": "bogus"}, {"index": 2, "file": "demo.mp4", "state": "stopped", "fps": 20}]', encoding="utf-8")
         sources = app_module.load_sources()
@@ -759,6 +775,28 @@ class PrepareEndpointTests(RenditionApiTestCase):
         index = renditions.load_index(self.index_path)
         self.assertEqual(index["renditions"], [])
         self.assertNotIn("demo.mp4", index["sources"])
+
+    def test_delete_directory_removes_renditions_and_unassigns_slots(self):
+        (self.media_dir / "clips").mkdir()
+        make_test_clip(self.media_dir / "clips" / "inner.mp4", fps=30, seconds=1.5)  # distinct bytes from demo.mp4
+        self.assign(index=2, file="clips/inner.mp4", fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 2}).get_data()
+        self.assign(index=3, file="demo.mp4", fps=15)
+        self.client.post("/api/mediasrc/prepare", json={"index": 3}).get_data()
+        records = {r["source_file"]: r for r in renditions.load_index(self.index_path)["renditions"]}
+        self.assertEqual(set(records), {"clips/inner.mp4", "demo.mp4"})
+
+        response = self.client.post("/api/delete-media", json={"path": "clips"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse((self.media_dir / "clips").exists())
+        self.assertFalse((self.media_dir / records["clips/inner.mp4"]["path"]).exists())
+        self.assertTrue((self.media_dir / records["demo.mp4"]["path"]).exists())
+        index = renditions.load_index(self.index_path)
+        self.assertEqual([r["source_file"] for r in index["renditions"]], ["demo.mp4"])
+        self.assertNotIn("clips/inner.mp4", index["sources"])
+        self.assertEqual(self.source(2)["file"], "")
+        self.assertEqual(self.source(3)["file"], "demo.mp4")
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")

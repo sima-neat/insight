@@ -1880,21 +1880,28 @@ def delete_media():
 
     try:
         if full_path.is_file():
-            file_name = os.path.relpath(full_path, MEDIA_DIR)
-            sources = load_sources()
-            modified = False
-            for src in sources:
-                if src.get("file") == file_name:
-                    stop_media_stream(src["index"])
-                    src["file"] = ""
-                    src["state"] = "stopped"
-                    modified = True
-            if modified:
-                save_sources(sources)
+            removed_files = [full_path]
+        else:
+            removed_files = [Path(root) / name for root, _dirs, names in os.walk(full_path) for name in names]
+        removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
+
+        sources = load_sources()
+        modified = False
+        for src in sources:
+            if (src.get("file") or "").replace(os.path.sep, "/") in removed_names:
+                stop_media_stream(src["index"])
+                src["file"] = ""
+                src["state"] = "stopped"
+                modified = True
+        if modified:
+            save_sources(sources)
+        for file_name in sorted(removed_names):
             try:
-                renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name.replace(os.path.sep, "/"))
+                renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name)
             except Exception as exc:
                 logging.warning("Failed to remove renditions for %s: %s", file_name, exc)
+
+        if full_path.is_file():
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
@@ -2326,7 +2333,10 @@ def auto_assign_all_sources():
         src["state"] = "stopped"
         if source_index in skipped_external:
             continue
-        src["file"] = next(remaining, "")
+        new_file = next(remaining, "")
+        if new_file != (src.get("file") or ""):
+            src["fps"] = None  # an fps override belongs to the clip it was chosen for
+        src["file"] = new_file
         assigned_count += bool(src["file"])
         src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
         src["state"] = "stopped"

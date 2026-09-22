@@ -365,7 +365,7 @@
       "post": {
         "tags": ["Media library"],
         "summary": "Delete a media file or directory",
-        "description": "Permanently deletes a file or directory beneath the media root. If the deleted path is assigned to a media-source slot, Insight clears that assignment to avoid leaving stale playback state. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
+        "description": "Permanently deletes a file or directory beneath the media root. If a deleted file (or any file inside a deleted directory) is assigned to a media-source slot, Insight stops that slot and clears the assignment, and it discards any cached FPS renditions built from the deleted files. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
         "operationId": "deleteMedia",
         "requestBody": {
           "required": true,
@@ -509,7 +509,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign available videos to source slots",
-        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin. Slots held by an external publisher are skipped and listed in `skipped_external`.",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. A slot whose file changes loses its `fps` override, exactly as with a manual assign. Call the bulk-start endpoint afterward when playback should begin. Slots held by an external publisher are skipped and listed in `skipped_external`.",
         "operationId": "autoAssignMediaSources",
         "responses": {
           "200": {
