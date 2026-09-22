@@ -30,11 +30,16 @@ export function makeVideo(target, seconds = 2) {
 export function seedTree() {
   const name = `folder-nav-test-${Date.now().toString(36)}`
   const dir = path.join(mediaRoot(), name)
-  for (const rel of TREE.videos) makeVideo(path.join(dir, rel))
-  for (const rel of TREE.others) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
-    fs.writeFileSync(path.join(dir, rel), 'not a video\n')
+  try {
+    for (const rel of TREE.videos) makeVideo(path.join(dir, rel))
+    for (const rel of TREE.others) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+      fs.writeFileSync(path.join(dir, rel), 'not a video\n')
+    }
+    for (const rel of TREE.emptyFolders) fs.mkdirSync(path.join(dir, rel), { recursive: true })
+  } catch (err) {
+    fs.rmSync(dir, { recursive: true, force: true })
+    throw err
   }
-  for (const rel of TREE.emptyFolders) fs.mkdirSync(path.join(dir, rel), { recursive: true })
   return { name, dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }

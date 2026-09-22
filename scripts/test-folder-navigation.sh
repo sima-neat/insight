@@ -14,7 +14,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-for tool in ffmpeg node npx; do
+for tool in ffmpeg node npx curl; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: $tool is required on PATH" >&2
     exit 1
