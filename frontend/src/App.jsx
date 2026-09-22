@@ -1,5 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  confirmWebcamPublishing,
+  describeWebcamError,
+  publishWebcamOffer,
+  selectH264Codecs,
+} from './streaming/webcamPublishing.js'
+
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
 const SOURCE_COUNT = 48
@@ -1513,32 +1520,6 @@ export default function App() {
     await loadSources()
   }
 
-  function describeWebcamError(e) {
-    if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
-      return 'Camera permission was denied. Allow camera access for this site and try again.'
-    }
-    if (e?.name === 'NotFoundError' || e?.name === 'OverconstrainedError') {
-      return 'That camera is no longer available. Detect webcams again and reselect one.'
-    }
-    if (e?.name === 'NotReadableError') {
-      return 'The camera could not be started (it may be in use by another application).'
-    }
-    return e?.message || 'Webcam publishing failed.'
-  }
-
-  function waitForIceGatheringComplete(pc) {
-    if (pc.iceGatheringState === 'complete') return Promise.resolve()
-    return new Promise((resolve) => {
-      function check() {
-        if (pc.iceGatheringState === 'complete') {
-          pc.removeEventListener('icegatheringstatechange', check)
-          resolve()
-        }
-      }
-      pc.addEventListener('icegatheringstatechange', check)
-    })
-  }
-
   function teardownWebcamSession(index) {
     const session = webcamSessionsRef.current.get(index)
     if (!session) return
@@ -1650,13 +1631,8 @@ export default function App() {
       pc = new RTCPeerConnection()
       const videoTrack = stream.getVideoTracks()[0]
       const sender = pc.addTrack(videoTrack, stream)
-      // Chrome's default offer prefers VP8; the rest of this app (codec
-      // badges, Core app expectations) assumes h264/h265/mjpeg only, and the
-      // ticket calls for H.264 specifically, so pin the transceiver to it
-      // rather than let the browser negotiate whatever it likes.
       const transceiver = pc.getTransceivers().find((t) => t.sender === sender)
-      const h264Codecs = (RTCRtpSender.getCapabilities?.('video')?.codecs || [])
-        .filter((codec) => /^video\/H264$/i.test(codec.mimeType))
+      const h264Codecs = selectH264Codecs(RTCRtpSender.getCapabilities?.('video'))
       if (transceiver && typeof transceiver.setCodecPreferences === 'function' && h264Codecs.length) {
         transceiver.setCodecPreferences(h264Codecs)
       }
@@ -1667,47 +1643,15 @@ export default function App() {
         }
       })
 
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      await waitForIceGatheringComplete(pc)
-
-      const response = await fetch(whipUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/sdp' },
-        body: pc.localDescription.sdp
-      })
-      if (!response.ok) {
-        throw new Error(`Webcam publish was rejected (HTTP ${response.status}).`)
-      }
-      const answerSdp = await response.text()
-      const location = response.headers.get('Location')
-      let deleteUrl = null
-      if (location) {
-        try {
-          deleteUrl = new URL(location, whipUrl).toString()
-        } catch {
-          deleteUrl = null
-        }
-      }
+      const { answerSdp, deleteUrl } = await publishWebcamOffer(pc, whipUrl)
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
 
       webcamSessionsRef.current.set(index, { pc, stream, deleteUrl })
       if (index === selectedSource) setWebcamPreviewStream(stream)
 
-      // MediaMTX marks the path ready within ~1s of ICE completing; one
-      // retry absorbs that race instead of surfacing a spurious failure.
-      let confirmed = false
-      let lastError = null
-      for (let attempt = 0; attempt < 2 && !confirmed; attempt += 1) {
-        try {
-          await startSource(index)
-          confirmed = true
-        } catch (e) {
-          lastError = e
-          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700))
-        }
-      }
-      if (!confirmed) throw lastError || new Error('Webcam did not start publishing in time.')
+      // Insight only records the slot as playing once MediaMTX sees the path,
+      // which lags the WHIP exchange by the ICE handshake.
+      await confirmWebcamPublishing(() => startSource(index))
     } catch (e) {
       teardownWebcamSession(index)
       if (stream && !webcamSessionsRef.current.has(index)) stream.getTracks().forEach((track) => track.stop())
