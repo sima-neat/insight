@@ -1526,11 +1526,13 @@ export default function App() {
     await loadSources()
   }
 
-  async function stopSource(index) {
+  async function stopSource(index, { publisherReleased = false } = {}) {
     await fetchJson('/api/mediasrc/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
+      // Closing our own peer connection released the camera regardless of what
+      // MediaMTX reports, so this slot needs no confirmation from it.
+      body: JSON.stringify({ index, publisher_released: publisherReleased })
     })
     await loadSources()
   }
@@ -1722,9 +1724,10 @@ export default function App() {
   }
 
   async function stopWebcamSource(index) {
+    const owned = webcamSessionsRef.current.has(index)
     teardownWebcamSession(index)
     try {
-      await stopSource(index)
+      await stopSource(index, { publisherReleased: owned })
     } catch (e) {
       setError(e.message)
     }
@@ -1770,8 +1773,13 @@ export default function App() {
     try {
       // Stop leaves the slot assigned, so the camera choice is kept and only
       // the publishing session ends.
+      const released = Array.from(webcamSessionsRef.current.keys())
       teardownAllWebcamSessions()
-      const data = await fetchJson('/api/mediasrc/stop-all', { method: 'POST' })
+      const data = await fetchJson('/api/mediasrc/stop-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_webcams: released })
+      })
       await loadSources()
       setUploadStatus(data.message || 'Stopped all sources.')
     } catch (e) {

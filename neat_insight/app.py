@@ -2445,7 +2445,15 @@ def stop_source():
             # ffmpeg process, the browser is the publisher. Ask MediaMTX to
             # close the session so this means "stopped" for any caller, not
             # just the tab that happens to own the RTCPeerConnection.
-            if src.get("type") == SOURCE_TYPE_WEBCAM and kick_webcam_publisher(index) is None:
+            # A caller that owned the publish has already closed its own peer
+            # connection, so the camera is released whatever MediaMTX says. Only
+            # a caller that did not own it depends on the kick to be sure.
+            publisher_released = bool(data.get("publisher_released"))
+            if (
+                src.get("type") == SOURCE_TYPE_WEBCAM
+                and kick_webcam_publisher(index) is None
+                and not publisher_released
+            ):
                 # Nothing is known about the publisher, so persisting "stopped"
                 # here would be a success response for a camera that may well
                 # still be streaming.
@@ -2467,6 +2475,11 @@ def stop_source():
 @app.post("/api/mediasrc/stop-all")
 def stop_all_sources():
     """Stop all source processes, persist every source as stopped, and return how many were previously playing."""
+    data = request.get_json(silent=True) or {}
+    # Indexes whose publisher the caller has already closed itself; those need
+    # no confirmation from MediaMTX.
+    released = {i for i in data.get("released_webcams") or [] if isinstance(i, int)}
+
     sources = load_sources()
     stopped_count = 0
     unconfirmed = []
@@ -2474,7 +2487,11 @@ def stop_all_sources():
         source_index = src.get("index")
         if src.get("state") == "playing":
             stopped_count += 1
-        if src.get("type") == SOURCE_TYPE_WEBCAM and kick_webcam_publisher(source_index) is None:
+        if (
+            src.get("type") == SOURCE_TYPE_WEBCAM
+            and kick_webcam_publisher(source_index) is None
+            and source_index not in released
+        ):
             unconfirmed.append(source_index)
         stop_media_stream(source_index)
         src["state"] = "stopped"

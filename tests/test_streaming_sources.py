@@ -503,6 +503,28 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("may still be publishing", response.get_json()["error"])
 
+    def test_a_caller_that_released_its_own_publisher_is_believed(self):
+        """The tab that owned the publish closed it itself; MediaMTX's opinion is moot."""
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            response = self.client.post(
+                "/api/mediasrc/stop", json={"index": 1, "publisher_released": True})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_stop_all_does_not_flag_slots_the_caller_released(self):
+        self._assign_webcam(2)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+            response = self.client.post(
+                "/api/mediasrc/stop-all", json={"released_webcams": [2]})
+
+        body = response.get_json()
+        self.assertEqual(body["unconfirmed_webcams"], [])
+        self.assertNotIn("Could not confirm", body["message"])
+
     def test_stop_succeeds_when_there_was_nothing_publishing(self):
         self._assign_webcam(1)
 

@@ -621,7 +621,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop one source",
-        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.",
+        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.\n\nA webcam slot is published by a browser rather than by Insight, so stopping one asks MediaMTX to close that session. If MediaMTX cannot be reached the call answers `502` rather than reporting a stop it cannot verify. A caller that has already closed its own publisher may send `publisher_released: true` to skip that check.",
         "operationId": "stopMediaSource",
         "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
         "responses": {
@@ -636,7 +636,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop every source",
-        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop.",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop. A caller that has already closed its own publishers may list those indexes in `released_webcams`, and they are not reported as unconfirmed.",
         "operationId": "stopAllMediaSources",
         "responses": {
           "200": {
