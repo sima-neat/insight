@@ -2722,15 +2722,18 @@ def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     snapshot = _path_snapshot()
     skipped_external = []
-    for src in load_sources():
-        source_index = src.get("index")
-        # Classify before stopping: _external_holder only discounts a path while our own
-        # publisher is alive, so stopping first would report our just-stopped slot as external.
-        if _external_holder(source_index, snapshot):
-            skipped_external.append(source_index)
-        # Reset clears every stored record; the external stream itself is never touched.
-        stop_media_stream(source_index)
-    reset_sources()
+    # Stop and rewrite under the slot lock so a start cannot launch between the two and leave a
+    # live process attached to a slot that reset just reported as empty.
+    with _slot_lock:
+        for src in load_sources():
+            source_index = src.get("index")
+            # Classify before stopping: _external_holder only discounts a path while our own
+            # publisher is alive, so stopping first would report our just-stopped slot as external.
+            if _external_holder(source_index, snapshot):
+                skipped_external.append(source_index)
+            # Reset clears every stored record; the external stream itself is never touched.
+            stop_media_stream(source_index)
+        reset_sources()
     return {"success": True, "skipped_external": skipped_external,
             "message": "Reset all source assignments." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)}
 
