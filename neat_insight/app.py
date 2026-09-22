@@ -2373,6 +2373,27 @@ def _resolve_stream_input(src) -> tuple[Optional[Path], Optional[str], Optional[
     return Path(result["path"]), result.get("rendition"), None, 200
 
 
+_sources_write_lock = threading.Lock()
+
+
+def _persist_slot(src) -> None:
+    """Write one slot into a freshly loaded source list.
+
+    Starting a slot can block for minutes while a rendition encodes, and other
+    requests keep editing sources meanwhile. Saving the whole pre-encode
+    snapshot would overwrite those edits, so only the started slot is written.
+    """
+    with _sources_write_lock:
+        sources = load_sources()
+        for position, existing in enumerate(sources):
+            if existing.get("index") == src.get("index"):
+                sources[position] = src
+                break
+        else:
+            sources.append(src)
+        save_sources(sources)
+
+
 def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
     """Derive stream settings, prepare the input (source or FPS rendition), start the slot. Mutates src; returns (ok, error, http status)."""
     file_name = src.get("file") or ""
@@ -2494,18 +2515,16 @@ def start_source():
     if holder:
         return _external_conflict_error(index, holder)
 
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            if not src.get("file"):
-                return _json_error("No file assigned to source")
-            ok, err, status = _start_source_slot(src)
-            save_sources(sources)
-            if not ok:
-                return _json_error(err, status)
-            return {"success": True}
-
-    return _json_error("Source not found", 404)
+    src = next((s for s in load_sources() if s["index"] == index), None)
+    if src is None:
+        return _json_error("Source not found", 404)
+    if not src.get("file"):
+        return _json_error("No file assigned to source")
+    ok, err, status = _start_source_slot(src)
+    _persist_slot(src)
+    if not ok:
+        return _json_error(err, status)
+    return {"success": True}
 
 
 # API: start multiple assigned media sources in source-index order.
@@ -2541,18 +2560,24 @@ def start_sources_bulk():
     already_running = []
     errors = []
 
-    for src in targets:
-        source_index = src["index"]
+    for target in targets:
+        source_index = target["index"]
+        # Re-read the slot: an earlier target may have encoded for minutes, and the
+        # slot's file or fps may have changed in the meantime.
+        src = next((s for s in load_sources() if s.get("index") == source_index), None)
+        if src is None or not src.get("file"):
+            errors.append({"index": source_index, "error": "No file assigned to source"})
+            continue
         if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
             continue
         ok, err, _status = _start_source_slot(src)
+        _persist_slot(src)
         if ok:
             started.append(source_index)
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})
 
-    save_sources(sources)
     started_or_running = len(started) + len(already_running)
     return {
         "success": len(errors) == 0,

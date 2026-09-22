@@ -43,14 +43,41 @@ class FpsRuleTests(unittest.TestCase):
         self.assertIsNone(renditions.detect_fps({"avg_frame_rate": "0/0", "r_frame_rate": "0/0"}))
         self.assertIsNone(renditions.detect_fps({}))
 
-    def test_level_and_bitrate_follow_catalog_rules(self):
-        self.assertEqual(renditions.video_level("h264", 720, 30), "3.1")
-        self.assertEqual(renditions.video_level("h264", 720, 60), "3.2")
-        self.assertEqual(renditions.video_level("h265", 720, 60), "4.0")
-        self.assertEqual(renditions.video_level("h264", 1080, 120), "5.1")
-        self.assertEqual(renditions.video_level("h264", 240, 15), "3.0")
-        self.assertEqual(renditions.expected_level_code("h264", 720, 30), 31)
-        self.assertEqual(renditions.expected_level_code("h265", 720, 30), 93)
+    def test_level_matches_catalog_grid(self):
+        # The catalog's fixed resolution/fps grid keeps the levels it always had.
+        self.assertEqual(renditions.video_level("h264", 1280, 720, 30), "3.1")
+        self.assertEqual(renditions.video_level("h264", 1280, 720, 60), "3.2")
+        self.assertEqual(renditions.video_level("h265", 1280, 720, 60), "4.0")
+        self.assertEqual(renditions.video_level("h264", 1920, 1080, 30), "4.0")
+        self.assertEqual(renditions.video_level("h264", 1920, 1080, 120), "5.1")
+        self.assertEqual(renditions.video_level("h265", 1920, 1080, 120), "5.0")
+        self.assertEqual(renditions.video_level("h264", 3840, 2160, 30), "5.1")
+        self.assertEqual(renditions.video_level("h264", 854, 480, 30), "3.1")
+        self.assertEqual(renditions.video_level("h265", 854, 480, 30), "3.0")
+        self.assertEqual(renditions.video_level("h264", 426, 240, 15), "3.0")
+        self.assertEqual(renditions.expected_level_code("h264", 1280, 720, 30), 31)
+        self.assertEqual(renditions.expected_level_code("h265", 1280, 720, 30), 93)
+
+    def test_level_grows_with_frame_rate_and_frame_size(self):
+        # Codex review: a level must cover the macroblock (H.264) or luma-sample (H.265)
+        # rate of the requested fps, not just the resolution tier.
+        self.assertEqual(renditions.video_level("h264", 1280, 720, 61), "4.0")
+        self.assertEqual(renditions.video_level("h264", 1280, 720, 120), "4.2")
+        self.assertEqual(renditions.video_level("h264", 1280, 720, 240), "5.1")
+        self.assertEqual(renditions.video_level("h264", 1920, 1080, 60), "4.2")
+        self.assertEqual(renditions.video_level("h264", 1920, 1080, 240), "5.2")
+        self.assertEqual(renditions.video_level("h264", 3840, 2160, 60), "5.2")
+        self.assertEqual(renditions.video_level("h264", 3840, 2160, 240), "6.1")
+        self.assertEqual(renditions.video_level("h265", 1280, 720, 240), "5.0")
+        self.assertEqual(renditions.video_level("h265", 3840, 2160, 240), "6.1")
+        # 4:3 content is judged by its real width, not a 16:9 assumption.
+        self.assertEqual(renditions.video_level("h264", 640, 480, 60), "3.1")
+        with self.assertRaises(renditions.UnsupportedRendition):
+            renditions.video_level("h264", 7680, 4320, 240)
+        with self.assertRaises(renditions.UnsupportedRendition):
+            renditions.video_level("h265", 7680, 4320, 240)
+
+    def test_bitrate_follows_catalog_rules(self):
         self.assertEqual(renditions.video_bitrate(720, 15), "2M")
         self.assertEqual(renditions.video_bitrate(720, 30), "5M")
         self.assertEqual(renditions.video_bitrate(1080, 30), "12M")
@@ -66,7 +93,7 @@ class FpsRuleTests(unittest.TestCase):
         )
 
     def test_encode_command_h264_matches_catalog_contract(self):
-        cmd = renditions.encode_command(Path("/m/demo.mp4"), Path("/m/.renditions/.x.tmp.mp4"), 15, "h264", 720)
+        cmd = renditions.encode_command(Path("/m/demo.mp4"), Path("/m/.renditions/.x.tmp.mp4"), 15, "h264", 1280, 720)
         joined = " ".join(cmd)
         self.assertEqual(cmd[0], "ffmpeg")
         self.assertIn("-vf setpts=PTS-STARTPTS,fps=15", joined)
@@ -87,7 +114,7 @@ class FpsRuleTests(unittest.TestCase):
         self.assertEqual(cmd[-1], "/m/.renditions/.x.tmp.mp4")
 
     def test_encode_command_h265_matches_catalog_contract(self):
-        cmd = renditions.encode_command(Path("/m/demo.mp4"), Path("/m/out.mp4"), 60, "h265", 720)
+        cmd = renditions.encode_command(Path("/m/demo.mp4"), Path("/m/out.mp4"), 60, "h265", 1280, 720)
         joined = " ".join(cmd)
         self.assertIn("-c:v libx265", joined)
         self.assertIn("-profile:v main", joined)
@@ -98,7 +125,7 @@ class FpsRuleTests(unittest.TestCase):
 
     def test_encode_command_rejects_mjpeg(self):
         with self.assertRaises(ValueError):
-            renditions.encode_command(Path("/m/a.mp4"), Path("/m/b.mp4"), 15, "mjpeg", 720)
+            renditions.encode_command(Path("/m/a.mp4"), Path("/m/b.mp4"), 15, "mjpeg", 1280, 720)
 
     def test_parse_progress_seconds(self):
         self.assertEqual(renditions.parse_progress_seconds("out_time_us", "2500000"), 2.5)
@@ -384,7 +411,7 @@ class RenditionEncodeTests(unittest.TestCase):
     def test_encoder_failure_cleans_up_and_leaves_source_and_index_untouched(self):
         source_bytes = self.source.read_bytes()
 
-        def broken_command(source, output, fps, codec, height):
+        def broken_command(source, output, fps, codec, width, height):
             return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
                     "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
 
@@ -438,7 +465,7 @@ class RenditionEncodeTests(unittest.TestCase):
     def test_validate_rendition_rejects_wrong_fps(self):
         _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         with self.assertRaises(renditions.RenditionError) as ctx:
-            renditions.validate_rendition(Path(done["path"]), 20, "h264", 240)
+            renditions.validate_rendition(Path(done["path"]), 20, "h264", 426, 240)
         self.assertIn("r_frame_rate", str(ctx.exception))
 
 
@@ -493,6 +520,53 @@ class RenditionApiTestCase(unittest.TestCase):
 
     def source(self, index=1):
         return next(s for s in self.client.get("/api/mediasrc").get_json() if s["index"] == index)
+
+
+class StartPersistenceTests(RenditionApiTestCase):
+    """Codex review: a start that encodes for minutes must not save a stale copy of the other slots."""
+
+    def setUp(self):
+        super().setUp()
+        self.sources_file.write_text(json.dumps([
+            {"index": 1, "file": "a.mp4", "state": "stopped", "fps": None},
+            {"index": 2, "file": "b.mp4", "state": "stopped", "fps": None},
+        ]), encoding="utf-8")
+        self.seen = []
+
+    def fake_start(self, src):
+        # While slot 1 "encodes", another request changes slot 2.
+        self.seen.append((src["index"], src.get("file"), src.get("fps")))
+        if src["index"] == 1:
+            sources = app_module.load_sources()
+            other = next(s for s in sources if s["index"] == 2)
+            other["file"] = "c.mp4"
+            other["fps"] = 20
+            app_module.save_sources(sources)
+        src["state"] = "playing"
+        return True, None, 200
+
+    def persisted(self):
+        return {s["index"]: s for s in app_module.load_sources()}
+
+    def test_bulk_start_keeps_edits_made_while_encoding_and_starts_the_fresh_slot(self):
+        with mock.patch.object(app_module, "_start_source_slot", side_effect=self.fake_start), \
+             mock.patch.object(app_module, "media_stream_is_running", return_value=False):
+            response = self.client.post("/api/mediasrc/start-bulk", json={"count": 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["started"], [1, 2])
+        after = self.persisted()
+        self.assertEqual(after[1]["state"], "playing")
+        self.assertEqual((after[2]["file"], after[2]["fps"], after[2]["state"]), ("c.mp4", 20, "playing"))
+        # Slot 2 was started from its current assignment, not the pre-encode snapshot.
+        self.assertEqual(self.seen, [(1, "a.mp4", None), (2, "c.mp4", 20)])
+
+    def test_single_start_keeps_edits_made_to_other_slots_while_encoding(self):
+        with mock.patch.object(app_module, "_start_source_slot", side_effect=self.fake_start):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 200)
+        after = self.persisted()
+        self.assertEqual(after[1]["state"], "playing")
+        self.assertEqual((after[2]["file"], after[2]["fps"]), ("c.mp4", 20))
 
 
 @unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
@@ -660,7 +734,7 @@ class StartWithRenditionTests(RenditionApiTestCase):
         self.assign(fps=15)
         source_bytes = (self.media_dir / "demo.mp4").read_bytes()
 
-        def broken_command(source, output, fps, codec, height):
+        def broken_command(source, output, fps, codec, width, height):
             return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
                     "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
 
@@ -744,7 +818,7 @@ class PrepareEndpointTests(RenditionApiTestCase):
     def test_prepare_reports_encode_errors_in_stream(self):
         self.assign(fps=15)
 
-        def broken_command(source, output, fps, codec, height):
+        def broken_command(source, output, fps, codec, width, height):
             return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
                     "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
 
