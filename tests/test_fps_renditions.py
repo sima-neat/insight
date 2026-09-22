@@ -1093,6 +1093,67 @@ class ClearRenditionsApiTests(RenditionApiTestCase):
         self.assertEqual(held, [True])
 
 
+@unittest.skipUnless(HAVE_FFMPEG, "ffmpeg and ffprobe are required")
+class SharedRenditionTests(RenditionApiTestCase):
+    """Codex review: a content-addressed rendition can be claimed by several identical files;
+    it must outlive the deletion or replacement of any one of them."""
+
+    def setUp(self):
+        super().setUp()
+        make_test_clip(self.media_dir / "demo.mp4", fps=30)
+        shutil.copyfile(self.media_dir / "demo.mp4", self.media_dir / "copy.mp4")  # identical bytes
+
+    def prepare(self, index, file):
+        self.assign(index=index, file=file, fps=15)
+        return self.client.post("/api/mediasrc/prepare", json={"index": index}).get_data(as_text=True)
+
+    def records(self):
+        return renditions.load_index(self.index_path)["renditions"]
+
+    def test_reuse_records_every_claiming_source(self):
+        self.assertIn("Rendition ready", self.prepare(1, "demo.mp4"))
+        self.assertIn("Reusing rendition", self.prepare(2, "copy.mp4"))
+        (record,) = self.records()
+        self.assertEqual(record["source_files"], ["demo.mp4", "copy.mp4"])
+        self.assertEqual(record["source_file"], "demo.mp4")
+
+    def test_deleting_one_claimant_keeps_the_shared_rendition(self):
+        self.prepare(1, "demo.mp4")
+        self.prepare(2, "copy.mp4")
+        (record,) = self.records()
+        self.assertEqual(self.client.post("/api/delete-media", json={"path": "demo.mp4"}).status_code, 200)
+        self.assertTrue((self.media_dir / record["path"]).exists())
+        (record,) = self.records()
+        self.assertEqual(record["source_files"], ["copy.mp4"])
+        self.assertIn("Reusing rendition", self.prepare(2, "copy.mp4"))
+        self.assertEqual(self.client.post("/api/delete-media", json={"path": "copy.mp4"}).status_code, 200)
+        self.assertFalse((self.media_dir / record["path"]).exists())
+        self.assertEqual(self.records(), [])
+
+    def test_replacing_one_claimant_keeps_the_shared_rendition(self):
+        self.prepare(1, "demo.mp4")
+        self.prepare(2, "copy.mp4")
+        (shared,) = self.records()
+        make_test_clip(self.media_dir / "demo.mp4", fps=30, seconds=1.5)  # new content under the old name
+        os.utime(self.media_dir / "demo.mp4", ns=(1, 1))  # make sure the stat differs from the cached one
+        self.assertIn("Rendition ready", self.prepare(1, "demo.mp4"))
+        paths = {r["path"]: r for r in self.records()}
+        self.assertIn(shared["path"], paths)
+        self.assertTrue((self.media_dir / shared["path"]).exists())
+        self.assertEqual(paths[shared["path"]]["source_files"], ["copy.mp4"])
+        self.assertEqual(len(paths), 2)
+
+    def test_legacy_record_without_source_files_still_removes(self):
+        self.prepare(1, "demo.mp4")
+        index = renditions.load_index(self.index_path)
+        del index["renditions"][0]["source_files"]
+        renditions.save_index(self.index_path, index)
+        path = self.records()[0]["path"]
+        renditions.remove_source(self.index_path, self.media_dir, "demo.mp4")
+        self.assertFalse((self.media_dir / path).exists())
+        self.assertEqual(self.records(), [])
+
+
 class IncrementalTimestampValidationTests(unittest.TestCase):
     """Codex review: validation must stream packets, not buffer a whole multi-hour probe."""
 

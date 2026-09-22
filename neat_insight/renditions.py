@@ -434,21 +434,64 @@ def find_rendition(index_path: Path, media_dir: Path, key: str) -> Optional[dict
         return dict(found) if found else None
 
 
+def record_sources(record: dict) -> list[str]:
+    """Every source path that claims `record`. Renditions are content-addressed, so byte-identical
+    files share one; older records carry only `source_file`."""
+    sources = record.get("source_files")
+    if isinstance(sources, list) and sources:
+        return [str(path) for path in sources]
+    single = record.get("source_file")
+    return [str(single)] if single else []
+
+
+def _release_source(record: dict, rel_path: str, media_dir: Path) -> bool:
+    """Drop `rel_path`'s claim on `record`; unlink the file and return False when no claim is left."""
+    remaining = [path for path in record_sources(record) if path != rel_path]
+    if remaining:
+        record["source_files"] = remaining
+        record["source_file"] = remaining[0]
+        return True
+    rel_out = record.get("path")
+    if rel_out:
+        (media_dir / rel_out).unlink(missing_ok=True)
+    return False
+
+
+def claim_rendition(index_path: Path, key: str, rel_path: str) -> None:
+    """Record that `rel_path` (a byte-identical file) also relies on the rendition stored under `key`."""
+    with _index_lock:
+        index = load_index(index_path)
+        changed = False
+        for record in index["renditions"]:
+            if record.get("key") != key:
+                continue
+            sources = record_sources(record)
+            if rel_path not in sources:
+                record["source_files"] = [*sources, rel_path]
+                record.setdefault("source_file", sources[0] if sources else rel_path)
+                changed = True
+        if changed:
+            save_index(index_path, index)
+
+
 def add_rendition(index_path: Path, record: dict, media_dir: Path) -> None:
-    """Store `record`, replacing the same key and pruning renditions orphaned by a replaced source."""
+    """Store `record`, replacing the same key and releasing the source's claim on renditions of its old content.
+
+    A rendition claimed by other byte-identical files survives; only one whose last claimant
+    was replaced is unlinked.
+    """
     source_file = record.get("source_file")
     digest = record.get("source_sha256")
+    record.setdefault("source_files", [source_file] if source_file else [])
     with _index_lock:
         index = load_index(index_path)
         kept = []
         for existing in index["renditions"]:
             if existing.get("key") == record["key"]:
                 continue
-            if existing.get("source_file") == source_file and existing.get("source_sha256") != digest:
-                rel_out = existing.get("path")
-                if rel_out:
-                    (media_dir / rel_out).unlink(missing_ok=True)
-                continue
+            if source_file in record_sources(existing) and existing.get("source_sha256") != digest:
+                if not _release_source(existing, source_file, media_dir):
+                    continue
             kept.append(existing)
         kept.append(record)
         index["renditions"] = kept
@@ -606,6 +649,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
     with _lock_for(key):
         existing = find_rendition(index_path, media_dir, key)
         if existing:
+            claim_rendition(index_path, key, rel_path)  # a byte-identical file under another name shares it
             yield {"event": "done", "path": str(media_dir / existing["path"]), "rendition": existing["path"], "reused": True, "native": False}
             return
 
@@ -689,6 +733,7 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
             record = {
                 "key": key,
                 "source_file": rel_path,
+                "source_files": [rel_path],
                 "source_sha256": digest,
                 "fps": fps,
                 "codec": source_codec,
@@ -759,13 +804,14 @@ def remove_source(index_path: Path, media_dir: Path, rel_path: str) -> list[str]
         removed = []
         kept = []
         for record in index["renditions"]:
-            if record.get("source_file") != rel_path:
+            if rel_path not in record_sources(record):
                 kept.append(record)
                 continue
-            rel_out = record.get("path")
-            if rel_out:
-                (media_dir / rel_out).unlink(missing_ok=True)
-                removed.append(rel_out)
+            if _release_source(record, rel_path, media_dir):
+                kept.append(record)  # other byte-identical files still rely on it
+                continue
+            if record.get("path"):
+                removed.append(record["path"])
         index["renditions"] = kept
         save_index(index_path, index)
         return removed
