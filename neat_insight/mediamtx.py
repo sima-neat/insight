@@ -61,6 +61,9 @@ INITIAL_BACKOFF_SECONDS = 1.0
 api_disabled_at_launch = False
 STALE_GRACE_SECONDS = 5.0
 PROBE_TIMEOUT_SECONDS = 5
+# One request can discover many external publishers at once; their ffprobe runs queue
+# behind this many so a DevKit is not flooded with processes.
+MAX_CONCURRENT_PROBES = 4
 PAGE_SIZE = 1000
 
 # path source.type -> (session list/kick endpoint, protocol label)
@@ -238,6 +241,7 @@ class MediamtxClient:
         self._failing_since: Optional[float] = None
         self._generation = 0  # bumped by kick(); a fetch spanning a bump is pre-kick data
         self._probes: dict = {}   # session id -> dict | None | pending-token (object())
+        self._probe_slots = threading.BoundedSemaphore(MAX_CONCURRENT_PROBES)
         self._bytes: dict = {}    # session id -> (bytes_received, monotonic seconds)
         self._bitrate: dict = {}  # session id -> bits per second
 
@@ -351,7 +355,12 @@ class MediamtxClient:
         }
 
     def _run_probe(self, session_id: str, path_name: str, token: object) -> None:
-        result = self._probe(f"{RTSP_BASE_URL}/{path_name}?{PROBE_READER_TAG}")
+        with self._probe_slots:
+            with self._lock:
+                # The session may have ended while this probe waited for a slot.
+                if self._probes.get(session_id) is not token:
+                    return
+            result = self._probe(f"{RTSP_BASE_URL}/{path_name}?{PROBE_READER_TAG}")
         with self._lock:
             # Only write back if this attempt's token is still the current one for the
             # session: if the session was evicted and reissued while probing, or a newer
