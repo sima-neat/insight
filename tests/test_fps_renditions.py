@@ -920,6 +920,29 @@ class SlotFpsTests(RenditionApiTestCase):
         self.assertIsNone(sources[0]["fps"])
         self.assertEqual(sources[1]["fps"], 20)
 
+    def test_failed_probe_is_cached_until_the_file_changes(self):
+        # Codex review: a broken file must not be re-probed (up to the 30 s timeout) on every poll
+        # of /api/mediasrc; the failure is cached under the same size/mtime key as a success.
+        bad = self.media_dir / "broken.mp4"
+        bad.write_bytes(b"not a video")
+        with mock.patch.object(renditions, "probe_video", wraps=renditions.probe_video) as probe:
+            first = renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
+            second = renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
+        self.assertEqual(probe.call_count, 1)
+        self.assertIn("broken.mp4", first)
+        self.assertIsNone(first["broken.mp4"]["native_fps"])
+        self.assertEqual(second["broken.mp4"]["native_fps"], None)
+        # The slot listing shows the file with an unknown native rate rather than stalling.
+        self.assign(index=1, file="broken.mp4")
+        self.assertIsNone(self.source()["native_fps"])
+        # A changed file is probed again.
+        make_test_clip(bad, fps=25)
+        os.utime(bad, ns=(1, 1))
+        with mock.patch.object(renditions, "probe_video", wraps=renditions.probe_video) as probe:
+            third = renditions.source_infos(self.index_path, self.media_dir, ["broken.mp4"])
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(third["broken.mp4"]["native_fps"], 25)
+
     def test_sources_probe_each_file_once_per_request(self):
         self.assign(index=1)
         self.assign(index=2)

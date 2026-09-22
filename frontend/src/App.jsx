@@ -1803,6 +1803,8 @@ export default function App() {
       return
     }
     try {
+      // Like Play, wait for any in-flight FPS commit so the server starts the committed rates.
+      await Promise.all([...pendingFpsCommits.current.values()])
       const data = await fetchJson('/api/mediasrc/start-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
