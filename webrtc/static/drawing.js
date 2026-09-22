@@ -577,9 +577,8 @@ window.drawStrategies = {
         .map(track => `${index}:${track.id}`)
     );
 
-    // Resolve each id once per frame. Past the palette size the allocator evicts on
-    // every miss, so asking again for the box pass could hand a trail and its box
-    // different colors.
+    // Resolve each id once per frame, so a track's trail and box always agree even
+    // when the allocator has to share slots above the palette size.
     const frameColors = new Map();
     const trackColor = (trackId) => {
       if (trackId === null || trackId === undefined) return identityColor(drawContext, index, "track", trackId);

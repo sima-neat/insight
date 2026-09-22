@@ -75,35 +75,83 @@ test("allocator maps are separate per channel and per namespace", () => {
   assert.equal(allocator.colorFor(0, "class", "car", 1), PALETTE[1]);
 });
 
-test("allocator evicts the least recently seen identity when the palette is exhausted", () => {
-  const { createColorAllocator, PALETTE } = loadColors();
+test("allocator hands a stale identity's slot to a newcomer, the one absent longest first", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
   const allocator = createColorAllocator();
   const size = PALETTE.length;
   const colors = [];
   for (let i = 0; i < size; i += 1) {
-    colors.push(allocator.colorFor(0, "track", `t${i}`, 100 + i));
+    colors.push(allocator.colorFor(0, "track", `t${i}`, i));
   }
-  // Refresh t0 so t1 becomes the oldest.
-  allocator.colorFor(0, "track", "t0", 500);
-  const newcomer = allocator.colorFor(0, "track", "new", 600);
-  assert.equal(newcomer, colors[1], "newcomer takes the slot of the oldest identity, t1");
-  assert.equal(allocator.colorFor(0, "track", "t0", 601), colors[0], "refreshed identity keeps its color");
-  assert.equal(allocator.colorFor(0, "track", "t1", 602), colors[2], "evicted t1 returns as a newcomer and takes the next oldest slot, t2's");
+  const later = size + RELEASE_AFTER_MS + 1;
+  // Refresh t0 so it is live; t1..t39 are stale, t1 the longest.
+  allocator.colorFor(0, "track", "t0", later);
+  const newcomer = allocator.colorFor(0, "track", "new", later);
+  assert.equal(newcomer, colors[1], "newcomer takes the slot of the stale identity absent longest, t1");
+  assert.equal(allocator.colorFor(0, "track", "t0", later + 1), colors[0], "live identity keeps its color");
+  assert.equal(allocator.colorFor(0, "track", "t1", later + 2), colors[2], "released t1 returns as a newcomer and takes the next stale slot, t2's");
   assert.equal(allocator.size(0, "track"), size);
 });
 
-test("allocator lastSeen updates are independent per channel and namespace", () => {
+test("allocator never takes a slot from a live identity; the newcomer shares one instead", () => {
   const { createColorAllocator, PALETTE } = loadColors();
   const allocator = createColorAllocator();
-  allocator.colorFor(1, "class", "far-future", 1_000_000);
   const size = PALETTE.length;
-  for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, 100 + i);
-  const refreshed = allocator.colorFor(0, "track", "t0", 300);
-  allocator.colorFor(0, "track", "new", 301);
-  assert.equal(allocator.colorFor(0, "track", "t0", 302), refreshed, "t0 survived because its refresh was recorded despite a larger now on another channel");
+  const colors = [];
+  for (let i = 0; i < size; i += 1) colors.push(allocator.colorFor(0, "track", `t${i}`, i));
+  const first = allocator.colorFor(0, "track", "new1", size);
+  const second = allocator.colorFor(0, "track", "new2", size + 1);
+  assert.ok(PALETTE.includes(first));
+  assert.notEqual(first, second, "newcomers spread over different shared slots");
+  for (let i = 0; i < size; i += 1) {
+    assert.equal(allocator.colorFor(0, "track", `t${i}`, size + 2), colors[i], `t${i} keeps its color`);
+  }
+  assert.equal(allocator.colorFor(0, "track", "new1", size + 3), first, "a sharing newcomer keeps its color too");
+  assert.equal(allocator.size(0, "track"), size + 2);
 });
 
-test("allocator breaks eviction ties by insertion order", () => {
+test("allocator does not recolor a full frame when one identity is swapped for another", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
+  const allocator = createColorAllocator();
+  const size = PALETTE.length;
+  const colors = [];
+  for (let i = 0; i < size; i += 1) colors.push(allocator.colorFor(0, "track", `c${i}`, 0));
+  // Next frame: c39 is gone, a newcomer is drawn before everyone else.
+  const frame = ["new", ...Array.from({ length: size - 1 }, (_, i) => `c${i}`)];
+  const seen = frame.map((id) => allocator.colorFor(0, "track", id, 33));
+  assert.deepEqual(seen.slice(1), colors.slice(0, size - 1), "no visible identity changes color");
+  // Once c39 has been absent long enough, the next newcomer gets its slot.
+  const later = RELEASE_AFTER_MS + 100;
+  frame.forEach((id) => allocator.colorFor(0, "track", id, later));
+  assert.equal(allocator.colorFor(0, "track", "new2", later), colors[size - 1]);
+});
+
+test("allocator drops stale identities that share a slot, so the map stays bounded", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
+  const allocator = createColorAllocator();
+  const size = PALETTE.length;
+  for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, 0);
+  for (let i = 0; i < 10; i += 1) allocator.colorFor(0, "track", `s${i}`, 1);
+  assert.equal(allocator.size(0, "track"), size + 10);
+  const later = RELEASE_AFTER_MS + 100;
+  for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, later);
+  allocator.colorFor(0, "track", "x", later);
+  assert.equal(allocator.size(0, "track"), size + 1, "the ten stale sharers are gone, x shares a slot");
+});
+
+test("allocator lastSeen updates are independent per channel and namespace", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
+  const allocator = createColorAllocator();
+  allocator.colorFor(1, "class", "far-future", 10 * RELEASE_AFTER_MS);
+  const size = PALETTE.length;
+  for (let i = 0; i < size; i += 1) allocator.colorFor(0, "track", `t${i}`, i);
+  const later = size + RELEASE_AFTER_MS + 1;
+  const refreshed = allocator.colorFor(0, "track", "t0", later);
+  allocator.colorFor(0, "track", "new", later + 1);
+  assert.equal(allocator.colorFor(0, "track", "t0", later + 2), refreshed, "t0 survived because its refresh was recorded despite a larger now on another channel");
+});
+
+test("allocator shares the slots inserted first when every identity is live", () => {
   const { createColorAllocator, PALETTE } = loadColors();
   const allocator = createColorAllocator();
   const size = PALETTE.length;
@@ -113,7 +161,9 @@ test("allocator breaks eviction ties by insertion order", () => {
   }
   // The last `size` identities must be pairwise distinct.
   assert.equal(new Set(colors.slice(5)).size, size);
-  // t0..t4 were evicted; t5 keeps PALETTE[5].
+  // t40..t44 share the slots of t0..t4; everyone keeps their color.
+  assert.equal(allocator.colorFor(0, "track", "t0", 43), PALETTE[0]);
+  assert.equal(allocator.colorFor(0, "track", "t40", 43), PALETTE[0]);
   assert.equal(allocator.colorFor(0, "track", "t5", 43), PALETTE[5]);
 });
 
