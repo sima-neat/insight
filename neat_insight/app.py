@@ -2336,11 +2336,14 @@ def start_sources_bulk():
 
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     snapshot = _path_snapshot()
-    skipped_external = [src["index"] for src in sources if _external_holder(src["index"], snapshot)]
-    assigned_sources = [src for src in sources if src.get("file") and src["index"] not in skipped_external]
+    # Only slots with a file are candidates; an external publisher on an unassigned slot
+    # is neither skipped nor a reason to suppress the "nothing assigned" error.
+    candidates = [src for src in sources if src.get("file")]
+    skipped_external = [src["index"] for src in candidates if _external_holder(src["index"], snapshot)]
+    assigned_sources = [src for src in candidates if src["index"] not in skipped_external]
     # A run where every assigned slot is external still answers in the result shape, so
     # a client can tell that apart from "nothing assigned".
-    if not assigned_sources and not skipped_external:
+    if not candidates:
         return _json_error("No assigned sources available to start")
 
     targets = assigned_sources[:count]
