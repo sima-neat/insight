@@ -97,9 +97,11 @@ class FpsRuleTests(unittest.TestCase):
         sha = "3a9fc2" + "0" * 58
         self.assertEqual(renditions.rendition_key(sha, 15, "h264"), f"{sha}:15:h264:baseline")
         self.assertEqual(renditions.rendition_key(sha, 15, "h265"), f"{sha}:15:h265:main")
+        # Codex review: 16 hex digits (64 bits) of the digest, so two different sources with the same
+        # stem, fps and codec cannot plausibly map to one output path.
         self.assertEqual(
             renditions.rendition_rel_path("clips/demo.mp4", sha, 15, "h264"),
-            ".renditions/demo_3a9fc2_15fps_h264.mp4",
+            ".renditions/demo_3a9fc20000000000_15fps_h264.mp4",
         )
 
     def test_encode_command_h264_matches_catalog_contract(self):
@@ -343,7 +345,7 @@ class RenditionEncodeTests(unittest.TestCase):
         self.assertEqual([e["event"] for e in events][0], "encoding")
         self.assertEqual(events[0]["encoder"], "libx264 baseline")
         self.assertFalse(done["reused"])
-        self.assertEqual(done["rendition"], ".renditions/demo_" + renditions.sha256_file(self.source)[:6] + "_15fps_h264.mp4")
+        self.assertEqual(done["rendition"], ".renditions/demo_" + renditions.sha256_file(self.source)[:16] + "_15fps_h264.mp4")
         output = Path(done["path"])
         self.assertTrue(output.is_file())
         self.assertFalse(any(p.name.startswith(".") and p.name.endswith(".tmp.mp4") for p in output.parent.iterdir()))
@@ -710,6 +712,56 @@ class StartPersistenceTests(RenditionApiTestCase):
             self.client.post("/api/mediasrc/stop-all")  # stops every slot, not just the two in the fixture
         self.assertGreaterEqual(len(held), 3)
         self.assertTrue(all(held), held)
+
+    def test_assign_restart_passes_the_generation_it_captured_under_the_lock(self):
+        # Codex review: a stop landing between assign releasing the lock and the starter reading
+        # the generation must still invalidate the restart, so assign hands over its own value.
+        self.edit_slot_one(state="playing")
+        seen = []
+
+        def spy(src, generation=None):
+            seen.append(generation)
+            src["state"] = "playing"
+            app_module._persist_slot(src)
+            return True, None, 200
+        with mock.patch.object(app_module, "media_stream_is_running", return_value=True), \
+             mock.patch.object(app_module, "stop_media_stream"), \
+             mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_start_source_slot", side_effect=spy):
+            response = self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "a.mp4", "fps": 20})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(seen, [app_module._slot_generation(1)])
+        self.assertIsNotNone(seen[0])
+
+    def test_start_with_a_stale_generation_is_abandoned(self):
+        src = self.persisted()[1]
+        before = app_module._slot_generation(1)
+        app_module._bump_slot(1)  # a stop that landed after the caller captured `before`
+        with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_resolve_stream_input", return_value=(self.media_dir / "a.mp4", None, None, 200)), \
+             mock.patch.object(app_module, "start_media_stream") as stream:
+            ok, _err, status = app_module._start_source_slot(src, generation=before)
+        self.assertEqual((ok, status), (False, 409))
+        stream.assert_not_called()
+
+    def test_start_re_prepares_when_the_cached_rendition_vanished_before_launch(self):
+        # Codex review: clear-renditions can unlink a reused file between the lookup and the
+        # locked launch; the start must notice under the lock and prepare again.
+        gone = self.media_dir / ".renditions" / "gone.mp4"
+        fresh = self.media_dir / ".renditions" / "fresh.mp4"
+        fresh.parent.mkdir()
+        fresh.write_bytes(b"x")
+        resolve = mock.Mock(side_effect=[(gone, ".renditions/gone.mp4", None, 200), (fresh, ".renditions/fresh.mp4", None, 200)])
+        stream = mock.Mock(return_value=(True, None))
+        with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_source_media_codec", return_value="h264"), \
+             mock.patch.object(app_module, "_resolve_stream_input", resolve), \
+             mock.patch.object(app_module, "start_media_stream", stream):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(resolve.call_count, 2)
+        self.assertEqual(stream.call_args.args[1], str(fresh))
+        self.assertEqual(self.persisted()[1]["state"], "playing")
 
     def test_start_proceeds_when_the_slot_is_unchanged(self):
         response, stream = self.start_slot_for_real(lambda: None)

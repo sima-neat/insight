@@ -623,7 +623,7 @@
                   },
                   "required": ["removed", "freed_bytes", "kept"]
                 },
-                "example": {"removed": 2, "freed_bytes": 10485760, "kept": [".renditions/demo_3a9fc2_15fps_h264.mp4"]}
+                "example": {"removed": 2, "freed_bytes": 10485760, "kept": [".renditions/demo_3a9fc20b7e41c9d2_15fps_h264.mp4"]}
               }
             }
           },

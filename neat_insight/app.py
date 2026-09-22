@@ -2311,8 +2311,9 @@ def assign_source():
         # Persist the new assignment first: a restart re-reads the slot after preparing its
         # input (outside this lock, since that may encode) and abandons it if it moved on.
         _persist_slot(src)
+        generation = _slot_generation(index)  # captured while this request still owns the slot
     if was_playing and file_name:
-        ok, err, status = _start_source_slot(src)
+        ok, err, status = _start_source_slot(src, generation=generation)
         if not ok:
             return _json_error(err, status)
     return {"success": True}
@@ -2435,15 +2436,18 @@ def _slot_changed_since(src, generation: int) -> bool:
     return (current.get("file") or "") != (src.get("file") or "") or renditions.coerce_fps(current.get("fps")) != renditions.coerce_fps(src.get("fps"))
 
 
-def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
+def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Optional[str], int]:
     """Derive stream settings, prepare the input (source or FPS rendition), start the slot and persist it.
 
     Mutates src; returns (ok, error, http status). Preparing the input can encode for
     minutes, so the slot is re-read afterwards: if another request reassigned, reset or
     unassigned it meanwhile, the start is abandoned (409) and nothing is persisted.
+    `generation` is the slot generation the caller observed while it still held the slot
+    lock; a caller that captured none lets this helper read it now.
     """
     file_name = src.get("file") or ""
-    generation = _slot_generation(src.get("index"))
+    if generation is None:
+        generation = _slot_generation(src.get("index"))
     stale = (False, "Source changed while its rendition was being prepared; start it again", 409)
     transport, codec, allowed_transports = _derive_source_stream_settings(file_name, src.get("transport"))
     src["transport"] = transport
@@ -2452,33 +2456,41 @@ def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
         if not _persist_slot_if_current(src, generation):
             return stale
         return False, _codec_detection_error(file_name), 400
-    input_path, rendition, error, status = _resolve_stream_input(src)
-    if error:
-        # A failed encode must not write the pre-encode snapshot back over a slot that was
-        # stopped, reassigned or cleared meanwhile (delete-media makes the encode fail this way).
-        if not _persist_slot_if_current(src, generation):
-            return stale
-        return False, error, status
-    # The final check, the launch and the persist are one step under the slot lock, so a stop or
-    # reassignment cannot slip in between the check and the process being registered.
-    with _slot_lock:
-        if _slot_changed_since(src, generation):
-            return stale
-        # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
-        ok, err = start_media_stream(
-            src["index"],
-            str(input_path),
-            src.get("transport"),
-            src.get("codec"),
-            _source_media_codec(file_name),
-            rendition=rendition,
-        )
-        if not ok:
+    for attempt in range(2):
+        input_path, rendition, error, status = _resolve_stream_input(src)
+        if error:
+            # A failed encode must not write the pre-encode snapshot back over a slot that was
+            # stopped, reassigned or cleared meanwhile (delete-media makes the encode fail this way).
+            if not _persist_slot_if_current(src, generation):
+                return stale
+            return False, error, status
+        # The final check, the launch and the persist are one step under the slot lock, so a stop or
+        # reassignment cannot slip in between the check and the process being registered.
+        with _slot_lock:
+            if _slot_changed_since(src, generation):
+                return stale
+            if rendition and not input_path.is_file():
+                # Clear renditions ran between the cache lookup and this launch; prepare again.
+                if attempt == 0:
+                    logging.info("Rendition %s was cleared before src%s could start; preparing it again", rendition, src.get("index"))
+                    continue
+                return False, f"Rendition {rendition} was removed before the stream could start", 500
+            # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
+            ok, err = start_media_stream(
+                src["index"],
+                str(input_path),
+                src.get("transport"),
+                src.get("codec"),
+                _source_media_codec(file_name),
+                rendition=rendition,
+            )
+            if not ok:
+                _persist_slot(src)
+                return False, err, 500
+            src["state"] = "playing"
             _persist_slot(src)
-            return False, err, 500
-        src["state"] = "playing"
-        _persist_slot(src)
-    return True, None, 200
+        return True, None, 200
+    return False, "Rendition preparation did not settle", 500  # unreachable: the loop returns on every path
 
 
 # API: create or reuse the FPS rendition for one source slot, streaming progress.

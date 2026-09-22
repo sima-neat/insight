@@ -167,7 +167,9 @@ def rendition_key(sha: str, fps: int, codec: str) -> str:
 
 
 def rendition_rel_path(rel_path: str, sha: str, fps: int, codec: str) -> str:
-    return f"{RENDITIONS_DIRNAME}/{Path(rel_path).stem}_{sha[:6]}_{fps}fps_{codec}.mp4"
+    # 16 hex digits (64 bits) of the source digest: the index trusts the path to be unique per key,
+    # and two sources with the same stem, fps and codec must not share one output file.
+    return f"{RENDITIONS_DIRNAME}/{Path(rel_path).stem}_{sha[:16]}_{fps}fps_{codec}.mp4"
 
 
 def _codec_args(codec: str, width: int, height: int, fps: int) -> list[str]:
