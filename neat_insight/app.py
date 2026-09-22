@@ -2549,15 +2549,16 @@ def clear_rendition_cache():
     """Delete every rendition file and record except ones a playing source is currently streaming.
     Returns {'removed': int, 'freed_bytes': int, 'kept': [rel paths]}."""
     try:
-        sources = _sync_source_runtime_states(load_sources())
-        keep = set()
-        for src in sources:
-            if src.get("state") != "playing":
-                continue
-            active_file = _active_stream_file(src.get("index"))
-            if active_file and active_file.startswith(f"{renditions.RENDITIONS_DIRNAME}/"):
-                keep.add(active_file)
-        removed, freed_bytes = renditions.clear_renditions(RENDITIONS_INDEX_FILE, MEDIA_DIR, keep)
+        # The keep set comes from the process registry, not the persisted state: a slot whose
+        # process was just launched still reads "stopped" on disk until the start persists it.
+        # Holding the slot lock keeps launches out of the window between listing and deleting.
+        with _slot_lock:
+            keep = set()
+            for src in load_sources():
+                active_file = _active_stream_file(src.get("index"))
+                if active_file and active_file.startswith(f"{renditions.RENDITIONS_DIRNAME}/"):
+                    keep.add(active_file)
+            removed, freed_bytes = renditions.clear_renditions(RENDITIONS_INDEX_FILE, MEDIA_DIR, keep)
         return jsonify({"removed": len(removed), "freed_bytes": freed_bytes, "kept": sorted(keep)})
     except Exception as exc:
         return _json_error(str(exc), 500)
