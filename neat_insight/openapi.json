@@ -504,6 +504,58 @@
         }
       }
     },
+    "/api/mediasrc/assign-webcam": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Register one source slot for a browser webcam",
+        "description": "Marks one one-based source slot as a browser-published webcam and returns the WHIP URL the browser posts its WebRTC offer to. Unlike `/api/mediasrc/assign`, Insight does not start a publisher itself: the browser publishes the camera over WHIP, MediaMTX republishes it as RTSP, and `/api/mediasrc/start` only confirms that the stream arrived. Any file assignment on the slot is cleared, and a playing file source is stopped first. The returned `urls.whip` host and port already account for SDK port remapping, so use it exactly as returned.",
+        "operationId": "assignWebcamMediaSource",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -H \"Content-Type: application/json\" -d '{\"index\":1}' https://<INSIGHT_HOST>:9900/api/mediasrc/assign-webcam"
+          }
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {
+            "description": "The slot is registered as a webcam source.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "source"],
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "source": {"$ref": "#/components/schemas/MediaSource"}
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "source": {
+                    "index": 1,
+                    "file": "",
+                    "state": "stopped",
+                    "transport": "rtsp",
+                    "codec": "h264",
+                    "type": "webcam",
+                    "allowed_transports": ["rtsp"],
+                    "urls": {
+                      "rtsp": "rtsp://<INSIGHT_HOST>:8554/src1",
+                      "whip": "https://<INSIGHT_HOST>:8889/src1/whip"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
     "/api/mediasrc/auto-assign-all": {
       "post": {
         "tags": ["Media sources"],
@@ -522,7 +574,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Start one source",
-        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.\n\nA webcam slot is published by the browser rather than by Insight, so for those slots this endpoint only confirms the stream: it returns `409` until MediaMTX reports the WHIP stream as publishing.",
         "operationId": "startMediaSource",
         "x-codeSamples": [
           {
@@ -536,6 +588,7 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/WebcamNotPublishing"},
           "500": {"$ref": "#/components/responses/InternalError"}
         }
       }
@@ -890,6 +943,7 @@
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
@@ -1020,20 +1074,22 @@
       "MediaSource": {
         "type": "object",
         "description": "Persisted configuration and current runtime state for one streaming source slot.",
-        "required": ["index", "file", "state", "transport", "codec", "allowed_transports", "urls"],
+        "required": ["index", "file", "state", "transport", "codec", "type", "allowed_transports", "urls"],
         "properties": {
           "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
           "file": {"type": "string", "description": "Assigned relative media-library path, or an empty string for an unassigned slot."},
           "state": {"type": "string", "enum": ["playing", "stopped"], "description": "Persisted playback state; `playing` indicates a source process should be active."},
           "transport": {"type": "string", "enum": ["rtsp", "http", ""], "description": "Selected output transport, or empty when the slot is unassigned."},
           "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg", "unknown"], "description": "Codec detected from the assigned media."},
+          "type": {"type": "string", "enum": ["file", "webcam"], "description": "Source kind. A `file` slot streams an assigned media-library path; a `webcam` slot is published into MediaMTX by a browser over WHIP and has no file."},
           "allowed_transports": {"type": "array", "description": "Transports compatible with the detected codec and current backend capabilities.", "items": {"type": "string", "enum": ["rtsp", "http"]}},
           "urls": {
             "type": "object",
             "description": "Client URLs for the selected source and transports.",
             "properties": {
               "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
-              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."}
+              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."},
+              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots."}
             }
           }
         }

@@ -10,13 +10,18 @@ logLevel: info
 # launch (see neat_insight/utils.py start_processes) via the MTX_WEBRTC*
 # environment overrides, so the WHIP endpoint reuses Insight's own trusted
 # mkcert/SDK certificate instead of shipping a second one here.
+#
+# webrtcEncryption stays `no` here only so MediaMTX still starts if this config
+# is ever launched without Insight. start_processes() always overrides it to
+# `yes` together with the cert pair, and the frontend only ever posts its WHIP
+# offer to https://, so the listener is TLS in every supported deployment.
 webrtc: yes
 webrtcAddress: :8889
 webrtcEncryption: no
 webrtcAllowOrigin: '*'
 
 # Backs the "is this webcam actually publishing" status Insight polls per
-# source (see neat_insight/mediasrc.py webcam_path_is_ready); loopback-only,
+# source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,
 # never exposed outside the container/host.
 api: yes
 apiAddress: 127.0.0.1:9997

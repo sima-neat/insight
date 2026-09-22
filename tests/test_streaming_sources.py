@@ -1,3 +1,5 @@
+import io
+import json
 import os
 import tempfile
 import unittest
@@ -267,6 +269,251 @@ class StreamingSourceTests(unittest.TestCase):
     def test_media_codec_display_name_uses_mjpeg_label(self):
         self.assertEqual(app_module._media_codec_display_name("MJPG", "mjpeg"), "MJPEG")
         self.assertEqual(app_module._media_codec_display_name("hvc1", None), "H.265")
+
+
+class WebcamSourceTests(unittest.TestCase):
+    """Cover the browser-published webcam source type (see issue #120).
+
+    A webcam slot has no file on disk and no Python-managed ffmpeg process, so
+    every liveness decision has to come from MediaMTX rather than from
+    pipeline_registry. These tests pin that difference down.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        self.media_dir = self.root / "media"
+        self.media_dir.mkdir()
+        self.sources_file = self.root / "media_sources.json"
+        self.sources_file.write_text("[]", encoding="utf-8")
+
+        self.old_media_dir = app_module.MEDIA_DIR
+        self.old_sources_file = app_module.MEDIA_SRC_DATA_FILE
+        app_module.MEDIA_DIR = self.media_dir
+        app_module.MEDIA_SRC_DATA_FILE = self.sources_file
+        app_module.app.config.update(TESTING=True)
+        self.client = app_module.app.test_client()
+        mediasrc.pipeline_registry.clear()
+
+    def tearDown(self):
+        mediasrc.pipeline_registry.clear()
+        app_module.MEDIA_DIR = self.old_media_dir
+        app_module.MEDIA_SRC_DATA_FILE = self.old_sources_file
+        self.tmpdir.cleanup()
+
+    def _assign_webcam(self, index=1):
+        return self.client.post(
+            "/api/mediasrc/assign-webcam",
+            json={"index": index},
+            headers={"Host": "localhost:9900"},
+        )
+
+    def test_assign_webcam_marks_slot_and_returns_publish_url(self):
+        response = self._assign_webcam(1)
+
+        self.assertEqual(response.status_code, 200)
+        source = response.get_json()["source"]
+        self.assertEqual(source["type"], "webcam")
+        self.assertEqual(source["file"], "")
+        self.assertEqual(source["state"], "stopped")
+        self.assertEqual(source["allowed_transports"], ["rtsp"])
+        self.assertEqual(source["urls"]["rtsp"], "rtsp://localhost:8554/src1")
+        self.assertEqual(source["urls"]["whip"], "https://localhost:8889/src1/whip")
+
+    def test_assign_webcam_requires_an_index(self):
+        response = self.client.post("/api/mediasrc/assign-webcam", json={})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Missing index", response.get_json()["error"])
+
+    def test_assign_webcam_rejects_unknown_source(self):
+        response = self._assign_webcam(999)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_webcam_whip_url_uses_the_sdk_mapped_host_port(self):
+        """In the SDK the WHIP listener is republished, so 8889 is not reachable."""
+        remapped = [
+            {"hostPortEnd": None, "hostPortStart": 18889, "name": "webrtcWhip", "protocol": "tcp"},
+        ]
+
+        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=remapped):
+            response = self._assign_webcam(1)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json()["source"]["urls"]["whip"],
+            "https://localhost:18889/src1/whip",
+        )
+
+    def test_webcam_whip_url_falls_back_to_the_default_port(self):
+        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=[]):
+            response = self._assign_webcam(1)
+
+        self.assertEqual(
+            response.get_json()["source"]["urls"]["whip"],
+            "https://localhost:8889/src1/whip",
+        )
+
+    def test_persisted_webcam_slot_reloads_without_a_file(self):
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "stale.mp4", "state": "stopped", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+
+        sources = app_module.load_sources()
+
+        self.assertEqual(sources[0]["type"], "webcam")
+        self.assertEqual(sources[0]["file"], "")
+        self.assertEqual(sources[0]["transport"], "rtsp")
+        self.assertEqual(sources[0]["codec"], "h264")
+
+    def test_unknown_source_type_normalizes_to_file(self):
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "stopped", "type": "bogus"}]',
+            encoding="utf-8",
+        )
+
+        sources = app_module.load_sources()
+
+        self.assertEqual(sources[0]["type"], "file")
+        self.assertEqual(sources[0]["file"], "clip.mp4")
+
+    def test_start_rejects_a_webcam_that_is_not_publishing_yet(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=False):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("not publishing", response.get_json()["error"])
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_start_marks_webcam_playing_once_mediamtx_reports_it(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            with mock.patch.object(app_module, "start_media_stream") as start_media_stream:
+                response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing")
+        # A webcam is published by the browser; Insight must not spawn ffmpeg.
+        start_media_stream.assert_not_called()
+
+    def test_restarting_insight_does_not_restore_a_dead_webcam_as_live(self):
+        """AC: "Restarting Insight does not falsely restore a webcam as live"."""
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=False):
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()[0]["state"], "stopped")
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_a_still_publishing_webcam_stays_live_across_a_reload(self):
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(response.get_json()[0]["state"], "playing")
+
+    def test_webcam_liveness_ignores_the_ffmpeg_registry(self):
+        """A stale file-source process must not keep a webcam slot marked live."""
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+        process = mock.Mock()
+        process.poll.return_value = None
+        mediasrc.pipeline_registry[0] = mediasrc.MediaStream(
+            index=0,
+            file_path=str(self.media_dir / "clip.mp4"),
+            transport="rtsp",
+            codec="h264",
+            process=process,
+        )
+
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=False):
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(response.get_json()[0]["state"], "stopped")
+
+    def test_assigning_a_file_over_a_webcam_restores_the_file_type(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            response = self.client.post(
+                "/api/mediasrc/assign",
+                json={"index": 1, "file": "clip.mp4"},
+                headers={"Host": "localhost:9900"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["type"], "file")
+        self.assertEqual(source["file"], "clip.mp4")
+
+    def test_assigning_a_webcam_over_a_playing_file_stops_its_stream(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+
+        with mock.patch.object(app_module, "stop_media_stream") as stop_media_stream:
+            response = self._assign_webcam(1)
+
+        self.assertEqual(response.status_code, 200)
+        stop_media_stream.assert_called_once_with(1)
+        self.assertEqual(app_module.load_sources()[0]["type"], "webcam")
+
+
+class WebcamPublishStateTests(unittest.TestCase):
+    """mediasrc.webcam_is_publishing() talks to the MediaMTX status API."""
+
+    def _urlopen_returning(self, payload):
+        response = mock.MagicMock()
+        response.__enter__.return_value = io.BytesIO(json.dumps(payload).encode("utf-8"))
+        return mock.Mock(return_value=response)
+
+    def test_reports_publishing_when_mediamtx_marks_the_path_ready(self):
+        urlopen = self._urlopen_returning({"name": "src1", "ready": True})
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertTrue(mediasrc.webcam_is_publishing(1))
+
+        self.assertIn("/v3/paths/get/src1", urlopen.call_args[0][0])
+
+    def test_reports_not_publishing_when_the_path_is_not_ready(self):
+        urlopen = self._urlopen_returning({"name": "src1", "ready": False})
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertFalse(mediasrc.webcam_is_publishing(1))
+
+    def test_reports_not_publishing_when_the_api_is_unreachable(self):
+        """MediaMTX may not be up yet; that must read as "not live", not crash."""
+        urlopen = mock.Mock(side_effect=mediasrc.urllib.error.URLError("refused"))
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertFalse(mediasrc.webcam_is_publishing(1))
+
+    def test_reports_not_publishing_when_the_api_returns_garbage(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = io.BytesIO(b"not json")
+        urlopen = mock.Mock(return_value=response)
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertFalse(mediasrc.webcam_is_publishing(1))
 
 
 if __name__ == "__main__":

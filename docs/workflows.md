@@ -53,6 +53,23 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 7. If your app sends metadata, confirm overlays appear on the video.
 8. Use the Stats placeholder to see where system load diagnostics will appear in the next release.
 
+## Validate an app against a live webcam
+
+Use this workflow to test an application against a real camera instead of a recorded file. The webcam is attached to the computer running your browser, not to the board.
+
+1. Open Insight over HTTPS and confirm the browser trusts its certificate.
+2. Go to Streaming Sources and select **Detect webcam**. Allow camera access when the browser asks.
+3. Select your camera in the `src1` dropdown; it is listed as `<webcam>`.
+4. Start `src1` and confirm the slot reports `Live` and the preview shows the camera.
+5. Run your application against the same RTSP URL a file source would use:
+   - Inside the SDK container: `rtsp://127.0.0.1:8554/src1`
+   - On a DevKit or external machine: `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1`
+6. Open Video Viewer and watch channel `0`.
+
+Keep the browser tab open for as long as the webcam is publishing; the tab is what sends video to Insight. Closing it, unplugging the camera, or selecting **Stop** ends the stream.
+
+When Insight runs inside the SDK, the browser also needs to reach the `webrtcWhip` host port from `neat --json`, in addition to the RTSP port your application uses. See [Ports and Network Behavior](ports-network.md).
+
 ## Validate multiple input streams
 
 1. Upload or prepare multiple videos in Media Sources.

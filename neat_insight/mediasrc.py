@@ -11,6 +11,11 @@ from typing import Dict, Optional, Tuple
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
 MEDIAMTX_API_BASE_URL = "http://127.0.0.1:9997"
 WEBCAM_WHIP_PORT = 8889
+# Key that the SDK port map uses for the WHIP listener above. The SDK may
+# republish 8889 on a different host port, so the browser-facing URL is
+# resolved through this name (see app._resolve_webcam_whip_port) rather than
+# assuming the container-internal port is reachable.
+WEBCAM_WHIP_PORT_MAP_NAME = "webrtcWhip"
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
 DEFAULT_TRANSPORT = "rtsp"

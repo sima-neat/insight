@@ -40,6 +40,7 @@ from neat_insight.mediasrc import (
     SOURCE_TYPE_FILE,
     SOURCE_TYPE_WEBCAM,
     WEBCAM_WHIP_PORT,
+    WEBCAM_WHIP_PORT_MAP_NAME,
     http_mjpeg_command,
     http_snapshot_command,
     media_stream_identity,
@@ -579,6 +580,7 @@ def _fake_sysinfo_payload():
             {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
             {"hostPortEnd": None, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
             {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+            {"hostPortEnd": None, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
             {"hostPortEnd": None, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"},
         ],
         "insight": {
@@ -786,6 +788,16 @@ def _resolve_video_ui_port():
 
 def _resolve_webssh_host_port():
     return _find_exposed_port(_read_exposed_ports_from_port_map(), "webSSH", "tcp") or get_webssh_port()
+
+
+def _resolve_webcam_whip_port():
+    """Host port the browser should POST its WHIP offer to.
+
+    In the SDK the WHIP listener is republished on the host, potentially on a
+    different port, so prefer the port map over the container-internal default
+    for the same reason _resolve_video_ui_port() does.
+    """
+    return _find_exposed_port(_read_exposed_ports_from_port_map(), WEBCAM_WHIP_PORT_MAP_NAME, "tcp") or WEBCAM_WHIP_PORT
 
 
 def _format_sysinfo_web_ui_url(host, port):
@@ -2081,7 +2093,7 @@ def _source_url(src, transport: Optional[str] = None):
 def _webcam_whip_url(src):
     index = int(src.get("index") or 0)
     host = _request_host_name()
-    return f"https://{host}:{WEBCAM_WHIP_PORT}/{webcam_path_name(index)}/whip"
+    return f"https://{host}:{_resolve_webcam_whip_port()}/{webcam_path_name(index)}/whip"
 
 
 def _source_with_urls(src):
