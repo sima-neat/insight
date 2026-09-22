@@ -313,6 +313,8 @@ def save_sources(sources):
 
 def reset_sources():
     sources = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
+    for src in sources:
+        _bump_slot(src["index"])
     save_sources(sources)
 
 
@@ -1890,6 +1892,7 @@ def delete_media():
         for src in sources:
             if (src.get("file") or "").replace(os.path.sep, "/") in removed_names:
                 stop_media_stream(src["index"])
+                _bump_slot(src["index"])
                 src["file"] = ""
                 src["state"] = "stopped"
                 modified = True
@@ -2285,6 +2288,7 @@ def assign_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
+            _bump_slot(index)
             was_playing = src.get("state") == "playing" and media_stream_is_running(index)
             if was_playing:
                 stop_media_stream(index)
@@ -2329,6 +2333,7 @@ def auto_assign_all_sources():
     assigned_count = 0
     for src in sources:
         source_index = src.get("index")
+        _bump_slot(source_index)
         # Insight's own HTTP/MJPEG stream can share an index with an external publisher:
         # it is stopped like every other active source.
         if src.get("state") == "playing":
@@ -2377,6 +2382,17 @@ def _resolve_stream_input(src) -> tuple[Optional[Path], Optional[str], Optional[
 
 
 _sources_write_lock = threading.Lock()
+# Per-slot generation, bumped by every user action that changes a slot (assign, stop, delete, ...).
+# A start compares it after preparing its input, which can take minutes, and abandons the slot if it moved.
+_slot_generations: dict[int, int] = {}
+
+
+def _bump_slot(index) -> None:
+    _slot_generations[index] = _slot_generations.get(index, 0) + 1
+
+
+def _slot_generation(index) -> int:
+    return _slot_generations.get(index, 0)
 
 
 def _persist_slot(src) -> None:
@@ -2397,8 +2413,10 @@ def _persist_slot(src) -> None:
         save_sources(sources)
 
 
-def _slot_changed_since(src) -> bool:
-    """True when the persisted slot no longer has the file and fps that `src` was started with."""
+def _slot_changed_since(src, generation: int) -> bool:
+    """True when the slot was touched (stop, assign, delete, ...) or no longer has the file and fps `src` started with."""
+    if _slot_generation(src.get("index")) != generation:
+        return True
     current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
     if current is None:
         return True
@@ -2413,6 +2431,7 @@ def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
     unassigned it meanwhile, the start is abandoned (409) and nothing is persisted.
     """
     file_name = src.get("file") or ""
+    generation = _slot_generation(src.get("index"))
     transport, codec, allowed_transports = _derive_source_stream_settings(file_name, src.get("transport"))
     src["transport"] = transport
     src["codec"] = codec
@@ -2423,7 +2442,7 @@ def _start_source_slot(src) -> tuple[bool, Optional[str], int]:
     if error:
         _persist_slot(src)
         return False, error, status
-    if _slot_changed_since(src):
+    if _slot_changed_since(src, generation):
         return False, "Source changed while its rendition was being prepared; start it again", 409
     # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
     ok, err = start_media_stream(
@@ -2635,6 +2654,7 @@ def stop_source():
         if src["index"] == index:
             stop_media_stream(index)
             src["state"] = "stopped"
+            _bump_slot(index)
             save_sources(sources)
             return {"success": True}
 
@@ -2662,6 +2682,7 @@ def stop_all_sources():
         if src.get("state") == "playing":
             stopped_count += 1
         src["state"] = "stopped"
+        _bump_slot(source_index)
 
     save_sources(sources)
     return {
