@@ -2247,16 +2247,20 @@ def auto_assign_all_sources():
     video_files = _collect_video_files()
 
     snapshot = _path_snapshot()
-    skipped_external = []
-    remaining = iter(video_files)
+    skipped_external = [src.get("index") for src in sources if _external_holder(src.get("index"), snapshot)]
+    # An external slot keeps its file, so that file is not available to the other slots.
+    kept = {src.get("file") for src in sources if src.get("index") in skipped_external}
+    remaining = iter(name for name in video_files if name not in kept)
     assigned_count = 0
     for src in sources:
         source_index = src.get("index")
-        if _external_holder(source_index, snapshot):
-            skipped_external.append(source_index)
-            continue
+        # Insight's own HTTP/MJPEG stream can share an index with an external publisher:
+        # it is stopped like every other active source.
         if src.get("state") == "playing":
             stop_media_stream(source_index)
+        src["state"] = "stopped"
+        if source_index in skipped_external:
+            continue
         src["file"] = next(remaining, "")
         assigned_count += bool(src["file"])
         src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
