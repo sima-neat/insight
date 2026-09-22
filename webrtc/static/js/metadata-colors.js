@@ -81,6 +81,20 @@
       });
     }
 
+    // A stale identity that comes back to a shared slot should not keep colliding.
+    // Stale sharers are dropped so it keeps its slot. If a live identity holds the
+    // slot, the returning one is dropped instead and allocated afresh; returns true.
+    function separateFromSharers(map, key, entry, now) {
+      let live = false;
+      map.forEach((other, otherKey) => {
+        if (otherKey === key || other.slot !== entry.slot) return;
+        if (isStale(other, now)) map.delete(otherKey);
+        else live = true;
+      });
+      if (live) map.delete(key);
+      return live;
+    }
+
     function freeSlot(map) {
       const used = new Set();
       map.forEach((entry) => used.add(entry.slot));
@@ -125,7 +139,7 @@
       if (key === null) return NEUTRAL_COLOR;
       const map = mapFor(channelIndex, namespace);
       const existing = map.get(key);
-      if (existing) {
+      if (existing && !(isStale(existing, now) && separateFromSharers(map, key, existing, now))) {
         existing.lastSeen = now;
         return PALETTE[existing.slot];
       }
