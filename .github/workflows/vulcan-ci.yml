@@ -67,6 +67,7 @@ jobs:
           tests.test_api_docs
           tests.test_environment
           tests.test_media_asset_builder
+          tests.test_media_tree
           tests.test_streaming_sources
           tests.test_viewer_url
           tests.test_workspace
