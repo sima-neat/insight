@@ -37,6 +37,8 @@ Supported video formats include common container formats such as `mp4`, `mov`, `
 
 After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
+The library is shown as folders. Folder rows open the folder and list its subfolders and videos; each folder row shows how many streamable files it holds. Use **Back** to return to the parent folder, **Media Root** to jump to the top of the library, and the breadcrumb to see where you are or jump to any level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Only files that Insight can stream are listed; a note in the folder says how many other files were hidden. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
+
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
 Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
@@ -61,7 +63,7 @@ Insight selects codec and transport options from the assigned media:
 
 The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
 
-You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
+Select the file field of a source row to open **Assign media to srcN**, a dialog with the same folder browser as Media Sources; pick a video, then **Assign**, or **Clear** to unassign. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
