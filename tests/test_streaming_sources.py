@@ -533,11 +533,12 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher",
-                               side_effect=app_module.MediaServerUnreachable("down")):
-            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
-                response = self.client.post(
-                    "/api/mediasrc/auto-assign-all", json={"released_webcams": [1]})
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
+            with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=app_module.MediaServerUnreachable("down")):
+                with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                    response = self.client.post(
+                        "/api/mediasrc/auto-assign-all",
+                        json={"released_webcams": [{"index": 1, "session": "mine"}]})
 
         body = response.get_json()
         self.assertEqual(body["unconfirmed_webcams"], [])
@@ -586,27 +587,29 @@ class WebcamSourceTests(unittest.TestCase):
             response = self.client.post("/api/mediasrc/stop", json={"index": 1})
 
         self.assertEqual(response.status_code, 502)
-        self.assertIn("may still be publishing", response.get_json()["error"])
+        self.assertIn("nothing was changed", response.get_json()["error"])
 
     def test_a_caller_that_released_its_own_publisher_is_believed(self):
         """The tab that owned the publish closed it itself; MediaMTX's opinion is moot."""
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher",
-                               side_effect=app_module.MediaServerUnreachable("down")):
-            response = self.client.post(
-                "/api/mediasrc/stop", json={"index": 1, "publisher_released": True})
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
+            with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                response = self.client.post("/api/mediasrc/stop", json={
+                    "index": 1, "publisher_released": True, "publisher_session": "mine"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+        kick.assert_not_called()
 
     def test_stop_all_does_not_flag_slots_the_caller_released(self):
         self._assign_webcam(2)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher",
-                               side_effect=app_module.MediaServerUnreachable("down")):
-            response = self.client.post(
-                "/api/mediasrc/stop-all", json={"released_webcams": [2]})
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value="mine"):
+            with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=app_module.MediaServerUnreachable("down")):
+                response = self.client.post(
+                    "/api/mediasrc/stop-all",
+                    json={"released_webcams": [{"index": 2, "session": "mine"}]})
 
         body = response.get_json()
         self.assertEqual(body["unconfirmed_webcams"], [])
@@ -674,6 +677,75 @@ class WebcamSourceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         kick.assert_not_called()
+
+    def test_a_release_claim_without_a_session_is_not_a_claim(self):
+        """Nothing to verify against means nothing can be honoured — for any route."""
+        self._assign_webcam(1)
+
+        for path, body in (
+            ("/api/mediasrc/stop", {"index": 1, "publisher_released": True}),
+            ("/api/mediasrc/assign-webcam", {"index": 1, "publisher_released": True}),
+            ("/api/mediasrc/assign", {"index": 1, "file": "", "publisher_released": True}),
+        ):
+            with self.subTest(path=path):
+                with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                    response = self.client.post(path, json=body)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("publisher_session", response.get_json()["error"])
+                kick.assert_not_called()
+
+    def test_a_released_stop_that_cannot_be_verified_changes_nothing(self):
+        """An unverifiable claim must not mark a possibly-replaced camera stopped."""
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "webcam_publisher_session", side_effect=app_module.MediaServerUnreachable("down")):
+            response = self.client.post("/api/mediasrc/stop", json={
+                "index": 1, "publisher_released": True, "publisher_session": "tab-a"})
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing")
+
+    def test_a_stale_release_claim_on_reassignment_is_refused(self):
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value="tab-b"):
+            with mock.patch.object(app_module, "kick_webcam_publisher") as kick:
+                switched = self.client.post(
+                    "/api/mediasrc/assign-webcam",
+                    json={"index": 1, "publisher_released": True, "publisher_session": "tab-a"})
+                converted = self.client.post(
+                    "/api/mediasrc/assign",
+                    json={"index": 1, "file": "", "publisher_released": True, "publisher_session": "tab-a"})
+
+        self.assertEqual(switched.status_code, 409)
+        self.assertEqual(converted.status_code, 409)
+        kick.assert_not_called()
+        self.assertEqual(app_module.load_sources()[0]["type"], "webcam", "untouched")
+
+    def test_a_stale_bulk_release_claim_falls_back_to_a_confirmed_kick(self):
+        """Stop All means stop everything; a stale claim just loses its shortcut."""
+        self._assign_webcam(2)
+
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value="tab-b"):
+            with mock.patch.object(app_module, "kick_webcam_publisher", return_value=True) as kick:
+                response = self.client.post(
+                    "/api/mediasrc/stop-all",
+                    json={"released_webcams": [{"index": 2, "session": "tab-a"}]})
+
+        self.assertEqual(response.get_json()["unconfirmed_webcams"], [])
+        kick.assert_called_once_with(2)
+
+    def test_a_bare_index_in_released_webcams_is_not_a_claim(self):
+        self._assign_webcam(2)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=True) as kick:
+            response = self.client.post(
+                "/api/mediasrc/stop-all", json={"released_webcams": [2]})
+
+        self.assertEqual(response.status_code, 200)
+        kick.assert_called_once_with(2)
 
     def test_webcam_rtsp_url_uses_the_sdk_mapped_port(self):
         remapped = [{"hostPortEnd": None, "hostPortStart": 18554, "name": "rtsp.tcp", "protocol": "tcp"}]
@@ -753,11 +825,10 @@ class WebcamSourceTests(unittest.TestCase):
     def test_switching_cameras_is_allowed_when_the_caller_released_its_publisher(self):
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher",
-                               side_effect=app_module.MediaServerUnreachable("down")):
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value="mine"):
             response = self.client.post(
                 "/api/mediasrc/assign-webcam",
-                json={"index": 1, "publisher_released": True},
+                json={"index": 1, "publisher_released": True, "publisher_session": "mine"},
                 headers={"Host": "localhost:9900"})
 
         self.assertEqual(response.status_code, 200)
@@ -831,12 +902,12 @@ class WebcamSourceTests(unittest.TestCase):
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
         self._assign_webcam(1)
 
-        with mock.patch.object(app_module, "kick_webcam_publisher",
-                               side_effect=app_module.MediaServerUnreachable("down")):
+        with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
             with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
                 response = self.client.post(
                     "/api/mediasrc/assign",
-                    json={"index": 1, "file": "clip.mp4", "publisher_released": True})
+                    json={"index": 1, "file": "clip.mp4",
+                          "publisher_released": True, "publisher_session": "mine"})
 
         self.assertEqual(response.status_code, 200)
         source = app_module.load_sources()[0]

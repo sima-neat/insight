@@ -2188,36 +2188,114 @@ def _source_is_live(src) -> Optional[bool]:
     return media_stream_is_running(index)
 
 
+# How a webcam slot may be changed. Insight never owns the publisher — a
+# browser does — so before a slot is stopped, converted or reassigned, one of
+# two things must be true about whatever is publishing to it:
+#
+#  1. Insight asked MediaMTX to close it, and MediaMTX confirmed. If MediaMTX
+#     cannot be reached, nothing is known and nothing is changed (502).
+#  2. The caller closed its own publisher and names the WHIP session it closed.
+#     That claim is honoured only for that session: if MediaMTX shows a
+#     different session on the slot, the claim is stale and the slot is left
+#     alone (409); if MediaMTX cannot be reached, the claim cannot be verified
+#     and nothing is changed (502). Nothing is kicked on this path — the
+#     caller's session is already gone, and a kick could only hit someone
+#     else's. A claim that names no session is not a claim (400).
+#
+# Every route below goes through _release_webcam_publisher() or its bulk
+# variant, so this holds everywhere rather than at whichever call sites
+# remembered it.
+
+
+class WebcamStopSuperseded(RuntimeError):
+    """A release claim named a session that no longer holds the slot."""
+
+
+class WebcamReleaseClaimInvalid(ValueError):
+    """`publisher_released` was sent without the session it refers to."""
+
+
 @app.errorhandler(MediaServerUnreachable)
 def _handle_media_server_unreachable(exc):
     """A route that did not handle an unknown answers 502 without having changed anything."""
     logging.warning("MediaMTX control API unavailable: %s", exc)
     return _json_error(
-        "Could not reach MediaMTX to manage the webcam publisher, so nothing was "
-        "changed. The camera may still be publishing; retry once Insight's media "
-        "server is reachable.",
+        "Could not reach MediaMTX to verify this source's publisher, so nothing "
+        "was changed. If the camera has already stopped, the source updates on "
+        "its own once the media server is reachable; otherwise retry then.",
         502,
     )
 
 
-def _release_webcam_publisher(index, released=False):
-    """Close the browser publishing to a slot, or raise if that cannot be confirmed.
+@app.errorhandler(WebcamStopSuperseded)
+def _handle_webcam_stop_superseded(exc):
+    return _json_error(
+        "This source is now published by a different session; nothing was changed.",
+        409,
+    )
 
-    `released` is for a caller that already closed its own peer connection: the
-    camera is off whatever MediaMTX says, so an unreachable control API is not a
-    reason to refuse.
+
+@app.errorhandler(WebcamReleaseClaimInvalid)
+def _handle_webcam_release_claim_invalid(exc):
+    return _json_error(
+        "publisher_released requires publisher_session, the WHIP session id that was closed.",
+        400,
+    )
+
+
+def _released_session_from(data) -> Optional[str]:
+    """The session a single-slot caller says it closed, or None if it makes no claim."""
+    if not data.get("publisher_released"):
+        return None
+    session = data.get("publisher_session")
+    if not isinstance(session, str) or not session:
+        raise WebcamReleaseClaimInvalid()
+    return session
+
+
+def _released_sessions_from(data) -> dict:
+    """Slot index -> session id, from a bulk caller's `released_webcams`.
+
+    Entries must name a session; a bare index is not a claim and is ignored,
+    which means that slot is treated as not released and confirmed with
+    MediaMTX like any other.
+    """
+    released = {}
+    for entry in data.get("released_webcams") or []:
+        if not isinstance(entry, dict):
+            continue
+        index, session = entry.get("index"), entry.get("session")
+        if isinstance(index, int) and isinstance(session, str) and session:
+            released[index] = session
+    return released
+
+
+def _release_webcam_publisher(index, released_session=None):
+    """Ensure the slot's publisher is gone before the slot is changed (see above)."""
+    if released_session:
+        current = webcam_publisher_session(index)
+        if current and current != released_session:
+            raise WebcamStopSuperseded(f"src{index} is held by {current}, not {released_session}")
+        return
+    kick_webcam_publisher(index)
+
+
+def _try_release_webcam_publisher(index, released_session=None) -> bool:
+    """Bulk variant: never raises. False only when MediaMTX could not be reached.
+
+    A stale release claim in a bulk request is not an error for the whole
+    request — the user asked for everything to stop — so it falls back to an
+    ordinary confirmed kick of whatever is there.
     """
     try:
-        kick_webcam_publisher(index)
+        _release_webcam_publisher(index, released_session)
+        return True
+    except WebcamStopSuperseded:
+        pass
     except MediaServerUnreachable:
-        if not released:
-            raise
-
-
-def _try_release_webcam_publisher(index, released=False) -> bool:
-    """_release_webcam_publisher for bulk routes; False when it could not be confirmed."""
+        return False
     try:
-        _release_webcam_publisher(index, released)
+        kick_webcam_publisher(index)
         return True
     except MediaServerUnreachable:
         return False
@@ -2275,7 +2353,7 @@ def assign_source():
                 # Writing the file assignment erases the webcam marking, and
                 # with it the only record that a browser may still be publishing
                 # to this path. Raises rather than erasing it unconfirmed.
-                _release_webcam_publisher(index, bool(data.get("publisher_released")))
+                _release_webcam_publisher(index, _released_session_from(data))
                 src["type"] = SOURCE_TYPE_FILE
                 was_playing = False
             else:
@@ -2328,7 +2406,7 @@ def assign_webcam_source():
                 # it is gone would hide the Stop control for a camera that may
                 # still be live, and nothing promotes a slot back to playing —
                 # so an unconfirmed release raises and leaves the slot as it was.
-                _release_webcam_publisher(index, bool(data.get("publisher_released")))
+                _release_webcam_publisher(index, _released_session_from(data))
             elif src.get("state") == "playing":
                 stop_media_stream(index)
             src["type"] = SOURCE_TYPE_WEBCAM
@@ -2347,7 +2425,7 @@ def assign_webcam_source():
 def auto_assign_all_sources():
     """Stop active sources, assign each slot a unique video when available, persist the stopped assignments."""
     data = request.get_json(silent=True) or {}
-    released = {i for i in data.get("released_webcams") or [] if isinstance(i, int)}
+    released = _released_sessions_from(data)
 
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
@@ -2362,7 +2440,7 @@ def auto_assign_all_sources():
             stop_media_stream(source_index)
 
         if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
-            source_index, source_index in released
+            source_index, released.get(source_index)
         ):
             # Same reasoning as reset: keep the slot marked as a webcam, and
             # playing, rather than losing the only record that a browser may
@@ -2534,32 +2612,10 @@ def stop_source():
             # connection, so the camera is released whatever MediaMTX says. Only
             # a caller that did not own it depends on the kick to be sure.
             if src.get("type") == SOURCE_TYPE_WEBCAM:
-                if bool(data.get("publisher_released")):
-                    # The caller closed its own publisher, so there is nothing
-                    # to kick — and kicking would be wrong: if another browser
-                    # has taken the slot since (reassigned it, then this tab's
-                    # dropped connection reports in a few seconds later), the
-                    # session on the path now is theirs. Compare identities and
-                    # refuse to touch a slot that has moved on.
-                    released_session = data.get("publisher_session")
-                    if released_session:
-                        try:
-                            current = webcam_publisher_session(index)
-                        except MediaServerUnreachable:
-                            # Cannot check; the caller did release its own,
-                            # and refusing here reintroduces the false alarm
-                            # for the tab that genuinely stopped its camera.
-                            current = None
-                        if current and current != released_session:
-                            return _json_error(
-                                "This source is now published by a different session; "
-                                "nothing was changed.",
-                                409,
-                            )
-                else:
-                    # Persisting "stopped" without confirming would be a success
-                    # response for a camera that may well still be streaming.
-                    _release_webcam_publisher(index)
+                # Persisting "stopped" without this would be a success response
+                # for a camera that may well still be streaming — or, for a
+                # stale release claim, for someone else's camera.
+                _release_webcam_publisher(index, _released_session_from(data))
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)
@@ -2573,9 +2629,7 @@ def stop_source():
 def stop_all_sources():
     """Stop all source processes, persist every source as stopped, and return how many were previously playing."""
     data = request.get_json(silent=True) or {}
-    # Indexes whose publisher the caller has already closed itself; those need
-    # no confirmation from MediaMTX.
-    released = {i for i in data.get("released_webcams") or [] if isinstance(i, int)}
+    released = _released_sessions_from(data)
 
     sources = load_sources()
     stopped_count = 0
@@ -2585,7 +2639,7 @@ def stop_all_sources():
         if src.get("state") == "playing":
             stopped_count += 1
         if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
-            source_index, source_index in released
+            source_index, released.get(source_index)
         ):
             # Persisting "stopped" would hide the Stop control for a camera that
             # may still be live, and nothing promotes a slot back to playing.
@@ -2617,14 +2671,14 @@ def stop_all_sources():
 def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     data = request.get_json(silent=True) or {}
-    released = {i for i in data.get("released_webcams") or [] if isinstance(i, int)}
+    released = _released_sessions_from(data)
 
     sources = load_sources()
     unconfirmed = []
     for src in sources:
         source_index = src.get("index")
         if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
-            source_index, source_index in released
+            source_index, released.get(source_index)
         ):
             unconfirmed.append(source_index)
         stop_media_stream(source_index)

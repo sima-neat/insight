@@ -1539,6 +1539,15 @@ export default function App() {
     await loadSources()
   }
 
+  // How this tab and Insight agree about a webcam it publishes:
+  //  - Insight never owns the publisher; only this tab can end it. So every
+  //    path that ends a session here also records the stop with the backend,
+  //    naming the WHIP session it ended.
+  //  - A "released" claim is only ever made for a session this tab held and
+  //    can name. The backend honours it only for that session, so a stale
+  //    claim can never mark another browser's camera stopped.
+  //  - A start spans several awaits; a per-slot generation lets anything that
+  //    changes the slot in the meantime abandon it.
   function invalidateWebcamStart(index) {
     const next = (webcamGenerationRef.current[index] || 0) + 1
     webcamGenerationRef.current[index] = next
@@ -1591,7 +1600,11 @@ export default function App() {
 
     if (!dropped.length) return
 
-    const lostSessions = dropped.map((index) => [index, webcamSessionsRef.current.get(index)?.sessionId ?? null])
+    // A dropped assignment this tab never published is only a local choice;
+    // there is nothing to stop and the slot may well be another browser's.
+    const lostSessions = dropped
+      .map((index) => [index, webcamSessionsRef.current.get(index)])
+      .filter(([, session]) => session)
     for (const index of dropped) teardownWebcamSession(index)
     setWebcamAssignments((prev) => {
       const next = { ...prev }
@@ -1600,13 +1613,14 @@ export default function App() {
     })
     // Same reasoning as a lost connection: record each stop rather than reload,
     // naming the session so a slot that has moved on is left alone.
-    for (const [index, publisherSession] of lostSessions) {
+    for (const [index, session] of lostSessions) {
       try {
-        await stopSource(index, { publisherReleased: true, publisherSession })
+        await stopSource(index, releaseClaimFor(session))
       } catch (e) {
         setError(e.message)
       }
     }
+    if (lostSessions.length) await loadSources().catch(() => {})
   }
 
   async function detectWebcams() {
@@ -1620,12 +1634,12 @@ export default function App() {
     await refreshWebcamDevices()
   }
 
-  async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false } = {}) {
+  async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false, publisherSession = null } = {}) {
     try {
       await fetchJson('/api/mediasrc/assign-webcam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ index, publisher_released: publisherReleased })
+        body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
       })
       setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label } }))
       await loadSources()
@@ -1641,12 +1655,12 @@ export default function App() {
       // Switching cameras on a publishing slot: end the current session first.
       // Otherwise the old track keeps publishing to the same MediaMTX path and
       // the replacement is rejected because the path already has a publisher.
-      const owned = webcamSessionsRef.current.has(index)
+      const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
       teardownWebcamSession(index)
-      assignWebcamToSource(index, deviceId, device?.label || 'Webcam', { publisherReleased: owned })
+      assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
       return
     }
-    const owned = webcamSessionsRef.current.has(index)
+    const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
     if (webcamAssignments[index]) {
       teardownWebcamSession(index)
       setWebcamAssignments((prev) => {
@@ -1656,8 +1670,13 @@ export default function App() {
       })
     }
     // Closing our own publisher above released the camera, so the backend does
-    // not need MediaMTX to confirm it before converting the slot to a file.
-    updateSource(index, { file: value, publisher_released: owned })
+    // not need MediaMTX to confirm it before converting the slot to a file —
+    // provided we can name the session, so a stale claim cannot hit another's.
+    updateSource(index, {
+      file: value,
+      publisher_released: Boolean(claim.publisherReleased),
+      publisher_session: claim.publisherSession ?? null,
+    })
   }
 
   async function startWebcamSource(index) {
@@ -1697,14 +1716,19 @@ export default function App() {
         onLost: () => {
           // Capture our identity before teardown: this stop can arrive after
           // another browser has taken the slot, and must name the session it
-          // is about so the backend can refuse to act on theirs.
+          // is about so the backend can refuse to act on theirs. A slot this
+          // tab no longer holds is not ours to stop at all.
           const lost = webcamSessionsRef.current.get(index)
+          if (!lost) return
           teardownWebcamSession(index)
           // Record the stop explicitly rather than reloading: MediaMTX may
           // still report the path ready while the teardown is in flight, and
           // a reload that sees that would leave the row Live with no session.
-          stopSource(index, { publisherReleased: true, publisherSession: lost?.sessionId ?? null })
-            .catch((e) => setError(e.message))
+          stopSource(index, releaseClaimFor(lost))
+            .catch(async (e) => {
+              setError(e.message)
+              await loadSources().catch(() => {})
+            })
         },
       })
       pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
@@ -1754,13 +1778,22 @@ export default function App() {
     }
   }
 
+  // Only a session this tab held, and can name, supports a released claim.
+  function releaseClaimFor(session) {
+    const sessionId = session?.sessionId ?? null
+    return sessionId ? { publisherReleased: true, publisherSession: sessionId } : {}
+  }
+
   async function stopWebcamSource(index) {
     const session = webcamSessionsRef.current.get(index)
     teardownWebcamSession(index)
     try {
-      await stopSource(index, { publisherReleased: Boolean(session), publisherSession: session?.sessionId ?? null })
+      await stopSource(index, releaseClaimFor(session))
     } catch (e) {
       setError(e.message)
+      // The slot may have moved on (409) or be unverifiable (502); show what
+      // the backend now holds rather than what this tab assumed.
+      await loadSources().catch(() => {})
     }
   }
 
@@ -1768,7 +1801,9 @@ export default function App() {
     try {
       // The backend rewrites every slot to a file source; the browser has to
       // release the cameras those slots were using.
-      const released = Array.from(webcamSessionsRef.current.keys())
+      const released = Array.from(webcamSessionsRef.current.entries())
+        .filter(([, session]) => session?.sessionId)
+        .map(([index, session]) => ({ index, session: session.sessionId }))
       teardownAllWebcamSessions({ clearAssignments: true })
       const data = await fetchJson('/api/mediasrc/auto-assign-all', {
         method: 'POST',
@@ -1809,7 +1844,9 @@ export default function App() {
     try {
       // Stop leaves the slot assigned, so the camera choice is kept and only
       // the publishing session ends.
-      const released = Array.from(webcamSessionsRef.current.keys())
+      const released = Array.from(webcamSessionsRef.current.entries())
+        .filter(([, session]) => session?.sessionId)
+        .map(([index, session]) => ({ index, session: session.sessionId }))
       teardownAllWebcamSessions()
       const data = await fetchJson('/api/mediasrc/stop-all', {
         method: 'POST',
@@ -1827,7 +1864,9 @@ export default function App() {
     try {
       // Reset returns every slot to an unassigned file source, so the camera
       // choices go with it.
-      const released = Array.from(webcamSessionsRef.current.keys())
+      const released = Array.from(webcamSessionsRef.current.entries())
+        .filter(([, session]) => session?.sessionId)
+        .map(([index, session]) => ({ index, session: session.sessionId }))
       teardownAllWebcamSessions({ clearAssignments: true })
       const data = await fetchJson('/api/mediasrc/reset', {
         method: 'POST',

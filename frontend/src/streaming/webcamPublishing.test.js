@@ -457,3 +457,17 @@ test("publishing returns the session id alongside the delete url", async () => {
   assert.equal(deleteUrl, "https://insight.local:8889/src1/whip/session-9");
   assert.equal(sessionId, "session-9");
 });
+
+test("a cancelled watcher ignores the close it caused", () => {
+  // teardown cancels, then closes the peer, which emits `closed` — that must
+  // not be reported as a lost connection.
+  const { w, lost, timers } = watcherHarness();
+
+  w.cancel();
+  w.update("closed");
+  w.update("failed");
+  w.update("disconnected");
+
+  assert.deepEqual(lost, []);
+  assert.equal(timers.size, 0);
+});

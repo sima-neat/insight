@@ -181,8 +181,14 @@ export function createDisconnectWatcher({
   clearTimer = clearTimeout,
 } = {}) {
   let timer = null
+  // Cancelling is permanent. Closing the peer connection on purpose emits a
+  // `closed` state change like any other, and a watcher that still reacted to
+  // it would report an intentional teardown as a lost connection — and send a
+  // second stop for a session that is already gone.
+  let active = true
 
   function cancel() {
+    active = false
     if (timer !== null) {
       clearTimer(timer)
       timer = null
@@ -192,6 +198,7 @@ export function createDisconnectWatcher({
   return {
     cancel,
     update(state) {
+      if (!active) return
       if (state === 'failed' || state === 'closed') {
         cancel()
         onLost?.(state)
