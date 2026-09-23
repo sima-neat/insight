@@ -2465,8 +2465,7 @@ def assign_source():
         # tab during the probe, and that process is the one to replace. (A
         # webcam slot has no ffmpeg; its playing state does not carry over.)
         was_playing = media_stream_is_running(index)
-        if was_playing:
-            stop_media_stream(index)
+        stop_media_stream(index)
         src["type"] = SOURCE_TYPE_FILE
         src["file"] = file_name
         src["transport"] = transport
@@ -2514,15 +2513,15 @@ def assign_webcam_source():
         # still be live, and nothing promotes a slot back to playing —
         # so an unconfirmed release raises and leaves the slot as it was.
         _release_webcam_publisher(index, _released_session_from(data))
-    elif snapshot.get("state") == "playing":
-        stop_media_stream(index)
 
     def register(slot):
-        # The same file restarted by another tab during the release above is
-        # the one case the identity check cannot see; do not leave its ffmpeg
-        # publishing to the path the webcam is about to take.
-        if media_stream_is_running(index):
-            stop_media_stream(index)
+        # A file slot's ffmpeg is stopped here, under the lock and after the
+        # identity check, never before it: stopping on the snapshot would kill
+        # a file another tab assigned in the meantime and then leave it
+        # persisted as playing. Also covers the same file restarted during
+        # the release above, which the identity check cannot see. Idempotent,
+        # so no need to ask first.
+        stop_media_stream(index)
         slot["type"] = SOURCE_TYPE_WEBCAM
         slot["file"] = ""
         slot["transport"] = DEFAULT_TRANSPORT
@@ -2560,9 +2559,6 @@ def auto_assign_all_sources():
     plan = {}
     for src in sources:
         source_index = src.get("index")
-        if src.get("state") == "playing":
-            stop_media_stream(source_index)
-
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
@@ -2601,9 +2597,9 @@ def auto_assign_all_sources():
             if (src.get("type"), src.get("file")) != outcome["was"]:
                 changed.append(src["index"])
                 continue
-            # Same file restarted meanwhile: stop it rather than orphan it.
-            if media_stream_is_running(src["index"]):
-                stop_media_stream(src["index"])
+            # File streams are stopped here, after the identity check, so a
+            # file another tab assigned meanwhile is neither killed nor overwritten.
+            stop_media_stream(src["index"])
             for key in ("type", "file", "transport", "codec", "state"):
                 src[key] = outcome[key]
         save_sources(fresh)
@@ -2827,18 +2823,14 @@ def stop_source():
         # must not fall through to stopping the file stream that took
         # its place.
         raise WebcamStopSuperseded(f"src{index} is now a file source")
-    else:
-        stop_media_stream(index)
 
-    # The release above can take a second. A slot that changed kind in that
-    # time — a file assigned over the webcam, or a webcam over the file — now
-    # carries a stream this request never looked at, and must not be marked
-    # stopped on the strength of one that is gone.
+    # The release above can take a second. A slot that changed in that time —
+    # a file assigned over the webcam, a webcam or another file over the file —
+    # now carries a stream this request never looked at, and must not be
+    # stopped or marked stopped on the strength of one that is gone. So the
+    # file slot's ffmpeg is stopped only here, after the identity check.
     def mark_stopped(slot):
-        # The same file restarted by another tab while this request waited is
-        # invisible to the identity check; stop whatever is running now.
-        if media_stream_is_running(index):
-            stop_media_stream(index)
+        stop_media_stream(index)
         slot["state"] = "stopped"
 
     identity = (source_type, snapshot.get("file"))
@@ -2873,7 +2865,9 @@ def stop_all_sources():
             # may still be live, and nothing promotes a slot back to playing.
             unconfirmed.append(source_index)
             continue
-        stop_media_stream(source_index)
+        # File streams are stopped in the merge below, after the identity
+        # check, so a file another tab assigned meanwhile is not killed and
+        # then left recorded as playing.
         stopped[source_index] = (src.get("type"), src.get("file"))
 
     # Stop All changes state and nothing else, but the list above was loaded
@@ -2893,12 +2887,11 @@ def stop_all_sources():
             if (src.get("type"), src.get("file")) != stopped[source_index]:
                 changed.append(source_index)
                 continue
-            # Same file restarted by another tab while later slots were being
-            # released: the identity still matches, so stop it here. (A webcam
-            # re-published on the same slot cannot be seen without asking
-            # MediaMTX, which does not belong inside the lock.)
-            if media_stream_is_running(source_index):
-                stop_media_stream(source_index)
+            # Stops whatever file stream is on the slot now, including the same
+            # file restarted by another tab while later slots were being
+            # released. (A webcam re-published on the same slot cannot be seen
+            # without asking MediaMTX, which does not belong inside the lock.)
+            stop_media_stream(source_index)
             if src.get("state") == "playing":
                 stopped_count += 1
             src["state"] = "stopped"
@@ -2946,7 +2939,6 @@ def reset_all_sources():
             source_index, released.get(source_index)
         ):
             unconfirmed.append(source_index)
-        stop_media_stream(source_index)
 
     # The releases above can take seconds. Each slot is reset in a fresh copy
     # only if it still holds what was stopped or released; a slot another tab
@@ -2960,9 +2952,9 @@ def reset_all_sources():
             if (src.get("type"), src.get("file")) != identities.get(source_index):
                 changed.append(source_index)
                 continue
-            # Same file restarted meanwhile: stop it rather than orphan it.
-            if media_stream_is_running(source_index):
-                stop_media_stream(source_index)
+            # File streams are stopped here, after the identity check, so a
+            # file another tab assigned meanwhile is neither killed nor reset.
+            stop_media_stream(source_index)
             default = _default_source(source_index)
             if source_index in unconfirmed:
                 # Resetting the slot to a file source would erase the only record

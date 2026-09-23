@@ -1178,8 +1178,29 @@ class WebcamSourceTests(unittest.TestCase):
                     body = self.client.post("/api/mediasrc/stop-all").get_json()
 
         self.assertEqual(body["changed_sources"], [])
-        self.assertEqual([c.args[0] for c in stop.call_args_list].count(1), 2, "stopped once in the loop, again in the merge")
+        self.assertEqual([c.args[0] for c in stop.call_args_list].count(1), 1, "stopped in the merge, after the identity check")
         self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_assign_webcam_does_not_kill_a_file_another_tab_assigned_meanwhile(self):
+        """The old file was playing; it is replaced and started by another tab before this request's lock."""
+        self._write_file_slot(1, "clip.mp4", state="playing")
+        real_load, calls = app_module.load_sources, []
+
+        def load_with_swap_before_the_lock():
+            # First load is the route's snapshot; the swap lands before its reload.
+            calls.append(1)
+            if len(calls) == 2:
+                self._write_file_slot(1, "other.mp4", state="playing")
+            return real_load()
+
+        with mock.patch.object(app_module, "load_sources", side_effect=load_with_swap_before_the_lock):
+            with mock.patch.object(app_module, "stop_media_stream") as stop:
+                response = self._assign_webcam(1)
+
+        self.assertEqual(response.status_code, 409)
+        stop.assert_not_called()
+        source = app_module.load_sources()[0]
+        self.assertEqual((source["file"], source["state"]), ("other.mp4", "playing"))
 
     def test_listing_keeps_a_change_made_during_the_second_liveness_check(self):
         self._assign_webcam(1)
