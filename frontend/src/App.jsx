@@ -711,6 +711,10 @@ export default function App() {
   // The devicechange listener below is registered once and would otherwise
   // close over the first render's assignments forever.
   const webcamAssignmentsRef = useRef({})
+  // Starting a webcam spans several awaits; by the time its stream is ready
+  // the user may have selected another row, and the closure's selectedSource
+  // would be stale. The preview must follow the selection as it is now.
+  const selectedSourceRef = useRef(1)
   // Starting a webcam spans getUserMedia and the WHIP exchange. Anything that
   // reassigns or stops the slot in between bumps this, and the in-flight start
   // abandons itself rather than publishing a camera the user already replaced.
@@ -1005,6 +1009,10 @@ export default function App() {
   useEffect(() => {
     webcamAssignmentsRef.current = webcamAssignments
   }, [webcamAssignments])
+
+  useEffect(() => {
+    selectedSourceRef.current = selectedSource
+  }, [selectedSource])
 
   useEffect(() => {
     const session = webcamSessionsRef.current.get(selectedSource)
@@ -1764,7 +1772,10 @@ export default function App() {
       if (superseded()) throw WEBCAM_START_SUPERSEDED
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
 
-      if (index === selectedSource) setWebcamPreviewStream(stream)
+      // Compare against the selection as it is now, not as it was when the
+      // start began; installing this stream under another row's preview
+      // would show the wrong camera until the next selection change.
+      if (index === selectedSourceRef.current) setWebcamPreviewStream(stream)
 
       // Insight only records the slot as playing once MediaMTX sees the path,
       // which lags the WHIP exchange by the ICE handshake. The slot can still be
