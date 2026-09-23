@@ -980,6 +980,147 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(body["stopped_count"], 0, "still publishing, so not stopped")
         self.assertEqual(app_module.load_sources()[0]["state"], "playing")
 
+    # --- Requests that wait on MediaMTX act on a fresh copy of the file ---
+    # Each of these makes the MediaMTX call itself change the file, the way a
+    # second tab would during the up-to-one-second wait, and checks that the
+    # route neither overwrites that change nor acts on the slot it now holds.
+
+    def _write_file_slot(self, index, file_name="other.mp4", state="stopped"):
+        sources = app_module.load_sources()
+        sources[index - 1].update({"type": "file", "file": file_name, "state": state})
+        app_module.save_sources(sources)
+
+    def test_webcam_start_answers_410_when_the_slot_became_a_file_meanwhile(self):
+        self._assign_webcam(1)
+
+        def publishing_then_reassigned(index):
+            self._write_file_slot(1, "clip.mp4")
+            return True
+
+        with mock.patch.object(app_module, "webcam_is_publishing", side_effect=publishing_then_reassigned):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 410)
+        source = app_module.load_sources()[0]
+        self.assertEqual((source["type"], source["file"], source["state"]), ("file", "clip.mp4", "stopped"),
+                         "the file nothing started must not be marked playing")
+
+    def test_webcam_start_keeps_a_change_made_to_another_slot_meanwhile(self):
+        self._assign_webcam(1)
+
+        def publishing_while_slot_2_assigned(index):
+            self._write_file_slot(2, "clip.mp4")
+            return True
+
+        with mock.patch.object(app_module, "webcam_is_publishing", side_effect=publishing_while_slot_2_assigned):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 200)
+        sources = app_module.load_sources()
+        self.assertEqual(sources[0]["state"], "playing")
+        self.assertEqual(sources[1]["file"], "clip.mp4", "the other tab's assignment survived the save")
+
+    def test_webcam_stop_answers_409_when_the_slot_became_a_file_meanwhile(self):
+        self._assign_webcam(1)
+
+        def kick_then_reassigned(index):
+            self._write_file_slot(1, "clip.mp4", state="playing")
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick_then_reassigned):
+            with mock.patch.object(app_module, "stop_media_stream") as stop:
+                response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 409)
+        stop.assert_not_called()
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing", "the file stream was never stopped")
+
+    def test_assign_webcam_answers_409_when_the_slot_became_a_file_meanwhile(self):
+        self._assign_webcam(1)
+
+        def kick_then_reassigned(index):
+            self._write_file_slot(1, "clip.mp4")
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick_then_reassigned):
+            response = self._assign_webcam(1)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(app_module.load_sources()[0]["file"], "clip.mp4")
+
+    def test_assign_file_answers_409_when_the_webcam_slot_changed_meanwhile(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        def kick_then_reassigned(index):
+            self._write_file_slot(1, "other.mp4")
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick_then_reassigned):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                response = self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(app_module.load_sources()[0]["file"], "other.mp4")
+
+    def test_stop_all_leaves_a_slot_reassigned_while_it_was_running(self):
+        """Slot 1 is stopped first; releasing slot 2 takes time, during which slot 1 is given a live file."""
+        self._assign_webcam(1)
+        self._assign_webcam(2)
+
+        def kick(index):
+            if index == 2:
+                self._write_file_slot(1, "clip.mp4", state="playing")
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick):
+            body = self.client.post("/api/mediasrc/stop-all").get_json()
+
+        self.assertEqual(body["changed_sources"], [1])
+        self.assertIn("reassigned while stopping", body["message"])
+        sources = app_module.load_sources()
+        self.assertEqual((sources[0]["file"], sources[0]["state"]), ("clip.mp4", "playing"))
+        self.assertEqual(sources[1]["state"], "stopped")
+
+    def test_file_start_stops_its_stream_when_the_slot_changed_meanwhile(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._write_file_slot(1, "clip.mp4")
+
+        def start_then_reassigned(index, *args, **kwargs):
+            self._write_file_slot(1, "other.mp4")
+            return True, None
+
+        with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+            with mock.patch.object(app_module, "start_media_stream", side_effect=start_then_reassigned):
+                with mock.patch.object(app_module, "stop_media_stream") as stop:
+                    response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 410)
+        stop.assert_called_once_with(1)
+        source = app_module.load_sources()[0]
+        self.assertEqual((source["file"], source["state"]), ("other.mp4", "stopped"))
+
+    def test_listing_keeps_a_change_made_during_the_second_liveness_check(self):
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        calls = []
+
+        def ready_paths():
+            calls.append(1)
+            if len(calls) == 2:
+                self._write_file_slot(2, "clip.mp4")
+            return set()
+
+        with mock.patch.object(app_module, "webcam_ready_paths", side_effect=ready_paths):
+            listed = self.client.get("/api/mediasrc").get_json()
+
+        self.assertEqual(len(calls), 2)
+        by_index = {src["index"]: src for src in listed}
+        self.assertEqual(by_index[1]["state"], "stopped")
+        self.assertEqual(by_index[2]["file"], "clip.mp4", "the assignment made during the re-check survived")
+
     def test_webcam_rtsp_url_uses_the_sdk_mapped_port(self):
         remapped = [{"hostPortEnd": None, "hostPortStart": 18554, "name": "rtsp.tcp", "protocol": "tcp"}]
 

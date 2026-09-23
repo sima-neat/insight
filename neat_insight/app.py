@@ -306,6 +306,18 @@ def _normalize_source(src, index: Optional[int] = None):
     }
 
 
+# The sources file is read, changed and written back whole, and Flask serves
+# requests on threads, so two tabs can interleave. Two rules keep one request
+# from silently undoing another:
+#   1. Every load-modify-save runs under this lock.
+#   2. Nothing that waits on MediaMTX or on a media probe runs between the
+#      load and the save it feeds. A route asks MediaMTX first, then takes
+#      the lock, loads a fresh copy, checks the slot is still the one it
+#      decided about (_update_source_slot), and saves. Spawning or killing
+#      the slot's own ffmpeg inside the lock is fine: it is local and brief.
+_sources_lock = threading.RLock()
+
+
 def load_sources():
     if not MEDIA_SRC_DATA_FILE.exists():
         reset_sources()
@@ -325,13 +337,35 @@ def load_sources():
 
 
 def save_sources(sources):
-    with open(MEDIA_SRC_DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(sources, f, indent=2)
+    with _sources_lock:
+        with open(MEDIA_SRC_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(sources, f, indent=2)
 
 
 def reset_sources():
     sources = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
     save_sources(sources)
+
+
+def _update_source_slot(index, expect, apply):
+    """Change one slot in a fresh copy of the file, if it is still what the caller decided about.
+
+    The caller has just waited on MediaMTX with an older copy in hand. Instead
+    of saving that copy, this reloads under the lock, hands the current slot to
+    `expect`, and only if that holds applies `apply` and saves. Returns the slot
+    as saved, or None when the slot changed hands (or no longer exists) — the
+    caller then answers "changed" rather than acting on a slot it never looked at.
+    """
+    with _sources_lock:
+        sources = load_sources()
+        for src in sources:
+            if src.get("index") == index:
+                if not expect(src):
+                    return None
+                apply(src)
+                save_sources(sources)
+                return src
+        return None
 
 
 def _safe_media_path(rel_path: str) -> Path:
@@ -2340,30 +2374,32 @@ def _sync_source_runtime_states(sources):
         return sources
 
     # The snapshot we were handed is now up to a second old — the MediaMTX
-    # request above can take that long — and another tab may have assigned or
-    # started something in the meantime. Saving the snapshot would rewrite the
-    # whole file with it and silently undo that change. So: re-read the file,
-    # confirm again which slots are still dead, and write only those
-    # demotions into the fresh copy.
-    fresh = load_sources()
-    dead = dead_webcams([
-        src["index"] for src in fresh
+    # request above can take that long — and another tab may have replaced a
+    # webcam on one of these slots with a camera that is now live. Ask again
+    # about only the slots still marked as playing webcams, then apply the
+    # demotions to a copy loaded after that answer: nothing between that load
+    # and the save can block, so nothing another tab writes meanwhile is lost.
+    still_webcams = [
+        src["index"] for src in load_sources()
         if src.get("index") in dead and src.get("state") == "playing" and src.get("type") == SOURCE_TYPE_WEBCAM
-    ])
-    changed = False
-    for src in fresh:
-        index = src.get("index")
-        if src.get("state") != "playing":
-            continue
-        if src.get("type") == SOURCE_TYPE_WEBCAM:
-            demote = index in dead
-        else:
-            demote = index in dead_files and not media_stream_is_running(index)
-        if demote:
-            src["state"] = "stopped"
-            changed = True
-    if changed:
-        save_sources(fresh)
+    ]
+    dead = dead_webcams(still_webcams)
+    with _sources_lock:
+        fresh = load_sources()
+        changed = False
+        for src in fresh:
+            index = src.get("index")
+            if src.get("state") != "playing":
+                continue
+            if src.get("type") == SOURCE_TYPE_WEBCAM:
+                demote = index in dead
+            else:
+                demote = index in dead_files and not media_stream_is_running(index)
+            if demote:
+                src["state"] = "stopped"
+                changed = True
+        if changed:
+            save_sources(fresh)
     return fresh
 
 
@@ -2393,55 +2429,69 @@ def assign_source():
         return _json_error("Missing index")
     requested_transport = data.get("transport")
 
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            if src.get("type") == SOURCE_TYPE_WEBCAM:
-                # Reassigning a webcam slot to a file drops the webcam
-                # registration, and the browser publishing to it has to be
-                # closed by MediaMTX — there is no ffmpeg process to stop.
-                # Writing the file assignment erases the webcam marking, and
-                # with it the only record that a browser may still be publishing
-                # to this path. Raises rather than erasing it unconfirmed.
-                _release_webcam_publisher(index, _released_session_from(data))
-                src["type"] = SOURCE_TYPE_FILE
-                # A file stream is only playing once its ffmpeg process has been
-                # started; the webcam's playing state does not carry over.
-                src["state"] = "stopped"
-                was_playing = False
-            else:
-                # A release claim on a file slot is ignored here, unlike in
-                # stop_source: assigning a file is a deliberate user action,
-                # not a delayed notification, so there is nothing to protect.
-                was_playing = src.get("state") == "playing" and media_stream_is_running(index)
-                if was_playing:
-                    stop_media_stream(index)
-            src["file"] = file_name
-            transport, codec, _allowed_transports = _derive_source_stream_settings(file_name, requested_transport or src.get("transport"))
-            src["transport"] = transport
-            src["codec"] = codec
-            if was_playing and file_name:
-                if not _allowed_transports:
-                    src["state"] = "stopped"
-                    save_sources(sources)
-                    return _json_error(_codec_detection_error(file_name), 400)
-                file_path = MEDIA_DIR / file_name
-                ok, err = start_media_stream(
-                    index,
-                    str(file_path),
-                    src.get("transport"),
-                    src.get("codec"),
-                    _source_media_codec(file_name),
-                )
-                if not ok:
-                    return _json_error(err, 500)
-                src["state"] = "playing"
-            elif not file_name:
-                src["state"] = "stopped"
-            save_sources(sources)
-            return {"success": True}
+    snapshot = next((src for src in load_sources() if src["index"] == index), None)
+    if snapshot is None:
+        return _json_error("Source not found", 404)
+    source_type = snapshot.get("type")
+    if source_type == SOURCE_TYPE_WEBCAM:
+        # Reassigning a webcam slot to a file drops the webcam
+        # registration, and the browser publishing to it has to be
+        # closed by MediaMTX — there is no ffmpeg process to stop.
+        # Writing the file assignment erases the webcam marking, and
+        # with it the only record that a browser may still be publishing
+        # to this path. Raises rather than erasing it unconfirmed.
+        _release_webcam_publisher(index, _released_session_from(data))
+        # A file stream is only playing once its ffmpeg process has been
+        # started; the webcam's playing state does not carry over.
+        was_playing = False
+    else:
+        # A release claim on a file slot is ignored here, unlike in
+        # stop_source: assigning a file is a deliberate user action,
+        # not a delayed notification, so there is nothing to protect.
+        was_playing = snapshot.get("state") == "playing" and media_stream_is_running(index)
+        if was_playing:
+            stop_media_stream(index)
+    # The media probe can take a moment too, so it also runs before the lock.
+    transport, codec, _allowed_transports = _derive_source_stream_settings(
+        file_name, requested_transport or snapshot.get("transport")
+    )
 
-    return _json_error("Source not found", 404)
+    identity = (source_type, snapshot.get("file"))
+    with _sources_lock:
+        sources = load_sources()
+        src = next((s for s in sources if s["index"] == index), None)
+        if src is None:
+            return _json_error("Source not found", 404)
+        if (src.get("type"), src.get("file")) != identity:
+            # Changed while the release, stop or probe was in flight; whatever
+            # is on the slot now was never released or stopped by this request.
+            return _json_error("Source changed while it was being reassigned; reload and try again", 409)
+        src["type"] = SOURCE_TYPE_FILE
+        src["file"] = file_name
+        src["transport"] = transport
+        src["codec"] = codec
+        if source_type == SOURCE_TYPE_WEBCAM:
+            src["state"] = "stopped"
+        if was_playing and file_name:
+            if not _allowed_transports:
+                src["state"] = "stopped"
+                save_sources(sources)
+                return _json_error(_codec_detection_error(file_name), 400)
+            file_path = MEDIA_DIR / file_name
+            ok, err = start_media_stream(
+                index,
+                str(file_path),
+                src.get("transport"),
+                src.get("codec"),
+                _source_media_codec(file_name),
+            )
+            if not ok:
+                return _json_error(err, 500)
+            src["state"] = "playing"
+        elif not file_name:
+            src["state"] = "stopped"
+        save_sources(sources)
+        return {"success": True}
 
 
 # API: register one RTSP source slot to accept a browser-published webcam.
@@ -2453,27 +2503,42 @@ def assign_webcam_source():
     if index is None:
         return _json_error("Missing index")
 
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            if src.get("type") == SOURCE_TYPE_WEBCAM:
-                # Switching cameras: the previous publisher still owns the
-                # MediaMTX path. Persisting "stopped" below without confirming
-                # it is gone would hide the Stop control for a camera that may
-                # still be live, and nothing promotes a slot back to playing —
-                # so an unconfirmed release raises and leaves the slot as it was.
-                _release_webcam_publisher(index, _released_session_from(data))
-            elif src.get("state") == "playing":
-                stop_media_stream(index)
-            src["type"] = SOURCE_TYPE_WEBCAM
-            src["file"] = ""
-            src["transport"] = DEFAULT_TRANSPORT
-            src["codec"] = DEFAULT_CODEC
-            src["state"] = "stopped"
-            save_sources(sources)
-            return {"success": True, "source": _source_with_urls(src)}
+    snapshot = next((src for src in load_sources() if src["index"] == index), None)
+    if snapshot is None:
+        return _json_error("Source not found", 404)
+    source_type = snapshot.get("type")
 
-    return _json_error("Source not found", 404)
+    if source_type == SOURCE_TYPE_WEBCAM:
+        # Switching cameras: the previous publisher still owns the
+        # MediaMTX path. Persisting "stopped" below without confirming
+        # it is gone would hide the Stop control for a camera that may
+        # still be live, and nothing promotes a slot back to playing —
+        # so an unconfirmed release raises and leaves the slot as it was.
+        _release_webcam_publisher(index, _released_session_from(data))
+    elif snapshot.get("state") == "playing":
+        stop_media_stream(index)
+
+    def register(slot):
+        # The same file restarted by another tab during the release above is
+        # the one case the identity check cannot see; do not leave its ffmpeg
+        # publishing to the path the webcam is about to take.
+        if media_stream_is_running(index):
+            stop_media_stream(index)
+        slot["type"] = SOURCE_TYPE_WEBCAM
+        slot["file"] = ""
+        slot["transport"] = DEFAULT_TRANSPORT
+        slot["codec"] = DEFAULT_CODEC
+        slot["state"] = "stopped"
+
+    # Applied to a fresh copy: the release above can take a second, and a slot
+    # that changed meanwhile holds a stream this request never released.
+    identity = (source_type, snapshot.get("file"))
+    updated = _update_source_slot(
+        index, lambda slot: (slot.get("type"), slot.get("file")) == identity, register
+    )
+    if updated is None:
+        return _json_error("Source changed while it was being reassigned; reload and try again", 409)
+    return {"success": True, "source": _source_with_urls(updated)}
 
 
 # API: assign available videos to all source slots in index order.
@@ -2556,30 +2621,57 @@ def start_source():
                 # An unreachable MediaMTX raises through to the 502 handler.
                 if not webcam_is_publishing(index):
                     return _json_error("Webcam is not publishing yet", 409)
-                src["state"] = "playing"
-                save_sources(sources)
+                # That request can take a second; the slot may have been given
+                # a file meanwhile, and marking that playing would report a
+                # stream nothing started.
+                def mark_playing(slot):
+                    slot["state"] = "playing"
+
+                updated = _update_source_slot(
+                    index, lambda slot: slot.get("type") == SOURCE_TYPE_WEBCAM, mark_playing
+                )
+                # 410 rather than 409: this route's 409 means "not publishing
+                # yet", which the browser retries; a slot that is no longer a
+                # webcam will never become one, and must not be retried.
+                if updated is None:
+                    return _json_error("Source changed while it was being started", 410)
                 return {"success": True}
 
             filename = src.get("file")
             if not filename:
                 return _json_error("No file assigned to source")
             transport, codec, allowed_transports = _derive_source_stream_settings(filename, src.get("transport"))
-            src["transport"] = transport
-            src["codec"] = codec
+            identity = (SOURCE_TYPE_FILE, filename)
+
+            def still_same(slot):
+                return (slot.get("type"), slot.get("file")) == identity
+
+            def record(state):
+                def apply(slot):
+                    slot["transport"] = transport
+                    slot["codec"] = codec
+                    if state:
+                        slot["state"] = state
+                return apply
+
             if not allowed_transports:
-                save_sources(sources)
+                _update_source_slot(index, still_same, record(None))
                 return _json_error(_codec_detection_error(filename), 400)
             ok, err = start_media_stream(
                 index,
                 str(MEDIA_DIR / filename),
-                src.get("transport"),
-                src.get("codec"),
+                transport,
+                codec,
                 _source_media_codec(filename),
             )
             if not ok:
                 return _json_error(err, 500)
-            src["state"] = "playing"
-            save_sources(sources)
+            # The probe and the spawn above took time; record the start only
+            # if the slot still holds this file, otherwise the stream belongs
+            # to nothing and is stopped again.
+            if _update_source_slot(index, still_same, record("playing")) is None:
+                stop_media_stream(index)
+                return _json_error("Source changed while it was being started", 410)
             return {"success": True}
 
     return _json_error("Source not found", 404)
@@ -2641,23 +2733,24 @@ def start_sources_bulk():
     # Re-read, and apply only this request's outcomes, only to slots that are
     # still what they were when the request began.
     outcomes = {src["index"]: src for src in targets}
-    fresh = load_sources()
-    for slot in fresh:
-        result = outcomes.get(slot.get("index"))
-        if result is None:
-            continue
-        if slot.get("type") != SOURCE_TYPE_FILE or slot.get("file") != result.get("file"):
-            # The slot changed hands while it was being started; the stream
-            # this request started belongs to nothing now.
-            if result["index"] in started:
-                stop_media_stream(result["index"])
-                started.remove(result["index"])
-                errors.append({"index": result["index"], "error": "Source changed while it was being started"})
-            continue
-        slot["transport"] = result.get("transport")
-        slot["codec"] = result.get("codec")
-        slot["state"] = result.get("state")
-    save_sources(fresh)
+    with _sources_lock:
+        fresh = load_sources()
+        for slot in fresh:
+            result = outcomes.get(slot.get("index"))
+            if result is None:
+                continue
+            if slot.get("type") != SOURCE_TYPE_FILE or slot.get("file") != result.get("file"):
+                # The slot changed hands while it was being started; the stream
+                # this request started belongs to nothing now.
+                if result["index"] in started:
+                    stop_media_stream(result["index"])
+                    started.remove(result["index"])
+                    errors.append({"index": result["index"], "error": "Source changed while it was being started"})
+                continue
+            slot["transport"] = result.get("transport")
+            slot["codec"] = result.get("codec")
+            slot["state"] = result.get("state")
+        save_sources(fresh)
     started_or_running = len(started) + len(already_running)
     return {
         "success": len(errors) == 0,
@@ -2684,29 +2777,44 @@ def stop_source():
         return _json_error("Missing index")
 
     released_session = _released_session_from(data)
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            if src.get("type") == SOURCE_TYPE_WEBCAM:
-                # stop_media_stream() is a no-op for a webcam slot: there is no
-                # ffmpeg process, the browser is the publisher. Persisting
-                # "stopped" without this would be a success response for a
-                # camera that may well still be streaming — or, for a stale
-                # release claim, for someone else's camera.
-                _release_webcam_publisher(index, released_session)
-            elif released_session:
-                # A release claim is a webcam stop by definition. The slot has
-                # since become a file source, so the claim is stale — a delayed
-                # notification from a browser whose camera was replaced — and
-                # must not fall through to stopping the file stream that took
-                # its place.
-                raise WebcamStopSuperseded(f"src{index} is now a file source")
-            stop_media_stream(index)
-            src["state"] = "stopped"
-            save_sources(sources)
-            return {"success": True}
+    snapshot = next((src for src in load_sources() if src["index"] == index), None)
+    if snapshot is None:
+        return _json_error("Source not found", 404)
+    source_type = snapshot.get("type")
 
-    return _json_error("Source not found", 404)
+    if source_type == SOURCE_TYPE_WEBCAM:
+        # stop_media_stream() is a no-op for a webcam slot: there is no
+        # ffmpeg process, the browser is the publisher. Persisting
+        # "stopped" without this would be a success response for a
+        # camera that may well still be streaming — or, for a stale
+        # release claim, for someone else's camera.
+        _release_webcam_publisher(index, released_session)
+    elif released_session:
+        # A release claim is a webcam stop by definition. The slot has
+        # since become a file source, so the claim is stale — a delayed
+        # notification from a browser whose camera was replaced — and
+        # must not fall through to stopping the file stream that took
+        # its place.
+        raise WebcamStopSuperseded(f"src{index} is now a file source")
+    else:
+        stop_media_stream(index)
+
+    # The release above can take a second. A slot that changed kind in that
+    # time — a file assigned over the webcam, or a webcam over the file — now
+    # carries a stream this request never looked at, and must not be marked
+    # stopped on the strength of one that is gone.
+    def mark_stopped(slot):
+        slot["state"] = "stopped"
+
+    identity = (source_type, snapshot.get("file"))
+    updated = _update_source_slot(
+        index, lambda slot: (slot.get("type"), slot.get("file")) == identity, mark_stopped
+    )
+    if updated is None:
+        if source_type == SOURCE_TYPE_WEBCAM:
+            raise WebcamStopSuperseded(f"src{index} changed while its publisher was being released")
+        return _json_error("Source changed while it was being stopped", 409)
+    return {"success": True}
 
 
 # API: stop every RTSP media source.
@@ -2719,7 +2827,7 @@ def stop_all_sources():
     sources = load_sources()
     stopped_count = 0
     unconfirmed = []
-    stopped = set()
+    stopped = {}
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
@@ -2731,21 +2839,30 @@ def stop_all_sources():
             unconfirmed.append(source_index)
             continue
         stop_media_stream(source_index)
-        stopped.add(source_index)
-        # Counted after the release, so an unconfirmed camera that is still
-        # publishing is not reported as stopped.
-        if src.get("state") == "playing":
-            stopped_count += 1
+        stopped[source_index] = (src.get("type"), src.get("file"))
 
     # Stop All changes state and nothing else, but the list above was loaded
     # before a loop of kicks that can take a second each. Writing it back would
     # also write back the files it saw, undoing any assignment another tab made
-    # meanwhile. Apply only the stops, to a fresh copy.
-    fresh = load_sources()
-    for src in fresh:
-        if src.get("index") in stopped:
+    # meanwhile. Apply only the stops, to a fresh copy — and only to slots
+    # that still hold what was stopped. A slot reassigned and started again
+    # while later publishers were being released carries a stream this
+    # request never touched; marking it stopped would hide a live source.
+    changed = []
+    with _sources_lock:
+        fresh = load_sources()
+        for src in fresh:
+            source_index = src.get("index")
+            if source_index not in stopped:
+                continue
+            if (src.get("type"), src.get("file")) != stopped[source_index]:
+                changed.append(source_index)
+                continue
+            if src.get("state") == "playing":
+                stopped_count += 1
             src["state"] = "stopped"
-    save_sources(fresh)
+        save_sources(fresh)
+
     message = f"Stopped {stopped_count} source(s)."
     if unconfirmed:
         # Stopping the rest still happened, so this is not an error; the caller
@@ -2755,10 +2872,17 @@ def stop_all_sources():
             + ", ".join(str(i) for i in unconfirmed)
             + "."
         )
+    if changed:
+        message += (
+            " Source(s) "
+            + ", ".join(str(i) for i in changed)
+            + " were reassigned while stopping and were left as they are now."
+        )
     return {
         "success": True,
         "stopped_count": stopped_count,
         "unconfirmed_webcams": unconfirmed,
+        "changed_sources": changed,
         "message": message,
     }
 

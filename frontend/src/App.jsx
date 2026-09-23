@@ -508,7 +508,11 @@ async function fetchJson(url, init) {
   const isJson = contentType.toLowerCase().includes('application/json')
   const body = isJson ? await res.json().catch(() => ({})) : {}
 
-  if (!res.ok) throw new Error(body.error || body.message || `Request failed: ${res.status}`)
+  if (!res.ok) {
+    const error = new Error(body.error || body.message || `Request failed: ${res.status}`)
+    error.status = res.status
+    throw error
+  }
   if (!isJson) {
     throw new Error(`Expected JSON from ${url}, received ${contentType || 'an empty content type'}.`)
   }
@@ -1540,6 +1544,15 @@ export default function App() {
     await loadSources()
   }
 
+  // The per-row Start/Stop buttons for file sources call the two helpers above
+  // directly; a rejected request there — the slot changed under another tab
+  // (409/410), or a codec problem — must reach the user and refresh the row,
+  // not vanish as an unhandled rejection.
+  async function reportSourceError(e) {
+    setError(e.message)
+    await loadSources().catch(() => {})
+  }
+
   async function stopSource(index, { publisherReleased = false, publisherSession = null } = {}) {
     await fetchJson('/api/mediasrc/stop', {
       method: 'POST',
@@ -1667,6 +1680,9 @@ export default function App() {
       await loadSources()
     } catch (e) {
       setError(e.message)
+      // The slot may have been changed by another tab (409) or be
+      // unverifiable (502); show what the backend now holds.
+      await loadSources().catch(() => {})
     } finally {
       setWebcamBusy((prev) => {
         const next = { ...prev }
@@ -1718,6 +1734,7 @@ export default function App() {
       })
     } catch (e) {
       setError(e.message)
+      await loadSources().catch(() => {})
     } finally {
       setWebcamBusy((prev) => {
         const next = { ...prev }
@@ -1806,7 +1823,10 @@ export default function App() {
           if (superseded()) throw WEBCAM_START_SUPERSEDED
           return startSource(index)
         },
-        { isTerminal: (e) => Boolean(e?.superseded) },
+        // 410: the backend saw the slot become a file source while confirming.
+        // Another tab did that, so this tab's generation never moved; without
+        // this the loop would retry a slot that can never become ours.
+        { isTerminal: (e) => Boolean(e?.superseded) || e?.status === 410 },
       )
     } catch (e) {
       if (webcamSessionsRef.current.has(index)) {
@@ -2390,7 +2410,7 @@ export default function App() {
                           {src.state === 'playing' ? (
                             <button
                               className="icon-action-btn stop"
-                              onClick={(e) => { e.stopPropagation(); isWebcam ? stopWebcamSource(src.index) : stopSource(src.index) }}
+                              onClick={(e) => { e.stopPropagation(); isWebcam ? stopWebcamSource(src.index) : stopSource(src.index).catch(reportSourceError) }}
                               aria-label={`Stop src${src.index}`}
                               title={`Stop src${src.index}`}
                             >
@@ -2401,7 +2421,7 @@ export default function App() {
                           ) : (
                             <button
                               className="icon-action-btn play"
-                              onClick={(e) => { e.stopPropagation(); isWebcam ? startWebcamSource(src.index) : startSource(src.index) }}
+                              onClick={(e) => { e.stopPropagation(); isWebcam ? startWebcamSource(src.index) : startSource(src.index).catch(reportSourceError) }}
                               disabled={!canStream || (isWebcam && (!webcamAssignment || webcamBusy[src.index]))}
                               aria-label={`Start src${src.index}`}
                               title={

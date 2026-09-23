@@ -594,6 +594,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/WebcamNotPublishing"},
+          "410": {"$ref": "#/components/responses/SourceChangedWhileStarting"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
@@ -643,13 +644,13 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop every source",
-        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop. A caller that has already closed its own publishers may list those indexes in `released_webcams`, and they are not reported as unconfirmed.",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop. A slot reassigned by another caller while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that has already closed its own publishers may list those indexes in `released_webcams`, and they are not reported as unconfirmed.",
         "operationId": "stopAllMediaSources",
         "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Number of sources that were previously playing.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "unconfirmed_webcams": [], "message": "Stopped 4 source(s)."}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "unconfirmed_webcams": [], "changed_sources": [], "message": "Stopped 4 source(s)."}}}
           }
         }
       }
@@ -972,7 +973,8 @@
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "WebcamStopSuperseded": {"description": "The released session no longer publishes to this slot; a different session does, and it was left untouched.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "SourceChangedWhileStarting": {"description": "The slot was reassigned while Insight was confirming a webcam publisher or starting a file, so the start was not recorded (a file stream started this way is stopped again). Unlike 409, not worth retrying: reload the source list.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "WebcamStopSuperseded": {"description": "Nothing was changed, for one of two reasons: the released session no longer publishes to this slot and a different session does; or the slot changed kind (file to webcam or back) while this request was waiting on MediaMTX. Reload the source list and retry.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamNotConfirmedStopped": {"description": "Insight could not reach MediaMTX to verify the slot's publisher, so nothing was changed. If the camera has in fact stopped, the slot updates on its own once MediaMTX is reachable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
