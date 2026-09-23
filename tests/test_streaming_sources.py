@@ -232,6 +232,30 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(stop_stream.call_args[0][0], 1, "only the stream this request started is stopped")
         self.assertEqual(app_module.load_sources()[0]["type"], "webcam", "the newer state kept")
 
+    def test_start_bulk_does_not_clobber_a_concurrent_start_it_found_already_running(self):
+        """A file this request could not start (another request already did) keeps that request's playing state."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+
+        def already_running_started_by_another_request(*args, **kwargs):
+            # A concurrent request wins the race and persists playing.
+            current = app_module.load_sources()
+            current[0]["state"] = "playing"
+            app_module.save_sources(current)
+            return False, "Already running"
+
+        with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
+            with mock.patch.object(app_module, "start_media_stream",
+                                   side_effect=already_running_started_by_another_request):
+                response = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
+
+        self.assertEqual([e["index"] for e in response.get_json()["errors"]], [1])
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing",
+                         "the concurrent request's playing state must survive the merge")
+
     def test_http_snapshot_uses_configured_source(self):
         (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")
         self.client.post(

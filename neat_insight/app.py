@@ -2823,19 +2823,26 @@ def start_sources_bulk():
             result = outcomes.get(slot.get("index"))
             if result is None:
                 continue
+            if result["index"] not in started:
+                # This request did not start this slot — it was already
+                # running, errored, or failed codec detection. Its snapshot
+                # outcome is stale: another request may have started the same
+                # file in the meantime and persisted "playing", so writing this
+                # request's "stopped" back would hide a live stream. Leave the
+                # fresh state alone.
+                continue
             if slot.get("type") != SOURCE_TYPE_FILE or slot.get("file") != result.get("file"):
                 # The slot changed hands while it was being started; the stream
                 # this request started belongs to nothing now — unless an
                 # assign in between already replaced it with its own, which
                 # stays. Only the stream this request started is stopped.
-                if result["index"] in started:
-                    stop_media_stream_if(result["index"], started_identity.get(result["index"]))
-                    started.remove(result["index"])
-                    errors.append({"index": result["index"], "error": "Source changed while it was being started"})
+                stop_media_stream_if(result["index"], started_identity.get(result["index"]))
+                started.remove(result["index"])
+                errors.append({"index": result["index"], "error": "Source changed while it was being started"})
                 continue
             slot["transport"] = result.get("transport")
             slot["codec"] = result.get("codec")
-            slot["state"] = result.get("state")
+            slot["state"] = "playing"
         save_sources(fresh)
     started_or_running = len(started) + len(already_running)
     return {
