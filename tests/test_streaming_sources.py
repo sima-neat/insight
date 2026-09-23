@@ -415,7 +415,7 @@ class WebcamSourceTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with mock.patch.object(app_module, "webcam_is_publishing", return_value=False):
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value=set()):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(response.status_code, 200)
@@ -429,7 +429,7 @@ class WebcamSourceTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with mock.patch.object(app_module, "webcam_is_publishing",
+        with mock.patch.object(app_module, "webcam_ready_paths",
                                side_effect=app_module.MediaServerUnreachable("down")):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
@@ -446,13 +446,47 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("Could not reach MediaMTX", response.get_json()["error"])
 
+    def _three_playing_webcams(self):
+        self.sources_file.write_text(json.dumps([
+            {"index": i, "file": "", "state": "playing", "type": "webcam"} for i in (1, 2, 3)
+        ]), encoding="utf-8")
+
+    def test_source_listing_asks_mediamtx_once_for_every_webcam(self):
+        """48 slots must not mean 48 control-API timeouts when MediaMTX hangs."""
+        self._three_playing_webcams()
+
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src2"}) as ready:
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(ready.call_count, 1)
+        states = {s["index"]: s["state"] for s in response.get_json()[:3]}
+        self.assertEqual(states, {1: "stopped", 2: "playing", 3: "stopped"})
+
+    def test_source_listing_leaves_every_webcam_alone_when_mediamtx_is_unreachable(self):
+        self._three_playing_webcams()
+
+        with mock.patch.object(app_module, "webcam_ready_paths",
+                               side_effect=app_module.MediaServerUnreachable("hung")) as ready:
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(ready.call_count, 1, "one attempt, not one per slot")
+        self.assertEqual({s["state"] for s in response.get_json()[:3]}, {"playing"})
+
+    def test_source_listing_does_not_ask_mediamtx_without_playing_webcams(self):
+        self._assign_webcam(1)  # registered, not playing
+
+        with mock.patch.object(app_module, "webcam_ready_paths") as ready:
+            self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        ready.assert_not_called()
+
     def test_a_still_publishing_webcam_stays_live_across_a_reload(self):
         self.sources_file.write_text(
             '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
             encoding="utf-8",
         )
 
-        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src1"}):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(response.get_json()[0]["state"], "playing")
@@ -473,7 +507,7 @@ class WebcamSourceTests(unittest.TestCase):
             process=process,
         )
 
-        with mock.patch.object(app_module, "webcam_is_publishing", return_value=False):
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value=set()):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(response.get_json()[0]["state"], "stopped")
@@ -960,6 +994,23 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             with self.assertRaises(mediasrc.MediaServerUnreachable):
                 mediasrc.webcam_is_publishing(1)
+
+    def test_ready_paths_collects_only_ready_names_from_one_request(self):
+        urlopen = self._urlopen_returning({"itemCount": 3, "pageCount": 1, "items": [
+            {"name": "src1", "ready": True}, {"name": "src2", "ready": False}, {"name": "src3", "ready": True}]})
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            self.assertEqual(mediasrc.webcam_ready_paths(), {"src1", "src3"})
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertIn("/v3/paths/list", urlopen.call_args[0][0].full_url)
+
+    def test_ready_paths_raises_when_unreachable(self):
+        urlopen = mock.Mock(side_effect=mediasrc.urllib.error.URLError("refused"))
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
+            with self.assertRaises(mediasrc.MediaServerUnreachable):
+                mediasrc.webcam_ready_paths()
 
     def test_publisher_session_reports_the_current_webrtc_session_id(self):
         urlopen = self._urlopen_returning(

@@ -474,3 +474,25 @@ test("a cancelled watcher ignores the close it caused", () => {
   assert.deepEqual(lost, []);
   assert.equal(timers.size, 0);
 });
+
+test("recovering keeps the watcher armed for a later loss", () => {
+  // Every successful publish reaches `connected`; that must not disarm the
+  // watcher, or a network loss minutes later leaves the row Live for good.
+  const { w, lost, timers, fire } = watcherHarness();
+
+  w.update("connecting");
+  w.update("connected");
+  assert.deepEqual(lost, []);
+
+  w.update("disconnected");
+  assert.equal(timers.size, 1, "still watching after recovery");
+  fire();
+  assert.deepEqual(lost, ["disconnected"]);
+});
+
+test("a failure after a healthy connection is still reported", () => {
+  const { w, lost } = watcherHarness();
+  w.update("connected");
+  w.update("failed");
+  assert.deepEqual(lost, ["failed"]);
+});

@@ -182,18 +182,25 @@ export function createDisconnectWatcher({
   clearTimer = clearTimeout,
 } = {}) {
   let timer = null
-  // Cancelling is permanent. Closing the peer connection on purpose emits a
+  // Two different things end the wait. Recovery — `connected` after a
+  // `disconnected` — only clears the pending grace timer; the watcher stays
+  // armed for the next loss. Cancellation is permanent and is reserved for
+  // intentional teardown: closing the peer connection on purpose emits a
   // `closed` state change like any other, and a watcher that still reacted to
-  // it would report an intentional teardown as a lost connection — and send a
-  // second stop for a session that is already gone.
+  // it would report the teardown as a lost connection and send a second stop
+  // for a session that is already gone.
   let active = true
 
-  function cancel() {
-    active = false
+  function clearGrace() {
     if (timer !== null) {
       clearTimer(timer)
       timer = null
     }
+  }
+
+  function cancel() {
+    active = false
+    clearGrace()
   }
 
   return {
@@ -214,8 +221,9 @@ export function createDisconnectWatcher({
         }
         return
       }
-      // connecting / connected / new: whatever interruption there was is over.
-      cancel()
+      // connecting / connected / new: whatever interruption there was is over,
+      // but the connection can still be lost later — stay armed.
+      clearGrace()
     },
   }
 }

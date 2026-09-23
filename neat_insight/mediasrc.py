@@ -366,6 +366,21 @@ def webcam_is_publishing(index: int) -> bool:
     return bool(data.get("ready"))
 
 
+def webcam_ready_paths() -> set:
+    """Names of every path MediaMTX currently reports ready, from one request.
+
+    Source listing checks every playing webcam slot. Asking about each one
+    separately costs one control-API timeout per slot when MediaMTX accepts
+    connections but stops answering — up to 48 seconds for a routine listing,
+    during the very outage the per-slot fallback exists to tolerate. Raises
+    MediaServerUnreachable.
+    """
+    data = _mediamtx_request("/v3/paths/list?itemsPerPage=1000")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return set()
+    return {item.get("name") for item in (data.get("items") or []) if item.get("ready")}
+
+
 def webcam_publisher_session(index: int) -> Optional[str]:
     """The id of the WebRTC session currently publishing to this slot, or None.
 

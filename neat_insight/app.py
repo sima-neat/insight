@@ -55,6 +55,7 @@ from neat_insight.mediasrc import (
     kick_webcam_publisher,
     webcam_is_publishing,
     webcam_publisher_session,
+    webcam_ready_paths,
     webcam_path_name,
 )
 from neat_insight.api_docs import api_docs_bp
@@ -2170,24 +2171,6 @@ def _source_with_urls(src):
     return enriched
 
 
-def _source_is_live(src) -> Optional[bool]:
-    """True, False, or None when liveness could not be determined.
-
-    The one place an unknown is swallowed rather than raised: this runs on every
-    source listing, and a momentary MediaMTX blip must not fail the request.
-    Callers must distinguish None from False — see _sync_source_runtime_states.
-    """
-    index = src.get("index")
-    if index is None:
-        return False
-    if src.get("type") == SOURCE_TYPE_WEBCAM:
-        try:
-            return webcam_is_publishing(index)
-        except MediaServerUnreachable:
-            return None
-    return media_stream_is_running(index)
-
-
 # How a webcam slot may be changed. Insight never owns the publisher — a
 # browser does — so before a slot is stopped, converted or reassigned, one of
 # two things must be true about whatever is publishing to it:
@@ -2302,14 +2285,35 @@ def _try_release_webcam_publisher(index, released_session=None) -> bool:
 
 
 def _sync_source_runtime_states(sources):
+    """Demote playing slots whose stream is definitely gone.
+
+    The one place an unreachable MediaMTX is swallowed rather than raised: this
+    runs on every source listing, and a momentary blip must not fail the
+    request. It asks MediaMTX once for all webcam slots together — one request
+    per slot would cost a control-API timeout each when MediaMTX hangs.
+    """
     changed = False
+    ready_paths = None
+    if any(src.get("state") == "playing" and src.get("type") == SOURCE_TYPE_WEBCAM for src in sources):
+        try:
+            ready_paths = webcam_ready_paths()
+        except MediaServerUnreachable:
+            # Only demote on a definite answer. Nothing ever promotes a slot
+            # back to playing, so treating "could not tell" as "stopped" would
+            # leave a live camera showing Idle for good.
+            ready_paths = None
+
     for src in sources:
         if src.get("state") != "playing":
             continue
-        # Only demote on a definite answer. Nothing ever promotes a slot back to
-        # playing, so treating "could not tell" as "stopped" would leave a live
-        # camera showing Idle for good.
-        if _source_is_live(src) is False:
+        index = src.get("index")
+        if src.get("type") == SOURCE_TYPE_WEBCAM:
+            if ready_paths is None or index is None:
+                continue
+            live = webcam_path_name(index) in ready_paths
+        else:
+            live = index is not None and media_stream_is_running(index)
+        if not live:
             src["state"] = "stopped"
             changed = True
     if changed:
