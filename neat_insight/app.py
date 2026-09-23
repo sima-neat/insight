@@ -2264,25 +2264,43 @@ def _release_webcam_publisher(index, released_session=None):
     kick_webcam_publisher(index)
 
 
-def _try_release_webcam_publisher(index, released_session=None) -> bool:
-    """Bulk variant: never raises. False only when MediaMTX could not be reached.
+class _BulkReleaser:
+    """Releases webcam publishers for one bulk request; never raises.
 
-    A stale release claim in a bulk request is not an error for the whole
-    request — the user asked for everything to stop — so it falls back to an
-    ordinary confirmed kick of whatever is there.
+    A stale release claim is not an error for the whole request — the user
+    asked for everything to stop — so it falls back to an ordinary confirmed
+    kick. The two kinds of "unconfirmed" are kept apart: a slot whose
+    publisher kept changing hands is reported and the loop moves on, but once
+    MediaMTX itself has stopped answering, every remaining webcam slot is
+    reported without contacting it again — otherwise a request across 48
+    slots waits out 48 one-second timeouts against a server already known to
+    be unavailable.
     """
-    try:
-        _release_webcam_publisher(index, released_session)
-        return True
-    except WebcamStopSuperseded:
-        pass
-    except WebcamPublisherUnconfirmed:
-        return False
-    try:
-        kick_webcam_publisher(index)
-        return True
-    except WebcamPublisherUnconfirmed:
-        return False
+
+    def __init__(self):
+        self.unreachable = False
+
+    def release(self, index, released_session=None) -> bool:
+        if self.unreachable:
+            return False
+        try:
+            _release_webcam_publisher(index, released_session)
+            return True
+        except WebcamStopSuperseded:
+            pass
+        except MediaServerUnreachable:
+            self.unreachable = True
+            return False
+        except WebcamPublisherUnconfirmed:
+            return False
+        try:
+            kick_webcam_publisher(index)
+            return True
+        except MediaServerUnreachable:
+            self.unreachable = True
+            return False
+        except WebcamPublisherUnconfirmed:
+            return False
 
 
 def _sync_source_runtime_states(sources):
@@ -2463,6 +2481,7 @@ def auto_assign_all_sources():
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
     unconfirmed = []
+    releaser = _BulkReleaser()
 
     # Slots are consumed in index order, but a slot skipped below must not
     # consume a video with it, so the file cursor advances only on assignment.
@@ -2472,7 +2491,7 @@ def auto_assign_all_sources():
         if src.get("state") == "playing":
             stop_media_stream(source_index)
 
-        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
             # Same reasoning as reset: keep the slot marked as a webcam, and
@@ -2608,7 +2627,29 @@ def start_sources_bulk():
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})
 
-    save_sources(sources)
+    # Every start above spawned a process, and between the load at the top and
+    # here another tab may have assigned or started something. Saving the
+    # snapshot would rewrite the whole file with it and silently undo that.
+    # Re-read, and apply only this request's outcomes, only to slots that are
+    # still what they were when the request began.
+    outcomes = {src["index"]: src for src in targets}
+    fresh = load_sources()
+    for slot in fresh:
+        result = outcomes.get(slot.get("index"))
+        if result is None:
+            continue
+        if slot.get("type") != SOURCE_TYPE_FILE or slot.get("file") != result.get("file"):
+            # The slot changed hands while it was being started; the stream
+            # this request started belongs to nothing now.
+            if result["index"] in started:
+                stop_media_stream(result["index"])
+                started.remove(result["index"])
+                errors.append({"index": result["index"], "error": "Source changed while it was being started"})
+            continue
+        slot["transport"] = result.get("transport")
+        slot["codec"] = result.get("codec")
+        slot["state"] = result.get("state")
+    save_sources(fresh)
     started_or_running = len(started) + len(already_running)
     return {
         "success": len(errors) == 0,
@@ -2670,11 +2711,12 @@ def stop_all_sources():
     sources = load_sources()
     stopped_count = 0
     unconfirmed = []
+    releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
         if src.get("state") == "playing":
             stopped_count += 1
-        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
             # Persisting "stopped" would hide the Stop control for a camera that
@@ -2711,9 +2753,10 @@ def reset_all_sources():
 
     sources = load_sources()
     unconfirmed = []
+    releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
-        if src.get("type") == SOURCE_TYPE_WEBCAM and not _try_release_webcam_publisher(
+        if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
             unconfirmed.append(source_index)

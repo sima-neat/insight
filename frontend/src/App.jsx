@@ -1871,6 +1871,12 @@ export default function App() {
   }
 
   async function startSourcesBulk() {
+    // The dialog can have been open since before a webcam selection began;
+    // start-bulk rewrites every slot, so it must wait like the other bulk actions.
+    if (anyWebcamBusy) {
+      setError('Waiting for a webcam selection to finish before starting sources.')
+      return
+    }
     const count = Number.parseInt(bulkStartCount, 10)
     if (!Number.isFinite(count) || count < 1) {
       setError('Enter a valid stream count (>= 1).')
@@ -2314,7 +2320,7 @@ export default function App() {
                   <button className="btn-ghost" onClick={autoAssignAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle || 'Auto assign unique media files to all sources'}>
                     Auto Assign
                   </button>
-                  <button className="btn-tonal" onClick={() => setBulkStartOpen(true)} disabled={!videoFiles.length}>
+                  <button className="btn-tonal" onClick={() => setBulkStartOpen(true)} disabled={!videoFiles.length || anyWebcamBusy} title={bulkHoldTitle}>
                     Bulk Start
                   </button>
                   <button className="btn-tonal" onClick={stopAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>

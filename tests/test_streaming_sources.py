@@ -175,6 +175,55 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(response.get_json()["already_running"], [])
         start.assert_called_once()
 
+    def test_start_bulk_does_not_undo_what_another_tab_wrote_meanwhile(self):
+        """Starting streams takes time; a concurrent assignment must survive the final save."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        (self.media_dir / "other.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+
+        def start_and_race(*args, **kwargs):
+            # While ffmpeg is "starting", another tab assigns src4.
+            current = app_module.load_sources()
+            current[3]["file"] = "other.mp4"
+            app_module.save_sources(current)
+            return True, None
+
+        with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
+            with mock.patch.object(app_module, "start_media_stream", side_effect=start_and_race):
+                response = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
+
+        self.assertEqual(response.get_json()["started"], [1])
+        after = app_module.load_sources()
+        self.assertEqual(after[0]["state"], "playing")
+        self.assertEqual(after[3]["file"], "other.mp4", "the other tab's assignment survived")
+
+    def test_start_bulk_abandons_a_slot_that_became_a_webcam_meanwhile(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+
+        def start_and_convert(*args, **kwargs):
+            current = app_module.load_sources()
+            current[0].update({"type": "webcam", "file": ""})
+            app_module.save_sources(current)
+            return True, None
+
+        with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
+            with mock.patch.object(app_module, "start_media_stream", side_effect=start_and_convert):
+                with mock.patch.object(app_module, "stop_media_stream") as stop_stream:
+                    response = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
+
+        body = response.get_json()
+        self.assertEqual(body["started"], [], "not reported as started")
+        self.assertEqual([e["index"] for e in body["errors"]], [1])
+        stop_stream.assert_called_once_with(1)
+        self.assertEqual(app_module.load_sources()[0]["type"], "webcam", "the newer state kept")
+
     def test_http_snapshot_uses_configured_source(self):
         (self.media_dir / "cam.mjpg").write_bytes(b"not-a-real-video")
         self.client.post(
@@ -855,6 +904,34 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(converted.status_code, 409)
         kick.assert_not_called()
         self.assertEqual(app_module.load_sources()[0]["type"], "webcam", "untouched")
+
+    def test_a_bulk_stop_contacts_an_unreachable_mediamtx_once_not_per_slot(self):
+        """48 webcam slots must not mean 48 one-second timeouts against a server known to be down."""
+        self._three_playing_webcams()
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("hung")) as kick:
+            response = self.client.post("/api/mediasrc/stop-all", json={})
+
+        body = response.get_json()
+        self.assertEqual(kick.call_count, 1, "stopped contacting MediaMTX after the first timeout")
+        self.assertEqual(body["unconfirmed_webcams"], [1, 2, 3], "every remaining slot reported unconfirmed")
+
+    def test_a_churning_slot_does_not_stop_the_bulk_loop_asking_about_the_others(self):
+        self._three_playing_webcams()
+        outcomes = {1: app_module.WebcamPublisherUnconfirmed("churn"), 2: True, 3: True}
+
+        def kick(index):
+            r = outcomes[index]
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick) as kicked:
+            response = self.client.post("/api/mediasrc/stop-all", json={})
+
+        self.assertEqual(kicked.call_count, 3, "only MediaMTX being down short-circuits, not one bad slot")
+        self.assertEqual(response.get_json()["unconfirmed_webcams"], [1])
 
     def test_a_stale_bulk_release_claim_falls_back_to_a_confirmed_kick(self):
         """Stop All means stop everything; a stale claim just loses its shortcut."""
