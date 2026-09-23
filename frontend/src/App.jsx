@@ -1700,11 +1700,31 @@ export default function App() {
     // Closing our own publisher above released the camera, so the backend does
     // not need MediaMTX to confirm it before converting the slot to a file —
     // provided we can name the session, so a stale claim cannot hit another's.
-    updateSource(index, {
-      file: value,
-      publisher_released: Boolean(claim.publisherReleased),
-      publisher_session: claim.publisherSession ?? null,
-    })
+    assignFileToSource(index, value, claim)
+  }
+
+  // A file selection is a server write like a camera selection, and just as
+  // able to complete out of order if a second one is launched while the first
+  // is in flight — converting away from a webcam is slow, since the backend
+  // verifies the released publisher first. Hold the slot busy until it lands,
+  // exactly as assignWebcamToSource() does, so the select cannot fire twice.
+  async function assignFileToSource(index, file, claim = {}) {
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    try {
+      await updateSource(index, {
+        file,
+        publisher_released: Boolean(claim.publisherReleased),
+        publisher_session: claim.publisherSession ?? null,
+      })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
   }
 
   async function startWebcamSource(index) {
