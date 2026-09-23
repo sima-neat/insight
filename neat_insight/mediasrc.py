@@ -245,9 +245,16 @@ def start_media_stream(
     transport: str = DEFAULT_TRANSPORT,
     codec: str = DEFAULT_CODEC,
     source_codec: Optional[str] = None,
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], Optional[int]]:
+    """Returns (ok, error, identity).
+
+    `identity` is the id of the stream this call registered, captured under the
+    same lock that created it. A caller keeps it so a later cleanup can stop
+    *this* stream and only this one: re-reading the registry afterwards would
+    return whatever another request has since put on the slot instead.
+    """
     if not file_path:
-        return False, "No file assigned"
+        return False, "No file assigned", None
 
     slot = index - 1
     rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}"
@@ -257,9 +264,9 @@ def start_media_stream(
     with registry_lock:
         existing = pipeline_registry.get(slot)
         if existing and existing.process and existing.process.poll() is None:
-            return False, "Already running"
+            return False, "Already running", None
         if existing and existing.transport == "http":
-            return False, "Already running"
+            return False, "Already running", None
 
         stream = MediaStream(
             index=slot,
@@ -271,11 +278,11 @@ def start_media_stream(
         )
         ok, err = stream.start()
         if not ok:
-            return False, err
+            return False, err, None
 
         pipeline_registry[slot] = stream
         logging.info("Started media source %s transport=%s codec=%s", index, transport, codec)
-        return True, None
+        return True, None, id(stream)
 
 
 def stop_media_stream(index: int) -> None:

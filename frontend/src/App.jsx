@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
   closeAllWebcamSessions,
   closeWebcamSession,
+  recordWebcamStopsOnExit,
   createDisconnectWatcher,
   pinH264,
   confirmWebcamPublishing,
@@ -1008,6 +1009,22 @@ export default function App() {
 
   useEffect(() => {
     return () => closeAllWebcamSessions(webcamSessionsRef.current)
+  }, [])
+
+  useEffect(() => {
+    // A full page reload or close does not run the unmount cleanup above, so
+    // record a stop for each owned webcam here instead — otherwise the
+    // reloaded page can show a Live row for a session that no longer exists
+    // until the user next touches a source. pagehide (not beforeunload) also
+    // fires when entering the bfcache; skip that case, since the page — and its
+    // live sessions — may be restored.
+    const onPageHide = (event) => {
+      if (event.persisted) return
+      recordWebcamStopsOnExit(webcamSessionsRef.current)
+      closeAllWebcamSessions(webcamSessionsRef.current)
+    }
+    window.addEventListener('pagehide', onPageHide)
+    return () => window.removeEventListener('pagehide', onPageHide)
   }, [])
 
   useEffect(() => {

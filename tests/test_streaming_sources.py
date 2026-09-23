@@ -174,7 +174,7 @@ class StreamingSourceTests(unittest.TestCase):
         )
 
         with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
-            with mock.patch.object(app_module, "start_media_stream", return_value=(True, None)) as start:
+            with mock.patch.object(app_module, "start_media_stream", return_value=(True, None, 101)) as start:
                 response = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
 
         self.assertEqual(response.status_code, 200)
@@ -196,7 +196,7 @@ class StreamingSourceTests(unittest.TestCase):
             current = app_module.load_sources()
             current[3]["file"] = "other.mp4"
             app_module.save_sources(current)
-            return True, None
+            return True, None, 101
 
         with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
             with mock.patch.object(app_module, "start_media_stream", side_effect=start_and_race):
@@ -218,7 +218,7 @@ class StreamingSourceTests(unittest.TestCase):
             current = app_module.load_sources()
             current[0].update({"type": "webcam", "file": ""})
             app_module.save_sources(current)
-            return True, None
+            return True, None, 101
 
         with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
             with mock.patch.object(app_module, "start_media_stream", side_effect=start_and_convert):
@@ -245,7 +245,7 @@ class StreamingSourceTests(unittest.TestCase):
             current = app_module.load_sources()
             current[0]["state"] = "playing"
             app_module.save_sources(current)
-            return False, "Already running"
+            return False, "Already running", None
 
         with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
             with mock.patch.object(app_module, "start_media_stream",
@@ -1155,16 +1155,21 @@ class WebcamSourceTests(unittest.TestCase):
 
         def start_then_reassigned(index, *args, **kwargs):
             self._write_file_slot(1, "other.mp4")
-            return True, None
+            return True, None, 101  # 101 = the identity this start captured
 
         with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
             with mock.patch.object(app_module, "start_media_stream", side_effect=start_then_reassigned):
-                with mock.patch.object(app_module, "stop_media_stream_if") as stop:
-                    response = self.client.post("/api/mediasrc/start", json={"index": 1})
+                with mock.patch.object(app_module, "media_stream_identity", return_value=999) as reread:
+                    with mock.patch.object(app_module, "stop_media_stream_if") as stop:
+                        response = self.client.post("/api/mediasrc/start", json={"index": 1})
 
         self.assertEqual(response.status_code, 410)
         stop.assert_called_once()
         self.assertEqual(stop.call_args[0][0], 1, "only the stream this request started is stopped")
+        # The identity must be the one start_media_stream returned (101), not a
+        # later re-read (999) that could name a replacement started meanwhile.
+        self.assertEqual(stop.call_args[0][1], 101, "uses the atomically captured identity")
+        reread.assert_not_called()
         source = app_module.load_sources()[0]
         self.assertEqual((source["file"], source["state"]), ("other.mp4", "stopped"))
 
@@ -1251,7 +1256,7 @@ class WebcamSourceTests(unittest.TestCase):
         with mock.patch.object(app_module, "_derive_source_stream_settings", side_effect=probe_then_started_elsewhere):
             with mock.patch.object(app_module, "media_stream_is_running", side_effect=lambda i: running["value"]):
                 with mock.patch.object(app_module, "stop_media_stream") as stop:
-                    with mock.patch.object(app_module, "start_media_stream", return_value=(True, None)) as start:
+                    with mock.patch.object(app_module, "start_media_stream", return_value=(True, None, 101)) as start:
                         with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
                             response = self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "next.mp4"})
 

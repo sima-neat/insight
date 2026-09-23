@@ -2545,7 +2545,7 @@ def assign_source():
                 save_sources(sources)
                 return _json_error(_codec_detection_error(file_name), 400)
             file_path = MEDIA_DIR / file_name
-            ok, err = start_media_stream(
+            ok, err, _identity = start_media_stream(
                 index,
                 str(file_path),
                 src.get("transport"),
@@ -2757,7 +2757,7 @@ def start_source():
             if not allowed_transports:
                 _update_source_slot(index, still_same, record(None))
                 return _json_error(_codec_detection_error(filename), 400)
-            ok, err = start_media_stream(
+            ok, err, mine = start_media_stream(
                 index,
                 str(MEDIA_DIR / filename),
                 transport,
@@ -2770,8 +2770,9 @@ def start_source():
             # if the slot still holds this file. Otherwise the stream belongs
             # to nothing and is stopped again — but only if it is still ours:
             # an assign that ran in between has already replaced it with its
-            # own process, which must be left running.
-            mine = media_stream_identity(index)
+            # own process, which must be left running. `mine` is the identity
+            # start_media_stream captured for this stream, not a later re-read
+            # that could name a replacement.
             if _update_source_slot(index, still_same, record("playing")) is None:
                 stop_media_stream_if(index, mine)
                 return _json_error("Source changed while it was being started", 410)
@@ -2818,7 +2819,7 @@ def start_sources_bulk():
         if not allowed_transports:
             errors.append({"index": source_index, "error": _codec_detection_error(src["file"])})
             continue
-        ok, err = start_media_stream(
+        ok, err, identity = start_media_stream(
             source_index,
             str(MEDIA_DIR / src["file"]),
             src.get("transport"),
@@ -2828,7 +2829,9 @@ def start_sources_bulk():
         if ok:
             src["state"] = "playing"
             started.append(source_index)
-            started_identity[source_index] = media_stream_identity(source_index)
+            # The identity captured by start_media_stream itself, not a re-read
+            # that could name a replacement started on this slot in between.
+            started_identity[source_index] = identity
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})
 

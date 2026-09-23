@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   closeAllWebcamSessions,
+  recordWebcamStopsOnExit,
   sessionIdFromResponse,
   pinH264,
   createDisconnectWatcher,
@@ -495,4 +496,36 @@ test("a failure after a healthy connection is still reported", () => {
   w.update("connected");
   w.update("failed");
   assert.deepEqual(lost, ["failed"]);
+});
+
+test("recordWebcamStopsOnExit sends a keepalive session-bound stop per owned webcam", () => {
+  const calls = [];
+  const fetchRequest = (url, init) => {
+    calls.push({ url, init });
+    return Promise.resolve();
+  };
+  const sessions = new Map([
+    [1, { sessionId: "sess-1" }],
+    [2, { sessionId: null }],   // no id: nothing to record, skipped
+    [3, { sessionId: "sess-3" }],
+  ]);
+
+  const stopped = recordWebcamStopsOnExit(sessions, fetchRequest);
+
+  assert.deepEqual(stopped, [1, 3], "only sessions this tab can name are stopped");
+  assert.equal(calls.length, 2);
+  for (const { url, init } of calls) {
+    assert.equal(url, "/api/mediasrc/stop");
+    assert.equal(init.method, "POST");
+    assert.equal(init.keepalive, true, "must survive page unload");
+    const body = JSON.parse(init.body);
+    assert.equal(body.publisher_released, true);
+    assert.equal(body.publisher_session, `sess-${body.index}`);
+  }
+});
+
+test("recordWebcamStopsOnExit swallows a fetch that throws as the page unloads", () => {
+  const sessions = new Map([[1, { sessionId: "sess-1" }]]);
+  const fetchRequest = () => { throw new Error("page is going away"); };
+  assert.deepEqual(recordWebcamStopsOnExit(sessions, fetchRequest), [1]);
 });

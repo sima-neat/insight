@@ -169,6 +169,39 @@ export function closeAllWebcamSessions(sessions, fetchRequest = globalThis.fetch
   return closed
 }
 
+// When the page is unloading (reload or close), closing the peer connection
+// only makes MediaMTX drop the path ~15-20s later, and the reloaded page can
+// query sources before that and keep the slot marked Live with no session
+// behind it, with no periodic refresh to correct it. So record a session-bound
+// stop for each owned webcam over a keepalive POST — a plain fetch is cancelled
+// when the page dies, keepalive lets it complete. Same-origin (Insight's own
+// API), so no CORS concern. Returns the indexes a stop was sent for.
+export function recordWebcamStopsOnExit(sessions, fetchRequest = globalThis.fetch) {
+  const stopped = []
+  if (!sessions) return stopped
+  for (const [index, session] of sessions) {
+    // Only a session this tab can name can be stopped without a kick; a
+    // session with no id has nothing to record and is just closed.
+    if (!session?.sessionId) continue
+    try {
+      fetchRequest('/api/mediasrc/stop', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          index,
+          publisher_released: true,
+          publisher_session: session.sessionId,
+        }),
+      })?.catch?.(() => {})
+    } catch {
+      // The page is unloading; there is nothing more we can do.
+    }
+    stopped.push(index)
+  }
+  return stopped
+}
+
 // `disconnected` is not the same as gone. ICE reports it for a transient
 // interruption — a Wi-Fi blip, a roam between APs — and recovers to
 // `connected` on its own without renegotiation. Tearing down on sight turns a
