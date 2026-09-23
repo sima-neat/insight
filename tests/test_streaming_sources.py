@@ -1136,6 +1136,51 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual((sources[0]["file"], sources[0]["state"]), ("clip.mp4", "playing"))
         self.assertEqual((sources[1]["type"], sources[1]["file"]), ("file", ""))
 
+    def test_assign_replaces_a_same_file_stream_started_during_the_probe(self):
+        """Identity (type, file) cannot see a restart of the same file; the running process is what gets replaced."""
+        for name in ("clip.mp4", "next.mp4"):
+            (self.media_dir / name).write_bytes(b"not-a-real-video")
+        self._write_file_slot(1, "clip.mp4", state="stopped")
+        running = {"value": False}
+
+        def probe_then_started_elsewhere(*args, **kwargs):
+            # Another tab starts clip.mp4 on slot 1 while this probe runs.
+            self._write_file_slot(1, "clip.mp4", state="playing")
+            running["value"] = True
+            return ("rtsp", "h264", ["rtsp"])
+
+        with mock.patch.object(app_module, "_derive_source_stream_settings", side_effect=probe_then_started_elsewhere):
+            with mock.patch.object(app_module, "media_stream_is_running", side_effect=lambda i: running["value"]):
+                with mock.patch.object(app_module, "stop_media_stream") as stop:
+                    with mock.patch.object(app_module, "start_media_stream", return_value=(True, None)) as start:
+                        with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
+                            response = self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "next.mp4"})
+
+        self.assertEqual(response.status_code, 200)
+        stop.assert_called_once_with(1)
+        self.assertEqual(start.call_args[0][0], 1)
+        self.assertEqual((app_module.load_sources()[0]["file"], app_module.load_sources()[0]["state"]), ("next.mp4", "playing"))
+
+    def test_stop_all_stops_a_same_file_restarted_while_it_was_running(self):
+        """Slot 1's file is stopped, then restarted by another tab while slot 2's publisher is released."""
+        self._write_file_slot(1, "clip.mp4", state="playing")
+        self._assign_webcam(2)
+        running = {"value": False}
+
+        def kick(index):
+            self._write_file_slot(1, "clip.mp4", state="playing")
+            running["value"] = True
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick):
+            with mock.patch.object(app_module, "media_stream_is_running", side_effect=lambda i: running["value"] and i == 1):
+                with mock.patch.object(app_module, "stop_media_stream") as stop:
+                    body = self.client.post("/api/mediasrc/stop-all").get_json()
+
+        self.assertEqual(body["changed_sources"], [])
+        self.assertEqual([c.args[0] for c in stop.call_args_list].count(1), 2, "stopped once in the loop, again in the merge")
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
     def test_listing_keeps_a_change_made_during_the_second_liveness_check(self):
         self._assign_webcam(1)
         with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
