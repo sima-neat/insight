@@ -973,6 +973,26 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
 
+    def test_stop_all_does_not_undo_an_assignment_made_while_it_ran(self):
+        """Stop All changes state only; a concurrent file assignment must survive."""
+        (self.media_dir / "other.mp4").write_bytes(b"not-a-real-video")
+        self._three_playing_webcams()
+
+        def kick_and_race(index):
+            if index == 1:
+                current = app_module.load_sources()
+                current[3]["file"] = "other.mp4"
+                app_module.save_sources(current)
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick_and_race):
+            response = self.client.post("/api/mediasrc/stop-all", json={})
+
+        self.assertEqual(response.status_code, 200)
+        after = app_module.load_sources()
+        self.assertEqual({s["state"] for s in after[:3]}, {"stopped"})
+        self.assertEqual(after[3]["file"], "other.mp4", "the other tab's assignment survived")
+
     def test_stop_all_names_the_slots_it_could_not_confirm(self):
         self._assign_webcam(2)
         with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):

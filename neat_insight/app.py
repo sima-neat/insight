@@ -2483,8 +2483,11 @@ def auto_assign_all_sources():
     unconfirmed = []
     releaser = _BulkReleaser()
 
-    # Slots are consumed in index order, but a slot skipped below must not
-    # consume a video with it, so the file cursor advances only on assignment.
+    # Auto Assign rewrites every slot's assignment by definition, so like reset
+    # it is a whole-file write on purpose; the UI holds it while any webcam
+    # selection is still in flight. Slots are consumed in index order, but a
+    # slot skipped below must not consume a video with it, so the file cursor
+    # advances only on assignment.
     next_file = 0
     for src in sources:
         source_index = src.get("index")
@@ -2711,6 +2714,7 @@ def stop_all_sources():
     sources = load_sources()
     stopped_count = 0
     unconfirmed = []
+    stopped = set()
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
@@ -2724,9 +2728,17 @@ def stop_all_sources():
             unconfirmed.append(source_index)
             continue
         stop_media_stream(source_index)
-        src["state"] = "stopped"
+        stopped.add(source_index)
 
-    save_sources(sources)
+    # Stop All changes state and nothing else, but the list above was loaded
+    # before a loop of kicks that can take a second each. Writing it back would
+    # also write back the files it saw, undoing any assignment another tab made
+    # meanwhile. Apply only the stops, to a fresh copy.
+    fresh = load_sources()
+    for src in fresh:
+        if src.get("index") in stopped:
+            src["state"] = "stopped"
+    save_sources(fresh)
     message = f"Stopped {stopped_count} source(s)."
     if unconfirmed:
         # Stopping the rest still happened, so this is not an error; the caller
@@ -2762,6 +2774,9 @@ def reset_all_sources():
             unconfirmed.append(source_index)
         stop_media_stream(source_index)
 
+    # Reset rewrites every slot to its default by definition; a change another
+    # tab makes while it runs is meant to be reset too, so unlike stop-all this
+    # is a whole-file write on purpose, with only the unconfirmed webcams kept.
     defaults = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
     for source_index in unconfirmed:
         # Resetting the slot to a file source would erase the only record that
