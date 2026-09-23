@@ -317,6 +317,21 @@ def _normalize_source(src, index: Optional[int] = None):
 #      the lock, loads a fresh copy, checks the slot is still the one it
 #      decided about (_update_source_slot), and saves. Spawning or killing
 #      the slot's own ffmpeg inside the lock is fine: it is local and brief.
+#
+# Known, accepted limitation — the residual webcam-publish window:
+#   A browser publishes to MediaMTX directly over WHIP, not through Insight, so
+#   Insight cannot atomically prevent a new publisher from appearing. Every
+#   route ends its webcam session check (webcam_publisher_session /
+#   _BulkReleaser.replacements) just before taking this lock, because that
+#   check waits on MediaMTX and rule 2 keeps it out of the lock. A camera that
+#   publishes and completes /start in the microseconds between that check and
+#   the lock is therefore not seen, and a reset/convert can persist over it.
+#   Closing this entirely would require holding MediaMTX still across the
+#   check and the write, which is not possible; each fix here has only shrunk
+#   the window to that final lock acquisition. It needs two actors within
+#   microseconds, self-corrects on the publishing tab's next action (stop or
+#   tab close runs the normal teardown), and is left documented rather than
+#   chased further. See PR #130 review threads for the full history.
 _sources_lock = threading.RLock()
 
 
