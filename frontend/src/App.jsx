@@ -2340,12 +2340,17 @@ export default function App() {
                           <span className={encodeProgress[src.index] ? 'src-state encoding' : (src.state === 'playing' ? 'src-state playing' : 'src-state stopped')}>
                             {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
+                          <span className="src-file-cell">
                           <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value }).catch(() => {})} disabled={Boolean(encodeProgress[src.index])}>
                             <option value="">Not assigned</option>
                             {videoFiles.map((file) => (
                               <option key={file} value={file}>{file}</option>
                             ))}
                           </select>
+                            {src.fps != null && (
+                              <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
+                            )}
+                          </span>
                           <select
                             value={transportValue}
                             onChange={(e) => updateSource(src.index, { transport: e.target.value }).catch(() => {})}
@@ -2361,15 +2366,6 @@ export default function App() {
                           <span className={isAssigned && canStream ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? (canStream ? 'Codec is determined by the selected media format' : 'Codec could not be detected for this media') : 'Assign media before selecting a codec'}>
                             {isAssigned ? codecLabel(src.codec) : '-'}
                           </span>
-                          <FpsStepper
-                            value={src.fps ?? null}
-                            nativeFps={src.native_fps ?? null}
-                            disabled={!isAssigned || !canStream || src.codec === 'mjpeg'}
-                            locked={src.state === 'playing' || Boolean(encodeProgress[src.index])}
-                            title={!isAssigned ? 'Assign media before choosing a frame rate' : (src.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (src.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${src.index} (source ${src.native_fps ?? '?'} fps)`))}
-                            onCommit={(fps) => commitFps(src.index, fps)}
-                            onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[src.index] === bad ? prev : { ...prev, [src.index]: bad }))}
-                          />
                           {(src.state === 'playing' || encodeProgress[src.index]) ? (
                             <button
                               className="icon-action-btn stop"
@@ -2419,6 +2415,8 @@ export default function App() {
                 if (!isExternal(currentSource)) {
                   const info = currentSource
                   const progress = encodeProgress[info.index]
+                  const panelTransports = Array.isArray(info.allowed_transports) ? info.allowed_transports : (info.file ? ['rtsp'] : [])
+                  const panelCanStream = Boolean(info.file) && panelTransports.length > 0
                   const effectiveFps = info.fps ?? info.native_fps ?? null
                   const customFps = info.fps != null && info.native_fps != null && info.fps !== info.native_fps
                   const streamingRendition = info.state === 'playing' && info.active_file && info.active_file !== info.file
@@ -2429,6 +2427,19 @@ export default function App() {
                     <>
                       <h2>Source Preview: src{currentSource.index}</h2>
                       <p className="hint">File: {fileDetail}</p>
+                      <div className="fps-field-row">
+                        <span className="hint">Output frame rate</span>
+                        <FpsStepper
+                          value={info.fps ?? null}
+                          nativeFps={info.native_fps ?? null}
+                          disabled={!info.file || !panelCanStream || info.codec === 'mjpeg'}
+                          locked={info.state === 'playing' || Boolean(progress)}
+                          title={!info.file ? 'Assign media before choosing a frame rate' : (info.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (info.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${info.index} (source ${info.native_fps ?? '?'} fps)`))}
+                          onCommit={(fps) => commitFps(info.index, fps)}
+                          onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[info.index] === bad ? prev : { ...prev, [info.index]: bad }))}
+                        />
+                        <span className="hint muted-text">{info.native_fps != null ? `Native ${info.native_fps} fps. A different rate creates a rendition on start.` : 'A rate other than the native one creates a rendition on start.'}</span>
+                      </div>
                       <p className="hint">
                         Output: {outputDetail}
                         {streamingRendition && <span className="ok-text"> · streaming rendition <code>{info.active_file}</code></span>}

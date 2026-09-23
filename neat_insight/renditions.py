@@ -304,7 +304,11 @@ def probe_video(path: Path) -> dict:
         "-show_entries", "format=duration",
         "-of", "json", str(path),
     ]
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        # Normalised here so every caller (listing, start, prepare, validation) sees one error type.
+        raise RenditionError(f"ffprobe timed out after {exc.timeout:.0f} s probing {path.name}") from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RenditionError(f"ffprobe failed for {path.name}: {detail or result.returncode}")
@@ -593,7 +597,10 @@ def probe_reference_frames(path: Path) -> int:
         raise RenditionError("ffmpeg is not installed; install FFmpeg and ensure ffmpeg is on PATH.")
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "verbose", "-i", str(path), "-map", "0:v:0", "-c", "copy", "-frames:v", "1", "-f", "null", "-"]
     try:
-        proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=60)
+        try:
+            proc = subprocess.run(cmd, text=True, capture_output=True, check=False, timeout=60)
+        except subprocess.TimeoutExpired as exc:
+            raise RenditionError(f"ffmpeg timed out after {exc.timeout:.0f} s counting reference frames in {path.name}") from exc
     except (subprocess.SubprocessError, ValueError) as exc:
         raise RenditionError(f"ffmpeg failed for {path.name}: {exc}") from exc
     match = re.search(r"Video:.*?([0-9]+) reference frame", proc.stderr)
