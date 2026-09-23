@@ -318,7 +318,11 @@ def webcam_path_name(index: int) -> str:
 _MEDIAMTX_NOT_FOUND = object()
 
 
-class MediaServerUnreachable(RuntimeError):
+class WebcamPublisherUnconfirmed(RuntimeError):
+    """Nothing is known about a slot's publisher (base for the two ways that happens)."""
+
+
+class MediaServerUnreachable(WebcamPublisherUnconfirmed):
     """MediaMTX's control API could not be reached, so nothing is known.
 
     Raised rather than returned deliberately. Insight has no handle on a browser
@@ -411,12 +415,18 @@ def kick_webcam_publisher(index: int) -> bool:
     Returns False when there was nothing to kick, and raises
     MediaServerUnreachable when that could not be established.
     """
-    session_id = webcam_publisher_session(index)
-    if not session_id:
-        return False
-
     # The session ending between the lookup and the kick is the common case,
     # not an edge one: the owning tab closes its peer connection and deletes the
-    # WHIP resource before asking Insight to stop. Already idle, not a failure.
-    kicked = _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST")
-    return kicked is not _MEDIAMTX_NOT_FOUND
+    # WHIP resource before asking Insight to stop. But another browser can take
+    # the path in that same gap, so a vanished target is not "idle" until a
+    # fresh lookup says so — each 404 re-reads the path and kicks whoever is
+    # there now. A path that keeps changing hands is reported as unconfirmed
+    # rather than guessed at.
+    for _ in range(3):
+        session_id = webcam_publisher_session(index)
+        if not session_id:
+            return False
+        kicked = _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST")
+        if kicked is not _MEDIAMTX_NOT_FOUND:
+            return True
+    raise WebcamPublisherUnconfirmed(f"src{index}: the publisher kept changing while being stopped")

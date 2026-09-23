@@ -1635,16 +1635,30 @@ export default function App() {
   }
 
   async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false, publisherSession = null } = {}) {
+    // The caller has just invalidated the slot (teardown), so this generation
+    // is the one this selection belongs to. Busy disables the select and Start
+    // while the request is in flight, so two selections cannot race; the
+    // generation check covers anything else — a stop or bulk action — that
+    // changes the slot before the answer lands.
+    const generation = webcamGenerationRef.current[index] || 0
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
     try {
       await fetchJson('/api/mediasrc/assign-webcam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
       })
+      if ((webcamGenerationRef.current[index] || 0) !== generation) return
       setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label } }))
       await loadSources()
     } catch (e) {
       setError(e.message)
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
     }
   }
 
@@ -1734,12 +1748,14 @@ export default function App() {
       pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
 
       const { answerSdp, deleteUrl, sessionId } = await publishWebcamOffer(pc, whipUrl)
-      if (superseded()) throw WEBCAM_START_SUPERSEDED
       // MediaMTX holds a session for this path from the POST onward, so the
-      // session is registered before the answer is applied: if
-      // setRemoteDescription() rejects, teardown can still close the peer
-      // connection and release the path instead of leaving it occupied.
+      // session is registered the moment the POST returns — before the
+      // supersession check and before the answer is applied. Either failure
+      // then reaches teardown with the delete URL in hand and releases the
+      // path, instead of leaving the resource occupying it until MediaMTX
+      // times it out.
       webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, sessionId, watcher })
+      if (superseded()) throw WEBCAM_START_SUPERSEDED
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
 
       if (index === selectedSource) setWebcamPreviewStream(stream)

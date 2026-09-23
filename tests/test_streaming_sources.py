@@ -444,7 +444,7 @@ class WebcamSourceTests(unittest.TestCase):
             response = self.client.post("/api/mediasrc/start", json={"index": 1})
 
         self.assertEqual(response.status_code, 502)
-        self.assertIn("Could not reach MediaMTX", response.get_json()["error"])
+        self.assertIn("nothing was changed", response.get_json()["error"])
 
     def _three_playing_webcams(self):
         self.sources_file.write_text(json.dumps([
@@ -727,6 +727,19 @@ class WebcamSourceTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIn("publisher_session", response.get_json()["error"])
                 kick.assert_not_called()
+
+    def test_a_publisher_that_keeps_changing_answers_502_and_changes_nothing(self):
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.WebcamPublisherUnconfirmed("churn")):
+            response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("nothing was changed", response.get_json()["error"])
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing")
 
     def test_a_released_stop_that_cannot_be_verified_changes_nothing(self):
         """An unverifiable claim must not mark a possibly-replaced camera stopped."""
@@ -1047,6 +1060,7 @@ class WebcamPublishStateTests(unittest.TestCase):
 
         self.assertEqual(calls[1], (
             "http://127.0.0.1:9997/v3/webrtcsessions/kick/abc-123", "POST"))
+        self.assertEqual(len(calls), 2, "a successful kick needs no re-check")
 
     def test_kick_is_a_no_op_when_nothing_is_publishing(self):
         urlopen = self._urlopen_returning({"name": "src1", "ready": False, "source": None})
@@ -1085,19 +1099,53 @@ class WebcamPublishStateTests(unittest.TestCase):
             with self.assertRaises(mediasrc.MediaServerUnreachable):
                 mediasrc.webcam_is_publishing(1)
 
-    def test_a_session_that_vanished_before_the_kick_counts_as_idle(self):
-        """The owning tab's own teardown commonly wins this race."""
+    def _mediamtx_sequence(self, lookups, kick_results):
+        """A fake control API: successive path lookups, then per-kick outcomes."""
+        state = {"lookup": 0, "kick": 0}
+
         def fake_urlopen(request, timeout=None):
             if "/v3/paths/get/" in request.full_url:
-                payload = {"name": "src1", "ready": True,
-                           "source": {"type": "webRTCSession", "id": "abc-123"}}
+                sid = lookups[min(state["lookup"], len(lookups) - 1)]
+                state["lookup"] += 1
+                payload = {"name": "src1", "ready": bool(sid),
+                           "source": {"type": "webRTCSession", "id": sid} if sid else None}
                 response = mock.MagicMock()
                 response.__enter__.return_value = io.BytesIO(json.dumps(payload).encode("utf-8"))
                 return response
-            raise mediasrc.urllib.error.HTTPError(request.full_url, 404, "gone", {}, None)
+            outcome = kick_results[min(state["kick"], len(kick_results) - 1)]
+            state["kick"] += 1
+            if outcome == 404:
+                raise mediasrc.urllib.error.HTTPError(request.full_url, 404, "gone", {}, None)
+            response = mock.MagicMock()
+            response.__enter__.return_value = io.BytesIO(b"")
+            return response
 
-        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake_urlopen):
+        return fake_urlopen, state
+
+    def test_a_session_that_vanished_before_the_kick_counts_as_idle_only_after_a_recheck(self):
+        """The owning tab's own teardown commonly wins this race."""
+        fake, state = self._mediamtx_sequence(lookups=["abc-123", None], kick_results=[404])
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake):
             self.assertIs(mediasrc.kick_webcam_publisher(1), False)
+
+        self.assertEqual(state["lookup"], 2, "looked again before calling the slot idle")
+
+    def test_a_vanished_target_replaced_by_a_newcomer_kicks_the_newcomer(self):
+        """A kicks its own session; B takes the path in the gap; B must be the one stopped."""
+        fake, state = self._mediamtx_sequence(lookups=["tab-a", "tab-b"], kick_results=[404, 200])
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake):
+            self.assertIs(mediasrc.kick_webcam_publisher(1), True)
+
+        self.assertEqual(state["kick"], 2)
+
+    def test_a_path_that_keeps_changing_hands_is_reported_unconfirmed(self):
+        fake, _ = self._mediamtx_sequence(lookups=["s1", "s2", "s3", "s4"], kick_results=[404])
+
+        with mock.patch.object(mediasrc.urllib.request, "urlopen", fake):
+            with self.assertRaises(mediasrc.WebcamPublisherUnconfirmed):
+                mediasrc.kick_webcam_publisher(1)
 
     def test_kick_raises_on_an_unreachable_api_rather_than_reading_as_idle(self):
         """Raising is what stops a caller mistaking "could not tell" for "nothing there"."""

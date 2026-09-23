@@ -52,6 +52,7 @@ from neat_insight.mediasrc import (
     start_media_stream,
     stop_media_stream,
     MediaServerUnreachable,
+    WebcamPublisherUnconfirmed,
     kick_webcam_publisher,
     webcam_is_publishing,
     webcam_publisher_session,
@@ -2198,14 +2199,14 @@ class WebcamReleaseClaimInvalid(ValueError):
     """`publisher_released` was sent without the session it refers to."""
 
 
-@app.errorhandler(MediaServerUnreachable)
-def _handle_media_server_unreachable(exc):
+@app.errorhandler(WebcamPublisherUnconfirmed)
+def _handle_webcam_publisher_unconfirmed(exc):
     """A route that did not handle an unknown answers 502 without having changed anything."""
-    logging.warning("MediaMTX control API unavailable: %s", exc)
+    logging.warning("Webcam publisher could not be confirmed: %s", exc)
     return _json_error(
-        "Could not reach MediaMTX to verify this source's publisher, so nothing "
-        "was changed. If the camera has already stopped, the source updates on "
-        "its own once the media server is reachable; otherwise retry then.",
+        "Could not confirm this source's publisher with MediaMTX, so nothing was "
+        "changed. If the camera has already stopped, the source updates on its "
+        "own once MediaMTX answers; otherwise retry.",
         502,
     )
 
@@ -2275,12 +2276,12 @@ def _try_release_webcam_publisher(index, released_session=None) -> bool:
         return True
     except WebcamStopSuperseded:
         pass
-    except MediaServerUnreachable:
+    except WebcamPublisherUnconfirmed:
         return False
     try:
         kick_webcam_publisher(index)
         return True
-    except MediaServerUnreachable:
+    except WebcamPublisherUnconfirmed:
         return False
 
 
@@ -2297,7 +2298,7 @@ def _sync_source_runtime_states(sources):
     if any(src.get("state") == "playing" and src.get("type") == SOURCE_TYPE_WEBCAM for src in sources):
         try:
             ready_paths = webcam_ready_paths()
-        except MediaServerUnreachable:
+        except WebcamPublisherUnconfirmed:
             # Only demote on a definite answer. Nothing ever promotes a slot
             # back to playing, so treating "could not tell" as "stopped" would
             # leave a live camera showing Idle for good.
