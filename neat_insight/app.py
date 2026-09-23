@@ -1970,16 +1970,17 @@ def delete_media():
     try:
         if full_path.is_file():
             file_name = os.path.relpath(full_path, MEDIA_DIR)
-            sources = load_sources()
-            modified = False
-            for src in sources:
-                if src.get("file") == file_name:
-                    stop_media_stream(src["index"])
-                    src["file"] = ""
-                    src["state"] = "stopped"
-                    modified = True
-            if modified:
-                save_sources(sources)
+            with _sources_lock:
+                sources = load_sources()
+                modified = False
+                for src in sources:
+                    if src.get("file") == file_name:
+                        stop_media_stream(src["index"])
+                        src["file"] = ""
+                        src["state"] = "stopped"
+                        modified = True
+                if modified:
+                    save_sources(sources)
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
@@ -2553,12 +2554,12 @@ def auto_assign_all_sources():
     unconfirmed = []
     releaser = _BulkReleaser()
 
-    # Auto Assign rewrites every slot's assignment by definition, so like reset
-    # it is a whole-file write on purpose; the UI holds it while any webcam
-    # selection is still in flight. Slots are consumed in index order, but a
-    # slot skipped below must not consume a video with it, so the file cursor
-    # advances only on assignment.
+    # Slots are consumed in index order, but a slot skipped below must not
+    # consume a video with it, so the file cursor advances only on assignment.
+    # The plan is made against the snapshot; the releases and media probes in
+    # this loop can take seconds, so it is applied to a fresh copy afterwards.
     next_file = 0
+    plan = {}
     for src in sources:
         source_index = src.get("index")
         if src.get("state") == "playing":
@@ -2577,27 +2578,56 @@ def auto_assign_all_sources():
         # the retained webcam type would make _normalize_source() clear the
         # filename on the next load, leaving a slot that reports success but
         # has nothing assigned.
-        src["type"] = SOURCE_TYPE_FILE
-        src["file"] = video_files[next_file] if next_file < len(video_files) else ""
-        if src["file"]:
+        file_name = video_files[next_file] if next_file < len(video_files) else ""
+        if file_name:
             next_file += 1
-        src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
-        src["state"] = "stopped"
+        transport, codec, _allowed_transports = _derive_source_stream_settings(file_name)
+        plan[source_index] = {
+            "was": (src.get("type"), src.get("file")),
+            "type": SOURCE_TYPE_FILE,
+            "file": file_name,
+            "transport": transport,
+            "codec": codec,
+            "state": "stopped",
+        }
 
-    save_sources(sources)
-    message = f"Assigned {next_file} source(s) with unique media file(s)."
+    # A slot another tab reassigned while this loop ran holds a stream this
+    # request never stopped or released; it is left as it is now and reported.
+    changed = []
+    with _sources_lock:
+        fresh = load_sources()
+        for src in fresh:
+            outcome = plan.get(src.get("index"))
+            if outcome is None:
+                continue
+            if (src.get("type"), src.get("file")) != outcome["was"]:
+                changed.append(src["index"])
+                continue
+            for key in ("type", "file", "transport", "codec", "state"):
+                src[key] = outcome[key]
+        save_sources(fresh)
+
+    assigned_count = sum(1 for i, outcome in plan.items() if outcome["file"] and i not in changed)
+    message = f"Assigned {assigned_count} source(s) with unique media file(s)."
     if unconfirmed:
         message += (
             " Could not confirm the webcam publisher stopped for source(s) "
             + ", ".join(str(i) for i in unconfirmed)
             + "; those slots stay marked as webcams and were left unassigned."
         )
+    if changed:
+        message += (
+            " Source(s) "
+            + ", ".join(str(i) for i in changed)
+            + " were reassigned while this ran and were left as they are now."
+        )
     return {
         "success": True,
-        "assigned_count": next_file,
+        "assigned_count": assigned_count,
         "source_count": len(sources),
         "available_files": len(video_files),
         "unconfirmed_webcams": unconfirmed,
+        "changed_sources": changed,
         "message": message,
     }
 
@@ -2896,28 +2926,40 @@ def reset_all_sources():
 
     sources = load_sources()
     unconfirmed = []
+    identities = {}
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
+        identities[source_index] = (src.get("type"), src.get("file"))
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
             unconfirmed.append(source_index)
         stop_media_stream(source_index)
 
-    # Reset rewrites every slot to its default by definition; a change another
-    # tab makes while it runs is meant to be reset too, so unlike stop-all this
-    # is a whole-file write on purpose, with only the unconfirmed webcams kept.
-    defaults = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
-    for source_index in unconfirmed:
-        # Resetting the slot to a file source would erase the only record that
-        # a browser may still be publishing to it, and with it any chance of a
-        # later stop identifying the slot and retrying the kick. It stays
-        # playing too, so the Stop control remains available to retry with.
-        if 1 <= source_index <= len(defaults):
-            defaults[source_index - 1]["type"] = SOURCE_TYPE_WEBCAM
-            defaults[source_index - 1]["state"] = "playing"
-    save_sources(defaults)
+    # The releases above can take seconds. Each slot is reset in a fresh copy
+    # only if it still holds what was stopped or released; a slot another tab
+    # reassigned meanwhile carries a stream this request never touched, and
+    # resetting it would erase the record of a camera that may still be live.
+    changed = []
+    with _sources_lock:
+        fresh = load_sources()
+        for position, src in enumerate(fresh):
+            source_index = src.get("index")
+            if (src.get("type"), src.get("file")) != identities.get(source_index):
+                changed.append(source_index)
+                continue
+            default = _default_source(source_index)
+            if source_index in unconfirmed:
+                # Resetting the slot to a file source would erase the only record
+                # that a browser may still be publishing to it, and with it any
+                # chance of a later stop identifying the slot and retrying the
+                # kick. It stays playing too, so the Stop control remains
+                # available to retry with.
+                default["type"] = SOURCE_TYPE_WEBCAM
+                default["state"] = "playing"
+            fresh[position] = default
+        save_sources(fresh)
 
     message = "Reset all source assignments."
     if unconfirmed:
@@ -2926,7 +2968,13 @@ def reset_all_sources():
             + ", ".join(str(i) for i in unconfirmed)
             + "; those slots stay marked as webcams so they can be stopped again."
         )
-    return {"success": True, "unconfirmed_webcams": unconfirmed, "message": message}
+    if changed:
+        message += (
+            " Source(s) "
+            + ", ".join(str(i) for i in changed)
+            + " were reassigned while this ran and were left as they are now."
+        )
+    return {"success": True, "unconfirmed_webcams": unconfirmed, "changed_sources": changed, "message": message}
 
 
 def _http_mjpeg_source_or_error(index: int):

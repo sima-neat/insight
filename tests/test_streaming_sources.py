@@ -1100,6 +1100,42 @@ class WebcamSourceTests(unittest.TestCase):
         source = app_module.load_sources()[0]
         self.assertEqual((source["file"], source["state"]), ("other.mp4", "stopped"))
 
+    def test_auto_assign_leaves_a_slot_reassigned_while_it_was_running(self):
+        """Slot 1 is planned first; releasing slot 2 takes time, during which slot 1 gets a live webcam."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(2)
+
+        def kick(index):
+            sources = app_module.load_sources()
+            sources[0].update({"type": "webcam", "file": "", "state": "playing"})
+            app_module.save_sources(sources)
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                body = self.client.post("/api/mediasrc/auto-assign-all").get_json()
+
+        self.assertEqual(body["changed_sources"], [1])
+        self.assertEqual(body["assigned_count"], 0, "the file planned for slot 1 was not written over the camera")
+        sources = app_module.load_sources()
+        self.assertEqual((sources[0]["type"], sources[0]["state"]), ("webcam", "playing"))
+        self.assertEqual(sources[1]["type"], "file", "slot 2 was still reset to a file slot")
+
+    def test_reset_leaves_a_slot_reassigned_while_it_was_running(self):
+        self._assign_webcam(2)
+
+        def kick(index):
+            self._write_file_slot(1, "clip.mp4", state="playing")
+            return True
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", side_effect=kick):
+            body = self.client.post("/api/mediasrc/reset").get_json()
+
+        self.assertEqual(body["changed_sources"], [1])
+        sources = app_module.load_sources()
+        self.assertEqual((sources[0]["file"], sources[0]["state"]), ("clip.mp4", "playing"))
+        self.assertEqual((sources[1]["type"], sources[1]["file"]), ("file", ""))
+
     def test_listing_keeps_a_change_made_during_the_second_liveness_check(self):
         self._assign_webcam(1)
         with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
