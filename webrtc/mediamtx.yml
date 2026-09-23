@@ -23,6 +23,14 @@ webrtcAllowOrigin: '*'
 # than left to the default so the port published by the container and the
 # ICE candidate MediaMTX advertises cannot drift apart.
 webrtcLocalUDPAddress: :8189
+# How long MediaMTX waits, once the peer connection is up, for the first
+# video frame before dropping the session. Its default of 2s is shorter than
+# some cameras take to start — an iPhone over Continuity Camera waking up,
+# for one. Seen on a DevKit: the first attempt connected and was closed with
+# "deadline exceeded while waiting tracks"; the retry published at once.
+# Insight's own confirmation window (confirmWebcamPublishing) must be longer
+# than this, or it gives up on a camera MediaMTX would still have accepted.
+webrtcTrackGatherTimeout: 10s
 
 # Backs the "is this webcam actually publishing" status Insight polls per
 # source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,

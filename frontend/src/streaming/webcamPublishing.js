@@ -93,7 +93,11 @@ export async function publishWebcamOffer(peerConnection, whipUrl, fetchRequest =
 // failure when the stream genuinely never arrives.
 export async function confirmWebcamPublishing(attempt, options = {}) {
   const {
-    timeoutMs = 5000,
+    // Longer than MediaMTX's webrtcTrackGatherTimeout (10s) plus the ICE
+    // handshake. A slow-starting camera is accepted by MediaMTX up to that
+    // point, and giving up here first would tear down a publish that was
+    // about to succeed.
+    timeoutMs = 15000,
     intervalMs = 250,
     sleep = defaultSleep,
     now = () => Date.now(),
