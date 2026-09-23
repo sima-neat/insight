@@ -2743,7 +2743,7 @@ def start_source():
             transport, codec, allowed_transports = _derive_source_stream_settings(filename, src.get("transport"))
             identity = (SOURCE_TYPE_FILE, filename)
 
-            def still_same(slot):
+            def matches_file(slot):
                 return (slot.get("type"), slot.get("file")) == identity
 
             def record(state):
@@ -2755,7 +2755,8 @@ def start_source():
                 return apply
 
             if not allowed_transports:
-                _update_source_slot(index, still_same, record(None))
+                # No stream started on this path, so revalidate on file only.
+                _update_source_slot(index, matches_file, record(None))
                 return _json_error(_codec_detection_error(filename), 400)
             ok, err, mine = start_media_stream(
                 index,
@@ -2766,14 +2767,26 @@ def start_source():
             )
             if not ok:
                 return _json_error(err, 500)
-            # The probe and the spawn above took time; record the start only
-            # if the slot still holds this file. Otherwise the stream belongs
-            # to nothing and is stopped again — but only if it is still ours:
-            # an assign that ran in between has already replaced it with its
-            # own process, which must be left running. `mine` is the identity
-            # start_media_stream captured for this stream, not a later re-read
-            # that could name a replacement.
-            if _update_source_slot(index, still_same, record("playing")) is None:
+
+            # Record the start only if the slot still holds this file with the
+            # transport/codec we started. Matching the file alone is not enough:
+            # another request can reassign the same file with a different
+            # transport in the window, which stops our stream, starts its own,
+            # and persists its transport — recording ours over it would report
+            # e.g. RTSP for a live HTTP stream, a state runtime sync never
+            # repairs (an HTTP entry counts as running). Codec cannot drift on
+            # its own (same file), but it is cheap to include.
+            def still_ours(slot):
+                return (
+                    matches_file(slot)
+                    and slot.get("transport") == transport
+                    and slot.get("codec") == codec
+                )
+
+            if _update_source_slot(index, still_ours, record("playing")) is None:
+                # The slot was reassigned in the window; the stream we started
+                # belongs to nothing now. Stop only ours (a no-op if a
+                # replacement already took the slot) and abandon this start.
                 stop_media_stream_if(index, mine)
                 return _json_error("Source changed while it was being started", 410)
             return {"success": True}
@@ -2855,11 +2868,18 @@ def start_sources_bulk():
                 # request's "stopped" back would hide a live stream. Leave the
                 # fresh state alone.
                 continue
-            if slot.get("type") != SOURCE_TYPE_FILE or slot.get("file") != result.get("file"):
-                # The slot changed hands while it was being started; the stream
-                # this request started belongs to nothing now — unless an
-                # assign in between already replaced it with its own, which
-                # stays. Only the stream this request started is stopped.
+            if (
+                slot.get("type") != SOURCE_TYPE_FILE
+                or slot.get("file") != result.get("file")
+                or slot.get("transport") != result.get("transport")
+                or slot.get("codec") != result.get("codec")
+            ):
+                # The slot changed hands while it was being started — a different
+                # file, or the same file reassigned with a different transport
+                # (which replaced our stream and persisted its own transport).
+                # Either way the stream this request started belongs to nothing
+                # now; stop only ours (a no-op if a replacement already took the
+                # slot) and leave the fresh state as it is.
                 stop_media_stream_if(result["index"], started_identity.get(result["index"]))
                 started.remove(result["index"])
                 errors.append({"index": result["index"], "error": "Source changed while it was being started"})

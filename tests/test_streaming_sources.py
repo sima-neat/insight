@@ -1173,6 +1173,53 @@ class WebcamSourceTests(unittest.TestCase):
         source = app_module.load_sources()[0]
         self.assertEqual((source["file"], source["state"]), ("other.mp4", "stopped"))
 
+    def test_file_start_does_not_overwrite_a_transport_reassigned_during_the_start(self):
+        """Same file, different transport, mid-start: our RTSP start must not overwrite the concurrent HTTP one."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._write_file_slot(1, "clip.mp4")  # rtsp by default
+
+        def start_then_reassigned_to_http(index, *args, **kwargs):
+            s = app_module.load_sources()
+            s[0].update({"type": "file", "file": "clip.mp4", "transport": "http", "codec": "mjpeg", "state": "playing"})
+            app_module.save_sources(s)
+            return True, None, 101
+
+        with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("rtsp", "h264", ["rtsp"])):
+            with mock.patch.object(app_module, "start_media_stream", side_effect=start_then_reassigned_to_http):
+                with mock.patch.object(app_module, "stop_media_stream_if") as stop:
+                    response = self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        self.assertEqual(response.status_code, 410)
+        stop.assert_called_once()
+        self.assertEqual(stop.call_args[0][1], 101, "stops only the stream this request started")
+        source = app_module.load_sources()[0]
+        self.assertEqual((source["transport"], source["codec"]), ("http", "mjpeg"),
+                         "the concurrent HTTP reassignment survived, not overwritten with RTSP")
+
+    def test_start_bulk_does_not_overwrite_a_transport_reassigned_during_the_start(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]',
+            encoding="utf-8",
+        )
+
+        def start_then_reassigned_to_http(*args, **kwargs):
+            s = app_module.load_sources()
+            s[0].update({"transport": "http", "codec": "mjpeg", "state": "playing"})
+            app_module.save_sources(s)
+            return True, None, 101
+
+        with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
+            with mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("rtsp", "h264", ["rtsp"])):
+                with mock.patch.object(app_module, "start_media_stream", side_effect=start_then_reassigned_to_http):
+                    with mock.patch.object(app_module, "stop_media_stream_if") as stop:
+                        body = self.client.post("/api/mediasrc/start-bulk", json={"count": 1}).get_json()
+
+        self.assertEqual([e["index"] for e in body["errors"]], [1], "reported as changed, not started")
+        stop.assert_called_once()
+        self.assertEqual(app_module.load_sources()[0]["transport"], "http",
+                         "the concurrent HTTP reassignment survived the merge")
+
     def test_auto_assign_leaves_a_slot_reassigned_while_it_was_running(self):
         """Slot 1 is planned first; releasing slot 2 takes time, during which slot 1 gets a live webcam."""
         (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
