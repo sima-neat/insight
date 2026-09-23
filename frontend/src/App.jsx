@@ -2400,6 +2400,13 @@ export default function App() {
                       const transportLocked = !isAssigned || allowedTransports.length <= 1
                       const transportValue = isAssigned && allowedTransports.includes(src.transport) ? src.transport : ''
                       const canStream = isAssigned && allowedTransports.length > 0
+                      // While an assign/publish for this slot is in flight, `src`
+                      // is the pre-request render: a transport change or start
+                      // fired now would post that stale file/type and race the
+                      // pending write (e.g. an /assign with the old filename
+                      // converting a just-assigned webcam back to a file). Hold
+                      // every mutating control on the row, not just the select.
+                      const rowBusy = Boolean(webcamBusy[src.index])
                       const selectValue = isWebcam
                         ? (webcamAssignment ? `${WEBCAM_OPTION_PREFIX}${webcamAssignment.deviceId}` : '')
                         : (src.file || '')
@@ -2411,7 +2418,7 @@ export default function App() {
                           </span>
                           <select
                             value={selectValue}
-                            disabled={Boolean(webcamBusy[src.index])}
+                            disabled={rowBusy}
                             onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
                           >
                             <option value="">{isWebcam ? 'Webcam (reselect)' : 'Not assigned'}</option>
@@ -2427,9 +2434,9 @@ export default function App() {
                           <select
                             value={transportValue}
                             onChange={(e) => updateSource(src.index, { transport: e.target.value })}
-                            disabled={transportLocked}
+                            disabled={transportLocked || rowBusy}
                             aria-label={`Transport for src${src.index}`}
-                            title={!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`))}
+                            title={rowBusy ? 'Waiting for the current change to finish' : (!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`)))}
                           >
                             {(!isAssigned || !canStream) && <option value="">-</option>}
                             {STREAMING_TRANSPORTS.filter((transport) => allowedTransports.includes(transport.value)).map((transport) => (
@@ -2443,8 +2450,9 @@ export default function App() {
                             <button
                               className="icon-action-btn stop"
                               onClick={(e) => { e.stopPropagation(); isWebcam ? stopWebcamSource(src.index) : stopSource(src.index).catch(reportSourceError) }}
+                              disabled={rowBusy}
                               aria-label={`Stop src${src.index}`}
-                              title={`Stop src${src.index}`}
+                              title={rowBusy ? 'Waiting for the current change to finish' : `Stop src${src.index}`}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -2454,7 +2462,7 @@ export default function App() {
                             <button
                               className="icon-action-btn play"
                               onClick={(e) => { e.stopPropagation(); isWebcam ? startWebcamSource(src.index) : startSource(src.index).catch(reportSourceError) }}
-                              disabled={!canStream || (isWebcam && (!webcamAssignment || webcamBusy[src.index]))}
+                              disabled={rowBusy || !canStream || (isWebcam && !webcamAssignment)}
                               aria-label={`Start src${src.index}`}
                               title={
                                 isWebcam
