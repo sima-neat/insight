@@ -14,6 +14,9 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     baseURL: process.env.INSIGHT_BASE_URL || 'https://127.0.0.1:19900',
+    // A desktop-sized viewport: at 1280 px the Streaming Sources rows overflow their panel and the
+    // Start/Copy buttons end up under the preview panel, which intercepts clicks (seen in CI).
+    viewport: { width: 1920, height: 1080 },
     ignoreHTTPSErrors: true,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
