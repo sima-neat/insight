@@ -1680,8 +1680,20 @@ export default function App() {
       await loadSources()
     } catch (e) {
       setError(e.message)
-      // The slot may have been changed by another tab (409) or be
-      // unverifiable (502); show what the backend now holds.
+      // This tab could not establish the intended assignment — the slot
+      // changed under another tab (409), or MediaMTX could not confirm the
+      // previous publisher (502). We already tore down our own session before
+      // this call, so drop the stale label rather than leave the row showing a
+      // camera we never confirmed; the dropdown falls back to "Webcam
+      // (reselect)" and the reload below shows the backend's actual state.
+      // Guarded by generation so a newer selection's assignment is not cleared.
+      if ((webcamGenerationRef.current[index] || 0) === generation) {
+        setWebcamAssignments((prev) => {
+          const next = { ...prev }
+          delete next[index]
+          return next
+        })
+      }
       await loadSources().catch(() => {})
     } finally {
       setWebcamBusy((prev) => {
@@ -1823,10 +1835,13 @@ export default function App() {
           if (superseded()) throw WEBCAM_START_SUPERSEDED
           return startSource(index)
         },
-        // 410: the backend saw the slot become a file source while confirming.
-        // Another tab did that, so this tab's generation never moved; without
-        // this the loop would retry a slot that can never become ours.
-        { isTerminal: (e) => Boolean(e?.superseded) || e?.status === 410 },
+        // Stop retrying on outcomes that will not change within the window:
+        //  - 410: another tab made the slot a file source; it can never become
+        //    ours, so this tab's generation never moved and a retry is pointless.
+        //  - 502: MediaMTX's control API is unreachable; every /start retry
+        //    blocks ~1s on the dead API, so a dozen retries just hammer a server
+        //    already known to be down. Surface it and tear down instead.
+        { isTerminal: (e) => Boolean(e?.superseded) || e?.status === 410 || e?.status === 502 },
       )
     } catch (e) {
       if (webcamSessionsRef.current.has(index)) {
