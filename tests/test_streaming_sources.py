@@ -712,6 +712,51 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         kick.assert_not_called()
 
+    def test_a_stale_release_claim_does_not_stop_the_file_that_replaced_the_webcam(self):
+        """Tab A's delayed disconnect must not kill the file stream tab B started on the slot."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "playing", "type": "file"}]',
+            encoding="utf-8")
+
+        with mock.patch.object(app_module, "stop_media_stream") as stop_stream:
+            response = self.client.post("/api/mediasrc/stop", json={
+                "index": 1, "publisher_released": True, "publisher_session": "tab-a"})
+
+        self.assertEqual(response.status_code, 409)
+        stop_stream.assert_not_called()
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing", "B's file untouched")
+
+    def test_a_plain_stop_still_stops_a_file_source(self):
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "clip.mp4", "state": "playing", "type": "file"}]',
+            encoding="utf-8")
+
+        with mock.patch.object(app_module, "stop_media_stream") as stop_stream:
+            response = self.client.post("/api/mediasrc/stop", json={"index": 1})
+
+        self.assertEqual(response.status_code, 200)
+        stop_stream.assert_called_once_with(1)
+
+    def test_converting_a_playing_webcam_to_a_file_leaves_it_stopped(self):
+        """No ffmpeg process was started, so the slot cannot be playing."""
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=True):
+            with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
+                with mock.patch.object(app_module, "start_media_stream") as start_stream:
+                    response = self.client.post(
+                        "/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
+
+        self.assertEqual(response.status_code, 200)
+        start_stream.assert_not_called()
+        source = app_module.load_sources()[0]
+        self.assertEqual((source["type"], source["file"], source["state"]), ("file", "clip.mp4", "stopped"))
+
     def test_a_release_claim_without_a_session_is_not_a_claim(self):
         """Nothing to verify against means nothing can be honoured — for any route."""
         self._assign_webcam(1)

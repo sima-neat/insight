@@ -2360,6 +2360,9 @@ def assign_source():
                 # to this path. Raises rather than erasing it unconfirmed.
                 _release_webcam_publisher(index, _released_session_from(data))
                 src["type"] = SOURCE_TYPE_FILE
+                # A file stream is only playing once its ffmpeg process has been
+                # started; the webcam's playing state does not carry over.
+                src["state"] = "stopped"
                 was_playing = False
             else:
                 was_playing = src.get("state") == "playing" and media_stream_is_running(index)
@@ -2606,21 +2609,24 @@ def stop_source():
     if index is None:
         return _json_error("Missing index")
 
+    released_session = _released_session_from(data)
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
-            # stop_media_stream() is a no-op for a webcam slot: there is no
-            # ffmpeg process, the browser is the publisher. Ask MediaMTX to
-            # close the session so this means "stopped" for any caller, not
-            # just the tab that happens to own the RTCPeerConnection.
-            # A caller that owned the publish has already closed its own peer
-            # connection, so the camera is released whatever MediaMTX says. Only
-            # a caller that did not own it depends on the kick to be sure.
             if src.get("type") == SOURCE_TYPE_WEBCAM:
-                # Persisting "stopped" without this would be a success response
-                # for a camera that may well still be streaming — or, for a
-                # stale release claim, for someone else's camera.
-                _release_webcam_publisher(index, _released_session_from(data))
+                # stop_media_stream() is a no-op for a webcam slot: there is no
+                # ffmpeg process, the browser is the publisher. Persisting
+                # "stopped" without this would be a success response for a
+                # camera that may well still be streaming — or, for a stale
+                # release claim, for someone else's camera.
+                _release_webcam_publisher(index, released_session)
+            elif released_session:
+                # A release claim is a webcam stop by definition. The slot has
+                # since become a file source, so the claim is stale — a delayed
+                # notification from a browser whose camera was replaced — and
+                # must not fall through to stopping the file stream that took
+                # its place.
+                raise WebcamStopSuperseded(f"src{index} is now a file source")
             stop_media_stream(index)
             src["state"] = "stopped"
             save_sources(sources)

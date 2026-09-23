@@ -843,6 +843,12 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+  // A camera selection or publish still in flight has a server request that a
+  // bulk action cannot cancel; the two could complete out of order and the
+  // earlier one re-register a webcam slot the bulk action just cleared. Hold
+  // the bulk controls until every slot has settled.
+  const anyWebcamBusy = Object.keys(webcamBusy).length > 0
+  const bulkHoldTitle = anyWebcamBusy ? 'Waiting for a webcam selection to finish' : undefined
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
@@ -2274,16 +2280,16 @@ export default function App() {
                   >
                     Detect webcam
                   </button>
-                  <button className="btn-ghost" onClick={autoAssignAllSources} title="Auto assign unique media files to all sources">
+                  <button className="btn-ghost" onClick={autoAssignAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle || 'Auto assign unique media files to all sources'}>
                     Auto Assign
                   </button>
                   <button className="btn-tonal" onClick={() => setBulkStartOpen(true)} disabled={!videoFiles.length}>
                     Bulk Start
                   </button>
-                  <button className="btn-tonal" onClick={stopAllSources}>
+                  <button className="btn-tonal" onClick={stopAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>
                     Stop All
                   </button>
-                  <button className="btn-ghost" onClick={resetAllSources}>
+                  <button className="btn-ghost" onClick={resetAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>
                     Reset
                   </button>
                 </div>
