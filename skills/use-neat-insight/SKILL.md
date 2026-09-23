@@ -169,6 +169,12 @@ and source PTS identical to the corresponding video and overlay messages. The
 built-in `blazepose-3d` renderer expects `payload.poses[].keypoints[]` with named
 finite `x`, `y`, and `z` world coordinates. Unknown versions/renderers are
 ignored and warned once in the browser console.
+The BlazePose panel can show a labeled reference cube and orbit around the world
+landmarks. Its panel-local controls toggle the cube and orbit, set orbit speed,
+pause or resume, and reset the camera; dragging the canvas pauses orbit for
+manual inspection. These preferences are browser-local and isolated by channel
+and auxiliary-view ID. Animation stops without a selected correlated payload or
+when the panel is collapsed, hidden, reset, or unmounted.
 A second ordinary message of the same type for the same frame replaces the first;
 auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses

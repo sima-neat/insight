@@ -17,22 +17,89 @@ export const BLAZEPOSE_CONNECTIONS = [
 
 const POSE_COLORS = ["#38bdf8", "#fb7185", "#4ade80", "#facc15", "#c084fc", "#fb923c"];
 const MIN_CONFIDENCE = 0.3;
-const YAW = -Math.PI / 4;
-const PITCH = Math.PI / 9;
+const DEFAULT_YAW = -Math.PI / 4;
+const DEFAULT_PITCH = Math.PI / 9;
+const MIN_PITCH = -Math.PI * 0.48;
+const MAX_PITCH = Math.PI * 0.48;
+const MIN_ORBIT_SPEED = 5;
+const MAX_ORBIT_SPEED = 90;
+const CUBE_MIN_EXTENT = 0.5;
 
-export function projectWorldPoint(point) {
+const CUBE_EDGES = [
+  [0, 1], [1, 2], [2, 3], [3, 0],
+  [4, 5], [5, 6], [6, 7], [7, 4],
+  [0, 4], [1, 5], [2, 6], [3, 7],
+];
+
+const CUBE_FACES = [
+  [0, 1, 2, 3], [4, 5, 6, 7],
+  [0, 1, 5, 4], [2, 3, 7, 6],
+  [1, 2, 6, 5], [3, 0, 4, 7],
+];
+
+export const DEFAULT_BLAZEPOSE_VIEW_SETTINGS = Object.freeze({
+  showReferenceCube: true,
+  autoRotate: true,
+  rotationSpeed: 25,
+  paused: false,
+  yaw: DEFAULT_YAW,
+  pitch: DEFAULT_PITCH,
+});
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function finiteOr(value, fallback) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+export function normalizeBlazePoseViewSettings(value) {
+  const candidate = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    showReferenceCube:
+      typeof candidate.showReferenceCube === "boolean"
+        ? candidate.showReferenceCube
+        : DEFAULT_BLAZEPOSE_VIEW_SETTINGS.showReferenceCube,
+    autoRotate:
+      typeof candidate.autoRotate === "boolean"
+        ? candidate.autoRotate
+        : DEFAULT_BLAZEPOSE_VIEW_SETTINGS.autoRotate,
+    rotationSpeed: clamp(
+      finiteOr(candidate.rotationSpeed, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.rotationSpeed),
+      MIN_ORBIT_SPEED,
+      MAX_ORBIT_SPEED,
+    ),
+    paused:
+      typeof candidate.paused === "boolean"
+        ? candidate.paused
+        : DEFAULT_BLAZEPOSE_VIEW_SETTINGS.paused,
+    yaw: finiteOr(candidate.yaw, DEFAULT_YAW),
+    pitch: clamp(finiteOr(candidate.pitch, DEFAULT_PITCH), MIN_PITCH, MAX_PITCH),
+  };
+}
+
+function normalizeWorldPoint(point) {
   const x = Number(point?.x);
   const y = -Number(point?.y);
   const z = Number(point?.z);
-  if (![x, y, z].every(Number.isFinite)) return null;
+  return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
+}
 
-  const yawX = Math.cos(YAW) * x + Math.sin(YAW) * z;
-  const yawZ = -Math.sin(YAW) * x + Math.cos(YAW) * z;
+function projectNormalizedPoint(world, camera) {
+  const yawX = Math.cos(camera.yaw) * world.x + Math.sin(camera.yaw) * world.z;
+  const yawZ = -Math.sin(camera.yaw) * world.x + Math.cos(camera.yaw) * world.z;
   return {
     x: yawX,
-    y: Math.cos(PITCH) * y - Math.sin(PITCH) * yawZ,
-    depth: Math.sin(PITCH) * y + Math.cos(PITCH) * yawZ,
+    y: Math.cos(camera.pitch) * world.y - Math.sin(camera.pitch) * yawZ,
+    depth: Math.sin(camera.pitch) * world.y + Math.cos(camera.pitch) * yawZ,
   };
+}
+
+export function projectWorldPoint(point, camera = DEFAULT_BLAZEPOSE_VIEW_SETTINGS) {
+  const world = normalizeWorldPoint(point);
+  return world ? projectNormalizedPoint(world, normalizeBlazePoseViewSettings(camera)) : null;
 }
 
 function normalizedPoses(payload) {
@@ -42,16 +109,55 @@ function normalizedPoses(payload) {
     if (Array.isArray(pose?.keypoints)) {
       for (const point of pose.keypoints) {
         if (typeof point?.name !== "string" || (point.confidence ?? 1) < MIN_CONFIDENCE) continue;
-        const projected = projectWorldPoint(point);
-        if (projected) points.set(point.name, projected);
+        const normalized = normalizeWorldPoint(point);
+        if (normalized) points.set(point.name, normalized);
       }
     }
-    return { id: pose?.id ?? `pose_${poseIndex + 1}`, points, color: POSE_COLORS[poseIndex % POSE_COLORS.length] };
+    return {
+      id: pose?.id ?? `pose_${poseIndex + 1}`,
+      points,
+      color: POSE_COLORS[poseIndex % POSE_COLORS.length],
+    };
   }).filter((pose) => pose.points.size > 0);
 }
 
-function fitProjection(poses, width, height) {
+function poseBounds(poses) {
   const points = poses.flatMap((pose) => [...pose.points.values()]);
+  const axis = (name) => points.map((point) => point[name]);
+  const minX = Math.min(...axis("x"));
+  const maxX = Math.max(...axis("x"));
+  const minY = Math.min(...axis("y"));
+  const maxY = Math.max(...axis("y"));
+  const minZ = Math.min(...axis("z"));
+  const maxZ = Math.max(...axis("z"));
+  return { minX, maxX, minY, maxY, minZ, maxZ };
+}
+
+function referenceCube(bounds) {
+  const center = {
+    x: (bounds.minX + bounds.maxX) / 2,
+    y: (bounds.minY + bounds.maxY) / 2,
+    z: (bounds.minZ + bounds.maxZ) / 2,
+  };
+  const extent = Math.max(
+    bounds.maxX - bounds.minX,
+    bounds.maxY - bounds.minY,
+    bounds.maxZ - bounds.minZ,
+    CUBE_MIN_EXTENT,
+  ) * 0.68;
+  return [
+    { x: center.x - extent, y: center.y - extent, z: center.z - extent },
+    { x: center.x + extent, y: center.y - extent, z: center.z - extent },
+    { x: center.x + extent, y: center.y + extent, z: center.z - extent },
+    { x: center.x - extent, y: center.y + extent, z: center.z - extent },
+    { x: center.x - extent, y: center.y - extent, z: center.z + extent },
+    { x: center.x + extent, y: center.y - extent, z: center.z + extent },
+    { x: center.x + extent, y: center.y + extent, z: center.z + extent },
+    { x: center.x - extent, y: center.y + extent, z: center.z + extent },
+  ];
+}
+
+function fitProjection(points, width, height) {
   const minX = Math.min(...points.map((point) => point.x));
   const maxX = Math.max(...points.map((point) => point.x));
   const minY = Math.min(...points.map((point) => point.y));
@@ -78,29 +184,79 @@ function drawEmpty(ctx, width, height) {
   ctx.fillText("No 3D pose for this frame", width / 2, height / 2);
 }
 
-export function drawBlazePose3D(ctx, viewport, payload) {
+function drawReferenceCube(ctx, vertices) {
+  const faces = CUBE_FACES.map((indices) => ({
+    indices,
+    depth: indices.reduce((total, index) => total + vertices[index].depth, 0) / indices.length,
+  })).sort((left, right) => left.depth - right.depth);
+
+  for (const face of faces) {
+    ctx.beginPath();
+    face.indices.forEach((index, position) => {
+      const vertex = vertices[index];
+      if (position === 0) ctx.moveTo(vertex.x, vertex.y);
+      else ctx.lineTo(vertex.x, vertex.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(56, 189, 248, 0.035)";
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.58)";
+  ctx.lineWidth = 1;
+  for (const [fromIndex, toIndex] of CUBE_EDGES) {
+    ctx.beginPath();
+    ctx.moveTo(vertices[fromIndex].x, vertices[fromIndex].y);
+    ctx.lineTo(vertices[toIndex].x, vertices[toIndex].y);
+    ctx.stroke();
+  }
+
+  const labels = [[1, "X"], [3, "Y"], [4, "Z"]];
+  ctx.fillStyle = "rgba(226, 232, 240, 0.78)";
+  ctx.font = "10px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const [index, label] of labels) {
+    ctx.fillText(label, vertices[index].x, vertices[index].y);
+  }
+}
+
+export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   const width = viewport?.width ?? 0;
   const height = viewport?.height ?? 0;
-  if (width <= 0 || height <= 0) return;
+  if (width <= 0 || height <= 0) return false;
 
   const poses = normalizedPoses(payload);
   if (poses.length === 0) {
     drawEmpty(ctx, width, height);
-    return;
+    return false;
   }
 
-  const projection = fitProjection(poses, width, height);
+  const camera = normalizeBlazePoseViewSettings(frame.camera);
+  const cube = frame.showReferenceCube === false ? [] : referenceCube(poseBounds(poses));
+  const projectedPosePoints = poses.flatMap((pose) =>
+    [...pose.points.values()].map((point) => projectNormalizedPoint(point, camera)),
+  );
+  const projectedCube = cube.map((point) => projectNormalizedPoint(point, camera));
+  const projection = fitProjection([...projectedPosePoints, ...projectedCube], width, height);
+
+  if (projectedCube.length > 0) {
+    drawReferenceCube(ctx, projectedCube.map((point) => projection.point(point)));
+  }
+
   const segments = [];
   for (const pose of poses) {
     for (const [fromName, toName] of BLAZEPOSE_CONNECTIONS) {
       const from = pose.points.get(fromName);
       const to = pose.points.get(toName);
       if (!from || !to) continue;
+      const projectedFrom = projectNormalizedPoint(from, camera);
+      const projectedTo = projectNormalizedPoint(to, camera);
       segments.push({
-        from: projection.point(from),
-        to: projection.point(to),
+        from: projection.point(projectedFrom),
+        to: projection.point(projectedTo),
         color: pose.color,
-        depth: (from.depth + to.depth) / 2,
+        depth: (projectedFrom.depth + projectedTo.depth) / 2,
       });
     }
   }
@@ -117,10 +273,13 @@ export function drawBlazePose3D(ctx, viewport, payload) {
     ctx.stroke();
   }
 
-  const projectedPoints = poses.flatMap((pose) =>
-    [...pose.points.values()].map((point) => ({ ...projection.point(point), color: pose.color })),
+  const points = poses.flatMap((pose) =>
+    [...pose.points.values()].map((point) => {
+      const projected = projectNormalizedPoint(point, camera);
+      return { ...projection.point(projected), color: pose.color };
+    }),
   ).sort((left, right) => left.depth - right.depth);
-  for (const point of projectedPoints) {
+  for (const point of points) {
     ctx.beginPath();
     ctx.arc(point.x, point.y, 2.8, 0, 2 * Math.PI);
     ctx.fillStyle = point.color;
@@ -128,9 +287,140 @@ export function drawBlazePose3D(ctx, viewport, payload) {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+  return true;
+}
+
+export function createBlazePose3DSession({ initialSettings, onSettingsChange, requestDraw } = {}) {
+  let settings = normalizeBlazePoseViewSettings(initialSettings);
+  let lastAnimationTime = null;
+  let drag = null;
+  let destroyed = false;
+  let hasRenderablePose = false;
+
+  const snapshot = () => ({ ...settings });
+  const notify = (persist = true) => {
+    if (destroyed) return;
+    if (persist && typeof onSettingsChange === "function") onSettingsChange(snapshot());
+    if (typeof requestDraw === "function") requestDraw();
+  };
+  const stopAnimationClock = () => {
+    lastAnimationTime = null;
+  };
+  const advanceOrbit = (timeMs) => {
+    if (!settings.autoRotate || settings.paused || !Number.isFinite(timeMs)) {
+      stopAnimationClock();
+      return;
+    }
+    if (lastAnimationTime != null) {
+      const elapsedSeconds = clamp((timeMs - lastAnimationTime) / 1000, 0, 0.1);
+      settings.yaw += elapsedSeconds * settings.rotationSpeed * Math.PI / 180;
+    }
+    lastAnimationTime = timeMs;
+  };
+
+  return {
+    draw(ctx, viewport, payload, frame = {}) {
+      if (destroyed) return;
+      advanceOrbit(frame.animationTimeMs);
+      hasRenderablePose = drawBlazePose3D(ctx, viewport, payload, {
+        ...frame,
+        camera: settings,
+        showReferenceCube: settings.showReferenceCube,
+      });
+    },
+    isAnimating() {
+      return !destroyed && hasRenderablePose && settings.autoRotate && !settings.paused;
+    },
+    getControls() {
+      return [
+        { id: "showReferenceCube", type: "toggle", label: "Cube", value: settings.showReferenceCube },
+        { id: "autoRotate", type: "toggle", label: "Orbit", value: settings.autoRotate },
+        {
+          id: "rotationSpeed",
+          type: "range",
+          label: "Speed",
+          value: settings.rotationSpeed,
+          min: MIN_ORBIT_SPEED,
+          max: MAX_ORBIT_SPEED,
+          step: 5,
+          valueLabel: `${Math.round(settings.rotationSpeed)} deg/s`,
+          disabled: !settings.autoRotate,
+        },
+        {
+          id: "paused",
+          type: "action",
+          label: settings.paused ? "Resume" : "Pause",
+          disabled: !settings.autoRotate,
+        },
+        { id: "resetCamera", type: "action", label: "Reset view" },
+      ];
+    },
+    applyControl(id, value) {
+      if (destroyed) return;
+      switch (id) {
+        case "showReferenceCube":
+          settings.showReferenceCube = Boolean(value);
+          break;
+        case "autoRotate":
+          settings.autoRotate = Boolean(value);
+          stopAnimationClock();
+          break;
+        case "rotationSpeed":
+          settings.rotationSpeed = clamp(finiteOr(value, settings.rotationSpeed), MIN_ORBIT_SPEED, MAX_ORBIT_SPEED);
+          stopAnimationClock();
+          break;
+        case "paused":
+          if (settings.autoRotate) settings.paused = !settings.paused;
+          stopAnimationClock();
+          break;
+        case "resetCamera":
+          settings = {
+            ...settings,
+            yaw: DEFAULT_YAW,
+            pitch: DEFAULT_PITCH,
+            paused: false,
+          };
+          stopAnimationClock();
+          break;
+        default:
+          return;
+      }
+      notify();
+    },
+    pointerDown({ x, y, pointerId }) {
+      if (destroyed || ![x, y].every(Number.isFinite)) return false;
+      drag = { x, y, pointerId };
+      settings.paused = true;
+      stopAnimationClock();
+      notify(false);
+      return true;
+    },
+    pointerMove({ x, y, pointerId }) {
+      if (destroyed || !drag || drag.pointerId !== pointerId || ![x, y].every(Number.isFinite)) return false;
+      settings.yaw += (x - drag.x) * 0.012;
+      settings.pitch = clamp(settings.pitch + (y - drag.y) * 0.012, MIN_PITCH, MAX_PITCH);
+      drag = { x, y, pointerId };
+      notify(false);
+      return true;
+    },
+    pointerUp({ pointerId }) {
+      if (destroyed || !drag || drag.pointerId !== pointerId) return false;
+      drag = null;
+      notify(true);
+      return true;
+    },
+    snapshot,
+    destroy() {
+      destroyed = true;
+      drag = null;
+      hasRenderablePose = false;
+      stopAnimationClock();
+    },
+  };
 }
 
 auxiliaryRendererRegistry.register("blazepose-3d", {
   title: "3D Pose",
   draw: drawBlazePose3D,
+  createSession: createBlazePose3DSession,
 });

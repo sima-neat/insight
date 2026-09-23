@@ -8,7 +8,8 @@ sidebar_position: 4
 
 The Video Viewer can render data that does not belong on top of the video in a
 separate panel. Each channel owns its panel. The first built-in renderer displays
-BlazePose world landmarks as a projected 3D skeleton.
+BlazePose world landmarks as a projected 3D skeleton inside an optional reference
+cube.
 
 Send auxiliary data through the same metadata UDP port as overlays: channel `N`
 uses `metadataUDP + N` (UDP `9100 + N` with the default mapping). Set the
@@ -60,6 +61,27 @@ The `blazepose-3d` payload accepts `poses[]`; every pose contains an ID and name
 optional and points below `0.3` are omitted. Multiple poses receive distinct
 colors.
 
+## BlazePose camera controls
+
+The BlazePose view orbits around the world-landmark skeleton by default so depth
+and limb placement are visible from more than one angle. The controls below the
+canvas can:
+
+- show or hide the labeled reference cube;
+- enable or disable automatic orbit;
+- change the orbit speed;
+- pause or resume the current orbit; and
+- reset the camera to its default angle.
+
+Drag directly on the canvas to inspect the pose manually. Dragging pauses the
+orbit at the selected angle; select **Resume** to continue. The cube and camera
+settings are browser-local and stored separately for every channel and auxiliary
+view ID, so adjusting one stream does not change another stream.
+
+Animation runs only while the selected view has frame-correlated data and its
+panel is visible. It stops when data is missing, the panel is collapsed or
+hidden, another tab is selected, or the viewer is closed.
+
 ## Multiple views and overlays
 
 Send one metadata message per view and use a distinct `data.id`. Several views
@@ -80,6 +102,13 @@ select arbitrary modules. A renderer supplies a stable name, a default title,
 and a `draw(context, viewport, payload, frame)` function. Keep payload validation
 inside the renderer and treat malformed input as an empty view.
 
+Interactive renderers may also provide `createSession()`. The returned session
+can expose declarative controls through `getControls()` and `applyControl()`,
+pointer handlers, and `isAnimating()`. The generic panel owns animation-frame
+scheduling and browser persistence, calls the session `draw()` method, and calls
+`destroy()` when the view is hidden, collapsed, replaced, switched away from,
+reset, or unmounted. A renderer must not start its own animation loop.
+
 Run the reusable viewer checks after changing the protocol or a renderer:
 
 ```bash
@@ -89,4 +118,3 @@ npm run test:auxiliary
 npm run test:viewer
 npm run build:viewer
 ```
-

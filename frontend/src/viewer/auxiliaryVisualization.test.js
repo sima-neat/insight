@@ -6,6 +6,7 @@ import {
   createAuxiliaryRendererRegistry,
   inspectAuxiliaryMessage,
   partitionFrameMetadata,
+  shouldAnimateAuxiliaryView,
 } from "./auxiliaryVisualization.js";
 import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
 
@@ -125,4 +126,17 @@ test("channel-local queues cannot display another channel's auxiliary payload", 
   assert.equal(zero.auxiliaryViews[0].payload.channel, 0);
   assert.equal(one.auxiliaryViews[0].payload.channel, 1);
   assert.equal(takeMetadataForFrame(channelZero, 42, 0, 12).length, 0);
+});
+
+test("auxiliary animation runs only for a visible payload that requests it", () => {
+  const animating = { isAnimating: () => true };
+  const still = { isAnimating: () => false };
+
+  assert.equal(shouldAnimateAuxiliaryView("compact", true, animating), true);
+  assert.equal(shouldAnimateAuxiliaryView("expanded", true, animating), true);
+  assert.equal(shouldAnimateAuxiliaryView("collapsed", true, animating), false);
+  assert.equal(shouldAnimateAuxiliaryView("hidden", true, animating), false);
+  assert.equal(shouldAnimateAuxiliaryView("compact", false, animating), false);
+  assert.equal(shouldAnimateAuxiliaryView("compact", true, still), false);
+  assert.equal(shouldAnimateAuxiliaryView("compact", true, null), false);
 });

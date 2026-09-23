@@ -30,6 +30,11 @@ export function createAuxiliaryRendererRegistry() {
 
 export const auxiliaryRendererRegistry = createAuxiliaryRendererRegistry();
 
+export function shouldAnimateAuxiliaryView(mode, hasPayload, session) {
+  if (mode === "collapsed" || mode === "hidden" || !hasPayload) return false;
+  return session?.isAnimating?.() === true;
+}
+
 function boundedString(value, maxLength) {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
