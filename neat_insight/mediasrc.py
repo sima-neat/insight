@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
-MEDIAMTX_API_BASE_URL = "http://127.0.0.1:9997"
+# Loopback-only control API (webrtc/mediamtx.yml apiAddress); never published.
+MEDIAMTX_API_PORT = 9997
+MEDIAMTX_API_BASE_URL = f"http://127.0.0.1:{MEDIAMTX_API_PORT}"
 WEBCAM_WHIP_PORT = 8889
 # Key that the SDK port map uses for the WHIP listener above. The SDK may
 # republish 8889 on a different host port, so the browser-facing URL is
@@ -309,9 +311,6 @@ def webcam_path_name(index: int) -> str:
     return f"src{index}"
 
 
-# A 404 from MediaMTX is an answer, not a failure: the path or session is not
-# there. Collapsing it into "no answer" would make callers treat a definite
-# "nothing is publishing" as "cannot tell".
 # A 404 from MediaMTX is an answer, not a failure: the path or session is not
 # there. Collapsing it into "no answer" would make callers treat a definite
 # "nothing is publishing" as "cannot tell".

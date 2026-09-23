@@ -649,7 +649,7 @@
         "responses": {
           "200": {
             "description": "Number of sources that were previously playing.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "message": "Stopped 4 source(s)."}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "unconfirmed_webcams": [], "message": "Stopped 4 source(s)."}}}
           }
         }
       }

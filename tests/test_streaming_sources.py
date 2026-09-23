@@ -956,6 +956,30 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         kick.assert_called_once_with(2)
 
+    def test_a_boolean_index_in_released_webcams_is_not_a_claim(self):
+        """bool is an int subclass; {"index": true} must not read as slot 1."""
+        self._assign_webcam(1)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value=True) as kick:
+            response = self.client.post(
+                "/api/mediasrc/stop-all", json={"released_webcams": [{"index": True, "session": "mine"}]})
+
+        self.assertEqual(response.status_code, 200)
+        kick.assert_called_once_with(1)
+
+    def test_stop_all_does_not_count_a_camera_it_could_not_confirm_stopped(self):
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        with mock.patch.object(app_module, "kick_webcam_publisher",
+                               side_effect=app_module.MediaServerUnreachable("down")):
+            body = self.client.post("/api/mediasrc/stop-all").get_json()
+
+        self.assertEqual(body["unconfirmed_webcams"], [1])
+        self.assertEqual(body["stopped_count"], 0, "still publishing, so not stopped")
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing")
+
     def test_webcam_rtsp_url_uses_the_sdk_mapped_port(self):
         remapped = [{"hostPortEnd": None, "hostPortStart": 18554, "name": "rtsp.tcp", "protocol": "tcp"}]
 

@@ -2213,6 +2213,7 @@ def _handle_webcam_publisher_unconfirmed(exc):
 
 @app.errorhandler(WebcamStopSuperseded)
 def _handle_webcam_stop_superseded(exc):
+    logging.info("Webcam stop ignored, claim is stale: %s", exc)
     return _json_error(
         "This source is now published by a different session; nothing was changed.",
         409,
@@ -2249,7 +2250,8 @@ def _released_sessions_from(data) -> dict:
         if not isinstance(entry, dict):
             continue
         index, session = entry.get("index"), entry.get("session")
-        if isinstance(index, int) and isinstance(session, str) and session:
+        if (isinstance(index, int) and not isinstance(index, bool)
+                and isinstance(session, str) and session):
             released[index] = session
     return released
 
@@ -2408,6 +2410,9 @@ def assign_source():
                 src["state"] = "stopped"
                 was_playing = False
             else:
+                # A release claim on a file slot is ignored here, unlike in
+                # stop_source: assigning a file is a deliberate user action,
+                # not a delayed notification, so there is nothing to protect.
                 was_playing = src.get("state") == "playing" and media_stream_is_running(index)
                 if was_playing:
                     stop_media_stream(index)
@@ -2497,9 +2502,9 @@ def auto_assign_all_sources():
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
-            # Same reasoning as reset: keep the slot marked as a webcam, and
-            # playing, rather than losing the only record that a browser may
-            # still be publishing to it and the control needed to stop it.
+            # Same reasoning as reset: keep the slot marked as a webcam, in the
+            # state it had, rather than losing the only record that a browser
+            # may still be publishing to it and the control needed to stop it.
             unconfirmed.append(source_index)
             continue
 
@@ -2718,8 +2723,6 @@ def stop_all_sources():
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
-        if src.get("state") == "playing":
-            stopped_count += 1
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
@@ -2729,6 +2732,10 @@ def stop_all_sources():
             continue
         stop_media_stream(source_index)
         stopped.add(source_index)
+        # Counted after the release, so an unconfirmed camera that is still
+        # publishing is not reported as stopped.
+        if src.get("state") == "playing":
+            stopped_count += 1
 
     # Stop All changes state and nothing else, but the list above was loaded
     # before a loop of kicks that can take a second each. Writing it back would

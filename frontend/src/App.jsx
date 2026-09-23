@@ -1831,6 +1831,16 @@ export default function App() {
     }
   }
 
+  // The bulk actions each end every session this tab holds and tell the
+  // backend which ones, by id, so a slot another browser has since taken is
+  // confirmed with MediaMTX instead of trusted. Read before teardown clears
+  // the registry.
+  function releasedWebcamClaims() {
+    return Array.from(webcamSessionsRef.current.entries())
+      .filter(([, session]) => session?.sessionId)
+      .map(([index, session]) => ({ index, session: session.sessionId }))
+  }
+
   // Only a session this tab held, and can name, supports a released claim.
   function releaseClaimFor(session) {
     const sessionId = session?.sessionId ?? null
@@ -1854,9 +1864,7 @@ export default function App() {
     try {
       // The backend rewrites every slot to a file source; the browser has to
       // release the cameras those slots were using.
-      const released = Array.from(webcamSessionsRef.current.entries())
-        .filter(([, session]) => session?.sessionId)
-        .map(([index, session]) => ({ index, session: session.sessionId }))
+      const released = releasedWebcamClaims()
       teardownAllWebcamSessions({ clearAssignments: true })
       const data = await fetchJson('/api/mediasrc/auto-assign-all', {
         method: 'POST',
@@ -1903,9 +1911,7 @@ export default function App() {
     try {
       // Stop leaves the slot assigned, so the camera choice is kept and only
       // the publishing session ends.
-      const released = Array.from(webcamSessionsRef.current.entries())
-        .filter(([, session]) => session?.sessionId)
-        .map(([index, session]) => ({ index, session: session.sessionId }))
+      const released = releasedWebcamClaims()
       teardownAllWebcamSessions()
       const data = await fetchJson('/api/mediasrc/stop-all', {
         method: 'POST',
@@ -1923,9 +1929,7 @@ export default function App() {
     try {
       // Reset returns every slot to an unassigned file source, so the camera
       // choices go with it.
-      const released = Array.from(webcamSessionsRef.current.entries())
-        .filter(([, session]) => session?.sessionId)
-        .map(([index, session]) => ({ index, session: session.sessionId }))
+      const released = releasedWebcamClaims()
       teardownAllWebcamSessions({ clearAssignments: true })
       const data = await fetchJson('/api/mediasrc/reset', {
         method: 'POST',

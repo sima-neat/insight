@@ -18,6 +18,10 @@ logLevel: info
 webrtc: yes
 webrtcAddress: :8889
 webrtcEncryption: no
+# The WHIP POST is cross-origin by construction: the page is served by Flask
+# on its own port and posts to this listener on 8889. There is nothing to
+# protect with a tighter origin — publishing needs no credentials and the
+# listener is only reachable where Insight itself is.
 webrtcAllowOrigin: '*'
 # Signalling happens on 8889, but the media arrives here. Pinned rather
 # than left to the default so the port published by the container and the

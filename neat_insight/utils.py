@@ -38,6 +38,8 @@ import psutil
 import ipaddress
 import socket
 
+from neat_insight.mediasrc import MEDIAMTX_API_PORT, WEBCAM_WHIP_ICE_PORT, WEBCAM_WHIP_PORT
+
 CERT_FILE = "cert.pem"
 KEY_FILE = "key.pem"
 CERT_HOST_ENV = "NFS_SERVER_HOST_IP"
@@ -275,9 +277,9 @@ def _terminate_conflicting_ports(webcam_ice_port=None):
     port_specs = [
         (8554, "TCP"),
         (8000, "UDP"),
-        (8889, "TCP"),
-        (webcam_ice_port or 8189, "UDP"),
-        (9997, "TCP"),
+        (WEBCAM_WHIP_PORT, "TCP"),
+        (webcam_ice_port or WEBCAM_WHIP_ICE_PORT, "UDP"),
+        (MEDIAMTX_API_PORT, "TCP"),
         (8081, "TCP"),
         *[(port, "UDP") for port in range(9000, 9080)],
         *[(port, "UDP") for port in range(9100, 9180)],
