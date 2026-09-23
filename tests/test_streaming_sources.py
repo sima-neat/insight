@@ -28,6 +28,13 @@ class StreamingSourceTests(unittest.TestCase):
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
         mediasrc.pipeline_registry.clear()
+        # No MediaMTX in tests. By default it reports no publisher anywhere, so
+        # the post-release replacement checks pass; tests that need a publisher,
+        # a replacement or an outage patch these again inside the test.
+        for name, value in (("webcam_publisher_session", None), ("webcam_publisher_sessions", {})):
+            patcher = mock.patch.object(app_module, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         mediasrc.pipeline_registry.clear()
@@ -215,13 +222,14 @@ class StreamingSourceTests(unittest.TestCase):
 
         with mock.patch.object(app_module, "_source_media_codec", return_value="h264"):
             with mock.patch.object(app_module, "start_media_stream", side_effect=start_and_convert):
-                with mock.patch.object(app_module, "stop_media_stream") as stop_stream:
+                with mock.patch.object(app_module, "stop_media_stream_if") as stop_stream:
                     response = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
 
         body = response.get_json()
         self.assertEqual(body["started"], [], "not reported as started")
         self.assertEqual([e["index"] for e in body["errors"]], [1])
-        stop_stream.assert_called_once_with(1)
+        stop_stream.assert_called_once()
+        self.assertEqual(stop_stream.call_args[0][0], 1, "only the stream this request started is stopped")
         self.assertEqual(app_module.load_sources()[0]["type"], "webcam", "the newer state kept")
 
     def test_http_snapshot_uses_configured_source(self):
@@ -343,6 +351,13 @@ class WebcamSourceTests(unittest.TestCase):
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
         mediasrc.pipeline_registry.clear()
+        # No MediaMTX in tests. By default it reports no publisher anywhere, so
+        # the post-release replacement checks pass; tests that need a publisher,
+        # a replacement or an outage patch these again inside the test.
+        for name, value in (("webcam_publisher_session", None), ("webcam_publisher_sessions", {})):
+            patcher = mock.patch.object(app_module, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         mediasrc.pipeline_registry.clear()
@@ -1092,11 +1107,12 @@ class WebcamSourceTests(unittest.TestCase):
 
         with mock.patch.object(app_module, "_media_video_codec", return_value="h264"):
             with mock.patch.object(app_module, "start_media_stream", side_effect=start_then_reassigned):
-                with mock.patch.object(app_module, "stop_media_stream") as stop:
+                with mock.patch.object(app_module, "stop_media_stream_if") as stop:
                     response = self.client.post("/api/mediasrc/start", json={"index": 1})
 
         self.assertEqual(response.status_code, 410)
-        stop.assert_called_once_with(1)
+        stop.assert_called_once()
+        self.assertEqual(stop.call_args[0][0], 1, "only the stream this request started is stopped")
         source = app_module.load_sources()[0]
         self.assertEqual((source["file"], source["state"]), ("other.mp4", "stopped"))
 
@@ -1135,6 +1151,37 @@ class WebcamSourceTests(unittest.TestCase):
         sources = app_module.load_sources()
         self.assertEqual((sources[0]["file"], sources[0]["state"]), ("clip.mp4", "playing"))
         self.assertEqual((sources[1]["type"], sources[1]["file"]), ("file", ""))
+
+    def test_stop_all_leaves_a_webcam_re_published_on_a_released_slot(self):
+        """The released camera and its replacement share the slot identity ("webcam", ""); only the session id differs."""
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            self.client.post("/api/mediasrc/start", json={"index": 1})
+
+        # Release reports it kicked session "old"; a new camera "new" is on the
+        # path by the time the replacement check runs.
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value="old"):
+            with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
+                with mock.patch.object(app_module, "webcam_publisher_sessions", return_value={"src1": "new"}):
+                    body = self.client.post("/api/mediasrc/stop-all").get_json()
+
+        self.assertEqual(body["changed_sources"], [1])
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing",
+                         "the replacement camera keeps its Live row and Stop control")
+
+    def test_reset_marks_every_released_slot_unconfirmed_when_sessions_cannot_be_listed(self):
+        """If MediaMTX cannot answer the replacement check, no released webcam may be erased."""
+        self._assign_webcam(2)
+
+        with mock.patch.object(app_module, "kick_webcam_publisher", return_value="old"):
+            with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
+                with mock.patch.object(app_module, "webcam_publisher_sessions",
+                                       side_effect=app_module.MediaServerUnreachable("down")):
+                    body = self.client.post("/api/mediasrc/reset").get_json()
+
+        self.assertEqual(body["unconfirmed_webcams"], [2])
+        self.assertEqual(app_module.load_sources()[1]["type"], "webcam",
+                         "not erased while a live camera cannot be ruled out")
 
     def test_assign_replaces_a_same_file_stream_started_during_the_probe(self):
         """Identity (type, file) cannot see a restart of the same file; the running process is what gets replaced."""
@@ -1202,7 +1249,7 @@ class WebcamSourceTests(unittest.TestCase):
         source = app_module.load_sources()[0]
         self.assertEqual((source["file"], source["state"]), ("other.mp4", "playing"))
 
-    def test_listing_keeps_a_change_made_during_the_second_liveness_check(self):
+    # --- A camera re-published on a released slot has the slot's identity; only its
         self._assign_webcam(1)
         with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
             self.client.post("/api/mediasrc/start", json={"index": 1})
@@ -1576,7 +1623,7 @@ class WebcamPublishStateTests(unittest.TestCase):
         fake, state = self._mediamtx_sequence(lookups=["abc-123", None], kick_results=[404])
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", fake):
-            self.assertIs(mediasrc.kick_webcam_publisher(1), False)
+            self.assertIsNone(mediasrc.kick_webcam_publisher(1))
 
         self.assertEqual(state["lookup"], 2, "looked again before calling the slot idle")
 
@@ -1585,7 +1632,7 @@ class WebcamPublishStateTests(unittest.TestCase):
         fake, state = self._mediamtx_sequence(lookups=["tab-a", "tab-b"], kick_results=[404, 200])
 
         with mock.patch.object(mediasrc.urllib.request, "urlopen", fake):
-            self.assertIs(mediasrc.kick_webcam_publisher(1), True)
+            self.assertEqual(mediasrc.kick_webcam_publisher(1), "tab-b", "reports the session it actually kicked")
 
         self.assertEqual(state["kick"], 2)
 

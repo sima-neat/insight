@@ -307,6 +307,25 @@ def media_stream_identity(index: int) -> Optional[int]:
         return id(stream) if stream else None
 
 
+def stop_media_stream_if(index: int, identity: Optional[int]) -> bool:
+    """Stop the slot's stream only if it is still the one `identity` names.
+
+    A route that started a stream and then finds the slot reassigned must not
+    stop whatever is there now: an assign that ran in between replaced the
+    process with its own. Compared and stopped under one lock so the answer
+    cannot change in the gap. Returns True when something was stopped.
+    """
+    slot = index - 1
+    with registry_lock:
+        stream = pipeline_registry.get(slot)
+        if not stream or identity is None or id(stream) != identity:
+            return False
+        stream.stop()
+        pipeline_registry.pop(slot, None)
+        logging.info("Stopped media source %s", index)
+        return True
+
+
 def webcam_path_name(index: int) -> str:
     return f"src{index}"
 
@@ -402,8 +421,28 @@ def webcam_publisher_session(index: int) -> Optional[str]:
     return source.get("id") or None
 
 
-def kick_webcam_publisher(index: int) -> bool:
-    """Drop whatever browser is publishing to this slot; True if one was.
+def webcam_publisher_sessions() -> Dict[str, str]:
+    """Path name -> id of the WebRTC session publishing to it, from one request.
+
+    The bulk routes release a publisher per slot and only then write; a camera
+    re-published on one of those slots in the meantime has the same slot
+    identity as the one released, so it can only be told apart by session id.
+    One request for every path, for the reason webcam_ready_paths() gives.
+    Raises MediaServerUnreachable.
+    """
+    data = _mediamtx_request("/v3/paths/list?itemsPerPage=1000")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return {}
+    sessions = {}
+    for item in data.get("items") or []:
+        source = item.get("source") or {}
+        if source.get("type") == "webRTCSession" and source.get("id") and item.get("name"):
+            sessions[item["name"]] = source["id"]
+    return sessions
+
+
+def kick_webcam_publisher(index: int) -> Optional[str]:
+    """Drop whatever browser is publishing to this slot; returns its session id.
 
     Stopping a file source kills an ffmpeg process Insight owns. A webcam is
     published by a browser Insight has no handle on, so the only way to make
@@ -411,8 +450,10 @@ def kick_webcam_publisher(index: int) -> bool:
     the session. Without this, a caller in another tab — or any API client —
     gets a success response while the camera keeps streaming.
 
-    Returns False when there was nothing to kick, and raises
-    MediaServerUnreachable when that could not be established.
+    Returns None when there was nothing to kick, and raises
+    MediaServerUnreachable when that could not be established. The id is what
+    a caller compares against afterwards to tell a replacement publisher from
+    the one it released.
     """
     # The session ending between the lookup and the kick is the common case,
     # not an edge one: the owning tab closes its peer connection and deletes the
@@ -424,8 +465,8 @@ def kick_webcam_publisher(index: int) -> bool:
     for _ in range(3):
         session_id = webcam_publisher_session(index)
         if not session_id:
-            return False
+            return None
         kicked = _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST")
         if kicked is not _MEDIAMTX_NOT_FOUND:
-            return True
+            return session_id
     raise WebcamPublisherUnconfirmed(f"src{index}: the publisher kept changing while being stopped")

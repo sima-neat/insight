@@ -58,6 +58,8 @@ from neat_insight.mediasrc import (
     webcam_publisher_session,
     webcam_ready_paths,
     webcam_path_name,
+    webcam_publisher_sessions,
+    stop_media_stream_if,
 )
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
@@ -2291,14 +2293,34 @@ def _released_sessions_from(data) -> dict:
     return released
 
 
-def _release_webcam_publisher(index, released_session=None):
-    """Ensure the slot's publisher is gone before the slot is changed (see above)."""
+def _end_webcam_publisher(index, released_session=None) -> Optional[str]:
+    """Honour a release claim or kick the publisher; returns the session that is gone.
+
+    None means the slot had no publisher. The bulk routes use this directly
+    and check for replacements once, for every slot, afterwards.
+    """
     if released_session:
         current = webcam_publisher_session(index)
         if current and current != released_session:
             raise WebcamStopSuperseded(f"src{index} is held by {current}, not {released_session}")
-        return
-    kick_webcam_publisher(index)
+        return released_session
+    return kick_webcam_publisher(index)
+
+
+def _release_webcam_publisher(index, released_session=None) -> Optional[str]:
+    """Ensure the slot's publisher is gone before the slot is changed (see above).
+
+    Ends the publisher, then looks once more: a browser can publish to the same
+    slot in the gap, and that camera has the same slot identity as the one just
+    released, so only its session id tells it apart. Finding one is a
+    supersession, not a reason to kick again — it is someone else's camera,
+    started after this request began.
+    """
+    released = _end_webcam_publisher(index, released_session)
+    current = webcam_publisher_session(index)
+    if current and current != released:
+        raise WebcamStopSuperseded(f"src{index} was re-published by {current} while being released")
+    return released
 
 
 class _BulkReleaser:
@@ -2316,12 +2338,15 @@ class _BulkReleaser:
 
     def __init__(self):
         self.unreachable = False
+        # index -> session that was released there (None when the slot was idle),
+        # so replacements() can tell a re-published camera from the one released.
+        self.released = {}
 
     def release(self, index, released_session=None) -> bool:
         if self.unreachable:
             return False
         try:
-            _release_webcam_publisher(index, released_session)
+            self.released[index] = _end_webcam_publisher(index, released_session)
             return True
         except WebcamStopSuperseded:
             pass
@@ -2331,13 +2356,34 @@ class _BulkReleaser:
         except WebcamPublisherUnconfirmed:
             return False
         try:
-            kick_webcam_publisher(index)
+            self.released[index] = kick_webcam_publisher(index)
             return True
         except MediaServerUnreachable:
             self.unreachable = True
             return False
         except WebcamPublisherUnconfirmed:
             return False
+
+    def replacements(self):
+        """Slots re-published since their release, as (replaced, unverified).
+
+        Releasing 48 slots takes seconds, and a camera published to an
+        already-released slot in that time has the same slot identity as the
+        one released; only its session id differs. One request answers for
+        every slot. If MediaMTX cannot answer, every released slot is
+        unverified — the caller must not write over what may be a live camera.
+        """
+        if not self.released:
+            return set(), set()
+        try:
+            current = webcam_publisher_sessions()
+        except WebcamPublisherUnconfirmed:
+            return set(), set(self.released)
+        replaced = {
+            index for index, released in self.released.items()
+            if current.get(webcam_path_name(index)) not in (None, released)
+        }
+        return replaced, set()
 
 
 def _sync_source_runtime_states(sources):
@@ -2587,6 +2633,12 @@ def auto_assign_all_sources():
 
     # A slot another tab reassigned while this loop ran holds a stream this
     # request never stopped or released; it is left as it is now and reported.
+    # A webcam re-published on a released slot has the same identity as the
+    # one released, so those are found by session id in one request first.
+    replaced, unverified = releaser.replacements()
+    for index in unverified:
+        plan.pop(index, None)
+    unconfirmed = sorted(set(unconfirmed) | unverified)
     changed = []
     with _sources_lock:
         fresh = load_sources()
@@ -2594,7 +2646,7 @@ def auto_assign_all_sources():
             outcome = plan.get(src.get("index"))
             if outcome is None:
                 continue
-            if (src.get("type"), src.get("file")) != outcome["was"]:
+            if src["index"] in replaced or (src.get("type"), src.get("file")) != outcome["was"]:
                 changed.append(src["index"])
                 continue
             # File streams are stopped here, after the identity check, so a
@@ -2694,10 +2746,13 @@ def start_source():
             if not ok:
                 return _json_error(err, 500)
             # The probe and the spawn above took time; record the start only
-            # if the slot still holds this file, otherwise the stream belongs
-            # to nothing and is stopped again.
+            # if the slot still holds this file. Otherwise the stream belongs
+            # to nothing and is stopped again — but only if it is still ours:
+            # an assign that ran in between has already replaced it with its
+            # own process, which must be left running.
+            mine = media_stream_identity(index)
             if _update_source_slot(index, still_same, record("playing")) is None:
-                stop_media_stream(index)
+                stop_media_stream_if(index, mine)
                 return _json_error("Source changed while it was being started", 410)
             return {"success": True}
 
@@ -2727,6 +2782,7 @@ def start_sources_bulk():
 
     targets = assigned_sources[:count]
     started = []
+    started_identity = {}
     already_running = []
     errors = []
 
@@ -2751,6 +2807,7 @@ def start_sources_bulk():
         if ok:
             src["state"] = "playing"
             started.append(source_index)
+            started_identity[source_index] = media_stream_identity(source_index)
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})
 
@@ -2768,9 +2825,11 @@ def start_sources_bulk():
                 continue
             if slot.get("type") != SOURCE_TYPE_FILE or slot.get("file") != result.get("file"):
                 # The slot changed hands while it was being started; the stream
-                # this request started belongs to nothing now.
+                # this request started belongs to nothing now — unless an
+                # assign in between already replaced it with its own, which
+                # stays. Only the stream this request started is stopped.
                 if result["index"] in started:
-                    stop_media_stream(result["index"])
+                    stop_media_stream_if(result["index"], started_identity.get(result["index"]))
                     started.remove(result["index"])
                     errors.append({"index": result["index"], "error": "Source changed while it was being started"})
                 continue
@@ -2877,7 +2936,13 @@ def stop_all_sources():
     # that still hold what was stopped. A slot reassigned and started again
     # while later publishers were being released carries a stream this
     # request never touched; marking it stopped would hide a live source.
-    changed = []
+    # A webcam re-published on a released slot looks identical to the one
+    # released, so those are found by session id in one request first.
+    replaced, unverified = releaser.replacements()
+    changed = sorted(replaced)
+    for index in replaced | unverified:
+        stopped.pop(index, None)
+    unconfirmed.extend(sorted(unverified))
     with _sources_lock:
         fresh = load_sources()
         for src in fresh:
@@ -2944,12 +3009,16 @@ def reset_all_sources():
     # only if it still holds what was stopped or released; a slot another tab
     # reassigned meanwhile carries a stream this request never touched, and
     # resetting it would erase the record of a camera that may still be live.
+    # A webcam re-published on a released slot has the same identity as the
+    # one released, so those are found by session id in one request first.
+    replaced, unverified = releaser.replacements()
+    unconfirmed = sorted(set(unconfirmed) | unverified)
     changed = []
     with _sources_lock:
         fresh = load_sources()
         for position, src in enumerate(fresh):
             source_index = src.get("index")
-            if (src.get("type"), src.get("file")) != identities.get(source_index):
+            if source_index in replaced or (src.get("type"), src.get("file")) != identities.get(source_index):
                 changed.append(source_index)
                 continue
             # File streams are stopped here, after the identity check, so a
