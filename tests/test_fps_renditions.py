@@ -851,16 +851,17 @@ class StartPersistenceTests(RenditionApiTestCase):
     def test_probe_timeout_is_a_json_error_and_bulk_start_continues(self):
         # Codex review: an ffprobe timeout must surface as the documented JSON error, not a
         # generic Flask error, and Bulk Start must record the slot and go on.
-        real_run = renditions.subprocess.run
-
+        # No real ffprobe is needed (the plain Tests workflow has none): the binary lookup and the
+        # subprocess call are both stubbed, and only a.mp4's probe times out.
         def run(cmd, *args, **kwargs):
-            if Path(cmd[0]).name == "ffprobe" and str(cmd[-1]).endswith("a.mp4"):
+            if str(cmd[-1]).endswith("a.mp4"):
                 raise subprocess.TimeoutExpired(cmd, 30)
-            return real_run(cmd, *args, **kwargs)
+            return subprocess.CompletedProcess(cmd, 0, stdout='{"streams": [{"codec_name": "h264", "width": 320, "height": 240, "r_frame_rate": "30/1", "avg_frame_rate": "30/1"}]}', stderr="")
         (self.media_dir / "a.mp4").write_bytes(b"x")
         (self.media_dir / "b.mp4").write_bytes(b"x")
         self.edit_slot_one(fps=15)
-        with mock.patch.object(renditions.subprocess, "run", side_effect=run), \
+        with mock.patch.object(renditions.shutil, "which", return_value="/usr/bin/ffprobe"), \
+             mock.patch.object(renditions.subprocess, "run", side_effect=run), \
              mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
              mock.patch.object(app_module, "_source_media_codec", return_value="h264"), \
              mock.patch.object(app_module, "media_stream_is_running", return_value=False), \
