@@ -1102,6 +1102,34 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(app_module.load_sources()[0]["file"], "other.mp4")
 
+    def test_assign_file_answers_409_when_a_replacement_webcam_publishes_during_the_probe(self):
+        """A new camera on the slot has the same ("webcam", "") identity; only its session id tells it apart.
+
+        The replacement appears *during* the probe, so this passes only because
+        the release (and its session recheck) runs after the probe, not before.
+        """
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        self._assign_webcam(1)
+
+        publishing = {"session": None}
+
+        def probe_then_newcomer(*args, **kwargs):
+            # A browser publishes to the slot while the file is being probed.
+            publishing["session"] = "a-newcomer"
+            return ("rtsp", "h264", ["rtsp"])
+
+        with mock.patch.object(app_module, "_derive_source_stream_settings", side_effect=probe_then_newcomer):
+            with mock.patch.object(app_module, "kick_webcam_publisher", return_value=None):
+                with mock.patch.object(app_module, "webcam_publisher_session",
+                                       side_effect=lambda index: publishing["session"]):
+                    with mock.patch.object(app_module, "stop_media_stream") as stop:
+                        response = self.client.post("/api/mediasrc/assign", json={"index": 1, "file": "clip.mp4"})
+
+        self.assertEqual(response.status_code, 409)
+        stop.assert_not_called()
+        source = app_module.load_sources()[0]
+        self.assertEqual(source["type"], "webcam", "the replacement camera's slot was not erased to a file")
+
     def test_stop_all_leaves_a_slot_reassigned_while_it_was_running(self):
         """Slot 1 is stopped first; releasing slot 2 takes time, during which slot 1 is given a live file."""
         self._assign_webcam(1)

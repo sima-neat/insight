@@ -2480,21 +2480,27 @@ def assign_source():
     if snapshot is None:
         return _json_error("Source not found", 404)
     source_type = snapshot.get("type")
-    if source_type == SOURCE_TYPE_WEBCAM:
-        # Reassigning a webcam slot to a file drops the webcam
-        # registration, and the browser publishing to it has to be
-        # closed by MediaMTX — there is no ffmpeg process to stop.
-        # Writing the file assignment erases the webcam marking, and
-        # with it the only record that a browser may still be publishing
-        # to this path. Raises rather than erasing it unconfirmed.
-        _release_webcam_publisher(index, _released_session_from(data))
-    # A release claim on a file slot is ignored, unlike in stop_source:
-    # assigning a file is a deliberate user action, not a delayed
-    # notification, so there is nothing to protect.
-    # The media probe can take a moment, so it runs before the lock.
+    # The media probe can take a moment, so it runs first — before the webcam
+    # release below and before the lock. A release claim on a file slot is
+    # ignored, unlike in stop_source: assigning a file is a deliberate user
+    # action, not a delayed notification, so there is nothing to protect.
     transport, codec, _allowed_transports = _derive_source_stream_settings(
         file_name, requested_transport or snapshot.get("transport")
     )
+
+    if source_type == SOURCE_TYPE_WEBCAM:
+        # Reassigning a webcam slot to a file drops the webcam registration,
+        # and the browser publishing to it has to be closed by MediaMTX —
+        # there is no ffmpeg process to stop. Writing the file assignment
+        # erases the webcam marking, and with it the only record that a
+        # browser may still be publishing to this path. Raises rather than
+        # erasing it unconfirmed. Done AFTER the probe, so its own recheck for
+        # a replacement publisher is the last MediaMTX call before the lock —
+        # a camera that published during the probe is caught here, not missed
+        # (the persisted identity stays ("webcam", "") and cannot tell them
+        # apart). The residual window is then only the local lock acquisition,
+        # the same as the bulk routes.
+        _release_webcam_publisher(index, _released_session_from(data))
 
     identity = (source_type, snapshot.get("file"))
     with _sources_lock:
