@@ -848,6 +848,32 @@ class StartPersistenceTests(RenditionApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(app_module._slot_generation(1), before + 1)
 
+    def test_probe_timeout_is_a_json_error_and_bulk_start_continues(self):
+        # Codex review: an ffprobe timeout must surface as the documented JSON error, not a
+        # generic Flask error, and Bulk Start must record the slot and go on.
+        real_run = renditions.subprocess.run
+
+        def run(cmd, *args, **kwargs):
+            if Path(cmd[0]).name == "ffprobe" and str(cmd[-1]).endswith("a.mp4"):
+                raise subprocess.TimeoutExpired(cmd, 30)
+            return real_run(cmd, *args, **kwargs)
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.edit_slot_one(fps=15)
+        with mock.patch.object(renditions.subprocess, "run", side_effect=run), \
+             mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("udp", "h264", ["udp"])), \
+             mock.patch.object(app_module, "_source_media_codec", return_value="h264"), \
+             mock.patch.object(app_module, "media_stream_is_running", return_value=False), \
+             mock.patch.object(app_module, "start_media_stream", return_value=(True, None)):
+            single = self.client.post("/api/mediasrc/start", json={"index": 1})
+            bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 2})
+        self.assertEqual(single.status_code, 500)
+        self.assertIn("timed out", single.get_json()["error"].lower())
+        self.assertEqual(bulk.status_code, 200)
+        payload = bulk.get_json()
+        self.assertEqual([e["index"] for e in payload["errors"]], [1])
+        self.assertEqual(payload["started"], [2])
+
     def test_start_proceeds_when_the_slot_is_unchanged(self):
         response, stream = self.start_slot_for_real(lambda: None)
         self.assertEqual(response.status_code, 200)

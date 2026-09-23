@@ -758,7 +758,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px 112px auto auto auto;
+  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -903,6 +903,35 @@ button:hover:not(:disabled) {
 .fps-stepper button:hover:not(:disabled) {
   transform: none;
   background: var(--accent-soft);
+}
+
+/* The file select plus a small note when the slot streams at an fps override. */
+.src-file-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.src-file-cell select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fps-note {
+  flex: 0 0 auto;
+  font-size: 0.8em;
+  color: var(--muted, #8b95a5);
+  white-space: nowrap;
+}
+
+/* The stepper's home in the Source Preview panel. */
+.fps-field-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 4px 0 8px;
 }
 
 .fps-field {
@@ -3438,7 +3467,7 @@ button:disabled {
   }
 
   .source-row {
-    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px 112px auto auto auto;
+    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px auto auto auto;
   }
 
   .masthead {
@@ -3480,10 +3509,6 @@ button:disabled {
   }
 
   .source-row select {
-    grid-column: 1 / -1;
-  }
-
-  .source-row .fps-stepper {
     grid-column: 1 / -1;
   }
 
