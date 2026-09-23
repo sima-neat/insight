@@ -2293,33 +2293,58 @@ def _sync_source_runtime_states(sources):
     request. It asks MediaMTX once for all webcam slots together — one request
     per slot would cost a control-API timeout each when MediaMTX hangs.
     """
-    changed = False
-    ready_paths = None
-    if any(src.get("state") == "playing" and src.get("type") == SOURCE_TYPE_WEBCAM for src in sources):
+    def dead_webcams(candidates):
+        """Indexes among `candidates` whose MediaMTX path is definitely not ready."""
+        if not candidates:
+            return set()
         try:
-            ready_paths = webcam_ready_paths()
+            ready = webcam_ready_paths()
         except WebcamPublisherUnconfirmed:
             # Only demote on a definite answer. Nothing ever promotes a slot
             # back to playing, so treating "could not tell" as "stopped" would
             # leave a live camera showing Idle for good.
-            ready_paths = None
+            return set()
+        return {i for i in candidates if webcam_path_name(i) not in ready}
 
-    for src in sources:
+    playing_webcams = [
+        src["index"] for src in sources
+        if src.get("state") == "playing" and src.get("type") == SOURCE_TYPE_WEBCAM and src.get("index") is not None
+    ]
+    dead = dead_webcams(playing_webcams)
+    dead_files = {
+        src["index"] for src in sources
+        if src.get("state") == "playing" and src.get("type") != SOURCE_TYPE_WEBCAM
+        and src.get("index") is not None and not media_stream_is_running(src["index"])
+    }
+    if not dead and not dead_files:
+        return sources
+
+    # The snapshot we were handed is now up to a second old — the MediaMTX
+    # request above can take that long — and another tab may have assigned or
+    # started something in the meantime. Saving the snapshot would rewrite the
+    # whole file with it and silently undo that change. So: re-read the file,
+    # confirm again which slots are still dead, and write only those
+    # demotions into the fresh copy.
+    fresh = load_sources()
+    dead = dead_webcams([
+        src["index"] for src in fresh
+        if src.get("index") in dead and src.get("state") == "playing" and src.get("type") == SOURCE_TYPE_WEBCAM
+    ])
+    changed = False
+    for src in fresh:
+        index = src.get("index")
         if src.get("state") != "playing":
             continue
-        index = src.get("index")
         if src.get("type") == SOURCE_TYPE_WEBCAM:
-            if ready_paths is None or index is None:
-                continue
-            live = webcam_path_name(index) in ready_paths
+            demote = index in dead
         else:
-            live = index is not None and media_stream_is_running(index)
-        if not live:
+            demote = index in dead_files and not media_stream_is_running(index)
+        if demote:
             src["state"] = "stopped"
             changed = True
     if changed:
-        save_sources(sources)
-    return sources
+        save_sources(fresh)
+    return fresh
 
 
 def _find_source(index: int):

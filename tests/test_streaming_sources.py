@@ -451,16 +451,56 @@ class WebcamSourceTests(unittest.TestCase):
             {"index": i, "file": "", "state": "playing", "type": "webcam"} for i in (1, 2, 3)
         ]), encoding="utf-8")
 
-    def test_source_listing_asks_mediamtx_once_for_every_webcam(self):
+    def test_source_listing_asks_mediamtx_once_when_every_webcam_is_live(self):
         """48 slots must not mean 48 control-API timeouts when MediaMTX hangs."""
+        self._three_playing_webcams()
+
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src1", "src2", "src3"}) as ready:
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(ready.call_count, 1)
+        self.assertEqual({s["state"] for s in response.get_json()[:3]}, {"playing"})
+
+    def test_a_demotion_is_confirmed_against_a_fresh_copy_before_it_is_written(self):
         self._three_playing_webcams()
 
         with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src2"}) as ready:
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
-        self.assertEqual(ready.call_count, 1)
+        self.assertEqual(ready.call_count, 2, "decide from the snapshot, confirm on the fresh copy")
         states = {s["index"]: s["state"] for s in response.get_json()[:3]}
         self.assertEqual(states, {1: "stopped", 2: "playing", 3: "stopped"})
+
+    def test_a_demotion_does_not_undo_what_another_tab_wrote_meanwhile(self):
+        """The Codex race: another tab assigns a file while the liveness request is in flight."""
+        self._three_playing_webcams()
+        (self.media_dir / "other.mp4").write_bytes(b"not-a-real-video")
+
+        def ready_with_a_concurrent_write():
+            # First call: while "MediaMTX is answering", another tab assigns src4.
+            if ready_with_a_concurrent_write.calls == 0:
+                current = app_module.load_sources()
+                current[3]["file"] = "other.mp4"
+                app_module.save_sources(current)
+            ready_with_a_concurrent_write.calls += 1
+            return set()
+        ready_with_a_concurrent_write.calls = 0
+
+        with mock.patch.object(app_module, "webcam_ready_paths", side_effect=ready_with_a_concurrent_write):
+            self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        after = app_module.load_sources()
+        self.assertEqual(after[0]["state"], "stopped", "the dead webcam was demoted")
+        self.assertEqual(after[3]["file"], "other.mp4", "the other tab's assignment survived")
+
+    def test_a_webcam_that_came_back_between_the_two_checks_is_not_demoted(self):
+        self._three_playing_webcams()
+        answers = iter([set(), {"src1", "src2", "src3"}])
+
+        with mock.patch.object(app_module, "webcam_ready_paths", side_effect=lambda: next(answers)):
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual({s["state"] for s in response.get_json()[:3]}, {"playing"})
 
     def test_source_listing_leaves_every_webcam_alone_when_mediamtx_is_unreachable(self):
         self._three_playing_webcams()
