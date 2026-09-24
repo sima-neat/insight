@@ -6,21 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="/static/viewer.css">
   <link rel="stylesheet" href="/static/pagination.css">
-  <link rel="stylesheet" href="/static/viewer-embed.css">
-  <script>
-    // Opt-in bare-video embed mode: `?embed=1` renders just the video surface
-    // for the channel in `src`, with no viewer chrome. Anything else - no
-    // parameter, embed=0, embed=true - leaves the viewer untouched.
-    // Runs before the app mounts so the chrome never flashes; viewer-embed.css
-    // does all the hiding from this class.
-    try {
-      if (new URLSearchParams(window.location.search).get('embed') === '1') {
-        document.documentElement.classList.add('viewer-embed');
-      }
-    } catch (err) {
-      /* Leave the viewer in its normal mode. */
-    }
-  </script>
 </head>
 <body>
   <div id="viewerRoot"></div>

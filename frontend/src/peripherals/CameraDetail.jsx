@@ -1,4 +1,3 @@
-import PreviewPane from './PreviewPane.jsx'
 import {
   availabilityInfo,
   blockedFormatSummary,
@@ -85,18 +84,7 @@ function ModePicker({ camera, selection, notice, onChange }) {
   )
 }
 
-export default function CameraDetail({
-  camera,
-  stale,
-  target,
-  selection,
-  selectionNotice,
-  onSelectionChange,
-  preview,
-  onStartPreview,
-  onStopPreview,
-  onOpenBoardPanel
-}) {
+export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
   const availability = availabilityInfo(camera.availability)
   const tier = tierInfo(camera.support?.tier)
   const summary = cameraSummaryLine(camera)
@@ -144,17 +132,6 @@ export default function CameraDetail({
       </details>
 
       <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange} />
-
-      <PreviewPane
-        camera={camera}
-        selection={selection}
-        stale={stale}
-        target={target}
-        state={preview}
-        onStart={onStartPreview}
-        onStop={onStopPreview}
-        onOpenBoardPanel={onOpenBoardPanel}
-      />
     </section>
   )
 }

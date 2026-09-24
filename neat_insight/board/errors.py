@@ -7,15 +7,11 @@ _HTTP_STATUS = {
     "host_key_changed": 409,
     "stale_snapshot": 409,
     "camera_in_use": 409,
-    "preview_active": 409,
-    "no_channel": 409,
     "unreachable": 502,
     "auth_failed": 502,
     "tool_missing": 502,
     "permission_denied": 502,
     "command_failed": 502,
-    "no_video": 502,
-    "viewer_unavailable": 502,
     "timeout": 504,
 }
 

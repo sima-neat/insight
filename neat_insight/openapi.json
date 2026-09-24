@@ -788,64 +788,6 @@
         }
       }
     },
-    "/api/peripherals/preview": {
-      "get": {
-        "tags": ["Peripherals"],
-        "summary": "Get the running camera preview",
-        "description": "Returns the preview session for the selected board, or `null`. Never contacts the board. A session belongs to one board generation; selecting another board invalidates it.",
-        "operationId": "getCameraPreview",
-        "responses": {
-          "200": {"description": "The current preview session, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"oneOf": [{"$ref": "#/components/schemas/PreviewSession"}, {"type": "null"}]}}}}}},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
-        }
-      }
-    },
-    "/api/peripherals/cameras/preview": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Start a camera preview",
-        "description": "Starts an explicit, temporary capture: the board hardware-encodes H.264 and sends RTP to a reserved viewer channel, which Insight already serves over WebRTC. Discovery and export never start capture; only this call does. The mode defaults to the camera's `default_selection` and must be one the scan listed. While a preview runs the camera cannot be opened by an application. Capture stops on `stop`, when heartbeats lapse, when a scan starts, or when the selected board changes.",
-        "operationId": "startCameraPreview",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}}, "example": {"id": "mipi:imx477 5-001a"}}}},
-        "responses": {
-          "200": {"description": "The preview session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
-          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
-        }
-      }
-    },
-    "/api/peripherals/cameras/preview/{session_id}/heartbeat": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Keep a camera preview alive",
-        "description": "Extends the session. The board-side worker stops capture on its own once heartbeats lapse, so cleanup never depends on a browser unload event or an SSH socket closing. An unknown or superseded session id returns 404 and cannot affect a newer session.",
-        "operationId": "heartbeatCameraPreview",
-        "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {
-          "200": {"description": "The extended session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
-          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "502": {"$ref": "#/components/responses/BoardErrorResponse"}
-        }
-      }
-    },
-    "/api/peripherals/cameras/preview/{session_id}/stop": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Stop a camera preview",
-        "description": "Stops capture on the board and releases the camera and the reserved channel. Idempotent for the session that owns the preview; an older session id returns 404.",
-        "operationId": "stopCameraPreview",
-        "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "responses": {
-          "200": {"description": "The stopped session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
-          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
-        }
-      }
-    },
     "/api/buildinfo": {
       "get": {
         "tags": ["Service and system"],
@@ -1273,7 +1215,7 @@
         "required": ["error", "code"],
         "properties": {
           "error": {"type": "string", "description": "Human-readable failure reason."},
-          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "preview_active", "no_channel", "no_video", "viewer_unavailable", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout"]},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout"]},
           "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
@@ -1364,23 +1306,6 @@
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
           "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous scan of the same board."}
-        }
-      },
-      "PreviewSession": {
-        "type": "object",
-        "description": "An explicit, temporary capture feeding one viewer channel.",
-        "required": ["id", "camera_id", "mode", "channel", "viewer_url", "generation", "state"],
-        "properties": {
-          "id": {"type": "string", "description": "Session id; every later call must present it."},
-          "camera_id": {"type": "string"},
-          "mode": {"type": "object", "properties": {"format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}},
-          "channel": {"type": "integer", "description": "Reserved viewer channel; never one already receiving video."},
-          "viewer_url": {"type": "string", "format": "uri", "description": "Existing vf viewer URL for that channel."},
-          "generation": {"type": "integer"},
-          "started_at": {"type": "string", "format": "date-time"},
-          "expires_at": {"type": "string", "format": "date-time", "description": "Without a heartbeat before this, the board stops capture."},
-          "heartbeat_interval_ms": {"type": "integer"},
-          "state": {"type": "string", "enum": ["starting", "live", "stopped"]}
         }
       },
       "CameraExportRequest": {
