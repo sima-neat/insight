@@ -3471,7 +3471,7 @@ button:disabled {
   border-radius: 10px;
   background: #f4f8fb;
   color: #20384f;
-  padding: 12px 12px;
+  padding: 12px;
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: normal;
@@ -3507,9 +3507,6 @@ button:disabled {
 
 .periph-mode-fields {
   display: grid;
-  /* Three equal columns: the resolution menu holds the longest text, so it must not sit in a
-     narrow middle column sized for a port number. */
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -3552,7 +3549,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #fff;
-  padding: 8px 8px;
+  padding: 8px;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
