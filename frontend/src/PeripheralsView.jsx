@@ -239,6 +239,7 @@ export default function PeripheralsView({
         dispatchPreview({ type: 'session', session: data.session })
       } else {
         stopPreview(data.session?.id)
+        dispatchPreview({ type: 'reset' })
       }
     } catch (err) {
       dispatchPreview({ type: 'failed', error: normalizeError(err) })

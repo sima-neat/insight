@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
 import { boardIndicator, normalizeError as normalizeBoardError } from './peripherals/model.js'
@@ -737,6 +737,9 @@ export default function App() {
   const [boardError, setBoardError] = useState(null)
   const [boardLoading, setBoardLoading] = useState(true)
   const [boardPanelOpen, setBoardPanelOpen] = useState(false)
+  // Stable, because the board panel's focus handling keys off it: a new function each render
+  // would re-run that effect and pull focus out of whatever the user is typing in.
+  const closeBoardPanel = useCallback(() => setBoardPanelOpen(false), [])
   const [sysInfoOpen, setSysInfoOpen] = useState(false)
   const [sysInfo, setSysInfo] = useState(null)
   const [sysInfoLoading, setSysInfoLoading] = useState(false)
@@ -2694,7 +2697,7 @@ export default function App() {
             onReload={loadBoard}
             onStatus={setUploadStatus}
             onError={setError}
-            onClose={() => setBoardPanelOpen(false)}
+            onClose={closeBoardPanel}
           />
         </Suspense>
       )}

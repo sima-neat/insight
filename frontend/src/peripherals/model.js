@@ -464,7 +464,12 @@ export function previewBlock({ camera, selection, stale = false, session = null,
 }
 
 function outOfDate(state, event) {
-  return event.for !== undefined && event.for !== null && state.session?.id !== event.for
+  if (event.for === undefined || event.for === null) return false
+  // A preview that is still starting holds no session id yet, so an event tagged with one cannot
+  // be matched. The only preview it can refer to is that one: discarding it would strand the page
+  // in "Starting…" with a Stop button that has nothing to stop.
+  if (!state.session) return state.status !== 'starting' && state.status !== 'stopping'
+  return state.session.id !== event.for
 }
 
 export function nextPreviewState(state, event) {

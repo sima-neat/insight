@@ -51,9 +51,10 @@ def camera_item(**overrides) -> dict:
 class FakeTransport:
     """Records commands, answers the worker's start check with a pid, and keeps a worker alive."""
 
-    def __init__(self, pid="4242", worker_alive=True, ssh_client=b"192.168.2.1 51234 22\n"):
+    def __init__(self, pid="4242", worker_alive=True, ssh_client=b"192.168.2.1 51234 22\n", saved_log=b""):
         self.calls = []
         self.pid = pid
+        self.saved_log = saved_log
         self.worker_alive = worker_alive
         self.ssh_client = ssh_client
 
@@ -65,6 +66,8 @@ class FakeTransport:
         if "echo alive" in script:
             return ExecResult(0, b"alive\n" if self.worker_alive else b"", b"")
         if "pipeline.pid" in script and script.startswith("sleep"):
+            if self.pid is None:
+                return ExecResult(0, self.saved_log, b"")
             return ExecResult(0, f"{self.pid}\n".encode(), b"")
         return ExecResult(0, b"", b"")
 
@@ -324,15 +327,17 @@ class PreviewOwnershipTests(unittest.TestCase):
         self.assertTrue(killed_on_a, "the first board should have been told to stop its own preview")
         self.assertFalse(killed_on_b, "the new board must not be asked to kill another board's session")
 
-    def test_a_stop_never_tears_down_the_session_that_replaced_it(self):
+    def test_a_stop_in_flight_never_tears_down_the_session_that_replaced_it(self):
+        """The stop reached `_stop_current` before a newer session took the slot."""
         session = fake_session()
         first = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
         self.manager._session = None  # the first session ended while the stop was in flight
         self.manager._owner = None
         second = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
-        with self.assertRaises(BoardError):
-            self.manager.stop(session, first["id"])
+        self.manager._stop_current(session, first["id"])
         self.assertEqual((self.manager.current(1) or {}).get("id"), second["id"])
+        self.assertFalse([cmd for cmd in session.transport.commands()
+                          if second["id"] in cmd and "kill" in cmd])
 
     def test_a_second_start_is_refused_while_the_first_is_still_starting(self):
         session = fake_session()
@@ -356,6 +361,22 @@ class PreviewOwnershipTests(unittest.TestCase):
             gate.set()
             first.join(10)
         self.assertEqual([exc.code for exc in errors], ["preview_active"])
+
+
+class PreviewStartFailureTests(unittest.TestCase):
+    def test_a_pipeline_that_dies_at_once_still_reports_why(self):
+        """The worker deletes its directory on exit, so the reason lives beside it."""
+        manager = preview.PreviewManager()
+        transport = FakeTransport(pid=None, saved_log=b"ERROR: Pipeline doesn't want to pause\n")
+        session = fake_session(transport=transport)
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_channel_packets", return_value=0), \
+                mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
+            with self.assertRaises(BoardError) as ctx:
+                manager.start(session, camera_item(), dict(MODE), "insight.local")
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertIn("doesn't want to pause", ctx.exception.extra.get("detail", ""))
+        self.assertIsNone(manager.current(1))
 
 
 class PreviewHeartbeatTests(unittest.TestCase):

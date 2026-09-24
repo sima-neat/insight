@@ -45,6 +45,9 @@ set -e
 sid="$1"; ttl="$2"; shift 2
 dir="{worker_dir}/$sid"
 mkdir -p "$dir"
+# Nothing else prunes these: a saved failure log whose session is long gone is litter.
+find "{worker_dir}" -maxdepth 1 -name '*.log' -mmin +60 -delete 2>/dev/null || true
+started=$(date +%s)
 beat="$dir/heartbeat"
 touch "$beat"
 "$@" > "$dir/pipeline.log" 2>&1 &
@@ -62,9 +65,12 @@ while :; do
         break
     fi
 done
-# Keep the tail of the log outside the directory: a pipeline that fails in the first seconds is
-# gone before Insight can read it, and its last words are the only explanation of why.
-tail -c 800 "$dir/pipeline.log" > "{worker_dir}/$sid.log" 2>/dev/null || true
+# A pipeline that fails in its first seconds is gone before Insight can read the log, and its last
+# words are the only explanation of why. Keep them outside the directory in that case only; a
+# pipeline that ran and then stopped normally has nothing to explain.
+if [ $(( $(date +%s) - started )) -lt 15 ]; then
+    tail -c 800 "$dir/pipeline.log" > "{worker_dir}/$sid.log" 2>/dev/null || true
+fi
 rm -rf "$dir"
 """.format(worker_dir=WORKER_DIR)
 
@@ -178,6 +184,7 @@ class PreviewManager:
         self._session: Optional[dict] = None
         self._owner = None  # the board session that started the preview, so a stop reaches it
         self._starting = False
+        self._starting_camera: Optional[str] = None
 
     # ---- public API -------------------------------------------------------
 
@@ -202,6 +209,7 @@ class PreviewManager:
                     "preview_active",
                     "A preview is already starting.",
                     hint="Wait for it to appear, then stop it before starting another one.",
+                    camera_id=self._starting_camera or "",
                 )
             if self._session is not None and self._session["generation"] == session_ctx.generation:
                 raise BoardError(
@@ -211,11 +219,13 @@ class PreviewManager:
                     camera_id=self._session["camera_id"],
                 )
             self._starting = True
+            self._starting_camera = item["id"]
         try:
             return self._start_locked(session_ctx, item, mode, request_host)
         finally:
             with self._lock:
                 self._starting = False
+                self._starting_camera = None
 
     def _start_locked(self, session_ctx, item: dict, mode: dict, request_host: str) -> dict:
         self._stop_current(session_ctx)

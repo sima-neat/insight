@@ -462,6 +462,18 @@ test('preview transitions: start, live, stop', () => {
   assert.deepEqual(nextPreviewState(live, { type: 'session', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
 })
 
+test('preview transitions: a start that was never adopted still releases the page', () => {
+  // Selecting another camera mid-start: the response belongs to the old camera, so the page stops
+  // that session instead of adopting it. Those events carry an id the page never held.
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  assert.equal(starting.status, 'starting')
+  assert.equal(starting.session, null)
+  const stopping = nextPreviewState(starting, { type: 'stopping', for: 'never-adopted' })
+  assert.equal(stopping.status, 'stopping')
+  const stopped = nextPreviewState(stopping, { type: 'stopped', for: 'never-adopted' })
+  assert.deepEqual(stopped, PREVIEW_IDLE)
+})
+
 test('preview transitions: a stale session id never disturbs a newer one', () => {
   const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
   assert.equal(nextPreviewState(live, { type: 'expired', for: 'old-id' }), live)
