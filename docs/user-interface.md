@@ -133,9 +133,25 @@ Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallb
 
 ## Stats
 
-The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.
+Stats reads the board's own telemetry from Sentinel, the `simaai-sentinel` daemon, so you can separate application behavior from device behavior. A dropped frame may come from the stream path, but it may also correlate with board power, on-die temperature, CPU load, or memory pressure.
 
-This feature is intended to be completed in the next release. Once complete, use Stats when you need to separate application behavior from system behavior. For example, a dropped frame problem may come from the application stream path, but it may also correlate with CPU load, memory pressure, or device runtime state.
+Stats works on the selected board, chosen in the same **Board** panel the Peripherals page uses.
+
+### Sentinel daemon
+
+The page first reports whether Sentinel is installed and running on that board, and its version. When it is missing, select **Install Sentinel**: Insight runs `sima-cli neat install sentinel` on the board itself, which needs `sima-cli` there and passwordless `sudo`. When either is missing, the page names the command to run in a shell on the board instead. An installed and running daemon is never reinstalled from here, because the installer restarts it and would end a trace in flight.
+
+### Live metrics
+
+While the tab is open and visible, Insight polls Sentinel's latest sample every two seconds and shows each value with the label, unit, group, and thresholds Sentinel defines for it, ranked as normal, warning, or critical. A metric the board cannot measure reads as an em dash, never as zero. Recent samples are drawn as a sparkline beside each value. Use **Pause updates** to stop polling; it also stops on its own when the browser tab is hidden or the view is left.
+
+### Traces and runs
+
+A trace records every sample around a workload. Name it, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. Saved runs are listed with their state, start time, duration, and sample count, and survive a daemon restart. Open a run to see its metadata, or select two to eight runs and **Compare selected** to see each run's statistics against the first, which is the baseline.
+
+### NEAT profiling timeline
+
+Below the board telemetry, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
 
 ## System Information
 
