@@ -13,6 +13,17 @@ const CONNECTIONS = [
 
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
 
+// Device kinds Insight knows a name for. Only "camera" has a view; the rest are
+// listed so the shape of the page does not change when the backend starts
+// reporting them (contract: build nothing for other kinds yet).
+const DEVICE_KINDS = [
+  { id: 'camera', label: 'Cameras' },
+  { id: 'microphone', label: 'Microphones' },
+  { id: 'lidar', label: 'LiDAR' }
+]
+
+const SUPPORTED_KINDS = new Set(['camera'])
+
 const SEVERITY = {
   error: { label: 'Error', tone: 'periph-danger', rank: 0 },
   warning: { label: 'Warning', tone: 'warn', rank: 1 },
@@ -55,9 +66,23 @@ export function connectionLabel(connection) {
 }
 
 export function connectionStateInfo(status) {
-  if (status?.state === 'connected') return { label: 'Connected', tone: 'ok' }
-  if (status?.state === 'error') return { label: 'Connection failed', tone: 'periph-danger' }
-  return { label: 'Not checked', tone: '' }
+  if (status?.state === 'connected') return { label: 'Connected', short: 'Connected', tone: 'ok' }
+  if (status?.state === 'error') return { label: 'Connection failed', short: 'Error', tone: 'periph-danger' }
+  return { label: 'Not checked', short: 'Not checked', tone: '' }
+}
+
+export function boardIndicator(board) {
+  if (!board) return { label: 'Board', state: { label: 'Loading…', short: 'Loading…', tone: '' }, title: 'Loading the selected board' }
+  const target = board.target || null
+  if (!target) {
+    return {
+      label: 'No board',
+      state: { label: 'Not selected', short: 'Not selected', tone: 'warn' },
+      title: 'No board is selected. Open board settings to choose one.'
+    }
+  }
+  const state = connectionStateInfo(board.status)
+  return { label: target.label, state, title: `${target.label} — ${state.label}. Open board settings.` }
 }
 
 export function availabilityInfo(availability) {
@@ -82,6 +107,46 @@ export function groupCameras(items) {
   return CONNECTIONS
     .map((c) => ({ ...c, items: cameras.filter((item) => item.connection === c.id) }))
     .filter((group) => group.items.length)
+}
+
+function kindLabel(kind) {
+  const text = String(kind || '').replace(/[_-]+/g, ' ').trim()
+  if (!text) return 'Other'
+  return text.charAt(0).toUpperCase() + text.slice(1) + (text.endsWith('s') ? '' : 's')
+}
+
+export function deviceTabs(items) {
+  const counts = new Map()
+  for (const item of items || []) {
+    if (!item?.kind) continue
+    counts.set(item.kind, (counts.get(item.kind) || 0) + 1)
+  }
+  const known = DEVICE_KINDS.map((kind) => ({ ...kind, count: counts.get(kind.id) || 0 }))
+  const extra = [...counts.keys()]
+    .filter((kind) => !DEVICE_KINDS.some((known_) => known_.id === kind))
+    .sort()
+    .map((kind) => ({ id: kind, label: kindLabel(kind), count: counts.get(kind) }))
+  return [...known, ...extra].map((kind) => {
+    const supported = SUPPORTED_KINDS.has(kind.id)
+    return {
+      id: kind.id,
+      label: kind.label,
+      count: kind.count,
+      supported,
+      disabled: !supported,
+      note: supported
+        ? ''
+        : kind.count
+          ? `${countLabel(kind.count, 'device')} detected; Insight cannot show ${kind.label.toLowerCase()} yet.`
+          : 'Not supported yet'
+    }
+  })
+}
+
+export function resolveDeviceKind(tabs, wanted) {
+  const usable = (tabs || []).filter((tab) => !tab.disabled)
+  if (wanted && usable.some((tab) => tab.id === wanted)) return wanted
+  return usable[0]?.id || null
 }
 
 export function cameraDeviceId(camera) {
@@ -187,6 +252,34 @@ export function fpsOptions(camera, format, width, height) {
   }))
 }
 
+// One visible explanation line per camera state, chosen by priority, so the
+// detail pane never stacks four near-identical sentences.
+export function cameraSummaryLine(camera) {
+  const availability = availabilityInfo(camera?.availability)
+  const tier = camera?.support?.tier
+  if (camera?.availability?.state === 'in_use') {
+    return `${availability.label}. Stop that process on the board before an application opens this camera; exporting a configuration still works.`
+  }
+  if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
+  if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
+  return camera?.support?.reason || ''
+}
+
+export function blockedFormatSummary(options) {
+  const blocked = (options || []).filter((option) => option.disabled)
+  if (!blocked.length) return ''
+  const names = blocked.map((option) => option.value).join(', ')
+  return blocked.length === 1
+    ? `1 format cannot be exported (${names})`
+    : `${blocked.length} formats cannot be exported (${names})`
+}
+
+export function selectionTier(camera, selection) {
+  if (!selection) return ''
+  const size = findSize(findFormat(camera, selection.format), selection.width, selection.height)
+  return findFps(size, selection.fps)?.tier || ''
+}
+
 export function resolveSelection(camera, wanted) {
   const formats = (camera?.formats || []).filter(isSelectable)
   if (!formats.length) return null
@@ -288,4 +381,136 @@ export function validateBoardForm(values) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'The SSH port must be a whole number from 1 to 65535.' }
   if (!user) return { error: 'Enter the SSH user, usually "sima".' }
   return { body: { host, port, user } }
+}
+
+// --- Camera preview -------------------------------------------------------
+// The preview is a small state machine driven entirely by the backend session
+// object. It lives here so the transitions can be tested without a DOM.
+
+export const PREVIEW_IDLE = Object.freeze({ status: 'idle', session: null, error: null })
+
+const PREVIEW_STATUS = {
+  idle: { label: 'Not running', tone: '', busy: false },
+  starting: { label: 'Starting…', tone: 'periph-info', busy: true },
+  live: { label: 'Live', tone: 'ok', busy: false },
+  stopping: { label: 'Stopping…', tone: 'periph-info', busy: true },
+  error: { label: 'Could not start', tone: 'periph-danger', busy: false }
+}
+
+const PREVIEW_ERROR_ACTIONS = {
+  camera_in_use: 'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
+  preview_active: 'Stop the preview that is already running, then start this one.',
+  no_channel: 'Every published viewer channel is taken. Stop a stream on the Streaming page, then start the preview again.',
+  invalid_request: 'Choose a mode Insight lists as verified or advertised; this one was rejected by the board.',
+  command_failed: 'The capture worker could not start on the board. The board output below says why.',
+  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.'
+}
+
+export function previewStatusInfo(state) {
+  return PREVIEW_STATUS[state?.status] || PREVIEW_STATUS.idle
+}
+
+export function heartbeatDelay(session) {
+  const ms = Number(session?.heartbeat_interval_ms)
+  if (!Number.isFinite(ms) || ms <= 0) return 5000
+  return Math.min(60000, Math.max(1000, Math.round(ms)))
+}
+
+export function sessionMatches(session, cameraId, generation) {
+  if (!session || !cameraId) return false
+  if (session.camera_id !== cameraId) return false
+  if (generation === undefined || generation === null || session.generation === undefined) return true
+  return Number(session.generation) === Number(generation)
+}
+
+export function previewErrorInfo(error) {
+  if (!error) return null
+  const code = error.code || ''
+  const details = error.details || {}
+  const other = details.session || details.preview || {}
+  return {
+    code,
+    message: error.message,
+    hint: error.hint || '',
+    action: PREVIEW_ERROR_ACTIONS[code] || '',
+    otherCamera: code === 'preview_active' ? String(other.camera_id || details.camera_id || '') : '',
+    detail: typeof details.detail === 'string' ? details.detail : ''
+  }
+}
+
+export function previewBlock({ camera, selection, stale = false, session = null, target = null } = {}) {
+  if (!target) return { blocked: true, reason: 'No board is selected. Open board settings and choose one.' }
+  if (!camera) return { blocked: true, reason: 'Select a camera first.' }
+  if (stale) return { blocked: true, reason: 'The board changed after this scan. Refresh before starting a preview.' }
+  if (camera.support?.tier === 'unsupported') {
+    return {
+      blocked: true,
+      reason: camera.support.reason || 'Preview uses the board libcamera capture path, which this camera is not supported by.'
+    }
+  }
+  if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
+  if (selectionTier(camera, selection) === 'unsupported') {
+    return { blocked: true, reason: `${modeLabel(selection)} is not validated on this board. Choose a verified or advertised mode.` }
+  }
+  if (camera.availability?.state === 'in_use') {
+    return { blocked: true, reason: `${availabilityInfo(camera.availability).label}. Stop that process on the board, then refresh.` }
+  }
+  if (session && session.camera_id && session.camera_id !== camera.id) {
+    return { blocked: true, reason: `A preview is already running on ${session.camera_id}. Stop it before starting this one.` }
+  }
+  return { blocked: false, reason: '' }
+}
+
+function outOfDate(state, event) {
+  return event.for !== undefined && event.for !== null && state.session?.id !== event.for
+}
+
+export function nextPreviewState(state, event) {
+  const current = state || PREVIEW_IDLE
+  switch (event?.type) {
+    case 'start':
+      return { status: 'starting', session: null, error: null }
+    case 'adopt': {
+      // A session this browser did not start (page reload, second tab).
+      const session = event.session
+      if (!session || session.state === 'stopped') return PREVIEW_IDLE
+      return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
+    }
+    case 'session': {
+      const session = event.session
+      if (!session) return PREVIEW_IDLE
+      // A response for a session we already replaced or stopped must not revive it.
+      if (current.session && current.session.id !== session.id) return current
+      if (current.status === 'idle' || current.status === 'error') return current
+      if (session.state === 'stopped') return { status: 'idle', session: null, error: null }
+      if (current.status === 'stopping') return { status: 'stopping', session, error: null }
+      return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
+    }
+    case 'stopping':
+      if (outOfDate(current, event)) return current
+      return { status: 'stopping', session: current.session, error: null }
+    case 'stopped':
+      if (outOfDate(current, event)) return current
+      return PREVIEW_IDLE
+    case 'expired':
+      // A 404 for an id we no longer hold must not stop a newer session.
+      if (outOfDate(current, event)) return current
+      return {
+        status: 'idle',
+        session: null,
+        error: {
+          message: 'The preview stopped because the board stopped receiving heartbeats.',
+          code: 'not_found',
+          hint: 'Start the preview again. Insight only keeps a preview alive while this pane is open.',
+          details: {}
+        }
+      }
+    case 'failed':
+      if (outOfDate(current, event)) return current
+      return { status: 'error', session: null, error: event.error || null }
+    case 'reset':
+      return PREVIEW_IDLE
+    default:
+      return current
+  }
 }

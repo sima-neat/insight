@@ -150,6 +150,7 @@ select:focus-visible,
   justify-content: flex-end;
 }
 
+.board-trigger,
 .devkit-trigger,
 .tour-trigger,
 .sysinfo-trigger {
@@ -157,6 +158,25 @@ select:focus-visible,
   border-color: var(--line);
   color: #365468;
   white-space: nowrap;
+}
+
+.board-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  cursor: pointer;
+}
+
+.board-trigger-label {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-trigger:hover {
+  border-color: var(--line-strong);
 }
 
 .devkit-trigger {
@@ -3684,5 +3704,261 @@ button:disabled {
   .periph-form-fields,
   .periph-mode-fields {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Board settings panel (masthead indicator opens this) */
+.board-panel-card {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 24px));
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.board-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 0;
+}
+
+.board-panel-head h3 {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+
+.board-panel-body {
+  padding: 0 16px 16px;
+}
+
+.board-panel-body .periph-board {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+
+/* Peripherals: board summary line and device sub-tabs */
+.periph-board-line {
+  margin: 10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.periph-link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--accent-alt);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.periph-link-btn:focus-visible {
+  outline: 0;
+  border-radius: 4px;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.periph-kind-layout {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.periph-kinds {
+  display: grid;
+  gap: 6px;
+}
+
+.periph-kind {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  text-align: left;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.periph-kind:hover:not([aria-disabled='true']) {
+  border-color: var(--line-strong);
+}
+
+.periph-kind.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+}
+
+.periph-kind:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+.periph-kind[aria-disabled='true'] {
+  cursor: not-allowed;
+  background: #fff;
+  color: var(--ink-soft);
+}
+
+.periph-kind-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.periph-kind[aria-disabled='true'] .periph-kind-label {
+  font-weight: 600;
+}
+
+.periph-kind-count,
+.periph-kind-note {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.periph-kind-panel {
+  min-width: 0;
+}
+
+.periph-kind-panel .periph-grid {
+  margin-top: 0;
+}
+
+/* Detail pane: one explanation line, progressive disclosure */
+.periph-summary-line {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.periph-summary-line .periph-links {
+  color: inherit;
+}
+
+.periph-blocked-disclosure {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.periph-blocked-disclosure > summary,
+.periph-integration > summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #40596d;
+  font-weight: 700;
+}
+
+.periph-blocked-disclosure > summary:focus-visible,
+.periph-integration > summary:focus-visible,
+.periph-preview-frame:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.periph-blocked-disclosure .periph-blocked {
+  margin-top: 6px;
+}
+
+.periph-integration {
+  margin: 14px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.periph-integration > summary {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Camera preview */
+.periph-preview {
+  margin: 14px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-preview-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-preview .hint,
+.periph-preview .periph-callout {
+  margin: 0;
+}
+
+.periph-preview-reason {
+  color: #8f2f45;
+}
+
+.periph-preview-frame {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #0e1923;
+}
+
+.periph-preview-placeholder {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.periph-inline-code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .periph-kind-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .periph-kinds {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(140px, 1fr);
+    overflow-x: auto;
   }
 }

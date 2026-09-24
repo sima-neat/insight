@@ -99,15 +99,17 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Peripherals
 
-Peripherals lists the cameras connected to a board and prepares the camera input configuration for your application. It reads device information only. It does not capture frames, change sensor controls, or publish a stream, so the cameras remain available to your applications.
+Peripherals lists the cameras connected to a board and prepares the camera input configuration for your application. Discovery and export read device information only: they never capture frames, change sensor controls, or publish a stream, so cameras stay available to your applications. **Preview** is the one exception, and it only runs when you start it.
 
 ### Selected board
 
-The page works on one selected board:
+Insight works with one selected board, shown in the header next to the DevKit shell button. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Stats and other board features use the same selection.
 
+The board is chosen in this order:
+
+- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
 - **Insight installed on the board**: Insight inspects the board it runs on.
-- **Neat SDK**: Insight uses the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
-- **Any installation**: select **Change board** and enter the board's address, SSH port, and user. Insight saves the selection; **Use default** returns to the on-board or SDK default.
+- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
 
 Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
 
@@ -122,6 +124,14 @@ Select **Refresh** to scan the board. Insight finds MIPI cameras through libcame
 | Not supported | Core `CameraInput` cannot use it. This includes USB cameras, raw sensor formats, and formats other than NV12. |
 
 To read a MIPI camera's modes, Refresh briefly opens the camera through libcamera without streaming. Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Preview a camera
+
+Select **Start preview** to see what a camera sees. The board captures video, encodes it in hardware, and sends it to Insight's viewer; the preview appears in the page and reserves one viewer channel.
+
+A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, when you leave the page, when a scan starts, and by itself shortly after Insight stops watching, so a lost browser or a restarted Insight cannot leave the camera busy.
+
+Preview is available for MIPI cameras on modes Insight lists as usable. USB cameras are discovered and can be exported, but preview is not available for them yet.
 
 ### Export a configuration
 

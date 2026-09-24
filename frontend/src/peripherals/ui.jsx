@@ -26,11 +26,12 @@ export function ErrorNotice({ error, children }) {
   )
 }
 
-export function SupportLinks({ links }) {
+export function SupportLinks({ links, inline = false }) {
   const valid = (links || []).filter((link) => safeHref(link.url))
   if (!valid.length) return null
+  const Tag = inline ? 'span' : 'p'
   return (
-    <p className="periph-links">
+    <Tag className="periph-links">
       Tracked in{' '}
       {valid.map((link, index) => (
         <span key={link.url}>
@@ -38,6 +39,6 @@ export function SupportLinks({ links }) {
           <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label || link.url}</a>
         </span>
       ))}
-    </p>
+    </Tag>
   )
 }

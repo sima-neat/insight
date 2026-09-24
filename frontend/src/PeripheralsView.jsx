@@ -1,36 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import BoardTargetCard from './peripherals/BoardTargetCard.jsx'
+import CameraDetail, { cameraSubtitle } from './peripherals/CameraDetail.jsx'
 import { copyText, downloadText, requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
+  PREVIEW_IDLE,
   availabilityInfo,
-  cameraDeviceId,
+  boardIndicator,
   changeSummary,
   countLabel,
-  deviceRows,
+  deviceTabs,
   formatDuration,
-  formatOptions,
   formatRelativeTime,
-  fpsOptions,
   groupCameras,
+  heartbeatDelay,
   isSnapshotStale,
   modeLabel,
+  nextPreviewState,
   normalizeError,
   resolveCameraId,
+  resolveDeviceKind,
   resolveSelection,
   sameSelection,
   severityInfo,
-  sizeKey,
-  sizeLabel,
-  sizeOptions,
   sortIssues,
   tierInfo
 } from './peripherals/model.js'
-import { Callout, ErrorNotice, Pill, SupportLinks } from './peripherals/ui.jsx'
+import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
-function subtitle(camera) {
-  const deviceId = cameraDeviceId(camera)
-  return [camera.model, deviceId !== camera.name && deviceId].filter(Boolean).join(' · ')
+const PREVIEW_BASE = '/api/peripherals/cameras/preview'
+
+function previewUrl(sessionId, action) {
+  return `${PREVIEW_BASE}/${encodeURIComponent(sessionId)}/${action}`
 }
 
 function IssueList({ issues }) {
@@ -50,6 +50,57 @@ function IssueList({ issues }) {
         )
       })}
     </ul>
+  )
+}
+
+function DeviceKindNav({ tabs, activeId, onSelect }) {
+  const refs = useRef(new Map())
+  // Unbuilt kinds stay focusable (aria-disabled, not disabled) so a keyboard or
+  // screen-reader user can read why they are not selectable.
+  const [focused, setFocused] = useState(null)
+  const order = tabs.map((tab) => tab.id)
+  const focusId = order.includes(focused) ? focused : order.includes(activeId) ? activeId : order[0]
+
+  function move(id) {
+    setFocused(id)
+    refs.current.get(id)?.focus()
+    const tab = tabs.find((item) => item.id === id)
+    if (tab && !tab.disabled) onSelect(id)
+  }
+
+  function onKeyDown(event) {
+    const index = order.indexOf(focusId)
+    const next = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: order.length - 1 }[event.key]
+    if (next === undefined || !order.length) return
+    event.preventDefault()
+    move(order[Math.max(0, Math.min(order.length - 1, next))])
+  }
+
+  return (
+    <div className="periph-kinds" role="tablist" aria-orientation="vertical" aria-label="Device kinds" onKeyDown={onKeyDown}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          id={`periph-kind-${tab.id}`}
+          aria-controls="periph-kind-panel"
+          ref={(node) => (node ? refs.current.set(tab.id, node) : refs.current.delete(tab.id))}
+          aria-selected={tab.id === activeId}
+          aria-disabled={tab.disabled ? 'true' : undefined}
+          tabIndex={tab.id === focusId ? 0 : -1}
+          className={tab.id === activeId ? 'periph-kind active' : 'periph-kind'}
+          onClick={() => move(tab.id)}
+        >
+          <span className="periph-kind-label">{tab.label}</span>
+          {tab.disabled ? (
+            <span className="periph-kind-note">{tab.note}</span>
+          ) : (
+            <span className="periph-kind-count">{countLabel(tab.count, 'device')}</span>
+          )}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -87,7 +138,7 @@ function CameraList({ groups, selectedId, onSelect }) {
                 onClick={() => onSelect(camera.id)}
               >
                 <span className="periph-camera-name">{camera.name}</span>
-                <span className="periph-camera-id">{subtitle(camera)}</span>
+                <span className="periph-camera-id">{cameraSubtitle(camera)}</span>
                 <span className="periph-pills">
                   <Pill tone={availability.tone}>{availability.label}</Pill>
                   <Pill tone={tier.tone}>{tier.label}</Pill>
@@ -101,189 +152,15 @@ function CameraList({ groups, selectedId, onSelect }) {
   )
 }
 
-function ModePicker({ camera, selection, notice, onChange }) {
-  const formats = formatOptions(camera)
-  const blocked = formats.filter((f) => f.disabled)
-  const range = formats.find((f) => f.value === selection?.format)?.range
-  const sizes = selection ? sizeOptions(camera, selection.format) : []
-  const rates = selection ? fpsOptions(camera, selection.format, selection.width, selection.height) : []
-  const blockedList = blocked.length > 0 && (
-    <ul className="periph-blocked">
-      {blocked.map((f) => <li key={f.value}><strong>{f.value}</strong> cannot be exported: {f.reason}</li>)}
-    </ul>
-  )
-
-  if (!selection) {
-    return (
-      <Callout title="No exportable modes">
-        <p>{camera.modes_source === 'live' ? 'None of the formats this camera reports can be exported. Reasons are listed below.' : 'Modes could not be read from this camera; the error above says why and how to fix it.'}</p>
-        {blockedList}
-      </Callout>
-    )
-  }
-
-  return (
-    <fieldset className="periph-modes">
-      <legend>Input mode</legend>
-      <div className="periph-mode-fields">
-        <label>
-          Pixel format
-          <select value={selection.format} onChange={(e) => onChange({ ...selection, format: e.target.value })}>
-            {formats.map((f) => <option key={f.value} value={f.value} disabled={f.disabled}>{f.label}</option>)}
-          </select>
-        </label>
-        <label>
-          Resolution
-          <select
-            value={sizeKey(selection.width, selection.height)}
-            onChange={(e) => {
-              const size = sizes.find((s) => s.value === e.target.value)
-              onChange({ format: selection.format, width: size.width, height: size.height, fps: selection.fps })
-            }}
-          >
-            {sizes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-        </label>
-        <label>
-          Frame rate
-          <select value={String(selection.fps)} onChange={(e) => onChange({ ...selection, fps: Number(e.target.value) })}>
-            {rates.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
-        </label>
-      </div>
-      {notice && <p className="hint" role="status">{notice}</p>}
-      {range && (
-        <p className="hint">
-          This format also accepts sizes from {sizeLabel(range.min_width, range.min_height)} to {sizeLabel(range.max_width, range.max_height)};
-          only the listed sizes can be exported.
-        </p>
-      )}
-      {blockedList}
-    </fieldset>
-  )
-}
-
-function ExportPanel({ camera, state, onCopy, onDownload, onRetry }) {
-  const [activeTab, setActiveTab] = useState('')
-  if (state.status === 'error') {
-    return (
-      <ErrorNotice error={state.error}>
-        <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>
-      </ErrorNotice>
-    )
-  }
-  const data = state.data?.camera_id === camera.id ? state.data : null
-  if (!data) return state.status === 'loading' ? <p className="hint" role="status">Preparing configuration…</p> : null
-  const busy = state.status === 'loading'
-  const { support, warnings = [], exports = [] } = data
-  const current = exports.find((item) => item.id === activeTab) || exports[0]
-  const tier = tierInfo(support?.tier)
-  const coreUnsupported = camera.connection === 'usb' || support?.tier === 'unsupported'
-
-  return (
-    <section className="periph-export" aria-labelledby="periph-export-title" aria-busy={busy}>
-      <div className="periph-export-head">
-        <h3 id="periph-export-title">Input configuration</h3>
-        <Pill tone={tier.tone}>{tier.label}</Pill>
-      </div>
-      {coreUnsupported && (
-        <Callout tone="danger" title="Not a Core CameraInput config">
-          <p>
-            {support?.reason || 'Core CameraInput supports MIPI (libcamera) cameras only.'} This descriptor records the device and
-            mode for your own capture code; Neat applications cannot open it with CameraInput.
-          </p>
-          <SupportLinks links={support?.links} />
-        </Callout>
-      )}
-      {warnings.length > 0 && (
-        <ul className="periph-warnings">
-          {warnings.map((warning, index) => <li key={index}>{warning}</li>)}
-        </ul>
-      )}
-      <div className="periph-export-tabs" role="group" aria-label="Configuration format">
-        {exports.map((item) => (
-          <button key={item.id} type="button" aria-pressed={item.id === current?.id} onClick={() => setActiveTab(item.id)}>
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {current && (
-        <>
-          <pre className="periph-code" tabIndex={0} aria-label={`${current.label} configuration`}><code>{current.content}</code></pre>
-          <div className="periph-actions">
-            <button type="button" className="btn-tonal" onClick={() => onCopy(current)} disabled={busy}>Copy</button>
-            <button type="button" className="btn-ghost" onClick={() => onDownload(current)} disabled={busy}>Download {current.filename}</button>
-          </div>
-        </>
-      )}
-    </section>
-  )
-}
-
-function CameraDetail({ camera, stale, selection, selectionNotice, onSelectionChange, exportState, onCopy, onDownload, onRetryExport }) {
-  const availability = availabilityInfo(camera.availability)
-  const tier = tierInfo(camera.support?.tier)
-
-  return (
-    <section className="periph-detail" aria-labelledby="periph-detail-title">
-      <div className="periph-detail-head">
-        <div>
-          <h3 id="periph-detail-title">{camera.name}</h3>
-          <p className="hint">{subtitle(camera)}</p>
-        </div>
-        <span className="periph-pills">
-          <Pill tone={availability.tone}>{availability.label}</Pill>
-          <Pill tone={tier.tone}>{tier.label}</Pill>
-        </span>
-      </div>
-
-      {camera.availability?.state === 'in_use' && (
-        <p className="hint">Another process has this camera open. Stop it before running an application on this camera; exporting a configuration still works.</p>
-      )}
-      {camera.availability?.state === 'unknown' && availability.reason && <p className="hint">Availability unknown: {availability.reason}</p>}
-
-      {camera.support?.tier === 'verified' ? (
-        camera.support.reason && <p className="hint">{camera.support.reason}</p>
-      ) : (
-        <Callout title={tier.label}>
-          {camera.support?.reason && <p>{camera.support.reason}</p>}
-          <SupportLinks links={camera.support?.links} />
-        </Callout>
-      )}
-      {camera.notes?.length > 0 && (
-        <ul className="periph-notes">
-          {camera.notes.map((note, index) => <li key={index}>{note}</li>)}
-        </ul>
-      )}
-      <IssueList issues={(camera.errors || []).map((e) => ({ ...e, severity: 'error' }))} />
-
-      <details className="periph-identity">
-        <summary>Device details</summary>
-        <table className="sysinfo-table key-value">
-          <tbody>
-            {deviceRows(camera).map(([label, value]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td>{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
-
-      <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange} />
-      {stale ? (
-        <p className="hint">Export is paused: the board changed after this scan. Refresh to export for the current board.</p>
-      ) : (
-        <ExportPanel camera={camera} state={exportState} onCopy={onCopy} onDownload={onDownload} onRetry={onRetryExport} />
-      )}
-    </section>
-  )
-}
-
-export default function PeripheralsView({ onError, onStatus }) {
-  const [board, setBoard] = useState(null)
-  const [boardError, setBoardError] = useState(null)
+export default function PeripheralsView({
+  board,
+  boardLoading = false,
+  boardError = null,
+  onReloadBoard,
+  onOpenBoardPanel,
+  onError,
+  onStatus
+}) {
   const [snapshot, setSnapshot] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -292,14 +169,21 @@ export default function PeripheralsView({ onError, onStatus }) {
   const [scanError, setScanError] = useState(null)
   const [serverStale, setServerStale] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [kind, setKind] = useState('camera')
   const [selectedId, setSelectedId] = useState(null)
   const [wanted, setWanted] = useState(null)
+  const [integrationOpen, setIntegrationOpen] = useState(false)
   const [exportState, setExportState] = useState({ status: 'idle' })
   const [exportAttempt, setExportAttempt] = useState(0)
+  const [preview, setPreview] = useState(PREVIEW_IDLE)
+  const [paneHidden, setPaneHidden] = useState(() => typeof document !== 'undefined' && document.hidden)
   const autoRefreshed = useRef(false)
   const exportSeq = useRef(0)
+  const previewRef = useRef(PREVIEW_IDLE)
   const mounted = useRef(false)
 
+  const tabs = useMemo(() => deviceTabs(snapshot?.items), [snapshot])
+  const activeKind = resolveDeviceKind(tabs, kind)
   const groups = useMemo(() => groupCameras(snapshot?.items), [snapshot])
   const activeId = resolveCameraId(snapshot, selectedId)
   const camera = groups.flatMap((group) => group.items).find((item) => item.id === activeId) || null
@@ -315,21 +199,50 @@ export default function PeripheralsView({ onError, onStatus }) {
   const issues = useMemo(() => sortIssues(snapshot?.issues), [snapshot])
   const connectionError = scanError && CONNECTION_ERROR_CODES.has(scanError.code) ? scanError : null
   const scannedLabel = snapshot?.board?.label || target?.label || 'the board'
-  const exportKey = selection && !stale ? `${snapshot.generation}|${snapshot.scanned_at}|${selection.id}|${modeLabel(selection)}|${exportAttempt}` : ''
+  const exportKey = integrationOpen && selection && !stale
+    ? `${snapshot.generation}|${snapshot.scanned_at}|${selection.id}|${modeLabel(selection)}|${exportAttempt}`
+    : ''
+  const boardSummary = boardIndicator(boardLoading && !board ? null : board)
 
-  async function loadBoard() {
+  useEffect(() => {
+    previewRef.current = preview
+  }, [preview])
+
+  function dispatchPreview(event) {
+    setPreview((prev) => nextPreviewState(prev, event))
+  }
+
+  async function stopPreview(sessionId = previewRef.current.session?.id) {
+    if (!sessionId) return
+    dispatchPreview({ type: 'stopping', for: sessionId })
     try {
-      const data = await requestJson('/api/board')
-      setBoard(data)
-      setBoardError(null)
-      return data
+      await requestJson(previewUrl(sessionId, 'stop'), { method: 'POST' })
+    } catch {
+      // The board-side worker expires on its own, so a failed stop is not fatal.
+    }
+    dispatchPreview({ type: 'stopped', for: sessionId })
+  }
+
+  async function startPreview() {
+    if (!camera || !selection) return
+    dispatchPreview({ type: 'start' })
+    try {
+      const data = await requestJson(PREVIEW_BASE, {
+        method: 'POST',
+        body: { id: camera.id, format: selection.format, width: selection.width, height: selection.height, fps: selection.fps }
+      })
+      dispatchPreview({ type: 'session', session: data.session })
     } catch (err) {
-      setBoardError(normalizeError(err))
-      return null
+      dispatchPreview({ type: 'failed', error: normalizeError(err) })
     }
   }
 
+  async function loadBoard() {
+    return onReloadBoard ? onReloadBoard() : null
+  }
+
   async function refresh() {
+    await stopPreview()
     setScanning(true)
     setScanStartedAt(Date.now())
     setScanError(null)
@@ -348,11 +261,6 @@ export default function PeripheralsView({ onError, onStatus }) {
     }
   }
 
-  function handleBoardChange(data) {
-    setBoard(data)
-    setScanError((prev) => (prev && CONNECTION_ERROR_CODES.has(prev.code) ? null : prev))
-  }
-
   function changeSelection(partial) {
     const next = resolveSelection(camera, partial)
     setWanted(next ? { id: camera.id, ...next } : null)
@@ -368,7 +276,7 @@ export default function PeripheralsView({ onError, onStatus }) {
   }
 
   async function loadInitial() {
-    const [boardData, snap] = await Promise.all([
+    const [boardData, snap, existing] = await Promise.all([
       loadBoard(),
       requestJson('/api/peripherals').then(
         (data) => {
@@ -380,11 +288,17 @@ export default function PeripheralsView({ onError, onStatus }) {
           setLoadError(error.code === 'no_target' ? null : error)
           return null
         }
-      )
+      ),
+      requestJson('/api/peripherals/preview').then((data) => data.session, () => null)
     ])
     if (!mounted.current) return
     setSnapshot((prev) => snap || prev)
     setLoading(false)
+    if (existing) {
+      dispatchPreview({ type: 'adopt', session: existing })
+      // Follow the running preview, so opening the page does not stop it.
+      if (existing.camera_id) setSelectedId(existing.camera_id)
+    }
     if (snap && !snap.scanned_at && boardData?.target && !autoRefreshed.current) {
       autoRefreshed.current = true
       refresh()
@@ -398,6 +312,67 @@ export default function PeripheralsView({ onError, onStatus }) {
       mounted.current = false
     }
   }, [])
+
+  // Best effort only: the backend expires the session without heartbeats.
+  useEffect(() => () => {
+    const session = previewRef.current.session
+    if (session?.id) {
+      fetch(previewUrl(session.id, 'stop'), { method: 'POST' }).catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    function onVisibility() {
+      setPaneHidden(document.hidden)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
+
+  // Stop the preview when the selected camera, the device kind, or the board changes.
+  useEffect(() => {
+    const session = previewRef.current.session
+    if (session && activeId && session.camera_id !== activeId) stopPreview(session.id)
+  }, [activeId])
+
+  useEffect(() => {
+    if (activeKind !== 'camera') {
+      const session = previewRef.current.session
+      if (session) stopPreview(session.id)
+    }
+  }, [activeKind])
+
+  useEffect(() => {
+    const session = previewRef.current.session
+    if (!session || board?.generation === undefined || session.generation === undefined) return
+    if (Number(session.generation) !== Number(board.generation)) dispatchPreview({ type: 'reset' })
+  }, [board?.generation])
+
+  const beatSessionId = preview.session?.id || ''
+  const beatMs = heartbeatDelay(preview.session)
+  const beating = Boolean(beatSessionId) && (preview.status === 'starting' || preview.status === 'live')
+
+  useEffect(() => {
+    if (!beating || paneHidden) return
+    let cancelled = false
+    async function beat() {
+      try {
+        const data = await requestJson(previewUrl(beatSessionId, 'heartbeat'), { method: 'POST' })
+        if (!cancelled) dispatchPreview({ type: 'session', session: data.session })
+      } catch (err) {
+        if (cancelled) return
+        const error = normalizeError(err)
+        // A 404 for an id we no longer hold must never stop a newer session.
+        if (error.code === 'not_found') dispatchPreview({ type: 'expired', for: beatSessionId })
+      }
+    }
+    beat()
+    const timer = setInterval(beat, beatMs)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [beating, beatSessionId, beatMs, paneHidden])
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), scanning ? 1000 : 30000)
@@ -435,9 +410,21 @@ export default function PeripheralsView({ onError, onStatus }) {
   const removedName = snapshot?.changes?.removed?.find((item) => item.id === activeId)?.name || 'The selected camera'
 
   let body = null
-  if (loading) body = <p className="hint">Loading peripherals…</p>
-  else if (!board) body = <p className="hint">Board information is unavailable. Use Retry in the Board panel.</p>
-  else if (!target) body = <p className="hint">Select a board above to discover its cameras.</p>
+  if (loading || (boardLoading && !board)) body = <p className="hint">Loading peripherals…</p>
+  else if (boardError) {
+    body = (
+      <ErrorNotice error={boardError}>
+        <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
+      </ErrorNotice>
+    )
+  } else if (!target) {
+    body = (
+      <Callout tone="info" title="No board selected">
+        <p>Insight needs a board before it can discover peripherals.</p>
+        <button type="button" className="btn-tonal" onClick={onOpenBoardPanel}>Choose a board</button>
+      </Callout>
+    )
+  } else if (activeKind !== 'camera') body = <p className="hint">Insight does not read this device kind yet.</p>
   else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
   else if (!scannedAt) body = !scanError && <p className="hint">Not scanned yet. Refresh to discover cameras on {target.label}.</p>
   else if (!groups.length) {
@@ -454,13 +441,20 @@ export default function PeripheralsView({ onError, onStatus }) {
           <CameraDetail
             camera={camera}
             stale={stale}
+            target={target}
             selection={selection}
             selectionNotice={selectionNotice}
             onSelectionChange={changeSelection}
+            preview={preview}
+            onStartPreview={startPreview}
+            onStopPreview={() => stopPreview()}
             exportState={exportState}
             onCopy={copyExport}
             onDownload={downloadExport}
             onRetryExport={() => setExportAttempt((n) => n + 1)}
+            onOpenBoardPanel={onOpenBoardPanel}
+            integrationOpen={integrationOpen}
+            onIntegrationToggle={setIntegrationOpen}
           />
         ) : (
           <div className="periph-detail">
@@ -475,23 +469,13 @@ export default function PeripheralsView({ onError, onStatus }) {
 
   return (
     <div className="periph-view">
-      <BoardTargetCard
-        board={board}
-        loading={loading}
-        error={boardError}
-        connectionError={connectionError}
-        onBoardChange={handleBoardChange}
-        onRetry={loadInitial}
-        onReload={loadBoard}
-        onStatus={onStatus}
-        onError={onError}
-      />
-
       <section className="panel periph-scan" aria-labelledby="periph-scan-title" aria-busy={scanning}>
         <div className="panel-topbar">
           <div>
-            <h2 id="periph-scan-title">Cameras</h2>
-            <p className="section-note">Discovery only reads device information. It never captures video or changes sensor settings.</p>
+            <h2 id="periph-scan-title">Peripherals</h2>
+            <p className="section-note">
+              Discovery only reads device information. Preview is the one action that opens a camera, and only while you run it.
+            </p>
           </div>
           <button
             type="button"
@@ -504,6 +488,13 @@ export default function PeripheralsView({ onError, onStatus }) {
             {scanning ? `Scanning… ${elapsed} s` : 'Refresh'}
           </button>
         </div>
+
+        <p className="periph-board-line">
+          Board <strong>{boardSummary.label}</strong>
+          {' '}<Pill tone={boardSummary.state.tone}>{boardSummary.state.short}</Pill>{' '}
+          <button type="button" className="periph-link-btn" onClick={onOpenBoardPanel}>Board settings</button>
+        </p>
+
         <p className="sr-only" role="status">
           {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh before exporting.' : ''}
         </p>
@@ -518,14 +509,15 @@ export default function PeripheralsView({ onError, onStatus }) {
         )}
         {stale && (
           <Callout title="Board changed — refresh">
-            <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}. Export is disabled until you refresh.</p>
+            <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}. Export and preview are disabled until you refresh.</p>
             {target && <button type="button" className="btn-tonal" onClick={() => !scanning && refresh()}>Refresh now</button>}
           </Callout>
         )}
         <ErrorNotice error={loadError} />
         {scanError && (connectionError ? (
           <Callout tone="danger" title={`Scan failed: ${scanError.message}`} role="alert">
-            <p>Fix the connection in the Board panel above, then refresh.</p>
+            <p>{scanError.hint || 'Insight could not reach the board.'}</p>
+            <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
           </Callout>
         ) : (
           <ErrorNotice error={{ ...scanError, message: `Scan failed: ${scanError.message}` }} />
@@ -536,7 +528,18 @@ export default function PeripheralsView({ onError, onStatus }) {
           </Callout>
         )}
         <IssueList issues={issues} />
-        {body}
+
+        <div className="periph-kind-layout">
+          <DeviceKindNav tabs={tabs} activeId={activeKind} onSelect={setKind} />
+          <div
+            className="periph-kind-panel"
+            id="periph-kind-panel"
+            role="tabpanel"
+            aria-labelledby={activeKind ? `periph-kind-${activeKind}` : undefined}
+          >
+            {body}
+          </div>
+        </div>
       </section>
     </div>
   )

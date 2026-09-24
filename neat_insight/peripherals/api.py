@@ -7,6 +7,7 @@ from flask import Blueprint, request
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.peripherals import export
 from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
+from neat_insight.peripherals.preview import PreviewManager
 from neat_insight.peripherals.probe import BUDGET_SEC, SCHEMA
 
 peripherals_bp = Blueprint("peripherals", __name__)
@@ -16,6 +17,7 @@ PROBE_TIMEOUT_SEC = BUDGET_SEC + 20.0
 DETAIL_LIMIT = 2000
 
 scans = ScanCache()
+previews = PreviewManager()
 
 
 @peripherals_bp.after_request
@@ -86,6 +88,7 @@ def refresh_peripherals():
             in_flight = scans.completed_since(session.generation, requested)
             if in_flight:
                 return in_flight
+            previews.stop_for_scan(session)
             board = _board_summary(session, session.identity())
             started = time.monotonic()
             probe = _run_probe(session)
@@ -110,5 +113,86 @@ def export_camera():
                 hint="Click Refresh, then export again.",
             )
         return export.render(snapshot, selection)
+    except BoardError as err:
+        return err.to_dict(), err.status
+
+
+def _preview_host() -> str:
+    host = request.host.split(":")[0].strip()
+    return host or "127.0.0.1"
+
+
+def _camera_or_404(session, camera_id: str):
+    snapshot = scans.snapshot(session.generation)
+    if snapshot is None:
+        raise BoardError(
+            "stale_snapshot",
+            "There is no camera scan for the selected board.",
+            hint="Click Refresh, then start the preview.",
+        )
+    item = next((entry for entry in snapshot["items"] if entry["id"] == camera_id), None)
+    if item is None:
+        raise BoardError(
+            "not_found",
+            f"Camera {camera_id} is not in the last scan.",
+            hint="Refresh and pick a camera from the list.",
+        )
+    return item
+
+
+# API: report the preview running on the selected board, if any.
+@peripherals_bp.get("/api/peripherals/preview")
+def get_preview():
+    """Return the current preview session for the selected board, or null; never contacts the board."""
+    try:
+        session = get_board_manager().session()
+    except BoardError as err:
+        return err.to_dict(), err.status
+    previews.stop_stale()
+    return {"session": previews.current(session.generation)}
+
+
+# API: start an explicit, temporary camera preview on the selected board.
+@peripherals_bp.post("/api/peripherals/cameras/preview")
+def start_preview():
+    """Capture and hardware-encode one camera into a reserved viewer channel until stopped or expired."""
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    try:
+        session = get_board_manager().session()
+        item = _camera_or_404(session, str(body.get("id") or ""))
+        mode = item.get("default_selection")
+        if any(key in body for key in ("format", "width", "height", "fps")):
+            mode = export.parse_request({"id": item["id"], **{k: body.get(k) for k in ("format", "width", "height", "fps")}})
+            mode = {key: mode[key] for key in ("format", "width", "height", "fps")}
+        if not mode:
+            raise BoardError(
+                "invalid_request",
+                "This camera has no mode Insight can preview.",
+                hint="Refresh; if the camera reports no usable modes, the errors on the camera say why.",
+            )
+        return {"session": previews.start(session, item, mode, _preview_host())}
+    except BoardError as err:
+        return err.to_dict(), err.status
+
+
+# API: keep a preview alive while a viewer is watching.
+@peripherals_bp.post("/api/peripherals/cameras/preview/<session_id>/heartbeat")
+def heartbeat_preview(session_id):
+    """Extend the preview; without heartbeats the board-side worker stops capture on its own."""
+    try:
+        session = get_board_manager().session()
+        return {"session": previews.heartbeat(session, session_id)}
+    except BoardError as err:
+        return err.to_dict(), err.status
+
+
+# API: stop a preview and release the camera and the channel.
+@peripherals_bp.post("/api/peripherals/cameras/preview/<session_id>/stop")
+def stop_preview(session_id):
+    """Stop capture on the board; an older session id cannot stop a newer session."""
+    try:
+        session = get_board_manager().session()
+        return {"session": previews.stop(session, session_id)}
     except BoardError as err:
         return err.to_dict(), err.status

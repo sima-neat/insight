@@ -2,25 +2,38 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  PREVIEW_IDLE,
   apiError,
   availabilityInfo,
+  blockedFormatSummary,
+  boardIndicator,
   cameraDeviceId,
+  cameraSummaryLine,
   changeSummary,
   defaultTargetText,
   deviceRows,
+  deviceTabs,
   formatDuration,
   formatOptions,
   formatRelativeTime,
   fpsOptions,
   groupCameras,
+  heartbeatDelay,
   initialBoardForm,
   isSnapshotStale,
   modeLabel,
+  nextPreviewState,
   normalizeError,
+  previewBlock,
+  previewErrorInfo,
+  previewStatusInfo,
   resolveCameraId,
+  resolveDeviceKind,
   resolveSelection,
   safeHref,
   sameSelection,
+  selectionTier,
+  sessionMatches,
   sizeOptions,
   sortIssues,
   sourceLabel,
@@ -315,4 +328,224 @@ test('only http(s) links are rendered', () => {
   assert.equal(safeHref(CORE_838.url), CORE_838.url)
   assert.equal(safeHref('javascript:alert(1)'), null)
   assert.equal(safeHref(undefined), null)
+})
+
+// --- #126 addendum: board indicator, device sub-tabs, declutter, preview ----
+
+test('the masthead board indicator collapses board state into a label and a short pill', () => {
+  assert.deepEqual(boardIndicator(null).state.short, 'Loading…')
+  const none = boardIndicator({ target: null, status: { state: 'unknown' } })
+  assert.equal(none.label, 'No board')
+  assert.equal(none.state.short, 'Not selected')
+  const connected = boardIndicator({ target: { label: 'sima@192.168.2.2' }, status: { state: 'connected' } })
+  assert.equal(connected.label, 'sima@192.168.2.2')
+  assert.equal(connected.state.short, 'Connected')
+  assert.equal(connected.state.tone, 'ok')
+  const failed = boardIndicator({ target: { label: 'This board' }, status: { state: 'error' } })
+  assert.equal(failed.state.short, 'Error')
+  assert.equal(failed.state.label, 'Connection failed', 'the card keeps the long label')
+  assert.equal(boardIndicator({ target: { label: 'This board' }, status: null }).state.short, 'Not checked')
+})
+
+test('device sub-tabs come from the snapshot kinds and keep unbuilt kinds disabled', () => {
+  const tabs = deviceTabs(snapshot.items)
+  assert.deepEqual(tabs.map((t) => t.id), ['camera', 'microphone', 'lidar'])
+  assert.deepEqual(tabs.map((t) => t.label), ['Cameras', 'Microphones', 'LiDAR'])
+  assert.equal(tabs[0].count, 4)
+  assert.equal(tabs[0].disabled, false)
+  assert.equal(tabs[1].count, 1, 'the microphone in the snapshot is counted')
+  assert.equal(tabs[1].disabled, true)
+  assert.match(tabs[1].note, /cannot show microphones yet/)
+  assert.equal(tabs[2].count, 0)
+  assert.equal(tabs[2].note, 'Not supported yet')
+})
+
+test('a kind the backend invents appears automatically, after the known ones', () => {
+  const tabs = deviceTabs([{ kind: 'camera' }, { kind: 'radar' }, { kind: 'radar' }, { kind: null }])
+  assert.deepEqual(tabs.map((t) => t.id), ['camera', 'microphone', 'lidar', 'radar'])
+  const radar = tabs.at(-1)
+  assert.equal(radar.label, 'Radars')
+  assert.equal(radar.count, 2)
+  assert.equal(radar.disabled, true)
+  assert.deepEqual(deviceTabs([]).map((t) => t.disabled), [false, true, true])
+})
+
+test('only an enabled sub-tab can be selected', () => {
+  const tabs = deviceTabs(snapshot.items)
+  assert.equal(resolveDeviceKind(tabs, 'camera'), 'camera')
+  assert.equal(resolveDeviceKind(tabs, 'microphone'), 'camera', 'disabled kinds fall back')
+  assert.equal(resolveDeviceKind(tabs, 'nonsense'), 'camera')
+  assert.equal(resolveDeviceKind([], 'camera'), null)
+})
+
+test('blocked export formats collapse into one line', () => {
+  assert.equal(blockedFormatSummary(formatOptions(imx477)), '')
+  assert.equal(blockedFormatSummary(formatOptions(imx568)), '1 format cannot be exported (RGB888)')
+  assert.equal(
+    blockedFormatSummary([{ value: 'A', disabled: true }, { value: 'B', disabled: true }, { value: 'C', disabled: false }]),
+    '2 formats cannot be exported (A, B)'
+  )
+})
+
+test('the detail pane shows one explanation line, chosen by priority', () => {
+  assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\. Stop that process/)
+  assert.equal(cameraSummaryLine(imx568), imx568.support.reason, 'an unverified tier wins over unknown availability')
+  assert.equal(cameraSummaryLine(imx477), imx477.support.reason)
+  assert.equal(
+    cameraSummaryLine({ ...imx477, support: support('verified', ''), availability: imx568.availability }),
+    'Availability unknown: fuser is not installed on the board.'
+  )
+  assert.equal(cameraSummaryLine({}), '')
+})
+
+test('the selected mode keeps the tier the board reported for it', () => {
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), 'verified')
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1280, height: 720, fps: 60 }), 'advertised')
+  assert.equal(selectionTier(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), 'unsupported')
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 640, height: 480, fps: 30 }), '')
+  assert.equal(selectionTier(imx477, null), '')
+})
+
+const mipiMode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+const boardTarget = { mode: 'ssh', label: 'sima@192.168.2.2' }
+const liveSession = {
+  id: '8f1c',
+  camera_id: imx477.id,
+  mode: mipiMode,
+  channel: 3,
+  viewer_url: 'https://host:8081/static/viewer.html?mode=light&src=3',
+  generation: 3,
+  heartbeat_interval_ms: 5000,
+  state: 'live'
+}
+
+test('Start preview is blocked with the reason for every state that forbids it', () => {
+  assert.deepEqual(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget }), { blocked: false, reason: '' })
+
+  assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: null }).reason, /No board is selected/)
+  assert.match(previewBlock({ camera: null, selection: null, target: boardTarget }).reason, /Select a camera/)
+  assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, stale: true }).reason, /board changed/)
+
+  // A camera Core cannot open (USB, core#838) can still be exported, never previewed.
+  assert.equal(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }).reason, usb.support.reason)
+
+  assert.match(previewBlock({ camera: imx477, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
+
+  const unvalidated = { ...imx477, formats: [format('NV12', 'NV12', true, support('advertised'), [size(1920, 1080, [30, 'unsupported'])])] }
+  assert.match(previewBlock({ camera: unvalidated, selection: mipiMode, target: boardTarget }).reason, /is not validated on this board/)
+
+  assert.match(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }).reason, /In use by gst-launch-1\.0 \(pid 812\)/)
+
+  const elsewhere = previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: { ...liveSession, camera_id: imx568.id } })
+  assert.match(elsewhere.reason, /already running on mipi:econ-imx568-fpga 5-0042/)
+  assert.equal(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: liveSession }).blocked, false)
+})
+
+test('preview transitions: start, live, stop', () => {
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  assert.deepEqual(starting, { status: 'starting', session: null, error: null })
+
+  const pending = nextPreviewState(starting, { type: 'session', session: { ...liveSession, state: 'starting' } })
+  assert.equal(pending.status, 'starting')
+  assert.equal(pending.session.id, '8f1c')
+
+  const live = nextPreviewState(pending, { type: 'session', session: liveSession })
+  assert.equal(live.status, 'live')
+  assert.equal(previewStatusInfo(live).label, 'Live')
+
+  const stopping = nextPreviewState(live, { type: 'stopping', for: '8f1c' })
+  assert.equal(stopping.status, 'stopping')
+  assert.equal(stopping.session.id, '8f1c', 'the channel stays on screen while the board stops')
+  assert.deepEqual(nextPreviewState(stopping, { type: 'stopped', for: '8f1c' }), PREVIEW_IDLE)
+
+  // The board reporting "stopped" on a heartbeat ends the session too.
+  assert.deepEqual(nextPreviewState(live, { type: 'session', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
+})
+
+test('preview transitions: a stale session id never disturbs a newer one', () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  assert.equal(nextPreviewState(live, { type: 'expired', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, { type: 'stopped', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, { type: 'stopping', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, { type: 'failed', for: 'old-id', error: { message: 'boom' } }), live)
+  assert.equal(nextPreviewState(live, { type: 'session', session: { ...liveSession, id: 'other' } }), live)
+
+  const expired = nextPreviewState(live, { type: 'expired', for: '8f1c' })
+  assert.equal(expired.status, 'idle')
+  assert.equal(expired.session, null)
+  assert.match(expired.error.message, /stopped receiving heartbeats/)
+  assert.ok(expired.error.hint, 'an expiry always offers a way back')
+})
+
+test('preview transitions: failures, reset, and adopting an existing session', () => {
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  const failed = nextPreviewState(starting, { type: 'failed', error: { message: 'Camera in use', code: 'camera_in_use' } })
+  assert.equal(failed.status, 'error')
+  assert.equal(previewStatusInfo(failed).label, 'Could not start')
+  // A late response from the failed attempt must not put the pane back in "live".
+  assert.equal(nextPreviewState(failed, { type: 'session', session: liveSession }), failed)
+  assert.deepEqual(nextPreviewState(failed, { type: 'reset' }), PREVIEW_IDLE)
+
+  const adopted = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: liveSession })
+  assert.equal(adopted.status, 'live')
+  assert.equal(adopted.session.channel, 3)
+  assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
+  assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: null }), PREVIEW_IDLE)
+
+  const live = nextPreviewState(starting, { type: 'session', session: liveSession })
+  assert.equal(nextPreviewState(live, { type: 'nonsense' }), live)
+  assert.equal(nextPreviewState(undefined, { type: 'nonsense' }), PREVIEW_IDLE)
+})
+
+test('heartbeats follow the backend interval, clamped to something sane', () => {
+  assert.equal(heartbeatDelay(liveSession), 5000)
+  assert.equal(heartbeatDelay(null), 5000)
+  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 0 }), 5000)
+  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 50 }), 1000)
+  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 900000 }), 60000)
+  assert.equal(heartbeatDelay({ heartbeat_interval_ms: '2500' }), 2500)
+})
+
+test('a session belongs to the camera and board generation it was started for', () => {
+  assert.equal(sessionMatches(liveSession, imx477.id, 3), true)
+  assert.equal(sessionMatches(liveSession, imx477.id, 4), false)
+  assert.equal(sessionMatches(liveSession, imx568.id, 3), false)
+  assert.equal(sessionMatches(liveSession, imx477.id), true)
+  assert.equal(sessionMatches(null, imx477.id, 3), false)
+})
+
+test('every preview failure carries a recovery action and nothing destructive', () => {
+  assert.equal(previewErrorInfo(null), null)
+
+  const busy = previewErrorInfo(normalizeError(apiError({
+    error: 'The camera is already open.',
+    code: 'camera_in_use',
+    hint: 'gst-launch-1.0 (pid 812) has /dev/video3 open.'
+  }, 409)))
+  assert.equal(busy.hint, 'gst-launch-1.0 (pid 812) has /dev/video3 open.')
+  assert.match(busy.action, /Insight never stops it for you/)
+
+  const other = previewErrorInfo(normalizeError(apiError({
+    error: 'A preview is already running.',
+    code: 'preview_active',
+    session: { camera_id: imx568.id }
+  }, 409)))
+  assert.equal(other.otherCamera, imx568.id)
+  assert.match(other.action, /Stop the preview that is already running/)
+
+  // The backend puts camera_id at the top level of the 409 body.
+  const flat = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409)))
+  assert.equal(flat.otherCamera, usb.id)
+
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_channel' }, 409))).action, /Stop a stream on the Streaming page/)
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /verified or advertised/)
+
+  const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
+  assert.equal(failed.detail, 'gst: no element')
+  assert.equal(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'unreachable' }, 502))).action, '')
+})
+
+test('a preview viewer address is only loaded when it is an http(s) URL', () => {
+  assert.equal(safeHref(liveSession.viewer_url), liveSession.viewer_url)
+  assert.equal(safeHref('javascript:alert(1)'), null)
 })

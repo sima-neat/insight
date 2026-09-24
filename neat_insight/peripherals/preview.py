@@ -1,0 +1,406 @@
+"""Explicit, temporary camera preview: capture on the board, play in Insight's existing viewer.
+
+The board encodes H.264 in hardware and sends RTP to a reserved viewer channel, which vf already
+serves over WebRTC. Capture starts only on request and never as part of discovery.
+
+The board-side worker owns cleanup: Insight refreshes a heartbeat file while a viewer is watching
+and the worker kills the pipeline once that file goes stale, so the camera is released even if
+Insight restarts, the browser never fires unload, or the SSH connection dies.
+"""
+import json
+import os
+import shlex
+import ssl
+import subprocess
+import threading
+import time
+import urllib.request
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+from neat_insight.board import BoardError
+
+VIDEO_CHANNELS = 80
+DEFAULT_VIDEO_UDP_PORT = 9000
+DEFAULT_VIDEO_UI_PORT = 8081
+HEARTBEAT_INTERVAL_MS = 5000
+SESSION_TTL_SEC = 45.0  # a briefly backgrounded tab should not kill the preview; the board still frees the camera
+START_TIMEOUT_SEC = 25.0
+VIDEO_ARRIVAL_TIMEOUT_SEC = 8.0
+BITRATE_KBPS = 6000
+WORKER_DIR = "/tmp/insight-preview"
+PORT_MAP_PATHS = (
+    "~/.insight-config/neat-port-map.json",
+    "/workspace/.insight-config/neat-port-map.json",
+    "/workspace/insight-config/neat-port-map.json",
+    "/insight-config/neat-port-map.json",
+)
+# Written to the board per session. $1 session id, $2 heartbeat ttl, $3.. pipeline.
+WORKER_SCRIPT = """#!/bin/sh
+set -e
+sid="$1"; ttl="$2"; shift 2
+dir="{worker_dir}/$sid"
+mkdir -p "$dir"
+beat="$dir/heartbeat"
+touch "$beat"
+"$@" > "$dir/pipeline.log" 2>&1 &
+pipeline=$!
+echo "$pipeline" > "$dir/pipeline.pid"
+while :; do
+    sleep 2
+    kill -0 "$pipeline" 2>/dev/null || break
+    now=$(date +%s)
+    beat_at=$(stat -c %Y "$beat" 2>/dev/null || echo 0)
+    if [ $((now - beat_at)) -gt "$ttl" ]; then
+        kill "$pipeline" 2>/dev/null || true
+        sleep 1
+        kill -9 "$pipeline" 2>/dev/null || true
+        break
+    fi
+done
+rm -rf "$dir"
+""".format(worker_dir=WORKER_DIR)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(moment: datetime) -> str:
+    return moment.isoformat(timespec="seconds")
+
+
+def _unsupported(message: str, hint: str) -> BoardError:
+    return BoardError("invalid_request", message, hint=hint)
+
+
+def _port_map_entry(name: str):
+    candidates = [os.getenv("NEAT_PORT_MAP_FILE")] if os.getenv("NEAT_PORT_MAP_FILE") else []
+    candidates += [str(Path(path).expanduser()) for path in PORT_MAP_PATHS]
+    for candidate in candidates:
+        try:
+            data = json.loads(Path(candidate).read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        for entry in data.get("exposedPorts", data if isinstance(data, list) else []):
+            if isinstance(entry, dict) and entry.get("name") == name:
+                return entry
+    return None
+
+
+def _neat_port_entry(name: str):
+    """The SDK publishes its port map through `neat --json` when no port-map file is present."""
+    try:
+        result = subprocess.run(["neat", "--json"], capture_output=True, timeout=20, check=False)
+        data = json.loads(result.stdout.decode("utf-8", errors="replace"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    for entry in data.get("exposedPorts", []):
+        if isinstance(entry, dict) and entry.get("name") == name:
+            return entry
+    return None
+
+
+def port_map_video_range():
+    """(host port of channel 0, channel count) published for senders outside this machine."""
+    entry = _port_map_entry("videoUDP") or _neat_port_entry("videoUDP")
+    start = (entry or {}).get("hostPortStart")
+    if not isinstance(start, int):
+        return None
+    end = entry.get("hostPortEnd") or start
+    return start, max(1, (end - start) + 1)
+
+
+def video_ui_port() -> int:
+    port = (_port_map_entry("videoUI") or _neat_port_entry("videoUI") or {}).get("hostPortStart")
+    return port if isinstance(port, int) else DEFAULT_VIDEO_UI_PORT
+
+
+def active_channels(port: int = DEFAULT_VIDEO_UI_PORT) -> Optional[set]:
+    """Channels vf currently receives RTP on, so a preview never lands on a live application stream.
+
+    None means vf did not answer: the caller must not read that as "every channel is free".
+    """
+    # vf's own route, not Insight's /api proxy: vf answers unknown paths with the viewer page.
+    url = f"https://127.0.0.1:{port}/ingest/stats?all=1"
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        with urllib.request.urlopen(url, timeout=3, context=context) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        channels = payload["channels"]
+    except Exception:
+        return None
+    return {entry.get("channel") for entry in channels if entry.get("active")}
+
+
+class PreviewManager:
+    """One preview at a time per Insight, tied to the selected board's generation."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._session: Optional[dict] = None
+
+    # ---- public API -------------------------------------------------------
+
+    def current(self, generation: Optional[int] = None) -> Optional[dict]:
+        with self._lock:
+            session = self._session
+            if session is None:
+                return None
+            if generation is not None and session["generation"] != generation:
+                return None
+            if _now() > datetime.fromisoformat(session["expires_at"]):
+                return None
+            return dict(session)
+
+    def start(self, session_ctx, item: dict, mode: dict, request_host: str) -> dict:
+        self.stop_stale()
+        with self._lock:
+            if self._session is not None and self._session["generation"] == session_ctx.generation:
+                raise BoardError(
+                    "preview_active",
+                    f"A preview of {self._session['camera_id']} is already running.",
+                    hint="Stop that preview before starting another one.",
+                    camera_id=self._session["camera_id"],
+                )
+        self._stop_current(session_ctx)
+        _require_previewable(item, mode)
+        channel = self._reserve_channel(session_ctx)
+        target_host, target_port = self._insight_endpoint(session_ctx, channel)
+        session_id = uuid.uuid4().hex
+        pipeline = _pipeline(item, mode, target_host, target_port)
+        self._start_worker(session_ctx, session_id, pipeline)
+        session = {
+            "id": session_id,
+            "camera_id": item["id"],
+            "mode": mode,
+            "channel": channel,
+            "viewer_url": _viewer_url(request_host, channel),
+            "generation": session_ctx.generation,
+            "started_at": _iso(_now()),
+            "expires_at": _iso(_now() + timedelta(seconds=SESSION_TTL_SEC)),
+            "heartbeat_interval_ms": HEARTBEAT_INTERVAL_MS,
+            "state": "live",
+        }
+        with self._lock:
+            self._session = session
+        self._await_video(session_ctx, session)
+        return dict(session)
+
+    def _await_video(self, session_ctx, session: dict) -> None:
+        deadline = time.monotonic() + VIDEO_ARRIVAL_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            if session["channel"] in (active_channels() or ()):
+                return
+            time.sleep(1.0)
+        self._stop_current(session_ctx)
+        raise BoardError(
+            "no_video",
+            "The board started capturing, but no video reached Insight.",
+            hint="The board must reach Insight's video port. Check that the mapped UDP port is open "
+            "(a host firewall usually blocks it) or run Insight on the board.",
+            channel=session["channel"],
+        )
+
+    def heartbeat(self, session_ctx, session_id: str) -> dict:
+        with self._lock:
+            session = self._session
+            if session is None or session["id"] != session_id:
+                raise _unknown_session()
+            session = dict(session)
+        session_ctx.transport.exec(["touch", f"{WORKER_DIR}/{session_id}/heartbeat"], timeout=10)
+        session["expires_at"] = _iso(_now() + timedelta(seconds=SESSION_TTL_SEC))
+        with self._lock:
+            if self._session is not None and self._session["id"] == session_id:
+                self._session = session
+        return dict(session)
+
+    def stop(self, session_ctx, session_id: str) -> dict:
+        with self._lock:
+            session = self._session
+            if session is None or session["id"] != session_id:
+                raise _unknown_session()
+        self._stop_current(session_ctx)
+        session = dict(session)
+        session["state"] = "stopped"
+        return session
+
+    def stop_for_scan(self, session_ctx) -> None:
+        """Discovery re-reads the camera, so a running preview is stopped first."""
+        if self._session is not None:
+            self._stop_current(session_ctx)
+
+    def stop_stale(self) -> None:
+        with self._lock:
+            session = self._session
+            if session and _now() > datetime.fromisoformat(session["expires_at"]):
+                # The board worker frees the camera on its own; drop the reservation here.
+                self._session = None
+
+    # ---- internals --------------------------------------------------------
+
+    def _stop_current(self, session_ctx) -> None:
+        with self._lock:
+            session = self._session
+            self._session = None
+        if session is None:
+            return
+        directory = f"{WORKER_DIR}/{session['id']}"
+        script = f"pid=$(cat {directory}/pipeline.pid 2>/dev/null); [ -n \"$pid\" ] && kill $pid 2>/dev/null; rm -rf {directory}"
+        try:
+            session_ctx.transport.exec(["sh", "-c", script], timeout=15)
+        except BoardError:
+            # The worker's heartbeat timeout still releases the camera.
+            pass
+
+    def _reserve_channel(self, session_ctx) -> int:
+        if session_ctx.target.mode == "local":
+            count = VIDEO_CHANNELS
+        else:
+            published = port_map_video_range()
+            if published is None:
+                raise BoardError(
+                    "no_channel",
+                    "Insight cannot tell which video ports are reachable from the board.",
+                    hint="Preview needs the board to send video back to Insight. Check the SDK port map "
+                    "(`neat --json`) or run Insight on the board.",
+                )
+            count = min(published[1], VIDEO_CHANNELS)
+        busy = active_channels()
+        if busy is None:
+            raise BoardError(
+                "viewer_unavailable",
+                "Insight cannot reach the video viewer service.",
+                hint="Preview sends video through the viewer. Check that vf is running, then try again.",
+            )
+        for channel in range(count - 1, -1, -1):
+            if channel not in busy:
+                return channel
+        raise BoardError(
+            "no_channel",
+            "Every viewer channel Insight publishes is already receiving video.",
+            hint="Stop a streaming source or an application stream, then start the preview again.",
+        )
+
+    def _insight_endpoint(self, session_ctx, channel: int):
+        if session_ctx.target.mode == "local":
+            return "127.0.0.1", DEFAULT_VIDEO_UDP_PORT + channel
+        published = port_map_video_range()
+        base = published[0] if published else DEFAULT_VIDEO_UDP_PORT
+        result = session_ctx.transport.exec(["sh", "-c", "echo $SSH_CLIENT"], timeout=10)
+        # The board tells us the address it reaches Insight on, which survives NAT and port mapping.
+        client = result.stdout.decode("utf-8", errors="replace").split()
+        if not client:
+            raise BoardError(
+                "command_failed",
+                "The board could not report the address Insight connects from.",
+                hint="Preview needs the board to send video back to Insight; check the SSH connection.",
+            )
+        return client[0], base + channel
+
+    def _start_worker(self, session_ctx, session_id: str, pipeline: list) -> None:
+        directory = f"{WORKER_DIR}/{session_id}"
+        script = f"{directory}/worker.sh"
+        setup = f"mkdir -p {directory} && cat > {script} && chmod +x {script}"
+        session_ctx.transport.exec(["sh", "-c", setup], timeout=15, stdin=WORKER_SCRIPT.encode())
+        launch = f"setsid nohup {script} {session_id} {int(SESSION_TTL_SEC)} {' '.join(shlex.quote(part) for part in pipeline)} > {directory}/worker.log 2>&1 < /dev/null &"
+        session_ctx.transport.exec(["sh", "-c", launch], timeout=START_TIMEOUT_SEC)
+        check = f"sleep 3; cat {directory}/pipeline.pid 2>/dev/null; tail -c 800 {directory}/pipeline.log 2>/dev/null"
+        result = session_ctx.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC)
+        output = result.stdout.decode("utf-8", errors="replace")
+        if not output.strip().split("\n")[0].strip().isdigit():
+            self._stop_pipeline_dir(session_ctx, directory)
+            raise BoardError(
+                "command_failed",
+                "The preview pipeline did not start on the board.",
+                hint="Check that the camera is free and that the board's encoder accepts this mode.",
+                detail=output[-1000:],
+            )
+
+    def _stop_pipeline_dir(self, session_ctx, directory: str) -> None:
+        try:
+            session_ctx.transport.exec(["sh", "-c", f"rm -rf {directory}"], timeout=10)
+        except BoardError:
+            pass
+
+
+def _unknown_session() -> BoardError:
+    return BoardError(
+        "not_found",
+        "That preview session is not running.",
+        hint="Start the preview again; an older session cannot control a newer one.",
+    )
+
+
+def _require_previewable(item: dict, mode: dict) -> None:
+    if item["connection"] != "mipi":
+        raise _unsupported(
+            "Preview is available for MIPI cameras only in this release.",
+            "USB cameras are discovered and can be exported, but preview is not implemented for them yet.",
+        )
+    if item["availability"]["state"] == "in_use":
+        holders = item["availability"].get("reason") or "another process is using it"
+        raise BoardError(
+            "camera_in_use",
+            f"{item['name']} is already in use: {holders}",
+            hint="Stop the application using the camera, then start the preview.",
+        )
+    fmt = next((entry for entry in item["formats"] if entry["format"] == mode["format"]), None)
+    if fmt is None or not fmt["exportable"]:
+        raise _unsupported(
+            f"{mode['format']} cannot be previewed on this camera.",
+            "Pick a format Insight lists as usable with Core; preview uses the same encoder path.",
+        )
+    size = next(
+        (s for s in fmt["sizes"] if (s["width"], s["height"]) == (mode["width"], mode["height"])),
+        None,
+    )
+    if size is None:
+        raise _unsupported(
+            f"{mode['width']}x{mode['height']} is not a size this camera reported.",
+            "Pick a resolution from the list; other sizes fail to configure (see core#883).",
+        )
+
+
+def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
+    caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={int(mode['fps'])}/1"
+    return [
+        "gst-launch-1.0",
+        "-q",
+        "libcamerasrc",
+        f"camera-name={item['device']['camera_name']}",
+        "!",
+        caps,
+        "!",
+        "neatencoder",
+        "enc-type=h264",
+        f"enc-fmt={mode['format']}",
+        f"enc-width={mode['width']}",
+        f"enc-height={mode['height']}",
+        f"enc-bitrate={BITRATE_KBPS}",
+        f"enc-frame-rate={int(mode['fps'])}",
+        "!",
+        "h264parse",
+        "config-interval=1",
+        "!",
+        "rtph264pay",
+        "pt=96",
+        "config-interval=1",
+        "mtu=1200",
+        "!",
+        "udpsink",
+        f"host={host}",
+        f"port={port}",
+        "sync=false",
+    ]
+
+
+def _viewer_url(request_host: str, channel: int) -> str:
+    return (
+        f"https://{request_host}:{video_ui_port()}/static/viewer.html"
+        f"?mode=light&src={channel}&max_channels={VIDEO_CHANNELS}"
+    )

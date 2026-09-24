@@ -1,7 +1,11 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
+import { requestJson as requestBoardJson } from './peripherals/api.js'
+import { boardIndicator, normalizeError as normalizeBoardError } from './peripherals/model.js'
+
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
+const BoardPanel = lazy(() => import('./peripherals/BoardPanel.jsx'))
 
 const SOURCE_COUNT = 48
 const STREAMING_TRANSPORTS = [
@@ -729,6 +733,10 @@ export default function App() {
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
   const [devkitShellBusy, setDevkitShellBusy] = useState(false)
+  const [board, setBoard] = useState(null)
+  const [boardError, setBoardError] = useState(null)
+  const [boardLoading, setBoardLoading] = useState(true)
+  const [boardPanelOpen, setBoardPanelOpen] = useState(false)
   const [sysInfoOpen, setSysInfoOpen] = useState(false)
   const [sysInfo, setSysInfo] = useState(null)
   const [sysInfoLoading, setSysInfoLoading] = useState(false)
@@ -919,6 +927,10 @@ export default function App() {
 
   useEffect(() => {
     Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
+  }, [])
+
+  useEffect(() => {
+    loadBoard()
   }, [])
 
   useEffect(() => {
@@ -1583,6 +1595,32 @@ export default function App() {
     loadSysInfo()
   }
 
+  // One board target, shared by Peripherals and (later) Stats.
+  async function loadBoard() {
+    setBoardLoading(true)
+    try {
+      const data = await requestBoardJson('/api/board')
+      setBoard(data)
+      setBoardError(null)
+      return data
+    } catch (err) {
+      setBoardError(normalizeBoardError(err))
+      return null
+    } finally {
+      setBoardLoading(false)
+    }
+  }
+
+  function handleBoardChange(data) {
+    setBoard(data)
+    setBoardError(null)
+  }
+
+  function openBoardPanel() {
+    setBoardPanelOpen(true)
+    if (!board) loadBoard()
+  }
+
   function nextTourStep() {
     if (tourStep >= ONBOARDING_STEPS.length - 1) {
       closeTour(true)
@@ -1675,6 +1713,7 @@ export default function App() {
       : null
 
   const temperatureValue = metrics?.temperature_celsius_avg
+  const boardIndicatorInfo = boardIndicator(boardLoading && !board ? null : board)
 
   return (
     <div className="app-shell">
@@ -1687,6 +1726,19 @@ export default function App() {
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
         <div className="masthead-actions">
+          <button
+            type="button"
+            className="board-trigger"
+            onClick={openBoardPanel}
+            title={boardIndicatorInfo.title}
+            aria-haspopup="dialog"
+            aria-expanded={boardPanelOpen}
+          >
+            <span className="board-trigger-label">{boardIndicatorInfo.label}</span>
+            <span className={['sysinfo-pill', 'periph-pill', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}>
+              {boardIndicatorInfo.state.short}
+            </span>
+          </button>
           {devkitShellInfo?.configured && (
             <button
               type="button"
@@ -2071,7 +2123,15 @@ export default function App() {
 
         {tab === 'peripherals' && (
           <Suspense fallback={<section className="panel"><p className="hint">Loading peripherals...</p></section>}>
-            <PeripheralsView onError={setError} onStatus={setUploadStatus} />
+            <PeripheralsView
+              board={board}
+              boardLoading={boardLoading}
+              boardError={boardError}
+              onReloadBoard={loadBoard}
+              onOpenBoardPanel={openBoardPanel}
+              onError={setError}
+              onStatus={setUploadStatus}
+            />
           </Suspense>
         )}
 
@@ -2621,6 +2681,22 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {boardPanelOpen && (
+        <Suspense fallback={null}>
+          <BoardPanel
+            board={board}
+            loading={boardLoading}
+            error={boardError}
+            onBoardChange={handleBoardChange}
+            onRetry={loadBoard}
+            onReload={loadBoard}
+            onStatus={setUploadStatus}
+            onError={setError}
+            onClose={() => setBoardPanelOpen(false)}
+          />
+        </Suspense>
       )}
 
       {sysInfoOpen && (
