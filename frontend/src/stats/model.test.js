@@ -192,6 +192,9 @@ test('every backend failure becomes a title, a sentence and a place to fix it', 
   assert.equal(unreachable.board, true)
   assert.match(unreachable.hint, /Board panel/)
 
+  const hostKey = failureNotice({ error: 'host key changed', code: 'host_key_changed', presented_fingerprint: 'SHA256:new' })
+  assert.equal(hostKey.details.presented_fingerprint, 'SHA256:new')
+
   const stale = failureNotice({ error: 'Sentinel speaks schema 2', code: 'sentinel_schema' })
   assert.equal(stale.title, 'Sentinel and Insight speak different API versions')
   assert.equal(stale.board, false)

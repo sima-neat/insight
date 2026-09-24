@@ -239,6 +239,8 @@ export function failureNotice(error) {
     message: normalized.message,
     hint: normalized.hint || FALLBACK_HINTS[code] || '',
     detail: typeof normalized.details?.detail === 'string' ? normalized.details.detail : '',
+    // Kept so the Board card can still offer its host-key recovery from a Sentinel failure.
+    details: normalized.details || {},
     board: BOARD_PROBLEM_CODES.has(code),
     daemon: DAEMON_PROBLEM_CODES.has(code),
     // A board that is missing or unreachable will not answer the next poll either.
