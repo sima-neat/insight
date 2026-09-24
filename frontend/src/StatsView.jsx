@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import BoardTargetCard from './peripherals/BoardTargetCard.jsx'
 import { Callout, Pill } from './peripherals/ui.jsx'
 import {
   compareRuns,
   fetchActiveTrace,
-  fetchBoard,
   fetchHostMetrics,
   fetchMetrics,
   fetchRun,
@@ -57,7 +55,6 @@ import {
 } from './stats/model.js'
 import { Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
 
-const BOARD_DESCRIPTION = 'Sentinel telemetry is read from this board over its own API socket.'
 
 /**
  * Values that were read from a board that is no longer the selected one. They are kept
@@ -105,7 +102,7 @@ function DaemonPanel({ info, health, busy, installing, install, installStale, er
         {info.state === 'unknown' && (
           <span className="hint">
             {blocked
-              ? 'Sentinel cannot be checked until the board answers; the Board panel above says why.'
+              ? 'Sentinel cannot be checked until the board answers; the board control in the top right says why.'
               : 'Sentinel has not been checked on this board yet.'}
           </span>
         )}
@@ -702,9 +699,7 @@ function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
   )
 }
 
-export default function StatsView({ onError, onStatus }) {
-  const [board, setBoard] = useState(null)
-  const [boardError, setBoardError] = useState(null)
+export default function StatsView({ board = null, boardError = null, onOpenBoardPanel, onReloadBoard, onError, onStatus }) {
   const [state, setState] = useState(null)
   const [stateError, setStateError] = useState(null)
   const [stateBusy, setStateBusy] = useState(true)
@@ -795,17 +790,8 @@ export default function StatsView({ onError, onStatus }) {
     setHalted(false)
   }
 
-  async function loadBoard() {
-    try {
-      const data = await fetchBoard()
-      if (!mounted.current) return null
-      setBoard(data)
-      setBoardError(null)
-      return data
-    } catch (err) {
-      if (mounted.current) setBoardError(failureNotice(err, generation))
-      return null
-    }
+  function loadBoard() {
+    return onReloadBoard ? onReloadBoard() : null
   }
 
   async function loadState({ quiet = false } = {}) {
@@ -1019,13 +1005,18 @@ export default function StatsView({ onError, onStatus }) {
     }
   }
 
-  function handleBoardChange(data) {
-    setBoard(data)
-    // Another board means another daemon, other runs and another history: keep nothing.
+  // The masthead changes the board; this page follows it. Another board means another daemon,
+  // other runs and another history, so nothing read from the previous one is kept.
+  const seenGeneration = useRef(generation)
+  useEffect(() => {
+    if (seenGeneration.current === generation) return
+    const first = seenGeneration.current === null
+    seenGeneration.current = generation
+    if (first) return
     setState(null)
     reset()
     loadState({ quiet: true })
-  }
+  }, [generation])
 
   useEffect(() => {
     mounted.current = true
@@ -1097,27 +1088,19 @@ export default function StatsView({ onError, onStatus }) {
 
   return (
     <div className="periph-view stats-view">
-      <BoardTargetCard
-        board={board}
-        loading={stateBusy && !board}
-        error={boardError}
-        connectionError={boardProblem && boardProblem.code !== 'no_target' ? boardProblem : null}
-        description={BOARD_DESCRIPTION}
-        onBoardChange={handleBoardChange}
-        onRetry={() => {
-          loadBoard()
-          loadState()
-        }}
-        onReload={loadBoard}
-        onStatus={onStatus}
-        onError={onError}
-      />
+      {boardProblem && boardProblem.code !== 'no_target' && (
+        <Callout tone="danger" title={boardProblem.message || 'The board could not be reached'}>
+          {boardProblem.hint && <p>{boardProblem.hint}</p>}
+          <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
+        </Callout>
+      )}
 
       {stateBusy && !state && <p className="hint" role="status">Checking Sentinel on the board…</p>}
 
       {stateError?.code === 'no_target' ? (
         <Callout tone="info" title="Select a board to see its telemetry">
           <p>{stateError.message} {stateError.hint}</p>
+          <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Choose a board</button>
         </Callout>
       ) : (
         <>

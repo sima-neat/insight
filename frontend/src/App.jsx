@@ -2073,7 +2073,14 @@ export default function App() {
         {tab === 'visualizer' && (
           <div className="visualizer-layout">
             <Suspense fallback={<section className="panel"><p className="hint">Loading board telemetry...</p></section>}>
-              <StatsView onError={setError} onStatus={setUploadStatus} />
+              <StatsView
+                board={board}
+                boardError={boardError}
+                onOpenBoardPanel={openBoardPanel}
+                onReloadBoard={loadBoard}
+                onError={setError}
+                onStatus={setUploadStatus}
+              />
             </Suspense>
 
             <section className="panel">
