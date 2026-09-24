@@ -97,6 +97,36 @@ Use the Video Viewer to confirm:
 
 The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
 
+## Peripherals
+
+Peripherals lists the cameras connected to a board and prepares the camera input configuration for your application. It reads device information only. It does not capture frames, change sensor controls, or publish a stream, so the cameras remain available to your applications.
+
+### Selected board
+
+The page works on one selected board:
+
+- **Insight installed on the board**: Insight inspects the board it runs on.
+- **Neat SDK**: Insight uses the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
+- **Any installation**: select **Change board** and enter the board's address, SSH port, and user. Insight saves the selection; **Use default** returns to the on-board or SDK default.
+
+Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
+
+### Cameras and modes
+
+Select **Refresh** to scan the board. Insight finds MIPI cameras through libcamera and the media graph, and USB cameras through V4L2. For each camera it shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+
+| Level | Meaning |
+| --- | --- |
+| Verified | The mode has been validated with Core `CameraInput`. |
+| Advertised | The camera reports the mode, but it has not been validated with Core. It can still fail when capture starts. |
+| Not supported | Core `CameraInput` cannot use it. This includes USB cameras, raw sensor formats, and formats other than NV12. |
+
+To read a MIPI camera's modes, Refresh briefly opens the camera through libcamera without streaming. Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Export a configuration
+
+Choose a format, resolution, and frame rate, then copy or download the configuration as Python (`pyneat.CameraInputOptions`), C++, an Apps `config.yaml` `camera:` block, or JSON. Exports always name the camera explicitly. For USB cameras the export is a device descriptor, not a `CameraInput` configuration.
+
 ## Stats
 
 The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.
