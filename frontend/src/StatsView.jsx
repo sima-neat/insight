@@ -1174,6 +1174,26 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     return mounted.current && guard.current.current(ticket)
   }
 
+  // One guarded request: nothing is sent while `name` is already out, `busy` is flagged
+  // while it is, and its answer or failure is applied only while it is still fresh.
+  async function send(name, { busy, start, call, done, fail, supersede = false, action }) {
+    const ticket = guard.current.begin(name, { supersede })
+    if (!ticket) return
+    busy(true)
+    start?.()
+    try {
+      const data = await call()
+      // A follow-up read that `done` returns keeps the request busy until it lands.
+      const after = fresh(ticket) ? done(data, ticket) : null
+      if (after) await after
+    } catch (err) {
+      if (fresh(ticket)) fail(failureNotice(err, ticket.generation, { action }))
+    } finally {
+      guard.current.end(ticket)
+      if (fresh(ticket)) busy(false)
+    }
+  }
+
   function reset() {
     // Requests to the previous board were cancelled by the switch and will not clear
     // their own busy flags.
@@ -1208,65 +1228,48 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     return onReloadBoard ? onReloadBoard() : null
   }
 
-  async function loadState({ quiet = false } = {}) {
-    const ticket = guard.current.begin('state')
-    if (!ticket) return null
-    if (!quiet) setStateBusy(true)
-    try {
-      const data = await fetchSentinel()
-      if (!fresh(ticket)) return null
-      setState(data)
-      setStateError(null)
-      if (data.available) {
-        setHalted(false)
-        loadTraces({ quiet: true })
-        loadRuns()
-      }
-      return data
-    } catch (err) {
-      if (fresh(ticket)) {
+  function loadState({ quiet = false } = {}) {
+    return send('state', {
+      busy: quiet ? () => {} : setStateBusy,
+      call: fetchSentinel,
+      done: (data) => {
+        setState(data)
+        setStateError(null)
+        if (data.available) {
+          setHalted(false)
+          loadTraces({ quiet: true })
+          loadRuns()
+        }
+      },
+      fail: (notice) => {
         setState(null)
-        setStateError(failureNotice(err, ticket.generation))
+        setStateError(notice)
       }
-      return null
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket) && !quiet) setStateBusy(false)
-    }
+    })
   }
 
-  async function loadTraces({ quiet = false } = {}) {
-    const ticket = guard.current.begin('traces')
-    if (!ticket) return
-    if (!quiet) setTraceBusy(true)
-    try {
-      const data = await fetchActiveTrace()
-      if (!fresh(ticket)) return
-      setTraces(data)
-      setTraceError(null)
-    } catch (err) {
-      if (fresh(ticket)) setTraceError(failureNotice(err, ticket.generation))
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket) && !quiet) setTraceBusy(false)
-    }
+  function loadTraces({ quiet = false } = {}) {
+    return send('traces', {
+      busy: quiet ? () => {} : setTraceBusy,
+      call: fetchActiveTrace,
+      done: (data) => {
+        setTraces(data)
+        setTraceError(null)
+      },
+      fail: setTraceError
+    })
   }
 
-  async function loadRuns() {
-    const ticket = guard.current.begin('runs')
-    if (!ticket) return
-    setRunsBusy(true)
-    try {
-      const data = await fetchRuns()
-      if (!fresh(ticket)) return
-      setRuns(data)
-      setRunsError(null)
-    } catch (err) {
-      if (fresh(ticket)) setRunsError(failureNotice(err, ticket.generation))
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket)) setRunsBusy(false)
-    }
+  function loadRuns() {
+    return send('runs', {
+      busy: setRunsBusy,
+      call: fetchRuns,
+      done: (data) => {
+        setRuns(data)
+        setRunsError(null)
+      },
+      fail: setRunsError
+    })
   }
 
   async function loadHost() {
@@ -1319,29 +1322,27 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     }
   }
 
-  async function install() {
-    const ticket = guard.current.begin('install')
-    if (!ticket) return
-    setInstallBusy(true)
-    setInstallError(null)
-    setInstallResult(null)
-    try {
-      const data = await installSentinel()
-      if (!fresh(ticket)) return
-      setInstallResult(data)
-      onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
-      await loadState({ quiet: true })
-      if (fresh(ticket)) pollMetrics({ manual: true })
-    } catch (err) {
-      if (!fresh(ticket)) return
-      const notice = failureNotice(err, ticket.generation, { action: 'install' })
-      setInstallError(notice)
-      onError?.(notice.message)
-      loadState({ quiet: true })
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket)) setInstallBusy(false)
-    }
+  function install() {
+    return send('install', {
+      busy: setInstallBusy,
+      start: () => {
+        setInstallError(null)
+        setInstallResult(null)
+      },
+      call: installSentinel,
+      done: async (data, ticket) => {
+        setInstallResult(data)
+        onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
+        await loadState({ quiet: true })
+        if (fresh(ticket)) pollMetrics({ manual: true })
+      },
+      fail: (notice) => {
+        setInstallError(notice)
+        onError?.(notice.message)
+        loadState({ quiet: true })
+      },
+      action: 'install'
+    })
   }
 
   async function onStartTrace(event) {
@@ -1352,45 +1353,35 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       return
     }
     setFormError('')
-    const ticket = guard.current.begin('trace-action')
-    if (!ticket) return
-    setTraceBusy(true)
-    setTraceError(null)
-    try {
-      const data = await startTrace(result.body)
-      if (!fresh(ticket)) return
-      setTraces(data)
-      setForm({ name: '', note: '', tags: '' })
-      onStatus?.(`Recording trace “${result.body.name}”.`)
-      loadRuns()
-    } catch (err) {
-      if (fresh(ticket)) setTraceError(failureNotice(err, ticket.generation))
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket)) setTraceBusy(false)
-    }
+    await send('trace-action', {
+      busy: setTraceBusy,
+      start: () => setTraceError(null),
+      call: () => startTrace(result.body),
+      done: (data) => {
+        setTraces(data)
+        setForm({ name: '', note: '', tags: '' })
+        onStatus?.(`Recording trace “${result.body.name}”.`)
+        loadRuns()
+      },
+      fail: setTraceError
+    })
   }
 
   async function onStopTrace() {
     // Stop the board the shown trace was read from: a board switched since is refused
     // with 409 stale_snapshot instead of ending a trace on the board selected now.
     const traceGeneration = Number.isInteger(traces?.generation) ? traces.generation : generation
-    const ticket = guard.current.begin('trace-action')
-    if (!ticket) return
-    setTraceBusy(true)
-    setTraceError(null)
-    try {
-      await stopTrace(traceGeneration)
-      if (!fresh(ticket)) return
-      onStatus?.('Trace stopped and saved as a run.')
-      await loadTraces({ quiet: true })
-      loadRuns()
-    } catch (err) {
-      if (fresh(ticket)) setTraceError(failureNotice(err, ticket.generation))
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket)) setTraceBusy(false)
-    }
+    await send('trace-action', {
+      busy: setTraceBusy,
+      start: () => setTraceError(null),
+      call: () => stopTrace(traceGeneration),
+      done: async () => {
+        onStatus?.('Trace stopped and saved as a run.')
+        await loadTraces({ quiet: true })
+        loadRuns()
+      },
+      fail: setTraceError
+    })
   }
 
   // Opening a run replaces the read of the run opened before it, whose answer would
@@ -1404,40 +1395,29 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       setDetailBusy(false)
       return
     }
-    const ticket = guard.current.begin('run', { supersede: true })
-    setDetailBusy(true)
-    try {
-      const data = await fetchRun(ref)
-      if (!fresh(ticket)) return
-      setDetail(data)
-    } catch (err) {
-      if (fresh(ticket)) setDetailError(failureNotice(err, ticket.generation))
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket)) setDetailBusy(false)
-    }
+    await send('run', {
+      busy: setDetailBusy,
+      call: () => fetchRun(ref),
+      done: (data) => setDetail(data),
+      fail: setDetailError,
+      supersede: true
+    })
   }
 
-  async function runCompare() {
-    const ticket = guard.current.begin('compare')
-    if (!ticket) return
-    setCompareBusy(true)
-    setCompareError(null)
-    try {
-      const data = await compareRuns(selected)
-      if (fresh(ticket)) {
+  function runCompare() {
+    return send('compare', {
+      busy: setCompareBusy,
+      start: () => setCompareError(null),
+      call: () => compareRuns(selected),
+      done: (data) => {
         setCompare(data)
         setCompareOpen(true)
-      }
-    } catch (err) {
-      if (fresh(ticket)) {
+      },
+      fail: (notice) => {
         setCompare(null)
-        setCompareError(failureNotice(err, ticket.generation))
+        setCompareError(notice)
       }
-    } finally {
-      guard.current.end(ticket)
-      if (fresh(ticket)) setCompareBusy(false)
-    }
+    })
   }
 
   /**
