@@ -769,23 +769,6 @@ export function compareReady(refs) {
   return uncomparableRefs(list).length === 0
 }
 
-export function compareHint(refs) {
-  const list = refs || []
-  const count = list.length
-  if (count < MIN_COMPARE_RUNS) {
-    const wanted = MIN_COMPARE_RUNS - count
-    // Nothing selected yet is not "more" of anything, and two runs are not "1 run".
-    return count === 0
-      ? `Select ${MIN_COMPARE_RUNS} runs to compare; the first is the baseline.`
-      : `Select ${wanted} more run${wanted === 1 ? '' : 's'} to compare; the first is the baseline.`
-  }
-  const comparing = `Comparing ${count} runs against ${list[0]}.`
-  // At the limit the checkboxes go disabled; say why, since that hint is what they point at.
-  return count >= MAX_COMPARE_RUNS
-    ? `${comparing} Sentinel compares at most ${MAX_COMPARE_RUNS} runs at once, so clear one to select another.`
-    : comparing
-}
-
 /**
  * The comparison /api/sentinel/compare returns, as a table: one row per metric, one
  * column per run, the baseline marked.

@@ -19,7 +19,6 @@ import {
   compareCsv,
   compareCsvFilename,
   compareGroups,
-  compareHint,
   compareReady,
   compareTable,
   compareView,
@@ -582,7 +581,6 @@ export function RunsPanel({
                         checked={selected.includes(run.ref)}
                         onChange={() => onToggle(run.ref)}
                         disabled={!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS}
-                        aria-describedby="stats-compare-hint"
                       />
                       <span className="sr-only">Compare {run.label}</span>
                     </label>
@@ -619,7 +617,6 @@ export function RunsPanel({
             {selected.length > 0 && (
               <button type="button" className="btn-ghost" onClick={onClearCompare}>Clear selection</button>
             )}
-            <span className="hint" id="stats-compare-hint">{compareHint(selected)}</span>
           </div>
 
           {uncomparable.length > 0 && (

@@ -9,7 +9,6 @@ import {
   MAX_POLL_MS,
   NAME_LIMIT,
   POLL_MS,
-  compareHint,
   compareQuery,
   compareReady,
   compareTable,
@@ -377,8 +376,6 @@ test('compare selection is bounded and the query keeps the baseline first', () =
   assert.equal(compareReady(['a', 'b']), true)
   assert.equal(compareReady(full.concat('x')), false)
   assert.equal(compareQuery(['baseline', 'a/b']), '/api/sentinel/compare?runs=baseline%2Ca%2Fb')
-  assert.match(compareHint(['a']), /1 more run/)
-  assert.match(compareHint(['a', 'b']), /against a/)
 })
 
 test('the captured comparison is read as a table of metrics against the baseline', () => {
@@ -658,12 +655,6 @@ test('the daemon panel is busy during the first check, before any state exists',
   assert.equal(daemonBusy(), false)
 })
 
-test('the compare hint explains the limit that disables the checkboxes', () => {
-  const full = Array.from({ length: MAX_COMPARE_RUNS }, (_, i) => `r${i}`)
-  assert.match(compareHint(full), /at most 8 runs at once/)
-  assert.ok(!/at most/.test(compareHint(['a', 'b'])))
-})
-
 test('byte sizes read in the unit that fits', () => {
   assert.equal(formatBytes(0), '0 B')
   assert.equal(formatBytes(2048), '2 kB')
@@ -777,13 +768,6 @@ test('the empty and refused states Sentinel actually returns are read as such', 
   assert.equal(missing.available, false)
   assert.equal(missing.canInstall, true)
   assert.equal(failureNotice(missing.error).daemon, true)
-})
-
-test('the compare hint counts the runs it asks for', () => {
-  // The hint the Saved runs panel shows beside a disabled Compare on every first load.
-  assert.equal(compareHint([]), 'Select 2 runs to compare; the first is the baseline.')
-  assert.equal(compareHint(['a']), 'Select 1 more run to compare; the first is the baseline.')
-  assert.match(compareHint(['a', 'b']), /^Comparing 2 runs against a\./)
 })
 
 test('a run whose name holds a comma is named, not sent into a 404', () => {
