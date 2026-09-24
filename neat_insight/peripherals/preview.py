@@ -70,6 +70,7 @@ done
 # pipeline that ran and then stopped normally has nothing to explain.
 if [ $(( $(date +%s) - started )) -lt 15 ]; then
     tail -c 800 "$dir/pipeline.log" > "{worker_dir}/$sid.log" 2>/dev/null || true
+    [ -s "{worker_dir}/$sid.log" ] || rm -f "{worker_dir}/$sid.log"
 fi
 rm -rf "$dir"
 """.format(worker_dir=WORKER_DIR)
