@@ -928,7 +928,7 @@ function HostPanel({ model, error, updatedAt, busy, now }) {
   )
 }
 
-export default function StatsView({ board = null, boardError = null, onOpenBoardPanel, onReloadBoard, onError, onStatus }) {
+export default function StatsView({ board = null, boardError = null, onOpenBoardPanel, onReloadBoard, onError, onStatus, hostExtra = null }) {
   const [state, setState] = useState(null)
   const [stateError, setStateError] = useState(null)
   const [stateBusy, setStateBusy] = useState(true)
@@ -1489,6 +1489,9 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
           busy={hostBusy}
           now={now}
         />
+        {/* The profiling timeline charts what arrives on Insight's metrics port, which today is
+            Insight's own host readings (topic "sys"), so it belongs with the host, not the board. */}
+        {hostExtra}
       </div>
     </div>
   )

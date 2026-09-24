@@ -2080,48 +2080,49 @@ export default function App() {
                 onReloadBoard={loadBoard}
                 onError={setError}
                 onStatus={setUploadStatus}
+                hostExtra={(
+                  <section className="panel">
+                    <div className="panel-topbar">
+                      <div>
+                        <h2>NEAT Profiling Timeline</h2>
+                        <p className="section-note">Select metrics to visualize profiling trends.</p>
+                      </div>
+                    </div>
+  
+                    <div className="profile-filter-bar">
+                      {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
+                      {availableProfileKeys.map((key) => {
+                        const selected = selectedProfileSeries.includes(key)
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={selected ? 'profile-chip active' : 'profile-chip'}
+                            onClick={() => {
+                              setSelectedProfileSeries((prev) => {
+                                if (prev.includes(key)) return prev.filter((item) => item !== key)
+                                return [...prev, key].slice(0, 6)
+                              })
+                            }}
+                          >
+                            {key}
+                          </button>
+                        )
+                      })}
+                    </div>
+  
+                    <div className="series-grid">
+                      {selectedProfileSeries.length === 0 && (
+                        <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
+                  )}
+                  {selectedProfileSeries.map((key) => (
+                    <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
+                  ))}
+                </div>
+              </section>
+                )}
               />
             </Suspense>
-
-            <section className="panel">
-              <div className="panel-topbar">
-                <div>
-                  <h2>NEAT Profiling Timeline</h2>
-                  <p className="section-note">Select metrics to visualize profiling trends.</p>
-                </div>
-              </div>
-
-              <div className="profile-filter-bar">
-                {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
-                {availableProfileKeys.map((key) => {
-                  const selected = selectedProfileSeries.includes(key)
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      className={selected ? 'profile-chip active' : 'profile-chip'}
-                      onClick={() => {
-                        setSelectedProfileSeries((prev) => {
-                          if (prev.includes(key)) return prev.filter((item) => item !== key)
-                          return [...prev, key].slice(0, 6)
-                        })
-                      }}
-                    >
-                      {key}
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="series-grid">
-                {selectedProfileSeries.length === 0 && (
-                  <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
-                )}
-                {selectedProfileSeries.map((key) => (
-                  <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
-                ))}
-              </div>
-            </section>
           </div>
         )}
 
