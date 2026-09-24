@@ -10,7 +10,7 @@ test.describe.serial('folder navigation', () => {
   let tree
 
   const SLOT = Number.parseInt(process.env.INSIGHT_TEST_SLOT || '48', 10) // a high slot, unlikely to be in use on a dev instance
-  if (!Number.isInteger(SLOT) || SLOT < 1) throw new Error('INSIGHT_TEST_SLOT must be a positive integer')
+  if (!Number.isInteger(SLOT) || SLOT < 1 || SLOT > 48) throw new Error('INSIGHT_TEST_SLOT must be an integer between 1 and 48')
 
   const lib = {
     folder: (page, path) => page.locator(`[data-testid="library-folder"][data-path="${path}"]`),
@@ -54,6 +54,7 @@ test.describe.serial('folder navigation', () => {
   })
 
   async function navigateAssignTo(page, folderPath) {
+    if (!folderPath) return
     const segments = folderPath.split('/').reduce((acc, seg) => [...acc, acc.length ? `${acc.at(-1)}/${seg}` : seg], [])
     for (const segment of segments) await assign.folder(page, segment).click()
   }
@@ -82,6 +83,10 @@ test.describe.serial('folder navigation', () => {
     const readme = lib.file(page, `${tree.name}/readme.md`)
     await expect(readme).toHaveAttribute('data-streamable', 'false')
     await expect(readme).toHaveClass(/unsupported/)
+    const box = readme.getByRole('checkbox')
+    await box.check()
+    await expect(box).toBeChecked()
+    await box.uncheck()
   })
 
   test('2. entering three levels deep updates the breadcrumb and greys out notes.txt', async ({ page }) => {

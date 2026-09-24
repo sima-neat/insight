@@ -35,7 +35,8 @@ export default function FolderBrowser({
   const query = (filter || '').trim()
   const listing = listFolder(tree, folder)
   const visibleFiles = showUnsupported ? listing.files : streamableOnly(listing.files)
-  const matches = query ? searchFolder(tree, folder, query) : []
+  const found = query ? searchFolder(tree, folder, query) : []
+  const matches = showUnsupported ? found : streamableOnly(found)
   const folderLabel = folder ? folder.split('/').pop() : 'Media Root'
   const countText = query
     ? `${plural(matches.length, 'match', 'matches')} in ${folderLabel}`
