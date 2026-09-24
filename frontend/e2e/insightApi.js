@@ -13,8 +13,12 @@ export async function sourceByIndex(request, index) {
 export async function releaseTestSources(request, folderName) {
   for (const src of await sources(request)) {
     if (!(src.file || '').startsWith(`${folderName}/`)) continue
-    if (src.state === 'playing') await request.post('/api/mediasrc/stop', { data: { index: src.index } })
-    await request.post('/api/mediasrc/assign', { data: { index: src.index, file: '', transport: src.transport || 'rtsp' } })
+    if (src.state === 'playing') {
+      const stopped = await request.post('/api/mediasrc/stop', { data: { index: src.index } })
+      if (!stopped.ok()) throw new Error(`POST /api/mediasrc/stop for src${src.index} failed: ${stopped.status()}`)
+    }
+    const cleared = await request.post('/api/mediasrc/assign', { data: { index: src.index, file: '', transport: src.transport || 'rtsp' } })
+    if (!cleared.ok()) throw new Error(`POST /api/mediasrc/assign for src${src.index} failed: ${cleared.status()}`)
   }
 }
 

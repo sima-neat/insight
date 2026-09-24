@@ -16,6 +16,8 @@ export default defineConfig({
     baseURL: process.env.INSIGHT_BASE_URL || 'https://127.0.0.1:19900',
     // A desktop-sized viewport: at 1280 px the Streaming Sources rows overflow their panel and the
     // Start/Copy buttons end up under the preview panel, which intercepts clicks (seen in CI).
+    // The 1280 px overlap is a responsive-layout defect of the Streaming Sources panel (rows wider
+    // than their column); tracked separately.
     viewport: { width: 1920, height: 1080 },
     ignoreHTTPSErrors: true,
     trace: 'retain-on-failure',
