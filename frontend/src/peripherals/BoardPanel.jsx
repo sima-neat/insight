@@ -69,7 +69,6 @@ export default function BoardPanel({
     >
       <div className="board-panel-card" ref={cardRef}>
         <header className="board-panel-head">
-          {/* One heading. The card below used to repeat "Board" immediately under this. */}
           <h3>Selected board</h3>
           <button type="button" ref={closeRef} onClick={onClose} aria-label="Close board settings">Close</button>
         </header>
