@@ -104,6 +104,8 @@ class PreviewManagerTests(unittest.TestCase):
         session, started = self.start()
         self.assertEqual((started["camera_id"], started["state"], started["channel"]), (CAMERA_ID, "live", 3))
         self.assertIn("src=3", started["viewer_url"])
+        # The pane shows video only: without embed=1 the iframe carries the viewer's whole toolbar.
+        self.assertIn("embed=1", started["viewer_url"])
         self.assertTrue(started["viewer_url"].startswith("https://insight.local:8081/static/viewer.html"))
         launched = "\n".join(session.transport.commands())
         self.assertIn(f"camera-name={IMX477}", launched)

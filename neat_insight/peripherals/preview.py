@@ -542,7 +542,9 @@ def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
 
 
 def _viewer_url(request_host: str, channel: int) -> str:
+    # embed=1 asks the viewer for the bare video surface: no page controls, no channel banner, no
+    # settings. There is one camera here and Insight chose its channel, so none of that can be acted on.
     return (
         f"https://{request_host}:{video_ui_port()}/static/viewer.html"
-        f"?mode=light&src={channel}&max_channels={VIDEO_CHANNELS}"
+        f"?mode=light&src={channel}&max_channels={VIDEO_CHANNELS}&embed=1"
     )
