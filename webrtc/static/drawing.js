@@ -376,6 +376,8 @@ window.drawStrategies = {
     const strokeColor = settings.type.poseStrokeColor || 'aqua';
     const fillColor = settings.type.poseFillColor || 'aqua';
     const font = settings.type.poseFont || FONT;
+    const showKeypoints = settings.type.showKeypoints !== false;
+    const showKeypointLabels = settings.type.showKeypointLabels === true;
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
@@ -399,10 +401,14 @@ window.drawStrategies = {
 
       pose.keypoints.forEach(kp => {
         if (kp.confidence > 0.3) {
-          ctx.beginPath();
-          ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
+          if (showKeypoints) {
+            ctx.beginPath();
+            ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          if (showKeypointLabels) {
+            ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
+          }
         }
       });
     });

@@ -33,6 +33,7 @@ function recordingContext() {
     strokes: [],
     fills: [],
     boxes: [],
+    texts: [],
     save() { stack.push({ lineDash: [...this.lineDash], globalAlpha: this.globalAlpha }); },
     restore() { Object.assign(this, stack.pop()); },
     setLineDash(value) { this.lineDash = [...value]; },
@@ -46,7 +47,7 @@ function recordingContext() {
     fill() { this.fills.push(this.fillStyle); },
     fillRect() {},
     measureText(text) { return { width: text.length * 7 }; },
-    fillText() {},
+    fillText(text) { this.texts.push(text); },
   };
 }
 
@@ -94,6 +95,30 @@ test("drawing restores canvas state even when a strategy throws", (t) => {
   assert.equal(warn.mock.callCount(), 1);
   assert.deepEqual(ctx.lineDash, []);
   assert.equal(ctx.globalAlpha, 1);
+});
+
+test("pose landmark names are opt-in while joint markers remain configurable", (t) => {
+  loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const pose = {
+    type: "pose-estimation",
+    data: { poses: [{ keypoints: [{ name: "nose", x: 20, y: 20, confidence: 1 }] }] },
+  };
+
+  const clean = recordingContext();
+  drawMetadata(clean, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: true, showKeypointLabels: false } },
+  });
+  assert.equal(clean.fills.length, 1);
+  assert.deepEqual(clean.texts, []);
+
+  const labeled = recordingContext();
+  drawMetadata(labeled, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: false, showKeypointLabels: true } },
+  });
+  assert.equal(labeled.fills.length, 0);
+  assert.deepEqual(labeled.texts, ["nose"]);
 });
 
 test("a malformed pose does not stop tracking or later frames", (t) => {

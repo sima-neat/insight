@@ -35,7 +35,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const objectDetectionSettings = document.getElementById("objectDetectionSettings");
   const segmentationSettings = document.getElementById("segmentationSettings");
   const trackingSettings = document.getElementById("trackingSettings");
+  const poseEstimationSettings = document.getElementById("poseEstimationSettings");
   const metadataNoSettings = document.getElementById("metadataNoSettings");
+  const poseKeypointsToggle = document.getElementById("togglePoseKeypoints");
+  const poseKeypointLabelsToggle = document.getElementById("togglePoseKeypointLabels");
   const roiToggle = document.getElementById("toggleRoiVisibility");
   const roiFilteringToggle = document.getElementById("toggleRoiFiltering");
   const trackHistoryToggle = document.getElementById("toggleTrackHistory");
@@ -184,6 +187,8 @@ document.addEventListener("DOMContentLoaded", () => {
       trailLength: parseInt(trackTrailLengthSlider.value, 10),
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
+    settings.types["pose-estimation"].showKeypoints = poseKeypointsToggle.checked;
+    settings.types["pose-estimation"].showKeypointLabels = poseKeypointLabelsToggle.checked;
     settingsApi.metadataTypes.forEach(({ value }) => {
       settings.types[value].visible = metadataVisibilityDraft[value] !== false;
     });
@@ -241,8 +246,10 @@ document.addEventListener("DOMContentLoaded", () => {
     objectDetectionSettings.style.display = selectedType === "object-detection" ? "flex" : "none";
     segmentationSettings.style.display = selectedType === "segmentation" ? "flex" : "none";
     trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
+    poseEstimationSettings.style.display = selectedType === "pose-estimation" ? "flex" : "none";
     metadataNoSettings.style.display =
-      selectedType !== "object-detection" && selectedType !== "segmentation" && selectedType !== "tracking" ? "flex" : "none";
+      selectedType !== "object-detection" && selectedType !== "segmentation" &&
+      selectedType !== "tracking" && selectedType !== "pose-estimation" ? "flex" : "none";
   }
 
   function updateTrackTrailLengthDisplay() {
@@ -430,6 +437,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const objectDetectionTypeSettings = settings.types["object-detection"];
     const segmentationTypeSettings = settings.types.segmentation;
     const trackingTypeSettings = settings.types.tracking;
+    const poseTypeSettings = settings.types["pose-estimation"];
     const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
     const blazePose3DSettings = settings.auxiliary["blazepose-3d"]
       || settingsApi.defaults.auxiliary["blazepose-3d"];
@@ -451,6 +459,8 @@ document.addEventListener("DOMContentLoaded", () => {
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
+    poseKeypointsToggle.checked = poseTypeSettings.showKeypoints !== false;
+    poseKeypointLabelsToggle.checked = poseTypeSettings.showKeypointLabels === true;
     blazePose3DPanelToggle.checked = blazePose3DSettings.enabled !== false;
     blazePose3DPanelMode.value = blazePose3DSettings.panelMode || "compact";
     blazePose3DYawSlider.value = blazePose3DSettings.yawDegrees ?? -45;

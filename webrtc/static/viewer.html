@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="/static/viewer.css">
+  <link rel="stylesheet" href="/static/viewer.css?v=9">
   <link rel="stylesheet" href="/static/pagination.css">
 </head>
 <body>
@@ -110,6 +110,21 @@
                   </td>
                 </tr>
               </table>
+            </div>
+            <div id="poseEstimationSettings" class="metadata-type-section">
+              <table class="filter-table">
+                <tr>
+                  <td><label for="togglePoseKeypoints">Show Joint Markers</label></td>
+                  <td><input type="checkbox" id="togglePoseKeypoints" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="togglePoseKeypointLabels">Show Landmark Names</label></td>
+                  <td><input type="checkbox" id="togglePoseKeypointLabels"></td>
+                </tr>
+              </table>
+              <p class="settings-field-note">
+                Landmark names are off by default to keep the video overlay readable.
+              </p>
             </div>
             <div id="metadataNoSettings" class="metadata-type-section metadata-empty-state">
               No settings for this metadata type yet.
@@ -227,14 +242,14 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
-  <script src="/static/js/viewer-settings-resolver.js?v=8"></script>
-  <script src="/static/drawing.js"></script>
-  <script src="/static/viewer-react.js?v=8"></script>
-  <link rel="stylesheet" href="/static/css/settings.css?v=8">
+  <script src="/static/js/viewer-settings-resolver.js?v=9"></script>
+  <script src="/static/drawing.js?v=9"></script>
+  <script src="/static/viewer-react.js?v=9"></script>
+  <link rel="stylesheet" href="/static/css/settings.css?v=9">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script type="module" src="/static/js/roi.js"></script>
-  <script src="/static/settings.js?v=8"></script>
+  <script src="/static/settings.js?v=9"></script>
 
 </body>
 </html>
