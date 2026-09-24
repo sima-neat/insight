@@ -3,7 +3,7 @@ import PreviewPane from './PreviewPane.jsx'
 import {
   availabilityInfo,
   blockedFormatSummary,
-  cameraDeviceId,
+  cameraSubtitle,
   cameraSummaryLine,
   deviceRows,
   formatOptions,
@@ -15,10 +15,7 @@ import {
 } from './model.js'
 import { Callout, ErrorNotice, Pill, SupportLinks } from './ui.jsx'
 
-export function cameraSubtitle(camera) {
-  const deviceId = cameraDeviceId(camera)
-  return [camera.model, deviceId !== camera.name && deviceId].filter(Boolean).join(' · ')
-}
+export { cameraSubtitle }
 
 function BlockedFormats({ options }) {
   const summary = blockedFormatSummary(options)

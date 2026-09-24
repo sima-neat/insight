@@ -8,6 +8,7 @@ import {
   blockedFormatSummary,
   boardIndicator,
   cameraDeviceId,
+  cameraSubtitle,
   cameraSummaryLine,
   changeSummary,
   defaultTargetText,
@@ -260,6 +261,15 @@ test('identity rows list only known device fields', () => {
   assert.equal('Serial' in rows, false)
   assert.equal('Media device' in rows, false)
   assert.equal(Object.fromEntries(deviceRows(imx568))['Name source'], 'media-graph')
+})
+
+test('a subtitle never repeats what the name already says', () => {
+  // "imx477 5-001a" carries the model, so the subtitle beneath it must not read "imx477" again.
+  assert.equal(cameraSubtitle(imx477), '')
+  // The USB camera reports its product string as both name and model, so only the device id is news.
+  assert.equal(cameraSubtitle(usb), usb.device.by_id)
+  assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
+  assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
 })
 
 test('issues sort by severity and changes read as sentences', () => {

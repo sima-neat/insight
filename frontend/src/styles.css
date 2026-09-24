@@ -3746,33 +3746,7 @@ button:disabled {
   background: transparent;
 }
 
-/* Peripherals: board summary line and device sub-tabs */
-.periph-board-line {
-  margin: 10px 0 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.periph-link-btn {
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-weight: 700;
-  color: var(--accent-alt);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.periph-link-btn:focus-visible {
-  outline: 0;
-  border-radius: 4px;
-  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
-}
-
+/* Peripherals: device sub-tabs */
 .periph-kind-layout {
   margin-top: 14px;
   display: grid;

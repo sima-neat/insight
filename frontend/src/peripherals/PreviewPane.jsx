@@ -56,10 +56,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
 
       {!running && (
         <>
-          <p className="hint">
-            Starts capture on the board and publishes it to a viewer channel. While it runs the camera is held open, so
-            applications on the board cannot use it.
-          </p>
+          {/* No explanation before the fact: the running state already says the camera is held, where it is true. */}
           <div className="periph-actions">
             <button
               type="button"

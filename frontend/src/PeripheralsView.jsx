@@ -5,11 +5,9 @@ import {
   CONNECTION_ERROR_CODES,
   PREVIEW_IDLE,
   availabilityInfo,
-  boardIndicator,
   changeSummary,
   countLabel,
   deviceTabs,
-  formatDuration,
   formatRelativeTime,
   groupCameras,
   heartbeatDelay,
@@ -204,7 +202,6 @@ export default function PeripheralsView({
   const exportKey = integrationOpen && selection && !stale
     ? `${snapshot.generation}|${snapshot.scanned_at}|${selection.id}|${modeLabel(selection)}|${exportAttempt}`
     : ''
-  const boardSummary = boardIndicator(boardLoading && !board ? null : board)
 
   useEffect(() => {
     previewRef.current = preview
@@ -494,12 +491,6 @@ export default function PeripheralsView({
           </button>
         </div>
 
-        <p className="periph-board-line">
-          Board <strong>{boardSummary.label}</strong>
-          {' '}<Pill tone={boardSummary.state.tone}>{boardSummary.state.short}</Pill>{' '}
-          <button type="button" className="periph-link-btn" onClick={onOpenBoardPanel}>Board settings</button>
-        </p>
-
         <p className="sr-only" role="status">
           {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh before exporting.' : ''}
         </p>
@@ -507,9 +498,9 @@ export default function PeripheralsView({
         {scannedAt && (
           <p className="periph-meta">
             Scanned <time dateTime={scannedAt} title={new Date(scannedAt).toLocaleString()}>{formatRelativeTime(scannedAt, now)}</time>
-            {' '}from <strong>{scannedLabel}</strong>
-            {snapshot.board?.hostname ? ` (${snapshot.board.hostname})` : ''}
-            {Number.isFinite(snapshot.scan_ms) ? ` in ${formatDuration(snapshot.scan_ms)}` : ''}.
+            {/* The board is named only when it is not the one selected now; the masthead shows that one, and
+                a mismatch already raises the "Board changed" callout below. */}
+            {stale ? <> from <strong>{scannedLabel}</strong></> : ''}.
           </p>
         )}
         {stale && (

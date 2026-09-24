@@ -27,10 +27,7 @@ INTERNALS_244 = _link("internals", 244)
 ADVERTISED_REASON = (
     "Modes are enumerated by libcamera but not validated with Core; advertised modes can fail, see core#883."
 )
-VERIFIED_REASON = (
-    "Modes marked verified are validated with Core CameraInput; the rest are advertised by libcamera only "
-    "(core#883)."
-)
+VERIFIED_REASON = "Verified modes are validated with Core CameraInput; the rest are advertised by libcamera only."
 NV12_ONLY_REASON = (
     "Core CameraInput is exercised with NV12 only: the neatcamerabridge zero-copy path repacks NV12 "
     "and the Apps example rejects other formats."
@@ -260,7 +257,8 @@ def _mipi_support(model: str, libcamerasrc: Optional[bool]) -> dict:
     if libcamerasrc is None:
         return _support("advertised", UNCHECKED_LIBCAMERASRC_REASON, [CORE_883])
     if compat.has_model(model):
-        return _support("verified", f"{model}: {VERIFIED_REASON}", [CORE_883])
+        # No model prefix: this sits directly under the camera's own heading.
+        return _support("verified", VERIFIED_REASON, [CORE_883])
     return _support("advertised", ADVERTISED_REASON, [CORE_883])
 
 

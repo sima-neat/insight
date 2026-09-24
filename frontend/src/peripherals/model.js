@@ -154,6 +154,13 @@ export function cameraDeviceId(camera) {
   return device.camera_name || device.by_id || device.video_node || ''
 }
 
+export function cameraSubtitle(camera) {
+  const deviceId = cameraDeviceId(camera)
+  // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
+  const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
+  return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
+}
+
 export function deviceRows(camera) {
   const rows = [['Connection', connectionLabel(camera.connection)]]
   if (camera.model) rows.push(['Model', camera.model])
