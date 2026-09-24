@@ -23,6 +23,12 @@ def _no_store(response):
     return response
 
 
+@sentinel_bp.errorhandler(BoardError)
+def _board_error(err: BoardError):
+    """Every route answers a board or Sentinel failure in the board error shape, with its status."""
+    return err.to_dict(), err.status
+
+
 class _Context:
     """The selected board, its cache key, and a client for its Sentinel daemon."""
 
@@ -154,119 +160,95 @@ def _passthrough(body: dict) -> dict:
 @sentinel_bp.get("/api/sentinel")
 def get_sentinel():
     """Return Sentinel's availability, version and daemon health for the selected board."""
-    try:
-        context = _Context()
-        daemon = context.daemon()
-        problem = install.describe(daemon)
-        health, state, error = None, "ready", None
-        if problem:
-            state, error = problem["code"].replace("sentinel_", ""), dict(problem)
-        else:
-            try:
-                health = context.client.health()
-            except SentinelError as err:
-                state, error = "error", err.to_dict()
-        return context.payload(
-            available=health is not None,
-            schema=SCHEMA,
-            version=(health or {}).get("version"),
-            status={"state": state, "error": error},
-            daemon=daemon,
-            health=_passthrough(health) if health else None,
-        )
-    except BoardError as err:
-        return err.to_dict(), err.status
+    context = _Context()
+    daemon = context.daemon()
+    problem = install.describe(daemon)
+    health, state, error = None, "ready", None
+    if problem:
+        state, error = problem["code"].replace("sentinel_", ""), dict(problem)
+    else:
+        try:
+            health = context.client.health()
+        except SentinelError as err:
+            state, error = "error", err.to_dict()
+    return context.payload(
+        available=health is not None,
+        schema=SCHEMA,
+        version=(health or {}).get("version"),
+        status={"state": state, "error": error},
+        daemon=daemon,
+        health=_passthrough(health) if health else None,
+    )
 
 
 # API: install Sentinel on the selected board.
 @sentinel_bp.post("/api/sentinel/install")
 def install_sentinel():
     """Run `sima-cli neat install sentinel` on the board; refuses when Sentinel is already healthy."""
-    try:
-        context = _Context()
-        result = install.install(context.session)
-        cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
-        return context.payload(daemon=result["status"], log=result["log"])
-    except BoardError as err:
-        return err.to_dict(), err.status
+    context = _Context()
+    result = install.install(context.session)
+    cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
+    return context.payload(daemon=result["status"], log=result["log"])
 
 
 # API: read the board's current telemetry.
 @sentinel_bp.get("/api/sentinel/metrics")
 def get_metrics():
     """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
-    try:
-        limit = _history_limit(request.args.get("history"))
-        context = _Context()
-        latest = context.client.latest()
-        history = cache.add_sample(context.key, latest.get("sample"))
-        return context.payload(**metric_view.build(context.definitions(), latest, history, limit))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    limit = _history_limit(request.args.get("history"))
+    context = _Context()
+    latest = context.client.latest()
+    history = cache.add_sample(context.key, latest.get("sample"))
+    return context.payload(**metric_view.build(context.definitions(), latest, history, limit))
 
 
 # API: report the trace Sentinel is recording, if any.
 @sentinel_bp.get("/api/sentinel/traces")
 def get_traces():
     """Return the active trace and its running summary, or nulls when nothing is being recorded."""
-    try:
-        context = _Context()
-        return context.payload(sentinel=_passthrough(context.client.active_trace()))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    context = _Context()
+    return context.payload(sentinel=_passthrough(context.client.active_trace()))
 
 
 # API: start a named trace on the selected board.
 @sentinel_bp.post("/api/sentinel/traces")
 def start_trace():
     """Start recording a named trace; 409 when another trace is active or the name is taken."""
-    try:
-        wanted = _trace_request(request.get_json(silent=True))
-        context = _Context()
-        started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
-        return context.payload(sentinel=_passthrough(started))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    wanted = _trace_request(request.get_json(silent=True))
+    context = _Context()
+    started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
+    return context.payload(sentinel=_passthrough(started))
 
 
 # API: stop the active trace on the selected board.
 @sentinel_bp.post("/api/sentinel/traces/stop")
 def stop_trace():
     """Stop and persist the active trace; 409 when no trace is active or the board changed since `generation`."""
-    try:
-        expected = _expected_generation(request.args.get("generation"), read="the active trace")
-        context = _Context()
-        _same_board(
-            context,
-            expected,
-            "The selected board changed since this trace was read, so no trace was stopped.",
-            "Read the active trace of the board selected now, then stop it again.",
-        )
-        return context.payload(sentinel=_passthrough(context.client.stop_trace()))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    expected = _expected_generation(request.args.get("generation"), read="the active trace")
+    context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since this trace was read, so no trace was stopped.",
+        "Read the active trace of the board selected now, then stop it again.",
+    )
+    return context.payload(sentinel=_passthrough(context.client.stop_trace()))
 
 
 # API: list the runs saved on the selected board.
 @sentinel_bp.get("/api/sentinel/runs")
 def get_runs():
     """Return summaries of the recording and completed runs Sentinel holds."""
-    try:
-        context = _Context()
-        return context.payload(sentinel=_passthrough(context.client.runs()))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    context = _Context()
+    return context.payload(sentinel=_passthrough(context.client.runs()))
 
 
 # API: read one saved run.
 @sentinel_bp.get("/api/sentinel/runs/<path:run_id>")
 def get_run(run_id):
     """Return one run by name or id, with its metadata and samples; 404 when it is unknown."""
-    try:
-        context = _Context()
-        return context.payload(sentinel=_passthrough(context.client.run(run_id)))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    context = _Context()
+    return context.payload(sentinel=_passthrough(context.client.run(run_id)))
 
 
 # API: delete one saved run.
@@ -278,24 +260,18 @@ def delete_run(run_id):
     changed since `generation`. The daemon's API has no delete, so this runs
     `simaai-sentinel runs delete` on the board with the id the daemon reported.
     """
-    try:
-        expected = _expected_generation(request.args.get("generation"))
-        context = _Context()
-        _same_board(context, expected)
-        deleted, listing = saved_runs.delete(context.session, context.client, run_id)
-        return context.payload(deleted=deleted, sentinel=_passthrough(listing))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    expected = _expected_generation(request.args.get("generation"))
+    context = _Context()
+    _same_board(context, expected)
+    deleted, listing = saved_runs.delete(context.session, context.client, run_id)
+    return context.payload(deleted=deleted, sentinel=_passthrough(listing))
 
 
 # API: compare saved runs against a baseline.
 @sentinel_bp.get("/api/sentinel/compare")
 def compare_runs():
     """Compare two or more runs, the first as baseline; `raw=1` adds timestamped samples."""
-    try:
-        runs = _compare_runs(request.args.get("runs"))
-        raw = request.args.get("raw") in ("1", "true", "yes")
-        context = _Context()
-        return context.payload(sentinel=_passthrough(context.client.compare(runs, raw)))
-    except BoardError as err:
-        return err.to_dict(), err.status
+    runs = _compare_runs(request.args.get("runs"))
+    raw = request.args.get("raw") in ("1", "true", "yes")
+    context = _Context()
+    return context.payload(sentinel=_passthrough(context.client.compare(runs, raw)))
