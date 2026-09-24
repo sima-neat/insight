@@ -4269,20 +4269,23 @@ button:disabled {
 }
 
 .stats-host-rows {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 8px 28px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
+/* Each reading in its own box, as the board's metric cards are: label, value, bar, detail. */
 .stats-host-rows li {
   min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px 10px;
 }
 
 .stats-host-label {
@@ -4293,7 +4296,7 @@ button:disabled {
 
 .stats-host-value {
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -4302,7 +4305,6 @@ button:disabled {
 }
 
 .stats-host-bar {
-  flex: 1 0 100%;
   display: block;
   height: 4px;
   border-radius: 999px;

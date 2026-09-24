@@ -854,12 +854,12 @@ function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
             <li key={row.key}>
               <span className="stats-host-label">{row.label}</span>
               <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
-              {row.detail && <span className="hint">{row.detail}</span>}
               {row.percent !== null && (
                 <span className="stats-host-bar" aria-hidden="true">
                   <span style={{ width: `${row.percent}%` }} />
                 </span>
               )}
+              {row.detail && <span className="hint">{row.detail}</span>}
             </li>
           ))}
         </ul>
