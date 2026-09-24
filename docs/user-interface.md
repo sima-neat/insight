@@ -155,7 +155,7 @@ A trace records every sample around a workload. Name it, optionally add a note a
 
 Select two to eight runs and **Compare selected** to put the metrics in rows and the runs in columns. Sentinel measures the comparison against one baseline run, which is marked in the header along with each run's note; every other cell shows that metric's mean over the run with its percentage change against the baseline beside it. A change too small to print shows as “<0.01%” rather than as no change at all.
 
-Where a cell shows “—” in place of a change, Sentinel withheld one, and the table says which of its reasons applies rather than leaving one em dash to stand for all of them. A list under the table counts each reason, and every “—” carries the same sentence for a pointer or a screen reader. The reasons are:
+Where a cell shows “—” in place of a change, Sentinel withheld one, and the table says which of its reasons applies rather than leaving one em dash to stand for all of them. Hover, tab to or tap a “—” to see its reason beside it; a screen reader reads the reason with the dash. The reasons are:
 
 - **Sentinel publishes no change for it.** Run totals — duration, energy and sample count — are reported per run without a percentage.
 - **The baseline measured 0, and there is no percentage change from 0.** The baseline did measure the metric; there is simply no percentage from zero. This is common for per-core CPU usage on an idle baseline, and it is where the change is often largest: a core that averaged 0% in the baseline and 5.9% in the other run shows “—” here, so read the two values rather than the change.
