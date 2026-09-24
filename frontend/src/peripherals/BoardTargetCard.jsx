@@ -205,11 +205,7 @@ export default function BoardTargetCard({
       )}
 
       {target && problem && (
-        <p className="sr-only" role="alert">{problem.message}</p>
-      )}
-      {target && problem && (
-        <Callout tone="danger" title={problem.message}>
-          {problem.hint && <p>{problem.hint}</p>}
+        <ErrorNotice error={problem}>
           {problem.code === 'auth_failed' && problem.details?.command && (
             <div className="periph-command">
               <pre className="periph-code"><code>{problem.details.command}</code></pre>
@@ -235,7 +231,7 @@ export default function BoardTargetCard({
               )}
             </>
           )}
-        </Callout>
+        </ErrorNotice>
       )}
 
       {formOpen && (
