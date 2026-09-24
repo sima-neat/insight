@@ -10,6 +10,7 @@ Insight restarts, the browser never fires unload, or the SSH connection dies.
 import ipaddress
 import json
 import logging
+import math
 import os
 import shlex
 import ssl
@@ -19,6 +20,7 @@ import time
 import urllib.request
 import uuid
 from datetime import datetime, timedelta, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 
@@ -490,8 +492,15 @@ def _require_previewable(item: dict, mode: dict) -> None:
         )
 
 
+def _framerate(fps) -> str:
+    """The rate as an exact GStreamer fraction: 59.94 is 60000/1001, not 59."""
+    fraction = Fraction(str(fps)).limit_denominator(1001)
+    return f"{fraction.numerator}/{fraction.denominator}"
+
+
 def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
-    caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={int(mode['fps'])}/1"
+    rate = _framerate(mode["fps"])
+    caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={rate}"
     return [
         "gst-launch-1.0",
         "-q",
@@ -499,6 +508,15 @@ def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
         f"camera-name={item['device']['camera_name']}",
         "!",
         caps,
+        "!",
+        # libcamera picks a sensor mode and delivers its rate, which the modalix pipeline handler
+        # says outright ("faster caps negotiate and snap to it"), so the caps above are a request,
+        # not a promise. max-rate drops the surplus so the stream really runs at the chosen rate.
+        # It only drops: a sensor slower than the request still passes through at its own rate.
+        "videorate",
+        # max-rate is a whole number, so a fractional rate rounds up: 59.94 must pass, not be
+        # clamped to 59.
+        f"max-rate={math.ceil(float(mode['fps']))}",
         "!",
         "neatencoder",
         "enc-type=h264",

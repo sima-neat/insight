@@ -38,9 +38,9 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
     <section className="periph-preview" aria-labelledby="periph-preview-title">
       <div className="periph-preview-head">
         <h4 id="periph-preview-title">Preview</h4>
+        {/* The channel is Insight's own bookkeeping, not something to act on, so it is not shown. */}
         <span className="periph-pills">
           <Pill tone={status.tone}>{status.label}</Pill>
-          {running && Number.isFinite(Number(session?.channel)) && <Pill tone="periph-info">Channel {session.channel}</Pill>}
         </span>
       </div>
 
@@ -77,8 +77,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
         <>
           <p className="hint">
             {sessionMode ? `${sessionMode} · ` : ''}
-            The preview holds this camera open on channel {String(session?.channel ?? '—')}, so applications on the board
-            cannot open it until you stop the preview.
+            The preview holds this camera open, so applications on the board cannot open it until you stop it.
           </p>
           <div className="periph-actions">
             <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>

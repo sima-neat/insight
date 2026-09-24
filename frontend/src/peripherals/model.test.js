@@ -400,7 +400,8 @@ test('blocked export formats collapse into one line', () => {
 test('the detail pane shows one explanation line, chosen by priority', () => {
   assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\. Stop that process/)
   assert.equal(cameraSummaryLine(imx568), imx568.support.reason, 'an unverified tier wins over unknown availability')
-  assert.equal(cameraSummaryLine(imx477), imx477.support.reason)
+  // A verified, available camera says nothing: the mode menus carry the verified/advertised labels.
+  assert.equal(cameraSummaryLine(imx477), '')
   assert.equal(
     cameraSummaryLine({ ...imx477, support: support('verified', ''), availability: imx568.availability }),
     'Availability unknown: fuser is not installed on the board.'

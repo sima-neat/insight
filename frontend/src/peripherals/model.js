@@ -269,7 +269,9 @@ export function cameraSummaryLine(camera) {
   }
   if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
-  return camera?.support?.reason || ''
+  // A working camera gets no sentence at all. Every mode menu already labels each entry
+  // "verified" or "advertised", so a paragraph repeating that distinction only adds text.
+  return ''
 }
 
 export function blockedFormatSummary(options) {

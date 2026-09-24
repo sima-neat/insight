@@ -3321,7 +3321,7 @@ button:disabled {
 
 .periph-view {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .periph-view a {
@@ -3362,10 +3362,10 @@ button:disabled {
 }
 
 .periph-facts {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 22px;
+  gap: 4px 24px;
   font-size: 12px;
 }
 
@@ -3396,11 +3396,11 @@ button:disabled {
 }
 
 .periph-callout {
-  margin: 10px 0;
+  margin: 8px 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 10px 12px;
+  padding: 8px 12px;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -3423,7 +3423,7 @@ button:disabled {
 .periph-callout p,
 .periph-callout ol,
 .periph-callout ul {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
 .periph-callout > :last-child {
@@ -3431,7 +3431,7 @@ button:disabled {
 }
 
 .periph-callout ol {
-  padding-left: 20px;
+  padding-left: 16px;
 }
 
 .periph-callout-title {
@@ -3447,14 +3447,14 @@ button:disabled {
   border-radius: 10px;
   background: #f4f8fb;
   color: #20384f;
-  padding: 12px 14px;
+  padding: 12px 12px;
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: normal;
 }
 
 .periph-command {
-  margin-top: 6px;
+  margin-top: 4px;
   display: grid;
   justify-items: start;
   gap: 8px;
@@ -3469,16 +3469,24 @@ button:disabled {
 
 .periph-confirm,
 .periph-form {
-  margin-top: 10px;
+  margin-top: 8px;
   display: grid;
   gap: 8px;
 }
 
-.periph-form-fields,
+.periph-form-fields {
+  display: grid;
+  /* host, then the short port, then user */
+  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
+  gap: 8px;
+}
+
 .periph-mode-fields {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
-  gap: 10px;
+  /* Three equal columns: the resolution menu holds the longest text, so it must not sit in a
+     narrow middle column sized for a port number. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .periph-form label,
@@ -3500,27 +3508,27 @@ button:disabled {
 }
 
 .periph-meta {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 12px;
   color: var(--ink-soft);
 }
 
 .periph-issues {
   list-style: none;
-  margin: 10px 0;
+  margin: 8px 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .periph-issues li {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #fff;
-  padding: 8px 10px;
+  padding: 8px 8px;
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -3529,7 +3537,7 @@ button:disabled {
 .periph-warnings,
 .periph-blocked {
   margin: 8px 0;
-  padding-left: 18px;
+  padding-left: 16px;
   font-size: 12px;
   color: var(--ink-soft);
   overflow-wrap: anywhere;
@@ -3544,7 +3552,7 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.6fr);
   align-items: start;
-  gap: 14px;
+  gap: 12px;
 }
 
 .periph-list,
@@ -3567,9 +3575,9 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 9px 10px;
+  padding: 8px 8px;
   display: grid;
-  gap: 5px;
+  gap: 4px;
   cursor: pointer;
   transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
@@ -3607,7 +3615,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: #fff;
-  padding: 14px;
+  padding: 12px;
 }
 
 .periph-detail-head,
@@ -3616,7 +3624,7 @@ button:disabled {
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .periph-detail h3,
@@ -3632,7 +3640,7 @@ button:disabled {
 }
 
 .periph-identity {
-  margin: 10px 0;
+  margin: 8px 0;
 }
 
 .periph-identity summary {
@@ -3651,14 +3659,14 @@ button:disabled {
 
 .periph-modes {
   min-width: 0;
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 10px 12px 12px;
+  padding: 8px 12px 12px;
 }
 
 .periph-modes legend {
-  padding: 0 6px;
+  padding: 0 4px;
 }
 
 .periph-mode-fields {
@@ -3670,9 +3678,9 @@ button:disabled {
 }
 
 .periph-export {
-  margin-top: 14px;
+  margin-top: 12px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .periph-export[aria-busy='true'] .periph-code {
@@ -3682,12 +3690,12 @@ button:disabled {
 .periph-export-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .periph-export-tabs button {
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 4px 12px;
   font-size: 12px;
 }
 
@@ -3726,7 +3734,7 @@ button:disabled {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px 0;
+  padding: 12px 16px 0;
 }
 
 .board-panel-head h3 {
@@ -3748,16 +3756,16 @@ button:disabled {
 
 /* Peripherals: device sub-tabs */
 .periph-kind-layout {
-  margin-top: 14px;
+  margin-top: 12px;
   display: grid;
   grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
   align-items: start;
-  gap: 14px;
+  gap: 12px;
 }
 
 .periph-kinds {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .periph-kind {
@@ -3769,7 +3777,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 8px 10px;
+  padding: 8px 8px;
   cursor: pointer;
   transition: border-color 160ms ease, background-color 160ms ease;
 }
@@ -3830,7 +3838,7 @@ button:disabled {
 }
 
 .periph-blocked-disclosure {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   font-size: 12px;
 }
 
@@ -3851,11 +3859,11 @@ button:disabled {
 }
 
 .periph-blocked-disclosure .periph-blocked {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .periph-integration {
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
@@ -3868,11 +3876,11 @@ button:disabled {
 
 /* Camera preview */
 .periph-preview {
-  margin: 14px 0 0;
+  margin: 12px 0 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 10px 12px 12px;
+  padding: 8px 12px 12px;
   display: grid;
   gap: 8px;
 }

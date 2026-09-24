@@ -137,7 +137,9 @@ function CameraList({ groups, selectedId, onSelect }) {
                 onClick={() => onSelect(camera.id)}
               >
                 <span className="periph-camera-name">{camera.name}</span>
-                <span className="periph-camera-id">{cameraSubtitle(camera)}</span>
+                {/* An empty subtitle must not render: the row is a grid, and a blank span would
+                    leave this row taller than its neighbours. */}
+                {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
                 <span className="periph-pills">
                   <Pill tone={availability.tone}>{availability.label}</Pill>
                   <Pill tone={tier.tone}>{tier.label}</Pill>

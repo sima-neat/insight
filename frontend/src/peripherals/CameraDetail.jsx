@@ -174,7 +174,7 @@ export default function CameraDetail({
       <div className="periph-detail-head">
         <div>
           <h3 id="periph-detail-title">{camera.name}</h3>
-          <p className="hint">{cameraSubtitle(camera)}</p>
+          {cameraSubtitle(camera) && <p className="hint">{cameraSubtitle(camera)}</p>}
         </div>
         <span className="periph-pills">
           <Pill tone={availability.tone}>{availability.label}</Pill>

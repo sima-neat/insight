@@ -403,6 +403,21 @@ class PreviewModeValidationTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "invalid_request")
         self.assertIn("30", ctx.exception.hint)
 
+    def test_the_chosen_rate_is_enforced_not_merely_requested(self):
+        """libcamera delivers the sensor mode's rate whatever the caps ask for, so the pipeline caps it."""
+        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 30}, "127.0.0.1", 9003))
+        self.assertIn("framerate=30/1", command)
+        self.assertIn("videorate max-rate=30", command)
+        # videorate sits between the camera and the encoder, or the encoder would see the surplus.
+        self.assertLess(command.index("videorate"), command.index("neatencoder"))
+
+    def test_a_fractional_rate_keeps_its_exact_fraction(self):
+        """59.94 fps is 60000/1001; truncating it to 59 would ask the sensor for a rate it has not got."""
+        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 59.94}, "127.0.0.1", 9003))
+        self.assertIn("framerate=2997/50", command)
+        # max-rate is a whole number and must round up, or every frame would be dropped as surplus.
+        self.assertIn("videorate max-rate=60", command)
+
     def test_an_address_the_board_reports_is_not_trusted_blindly(self):
         manager = preview.PreviewManager()
         session = fake_session(transport=FakeTransport(ssh_client=b"$(reboot) 51234 22\n"))
