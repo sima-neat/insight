@@ -91,10 +91,6 @@ const RUN_FIELDS = {
   durationMs: ['duration_ms', 'elapsed_ms']
 }
 
-const STAT_FIELDS = ['mean', 'avg', 'average', 'value', 'median', 'last', 'max']
-const DELTA_FIELDS = ['delta', 'delta_mean', 'delta_vs_baseline', 'diff']
-const DELTA_PCT_FIELDS = ['delta_pct', 'delta_percent', 'pct_change', 'percent_change']
-
 function pick(source, keys) {
   for (const key of keys) {
     const value = source?.[key]
@@ -144,10 +140,17 @@ export function formatValue(value, unit) {
   return suffix === '%' ? `${formatNumber(value)}%` : `${formatNumber(value)} ${suffix}`
 }
 
-export function formatDelta(value, unit) {
-  if (!isNumber(value)) return ''
-  const sign = value > 0 ? '+' : value < 0 ? '−' : '±'
-  return `${sign}${formatValue(Math.abs(value), unit)}`
+/**
+ * A percentage change against the baseline. A change too small to show at this precision
+ * is reported as such rather than rounded to 0%, which would read as "no change", and an
+ * absent comparison stays an em dash.
+ */
+export function formatPercentDelta(value) {
+  if (!isNumber(value)) return '—'
+  if (value === 0) return '±0%'
+  const sign = value > 0 ? '+' : '−'
+  const size = Math.abs(value)
+  return size < 0.01 ? `${sign}<0.01%` : `${sign}${formatNumber(size)}%`
 }
 
 export function formatSeconds(seconds) {
@@ -504,60 +507,154 @@ export function compareHint(refs) {
     : comparing
 }
 
-function statValue(stat) {
-  if (isNumber(stat)) return { value: stat, delta: null, deltaPct: null }
-  if (!stat || typeof stat !== 'object') return { value: null, delta: null, deltaPct: null }
-  const value = pick(stat, STAT_FIELDS)
-  const delta = pick(stat, DELTA_FIELDS)
-  const deltaPct = pick(stat, DELTA_PCT_FIELDS)
-  return {
-    value: isNumber(value) ? value : null,
-    delta: isNumber(delta) ? delta : null,
-    deltaPct: isNumber(deltaPct) ? deltaPct : null
-  }
-}
+/**
+ * The comparison /api/sentinel/compare returns, as a table: one row per metric, one
+ * column per run, the baseline marked.
+ *
+ * The daemon's shape is pinned against sentinel main:80ab7de4da31 and captured in
+ * fixtures/compare-shape.json:
+ *
+ *   baseline_id        the run id the deltas are measured against
+ *   runs[]             {id, name, note, started_at, ended_at, sample_interval_ms, ...}
+ *   summaries[runId]   {duration_ms, energy_joules, samples, metrics: {key: stats}}
+ *                      where stats is {count, minimum, maximum, mean, median, p95}
+ *   baseline_deltas_pct[runId][key]   percent change of that metric's MEAN against the
+ *                      baseline's mean, or null when the baseline mean is zero and there
+ *                      is nothing to compare against
+ *
+ * Cells therefore carry the mean, because that is the statistic the delta describes.
+ * Nothing is invented: a label and unit are used only when the board's own metric
+ * definitions name that key, and a run-level scalar has no delta because the daemon
+ * publishes none. A body that does not match this shape returns null, and the view falls
+ * back to listing the values as they came.
+ */
+export const COMPARE_STATISTIC = 'mean'
+// Sentinel reports these per run alongside the metric summaries; they have no deltas.
+const RUN_SCALARS = ['duration_ms', 'energy_joules', 'samples']
 
-function compareColumns(runs) {
-  return (runs || []).map((run, index) => {
-    if (run && typeof run === 'object') {
-      const name = pick(run, RUN_FIELDS.name) || pick(run, RUN_FIELDS.id)
-      return { key: String(name || index), label: String(name || `Run ${index + 1}`), baseline: index === 0 }
+function compareColumns(runs, baselineId) {
+  return runs.map((run, index) => {
+    const id = String(run?.id ?? index)
+    return {
+      key: id,
+      label: String(run?.name || run?.id || `Run ${index + 1}`),
+      baseline: id === String(baselineId),
+      run: run || null
     }
-    return { key: String(run ?? index), label: String(run ?? `Run ${index + 1}`), baseline: index === 0 }
   })
 }
 
-/**
- * A metric-per-row table for /api/sentinel/compare, when the daemon's body carries one.
- * The comparison body is Sentinel's own and is not pinned by Insight's contract, so an
- * unrecognized shape returns null and the view falls back to plain fact rows.
- */
-export function compareTable(payload) {
+function metricKeysOf(summaries, columns) {
+  const keys = []
+  for (const column of columns) {
+    const metrics = summaries[column.key]?.metrics
+    if (!metrics || typeof metrics !== 'object') continue
+    for (const key of Object.keys(metrics)) if (!keys.includes(key)) keys.push(key)
+  }
+  return keys.sort()
+}
+
+function compareCell(column, value, delta) {
+  return {
+    column: column.key,
+    baseline: column.baseline,
+    value: isNumber(value) ? value : null,
+    // The baseline is what the others are measured against, so it shows no change.
+    deltaPct: column.baseline || !isNumber(delta) ? null : delta
+  }
+}
+
+export function compareTable(payload, definitions = null) {
   const body = payload?.sentinel
   if (!body || typeof body !== 'object') return null
-  const columns = compareColumns(body.runs)
-  const metrics = Array.isArray(body.metrics) ? body.metrics : null
-  if (columns.length < MIN_COMPARE_RUNS || !metrics) return null
-  const rows = metrics
-    .map((metric) => {
-      if (!metric || typeof metric !== 'object') return null
-      const perRun = metric.runs || metric.values || metric.stats
-      if (!perRun) return null
-      const cells = columns.map((column, index) => {
-        const stat = Array.isArray(perRun) ? perRun[index] : perRun[column.key]
-        return { ...statValue(stat), column: column.key }
-      })
-      if (cells.every((cell) => cell.value === null)) return null
-      return {
-        key: String(metric.key || metric.label || ''),
-        label: String(metric.label || titleCase(metric.key) || 'Metric'),
-        unit: metric.unit || null,
-        cells
-      }
+  const runs = Array.isArray(body.runs) ? body.runs : null
+  const summaries = body.summaries
+  if (!runs || !summaries || typeof summaries !== 'object') return null
+  const columns = compareColumns(runs, body.baseline_id)
+  if (columns.length < MIN_COMPARE_RUNS || !columns.some((column) => summaries[column.key])) return null
+  const deltas = body.baseline_deltas_pct && typeof body.baseline_deltas_pct === 'object' ? body.baseline_deltas_pct : {}
+  const define = (key) => (definitions instanceof Map ? definitions.get(key) : null) || null
+
+  const scalarRows = RUN_SCALARS.filter((key) => columns.some((column) => isNumber(summaries[column.key]?.[key]))).map(
+    (key) => ({
+      key,
+      label: titleCase(key),
+      unit: null,
+      // The daemon publishes no delta for a run scalar, so none is shown for it.
+      cells: columns.map((column) => compareCell(column, summaries[column.key]?.[key], null))
     })
-    .filter(Boolean)
-  return rows.length ? { columns, rows } : null
+  )
+
+  const metricRows = metricKeysOf(summaries, columns).map((key) => {
+    const definition = define(key)
+    return {
+      key,
+      label: definition?.label || titleCase(key),
+      unit: definition?.unit || null,
+      group: definition?.group || null,
+      cells: columns.map((column) =>
+        compareCell(column, summaries[column.key]?.metrics?.[key]?.[COMPARE_STATISTIC], deltas[column.key]?.[key])
+      )
+    }
+  })
+
+  const rows = [...scalarRows, ...metricRows].filter((row) => row.cells.some((cell) => cell.value !== null))
+  if (!rows.length) return null
+  return {
+    columns,
+    rows,
+    baselineId: body.baseline_id ?? null,
+    baselineLabel: columns.find((column) => column.baseline)?.label || '',
+    generatedAt: body.generated_at || null,
+    statistic: COMPARE_STATISTIC
+  }
 }
+
+/** Metric definitions from /api/sentinel/metrics, by key, for labelling saved runs. */
+export function definitionsByKey(metrics) {
+  const map = new Map()
+  for (const group of metrics?.groups || []) {
+    for (const metric of group?.metrics || []) {
+      if (metric?.key) map.set(metric.key, metric)
+    }
+  }
+  return map
+}
+
+/**
+ * One saved run from /api/sentinel/runs/<id>. The daemon answers with exactly three
+ * keys - metadata, metrics and samples - so each is read directly; anything inside them
+ * is still shown as the board sent it, never assumed.
+ */
+export function runDetail(payload) {
+  const body = payload?.sentinel
+  if (!body || typeof body !== 'object') return null
+  const known = 'metadata' in body || 'metrics' in body || 'samples' in body
+  if (!known) return null
+  const samples = Array.isArray(body.samples) ? body.samples : []
+  const stamps = samples.map((sample) => sample?.timestamp).filter((stamp) => typeof stamp === 'string')
+  const definitions = Array.isArray(body.metrics)
+    ? body.metrics
+    : Array.isArray(body.metrics?.metrics)
+      ? body.metrics.metrics
+      : []
+  return {
+    metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : null,
+    facts: factRows(body.metadata, []),
+    definitions: definitions.filter((metric) => metric && metric.key),
+    // `metrics` may be a map of key -> definition rather than a list; count it either way.
+    metricCount: definitions.length || (body.metrics && typeof body.metrics === 'object' ? Object.keys(body.metrics).length : 0),
+    sampleCount: samples.length,
+    firstSampleAt: stamps[0] || null,
+    lastSampleAt: stamps.length ? stamps[stamps.length - 1] : null,
+    // Anything the daemon adds beyond the three documented keys is still listed.
+    extras: factRows(
+      Object.fromEntries(Object.entries(body).filter(([key]) => !['metadata', 'metrics', 'samples'].includes(key))),
+      []
+    )
+  }
+}
+
 
 // --- the Insight host --------------------------------------------------------
 // /api/metrics measures the machine Insight itself runs on - the SDK container or the

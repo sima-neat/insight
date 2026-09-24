@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -16,10 +17,11 @@ import {
   daemonBusy,
   daemonFacts,
   daemonInfo,
+  definitionsByKey,
   factRows,
   failureNotice,
   formatBytes,
-  formatDelta,
+  formatPercentDelta,
   formatSeconds,
   formatValue,
   healthFacts,
@@ -30,6 +32,7 @@ import {
   parseTags,
   payloadBoardLabel,
   pollDelay,
+  runDetail,
   runList,
   runSubtitle,
   sparkline,
@@ -42,6 +45,10 @@ import {
   traceModel,
   validateTrace
 } from './model.js'
+
+// The comparison Sentinel main:80ab7de4da31 returned on a Modalix DevKit, trimmed to six
+// metrics; every value kept is exactly as the daemon sent it.
+const COMPARE = JSON.parse(readFileSync(new URL('./fixtures/compare-shape.json', import.meta.url), 'utf8'))
 
 const daemon = (extra = {}) => ({
   installed: true,
@@ -90,10 +97,12 @@ test('a value Sentinel could not measure never reads as zero', () => {
   assert.equal(formatValue(undefined, 'W'), '—')
   assert.equal(formatValue('72', 'C'), '—')
   assert.equal(formatValue(800, null), '800')
-  assert.equal(formatDelta(-1.25, 'W'), '−1.25 W')
-  assert.equal(formatDelta(2, 'W'), '+2 W')
-  assert.equal(formatDelta(0, 'W'), '±0 W')
-  assert.equal(formatDelta(null, 'W'), '')
+  assert.equal(formatPercentDelta(-1.507232237109984), '−1.51%')
+  assert.equal(formatPercentDelta(12.753877670471164), '+12.8%')
+  assert.equal(formatPercentDelta(0), '±0%')
+  // A change too small to print must not round to 0%, which would read as no change.
+  assert.equal(formatPercentDelta(-0.0002595591909001994), '−<0.01%')
+  assert.equal(formatPercentDelta(null), '—')
 })
 
 test('durations read in the unit a developer expects', () => {
@@ -315,31 +324,101 @@ test('compare selection is bounded and the query keeps the baseline first', () =
   assert.match(compareHint(['a', 'b']), /against a/)
 })
 
-test('a comparison is tabled when the daemon reports per-run statistics', () => {
-  const table = compareTable({
-    sentinel: {
-      runs: [{ name: 'baseline' }, { name: 'optimized' }],
-      metrics: [
-        { key: 'power_current_watts', label: 'Current board power', unit: 'W', runs: [{ mean: 7.2 }, { mean: 6.1, delta: -1.1, delta_pct: -15.3 }] },
-        { key: 'rtsn_0', unit: 'C', runs: { baseline: 70, optimized: 68 } },
-        { key: 'unmeasured', runs: [null, null] },
-        'nonsense'
-      ]
-    }
+test('the captured comparison is read as a table of metrics against the baseline', () => {
+  const table = compareTable({ sentinel: COMPARE })
+  assert.deepEqual(table.columns.map((column) => [column.label, column.baseline]), [
+    ['insight-hw-1790177227', true],
+    ['insight-hw-1790177178', false]
+  ])
+  assert.equal(table.baselineId, COMPARE.baseline_id)
+  assert.equal(table.baselineLabel, 'insight-hw-1790177227')
+  assert.equal(table.generatedAt, '2026-09-23T15:27:56.138344320Z')
+  assert.equal(table.statistic, 'mean')
+
+  // The run scalars Sentinel reports alongside the metric summaries, which carry no delta.
+  const duration = table.rows.find((row) => row.key === 'duration_ms')
+  assert.equal(duration.label, 'Duration ms')
+  assert.deepEqual(duration.cells.map((cell) => cell.value), [6667, 34379])
+  assert.deepEqual(duration.cells.map((cell) => cell.deltaPct), [null, null])
+
+  // A metric cell carries the mean, because that is the statistic the delta is measured on.
+  const power = table.rows.find((row) => row.key === 'power_current_watts')
+  assert.equal(power.cells[0].value, COMPARE.summaries[COMPARE.baseline_id].metrics.power_current_watts.mean)
+  assert.equal(power.cells[1].deltaPct, -0.35731427657192105)
+  assert.equal(power.cells[0].baseline, true)
+  // The baseline is what the rest are measured against, so it shows no change of its own.
+  assert.equal(power.cells[0].deltaPct, null)
+
+  // A metric the baseline never measured has nothing to compare against.
+  const idle = table.rows.find((row) => row.key === 'cpu_core_11_usage_pct')
+  assert.deepEqual(idle.cells.map((cell) => cell.value), [0, 0])
+  assert.equal(idle.cells[1].deltaPct, null)
+  assert.equal(formatPercentDelta(idle.cells[1].deltaPct), '—')
+})
+
+test('a comparison is labelled from the board definitions, and never from invented ones', () => {
+  const definitions = definitionsByKey({
+    groups: [{ name: 'Power', metrics: [{ key: 'power_current_watts', label: 'Current board power', unit: 'W', group: 'Power' }] }]
   })
-  assert.deepEqual(table.columns.map((column) => column.label), ['baseline', 'optimized'])
-  assert.equal(table.columns[0].baseline, true)
-  assert.deepEqual(table.rows.map((row) => row.key), ['power_current_watts', 'rtsn_0'])
-  assert.deepEqual(table.rows[0].cells[1], { value: 6.1, delta: -1.1, deltaPct: -15.3, column: 'optimized' })
-  assert.equal(table.rows[1].label, 'Rtsn 0')
-  assert.equal(table.rows[1].cells[0].value, 70)
+  const table = compareTable({ sentinel: COMPARE }, definitions)
+  const power = table.rows.find((row) => row.key === 'power_current_watts')
+  assert.equal(power.label, 'Current board power')
+  assert.equal(power.unit, 'W')
+  assert.equal(formatValue(power.cells[0].value, power.unit), '8.62 W')
+  // A key no definition names keeps its key, with no unit invented for it.
+  const rtsn = table.rows.find((row) => row.key === 'rtsn_6')
+  assert.equal(rtsn.label, 'Rtsn 6')
+  assert.equal(rtsn.unit, null)
+  assert.equal(compareTable({ sentinel: COMPARE }).rows.find((row) => row.key === 'power_current_watts').unit, null)
 })
 
 test('a comparison shape Insight does not know is reported, not guessed at', () => {
+  // The fallback the view still needs: null here means "list the values as they came".
   assert.equal(compareTable({ sentinel: { runs: [{ name: 'a' }, { name: 'b' }], series: {} } }), null)
-  assert.equal(compareTable({ sentinel: { runs: [{ name: 'a' }], metrics: [] } }), null)
-  assert.equal(compareTable({ sentinel: { runs: ['a', 'b'], metrics: [{ key: 'x', runs: [null, null] }] } }), null)
+  assert.equal(compareTable({ sentinel: { runs: [COMPARE.runs[0]], summaries: COMPARE.summaries } }), null)
+  assert.equal(compareTable({ sentinel: { ...COMPARE, summaries: {} } }), null)
+  assert.equal(compareTable({ sentinel: { ...COMPARE, runs: [] } }), null)
+  assert.equal(compareTable({ sentinel: {} }), null)
   assert.equal(compareTable(null), null)
+})
+
+test('a run is read from the metadata, metrics and samples the daemon sends', () => {
+  const run = runDetail({
+    generation: 4,
+    sentinel: {
+      metadata: { id: 'r1', name: 'baseline', note: 'before', sample_interval_ms: 1989 },
+      metrics: [{ key: 'power_current_watts', label: 'Current board power', unit: 'W' }, { key: 'rtsn_6' }],
+      samples: [
+        { timestamp: '2026-09-23T15:27:14Z', values: { power_current_watts: 8.5 } },
+        { timestamp: '2026-09-23T15:27:16Z', values: { power_current_watts: 8.9 } }
+      ]
+    }
+  })
+  assert.equal(run.metricCount, 2)
+  assert.equal(run.sampleCount, 2)
+  assert.equal(run.firstSampleAt, '2026-09-23T15:27:14Z')
+  assert.equal(run.lastSampleAt, '2026-09-23T15:27:16Z')
+  assert.deepEqual(run.facts, [
+    ['Id', 'r1'],
+    ['Name', 'baseline'],
+    ['Note', 'before'],
+    ['Sample interval ms', '1989']
+  ])
+  assert.deepEqual(run.definitions.map((metric) => metric.key), ['power_current_watts', 'rtsn_6'])
+  assert.deepEqual(run.extras, [])
+})
+
+test('a run body without the three documented keys falls back instead of guessing', () => {
+  assert.equal(runDetail({ sentinel: { run: { id: 'r1' } } }), null)
+  assert.equal(runDetail({ sentinel: {} }), null)
+  assert.equal(runDetail(null), null)
+  // Metrics as a map, samples absent, and a field beyond the three: all still reported.
+  const odd = runDetail({ sentinel: { metadata: null, metrics: { power_current_watts: { unit: 'W' } }, retention: 'kept' } })
+  assert.equal(odd.metricCount, 1)
+  assert.equal(odd.sampleCount, 0)
+  assert.deepEqual(odd.definitions, [])
+  assert.deepEqual(odd.facts, [])
+  assert.deepEqual(odd.extras, [['Retention', 'kept']])
 })
 
 test('every payload is judged stale on its own generation, not just the metrics', () => {

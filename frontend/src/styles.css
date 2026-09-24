@@ -4137,3 +4137,28 @@ button:disabled {
 .stats-host .hint {
   margin: 0;
 }
+
+/* Run comparison: the change against the baseline sits under each value, and a metric
+   with nothing to compare against shows an em dash in the same place. */
+.stats-compare-table th[scope='col'] .hint {
+  display: block;
+  margin: 2px 0 0;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.stats-delta {
+  font-family: var(--font-mono);
+  color: var(--accent-alt);
+}
+
+.stats-compare-table td {
+  white-space: nowrap;
+}
+
+/* A run's metadata can carry a multi-line value, such as the board's os-release; keep
+   its lines rather than running them together. */
+.stats-run-detail .sysinfo-table td {
+  white-space: pre-wrap;
+}

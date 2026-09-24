@@ -25,19 +25,20 @@ import {
   daemonBusy,
   daemonFacts,
   daemonInfo,
+  definitionsByKey,
   factRows,
   failureNotice,
-  formatDelta,
+  formatPercentDelta,
   formatRelativeTime,
   formatTimestamp,
   formatValue,
   healthFacts,
   healthProblems,
   hostMetricsModel,
-  isStale,
   metricsModel,
-  pollDelay,
   payloadBoardLabel,
+  pollDelay,
+  runDetail,
   runList,
   runSubtitle,
   staleFlags,
@@ -312,9 +313,10 @@ function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, 
   )
 }
 
-function RunsPanel({
+export function RunsPanel({
   runs,
   runsPayload,
+  definitions,
   stale,
   busy,
   error,
@@ -335,10 +337,11 @@ function RunsPanel({
   onCompare,
   onClearCompare
 }) {
-  const table = useMemo(() => (compare ? compareTable(compare) : null), [compare])
+  const table = useMemo(() => (compare ? compareTable(compare, definitions) : null), [compare, definitions])
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
-  // A run carries its raw samples; they belong in a chart, not in a fact list.
-  const detailRows = useMemo(() => factRows(detail?.sentinel?.run ?? detail?.sentinel, ['samples']), [detail])
+  const run = useMemo(() => runDetail(detail), [detail])
+  // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
+  const detailRows = useMemo(() => (detail && !run ? factRows(detail.sentinel, ['samples']) : []), [detail, run])
 
   return (
     <section className="panel stats-runs" aria-labelledby="stats-runs-title" aria-busy={busy}>
@@ -426,9 +429,38 @@ function RunsPanel({
           <FailureCallout notice={detailError} />
           {detailStale && <StaleBanner what="This run" payload={detail} onRefresh={() => onOpen(openRef)} refreshLabel="Read it again" />}
           {detailBusy && <p className="hint" role="status">Reading the run from the board…</p>}
-          {detail && !detailError && (
+          {detail && !detailError && run && (
+            <>
+              <p className="hint">
+                {run.sampleCount} sample{run.sampleCount === 1 ? '' : 's'} of {run.metricCount} metric
+                {run.metricCount === 1 ? '' : 's'}
+                {run.firstSampleAt && run.lastSampleAt && (
+                  <>
+                    {' '}from <time dateTime={run.firstSampleAt}>{formatTimestamp(run.firstSampleAt)}</time> to{' '}
+                    <time dateTime={run.lastSampleAt}>{formatTimestamp(run.lastSampleAt)}</time>
+                  </>
+                )}
+                .
+              </p>
+              {run.facts.length > 0 && <KeyValueTable rows={run.facts} caption={`Run ${openRef}`} />}
+              {run.facts.length === 0 && <p className="hint">Sentinel recorded no metadata for this run.</p>}
+              {run.extras.length > 0 && (
+                <details className="stats-detail">
+                  <summary>Other fields Sentinel returned</summary>
+                  <KeyValueTable rows={run.extras} />
+                </details>
+              )}
+            </>
+          )}
+          {detail && !detailError && !run && (
             detailRows.length > 0 ? (
-              <KeyValueTable rows={detailRows} caption={`Run ${openRef}`} />
+              <>
+                <p className="hint">
+                  This Sentinel build answered with a run body Insight does not know; its values are listed as they came
+                  from the board.
+                </p>
+                <KeyValueTable rows={detailRows} caption={`Run ${openRef}`} />
+              </>
             ) : (
               <p className="hint">Sentinel returned no detail for this run.</p>
             )
@@ -442,35 +474,48 @@ function RunsPanel({
           <h3>Comparison</h3>
           {compareStale && <StaleBanner what="This comparison" payload={compare} onRefresh={onCompare} refreshLabel="Compare again" />}
           {table ? (
-            <table className="sysinfo-table stats-table">
-              <thead>
-                <tr>
-                  <th scope="col">Metric</th>
-                  {table.columns.map((column) => (
-                    <th key={column.key} scope="col">
-                      {column.label}
-                      {column.baseline && <span className="hint">baseline</span>}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {table.rows.map((row) => (
-                  <tr key={row.key}>
-                    <th scope="row">{row.label}</th>
-                    {row.cells.map((cell, index) => (
-                      <td key={`${row.key}-${index}`} className="stats-cell-value">
-                        {formatValue(cell.value, row.unit)}
-                        {cell.delta !== null && <span className="hint">{formatDelta(cell.delta, row.unit)}</span>}
-                        {cell.delta === null && cell.deltaPct !== null && (
-                          <span className="hint">{formatDelta(cell.deltaPct, '%')}</span>
-                        )}
-                      </td>
+            <>
+              <p className="hint">
+                Each value is that metric's {table.statistic} over the run, and the change beside it is against the
+                baseline{table.baselineLabel ? ` ${table.baselineLabel}` : ''}. A metric the baseline never measured has
+                nothing to compare against and shows “—”.
+                {table.generatedAt && (
+                  <>
+                    {' '}Compared <time dateTime={table.generatedAt}>{formatTimestamp(table.generatedAt)}</time>.
+                  </>
+                )}
+              </p>
+              <table className="sysinfo-table stats-table stats-compare-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Metric</th>
+                    {table.columns.map((column) => (
+                      <th key={column.key} scope="col">
+                        {column.label}
+                        {column.baseline && <span className="hint">baseline</span>}
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {table.rows.map((row) => (
+                    <tr key={row.key}>
+                      <th scope="row">{row.label}</th>
+                      {row.cells.map((cell) => (
+                        <td key={`${row.key}-${cell.column}`} className="stats-cell-value">
+                          {formatValue(cell.value, row.unit)}
+                          {!cell.baseline && (
+                            <span className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}>
+                              {formatPercentDelta(cell.deltaPct)}
+                            </span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           ) : (
             <>
               <p className="hint">
@@ -581,6 +626,9 @@ export default function StatsView({ onError, onStatus }) {
   const trace = useMemo(() => traceModel(traces), [traces])
   const runRows = useMemo(() => runList(runs), [runs])
   const hostModel = useMemo(() => hostMetricsModel(host), [host])
+  // The board's own metric definitions, used to label saved runs and comparisons, which
+  // carry metric keys but no labels or units of their own.
+  const definitions = useMemo(() => definitionsByKey(metrics), [metrics])
   // Everything the board answered is judged against the board selected now, including
   // the failures: an SSH round trip can outlive a board switch.
   const stalePayloads = staleFlags(board, {
@@ -1001,6 +1049,7 @@ export default function StatsView({ onError, onStatus }) {
               <RunsPanel
                 runs={runRows}
                 runsPayload={runs}
+                definitions={definitions}
                 stale={stalePayloads.runs || stalePayloads.runsError}
                 busy={runsBusy}
                 error={runsError}
