@@ -176,12 +176,12 @@ Viewer Configuration has a **3D Pose** tab. Open it globally to set defaults or
 from a tile menu to control that channel's panel visibility, panel size, camera
 yaw/pitch, and 3D reference cube independently. Cube and camera changes from the
 panel controls stay synchronized with the corresponding channel configuration.
-The BlazePose panel can show a labeled reference cube and orbit around the world
-landmarks. Its panel-local controls toggle the cube and orbit, set orbit speed,
-pause or resume, and reset the camera; dragging the canvas pauses orbit for
-manual inspection. These preferences are browser-local and isolated by channel
-and auxiliary-view ID. Animation stops without a selected correlated payload or
-when the panel is collapsed, hidden, reset, or unmounted.
+The BlazePose panel can show a labeled reference cube around the world landmarks.
+Its panel-local controls toggle the cube and reset the camera; dragging the
+canvas selects a fixed manual inspection angle. The renderer uses each correlated
+frame's world landmarks directly, without temporal smoothing or automatic camera
+motion, so its pose timing remains aligned with the 2D overlay. These preferences
+are browser-local and isolated by channel and auxiliary-view ID.
 The **Pose Estimation** metadata settings independently control overlay
 visibility, joint markers, and landmark names. Landmark names default off to
 avoid covering the subject in full-body demos.

@@ -1,6 +1,6 @@
 (() => {
-  const SETTINGS_VERSION = 6;
-  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, SETTINGS_VERSION]);
+  const SETTINGS_VERSION = 7;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, SETTINGS_VERSION]);
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -49,8 +49,7 @@
       panelMode: "compact",
       yawDegrees: -45,
       pitchDegrees: 20,
-      showReferenceBox: true,
-      stabilizePose: true
+      showReferenceBox: true
     }
   };
   const PANEL_MODES = new Set(["compact", "collapsed", "expanded"]);
@@ -208,9 +207,6 @@
       }
       if (Object.prototype.hasOwnProperty.call(rawSettings, "showReferenceBox")) {
         settings.showReferenceBox = rawSettings.showReferenceBox !== false;
-      }
-      if (Object.prototype.hasOwnProperty.call(rawSettings, "stabilizePose")) {
-        settings.stabilizePose = rawSettings.stabilizePose !== false;
       }
     }
     return settings;

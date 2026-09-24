@@ -296,8 +296,8 @@ body {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  min-height: 48px;
-  padding: 5px 7px;
+  min-height: 31px;
+  padding: 4px 7px;
   overflow: hidden;
   flex-wrap: wrap;
   gap: 5px 8px;
@@ -334,15 +334,6 @@ body {
   background: rgba(51, 65, 85, 0.72);
   cursor: pointer;
   font: inherit;
-}
-
-.auxiliary-control-range[data-control-id="rotationSpeed"] {
-  flex: 1 1 100%;
-}
-
-.auxiliary-control-range[data-control-id="rotationSpeed"] input {
-  flex: 1 1 auto;
-  width: auto;
 }
 
 .settings-field-note {
