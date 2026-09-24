@@ -737,9 +737,13 @@ test('a selected run that has left the board is named, not left stuck in the sel
 
   // A run is selectable by name or by id, so both must count as still being on the board.
   assert.deepEqual(missingSelection(['20260923T152624.613Z-insight-hw-1790177178'], runs), [])
-  // Runs not read yet is not the same as every run having gone.
-  assert.deepEqual(missingSelection(selected, []), [])
+  // Runs not read yet is not the same as every run having gone...
+  assert.deepEqual(missingSelection(selected, null), [])
+  assert.deepEqual(missingSelection(selected, undefined), [])
+  // ...but a list read and found empty is: every selected run has left the board.
+  assert.deepEqual(missingSelection(selected, []), selected)
   assert.deepEqual(missingSelection([], runs), [])
+  assert.deepEqual(missingSelection([], []), [])
 })
 
 test('the empty and refused states Sentinel actually returns are read as such', () => {

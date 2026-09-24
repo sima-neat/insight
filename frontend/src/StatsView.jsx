@@ -518,7 +518,8 @@ export function RunsPanel({
   }
   // Why the em dashes in the table are there, counted from the comparison itself.
   // Runs that were selected and are no longer on the board: their checkbox is gone.
-  const missing = useMemo(() => missingSelection(selected, runs), [selected, runs])
+  // Until a list has been read there is nothing to judge the selection against.
+  const missing = useMemo(() => missingSelection(selected, runsPayload ? runs : null), [selected, runs, runsPayload])
   // Runs whose own name breaks the comma-separated compare query.
   const uncomparable = useMemo(() => uncomparableRefs(selected), [selected])
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
@@ -724,20 +725,22 @@ export function RunsPanel({
               </button>
             </Callout>
           )}
-
-          {missing.length > 0 && (
-            <Callout tone="warn" title="Some selected runs are no longer on the board">
-              <p>
-                {missing.join(', ')} {missing.length === 1 ? 'is' : 'are'} not in the list Sentinel reports now, so there is
-                no longer a checkbox to clear {missing.length === 1 ? 'it' : 'them'} with, and comparing will fail on{' '}
-                {missing.length === 1 ? 'it' : 'them'}.
-              </p>
-              <button type="button" className="btn-tonal" onClick={() => onDropMissing(missing)}>
-                {missing.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
-              </button>
-            </Callout>
-          )}
         </>
+      )}
+
+      {/* Outside the table: when every selected run has gone there is no table, and this
+          is then the only place the selection can be seen and cleared. */}
+      {missing.length > 0 && (
+        <Callout tone="warn" title="Some selected runs are no longer on the board">
+          <p>
+            {missing.join(', ')} {missing.length === 1 ? 'is' : 'are'} not in the list Sentinel reports now, so there is
+            no longer a checkbox to clear {missing.length === 1 ? 'it' : 'them'} with, and comparing will fail on{' '}
+            {missing.length === 1 ? 'it' : 'them'}.
+          </p>
+          <button type="button" className="btn-tonal" onClick={() => onDropMissing(missing)}>
+            {missing.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
+          </button>
+        </Callout>
       )}
 
       {deleteResult?.title && (

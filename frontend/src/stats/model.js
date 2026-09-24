@@ -751,15 +751,14 @@ export function toggleSelection(selected, key, limit = MAX_COMPARE_RUNS) {
  * takes its checkbox off the page with it, so the selection keeps a ref that cannot be
  * unticked and every Compare fails with the daemon's `not_found` naming it - on this
  * board, `{"code":"not_found","error":"unknown run '<ref>'"}` with a 404. The view has to
- * say which ref to drop. An empty run list means the runs have not been read yet, not
- * that every selection has gone.
+ * say which ref to drop. `runs` is null until the list has been read: that is not the
+ * same as a list read and found empty, in which every selected run has gone.
  */
 export function missingSelection(selected, runs) {
   const list = selected || []
-  const known = runs || []
-  if (!list.length || !known.length) return []
+  if (!list.length || !Array.isArray(runs)) return []
   const refs = new Set()
-  for (const run of known) {
+  for (const run of runs) {
     for (const value of [run?.ref, run?.id, run?.name]) if (value) refs.add(String(value))
   }
   return list.filter((ref) => !refs.has(String(ref)))
