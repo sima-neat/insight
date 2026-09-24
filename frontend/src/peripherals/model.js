@@ -559,7 +559,8 @@ const PREVIEW_ERROR_ACTIONS = {
   command_failed: 'The capture worker could not start on the board. The board output below says why.',
   stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.',
   no_video: 'The board captured, but its video never reached Insight. The UDP port Insight listens on has to be reachable from the board; a host firewall is the usual reason it is not.',
-  viewer_unavailable: 'Insight could not reach its own video viewer, which the preview plays through. Reload the page; if it keeps failing, Insight needs restarting.'
+  viewer_unavailable: 'Insight could not reach its own video viewer, which the preview plays through. Reload the page; if it keeps failing, Insight needs restarting.',
+  channel_taken: 'Another sender is using that viewer channel. Starting the preview again picks a channel nothing is sending to.'
 }
 
 export function previewStatusInfo(state) {
@@ -570,6 +571,15 @@ export function heartbeatDelay(session) {
   const ms = Number(session?.heartbeat_interval_ms)
   if (!Number.isFinite(ms) || ms <= 0) return 5000
   return Math.min(60000, Math.max(1000, Math.round(ms)))
+}
+
+// What a failed heartbeat means for the pane, or null to keep beating (a transient error).
+export function heartbeatFailureEvent(error, sessionId) {
+  // A 404 for an id we no longer hold must never stop a newer session: `for` scopes it.
+  if (error?.code === 'not_found') return { type: 'expired', for: sessionId }
+  // The backend stopped the preview because another stream arrived on its channel.
+  if (error?.code === 'channel_taken') return { type: 'ended', for: sessionId, error }
+  return null
 }
 
 export function sessionMatches(session, cameraId, generation, selection = null) {
@@ -669,6 +679,10 @@ export function nextPreviewState(state, event) {
           details: {}
         }
       }
+    case 'ended':
+      // A live preview the backend stopped, with its reason; nothing is left to stop.
+      if (outOfDate(current, event)) return current
+      return { status: 'idle', session: null, error: event.error || null }
     case 'failed':
       if (outOfDate(current, event)) return current
       return { status: 'error', session: null, error: event.error || null }

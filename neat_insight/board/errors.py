@@ -9,6 +9,7 @@ _HTTP_STATUS = {
     "camera_in_use": 409,
     "preview_active": 409,
     "no_channel": 409,
+    "channel_taken": 409,
     "unreachable": 502,
     "auth_failed": 502,
     "tool_missing": 502,

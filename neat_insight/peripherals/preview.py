@@ -10,6 +10,7 @@ Insight restarts, the browser never fires unload, or the SSH connection dies.
 import ipaddress
 import json
 import logging
+import secrets
 import shlex
 import ssl
 import subprocess
@@ -151,17 +152,38 @@ def active_channels(port: int = DEFAULT_VIDEO_UI_PORT) -> Optional[set]:
     return {entry.get("channel") for entry in channels if entry.get("active")}
 
 
-def _channel_packets(channel: int) -> Optional[int]:
-    """RTP packets vf has counted on a channel, or None when it cannot be read."""
+def _channel_rtp(channel: int) -> Optional[dict]:
+    """`{"active", "ssrc"}` for one vf channel, or None when vf cannot be read.
+
+    vf reports the SSRC of the last RTP packet it received on the channel (omitted until one has
+    arrived), so a second sender on the channel shows up as an SSRC that is not the preview's.
+    """
     stats = _ingest_stats()
     if stats is None:
         return None
     for entry in stats:
         if entry.get("channel") == channel:
             rtp = entry.get("rtp")
-            value = rtp.get("packets_received") if isinstance(rtp, dict) else None
-            return value if isinstance(value, int) else None
-    return None
+            ssrc = rtp.get("ssrc") if isinstance(rtp, dict) else None
+            return {"active": bool(entry.get("active")), "ssrc": ssrc if isinstance(ssrc, int) and ssrc else None}
+    return {"active": False, "ssrc": None}
+
+
+def _pick_ssrc(avoid: Optional[int]) -> int:
+    """A random RTP SSRC for the preview: never 0 (vf omits it) nor 0xFFFFFFFF (rtph264pay's "random")."""
+    while True:
+        ssrc = secrets.randbelow(0xFFFFFFFE) + 1
+        if ssrc != avoid:
+            return ssrc
+
+
+def _channel_taken(channel: int) -> BoardError:
+    return BoardError(
+        "channel_taken",
+        "An application started sending to this channel; the preview stopped so it would not corrupt that stream.",
+        hint="Start the preview again; Insight will pick a channel nothing is sending to.",
+        channel=channel,
+    )
 
 
 class PreviewManager:
@@ -232,16 +254,19 @@ class PreviewManager:
         self._stop_current(session_ctx)
         _require_previewable(item, mode)
         channel = self._reserve_channel(session_ctx)
-        baseline = _channel_packets(channel)
+        # vf keeps reporting the last SSRC a channel saw; the preview's own must differ from it.
+        previous = (_channel_rtp(channel) or {}).get("ssrc")
+        ssrc = _pick_ssrc(previous)
         target_host, target_port = self._insight_endpoint(session_ctx, channel)
         session_id = uuid.uuid4().hex
-        pipeline = _pipeline(item, mode, target_host, target_port)
+        pipeline = _pipeline(item, mode, target_host, target_port, ssrc)
         self._start_worker(session_ctx, session_id, pipeline)
         session = {
             "id": session_id,
             "camera_id": item["id"],
             "mode": mode,
             "channel": channel,
+            "ssrc": ssrc,
             "generation": session_ctx.generation,
             "started_at": _iso(_now()),
             "expires_at": _iso(_now() + timedelta(seconds=SESSION_TTL_SEC)),
@@ -251,21 +276,29 @@ class PreviewManager:
         with self._lock:
             self._session = session
             self._owner = session_ctx
-        self._await_video(session_ctx, session, baseline)
+        self._await_video(session_ctx, session)
         return dict(session)
 
-    def _await_video(self, session_ctx, session: dict, baseline: Optional[int] = None) -> None:
+    def _await_video(self, session_ctx, session: dict) -> None:
+        """Return once vf receives the preview's own SSRC on its channel.
+
+        Choosing a free channel is a check, not a reservation: an application can start sending
+        to it at any moment. Only packets carrying the SSRC Insight gave the pipeline prove that
+        the preview's video, not someone else's, is what reached vf.
+        """
         deadline = time.monotonic() + VIDEO_ARRIVAL_TIMEOUT_SEC
         channel = session["channel"]
+        foreign = False
         while time.monotonic() < deadline:
-            if channel in (active_channels() or ()):
-                packets = _channel_packets(channel)
-                # "Active" alone could be someone else's stream that started on this channel in the
-                # meantime; a rising packet count on a channel that was idle is our own video.
-                if baseline is None or packets is None or packets > baseline:
+            rtp = _channel_rtp(channel)
+            if rtp and rtp["active"] and rtp["ssrc"] is not None:
+                if rtp["ssrc"] == session["ssrc"]:
                     return
+                foreign = True
             time.sleep(1.0)
         self._stop_current(session_ctx, session["id"])
+        if foreign:
+            raise _channel_taken(channel)
         raise BoardError(
             "no_video",
             "The board started capturing, but no video reached Insight.",
@@ -299,6 +332,7 @@ class PreviewManager:
                         self._session = None
                         self._owner = None
                 raise _unknown_session()
+            self._check_channel(session_ctx, session)
             session["expires_at"] = _iso(_now() + timedelta(seconds=SESSION_TTL_SEC))
             with self._lock:
                 if self._session is not None and self._session["id"] == session_id:
@@ -308,6 +342,23 @@ class PreviewManager:
             with self._condition:
                 self._heartbeats -= 1
                 self._condition.notify_all()
+
+    def _check_channel(self, session_ctx, session: dict) -> None:
+        """Stop the preview once another sender shares its channel.
+
+        vf reports the SSRC of the last packet on the channel, so a sample that is not the
+        preview's means a second stream is arriving there. Two senders on one channel corrupt
+        each other, and the application's stream is the one that matters.
+        """
+        rtp = _channel_rtp(session["channel"])
+        if not rtp or rtp["ssrc"] is None or rtp["ssrc"] == session["ssrc"]:
+            return
+        try:
+            self._stop_current(session_ctx, session["id"])
+        except BoardError as exc:
+            # The board worker still stops capture once heartbeats lapse; report the real reason.
+            logging.warning("Could not stop preview %s after its channel was taken: %s", session["id"], exc)
+        raise _channel_taken(session["channel"])
 
     def stop(self, session_ctx, session_id: str) -> dict:
         with self._lock:
@@ -540,7 +591,7 @@ def _whole_fps(fps) -> int:
     return int(fps)
 
 
-def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
+def _pipeline(item: dict, mode: dict, host: str, port: int, ssrc: int) -> list:
     fps = _whole_fps(mode["fps"])
     caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={fps}/1"
     return [
@@ -571,6 +622,8 @@ def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
         "!",
         "rtph264pay",
         "pt=96",
+        # A fixed SSRC lets Insight tell the preview's packets from any other sender's in vf's stats.
+        f"ssrc={ssrc}",
         "config-interval=1",
         "mtu=1200",
         "!",

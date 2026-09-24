@@ -96,6 +96,7 @@ class PreviewManagerTests(unittest.TestCase):
         self.manager = preview.PreviewManager()
         patches = [
             mock.patch.object(preview, "active_channels", return_value=set()),
+            mock.patch.object(preview, "_channel_rtp", return_value=None),
             mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)),
             mock.patch.object(preview, "video_ui_port", return_value=8081),
             mock.patch.object(preview.PreviewManager, "_await_video", lambda *args: None),
@@ -309,27 +310,54 @@ class PreviewVideoArrivalTests(unittest.TestCase):
             mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)),
             mock.patch.object(preview, "video_ui_port", return_value=8081),
             mock.patch.object(preview.time, "sleep", lambda _seconds: None),
+            # sleep is a no-op here, so the real 8 s deadline would only spin the loop.
+            mock.patch.object(preview, "VIDEO_ARRIVAL_TIMEOUT_SEC", 0.2),
         ):
             patch.start()
             self.addCleanup(patch.stop)
 
     def test_start_returns_once_video_arrives(self):
         session = fake_session()
-        with mock.patch.object(preview, "active_channels", side_effect=[set(), set(), {3}]), \
-                mock.patch.object(preview, "_channel_packets", return_value=None):
+        idle = {"active": False, "ssrc": None}
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_pick_ssrc", return_value=1234), \
+                mock.patch.object(preview, "_channel_rtp", side_effect=[idle, idle, idle, {"active": True, "ssrc": 1234}]):
             started = self.manager.start(session, camera_item(), dict(MODE))
         self.assertEqual(started["channel"], 3)
         self.assertIsNotNone(self.manager.current(1))
 
     def test_silent_channel_stops_capture_and_explains_the_network(self):
         session = fake_session()
-        with mock.patch.object(preview, "active_channels", return_value=set()):
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_channel_rtp", return_value={"active": False, "ssrc": None}):
             with self.assertRaises(BoardError) as ctx:
                 self.manager.start(session, camera_item(), dict(MODE))
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("no_video", 502))
         self.assertIn("firewall", ctx.exception.hint)
         self.assertIsNone(self.manager.current(1))
         self.assertIn("pipeline.pid", "\n".join(session.transport.commands()))
+
+    def test_a_foreign_stream_on_the_channel_is_not_taken_for_the_preview(self):
+        """Another sender starting on the channel in the gap must not make the preview look live."""
+        session = fake_session()
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_pick_ssrc", return_value=1234), \
+                mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 777}):
+            with self.assertRaises(BoardError) as ctx:
+                self.manager.start(session, camera_item(), dict(MODE))
+        self.assertEqual((ctx.exception.code, ctx.exception.status), ("channel_taken", 409))
+        self.assertIn("An application started sending to this channel", ctx.exception.message)
+        self.assertIsNone(self.manager.current(1))
+        self.assertIn("kill $pid", "\n".join(session.transport.commands()))
+
+    def test_the_preview_is_live_once_its_own_ssrc_arrives_even_after_another(self):
+        session = fake_session()
+        rtp = [{"active": False, "ssrc": 777}, {"active": True, "ssrc": 777}, {"active": True, "ssrc": 1234}]
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_pick_ssrc", return_value=1234), \
+                mock.patch.object(preview, "_channel_rtp", side_effect=rtp):
+            started = self.manager.start(session, camera_item(), dict(MODE))
+        self.assertEqual((started["state"], started["ssrc"]), ("live", 1234))
 
     def test_a_remote_board_without_a_published_range_is_refused(self):
         with mock.patch.object(preview, "port_map_video_range", return_value=None):
@@ -349,6 +377,7 @@ class PreviewApiTests(unittest.TestCase):
             mock.patch.object(api, "previews", preview.PreviewManager()),
             mock.patch.object(api, "scans", cameras.ScanCache()),
             mock.patch.object(preview, "active_channels", return_value=set()),
+            mock.patch.object(preview, "_channel_rtp", return_value=None),
             mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)),
         ):
             patch.start()
@@ -502,7 +531,7 @@ class PreviewOwnershipTests(unittest.TestCase):
         self.manager = preview.PreviewManager()
         patches = [
             mock.patch.object(preview, "active_channels", return_value=set()),
-            mock.patch.object(preview, "_channel_packets", return_value=0),
+            mock.patch.object(preview, "_channel_rtp", return_value=None),
             mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)),
             mock.patch.object(preview.PreviewManager, "_await_video", lambda *args, **kwargs: None),
         ]
@@ -592,7 +621,7 @@ class PreviewStartFailureTests(unittest.TestCase):
         transport = FakeTransport(pid=None, saved_log=b"ERROR: Pipeline doesn't want to pause\n")
         session = fake_session(transport=transport)
         with mock.patch.object(preview, "active_channels", return_value=set()), \
-                mock.patch.object(preview, "_channel_packets", return_value=0), \
+                mock.patch.object(preview, "_channel_rtp", return_value=None), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
             with self.assertRaises(BoardError) as ctx:
                 manager.start(session, camera_item(), dict(MODE))
@@ -606,7 +635,7 @@ class PreviewStartFailureTests(unittest.TestCase):
         transport = FakeTransport(pid=None, saved_log=b"ERROR: Pipeline doesn't want to pause\n")
         session = fake_session(transport=transport)
         with mock.patch.object(preview, "active_channels", return_value=set()), \
-                mock.patch.object(preview, "_channel_packets", return_value=0), \
+                mock.patch.object(preview, "_channel_rtp", return_value=None), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
             with self.assertRaises(BoardError):
                 manager.start(session, camera_item(), dict(MODE))
@@ -624,7 +653,7 @@ class PreviewHeartbeatTests(unittest.TestCase):
         transport = FakeTransport()
         session = fake_session(transport=transport)
         with mock.patch.object(preview, "active_channels", return_value=set()), \
-                mock.patch.object(preview, "_channel_packets", return_value=0), \
+                mock.patch.object(preview, "_channel_rtp", return_value=None), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)), \
                 mock.patch.object(preview.PreviewManager, "_await_video", lambda *a, **k: None):
             started = manager.start(session, camera_item(), dict(MODE))
@@ -633,6 +662,48 @@ class PreviewHeartbeatTests(unittest.TestCase):
             manager.heartbeat(session, started["id"])
         self.assertEqual(ctx.exception.status, 404)
         self.assertIsNone(manager.current(1))
+
+    def start_with_ssrc(self, manager, session, ssrc=1234):
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_channel_rtp", return_value=None), \
+                mock.patch.object(preview, "_pick_ssrc", return_value=ssrc), \
+                mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)), \
+                mock.patch.object(preview.PreviewManager, "_await_video", lambda *a, **k: None):
+            return manager.start(session, camera_item(), dict(MODE))
+
+    def test_a_second_sender_on_the_channel_stops_the_preview(self):
+        """The channel was only checked free at start; an application may start sending to it later."""
+        manager = preview.PreviewManager()
+        session = fake_session()
+        started = self.start_with_ssrc(manager, session)
+        with mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 999}):
+            with self.assertRaises(BoardError) as ctx:
+                manager.heartbeat(session, started["id"])
+        self.assertEqual((ctx.exception.code, ctx.exception.status), ("channel_taken", 409))
+        self.assertEqual(
+            ctx.exception.message,
+            "An application started sending to this channel; the preview stopped so it would not corrupt that stream.",
+        )
+        self.assertIsNone(manager.current(1))
+        self.assertTrue([cmd for cmd in session.transport.commands() if started["id"] in cmd and "kill $pid" in cmd])
+
+    def test_the_preview_own_ssrc_or_unreadable_stats_keep_it_running(self):
+        manager = preview.PreviewManager()
+        session = fake_session()
+        started = self.start_with_ssrc(manager, session)
+        for rtp in ({"active": True, "ssrc": 1234}, {"active": False, "ssrc": None}, None):
+            with self.subTest(rtp=rtp), mock.patch.object(preview, "_channel_rtp", return_value=rtp):
+                self.assertEqual(manager.heartbeat(session, started["id"])["state"], "live")
+        self.assertFalse([cmd for cmd in session.transport.commands() if "kill $pid" in cmd])
+
+    def test_a_failed_stop_still_reports_that_the_channel_was_taken(self):
+        manager = preview.PreviewManager()
+        session = fake_session(transport=FailingStopTransport())
+        started = self.start_with_ssrc(manager, session)
+        with mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 999}):
+            with self.assertRaises(BoardError) as ctx:
+                manager.heartbeat(session, started["id"])
+        self.assertEqual(ctx.exception.code, "channel_taken")
 
 
 class PreviewModeValidationTests(unittest.TestCase):
@@ -644,14 +715,25 @@ class PreviewModeValidationTests(unittest.TestCase):
 
     def test_the_chosen_rate_is_enforced_not_merely_requested(self):
         """libcamera delivers the sensor mode's rate whatever the caps ask for, so the pipeline caps it."""
-        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 30}, "127.0.0.1", 9003))
+        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 30}, "127.0.0.1", 9003, 1234))
         self.assertIn("framerate=30/1", command)
         self.assertIn("videorate max-rate=30", command)
         # videorate sits between the camera and the encoder, or the encoder would see the surplus.
         self.assertLess(command.index("videorate"), command.index("neatencoder"))
 
+    def test_the_payloader_sends_with_the_ssrc_insight_chose(self):
+        command = preview._pipeline(camera_item(), dict(MODE), "127.0.0.1", 9003, 1234)
+        payloader = command[command.index("rtph264pay"):command.index("udpsink")]
+        self.assertIn("ssrc=1234", payloader)
+
+    def test_a_chosen_ssrc_is_never_0_all_ones_or_the_one_vf_last_saw(self):
+        with mock.patch.object(preview.secrets, "randbelow", side_effect=[41, 99]):
+            self.assertEqual(preview._pick_ssrc(avoid=42), 100)
+        for _ in range(200):
+            self.assertTrue(1 <= preview._pick_ssrc(None) <= 0xFFFFFFFE)
+
     def test_caps_videorate_and_encoder_all_get_the_same_rate(self):
-        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 30.0}, "127.0.0.1", 9003))
+        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 30.0}, "127.0.0.1", 9003, 1234))
         self.assertIn("framerate=30/1", command)
         self.assertIn("max-rate=30 ", command)
         self.assertIn("enc-frame-rate=30 ", command)
@@ -659,7 +741,7 @@ class PreviewModeValidationTests(unittest.TestCase):
     def test_a_fractional_rate_is_refused_not_given_to_the_encoder_truncated(self):
         """enc-frame-rate and max-rate are integers; 29.97 caps with a 29 fps encoder is inconsistent."""
         with self.assertRaises(BoardError) as ctx:
-            preview._pipeline(camera_item(), {**MODE, "fps": 29.97}, "127.0.0.1", 9003)
+            preview._pipeline(camera_item(), {**MODE, "fps": 29.97}, "127.0.0.1", 9003, 1234)
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("invalid_request", 400))
         self.assertIn("whole-number", ctx.exception.message)
 
@@ -722,19 +804,26 @@ class ActiveChannelTests(unittest.TestCase):
             self.assertEqual(preview.active_channels(8081), {2})
         self.assertEqual(opened.call_args.args[0], "https://127.0.0.1:8081/ingest/stats?all=1")
 
-    def test_packet_counter_uses_the_real_nested_rtp_schema(self):
-        payload = json.dumps({"channels": [{"channel": 3, "packets_received": 999, "rtp": {"packets_received": 41}}]}).encode()
+    def test_channel_ssrc_uses_the_real_nested_rtp_schema(self):
+        payload = json.dumps({"channels": [
+            {"channel": 3, "active": True, "ssrc": 5, "rtp": {"ssrc": 41, "packets_received": 9}},
+            {"channel": 4, "active": False, "rtp": {"packets_received": 0}},  # vf omits a zero ssrc
+        ]}).encode()
         with self.urlopen(payload):
-            self.assertEqual(preview._channel_packets(3), 41)
+            self.assertEqual(preview._channel_rtp(3), {"active": True, "ssrc": 41})
+        with self.urlopen(payload):
+            self.assertEqual(preview._channel_rtp(4), {"active": False, "ssrc": None})
+        with self.urlopen(b"<!DOCTYPE html>"):
+            self.assertIsNone(preview._channel_rtp(3))
 
-    def test_collision_guard_waits_for_the_reserved_channel_counter_to_rise(self):
+    def test_arrival_waits_for_the_preview_ssrc_not_any_traffic(self):
         manager = preview.PreviewManager()
-        session = {"id": "s1", "channel": 3}
-        with mock.patch.object(preview, "active_channels", return_value={3}), \
-                mock.patch.object(preview, "_channel_packets", side_effect=[12, 13]), \
+        session = {"id": "s1", "channel": 3, "ssrc": 1234}
+        with mock.patch.object(preview, "_channel_rtp", side_effect=[{"active": True, "ssrc": 12}, {"active": True, "ssrc": 1234}]) as rtp, \
                 mock.patch.object(preview.time, "monotonic", side_effect=[0.0, 0.1, 0.2]), \
                 mock.patch.object(preview.time, "sleep", return_value=None):
-            manager._await_video(fake_session(), session, baseline=12)
+            manager._await_video(fake_session(), session)
+        self.assertEqual(rtp.call_count, 2)
 
     def test_the_viewer_page_is_not_read_as_an_idle_board(self):
         with self.urlopen(b"<!DOCTYPE html>\n<html></html>"):

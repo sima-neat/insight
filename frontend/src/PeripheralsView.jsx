@@ -11,6 +11,7 @@ import {
   deviceTabs,
   groupCameras,
   heartbeatDelay,
+  heartbeatFailureEvent,
   isSnapshotStale,
   modeLabel,
   nextPreviewState,
@@ -409,9 +410,8 @@ export default function PeripheralsView({
         if (!cancelled) dispatchPreview({ type: 'session', session: data.session })
       } catch (err) {
         if (cancelled) return
-        const error = normalizeError(err)
-        // A 404 for an id we no longer hold must never stop a newer session.
-        if (error.code === 'not_found') dispatchPreview({ type: 'expired', for: beatSessionId })
+        const event = heartbeatFailureEvent(normalizeError(err), beatSessionId)
+        if (event) dispatchPreview(event)
       }
     }
     beat()

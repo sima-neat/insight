@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   PREVIEW_IDLE,
   apiError,
+  heartbeatFailureEvent,
   availabilityInfo,
   blockedFormatSummary,
   boardIndicator,
@@ -781,4 +782,23 @@ test('every preview failure carries a recovery action and nothing destructive', 
 test('a preview viewer address is only loaded when it is an http(s) URL', () => {
   assert.equal(safeHref(liveSession.viewer_url), liveSession.viewer_url)
   assert.equal(safeHref('javascript:alert(1)'), null)
+})
+
+test('preview heartbeat: a taken channel ends the preview with the backend reason', () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  const error = {
+    code: 'channel_taken',
+    message: 'An application started sending to this channel; the preview stopped so it would not corrupt that stream.',
+    hint: 'Start the preview again.'
+  }
+  const event = heartbeatFailureEvent(error, liveSession.id)
+  const ended = nextPreviewState(live, event)
+  assert.equal(ended.status, 'idle')
+  assert.equal(ended.session, null)
+  assert.equal(ended.error.message, error.message)
+  assert.ok(previewErrorInfo(ended.error).action, 'the pane says what to do next')
+  // Scoped to its session: it never ends a newer one.
+  assert.equal(nextPreviewState(live, heartbeatFailureEvent(error, 'old-id')), live)
+  assert.deepEqual(heartbeatFailureEvent({ code: 'not_found' }, 'abc'), { type: 'expired', for: 'abc' })
+  assert.equal(heartbeatFailureEvent({ code: 'timeout' }, 'abc'), null)
 })
