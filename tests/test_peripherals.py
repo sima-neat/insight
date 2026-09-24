@@ -452,6 +452,13 @@ class SnapshotTests(unittest.TestCase):
         descriptor = json.loads(next(e for e in rendered["exports"] if e["id"] == "json")["content"])
         self.assertEqual(descriptor["capture_buffer_count"], 0)
         self.assertIn(cameras.UNCHECKED_LIBCAMERASRC_REASON, rendered["warnings"])
+        self.assertNotIn("missing", cameras.UNCHECKED_LIBCAMERASRC_REASON)
+
+    def test_usb_modes_skipped_by_the_time_budget_point_at_slow_tools(self):
+        output = camera_board(self.tmp.name).collect()
+        output["usb"][0].update(formats=None, detail=probe.OUT_OF_TIME)
+        camera = next(entry for entry in snapshot_of(output)["items"] if entry["connection"] == "usb")
+        self.assertEqual((camera["errors"][0]["code"], camera["errors"][0]["hint"]), ("timeout", cameras.OUT_OF_TIME_HINT))
 
     def test_fps_choices_follow_the_rate_limit(self):
         self.assertEqual(cameras.fps_choices(59.94), [60, 30, 25, 20, 15, 10, 5])

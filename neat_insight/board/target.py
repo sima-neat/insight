@@ -20,7 +20,7 @@ _WARNED = set()
 def _warn_once(message: str) -> None:
     if message not in _WARNED:
         _WARNED.add(message)
-        logging.warning("Ignoring SDK DevKit target from the environment: %s", message)
+        logging.warning(message)
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ def sdk_env_target() -> Optional[dict]:
     try:
         host = get_devkit_sync_devkit_ip()
     except RuntimeError as exc:
-        _warn_once(str(exc))
+        _warn_once(f"Ignoring DEVKIT_SYNC_DEVKIT_IP ({exc}); trying SIMA_DEVKIT_IP instead.")
         host = ""
     host = host or (os.getenv("SIMA_DEVKIT_IP") or "").strip()
     if not host:
@@ -75,7 +75,7 @@ def sdk_env_target() -> Optional[dict]:
             os.getenv("DEVKIT_SYNC_DEVKIT_USER") or DEFAULT_SSH_USER,
         )
     except BoardError as exc:
-        _warn_once(exc.message)
+        _warn_once(f"Ignoring the SDK DevKit target from the environment: {exc.message}")
         return None
 
 

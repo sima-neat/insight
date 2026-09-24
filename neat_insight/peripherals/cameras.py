@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from neat_insight.peripherals import compat
+from neat_insight.peripherals.probe import OUT_OF_TIME
 
 STANDARD_FPS = (60, 30, 25, 20, 15, 10, 5)
 # libcamera snaps a faster request to the mode's rate limit, so a 29.97 fps mode still serves 30.
@@ -38,7 +39,7 @@ RAW_REASON = "Raw sensor format; CameraInput needs ISP output."
 NO_LIBCAMERASRC_REASON = (
     "GStreamer libcamerasrc was not found on the board, so Core CameraInput cannot open MIPI cameras."
 )
-UNCHECKED_LIBCAMERASRC_REASON = "libcamerasrc could not be checked (gst-inspect-1.0 is missing). " + ADVERTISED_REASON
+UNCHECKED_LIBCAMERASRC_REASON = "libcamerasrc could not be checked on the board (see the warnings above). " + ADVERTISED_REASON
 USB_REASON = (
     "Detected through V4L2. Core CameraInput supports libcamera/MIPI cameras only; "
     "USB support is tracked in core#838."
@@ -365,7 +366,10 @@ def _usb_item(camera: dict, platform: dict) -> dict:
     if camera.get("formats") is None:
         if camera.get("detail"):
             show = f"v4l2-ctl -d {camera['node']} --list-formats-ext"
-            if _permission_denied(camera["detail"]):
+            if camera["detail"] == OUT_OF_TIME:
+                message = "The discovery probe ran out of time before listing this camera's modes."
+                errors.append(_error("timeout", message, OUT_OF_TIME_HINT))
+            elif _permission_denied(camera["detail"]):
                 message = f"`{show}` was denied access to the camera: {camera['detail']}"
                 errors.append(_error("permission_denied", message, PERMISSION_HINT))
             else:

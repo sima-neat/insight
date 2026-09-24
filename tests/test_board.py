@@ -63,6 +63,7 @@ class TargetResolutionTests(unittest.TestCase):
                 self.assertIsNone(target_module.sdk_env_target())
                 self.assertIsNone(target_module.sdk_env_target())
             self.assertEqual(len(logs.records), 1)
+            self.assertIn("Ignoring DEVKIT_SYNC_DEVKIT_IP", logs.output[0])
         env = {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local", "SIMA_DEVKIT_IP": "192.168.2.9"}
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(target_module, "_WARNED", set()):
             with self.assertLogs(level="WARNING"):
