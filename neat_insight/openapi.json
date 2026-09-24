@@ -27,7 +27,8 @@
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "Discover MIPI and USB cameras on the selected board and export a camera input configuration. Discovery reads device information only: it does not capture frames, change sensor controls, or publish streams. Each camera and mode states whether Core `CameraInput` supports it."}
+    {"name": "Peripherals", "description": "Discover MIPI and USB cameras on the selected board and export a camera input configuration. Discovery reads device information only: it does not capture frames, change sensor controls, or publish streams. Each camera and mode states whether Core `CameraInput` supports it."},
+    {"name": "Sentinel", "description": "Read SiMa Sentinel telemetry from the selected board and control its traces. Sentinel serves its API on a unix socket that is never exposed over the network, so Insight reaches it from the board itself: in process when Insight runs on the board, and otherwise by running a small client there over SSH. Metric values are `null` when the board cannot measure them, never zero."}
   ],
   "x-tagGroups": [
     {
@@ -36,7 +37,7 @@
     },
     {
       "name": "Board and peripherals",
-      "tags": ["Board", "Peripherals"]
+      "tags": ["Board", "Peripherals", "Sentinel"]
     },
     {
       "name": "Automate Insight",
@@ -789,6 +790,146 @@
         }
       }
     },
+    "/api/sentinel": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get Sentinel availability on the selected board",
+        "description": "Reports whether the `simaai-sentinel` daemon is installed, running and answering on its unix socket, together with its version and the board it belongs to. A daemon that is missing, stopped or unreadable is reported as `available: false` with `status.state` and `status.error`, not as an HTTP failure; only board-level failures (no board selected, unreachable, timeout) use an error status. The daemon state is cached briefly per board, so polling this endpoint does not run a command on the board for every call.",
+        "operationId": "getSentinel",
+        "responses": {
+          "200": {"description": "Sentinel availability for the selected board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelState"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/install": {
+      "post": {
+        "tags": ["Sentinel"],
+        "summary": "Install Sentinel on the selected board",
+        "description": "Runs `sima-cli neat install sentinel` on the board itself (the installer has no `--ip`) with `SIMA_INSTALL_CONTEXT=1`, `SIMA_CLI_CHECK_FOR_UPDATE=0` and a temporary download directory, using passwordless sudo. An installed and healthy daemon is never reinstalled: the installer restarts the daemon and would end a trace in flight, so that case returns `409 already_installed`. Without passwordless sudo the response names the exact command to run on the board.",
+        "operationId": "installSentinel",
+        "responses": {
+          "200": {"description": "Sentinel installed; the new daemon state and the installer's output.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelInstallResult"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/metrics": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get the board's current telemetry",
+        "description": "Joins Sentinel's metric definitions with its latest sample so every value carries its label, unit, group and thresholds, and ranks each value as `ok`, `warn`, `critical` or `unavailable`. A metric the board cannot measure has `value: null` and status `unavailable`; it is never reported as zero. Definitions are cached per board for a minute, while the sample is read on every call. Samples are also appended to a bounded per-board history: pass `history=<n>` to get the last `n` samples as aligned per-metric series for sparklines. Cached samples, definitions and history are keyed by the board's generation and fingerprint, so selecting another board starts empty.",
+        "operationId": "getSentinelMetrics",
+        "parameters": [
+          {"name": "history", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 240, "default": 0}, "description": "Number of recent samples to return as series; `0` (the default) returns none."}
+        ],
+        "responses": {
+          "200": {"description": "Current metric values for the selected board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelMetrics"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/traces": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get the active trace",
+        "description": "Returns Sentinel's active trace and its running summary in `sentinel`, or `trace: null` when nothing is being recorded.",
+        "operationId": "getSentinelTraces",
+        "responses": {
+          "200": {"description": "The active trace, if any.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      },
+      "post": {
+        "tags": ["Sentinel"],
+        "summary": "Start a named trace",
+        "description": "Starts recording a named trace around a workload. Only one trace can be active and names must be unique, so a second start returns `409 trace_conflict` with Sentinel's own message. The request is validated before it reaches the board: a missing or empty name, an over-long note, or tags that are not a list of non-empty strings return `400 invalid_request` without touching it.",
+        "operationId": "startSentinelTrace",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceRequest"}, "example": {"name": "baseline", "note": "before optimization", "tags": ["compiler-v1"]}}}},
+        "responses": {
+          "200": {"description": "The trace Sentinel started.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/traces/stop": {
+      "post": {
+        "tags": ["Sentinel"],
+        "summary": "Stop the active trace",
+        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active.",
+        "operationId": "stopSentinelTrace",
+        "responses": {
+          "200": {"description": "The run Sentinel saved.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/runs": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "List saved runs",
+        "description": "Returns Sentinel's recording and completed run summaries in `sentinel.runs`, newest retention first. Runs are stored on the board and survive a daemon restart.",
+        "operationId": "getSentinelRuns",
+        "responses": {
+          "200": {"description": "Run summaries held by the board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/runs/{run_id}": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Get one saved run",
+        "description": "Returns one run by unique name or stable id, with its metadata, metric definitions and raw samples, in `sentinel`. An unknown or ambiguous name returns `404 not_found` with Sentinel's message.",
+        "operationId": "getSentinelRun",
+        "parameters": [
+          {"name": "run_id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "The run's unique name or stable id."}
+        ],
+        "responses": {
+          "200": {"description": "The saved run.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/sentinel/compare": {
+      "get": {
+        "tags": ["Sentinel"],
+        "summary": "Compare saved runs",
+        "description": "Compares two or more runs on the same elapsed timeline and returns run metadata, per-run statistics and deltas against the first run, which is the baseline. `raw=1` adds timestamped samples and is much larger. Fewer than two runs, or more than eight, return `400 invalid_request` without touching the board; an unknown run returns `404 not_found`.",
+        "operationId": "compareSentinelRuns",
+        "parameters": [
+          {"name": "runs", "in": "query", "required": true, "schema": {"type": "string"}, "description": "Comma-separated run names or ids; the first is the baseline.", "example": "baseline,optimized"},
+          {"name": "raw", "in": "query", "required": false, "schema": {"type": "string", "enum": ["1", "true", "yes"]}, "description": "Include timestamped samples in the comparison."}
+        ],
+        "responses": {
+          "200": {"description": "The comparison Sentinel computed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
     "/api/buildinfo": {
       "get": {
         "tags": ["Service and system"],
@@ -1329,6 +1470,120 @@
           "support": {"$ref": "#/components/schemas/SupportTier"},
           "warnings": {"type": "array", "items": {"type": "string"}},
           "exports": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "enum": ["python", "cpp", "yaml", "json"]}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
+        }
+      },
+      "SentinelBoard": {
+        "type": "object",
+        "description": "The board the telemetry belongs to; `fingerprint` also keys Insight's per-board caches.",
+        "required": ["label", "source", "hostname", "machine", "build_version", "fingerprint"],
+        "properties": {
+          "label": {"type": "string", "example": "sima@192.168.2.2"},
+          "source": {"type": "string", "enum": ["manual", "on-board", "sdk-env"]},
+          "hostname": {"type": ["string", "null"]},
+          "machine": {"type": ["string", "null"]},
+          "build_version": {"type": ["string", "null"]},
+          "fingerprint": {"type": ["string", "null"]}
+        }
+      },
+      "SentinelDaemon": {
+        "type": "object",
+        "description": "What the board reports about the simaai-sentinel service.",
+        "required": ["installed", "healthy", "service", "socket", "socket_path", "sima_cli"],
+        "properties": {
+          "installed": {"type": "boolean", "description": "A simaai-sentinel unit or its socket exists on the board."},
+          "healthy": {"type": "boolean", "description": "The service is active and its socket is present."},
+          "service": {"type": "string", "description": "`systemctl is-active simaai-sentinel`.", "example": "active"},
+          "socket": {"type": "boolean"},
+          "socket_path": {"type": "string", "example": "/run/simaai-sentinel/api.sock"},
+          "sima_cli": {"type": ["string", "null"], "description": "Path to sima-cli on the board, used to install Sentinel."}
+        }
+      },
+      "SentinelState": {
+        "type": "object",
+        "required": ["board", "generation", "available", "schema", "version", "status", "daemon", "health"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer", "description": "Board selection generation; it bumps whenever the selected board changes."},
+          "available": {"type": "boolean", "description": "Sentinel answered its API and speaks the schema Insight understands."},
+          "schema": {"type": "integer", "description": "The Sentinel API schema this Insight understands.", "example": 1},
+          "version": {"type": ["string", "null"], "example": "main:80ab7de4da31"},
+          "status": {
+            "type": "object",
+            "required": ["state", "error"],
+            "properties": {
+              "state": {"type": "string", "enum": ["ready", "missing", "stopped", "error"]},
+              "error": {"oneOf": [{"type": "null"}, {"$ref": "#/components/schemas/BoardError"}], "description": "Why Sentinel cannot be used, with the step that fixes it."}
+            }
+          },
+          "daemon": {"$ref": "#/components/schemas/SentinelDaemon"},
+          "health": {"type": ["object", "null"], "description": "Sentinel's `/v1/health` body: version, freshness, sample and metric counts, errors, and the active trace."}
+        }
+      },
+      "SentinelInstallResult": {
+        "type": "object",
+        "required": ["board", "generation", "daemon", "log"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer"},
+          "daemon": {"$ref": "#/components/schemas/SentinelDaemon"},
+          "log": {"type": "string", "description": "Tail of the installer's output."}
+        }
+      },
+      "SentinelMetric": {
+        "type": "object",
+        "required": ["key", "label", "short", "unit", "description", "group", "warn", "critical", "value", "status"],
+        "properties": {
+          "key": {"type": "string", "example": "power_current_watts"},
+          "label": {"type": "string", "example": "Current board power"},
+          "short": {"type": "string", "example": "Current"},
+          "unit": {"type": ["string", "null"], "description": "As Sentinel defines it.", "example": "W"},
+          "description": {"type": ["string", "null"]},
+          "group": {"type": "string", "description": "Sentinel's group, or `Other` for a value with no definition.", "example": "Power"},
+          "warn": {"type": ["number", "null"]},
+          "critical": {"type": ["number", "null"]},
+          "value": {"type": ["number", "null"], "description": "`null` when the board cannot measure it; never zero for a missing value."},
+          "status": {"type": "string", "enum": ["ok", "warn", "critical", "unavailable"]}
+        }
+      },
+      "SentinelMetrics": {
+        "type": "object",
+        "required": ["board", "generation", "sampled_at", "version", "counts", "highlights", "groups", "history"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer"},
+          "sampled_at": {"type": ["string", "null"], "format": "date-time", "description": "Timestamp of the sample the values come from."},
+          "version": {"type": ["string", "null"]},
+          "counts": {"type": "object", "properties": {"total": {"type": "integer"}, "unavailable": {"type": "integer"}, "warn": {"type": "integer"}, "critical": {"type": "integer"}}},
+          "highlights": {"type": "array", "items": {"type": "string"}, "description": "Keys the Stats page leads with: board power, CPU, Linux memory, MLA allocated memory, EV74 CMA memory, and the hottest temperature sensor the board reports."},
+          "groups": {"type": "array", "items": {"type": "object", "required": ["name", "metrics"], "properties": {"name": {"type": "string"}, "metrics": {"type": "array", "items": {"$ref": "#/components/schemas/SentinelMetric"}}}}},
+          "history": {
+            "type": "object",
+            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested.",
+            "required": ["timestamps", "series"],
+            "properties": {
+              "timestamps": {"type": "array", "items": {"type": ["string", "null"]}},
+              "series": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": ["number", "null"]}}}
+            }
+          }
+        }
+      },
+      "SentinelPassthrough": {
+        "type": "object",
+        "description": "Sentinel's own response body under `sentinel`, minus its `schema` marker, plus the board it came from. Nesting keeps a run's or comparison's fields from shadowing `board` and `generation`.",
+        "required": ["board", "generation", "sentinel"],
+        "properties": {
+          "board": {"$ref": "#/components/schemas/SentinelBoard"},
+          "generation": {"type": "integer"},
+          "sentinel": {"type": "object", "description": "The daemon's body, such as `{trace, summary}`, `{runs}`, `{run}` or a comparison."}
+        }
+      },
+      "TraceRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Unique trace name; Sentinel rejects a name a run already uses."},
+          "note": {"type": ["string", "null"], "maxLength": 512},
+          "tags": {"type": ["array", "null"], "maxItems": 16, "items": {"type": "string", "minLength": 1}}
         }
       }
     }

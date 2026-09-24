@@ -56,6 +56,7 @@ from neat_insight.remote_devkit import (
     is_remote_devkit_connected,
 )
 from neat_insight.remotefs import read_remote_file
+from neat_insight.sentinel import sentinel_bp
 from neat_insight.utils import (
     board_type,
     check_and_generate_mkcert_certificate,
@@ -152,6 +153,7 @@ app.register_blueprint(api_docs_bp)
 app.register_blueprint(workspace_bp)
 board.init_app(app, env["NEAT_INSIGHT_DATA"], on_board=is_sima_board())
 app.register_blueprint(peripherals_bp)
+app.register_blueprint(sentinel_bp)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
