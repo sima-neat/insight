@@ -386,6 +386,46 @@ export function countsSummary(counts) {
 }
 
 /**
+ * The live metric groups as chips: name, how many metrics, and how many of them are past a
+ * threshold. Every group starts closed, so the count of warnings and criticals is carried on
+ * the chip itself; a group used to open by itself when it held a critical metric, and a
+ * closed chip must not hide that.
+ */
+export function metricGroupChips(groups) {
+  return (groups || []).map((group) => {
+    const critical = group.metrics.filter((metric) => metric.status === 'critical').length
+    const warn = group.metrics.filter((metric) => metric.status === 'warn').length
+    return {
+      id: group.name,
+      label: group.name,
+      count: group.metrics.length,
+      alert: critical ? { tone: 'critical', count: critical } : warn ? { tone: 'warn', count: warn } : null
+    }
+  })
+}
+
+/** The group the user opened, if the latest sample still has it. */
+export function openGroup(groups, name) {
+  if (!name) return null
+  return (groups || []).find((group) => group.name === name) || null
+}
+
+/**
+ * Where an arrow key moves focus in a row of chips. Chips wrap onto several lines, but they
+ * are one list in reading order, so Left and Right step through it and wrap at the ends.
+ * Anything else returns null and is left to the browser.
+ */
+export function chipKeyTarget(key, index, length) {
+  if (!length) return null
+  const at = Number.isInteger(index) && index >= 0 && index < length ? index : 0
+  if (key === 'ArrowRight') return (at + 1) % length
+  if (key === 'ArrowLeft') return (at - 1 + length) % length
+  if (key === 'Home') return 0
+  if (key === 'End') return length - 1
+  return null
+}
+
+/**
  * An SVG polyline for one metric's recent values, scaled to the card.
  * Gaps (nulls) are dropped rather than drawn as zero, and a flat series stays centred.
  */

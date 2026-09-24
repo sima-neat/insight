@@ -37,8 +37,10 @@ import {
   healthProblems,
   hostMetricsModel,
   hostNotice,
+  metricGroupChips,
   metricsModel,
   missingSelection,
+  openGroup,
   payloadBoardLabel,
   pollDelay,
   runDetail,
@@ -53,7 +55,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
-import { Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
+import { ChipTabs, Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
 
 
 /**
@@ -148,6 +150,11 @@ function DaemonPanel({ info, health, busy, installing, install, installStale, er
 
 function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, onToggleLive, onRefresh, onRetry }) {
   const sampled = model.sampledAt ? formatRelativeTime(model.sampledAt, now) : ''
+  // Held by name, not by the group object: every poll builds new groups, and a refresh must
+  // not close what the user opened.
+  const [openName, setOpenName] = useState(null)
+  const chips = useMemo(() => metricGroupChips(model.groups), [model.groups])
+  const group = openGroup(model.groups, openName)
   return (
     <section className="panel stats-metrics" aria-labelledby="stats-metrics-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -196,39 +203,59 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
         </div>
       )}
 
-      {model.groups.map((group) => (
-        <details key={group.name} className="stats-group" open={group.metrics.some((metric) => metric.status === 'critical')}>
-          <summary>{group.name} <span className="hint">({group.metrics.length})</span></summary>
-          <table className="sysinfo-table stats-table">
-            <thead>
-              <tr>
-                <th scope="col">Metric</th>
-                <th scope="col">Value</th>
-                <th scope="col">Status</th>
-                <th scope="col">Recent</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.metrics.map((metric) => {
-                const status = statusInfo(metric.status)
-                return (
-                  <tr key={metric.key}>
-                    <th scope="row">
-                      {metric.label}
-                      {metric.description && <span className="hint">{metric.description}</span>}
-                    </th>
-                    <td className="stats-cell-value">{formatValue(metric.value, metric.unit)}</td>
-                    <td><Pill tone={status.tone}>{status.label}</Pill></td>
-                    <td className={`stats-cell-spark tone-${metric.status}`}>
-                      <Sparkline metric={metric} values={model.series[metric.key]} />
-                    </td>
+      {model.groups.length > 0 && (
+        <>
+          <ChipTabs
+            label="Metric groups"
+            items={chips}
+            selected={group ? group.name : null}
+            onSelect={setOpenName}
+            idPrefix="stats-group-tab"
+            panelId="stats-group-panel"
+            noun="metric"
+            collapsible
+          />
+          <div
+            id="stats-group-panel"
+            role="tabpanel"
+            className="stats-group-panel"
+            aria-labelledby={group ? `stats-group-tab-${chips.findIndex((chip) => chip.id === group.name)}` : undefined}
+            hidden={!group}
+          >
+            {group && (
+              <table className="sysinfo-table stats-table">
+                <caption className="sr-only">{group.name} metrics</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Metric</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Recent</th>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </details>
-      ))}
+                </thead>
+                <tbody>
+                  {group.metrics.map((metric) => {
+                    const status = statusInfo(metric.status)
+                    return (
+                      <tr key={metric.key}>
+                        <th scope="row">
+                          {metric.label}
+                          {metric.description && <span className="hint">{metric.description}</span>}
+                        </th>
+                        <td className="stats-cell-value">{formatValue(metric.value, metric.unit)}</td>
+                        <td><Pill tone={status.tone}>{status.label}</Pill></td>
+                        <td className={`stats-cell-spark tone-${metric.status}`}>
+                          <Sparkline metric={metric} values={model.series[metric.key]} />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
 
       {!model.groups.length && !error && (
         <p className="hint">{busy ? 'Reading the first sample…' : 'Sentinel has not reported any metric yet.'}</p>

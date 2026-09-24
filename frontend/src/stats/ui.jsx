@@ -1,7 +1,8 @@
 // Small presentational pieces shared by the Stats panels. They reuse the Peripherals
 // callout and pill so both views keep one visual language.
+import { useRef, useState } from 'react'
 import { Callout, Pill } from '../peripherals/ui.jsx'
-import { formatValue, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
+import { chipKeyTarget, formatValue, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
 
 export function Facts({ rows, className = 'periph-facts' }) {
   if (!rows?.length) return null
@@ -81,6 +82,65 @@ export function MetricCard({ metric, values }) {
       <span className="stats-metric-value">{formatValue(metric.value, metric.unit)}</span>
       <Sparkline metric={metric} values={values} />
       {thresholds && <span className="hint">{thresholds}</span>}
+    </div>
+  )
+}
+
+/**
+ * A single-select row of chips with tab semantics. The chips wrap onto further lines rather
+ * than scroll or shrink. Focus is roving: Tab enters and leaves the row, the arrow keys, Home
+ * and End move within it. With `automatic` the focused chip is selected as focus moves;
+ * otherwise Enter or Space selects it. With `collapsible`, selecting the selected chip again
+ * selects nothing, which closes its panel.
+ */
+export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, noun = '', automatic = false, collapsible = false }) {
+  const refs = useRef([])
+  const [focused, setFocused] = useState(null)
+  const selectedIndex = items.findIndex((item) => item.id === selected)
+  const current = focused !== null && focused < items.length ? focused : Math.max(0, selectedIndex)
+
+  function onKeyDown(event) {
+    const next = chipKeyTarget(event.key, current, items.length)
+    if (next === null) return
+    event.preventDefault()
+    setFocused(next)
+    refs.current[next]?.focus()
+    if (automatic) onSelect(items[next].id)
+  }
+
+  return (
+    <div className="stats-chips" role="tablist" aria-label={label} onKeyDown={onKeyDown}>
+      {items.map((item, index) => {
+        const active = item.id === selected
+        return (
+          <button
+            key={item.id}
+            ref={(node) => {
+              refs.current[index] = node
+            }}
+            type="button"
+            role="tab"
+            id={`${idPrefix}-${index}`}
+            aria-selected={active}
+            aria-controls={panelId}
+            tabIndex={index === current ? 0 : -1}
+            className={active ? 'stats-chip active' : 'stats-chip'}
+            onFocus={() => setFocused(index)}
+            onClick={() => onSelect(collapsible && active ? null : item.id)}
+          >
+            <span className="stats-chip-label">{item.label}</span>
+            <span className="stats-chip-count">
+              {item.count}
+              {noun && <span className="sr-only">{` ${noun}${item.count === 1 ? '' : 's'}`}</span>}
+            </span>
+            {item.alert && (
+              <span className={`stats-chip-alert tone-${item.alert.tone}`}>
+                {item.alert.count} {item.alert.tone === 'critical' ? 'critical' : `warning${item.alert.count === 1 ? '' : 's'}`}
+              </span>
+            )}
+          </button>
+        )
+      })}
     </div>
   )
 }
