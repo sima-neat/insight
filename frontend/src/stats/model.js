@@ -377,28 +377,129 @@ export function metricsModel(payload) {
 }
 
 /**
- * The live metric groups as chips: name, how many metrics, and how many of them are past a
- * threshold. Every group starts closed, so the count of warnings and criticals is carried on
- * the chip itself; a group used to open by itself when it held a critical metric, and a
- * closed chip must not hide that.
+ * The Stats page splits into what the board reports and what the machine Insight runs on
+ * reports. The board is what people open the page for, so it is the default; a saved value
+ * that is not one of the two (an old build's, or a hand edit) falls back to it.
  */
-export function metricGroupChips(groups) {
-  return (groups || []).map((group) => {
-    const critical = group.metrics.filter((metric) => metric.status === 'critical').length
-    const warn = group.metrics.filter((metric) => metric.status === 'warn').length
-    return {
-      id: group.name,
-      label: group.name,
-      count: group.metrics.length,
-      alert: critical ? { tone: 'critical', count: critical } : warn ? { tone: 'warn', count: warn } : null
+export const STATS_TABS = [
+  { id: 'devkit', label: 'DevKit' },
+  { id: 'host', label: 'Host' }
+]
+export const STATS_TAB_KEY = 'neat-insight:stats-tab'
+
+export function statsTabFrom(saved) {
+  return STATS_TABS.some((tab) => tab.id === saved) ? saved : STATS_TABS[0].id
+}
+
+/**
+ * The board's live metrics as the reader asks about them: an overview, then power, thermal
+ * and system. Overview is Sentinel's own highlights; every metric lands in exactly one of
+ * the other three.
+ */
+export const METRIC_SECTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'power', label: 'Power' },
+  { id: 'thermal', label: 'Thermal' },
+  { id: 'system', label: 'System' }
+]
+
+const TEMPERATURE_UNITS = new Set(['c', '°c', 'degc', 'deg c', 'celsius'])
+const POWER_UNITS = new Set(['w', 'mw', 'kw'])
+const TEMPERATURE_NAME = /temp|rtsn|thermal/i
+
+function unitKey(unit) {
+  return String(unit ?? '').trim().toLowerCase()
+}
+
+/**
+ * A temperature, wherever Sentinel grouped it: the board sensors sit under Board, the SoC's
+ * RTSN sensors under MLA, APU, CVU and TOP. The unit decides when there is one, so a
+ * percentage or a size whose name happens to hold "temp" is never read as a temperature; a
+ * metric with no unit is a temperature when its key or label names a sensor.
+ */
+export function isThermalMetric(metric) {
+  const unit = unitKey(metric?.unit)
+  if (unit) return TEMPERATURE_UNITS.has(unit)
+  return TEMPERATURE_NAME.test(`${metric?.key || ''} ${metric?.label || ''}`)
+}
+
+/**
+ * The one section a metric belongs to. Thermal is decided first, so a temperature Sentinel
+ * filed under Power is still found under Thermal. Power is Sentinel's Power and PowerRail
+ * groups, and anything else measured in watts. Everything left is System.
+ */
+export function metricSection(metric, groupName = metric?.group) {
+  if (isThermalMetric(metric)) return 'thermal'
+  const group = String(groupName || '').replace(/[\s_-]+/g, '').toLowerCase()
+  if (group.startsWith('power') || POWER_UNITS.has(unitKey(metric?.unit))) return 'power'
+  return 'system'
+}
+
+/**
+ * The live groups sorted into the three sections. Each section keeps Sentinel's own group
+ * names, in Sentinel's order, as its sub-headings; a group whose metrics went elsewhere is
+ * left out of the section rather than shown empty.
+ */
+export function metricSections(groups) {
+  const sections = { power: [], thermal: [], system: [] }
+  for (const group of groups || []) {
+    const split = { power: [], thermal: [], system: [] }
+    for (const metric of group.metrics || []) split[metricSection(metric, group.name)].push(metric)
+    for (const id of Object.keys(split)) {
+      if (split[id].length) sections[id].push({ name: group.name, metrics: split[id] })
     }
+  }
+  return sections
+}
+
+/** How many of these metrics are past a threshold, as the worst tone and its count. */
+export function metricAlert(metrics) {
+  const critical = (metrics || []).filter((metric) => metric.status === 'critical').length
+  const warn = (metrics || []).filter((metric) => metric.status === 'warn').length
+  return critical ? { tone: 'critical', count: critical } : warn ? { tone: 'warn', count: warn } : null
+}
+
+/**
+ * The section tabs, with each section's size and anything in it past a threshold, so a hot
+ * sensor shows on the Thermal tab while Overview is open. Overview counts nothing: it is a
+ * choice of metrics from the other three.
+ */
+export function metricSectionTabs(sections) {
+  return METRIC_SECTIONS.map((section) => {
+    if (section.id === 'overview') return { ...section }
+    const metrics = (sections?.[section.id] || []).flatMap((group) => group.metrics)
+    return { ...section, count: metrics.length, alert: metricAlert(metrics) }
   })
 }
 
-/** The group the user opened, if the latest sample still has it. */
-export function openGroup(groups, name) {
-  if (!name) return null
-  return (groups || []).find((group) => group.name === name) || null
+export function metricSectionFrom(id) {
+  return METRIC_SECTIONS.some((section) => section.id === id) ? id : METRIC_SECTIONS[0].id
+}
+
+/**
+ * One line above the thermal tables: how many sensors, the hottest one, and the limits they
+ * share. Sensors that did not report are counted but never chosen as the hottest.
+ */
+export function thermalSummary(groups) {
+  const metrics = (groups || []).flatMap((group) => group.metrics)
+  let hottest = null
+  for (const metric of metrics) {
+    if (isNumber(metric.value) && (!hottest || metric.value > hottest.value)) hottest = metric
+  }
+  const shared = (field) => {
+    const values = new Set(metrics.map((metric) => (isNumber(metric[field]) ? metric[field] : null)))
+    const [only] = values
+    return values.size === 1 && only !== null ? only : null
+  }
+  const warn = shared('warn')
+  const critical = shared('critical')
+  const unit = metrics[0]?.unit ?? 'C'
+  return {
+    count: metrics.length,
+    reporting: metrics.filter((metric) => isNumber(metric.value)).length,
+    hottest,
+    limits: thresholdText({ warn, critical, unit })
+  }
 }
 
 /**

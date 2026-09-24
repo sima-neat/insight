@@ -144,3 +144,60 @@ export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, 
     </div>
   )
 }
+
+/**
+ * A short row of tabs, each owning its own panel (`${panelPrefix}-${id}`). Selection follows
+ * focus: the arrow keys, Home and End move to a tab and show its panel at once, since every
+ * panel here is already in memory. Only the selected tab is in the Tab order. An item may
+ * carry a count and a threshold alert, which are drawn after its label.
+ */
+export function SegmentedTabs({ label, items, selected, onSelect, idPrefix, panelPrefix, className = '', noun = '' }) {
+  const refs = useRef([])
+  const index = Math.max(0, items.findIndex((item) => item.id === selected))
+
+  function onKeyDown(event) {
+    const next = chipKeyTarget(event.key, index, items.length)
+    if (next === null) return
+    event.preventDefault()
+    onSelect(items[next].id)
+    refs.current[next]?.focus()
+  }
+
+  return (
+    <div className={`stats-segments ${className}`.trim()} role="tablist" aria-label={label} onKeyDown={onKeyDown}>
+      {items.map((item, position) => {
+        const active = position === index
+        return (
+          <button
+            key={item.id}
+            ref={(node) => {
+              refs.current[position] = node
+            }}
+            type="button"
+            role="tab"
+            id={`${idPrefix}-${item.id}`}
+            aria-selected={active}
+            aria-controls={`${panelPrefix}-${item.id}`}
+            tabIndex={active ? 0 : -1}
+            className={active ? 'stats-segment active' : 'stats-segment'}
+            onClick={() => onSelect(item.id)}
+          >
+            <span className="stats-segment-label">{item.label}</span>
+            {item.hint && <span className="stats-segment-hint">{item.hint}</span>}
+            {item.count !== undefined && (
+              <span className="stats-segment-count">
+                {item.count}
+                {noun && <span className="sr-only">{` ${noun}${item.count === 1 ? '' : 's'}`}</span>}
+              </span>
+            )}
+            {item.alert && (
+              <span className={`stats-chip-alert tone-${item.alert.tone}`}>
+                {item.alert.count} {item.alert.tone === 'critical' ? 'critical' : `warning${item.alert.count === 1 ? '' : 's'}`}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}

@@ -17,9 +17,6 @@ import {
   csvField,
   definitionsByKey,
   RUNS_NOTE,
-  metricGroupChips,
-  metricsModel,
-  openGroup,
   rowChanged,
   traceBar,
   traceExtrasSummary,
@@ -74,34 +71,6 @@ function parseCsv(text) {
   if (field || row.length) rows.push([...row, field])
   return rows
 }
-
-const group = (name, statuses) => ({
-  name,
-  metrics: statuses.map((status, index) => ({ key: `${name}-${index}`, label: `${name} ${index}`, status, value: 1 }))
-})
-
-test('metric groups become chips that carry their size and anything past a threshold', () => {
-  const chips = metricGroupChips([group('CPU', ['ok', 'warn', 'critical', 'critical']), group('Disk', ['ok', 'warn']), group('APU', ['ok'])])
-  assert.deepEqual(chips.map((chip) => [chip.label, chip.count]), [['CPU', 4], ['Disk', 2], ['APU', 1]])
-  // A group used to open by itself when it held a critical metric. Groups now start closed,
-  // so the chip is what says so, and a critical outranks a warning.
-  assert.deepEqual(chips[0].alert, { tone: 'critical', count: 2 })
-  assert.deepEqual(chips[1].alert, { tone: 'warn', count: 1 })
-  assert.equal(chips[2].alert, null)
-  assert.deepEqual(metricGroupChips(null), [])
-})
-
-test('the open group is remembered by name, so a live refresh keeps it open', () => {
-  const first = metricsModel({ groups: [group('CPU', ['ok']), group('Disk', ['ok'])] })
-  // Nothing is open until someone opens it.
-  assert.equal(openGroup(first.groups, ''), null)
-  assert.equal(openGroup(first.groups, 'Disk').name, 'Disk')
-  // The next poll builds new objects; the same name still finds the group.
-  const next = metricsModel({ groups: [group('CPU', ['warn']), group('Disk', ['critical'])] })
-  assert.equal(openGroup(next.groups, 'Disk').metrics[0].status, 'critical')
-  // A sample without that group shows nothing rather than another group.
-  assert.equal(openGroup(metricsModel({ groups: [group('CPU', ['ok'])] }).groups, 'Disk'), null)
-})
 
 test('arrow keys walk the chips in reading order and wrap at both ends', () => {
   assert.equal(chipKeyTarget('ArrowRight', 0, 3), 1)

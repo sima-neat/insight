@@ -41,10 +41,13 @@ import {
   healthProblems,
   hostMetricsModel,
   hostNotice,
-  metricGroupChips,
+  METRIC_SECTIONS,
+  metricAlert,
+  metricSectionFrom,
+  metricSectionTabs,
+  metricSections,
   metricsModel,
   missingSelection,
-  openGroup,
   payloadBoardLabel,
   pollDelay,
   RUNS_NOTE,
@@ -53,8 +56,12 @@ import {
   runSubtitle,
   staleFlags,
   staleNote,
+  STATS_TAB_KEY,
+  STATS_TABS,
+  statsTabFrom,
   statusInfo,
   telemetryVisible,
+  thermalSummary,
   toggleSelection,
   traceBar,
   traceExtrasSummary,
@@ -62,7 +69,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
-import { ChipTabs, Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
+import { ChipTabs, Facts, FailureCallout, KeyValueTable, MetricCard, SegmentedTabs, Sparkline } from './stats/ui.jsx'
 
 /** Hands the browser a file to save. The object URL is released once the click has used it. */
 // How often the saved-runs list is re-read while the Stats tab is visible.
@@ -170,12 +177,95 @@ function DaemonPanel({ info, health, busy, installing, install, installStale, er
   )
 }
 
-function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, onToggleLive, onRefresh, onRetry }) {
-  // Held by name, not by the group object: every poll builds new groups, and a refresh must
-  // not close what the user opened.
-  const [openName, setOpenName] = useState(null)
-  const chips = useMemo(() => metricGroupChips(model.groups), [model.groups])
-  const group = openGroup(model.groups, openName)
+const SECTION_EMPTY = {
+  power: 'Sentinel reported no power readings on this board.',
+  thermal: 'Sentinel reported no temperatures on this board.',
+  system: 'Sentinel reported no other metrics on this board.'
+}
+
+/** One Sentinel group of live metrics: its name as a sub-heading, then a row per metric. */
+function MetricGroupTable({ group, headingId, series }) {
+  const alert = metricAlert(group.metrics)
+  return (
+    <section className="stats-group-block" aria-labelledby={headingId}>
+      <h3 id={headingId} className="stats-group-head">
+        <span>{group.name}</span>
+        <span className="stats-segment-count">
+          {group.metrics.length}
+          <span className="sr-only">{` metric${group.metrics.length === 1 ? '' : 's'}`}</span>
+        </span>
+        {alert && (
+          <span className={`stats-chip-alert tone-${alert.tone}`}>
+            {alert.count} {alert.tone === 'critical' ? 'critical' : `warning${alert.count === 1 ? '' : 's'}`}
+          </span>
+        )}
+      </h3>
+      <table className="sysinfo-table stats-table">
+        <caption className="sr-only">{group.name} metrics</caption>
+        <thead>
+          <tr>
+            <th scope="col">Metric</th>
+            <th scope="col">Value</th>
+            <th scope="col">Status</th>
+            <th scope="col" className="stats-col-spark">Recent</th>
+          </tr>
+        </thead>
+        <tbody>
+          {group.metrics.map((metric) => {
+            const status = statusInfo(metric.status)
+            return (
+              <tr key={metric.key}>
+                <th scope="row">
+                  {metric.label}
+                  {metric.description && <span className="hint">{metric.description}</span>}
+                </th>
+                <td className="stats-cell-value">{formatValue(metric.value, metric.unit)}</td>
+                <td><Pill tone={status.tone}>{status.label}</Pill></td>
+                <td className={`stats-cell-spark tone-${metric.status}`}>
+                  <Sparkline metric={metric} values={series[metric.key]} />
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </section>
+  )
+}
+
+/** The line above the thermal tables: how many sensors, the hottest, and the limits they share. */
+function ThermalSummary({ summary }) {
+  if (!summary.count) return null
+  return (
+    <p className="stats-thermal-summary">
+      <span>
+        {summary.count} sensor{summary.count === 1 ? '' : 's'}
+        {summary.reporting < summary.count && `, ${summary.reporting} reporting`}
+      </span>
+      {summary.hottest ? (
+        <span>
+          Hottest <strong>{summary.hottest.label}</strong>{' '}
+          <span className="stats-cell-value">{formatValue(summary.hottest.value, summary.hottest.unit)}</span>
+        </span>
+      ) : (
+        <span>None reported a value</span>
+      )}
+      {summary.limits && <span className="hint">{summary.limits}</span>}
+    </p>
+  )
+}
+
+/**
+ * The board's live readings. Overview (Sentinel's highlights) opens first; Power, Thermal and
+ * System are peer tabs beside it, each showing all of its metrics under Sentinel's group names,
+ * so any metric is one click from the default view and only one section is on screen at once.
+ */
+function MetricsPanel({ model, live, polling, paused, stale, error, busy, onToggleLive, onRefresh, onRetry }) {
+  const [sectionId, setSectionId] = useState(METRIC_SECTIONS[0].id)
+  const section = metricSectionFrom(sectionId)
+  const sections = useMemo(() => metricSections(model.groups), [model.groups])
+  const tabs = useMemo(() => metricSectionTabs(sections), [sections])
+  const thermal = useMemo(() => thermalSummary(sections.thermal), [sections])
   return (
     <section className="panel stats-metrics" aria-labelledby="stats-metrics-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -209,65 +299,58 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
         {error?.retryable && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
       </FailureCallout>
 
-      {model.highlights.length > 0 && (
-        <div className="stats-metric-grid">
-          {model.highlights.map((metric) => (
-            <MetricCard key={metric.key} metric={metric} values={model.series[metric.key]} />
-          ))}
-        </div>
-      )}
-
       {model.groups.length > 0 && (
         <>
-          <ChipTabs
-            label="Metric groups"
-            items={chips}
-            selected={group ? group.name : null}
-            onSelect={setOpenName}
-            idPrefix="stats-group-tab"
-            panelId="stats-group-panel"
+          <SegmentedTabs
+            label="Board metrics"
+            items={tabs}
+            selected={section}
+            onSelect={setSectionId}
+            idPrefix="stats-section-tab"
+            panelPrefix="stats-section"
+            className="stats-sections"
             noun="metric"
-            collapsible
           />
-          <div
-            id="stats-group-panel"
-            role="tabpanel"
-            className="stats-group-panel"
-            aria-labelledby={group ? `stats-group-tab-${chips.findIndex((chip) => chip.id === group.name)}` : undefined}
-            hidden={!group}
-          >
-            {group && (
-              <table className="sysinfo-table stats-table">
-                <caption className="sr-only">{group.name} metrics</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Metric</th>
-                    <th scope="col">Value</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Recent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.metrics.map((metric) => {
-                    const status = statusInfo(metric.status)
-                    return (
-                      <tr key={metric.key}>
-                        <th scope="row">
-                          {metric.label}
-                          {metric.description && <span className="hint">{metric.description}</span>}
-                        </th>
-                        <td className="stats-cell-value">{formatValue(metric.value, metric.unit)}</td>
-                        <td><Pill tone={status.tone}>{status.label}</Pill></td>
-                        <td className={`stats-cell-spark tone-${metric.status}`}>
-                          <Sparkline metric={metric} values={model.series[metric.key]} />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
+          {/* Only the open section is drawn: the others are empty until chosen, so a poll
+              re-renders one section's rows, not all 59. */}
+          {METRIC_SECTIONS.map(({ id, label }) => (
+            <div
+              key={id}
+              id={`stats-section-${id}`}
+              role="tabpanel"
+              aria-labelledby={`stats-section-tab-${id}`}
+              className="stats-section-panel"
+              tabIndex={0}
+              hidden={id !== section}
+            >
+              {id === section && id === 'overview' && (
+                <div className="stats-metric-grid">
+                  {model.highlights.map((metric) => (
+                    <MetricCard key={metric.key} metric={metric} values={model.series[metric.key]} />
+                  ))}
+                </div>
+              )}
+              {id === section && id !== 'overview' && (
+                <>
+                  {id === 'thermal' && <ThermalSummary summary={thermal} />}
+                  {sections[id].length ? (
+                    <div className="stats-group-blocks">
+                      {sections[id].map((group, index) => (
+                        <MetricGroupTable
+                          key={group.name}
+                          group={group}
+                          headingId={`stats-${id}-group-${index}`}
+                          series={model.series}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="hint">{SECTION_EMPTY[id] || `No ${label.toLowerCase()} metrics.`}</p>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
         </>
       )}
 
@@ -800,10 +883,9 @@ export function RunsPanel({
 }
 
 /**
- * The machine Insight runs on, from /api/metrics. It is deliberately the smallest panel
- * in this view and sits below the board's: it answers "is my SDK container out of disk",
- * which is a different question from what the board is doing, and the two must not be
- * read as one set of numbers. Its readings are always on screen, as one short row.
+ * The machine Insight runs on, from /api/metrics. It lives on its own Host sub-tab: it
+ * answers "is my SDK container out of disk", which is a different question from what the
+ * board is doing, and the two must not be read as one set of numbers.
  */
 function HostPanel({ model, error, updatedAt, busy, now }) {
   // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
@@ -882,6 +964,16 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [hostBusy, setHostBusy] = useState(false)
   const [hostReadAt, setHostReadAt] = useState(0)
   const [now, setNow] = useState(() => Date.now())
+  // DevKit or Host. Remembered across reloads; storage that throws (a private window, blocked
+  // site data) only costs the memory, never the page.
+  const [statsTab, setStatsTab] = useState(() => {
+    try {
+      return statsTabFrom(window.localStorage.getItem(STATS_TAB_KEY))
+    } catch {
+      return statsTabFrom(null)
+    }
+  })
+  const hostShown = statsTab === 'host'
 
   const mounted = useRef(false)
   // One in-flight request per endpoint: a second click must not run a second command
@@ -1206,9 +1298,17 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     }
   }, [polling, delay])
 
-  // The host moves slowly and costs a psutil read, so it is polled far less often than
-  // the board, and like the board poll it stops with the view and with a hidden tab.
   useEffect(() => {
+    try {
+      window.localStorage.setItem(STATS_TAB_KEY, statsTab)
+    } catch {}
+  }, [statsTab])
+
+  // The host moves slowly and costs a psutil read, so it is polled far less often than
+  // the board, and only while its sub-tab is the one on screen; like the board poll it
+  // stops with the view and with a hidden browser tab. Opening it reads it at once.
+  useEffect(() => {
+    if (!hostShown) return undefined
     let timer = null
     const run = () => loadHost()
     const start = () => {
@@ -1228,7 +1328,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       stop()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [])
+  }, [hostShown])
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 10000)
@@ -1253,115 +1353,143 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
 
   return (
     <div className="periph-view stats-view">
-      {boardProblem && boardProblem.code !== 'no_target' && (
-        <Callout tone="danger" title={boardProblem.message || 'The board could not be reached'}>
-          {boardProblem.hint && <p>{boardProblem.hint}</p>}
-          <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
-        </Callout>
-      )}
-
-      {stateBusy && !state && <p className="hint" role="status">Checking Sentinel on the board…</p>}
-
-      {stateError?.code === 'no_target' ? (
-        <Callout tone="info" title="Select a board to see its telemetry">
-          <p>{stateError.message} {stateError.hint}</p>
-          <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Choose a board</button>
-        </Callout>
-      ) : (
-        <>
-          {/* Nothing to say about a daemon that is working: the telemetry below is the proof. */}
-          {daemonNoticeNeeded(info, { error: installError || sentinelProblem, health: state?.health || null, install: installResult }) && (
-          <DaemonPanel
-            info={info}
-            health={state?.health || null}
-            busy={daemonBusy({ installBusy, stateBusy })}
-            installing={installBusy}
-            install={installResult}
-            installStale={stalePayloads.install}
-            error={installError || sentinelProblem}
-            blocked={Boolean(boardProblem)}
-            onInstall={install}
-            onRetry={() => loadState()}
-          />
-          )}
-
-          {/* Sentinel not answering now does not unmake what this board already gave. */}
-          {telemetryVisible(info, { metrics, traces, runs }) && (
-            <>
-              <MetricsPanel
-                model={model}
-                live={live}
-                polling={polling}
-                paused={!live}
-                stale={stale}
-                error={metricsError}
-                busy={metricsBusy}
-                now={now}
-                onToggleLive={() => setLive((value) => !value)}
-                onRefresh={() => {
-                  loadBoard()
-                  pollMetrics({ manual: true })
-                }}
-                onRetry={() => {
-                  setHalted(false)
-                  setFailures(0)
-                  pollMetrics({ manual: true })
-                }}
-              />
-
-              <RunsPanel
-                trace={trace}
-                traceStale={stalePayloads.traces || stalePayloads.traceError}
-                traceBusy={traceBusy}
-                traceError={traceError}
-                form={form}
-                formError={formError}
-                onFormChange={setForm}
-                onStart={onStartTrace}
-                onStop={onStopTrace}
-                onRefreshTrace={() => loadTraces()}
-                runs={runRows}
-                runsPayload={runs}
-                definitions={definitions}
-                stale={stalePayloads.runs || stalePayloads.runsError}
-                busy={runsBusy}
-                error={runsError}
-                selected={selected}
-                openRef={openRef}
-                detail={detail}
-                detailError={detailError}
-                detailBusy={detailBusy}
-                detailStale={stalePayloads.detail || stalePayloads.detailError}
-                compare={compare}
-                compareError={compareError}
-                compareBusy={compareBusy}
-                compareStale={stalePayloads.compare || stalePayloads.compareError}
-                compareOpen={compareOpen}
-                now={now}
-                onRefresh={() => loadRuns()}
-                onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
-                onOpen={openRun}
-                onCompare={runCompare}
-                onClearCompare={() => {
-                  setSelected([])
-                  setCompare(null)
-                  setCompareError(null)
-                }}
-                onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
-                onToggleCompare={() => setCompareOpen((open) => !open)}
-              />
-            </>
-          )}
-        </>
-      )}
-
-      <HostPanel
-        model={hostModel}
-        error={hostError}
-        updatedAt={hostReadAt}
-        busy={hostBusy}
-        now={now}
+      <SegmentedTabs
+        label="Stats source"
+        items={STATS_TABS}
+        selected={statsTab}
+        onSelect={setStatsTab}
+        idPrefix="stats-tab"
+        panelPrefix="stats-tabpanel"
+        className="stats-subtabs"
       />
+
+      {/* Everything read from the board. It stays mounted while Host is open, so an open run,
+          a comparison and its filters are still there on the way back, and the board keeps
+          being polled as it was before the page had sub-tabs. */}
+      <div
+        id="stats-tabpanel-devkit"
+        role="tabpanel"
+        aria-labelledby="stats-tab-devkit"
+        className="stats-tabpanel"
+        hidden={statsTab !== 'devkit'}
+      >
+        {boardProblem && boardProblem.code !== 'no_target' && (
+          <Callout tone="danger" title={boardProblem.message || 'The board could not be reached'}>
+            {boardProblem.hint && <p>{boardProblem.hint}</p>}
+            <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
+          </Callout>
+        )}
+
+        {stateBusy && !state && <p className="hint" role="status">Checking Sentinel on the board…</p>}
+
+        {stateError?.code === 'no_target' ? (
+          <Callout tone="info" title="Select a board to see its telemetry">
+            <p>{stateError.message} {stateError.hint}</p>
+            <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Choose a board</button>
+          </Callout>
+        ) : (
+          <>
+            {/* Nothing to say about a daemon that is working: the telemetry below is the proof. */}
+            {daemonNoticeNeeded(info, { error: installError || sentinelProblem, health: state?.health || null, install: installResult }) && (
+            <DaemonPanel
+              info={info}
+              health={state?.health || null}
+              busy={daemonBusy({ installBusy, stateBusy })}
+              installing={installBusy}
+              install={installResult}
+              installStale={stalePayloads.install}
+              error={installError || sentinelProblem}
+              blocked={Boolean(boardProblem)}
+              onInstall={install}
+              onRetry={() => loadState()}
+            />
+            )}
+
+            {/* Sentinel not answering now does not unmake what this board already gave. */}
+            {telemetryVisible(info, { metrics, traces, runs }) && (
+              <>
+                <MetricsPanel
+                  model={model}
+                  live={live}
+                  polling={polling}
+                  paused={!live}
+                  stale={stale}
+                  error={metricsError}
+                  busy={metricsBusy}
+                  onToggleLive={() => setLive((value) => !value)}
+                  onRefresh={() => {
+                    loadBoard()
+                    pollMetrics({ manual: true })
+                  }}
+                  onRetry={() => {
+                    setHalted(false)
+                    setFailures(0)
+                    pollMetrics({ manual: true })
+                  }}
+                />
+
+                <RunsPanel
+                  trace={trace}
+                  traceStale={stalePayloads.traces || stalePayloads.traceError}
+                  traceBusy={traceBusy}
+                  traceError={traceError}
+                  form={form}
+                  formError={formError}
+                  onFormChange={setForm}
+                  onStart={onStartTrace}
+                  onStop={onStopTrace}
+                  onRefreshTrace={() => loadTraces()}
+                  runs={runRows}
+                  runsPayload={runs}
+                  definitions={definitions}
+                  stale={stalePayloads.runs || stalePayloads.runsError}
+                  busy={runsBusy}
+                  error={runsError}
+                  selected={selected}
+                  openRef={openRef}
+                  detail={detail}
+                  detailError={detailError}
+                  detailBusy={detailBusy}
+                  detailStale={stalePayloads.detail || stalePayloads.detailError}
+                  compare={compare}
+                  compareError={compareError}
+                  compareBusy={compareBusy}
+                  compareStale={stalePayloads.compare || stalePayloads.compareError}
+                  compareOpen={compareOpen}
+                  now={now}
+                  onRefresh={() => loadRuns()}
+                  onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
+                  onOpen={openRun}
+                  onCompare={runCompare}
+                  onClearCompare={() => {
+                    setSelected([])
+                    setCompare(null)
+                    setCompareError(null)
+                  }}
+                  onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
+                  onToggleCompare={() => setCompareOpen((open) => !open)}
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      <div
+        id="stats-tabpanel-host"
+        role="tabpanel"
+        aria-labelledby="stats-tab-host"
+        className="stats-tabpanel"
+        hidden={!hostShown}
+      >
+        <HostPanel
+          model={hostModel}
+          error={hostError}
+          updatedAt={hostReadAt}
+          busy={hostBusy}
+          now={now}
+        />
+      </div>
     </div>
   )
 }
