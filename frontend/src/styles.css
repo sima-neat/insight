@@ -3902,6 +3902,13 @@ button:disabled {
 
 /* Stats (Sentinel) view. It reuses the Peripherals panel, callout and pill styles and
    adds only what telemetry needs: metric cards, sparklines and the run tables. */
+/* One column that may be narrower than its widest table. The default auto column grows to
+   the smallest width every panel fits in, so a wide table widened the page instead of
+   scrolling in its own region. */
+.stats-view {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .stats-view .stats-version,
 .stats-view .stats-cell-value,
 .stats-view .stats-metric-value {

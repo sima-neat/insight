@@ -609,37 +609,39 @@ export function RunsPanel({
                       : "The smallest, largest and mean value of each metric over this run's samples."}{' '}
                     The labels, units and thresholds are the ones the run itself recorded.
                   </p>
-                  <table className="sysinfo-table stats-table stats-run-metrics">
-                    <thead>
-                      <tr>
-                        <th scope="col">Metric</th>
-                        <th scope="col">Group</th>
-                        <th scope="col">Mean</th>
-                        <th scope="col">Minimum</th>
-                        <th scope="col">Maximum</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {run.metrics.map((metric) => {
-                        const peak = statusInfo(metric.status)
-                        return (
-                          <tr key={metric.key}>
-                            <th scope="row">
-                              {metric.label}
-                              {metric.description && <span className="hint">{metric.description}</span>}
-                            </th>
-                            <td>{metric.group}</td>
-                            <td className="stats-cell-value">{formatValue(metric.mean, metric.unit)}</td>
-                            <td className="stats-cell-value">{formatValue(metric.minimum, metric.unit)}</td>
-                            <td className="stats-cell-value">
-                              {formatValue(metric.maximum, metric.unit)}
-                              {metric.status !== 'ok' && <Pill tone={peak.tone}>{peak.label}</Pill>}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                  <div className="stats-table-scroll" role="region" aria-label={`Metrics of run ${openRef}`} tabIndex={0}>
+                    <table className="sysinfo-table stats-table stats-run-metrics">
+                      <thead>
+                        <tr>
+                          <th scope="col">Metric</th>
+                          <th scope="col">Group</th>
+                          <th scope="col">Mean</th>
+                          <th scope="col">Minimum</th>
+                          <th scope="col">Maximum</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {run.metrics.map((metric) => {
+                          const peak = statusInfo(metric.status)
+                          return (
+                            <tr key={metric.key}>
+                              <th scope="row">
+                                {metric.label}
+                                {metric.description && <span className="hint">{metric.description}</span>}
+                              </th>
+                              <td>{metric.group}</td>
+                              <td className="stats-cell-value">{formatValue(metric.mean, metric.unit)}</td>
+                              <td className="stats-cell-value">{formatValue(metric.minimum, metric.unit)}</td>
+                              <td className="stats-cell-value">
+                                {formatValue(metric.maximum, metric.unit)}
+                                {metric.status !== 'ok' && <Pill tone={peak.tone}>{peak.label}</Pill>}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </>
               )}
               {run.undefinedKeys.length > 0 && (
