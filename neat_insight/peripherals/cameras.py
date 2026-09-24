@@ -75,6 +75,10 @@ TOOL_ISSUES = {
     ),
 }
 UNKNOWN_USERS_REASON = "processes owned by other users cannot be inspected without root"
+UNMATCHED_REASON = (
+    "libcamera's name for this camera matched no sensor in the media graph, so its device nodes were not "
+    "checked for other processes"
+)
 AVAILABILITY_ISSUES = {
     "proc-user": (
         "info",
@@ -204,12 +208,15 @@ def _libcamerasrc_state(probe: dict) -> Optional[bool]:
     return None if libcamerasrc is None else bool(libcamerasrc.get("present"))
 
 
-def _availability(users: Optional[list], method: str, acquire: Optional[str] = None) -> dict:
+def _availability(users: Optional[list], method: str, acquire: Optional[str] = None, unmatched: bool = False) -> dict:
     if users:
         holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users)
         return {"state": "in_use", "users": users, "reason": f"Open in {holders}."}
     if acquire == "busy":
         state, reason = "in_use", "libcamera could not acquire the camera; another process holds it."
+    elif unmatched:
+        # A libcamera acquire does not see processes using the V4L2 nodes directly.
+        state, reason = "unknown", UNMATCHED_REASON
     elif acquire == "ok" or (users is not None and method in ("proc-root", "sudo-fuser")):
         state, reason = "available", None
     elif method == "proc-user":
@@ -274,7 +281,9 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         "name": camera_id,
         "model": model or None,
         "device": device,
-        "availability": _availability(camera.get("users"), platform["availability_method"], camera.get("acquire")),
+        "availability": _availability(
+            camera.get("users"), platform["availability_method"], camera.get("acquire"), _unmatched(camera)
+        ),
         "support": _mipi_support(model, libcamerasrc),
         "modes_source": modes_source,
         "formats": formats,
@@ -282,6 +291,26 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         "notes": notes,
         "errors": errors,
     }
+
+
+def _unmatched(camera: dict) -> bool:
+    return camera.get("sensor_match") == "none"
+
+
+def _unmatched_issue(camera: dict) -> dict:
+    message = (
+        f'libcamera camera "{camera["id"]}" could not be matched to a sensor in the media graph, so its media '
+        "device is not shown and its availability is unknown."
+    )
+    possible = camera.get("possible_sensors") or []
+    if possible:
+        names = ", ".join(f'"{name}"' for name in possible)
+        message += f" Media-graph sensor {names} is not listed separately because it may be the same camera."
+    hint = (
+        "Compare `cam -l` with the sensor entities in `media-ctl -p` on the board. libcamera names a sensor by "
+        "its entity or its device-tree node (/sys/bus/i2c/devices/<bus>-<addr>/of_node); report both outputs."
+    )
+    return _issue("warning", "sensor_unmatched", message, hint)
 
 
 def _mipi_support(model: str, libcamerasrc: Optional[bool]) -> dict:
@@ -513,6 +542,10 @@ def _issues(probe: dict, platform: dict, media: dict, isp_unread: bool) -> list:
         bus_info = (media.get(path) or {}).get("bus_info")
         where = f"{path} ({bus_info})" if bus_info else path
         issues.append(_issue("info", "no_sensor", f"No MIPI sensor detected on {where}.", NO_SENSOR_HINT))
+    # Without a media graph every camera is unmatched; the media-ctl issue above already says why.
+    graph_read = tools.get("media-ctl") and not any(f.get("tool") == "media-ctl" for f in probe.get("failures") or [])
+    if graph_read:
+        issues += [_unmatched_issue(camera) for camera in probe.get("mipi") or [] if _unmatched(camera)]
     for failure in probe.get("failures") or []:
         tool = failure.get("tool")
         hint = f"Refresh again; if it keeps failing, run `{tool}` on the board to see the full error."

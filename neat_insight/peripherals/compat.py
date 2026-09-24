@@ -5,6 +5,8 @@ sensor model token, lowercased (see model_token).
 """
 from typing import Optional
 
+from neat_insight.peripherals.probe import sensor_model
+
 VERIFIED_MODES = (
     {
         "model": "imx477",
@@ -20,21 +22,13 @@ VERIFIED_MODES = (
 )
 
 
-def _sensor_name(name: str) -> str:
-    # Device-tree path ids end in the sensor node, "<model>@<i2c address>"; entity-name ids are
-    # "<model> <bus>-<address>".
-    leaf = name.strip().rstrip("/").rsplit("/", 1)[-1]
-    parts = leaf.split()
-    return parts[0].split("@", 1)[0].lower() if parts else ""
-
-
 def model_token(camera_id: str, model: Optional[str] = None) -> str:
     """The sensor model: the model `cam -l` reported, else the one read from the libcamera id.
 
     libcamera names a camera by its sensor entity ("imx477 5-001a") or, when the sensor has a
     firmware node, by its device-tree path ("/base/axi/.../imx477@1a").
     """
-    return _sensor_name(model or "") or _sensor_name(camera_id or "")
+    return sensor_model(model) or sensor_model(camera_id)
 
 
 def has_model(model: str) -> bool:

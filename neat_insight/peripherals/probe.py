@@ -56,6 +56,8 @@ ISP_OUTPUT_NAME = "isp_v4l2-vid-cap-out"
 ISP_OUTPUT_CARD = "arm-isp-out"
 # libcamera's UVC pipeline ids end in "<vid>:<pid>"; those cameras are reported through V4L2.
 _USB_CAMERA_ID_RE = re.compile(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$")
+# v4l2_i2c_subdev_set_name() names an I2C sensor entity "<driver> <bus>-<4-hex-digit address>".
+_I2C_CLIENT_RE = re.compile(r"\s(\d+-[0-9a-fA-F]{4})$")
 
 
 def which(name):
@@ -320,6 +322,42 @@ def user_checker(method, tools):
     return lambda nodes: None
 
 
+def sensor_model(name):
+    """The sensor model read from a libcamera id or entity name, lowercased.
+
+    Device-tree path ids end in the sensor node, "<model>@<address>"; entity names are
+    "<model> <bus>-<address>".
+    """
+    leaf = (name or "").strip().rstrip("/").rsplit("/", 1)[-1]
+    parts = leaf.split()
+    return parts[0].split("@", 1)[0].lower() if parts else ""
+
+
+def firmware_id(sensor):
+    """The sensor's firmware node as libcamera names the camera when it has one, else None.
+
+    libcamera (sysfs::firmwareNodePath) resolves the subdevice's device/of_node and strips
+    /sys/firmware/devicetree, giving "/base/...", or reads firmware_node/path on ACPI systems.
+    The device is found through the entity's subdevice node, else its I2C client "<bus>-<addr>".
+    """
+    devices = []
+    if sensor.get("node"):
+        devices.append(os.path.join(SYSFS_ROOT, "class", "video4linux", os.path.basename(sensor["node"]), "device"))
+    match = _I2C_CLIENT_RE.search(sensor["name"])
+    if match:
+        devices.append(os.path.join(SYSFS_ROOT, "bus", "i2c", "devices", match.group(1)))
+    for device in devices:
+        of_node = os.path.join(device, "of_node")
+        if os.path.exists(of_node):
+            path = os.path.realpath(of_node)
+            prefix = os.path.realpath(os.path.join(SYSFS_ROOT, "firmware", "devicetree"))
+            return path[len(prefix):] if path.startswith(prefix + os.sep) else path
+        acpi_path = _read(os.path.join(device, "firmware_node", "path"))
+        if acpi_path:
+            return acpi_path
+    return None
+
+
 def discover_media(tools, failures):
     devices = []
     for name in _names(DEV_ROOT, r"media\d+"):
@@ -335,7 +373,9 @@ def discover_media(tools, failures):
                 device.update(driver=graph["driver"], model=graph["model"], bus_info=graph["bus_info"])
                 for entity in graph["entities"]:
                     if "subtype Sensor" in entity["type"]:
-                        device["sensors"].append({"name": entity["name"], "node": entity["node"]})
+                        sensor = {"name": entity["name"], "node": entity["node"]}
+                        sensor["firmware_id"] = firmware_id(sensor)
+                        device["sensors"].append(sensor)
                     elif ".csi" in entity["name"] and device["csi"] is None:
                         device["csi"] = entity["name"]
                     if entity["node"]:
@@ -377,24 +417,58 @@ def probe_libcamerasrc(tools, failures):
     }
 
 
-def collect_mipi(tools, media, listing, check_users):
-    sensors = {sensor["name"]: device for device in media for sensor in device["sensors"]}
-    entries = []
-    for camera in (listing or {}).get("cameras", []):
-        if camera["id"] in sensors or not _USB_CAMERA_ID_RE.search(camera["id"]):
-            entries.append(dict(camera, source="libcamera"))
-    listed = {entry["id"] for entry in entries}
-    entries += [{"id": name, "model": None, "source": "media-graph"} for name in sensors if name not in listed]
-    rates = (listing or {}).get("rates", {})
+def _match_sensors(media, listing):
+    """Pair each libcamera camera with its media-graph sensor entity; one entry per physical sensor.
 
+    libcamera names a camera by its sensor entity ("imx477 5-001a") or by the sensor's firmware
+    node ("/base/.../imx477@1a"); both are matched exactly, never on the model or address alone.
+    """
+    sensors = [dict(sensor, device=device) for device in media for sensor in device["sensors"]]
+    by_id = {}
+    for sensor in sensors:
+        by_id.setdefault(sensor["name"], (sensor, "entity-name"))
+        if sensor.get("firmware_id"):
+            by_id.setdefault(sensor["firmware_id"], (sensor, "firmware-node"))
+    entries, claimed, unmatched = [], set(), []
+    for camera in (listing or {}).get("cameras", []):
+        sensor, how = by_id.get(camera["id"], (None, "none"))
+        if sensor is None and _USB_CAMERA_ID_RE.search(camera["id"]):
+            continue
+        entry = dict(camera, source="libcamera", sensor=sensor, sensor_match=how, possible_sensors=[])
+        if sensor is None:
+            unmatched.append(entry)
+        else:
+            claimed.add(id(sensor))
+        entries.append(entry)
+    for sensor in sensors:
+        if id(sensor) in claimed:
+            continue
+        # A sensor libcamera may already list under a name that could not be matched is not listed
+        # twice; the unmatched camera names it instead.
+        model = sensor_model(sensor["name"])
+        suspects = [e for e in unmatched if sensor_model(e.get("model") or e["id"]) in ("", model)]
+        for entry in suspects:
+            entry["possible_sensors"].append(sensor["name"])
+        if not suspects:
+            entry = {"id": sensor["name"], "model": None, "source": "media-graph"}
+            entries.append(dict(entry, sensor=sensor, sensor_match="entity-name"))
+    return entries
+
+
+def collect_mipi(tools, media, listing, check_users):
+    rates = (listing or {}).get("rates", {})
     cameras = []
-    for entry in entries:
-        device = sensors.get(entry["id"])
+    for entry in _match_sensors(media, listing):
+        sensor = entry["sensor"]
+        device = sensor["device"] if sensor else None
         users = check_users(device["nodes"]) if device else None
         camera = {
             "id": entry["id"],
             "model": entry.get("model"),
             "source": entry["source"],
+            "sensor": sensor["name"] if sensor else None,
+            "sensor_match": entry["sensor_match"],
+            "possible_sensors": entry.get("possible_sensors", []),
             "media_device": device["path"] if device else None,
             "users": users,
             "acquire": None,

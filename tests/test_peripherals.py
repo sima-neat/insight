@@ -85,6 +85,23 @@ class FakeBoard:
             (usb / key).write_text(f"{value}\n")
         return f"platform/xhci-hcd.0.auto/usb1/{bus_path}/{bus_path}:1.0"
 
+    def i2c_sensor(self, client: str, of_node=None, subdev=None, adapter="platform/sio@5/4059000.i2c/i2c-4"):
+        """An I2C sensor client as the kernel links it: bus/i2c/devices/<client>, its of_node, its subdevice."""
+        sys = self.root / "sys"
+        device = sys / "devices" / adapter / f"i2c-{client.split('-')[0]}" / client
+        device.mkdir(parents=True)
+        links = sys / "bus" / "i2c" / "devices"
+        links.mkdir(parents=True, exist_ok=True)
+        (links / client).symlink_to(os.path.relpath(device, links))
+        if of_node:
+            node = sys / "firmware" / "devicetree" / of_node.lstrip("/")
+            node.mkdir(parents=True)
+            (device / "of_node").symlink_to(os.path.relpath(node, device))
+        if subdev:
+            entry = sys / "class" / "video4linux" / subdev
+            entry.mkdir()
+            (entry / "device").symlink_to(os.path.relpath(device, entry))
+
     def by_id(self, name: str, node: str):
         (self.root / "dev" / "v4l" / "by-id" / name).symlink_to(f"../../{node}")
 
@@ -156,6 +173,11 @@ def real_imx477_board(root) -> FakeBoard:
     board.command("cam", "-l", text=fixture("cam_list_imx477_real.txt"))
     board.command("cam", "-c", IMX477, "-I", text=fixture("cam_info_imx477_real.txt"))
     return board
+
+
+# The DevKit's imx477 as its sysfs links it (read on the board): I2C client 5-001a behind an I2C mux,
+# subdevice v4l-subdev2, device-tree node below. libcamera there names the camera by its entity.
+DEVKIT_OF_NODE = "/base/i2cmux@0/i2c@0/imx477@1a"
 
 
 BOARD = {
@@ -383,6 +405,154 @@ class ProbeCollectTests(unittest.TestCase):
         self.assertEqual(camera["device"]["csi"], "csidev-40c3000.csi")
         self.assertEqual((camera["modes_source"], camera["errors"][0]["code"]), ("unavailable", "tool_missing"))
         self.assertIn("tool_missing", [i["code"] for i in snapshot["issues"]])
+
+
+class SensorIdentityTests(unittest.TestCase):
+    """One item per physical sensor, whichever name libcamera gives it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def path_id_board(self, path_id: str, of_node) -> FakeBoard:
+        """Synthetic: the DevKit graph, but libcamera names the imx477 by a device-tree path."""
+        board = devkit_board(self.tmp.name)
+        board.media("media0", fixture("media_ctl_imx477_synthetic.txt"))
+        board.i2c_sensor("5-001a", of_node=of_node, subdev="v4l-subdev0")
+        board.command("cam", "-l", text=fixture("cam_list_imx477_synthetic.txt").replace(IMX477, path_id))
+        board.command("cam", "-c", path_id, "-I", text=fixture("cam_info_imx477_synthetic.txt").replace(IMX477, path_id))
+        return board
+
+    def test_entity_name_id_on_the_devkit(self):
+        # Real: media graph, cam output and sysfs links as captured on the DevKit.
+        board = real_imx477_board(self.tmp.name)
+        board.i2c_sensor("5-001a", of_node=DEVKIT_OF_NODE, subdev="v4l-subdev2")
+        output = board.collect()
+        self.assertEqual(output["media_devices"][0]["sensors"][0]["firmware_id"], DEVKIT_OF_NODE)
+        (camera,) = output["mipi"]
+        self.assertEqual((camera["id"], camera["sensor"], camera["sensor_match"]), (IMX477, IMX477, "entity-name"))
+        snapshot = snapshot_of(output)
+        self.assertEqual([i["id"] for i in snapshot["items"]], ["mipi:" + IMX477])
+        self.assertEqual(snapshot["items"][0]["device"]["media_device"], "/dev/media0")
+        self.assertEqual(snapshot["items"][0]["availability"]["state"], "available")
+        self.assertNotIn("sensor_unmatched", [i["code"] for i in snapshot["issues"]])
+
+    def test_device_tree_path_id_is_one_item_with_the_entity_placement(self):
+        board = self.path_id_board(DEVKIT_OF_NODE, DEVKIT_OF_NODE)
+        output = board.collect()
+        (camera,) = output["mipi"]
+        self.assertEqual((camera["id"], camera["sensor"], camera["sensor_match"]), (DEVKIT_OF_NODE, IMX477, "firmware-node"))
+        snapshot = snapshot_of(output)
+        (entry,) = snapshot["items"]
+        self.assertEqual(entry["id"], "mipi:" + DEVKIT_OF_NODE)
+        self.assertEqual(entry["device"]["camera_name"], DEVKIT_OF_NODE)
+        self.assertEqual(entry["device"]["camera_name_source"], "libcamera")
+        self.assertEqual((entry["device"]["media_device"], entry["device"]["csi"]), ("/dev/media0", "csidev-40c3000.csi"))
+        self.assertEqual((entry["availability"]["state"], entry["support"]["tier"]), ("available", "verified"))
+
+    def test_device_tree_path_id_gets_the_process_holder_check(self):
+        board = self.path_id_board(DEVKIT_OF_NODE, DEVKIT_OF_NODE)
+        board.hold(4321, "gst-launch-1.0", "/dev/v4l-subdev0")
+        output = board.collect()
+        self.assertNotIn(("cam", "-c", DEVKIT_OF_NODE, "-I"), board.calls)
+        availability = item(snapshot_of(output), "mipi:" + DEVKIT_OF_NODE)["availability"]
+        self.assertEqual((availability["state"], availability["users"][0]["pid"]), ("in_use", 4321))
+
+    def test_two_identical_sensors_on_different_buses_match_by_full_path(self):
+        # Synthetic: two imx477 at address 0x1a behind different mux channels share the leaf "imx477@1a".
+        board = devkit_board(self.tmp.name)
+        second = "imx477 6-001a"
+        paths = {IMX477: DEVKIT_OF_NODE, second: "/base/i2cmux@0/i2c@1/imx477@1a"}
+        board.media("media0", fixture("media_ctl_imx477_synthetic.txt"))
+        board.media(
+            "media1",
+            fixture("media_ctl_imx477_synthetic.txt")
+            .replace(IMX477, second)
+            .replace("/dev/v4l-subdev0", "/dev/v4l-subdev3")
+            .replace("csi2video@1", "csi2video@2"),
+        )
+        # No subdevice links: the I2C client named in the entity is the route to the of_node.
+        board.i2c_sensor("5-001a", of_node=paths[IMX477])
+        board.i2c_sensor("6-001a", of_node=paths[second])
+        board.command("cam", "-l", out=f"Available cameras:\n1: 'imx477' ({paths[second]})\n2: 'imx477' ({paths[IMX477]})\n")
+        for path in paths.values():
+            board.command("cam", "-c", path, "-I", text=fixture("cam_info_imx477_synthetic.txt").replace(IMX477, path))
+        board.hold(4321, "gst-launch-1.0", "/dev/v4l-subdev3")
+        output = board.collect()
+        placed = {c["id"]: (c["sensor"], c["media_device"]) for c in output["mipi"]}
+        self.assertEqual(placed, {paths[IMX477]: (IMX477, "/dev/media0"), paths[second]: (second, "/dev/media1")})
+        snapshot = snapshot_of(output)
+        self.assertEqual(len(snapshot["items"]), 2)
+        self.assertEqual(item(snapshot, "mipi:" + paths[second])["availability"]["state"], "in_use")
+        first = item(snapshot, "mipi:" + paths[IMX477])
+        self.assertEqual((first["availability"]["state"], first["device"]["bus_info"]), ("available", "platform:csi2video@1"))
+
+    def test_missing_of_node_leaves_one_libcamera_item_with_unknown_availability(self):
+        # Synthetic: the I2C client has no of_node, so the path libcamera printed cannot be traced.
+        board = self.path_id_board(DEVKIT_OF_NODE, None)
+        board.hold(4321, "gst-launch-1.0", "/dev/v4l-subdev0")
+        output = board.collect()
+        (camera,) = output["mipi"]
+        self.assertEqual((camera["sensor"], camera["sensor_match"], camera["media_device"]), (None, "none", None))
+        self.assertEqual(camera["possible_sensors"], [IMX477])
+        snapshot = snapshot_of(output)
+        self.assertEqual([i["id"] for i in snapshot["items"]], ["mipi:" + DEVKIT_OF_NODE])
+        availability = snapshot["items"][0]["availability"]
+        self.assertEqual((availability["state"], availability["reason"]), ("unknown", cameras.UNMATCHED_REASON))
+        (issue,) = [i for i in snapshot["issues"] if i["code"] == "sensor_unmatched"]
+        self.assertIn(DEVKIT_OF_NODE, issue["message"])
+        self.assertIn(f'"{IMX477}" is not listed separately', issue["message"])
+
+    def test_sensor_libcamera_does_not_list_keeps_the_media_graph_fallback(self):
+        board = devkit_board(self.tmp.name)
+        board.media("media0", fixture("media_ctl_imx477_synthetic.txt"))
+        board.i2c_sensor("5-001a", of_node=DEVKIT_OF_NODE, subdev="v4l-subdev0")
+        board.command("cam", "-l", out="Available cameras:\n")
+        snapshot = snapshot_of(board.collect())
+        (camera,) = snapshot["items"]
+        self.assertEqual((camera["id"], camera["device"]["camera_name_source"]), ("mipi:" + IMX477, "media-graph"))
+        self.assertEqual(camera["errors"][0]["code"], "not_listed")
+        self.assertNotIn("sensor_unmatched", [i["code"] for i in snapshot["issues"]])
+
+    def test_an_unmatched_camera_of_another_model_does_not_hide_an_unlisted_sensor(self):
+        # Synthetic: libcamera lists an ov5647 the graph does not show; the graph's imx477 is not listed.
+        board = devkit_board(self.tmp.name)
+        board.media("media0", fixture("media_ctl_imx477_synthetic.txt"))
+        board.i2c_sensor("5-001a", subdev="v4l-subdev0")
+        board.command("cam", "-l", out="Available cameras:\n1: 'ov5647' (/base/soc/i2c@1/ov5647@36)\n")
+        output = board.collect()
+        sources = [(c["id"], c["source"], c["possible_sensors"]) for c in output["mipi"]]
+        self.assertEqual(sources, [("/base/soc/i2c@1/ov5647@36", "libcamera", []), (IMX477, "media-graph", [])])
+        issue = next(i for i in snapshot_of(output)["issues"] if i["code"] == "sensor_unmatched")
+        self.assertNotIn("not listed separately", issue["message"])
+
+    def test_without_media_ctl_the_tool_issue_explains_the_unmatched_camera(self):
+        board = camera_board(self.tmp.name, usb=False)
+        board.tools["media-ctl"] = None
+        snapshot = snapshot_of(board.collect())
+        (camera,) = snapshot["items"]
+        self.assertEqual((camera["id"], camera["availability"]["state"]), ("mipi:" + IMX477, "unknown"))
+        codes = [i["code"] for i in snapshot["issues"]]
+        self.assertIn("tool_missing", codes)
+        self.assertNotIn("sensor_unmatched", codes)
+
+    def test_firmware_id_follows_libcamera(self):
+        board = devkit_board(self.tmp.name)
+        # A sensor whose entity name carries no I2C client is traced through its subdevice node.
+        board.i2c_sensor("7-0010", of_node="/base/soc/csi@0/cam@10", subdev="v4l-subdev9")
+        acpi = board.root / "sys/devices/platform/i2c-8/8-0036"
+        (acpi / "firmware_node").mkdir(parents=True)
+        (acpi / "firmware_node" / "path").write_text("\\_SB_.PCI0.I2C2.CAM0\n")
+        (board.root / "sys/bus/i2c/devices/8-0036").symlink_to(acpi)
+        cases = [
+            ({"name": "virtual-sensor", "node": "/dev/v4l-subdev9"}, "/base/soc/csi@0/cam@10"),
+            ({"name": "ov5693 8-0036", "node": None}, "\\_SB_.PCI0.I2C2.CAM0"),
+            ({"name": "imx477 9-001a", "node": "/dev/v4l-subdev4"}, None),
+        ]
+        with mock.patch.object(probe, "SYSFS_ROOT", str(board.root / "sys")):
+            for sensor, expected in cases:
+                with self.subTest(sensor=sensor["name"]):
+                    self.assertEqual(probe.firmware_id(sensor), expected)
 
 
 class SnapshotTests(unittest.TestCase):
