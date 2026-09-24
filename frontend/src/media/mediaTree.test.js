@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { breadcrumbs, childrenAt, listFolder, nearestExistingFolder, parentPath, searchFolder, streamableFiles, streamableOnly } from './mediaTree.js'
+import { allFilePaths, breadcrumbs, childrenAt, listFolder, nearestExistingFolder, parentPath, searchFolder, streamableFiles, streamableOnly } from './mediaTree.js'
 
 const file = (path, streamable = true) => ({ name: path.split('/').pop(), path, type: 'file', streamable })
 const folder = (path, children) => ({
@@ -67,15 +67,29 @@ test('parentPath goes up one level and stops at the root', () => {
   assert.equal(parentPath(''), '')
 })
 
-test('searchFolder matches streamable files below the folder by their relative path', () => {
+test('searchFolder matches every file below the folder by their relative path', () => {
   assert.deepEqual(searchFolder(tree, '30FPS', 'deep'), [
-    { name: 'deep.mp4', path: '30FPS/indoor/cam-a/deep.mp4', relative: 'indoor/cam-a/deep.mp4' },
+    { name: 'deep.mp4', path: '30FPS/indoor/cam-a/deep.mp4', relative: 'indoor/cam-a/deep.mp4', streamable: true },
   ])
   assert.deepEqual(searchFolder(tree, '30FPS', 'drone'), [])
   assert.equal(searchFolder(tree, '30FPS', 'CAM-A').length, 1)
-  assert.deepEqual(searchFolder(tree, '30FPS', 'notes'), [])
+  assert.deepEqual(searchFolder(tree, '30FPS', 'notes'), [
+    { name: 'notes.txt', path: '30FPS/indoor/notes.txt', relative: 'indoor/notes.txt', streamable: false },
+  ])
   assert.deepEqual(searchFolder(tree, '30FPS', '  '), [])
   assert.equal(searchFolder(tree, '', 'mp4').length, 5)
+})
+
+test('allFilePaths flattens every file, streamable or not, in tree order', () => {
+  assert.deepEqual(allFilePaths(tree), [
+    '120FPS-720p-h264/drone.mp4',
+    '30FPS/indoor/cam-a/deep.mp4',
+    '30FPS/indoor/lobby.mp4',
+    '30FPS/indoor/notes.txt',
+    '30FPS/highway.mp4',
+    'readme.md',
+    'video.mp4',
+  ])
 })
 
 test('nearestExistingFolder falls back to the closest ancestor that still exists', () => {

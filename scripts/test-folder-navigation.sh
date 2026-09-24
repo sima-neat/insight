@@ -88,7 +88,7 @@ if [[ -z "${INSIGHT_BASE_URL:-}" ]]; then
   # Reuse the CA mkcert already installed for this user; a fresh HOME would otherwise create and
   # try to install a new one, which needs sudo and fails on laptops, containers and the SDK.
   CAROOT_DIR="$(mkcert -CAROOT 2>/dev/null || true)"
-  HOME="$TMP_HOME" CAROOT="${CAROOT_DIR:-$TMP_HOME/.local/share/mkcert}" NEAT_METRICS_ZMQ_ENDPOINT="${NEAT_METRICS_ZMQ_ENDPOINT:-tcp://127.0.0.1:55580}" \
+  HOME="$TMP_HOME" CAROOT="${CAROOT_DIR:-$TMP_HOME/.local/share/mkcert}" PYTHONUNBUFFERED=1 NEAT_METRICS_ZMQ_ENDPOINT="${NEAT_METRICS_ZMQ_ENDPOINT:-tcp://127.0.0.1:55580}" \
     "$CMD" --port "$PORT" > "$LOG" 2>&1 &
   APP_PID=$!
   for attempt in $(seq 1 90); do
@@ -106,12 +106,15 @@ if [[ -z "${INSIGHT_BASE_URL:-}" ]]; then
       exit 1
     fi
   done
-  # The service prints its media directory at startup; trust that instead of guessing a path.
-  INSIGHT_MEDIA_ROOT="$(sed -n 's/^Insight media directory: //p' "$LOG" | tail -1)"
-  if [[ -z "$INSIGHT_MEDIA_ROOT" ]]; then
-    echo "error: could not read the media root from $LOG" >&2
-    exit 1
-  fi
+  # The service prints its media directory at startup; trust that instead of guessing a path. The
+  # health check above only means the port is listening, so give the log line a bounded wait too.
+  INSIGHT_MEDIA_ROOT=""
+  for attempt in $(seq 1 30); do
+    INSIGHT_MEDIA_ROOT="$(sed -n 's/^Insight media directory: //p' "$LOG" | tail -1)"
+    [[ -n "$INSIGHT_MEDIA_ROOT" ]] && break
+    sleep 1
+  done
+  if [[ -z "$INSIGHT_MEDIA_ROOT" ]]; then echo "error: could not read the media root from $LOG" >&2; exit 1; fi
   export INSIGHT_MEDIA_ROOT
 fi
 

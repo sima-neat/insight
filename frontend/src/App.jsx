@@ -6,7 +6,7 @@ import {
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
-import { listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
+import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -833,8 +833,9 @@ export default function App() {
   const sourcePollBusy = useRef(false)
   sourcesRef.current = sources
 
-  // Only streamable files are listed anywhere (issue #113); the server marks them.
+  // Streamable files drive assignment and Bulk Start; the library also lists the rest greyed (issue #113).
   const allFiles = useMemo(() => streamableFiles(mediaTree), [mediaTree])
+  const allMediaPaths = useMemo(() => allFilePaths(mediaTree), [mediaTree])
   const videoFiles = allFiles // streamable files only; Bulk Start needs at least one
   const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
   const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
@@ -1095,12 +1096,12 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedMediaPaths.length) return
-    const available = new Set(allFiles)
+    const available = new Set(allMediaPaths)
     const next = selectedMediaPaths.filter((path) => available.has(path))
     if (next.length !== selectedMediaPaths.length) {
       setSelectedMediaPaths(next)
     }
-  }, [allFiles, selectedMediaPaths])
+  }, [allMediaPaths, selectedMediaPaths])
 
   useEffect(() => {
     if (!selectedCatalogSource) {

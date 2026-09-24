@@ -61,8 +61,9 @@ export function breadcrumbs(folderPath) {
   return crumbs
 }
 
-// Streamable files anywhere below `folderPath` whose path relative to that folder contains
-// `query`, case-insensitively. `relative` is what the list shows, `path` is the library path.
+// Every file anywhere below `folderPath`, streamable or not, whose path relative to that folder
+// contains `query`, case-insensitively. `relative` is what the list shows, `path` is the library
+// path; callers filter out unsupported matches when they must not offer them.
 export function searchFolder(tree, folderPath, query) {
   const q = String(query || '').trim().toLowerCase()
   const nodes = childrenAt(tree, folderPath)
@@ -73,9 +74,11 @@ export function searchFolder(tree, folderPath, query) {
     for (const node of list) {
       if (node.type === 'folder') {
         walk(node.children || [])
-      } else if (node.streamable) {
+      } else if (node.type === 'file') {
         const relative = node.path.startsWith(prefix) ? node.path.slice(prefix.length) : node.path
-        if (relative.toLowerCase().includes(q)) matches.push({ name: node.name, path: node.path, relative })
+        if (relative.toLowerCase().includes(q)) {
+          matches.push({ name: node.name, path: node.path, relative, streamable: Boolean(node.streamable) })
+        }
       }
     }
   }
@@ -95,6 +98,15 @@ export function streamableFiles(tree, acc = []) {
   for (const node of tree || []) {
     if (node.type === 'file' && node.streamable) acc.push(node.path)
     if (node.type === 'folder') streamableFiles(node.children || [], acc)
+  }
+  return acc
+}
+
+// Every file path in tree order, streamable or not (the delete selection is pruned against this).
+export function allFilePaths(tree, acc = []) {
+  for (const node of tree || []) {
+    if (node.type === 'file') acc.push(node.path)
+    if (node.type === 'folder') allFilePaths(node.children || [], acc)
   }
   return acc
 }
