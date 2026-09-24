@@ -75,10 +75,10 @@ import {
 } from './stats/model.js'
 import { AlertBadge, ChipTabs, CountBadge, DeltaReason, Facts, FailureCallout, KeyValueTable, MetricCard, OutputDetails, SegmentedTabs, Sparkline } from './stats/ui.jsx'
 
-/** Hands the browser a file to save. The object URL is released once the click has used it. */
 // How often the saved-runs list is re-read while the Stats tab is visible.
 const RUNS_POLL_MS = 30000
 
+/** Hands the browser a file to save. The object URL is released once the click has used it. */
 function downloadText(filename, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }))
   const link = document.createElement('a')
@@ -383,7 +383,7 @@ function MetricsPanel({ model, live, polling, stale, error, busy, onToggleLive, 
 }
 
 /**
- * The Runs panel's header row, less its title and Refresh: the trace form, or what is
+ * The Runs panel's header row, less its title: the trace form, or what is
  * recording and the control that stops it. The note and tags fields it can unfold, and
  * what a recording trace was started with, are rendered below the header by `TraceDetails`.
  */
@@ -530,7 +530,6 @@ export function RunsPanel({
   function exportCsv() {
     downloadText(compareCsvFilename(table), compareCsv(table), 'text/csv;charset=utf-8')
   }
-  // Why the em dashes in the table are there, counted from the comparison itself.
   // Runs that were selected and are no longer on the board: their checkbox is gone.
   // Until a list has been read there is nothing to judge the selection against.
   const missing = useMemo(() => missingSelection(selected, runsPayload ? runs : null), [selected, runs, runsPayload])
