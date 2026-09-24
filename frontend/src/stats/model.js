@@ -493,6 +493,25 @@ export function toggleSelection(selected, key, limit = MAX_COMPARE_RUNS) {
   return list.length >= limit ? list : [...list, key]
 }
 
+/**
+ * The selected refs the board's run list no longer contains. A run deleted on the board
+ * takes its checkbox off the page with it, so the selection keeps a ref that cannot be
+ * unticked and every Compare fails with the daemon's `not_found` naming it - on this
+ * board, `{"code":"not_found","error":"unknown run '<ref>'"}` with a 404. The view has to
+ * say which ref to drop. An empty run list means the runs have not been read yet, not
+ * that every selection has gone.
+ */
+export function missingSelection(selected, runs) {
+  const list = selected || []
+  const known = runs || []
+  if (!list.length || !known.length) return []
+  const refs = new Set()
+  for (const run of known) {
+    for (const value of [run?.ref, run?.id, run?.name]) if (value) refs.add(String(value))
+  }
+  return list.filter((ref) => !refs.has(String(ref)))
+}
+
 export function compareQuery(refs) {
   return `/api/sentinel/compare?runs=${encodeURIComponent((refs || []).join(','))}`
 }

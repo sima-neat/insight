@@ -160,6 +160,8 @@ Where a cell shows “—” in place of a change, Sentinel withheld one, and th
 
 Run totals are shown in the units the rest of the view uses: a duration Sentinel reports in milliseconds reads in seconds, and energy in joules.
 
+If a run is deleted on the board while it is selected, its row leaves the list and there is no longer a checkbox to clear it with, so every comparison fails on it. Insight names any selected run Sentinel no longer lists and offers to drop it from the selection.
+
 ### Values from a board you have left
 
 Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Insight keeps those values and labels them with the board they came from, with a way to read them again, rather than showing them as the current board's.

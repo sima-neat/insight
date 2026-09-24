@@ -38,6 +38,7 @@ import {
   healthProblems,
   hostMetricsModel,
   metricsModel,
+  missingSelection,
   payloadBoardLabel,
   pollDelay,
   runDetail,
@@ -337,11 +338,14 @@ export function RunsPanel({
   onToggle,
   onOpen,
   onCompare,
-  onClearCompare
+  onClearCompare,
+  onDropMissing
 }) {
   const table = useMemo(() => (compare ? compareTable(compare, definitions) : null), [compare, definitions])
   // Why the em dashes in the table are there, counted from the comparison itself.
   const legend = useMemo(() => compareLegend(table), [table])
+  // Runs that were selected and are no longer on the board: their checkbox is gone.
+  const missing = useMemo(() => missingSelection(selected, runs), [selected, runs])
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
   const run = useMemo(() => runDetail(detail), [detail])
   // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
@@ -424,6 +428,19 @@ export function RunsPanel({
             )}
             <span className="hint" id="stats-compare-hint">{compareHint(selected)}</span>
           </div>
+
+          {missing.length > 0 && (
+            <Callout tone="warn" title="Some selected runs are no longer on the board">
+              <p>
+                {missing.join(', ')} {missing.length === 1 ? 'is' : 'are'} not in the list Sentinel reports now, so there is
+                no longer a checkbox to clear {missing.length === 1 ? 'it' : 'them'} with, and comparing will fail on{' '}
+                {missing.length === 1 ? 'it' : 'them'}.
+              </p>
+              <button type="button" className="btn-tonal" onClick={() => onDropMissing(missing)}>
+                {missing.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
+              </button>
+            </Callout>
+          )}
         </>
       )}
 
@@ -1150,6 +1167,7 @@ export default function StatsView({ onError, onStatus }) {
                   setCompare(null)
                   setCompareError(null)
                 }}
+                onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
               />
             </>
           )}

@@ -31,6 +31,7 @@ import {
   hostMetricsModel,
   isStale,
   metricsModel,
+  missingSelection,
   parseTags,
   payloadBoardLabel,
   pollDelay,
@@ -680,4 +681,78 @@ test('a host reading the endpoint does not give stays absent instead of reading 
   const nothing = hostMetricsModel(null)
   assert.equal(nothing.empty, true)
   assert.deepEqual(nothing.rows.map((row) => row.value), [null, null, null])
+})
+
+test('a selected run that has left the board is named, not left stuck in the selection', () => {
+  // The board's two saved runs, then one of them deleted on the board and the list
+  // refreshed. `insight-hw-1790177178` keeps its place in the selection with no row and
+  // no checkbox to clear it, and every Compare fails on it.
+  const runs = runList({
+    sentinel: {
+      runs: [
+        { id: '20260923T152712.952Z-insight-hw-1790177227', name: 'insight-hw-1790177227' },
+        { id: '20260923T152624.613Z-insight-hw-1790177178', name: 'insight-hw-1790177178' }
+      ]
+    }
+  })
+  const selected = runs.map((run) => run.ref)
+  assert.deepEqual(missingSelection(selected, runs), [])
+
+  const left = runs.slice(0, 1)
+  assert.deepEqual(missingSelection(selected, left), ['insight-hw-1790177178'])
+  // What the daemon answers for that selection, captured from the DevKit.
+  const refused = failureNotice({
+    error: "unknown run 'insight-hw-1790177178'",
+    code: 'not_found',
+    hint: 'List runs and use a name or id Sentinel reports.'
+  })
+  assert.equal(refused.title, 'That run is not on this board')
+  assert.equal(refused.board, false)
+  assert.equal(refused.daemon, false)
+  assert.equal(refused.retryable, true)
+
+  // A run is selectable by name or by id, so both must count as still being on the board.
+  assert.deepEqual(missingSelection(['20260923T152624.613Z-insight-hw-1790177178'], runs), [])
+  // Runs not read yet is not the same as every run having gone.
+  assert.deepEqual(missingSelection(selected, []), [])
+  assert.deepEqual(missingSelection([], runs), [])
+})
+
+test('the empty and refused states Sentinel actually returns are read as such', () => {
+  // /api/sentinel/runs on a board whose daemon runs but has recorded nothing.
+  assert.deepEqual(runList({ generation: 1, sentinel: { runs: [] } }), [])
+
+  // Comparing one run, verbatim from the DevKit: a 400 the page must not read as a
+  // comparison, since selecting a second run is the fix.
+  const single = failureNotice({
+    error: 'Comparing needs at least two runs.',
+    code: 'invalid_request',
+    hint: 'Pass `runs=<baseline>,<other>`; the first run is the baseline.'
+  })
+  assert.equal(single.title, 'The request was rejected')
+  assert.equal(single.board, false)
+  assert.equal(compareReady(['only-one']), false)
+
+  // A board that has been left: /api/sentinel answers 502 with the board's own hint.
+  const gone = failureNotice({
+    error: 'The board could not be reached.',
+    code: 'unreachable',
+    hint: 'Check that the board is powered on and on the network, and that `ssh -p 22 sima@192.168.2.254` works from this machine.'
+  })
+  assert.equal(gone.board, true)
+  assert.match(gone.hint, /ssh -p 22 sima@192\.168\.2\.254/)
+  // Its answer is the Board panel's problem, so the daemon panel must not claim it.
+  assert.equal(gone.daemon, false)
+  assert.equal(daemonInfo(null).state, 'unknown')
+  assert.equal(daemonInfo(null).available, false)
+
+  // A daemon that is not installed: the page offers to install it and nothing else.
+  const missing = daemonInfo({
+    available: false,
+    status: { state: 'missing', error: { error: 'Sentinel is not installed on this board.', code: 'sentinel_missing' } },
+    daemon: { installed: false, healthy: false, service: 'inactive', socket: false, sima_cli: '/usr/bin/sima-cli' }
+  })
+  assert.equal(missing.available, false)
+  assert.equal(missing.canInstall, true)
+  assert.equal(failureNotice(missing.error).daemon, true)
 })
