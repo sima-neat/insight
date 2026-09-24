@@ -315,8 +315,7 @@ class PreviewManager:
             if session is None or session["id"] != session_id:
                 raise _unknown_session()
             if _now() > datetime.fromisoformat(session["expires_at"]):
-                self._session = None
-                self._owner = None
+                self._forget(session_id)
                 raise _unknown_session()
             session = dict(session)
             self._heartbeats += 1
@@ -328,9 +327,7 @@ class PreviewManager:
             result = session_ctx.transport.exec(["sh", "-c", beat], timeout=10)
             if b"alive" not in result.stdout:
                 with self._lock:
-                    if self._session is not None and self._session["id"] == session_id:
-                        self._session = None
-                        self._owner = None
+                    self._forget(session_id)
                 raise _unknown_session()
             self._check_channel(session_ctx, session)
             session["expires_at"] = _iso(_now() + timedelta(seconds=SESSION_TTL_SEC))
@@ -402,8 +399,7 @@ class PreviewManager:
             session = self._session
             if session and not self._heartbeats and _now() > datetime.fromisoformat(session["expires_at"]):
                 # The board worker frees the camera on its own; drop the reservation here.
-                self._session = None
-                self._owner = None
+                self._forget(session["id"])
 
     # ---- internals --------------------------------------------------------
 
@@ -430,9 +426,13 @@ class PreviewManager:
         )
         owner.transport.exec(["sh", "-c", script], timeout=20)
         with self._lock:
-            if self._session is not None and self._session["id"] == session["id"]:
-                self._session = None
-                self._owner = None
+            self._forget(session["id"])
+
+    def _forget(self, session_id: str) -> None:
+        """Drop the session and its owner if it is still `session_id`; the caller holds the lock."""
+        if self._session is not None and self._session["id"] == session_id:
+            self._session = None
+            self._owner = None
 
     def _reserve_channel(self, session_ctx) -> int:
         if session_ctx.target.mode == "local":
