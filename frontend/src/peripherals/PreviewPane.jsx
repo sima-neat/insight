@@ -51,7 +51,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
       <div className="periph-preview-head">
-        <h4 id="periph-preview-title">Preview</h4>
+        <h4 id="periph-preview-title">Video Preview</h4>
         {/* The channel is Insight's own bookkeeping, not something to act on, so it is not shown. */}
         <span className="periph-pills">
           {running && <ModeBadges mode={session?.mode} label="Streaming" />}
