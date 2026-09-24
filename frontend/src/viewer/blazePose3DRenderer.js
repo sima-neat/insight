@@ -22,6 +22,8 @@ const DEFAULT_PITCH = Math.PI / 9;
 const MIN_PITCH = -Math.PI * 0.48;
 const MAX_PITCH = Math.PI * 0.48;
 const CUBE_MIN_EXTENT = 0.5;
+const DEFAULT_REFERENCE_HALF_EXTENT = 1.2;
+const MAX_REFERENCE_HALF_EXTENT = 10;
 
 const CUBE_EDGES = [
   [0, 1], [1, 2], [2, 3], [3, 0],
@@ -69,19 +71,29 @@ function normalizeWorldPoint(point) {
   return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
 }
 
+function projectionCamera(settings) {
+  const camera = normalizeBlazePoseViewSettings(settings);
+  return {
+    yawCos: Math.cos(camera.yaw),
+    yawSin: Math.sin(camera.yaw),
+    pitchCos: Math.cos(camera.pitch),
+    pitchSin: Math.sin(camera.pitch),
+  };
+}
+
 function projectNormalizedPoint(world, camera) {
-  const yawX = Math.cos(camera.yaw) * world.x + Math.sin(camera.yaw) * world.z;
-  const yawZ = -Math.sin(camera.yaw) * world.x + Math.cos(camera.yaw) * world.z;
+  const yawX = camera.yawCos * world.x + camera.yawSin * world.z;
+  const yawZ = -camera.yawSin * world.x + camera.yawCos * world.z;
   return {
     x: yawX,
-    y: Math.cos(camera.pitch) * world.y - Math.sin(camera.pitch) * yawZ,
-    depth: Math.sin(camera.pitch) * world.y + Math.cos(camera.pitch) * yawZ,
+    y: camera.pitchCos * world.y - camera.pitchSin * yawZ,
+    depth: camera.pitchSin * world.y + camera.pitchCos * yawZ,
   };
 }
 
 export function projectWorldPoint(point, camera = DEFAULT_BLAZEPOSE_VIEW_SETTINGS) {
   const world = normalizeWorldPoint(point);
-  return world ? projectNormalizedPoint(world, normalizeBlazePoseViewSettings(camera)) : null;
+  return world ? projectNormalizedPoint(world, projectionCamera(camera)) : null;
 }
 
 function normalizedPoses(payload) {
@@ -103,39 +115,31 @@ function normalizedPoses(payload) {
   }).filter((pose) => pose.points.size > 0);
 }
 
-function poseBounds(poses) {
-  const points = poses.flatMap((pose) => [...pose.points.values()]);
-  const axis = (name) => points.map((point) => point[name]);
-  const minX = Math.min(...axis("x"));
-  const maxX = Math.max(...axis("x"));
-  const minY = Math.min(...axis("y"));
-  const maxY = Math.max(...axis("y"));
-  const minZ = Math.min(...axis("z"));
-  const maxZ = Math.max(...axis("z"));
-  return { minX, maxX, minY, maxY, minZ, maxZ };
+function referenceFrame(payload) {
+  const requested = payload?.view;
+  const center = {
+    x: finiteOr(requested?.center?.x, 0),
+    y: finiteOr(requested?.center?.y, 0),
+    z: finiteOr(requested?.center?.z, 0),
+  };
+  const halfExtent = clamp(
+    finiteOr(requested?.half_extent, DEFAULT_REFERENCE_HALF_EXTENT),
+    CUBE_MIN_EXTENT,
+    MAX_REFERENCE_HALF_EXTENT,
+  );
+  return { center, halfExtent };
 }
 
-function referenceCube(bounds) {
-  const center = {
-    x: (bounds.minX + bounds.maxX) / 2,
-    y: (bounds.minY + bounds.maxY) / 2,
-    z: (bounds.minZ + bounds.maxZ) / 2,
-  };
-  const extent = Math.max(
-    bounds.maxX - bounds.minX,
-    bounds.maxY - bounds.minY,
-    bounds.maxZ - bounds.minZ,
-    CUBE_MIN_EXTENT,
-  ) * 0.6;
+function referenceCube({ center, halfExtent }) {
   return [
-    { x: center.x - extent, y: center.y - extent, z: center.z - extent },
-    { x: center.x + extent, y: center.y - extent, z: center.z - extent },
-    { x: center.x + extent, y: center.y + extent, z: center.z - extent },
-    { x: center.x - extent, y: center.y + extent, z: center.z - extent },
-    { x: center.x - extent, y: center.y - extent, z: center.z + extent },
-    { x: center.x + extent, y: center.y - extent, z: center.z + extent },
-    { x: center.x + extent, y: center.y + extent, z: center.z + extent },
-    { x: center.x - extent, y: center.y + extent, z: center.z + extent },
+    { x: center.x - halfExtent, y: center.y - halfExtent, z: center.z - halfExtent },
+    { x: center.x + halfExtent, y: center.y - halfExtent, z: center.z - halfExtent },
+    { x: center.x + halfExtent, y: center.y + halfExtent, z: center.z - halfExtent },
+    { x: center.x - halfExtent, y: center.y + halfExtent, z: center.z - halfExtent },
+    { x: center.x - halfExtent, y: center.y - halfExtent, z: center.z + halfExtent },
+    { x: center.x + halfExtent, y: center.y - halfExtent, z: center.z + halfExtent },
+    { x: center.x + halfExtent, y: center.y + halfExtent, z: center.z + halfExtent },
+    { x: center.x - halfExtent, y: center.y + halfExtent, z: center.z + halfExtent },
   ];
 }
 
@@ -214,31 +218,37 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
     return false;
   }
 
-  const camera = normalizeBlazePoseViewSettings(frame.camera);
-  const cube = frame.showReferenceCube === false ? [] : referenceCube(poseBounds(poses));
-  const projectedPosePoints = poses.flatMap((pose) =>
-    [...pose.points.values()].map((point) => projectNormalizedPoint(point, camera)),
-  );
-  const projectedCube = cube.map((point) => projectNormalizedPoint(point, camera));
-  const projection = fitProjection([...projectedPosePoints, ...projectedCube], width, height);
+  const camera = projectionCamera(frame.camera);
+  const projectedPoses = poses.map((pose) => ({
+    ...pose,
+    points: new Map([...pose.points].map(([name, point]) => [
+      name,
+      projectNormalizedPoint(point, camera),
+    ])),
+  }));
+  const projectedCube = referenceCube(referenceFrame(payload))
+    .map((point) => projectNormalizedPoint(point, camera));
+  const projection = fitProjection(projectedCube, width, height);
+  const screenPoses = projectedPoses.map((pose) => ({
+    ...pose,
+    points: new Map([...pose.points].map(([name, point]) => [name, projection.point(point)])),
+  }));
 
-  if (projectedCube.length > 0) {
+  if (frame.showReferenceCube !== false) {
     drawReferenceCube(ctx, projectedCube.map((point) => projection.point(point)));
   }
 
   const segments = [];
-  for (const pose of poses) {
+  for (const pose of screenPoses) {
     for (const [fromName, toName] of BLAZEPOSE_CONNECTIONS) {
       const from = pose.points.get(fromName);
       const to = pose.points.get(toName);
       if (!from || !to) continue;
-      const projectedFrom = projectNormalizedPoint(from, camera);
-      const projectedTo = projectNormalizedPoint(to, camera);
       segments.push({
-        from: projection.point(projectedFrom),
-        to: projection.point(projectedTo),
+        from,
+        to,
         color: pose.color,
-        depth: (projectedFrom.depth + projectedTo.depth) / 2,
+        depth: (from.depth + to.depth) / 2,
       });
     }
   }
@@ -262,11 +272,8 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
     ctx.stroke();
   }
 
-  const points = poses.flatMap((pose) =>
-    [...pose.points.values()].map((point) => {
-      const projected = projectNormalizedPoint(point, camera);
-      return { ...projection.point(projected), color: pose.color };
-    }),
+  const points = screenPoses.flatMap((pose) =>
+    [...pose.points.values()].map((point) => ({ ...point, color: pose.color })),
   ).sort((left, right) => left.depth - right.depth);
   for (const point of points) {
     ctx.beginPath();
@@ -366,4 +373,21 @@ auxiliaryRendererRegistry.register("blazepose-3d", {
   title: "3D Pose",
   draw: drawBlazePose3D,
   createSession: createBlazePose3DSession,
+  viewerSettings: {
+    toSession(settings) {
+      return {
+        showReferenceCube: settings.showReferenceBox !== false,
+        yaw: settings.yawDegrees * Math.PI / 180,
+        pitch: settings.pitchDegrees * Math.PI / 180,
+      };
+    },
+    toViewer(settings, current) {
+      return {
+        ...current,
+        showReferenceBox: settings.showReferenceCube !== false,
+        yawDegrees: Math.round(settings.yaw * 180 / Math.PI),
+        pitchDegrees: Math.round(settings.pitch * 180 / Math.PI),
+      };
+    },
+  },
 });

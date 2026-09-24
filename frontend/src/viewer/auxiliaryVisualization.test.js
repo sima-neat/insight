@@ -37,6 +37,31 @@ test("renderer selection uses the registered renderer named by the generic paylo
   assert.equal(result.view.frameId, "frame-1");
 });
 
+test("generic renderer registration preserves renderer-owned settings integration", () => {
+  const registry = createAuxiliaryRendererRegistry();
+  const viewerSettings = {
+    toSession(settings) { return { scale: settings.scale }; },
+    toViewer(settings) { return { scale: settings.scale }; },
+  };
+  registry.register("point-cloud-3d", { title: "Point Cloud", draw() {}, viewerSettings });
+
+  assert.equal(registry.get("point-cloud-3d").viewerSettings, viewerSettings);
+  assert.deepEqual(registry.get("point-cloud-3d").viewerSettings.toSession({ scale: 2 }), { scale: 2 });
+});
+
+test("generic transport preserves an arbitrary renderer-owned 3D payload", () => {
+  const registry = registryWith("mesh-3d");
+  const payload = {
+    vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    triangles: [[0, 1, 2]],
+    coordinateSystem: { handedness: "right", units: "millimeters" },
+  };
+  const result = inspectAuxiliaryMessage(message({ renderer: "mesh-3d", payload }), registry);
+
+  assert.equal(result.reason, null);
+  assert.equal(result.view.payload, payload);
+});
+
 test("unknown and malformed auxiliary payloads are rejected without becoming overlays", () => {
   const registry = registryWith("blazepose-3d");
   const unknown = message({ renderer: "not-installed" });

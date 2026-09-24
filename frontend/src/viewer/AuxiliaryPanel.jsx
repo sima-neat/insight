@@ -5,10 +5,9 @@ import {
   shouldAnimateAuxiliaryView,
   shouldHoldLastAuxiliaryFrame,
 } from "./auxiliaryVisualization.js";
-import "./blazePose3DRenderer.js";
 
 const VALID_MODES = new Set(["compact", "collapsed", "expanded", "hidden"]);
-const DEFAULT_RENDERER = "blazepose-3d";
+const MAX_CANVAS_PIXEL_RATIO = 2;
 const drawWarnings = new Set();
 
 function preferenceKey(channelIndex) {
@@ -55,7 +54,8 @@ function saveRendererPreference(channelIndex, view, settings) {
   }
 }
 
-function resolveRendererSettings(channelIndex, renderer = DEFAULT_RENDERER) {
+function resolveRendererSettings(channelIndex, renderer) {
+  if (!renderer) return { enabled: true, panelMode: "compact" };
   const resolved = window.viewerSettingsApi?.resolveAuxiliarySettings?.(channelIndex, renderer);
   return {
     enabled: resolved?.enabled !== false,
@@ -66,7 +66,8 @@ function resolveRendererSettings(channelIndex, renderer = DEFAULT_RENDERER) {
   };
 }
 
-function hasExplicitRendererSettings(channelIndex, renderer = DEFAULT_RENDERER) {
+function hasExplicitRendererSettings(channelIndex, renderer) {
+  if (!renderer) return false;
   try {
     return ["global", `channel_${channelIndex}`].some((scope) => {
       const raw = JSON.parse(window.localStorage.getItem(`viewerSettings_${scope}`) || "null");
@@ -85,42 +86,33 @@ function rendererForSelection(selectedId, payloads, knownViews) {
   return payloads.get(selectedId)?.renderer
     ?? knownViews.find((view) => view.id === selectedId)?.renderer
     ?? knownViews[0]?.renderer
-    ?? DEFAULT_RENDERER;
+    ?? null;
 }
 
 function settingsForSession(channelIndex, view) {
   const stored = loadRendererPreference(channelIndex, view);
-  if (view.renderer !== DEFAULT_RENDERER || !hasExplicitRendererSettings(channelIndex, view.renderer)) {
+  const renderer = auxiliaryRendererRegistry.get(view.renderer);
+  const toSession = renderer?.viewerSettings?.toSession;
+  if (typeof toSession !== "function" || !hasExplicitRendererSettings(channelIndex, view.renderer)) {
     return stored;
   }
-  const configured = resolveRendererSettings(channelIndex, view.renderer);
   return {
     ...(stored || {}),
-    showReferenceCube: configured.showReferenceBox !== false,
-    yaw: configured.yawDegrees * Math.PI / 180,
-    pitch: configured.pitchDegrees * Math.PI / 180,
-  };
-}
-
-function rendererSettingsPatch(settings) {
-  return {
-    showReferenceCube: settings.showReferenceBox !== false,
-    yaw: settings.yawDegrees * Math.PI / 180,
-    pitch: settings.pitchDegrees * Math.PI / 180,
+    ...toSession(resolveRendererSettings(channelIndex, view.renderer)),
   };
 }
 
 function saveSessionToViewerSettings(channelIndex, view, settings) {
   const settingsApi = window.viewerSettingsApi;
-  if (view.renderer !== DEFAULT_RENDERER || !settingsApi?.writeScopeAuxiliarySettings) return;
+  const toViewer = auxiliaryRendererRegistry.get(view.renderer)?.viewerSettings?.toViewer;
+  if (typeof toViewer !== "function" || !settingsApi?.writeScopeAuxiliarySettings) return;
   const targetScope = `channel_${channelIndex}`;
   const current = resolveRendererSettings(channelIndex, view.renderer);
-  settingsApi.writeScopeAuxiliarySettings(targetScope, view.renderer, {
-    ...current,
-    showReferenceBox: settings.showReferenceCube !== false,
-    yawDegrees: Math.round(settings.yaw * 180 / Math.PI),
-    pitchDegrees: Math.round(settings.pitch * 180 / Math.PI),
-  });
+  settingsApi.writeScopeAuxiliarySettings(
+    targetScope,
+    view.renderer,
+    toViewer(settings, current),
+  );
   window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
     detail: { scope: targetScope, auxiliaryRenderer: view.renderer },
   }));
@@ -210,11 +202,11 @@ function RendererControls({ controls, onControl }) {
 
 const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref) {
   const initialPreference = useRef(loadPreference(channelIndex));
-  const initialRendererSettings = useRef(resolveRendererSettings(channelIndex));
+  const initialRendererSettings = useRef(resolveRendererSettings(channelIndex, null));
   const [mode, setMode] = useState(() => {
     const resolvedMode = displayMode(initialRendererSettings.current);
     const stored = initialPreference.current.mode;
-    return !hasExplicitRendererSettings(channelIndex) && resolvedMode === "compact" && stored !== "compact"
+    return resolvedMode === "compact" && stored !== "compact"
       ? stored
       : resolvedMode;
   });
@@ -285,7 +277,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     const cssHeight = Math.max(0, canvas.clientHeight);
     if (cssWidth === 0 || cssHeight === 0) return false;
 
-    const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
+    const pixelRatio = Math.min(MAX_CANVAS_PIXEL_RATIO, Math.max(1, window.devicePixelRatio || 1));
     const width = Math.round(cssWidth * pixelRatio);
     const height = Math.round(cssHeight * pixelRatio);
     if (canvas.width !== width) canvas.width = width;
@@ -405,9 +397,8 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       modeRef.current = nextMode;
       setMode(nextMode);
       const current = sessionsRef.current.get(selectedIdRef.current)?.session;
-      if (renderer === DEFAULT_RENDERER) {
-        current?.applySettings?.(rendererSettingsPatch(resolved));
-      }
+      const toSession = auxiliaryRendererRegistry.get(renderer)?.viewerSettings?.toSession;
+      if (typeof toSession === "function") current?.applySettings?.(toSession(resolved));
       updateControls(current);
       scheduleDraw();
     };
@@ -472,9 +463,9 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   };
   const setPanelMode = (nextMode) => {
     if (!VALID_MODES.has(nextMode)) return;
-    const renderer = selected?.renderer ?? DEFAULT_RENDERER;
+    const renderer = selected?.renderer;
     const settingsApi = window.viewerSettingsApi;
-    if (settingsApi?.writeScopeAuxiliarySettings) {
+    if (renderer && settingsApi?.writeScopeAuxiliarySettings) {
       const targetScope = `channel_${channelIndex}`;
       const current = resolveRendererSettings(channelIndex, renderer);
       settingsApi.writeScopeAuxiliarySettings(targetScope, renderer, {
