@@ -427,3 +427,49 @@ export function validateBoardForm(values) {
   if (!user) return { error: 'Enter the SSH user, usually "sima".' }
   return { body: { host, port, user } }
 }
+
+// The board state has several writers: reads (on load, Retry, after a scan) and the POSTs that
+// change the board and answer with the new state. Their answers can arrive out of order, so a
+// read only applies while nothing newer has been sent or applied; a superseded read resolves to
+// whatever state won instead of its own out-of-date answer.
+export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
+  let latest = 0
+  let newest = Promise.resolve(null)
+
+  function load() {
+    const seq = ++latest
+    onLoading(true)
+    let request
+    try {
+      request = Promise.resolve(fetchBoard())
+    } catch (err) {
+      request = Promise.reject(err)
+    }
+    const promise = request.then(
+      (data) => {
+        if (seq !== latest) return newest
+        onBoard(data)
+        onLoading(false)
+        return data
+      },
+      (err) => {
+        if (seq !== latest) return newest
+        onError(err)
+        onLoading(false)
+        return null
+      }
+    )
+    newest = promise
+    return promise
+  }
+
+  function apply(data) {
+    latest += 1
+    newest = Promise.resolve(data)
+    onBoard(data)
+    onLoading(false)
+    return data
+  }
+
+  return { load, apply }
+}

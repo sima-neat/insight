@@ -10,6 +10,7 @@ import {
   cameraSubtitle,
   cameraSummaryLine,
   changeSummary,
+  createBoardSync,
   defaultTargetText,
   deviceRows,
   deviceTabs,
@@ -459,4 +460,71 @@ test('the detail pane shows one explanation line, chosen by priority', () => {
     'Availability unknown: fuser is not installed on the board.'
   )
   assert.equal(cameraSummaryLine({}), '')
+})
+
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+function boardSyncHarness() {
+  const requests = []
+  const state = { board: null, error: null, loading: false, errors: 0 }
+  const sync = createBoardSync({
+    fetchBoard: () => {
+      const request = deferred()
+      requests.push(request)
+      return request.promise
+    },
+    onBoard: (data) => { state.board = data; state.error = null },
+    onError: (err) => { state.error = err; state.errors += 1 },
+    onLoading: (value) => { state.loading = value }
+  })
+  return { sync, requests, state }
+}
+
+const boardA = { target: { label: 'sima@192.168.2.2' }, generation: 1 }
+const boardB = { target: { label: 'sima@192.168.2.9' }, generation: 2 }
+
+test('a board read that was sent before a board change cannot undo it', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const load = sync.load()
+  sync.apply(boardB) // the POST that selected B answered first
+  requests[0].resolve(boardA) // then the older GET, answered before the change
+  assert.equal(await load, boardB, 'the superseded read reports the state that won')
+  assert.equal(state.board, boardB)
+  assert.equal(state.loading, false)
+})
+
+test('a failed board read that was superseded does not raise an error', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const load = sync.load()
+  sync.apply(boardB)
+  requests[0].reject(new Error('network'))
+  await load
+  assert.equal(state.errors, 0)
+  assert.equal(state.board, boardB)
+})
+
+test('overlapping board reads keep the newest answer, whatever order they arrive in', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  const first = sync.load()
+  const second = sync.load()
+  requests[1].resolve(boardB)
+  requests[0].resolve(boardA)
+  assert.deepEqual([await first, await second], [boardB, boardB])
+  assert.equal(state.board, boardB)
+  assert.equal(state.loading, false)
+})
+
+test('a board read sent after a change applies normally', async () => {
+  const { sync, requests, state } = boardSyncHarness()
+  sync.apply(boardA)
+  const load = sync.load()
+  assert.equal(state.loading, true)
+  requests[0].resolve(boardB)
+  assert.equal(await load, boardB)
+  assert.equal(state.board, boardB)
+  assert.equal(state.loading, false)
 })

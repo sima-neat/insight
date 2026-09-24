@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
-import { boardIndicator, normalizeError as normalizeBoardError } from './peripherals/model.js'
+import { boardIndicator, createBoardSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
@@ -742,6 +742,20 @@ export default function App() {
   // Stable, because the board panel's focus handling keys off it: a new function each render
   // would re-run that effect and pull focus out of whatever the user is typing in.
   const closeBoardPanel = useCallback(() => setBoardPanelOpen(false), [])
+  // Reads and board changes can answer out of order; the sync keeps an older read from undoing
+  // a newer change. It only calls state setters, which React keeps stable, so one is enough.
+  const boardSyncRef = useRef(null)
+  if (!boardSyncRef.current) {
+    boardSyncRef.current = createBoardSync({
+      fetchBoard: () => requestBoardJson('/api/board'),
+      onBoard: (data) => {
+        setBoard(data)
+        setBoardError(null)
+      },
+      onError: (err) => setBoardError(normalizeBoardError(err)),
+      onLoading: setBoardLoading
+    })
+  }
   const [sysInfoOpen, setSysInfoOpen] = useState(false)
   const [sysInfo, setSysInfo] = useState(null)
   const [sysInfoLoading, setSysInfoLoading] = useState(false)
@@ -1601,24 +1615,12 @@ export default function App() {
   }
 
   // One board target, shared by Peripherals and (later) Stats.
-  async function loadBoard() {
-    setBoardLoading(true)
-    try {
-      const data = await requestBoardJson('/api/board')
-      setBoard(data)
-      setBoardError(null)
-      return data
-    } catch (err) {
-      setBoardError(normalizeBoardError(err))
-      return null
-    } finally {
-      setBoardLoading(false)
-    }
+  function loadBoard() {
+    return boardSyncRef.current.load()
   }
 
   function handleBoardChange(data) {
-    setBoard(data)
-    setBoardError(null)
+    boardSyncRef.current.apply(data)
     loadDevkitShellInfo()
   }
 
