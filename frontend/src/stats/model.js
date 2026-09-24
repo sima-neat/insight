@@ -352,6 +352,9 @@ export function telemetryVisible(info, read = {}) {
  * the daemon itself raised, or installer output to read.
  */
 export function daemonNoticeNeeded(info, { error = null, health = null, install = null } = {}) {
+  // No answer yet (every visit to the page starts here): the "Checking Sentinel" line covers the
+  // wait, so the section only appears if that first read already failed.
+  if (info?.state === 'unknown') return Boolean(error)
   if (!info || info.state !== 'ready') return true
   if (error) return true
   if (healthProblems(health).length > 0) return true

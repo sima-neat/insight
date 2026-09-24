@@ -115,7 +115,8 @@ test('the daemon section appears only when it has something to say', () => {
   assert.equal(daemonNoticeNeeded(ready, { error: null, health: null, install: null }), false)
   // Not ready is the whole point of the section: it carries the reason and the Install button.
   assert.equal(daemonNoticeNeeded({ state: 'missing' }), true)
-  assert.equal(daemonNoticeNeeded({ state: 'unknown' }), true)
+  assert.equal(daemonNoticeNeeded({ state: 'unknown' }), false, 'no panel flashes while the first read is out')
+  assert.equal(daemonNoticeNeeded({ state: 'unknown' }, { error: { message: 'Sentinel did not answer' } }), true)
   assert.equal(daemonNoticeNeeded(null), true)
   // A working daemon can still have something to report.
   assert.equal(daemonNoticeNeeded(ready, { error: { message: 'Sentinel could not be installed' } }), true)
