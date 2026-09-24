@@ -167,7 +167,7 @@ class ViewerUrlTests(unittest.TestCase):
         ]
 
         with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
-             mock.patch.object(app_module, "_shell_target", return_value=("10.42.0.175", 22, "sima")), \
+             mock.patch.object(app_module, "_shell_target", return_value=("10.42.0.175", 22, "sima", True)), \
              mock.patch.object(app_module, "webssh_is_available", return_value=True), \
              mock.patch.object(app_module, "is_webssh_running", return_value=False):
             response = self.client.get("/api/devkit-shell", headers={"Host": "10.0.0.23:20710"})
@@ -183,15 +183,49 @@ class ViewerUrlTests(unittest.TestCase):
         """One control owns the board, so its shell must follow the board that control selected."""
         target = SimpleNamespace(mode="ssh", source="manual", host="10.0.0.9", port=2222, user="dev")
         manager = SimpleNamespace(target=lambda: target)
-        with mock.patch.object(app_module.board, "get_board_manager", return_value=manager), \
+        with app_module.app.test_request_context(headers={"Host": "10.0.0.23:9900"}), \
+             mock.patch.object(app_module.board, "get_board_manager", return_value=manager), \
              mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
-            self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev"))
+            self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev", False))
+            payload = app_module._build_devkit_shell_payload()
+            self.assertFalse(payload["credentials_prefilled"])
+            self.assertFalse(payload["launch_supported"])
+            self.assertIsNone(payload["launch_url"])
 
         # Insight running on the board itself has no shell of its own to open; the SDK's DevKit stands in.
         local = SimpleNamespace(mode="local", source="on-board", host=None, port=None, user=None)
         with mock.patch.object(app_module.board, "get_board_manager", return_value=SimpleNamespace(target=lambda: local)), \
              mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
-            self.assertEqual(app_module._shell_target(), ("10.42.0.175", 22, "sima"))
+            self.assertEqual(app_module._shell_target(), ("10.42.0.175", 22, "sima", True))
+
+    def test_sdk_shell_does_not_prefill_default_password_for_custom_user(self):
+        target = SimpleNamespace(mode="ssh", source="sdk-env", host="10.0.0.9", port=2222, user="dev")
+        manager = SimpleNamespace(target=lambda: target)
+
+        with app_module.app.test_request_context(headers={"Host": "10.0.0.23:9900"}), \
+             mock.patch.object(app_module.board, "get_board_manager", return_value=manager):
+            self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev", False))
+            payload = app_module._build_devkit_shell_payload()
+
+        self.assertFalse(payload["credentials_prefilled"])
+        self.assertFalse(payload["launch_supported"])
+        self.assertIsNone(payload["launch_url"])
+
+    def test_start_devkit_shell_rejects_target_without_safe_prefill(self):
+        payload = {
+            "configured": True,
+            "launch_supported": False,
+        }
+        with mock.patch.object(app_module, "_build_devkit_shell_payload", return_value=payload), \
+             mock.patch.object(app_module, "ensure_webssh_started") as start:
+            response = self.client.post("/api/devkit-shell/start")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.get_json(),
+            {"error": "The browser shell is available only for the SDK-paired DevKit."},
+        )
+        start.assert_not_called()
 
     def test_devkit_shell_url_preserves_ipv6_host(self):
         ports = [

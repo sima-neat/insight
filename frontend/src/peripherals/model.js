@@ -233,15 +233,26 @@ export function modeLabel(selection) {
   return `${selection.format} ${sizeLabel(selection.width, selection.height)} @ ${fpsLabel(selection.fps)} fps`
 }
 
+export function formatRangeLabel(range) {
+  if (!range) return ''
+  const width = `${range.min_width}–${range.max_width}`
+  const height = `${range.min_height}–${range.max_height}`
+  const step = range.step_width || range.step_height
+    ? ` in ${range.step_width || 1}×${range.step_height || 1} steps`
+    : ''
+  return `${width}×${height}${step}`
+}
+
 export function formatOptions(camera) {
   return (camera?.formats || []).map((f) => {
     const selectable = isSelectable(f)
+    const range = formatRangeLabel(f.range)
     const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
     return {
       value: f.format,
       label: `${f.label || f.format} — ${selectable ? tierInfo(f.support?.tier).short : 'not usable'}`,
       disabled: !selectable,
-      reason: selectable ? '' : reason,
+      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
       range: f.range || null
     }
   })

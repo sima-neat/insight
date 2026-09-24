@@ -136,7 +136,7 @@ export default function BoardTargetCard({
           {/* Identity and the last check read as one list rather than a line of prose and a grid. */}
           <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
           <div className="periph-actions periph-board-actions">
-            {onOpenShell && shell?.configured && (
+            {onOpenShell && shell?.launch_supported && (
               <button
                 type="button"
                 className="btn-tonal"

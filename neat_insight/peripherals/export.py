@@ -128,17 +128,22 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
         ("strict_zero_copy", not options["allow_cpu_fallback"]),
         ("queue_depth", options["queue_depth"]),
     ]
+    exports = [
+        _export("python", "Python (pyneat)", "camera_input.py", "python", _python(options, capture_buffers)),
+        _export("cpp", "C++ (Neat)", "camera_input.cpp", "cpp", _cpp(options, capture_buffers)),
+    ]
+    # Apps treats capture_buffers as a positive capture-buffer request; unlike the Core APIs it
+    # has no value that means "do not set buffer-count".  Do not offer a configuration that the
+    # installed libcamerasrc is known to reject.
+    if capture_buffers:
+        exports.append(_export("yaml", "Apps config.yaml camera block", "config.yaml", "yaml", _yaml_block(yaml_rows)))
+    exports.append(_export("json", "JSON", "camera_input.json", "json", json.dumps(descriptor, indent=2) + "\n"))
     return {
         "camera_id": item["id"],
         "selection": selection,
         "support": _mode_support(item, choice, mode),
         "warnings": _mipi_warnings(item, choice, mode, libcamerasrc),
-        "exports": [
-            _export("python", "Python (pyneat)", "camera_input.py", "python", _python(options, capture_buffers)),
-            _export("cpp", "C++ (Neat)", "camera_input.cpp", "cpp", _cpp(options, capture_buffers)),
-            _export("yaml", "Apps config.yaml camera block", "config.yaml", "yaml", _yaml_block(yaml_rows)),
-            _export("json", "JSON", "camera_input.json", "json", json.dumps(descriptor, indent=2) + "\n"),
-        ],
+        "exports": exports,
     }
 
 

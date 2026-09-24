@@ -102,7 +102,7 @@ const ONBOARDING_STEPS = [
     title: 'See what is attached to the board',
     summary: 'Peripherals detects devices on the selected board and shows what each one reports.',
     details:
-      'Confirm a camera is connected and read the modes it reports, then take away a configuration your application can open it with. Cameras work today; other kinds appear as Insight learns to read them.'
+      'Confirm a camera is connected and read the modes it reports. Cameras work today; other kinds appear as Insight learns to read them.'
   },
   {
     id: 'visualizer',
@@ -1619,6 +1619,7 @@ export default function App() {
   function handleBoardChange(data) {
     setBoard(data)
     setBoardError(null)
+    loadDevkitShellInfo()
   }
 
   function openBoardPanel() {

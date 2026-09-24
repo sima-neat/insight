@@ -15,6 +15,7 @@ import {
   deviceTabs,
   formatDuration,
   formatOptions,
+  formatRangeLabel,
   formatRelativeTime,
   fpsOptions,
   groupCameras,
@@ -399,6 +400,17 @@ test('blocked export formats collapse into one line', () => {
     blockedFormatSummary([{ value: 'A', disabled: true }, { value: 'B', disabled: true }, { value: 'C', disabled: false }]),
     '2 formats cannot be used (A, B)'
   )
+})
+
+test('stepwise and continuous format ranges keep their bounds and steps visible', () => {
+  assert.equal(
+    formatRangeLabel({ min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 8 }),
+    '16–1920×16–1080 in 16×8 steps'
+  )
+  const option = formatOptions({ formats: [format('YUYV', 'YUYV', false, support('unsupported', 'Discrete sizes are unavailable.'), [], {
+    min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 16
+  })] })[0]
+  assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
 test('the detail pane shows one explanation line, chosen by priority', () => {

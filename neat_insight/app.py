@@ -211,19 +211,32 @@ def _shell_target():
     except Exception:  # noqa: BLE001 - the shell must not depend on board resolution succeeding
         target = None
     if target is not None and target.mode == "ssh" and target.host:
-        return target.host, target.port or 22, target.user or DEFAULT_DEVKIT_SSH_USERNAME
+        # The bundled password is only a promise the SDK makes for its paired default DevKit.
+        # Manual targets and SDK targets with an overridden account use the service account's
+        # SSH key and may have unrelated passwords, so never send the DevKit credential to them.
+        ssh_user = target.user or DEFAULT_DEVKIT_SSH_USERNAME
+        return (
+            target.host,
+            target.port or 22,
+            ssh_user,
+            target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
+        )
     devkit_ip = get_devkit_sync_devkit_ip()
-    return (devkit_ip, 22, DEFAULT_DEVKIT_SSH_USERNAME) if devkit_ip else (None, 22, DEFAULT_DEVKIT_SSH_USERNAME)
+    return (
+        (devkit_ip, 22, DEFAULT_DEVKIT_SSH_USERNAME, True)
+        if devkit_ip
+        else (None, 22, DEFAULT_DEVKIT_SSH_USERNAME, False)
+    )
 
 
 def _build_devkit_shell_payload():
-    devkit_ip, ssh_port, ssh_user = _shell_target()
+    devkit_ip, ssh_port, ssh_user, credentials_prefilled = _shell_target()
     configured = bool(devkit_ip)
     webssh_port = get_webssh_port()
     webssh_host_port = _resolve_webssh_host_port()
     launch_url = None
 
-    if configured:
+    if configured and credentials_prefilled:
         password_b64 = base64.b64encode(DEFAULT_DEVKIT_SSH_PASSWORD.encode("utf-8")).decode("ascii")
         params = urllib.parse.urlencode(
             {
@@ -245,7 +258,8 @@ def _build_devkit_shell_payload():
         "webssh_port": webssh_port,
         "webssh_host_port": webssh_host_port,
         "default_username": DEFAULT_DEVKIT_SSH_USERNAME,
-        "credentials_prefilled": True,
+        "credentials_prefilled": credentials_prefilled,
+        "launch_supported": configured and credentials_prefilled,
         "launch_url": launch_url,
     }
 
@@ -2469,6 +2483,8 @@ def start_devkit_shell():
 
     if not payload["configured"]:
         return _json_error("DEVKIT_SYNC_DEVKIT_IP is not configured.", 404)
+    if not payload["launch_supported"]:
+        return _json_error("The browser shell is available only for the SDK-paired DevKit.", 409)
     if server_ssl_context is None:
         return _json_error("Insight TLS context is not initialized.", 500)
 

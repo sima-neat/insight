@@ -709,6 +709,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.refresh()
         body = self.export(id="mipi:" + hostile, width=1280, height=720).get_json()
         exports = {e["id"]: e["content"] for e in body["exports"]}
+        self.assertEqual(list(exports), ["python", "cpp", "json"])
         namespace = {}
         code = compile(exports["python"].replace("import pyneat", ""), "export", "exec")
         exec(code, {"pyneat": _FakePyneat()}, namespace)
@@ -716,8 +717,6 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertTrue(namespace["camera"].allow_cpu_fallback)
         self.assertIn("neat::nodes::CameraInput(camera)", exports["cpp"])
         self.assertNotIn("\n\\ 5", exports["cpp"])
-        self.assertEqual(parse_yaml_block(exports["yaml"])["name"], hostile)
-        self.assertFalse(parse_yaml_block(exports["yaml"])["strict_zero_copy"])
         self.assertEqual(body["support"]["tier"], "advertised")
         self.assertEqual(len(body["warnings"]), 2)
         self.assertTrue(any("strict zero-copy is unavailable" in w for w in body["warnings"]))

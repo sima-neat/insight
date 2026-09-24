@@ -690,6 +690,7 @@
         "responses": {
           "200": {"description": "Running service status and launch metadata.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/BadGateway"}
         }
@@ -777,7 +778,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the last scan without contacting the board. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, an Apps `config.yaml` `camera:` block, and JSON, always with an explicit `camera_name`. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "description": "Renders one mode from the last scan without contacting the board. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name`; an Apps `config.yaml` `camera:` block is included only when the board's `libcamerasrc` supports `buffer-count`. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
         "operationId": "exportCameraInput",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"id": "mipi:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
@@ -988,7 +989,7 @@
       "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The resource's current state does not permit the requested operation.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},

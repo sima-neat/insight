@@ -99,11 +99,11 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Peripherals
 
-Peripherals lists the cameras connected to a board and prepares the camera input configuration for your application. Discovery and export read device information only: they never capture frames, change sensor controls, or publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes.
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. Discovery reads device information only: it does not publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes. The camera export API also works from the cached scan without touching the board.
 
 ### Selected board
 
-Insight works with one selected board, shown in the header next to the DevKit shell button. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Stats and other board features use the same selection.
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
 
 The board is chosen in this order:
 
@@ -125,9 +125,9 @@ Select **Refresh** to scan the board. Insight finds MIPI cameras through libcame
 
 To read a MIPI camera's modes, Refresh briefly opens the camera through libcamera without streaming. Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
-### Export a configuration
+### Camera configuration API
 
-Choose a format, resolution, and frame rate, then copy or download the configuration as Python (`pyneat.CameraInputOptions`), C++, an Apps `config.yaml` `camera:` block, or JSON. Exports always name the camera explicitly. For USB cameras the export is a device descriptor, not a `CameraInput` configuration.
+The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
 
 Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
 
