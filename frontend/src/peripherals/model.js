@@ -74,7 +74,7 @@ export function connectionStateInfo(status) {
 
 export function boardIndicator(board) {
   if (!board) return { label: 'Board', state: { label: 'Loading…', short: 'Loading…', tone: '' }, title: 'Loading the selected board' }
-  const target = board.target || null
+  const target = board.target
   if (!target) {
     return {
       label: 'No board',
@@ -319,10 +319,7 @@ export function cameraSummaryLine(camera) {
 export function blockedFormatSummary(options) {
   const blocked = (options || []).filter((option) => option.disabled)
   if (!blocked.length) return ''
-  const names = blocked.map((option) => option.value).join(', ')
-  return blocked.length === 1
-    ? `1 format cannot be used (${names})`
-    : `${blocked.length} formats cannot be used (${names})`
+  return `${countLabel(blocked.length, 'format')} cannot be used (${blocked.map((option) => option.value).join(', ')})`
 }
 
 export function resolveSelection(camera, wanted) {
