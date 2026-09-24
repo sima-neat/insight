@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 import unittest
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
@@ -47,17 +49,21 @@ def camera_item(**overrides) -> dict:
 
 
 class FakeTransport:
-    """Records commands and answers the worker's start check with a pid."""
+    """Records commands, answers the worker's start check with a pid, and keeps a worker alive."""
 
-    def __init__(self, pid="4242"):
+    def __init__(self, pid="4242", worker_alive=True, ssh_client=b"192.168.2.1 51234 22\n"):
         self.calls = []
         self.pid = pid
+        self.worker_alive = worker_alive
+        self.ssh_client = ssh_client
 
     def exec(self, argv, *, timeout, stdin=None):
         self.calls.append((list(argv), stdin))
         script = argv[-1] if argv else ""
         if "echo $SSH_CLIENT" in script:
-            return ExecResult(0, b"192.168.2.1 51234 22\n", b"")
+            return ExecResult(0, self.ssh_client, b"")
+        if "echo alive" in script:
+            return ExecResult(0, b"alive\n" if self.worker_alive else b"", b"")
         if "pipeline.pid" in script and script.startswith("sleep"):
             return ExecResult(0, f"{self.pid}\n".encode(), b"")
         return ExecResult(0, b"", b"")
@@ -291,6 +297,119 @@ class PreviewApiTests(unittest.TestCase):
 
     def test_preview_responses_are_not_cached(self):
         self.assertEqual(self.client.get("/api/peripherals/preview").headers["Cache-Control"], "no-store")
+
+
+class PreviewOwnershipTests(unittest.TestCase):
+    """A preview belongs to the board that runs it, and to the id that started it."""
+
+    def setUp(self):
+        self.manager = preview.PreviewManager()
+        patches = [
+            mock.patch.object(preview, "active_channels", return_value=set()),
+            mock.patch.object(preview, "_channel_packets", return_value=0),
+            mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)),
+            mock.patch.object(preview.PreviewManager, "_await_video", lambda *args, **kwargs: None),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_a_preview_is_stopped_on_the_board_that_is_running_it(self):
+        board_a = fake_session(generation=1)
+        started = self.manager.start(board_a, camera_item(), dict(MODE), "insight.local")
+        board_b = fake_session(generation=2)
+        self.manager.start(board_b, camera_item(), dict(MODE), "insight.local")
+        killed_on_a = [cmd for cmd in board_a.transport.commands() if started["id"] in cmd and "kill" in cmd]
+        killed_on_b = [cmd for cmd in board_b.transport.commands() if started["id"] in cmd and "kill" in cmd]
+        self.assertTrue(killed_on_a, "the first board should have been told to stop its own preview")
+        self.assertFalse(killed_on_b, "the new board must not be asked to kill another board's session")
+
+    def test_a_stop_never_tears_down_the_session_that_replaced_it(self):
+        session = fake_session()
+        first = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+        self.manager._session = None  # the first session ended while the stop was in flight
+        self.manager._owner = None
+        second = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+        with self.assertRaises(BoardError):
+            self.manager.stop(session, first["id"])
+        self.assertEqual((self.manager.current(1) or {}).get("id"), second["id"])
+
+    def test_a_second_start_is_refused_while_the_first_is_still_starting(self):
+        session = fake_session()
+        gate = threading.Event()
+        errors = []
+
+        def slow_worker(*args, **kwargs):
+            gate.wait(5)
+
+        with mock.patch.object(preview.PreviewManager, "_start_worker", slow_worker):
+            first = threading.Thread(target=lambda: self.manager.start(session, camera_item(), dict(MODE), "h"))
+            first.start()
+            for _ in range(200):
+                if self.manager._starting:
+                    break
+                time.sleep(0.01)
+            try:
+                self.manager.start(session, camera_item(), dict(MODE), "h")
+            except BoardError as exc:
+                errors.append(exc)
+            gate.set()
+            first.join(10)
+        self.assertEqual([exc.code for exc in errors], ["preview_active"])
+
+
+class PreviewHeartbeatTests(unittest.TestCase):
+    def test_a_heartbeat_that_finds_no_worker_reports_the_preview_as_gone(self):
+        manager = preview.PreviewManager()
+        transport = FakeTransport()
+        session = fake_session(transport=transport)
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_channel_packets", return_value=0), \
+                mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)), \
+                mock.patch.object(preview.PreviewManager, "_await_video", lambda *a, **k: None):
+            started = manager.start(session, camera_item(), dict(MODE), "insight.local")
+        transport.worker_alive = False  # the board-side worker died or was cleaned up
+        with self.assertRaises(BoardError) as ctx:
+            manager.heartbeat(session, started["id"])
+        self.assertEqual(ctx.exception.status, 404)
+        self.assertIsNone(manager.current(1))
+
+
+class PreviewModeValidationTests(unittest.TestCase):
+    def test_an_unreported_frame_rate_is_refused_with_the_rates_that_exist(self):
+        with self.assertRaises(BoardError) as ctx:
+            preview._require_previewable(camera_item(), {**MODE, "fps": 120})
+        self.assertEqual(ctx.exception.code, "invalid_request")
+        self.assertIn("30", ctx.exception.hint)
+
+    def test_an_address_the_board_reports_is_not_trusted_blindly(self):
+        manager = preview.PreviewManager()
+        session = fake_session(transport=FakeTransport(ssh_client=b"$(reboot) 51234 22\n"))
+        with mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
+            with self.assertRaises(BoardError) as ctx:
+                manager._insight_endpoint(session, 3)
+        self.assertEqual(ctx.exception.code, "command_failed")
+
+
+class BusyCameraTests(unittest.TestCase):
+    """A camera another process holds reports no modes, and that must not mask the real reason."""
+
+    def test_a_busy_camera_names_its_holder_even_with_no_known_modes(self):
+        app = Flask("busy")
+        app.register_blueprint(peripherals_bp)
+        item = camera_item(
+            formats=[],
+            default_selection=None,
+            availability={"state": "in_use", "users": [{"pid": 25411, "command": "gst-launch-1.0"}],
+                          "reason": "Open in gst-launch-1.0 (pid 25411)."},
+        )
+        session = fake_session()
+        with mock.patch.object(api, "get_board_manager", return_value=SimpleNamespace(session=lambda: session)), \
+                mock.patch.object(api, "_camera_or_404", return_value=item):
+            response = app.test_client().post("/api/peripherals/cameras/preview", json={"id": CAMERA_ID})
+        body = response.get_json()
+        self.assertEqual((response.status_code, body["code"]), (409, "camera_in_use"))
+        self.assertIn("gst-launch-1.0 (pid 25411)", body["error"])
 
 
 class ActiveChannelTests(unittest.TestCase):

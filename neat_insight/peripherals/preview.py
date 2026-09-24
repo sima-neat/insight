@@ -7,7 +7,9 @@ The board-side worker owns cleanup: Insight refreshes a heartbeat file while a v
 and the worker kills the pipeline once that file goes stale, so the camera is released even if
 Insight restarts, the browser never fires unload, or the SSH connection dies.
 """
+import ipaddress
 import json
+import logging
 import os
 import shlex
 import ssl
@@ -60,6 +62,9 @@ while :; do
         break
     fi
 done
+# Keep the tail of the log outside the directory: a pipeline that fails in the first seconds is
+# gone before Insight can read it, and its last words are the only explanation of why.
+tail -c 800 "$dir/pipeline.log" > "{worker_dir}/$sid.log" 2>/dev/null || true
 rm -rf "$dir"
 """.format(worker_dir=WORKER_DIR)
 
@@ -70,6 +75,14 @@ def _now() -> datetime:
 
 def _iso(moment: datetime) -> str:
     return moment.isoformat(timespec="seconds")
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _unsupported(message: str, hint: str) -> BoardError:
@@ -118,11 +131,8 @@ def video_ui_port() -> int:
     return port if isinstance(port, int) else DEFAULT_VIDEO_UI_PORT
 
 
-def active_channels(port: int = DEFAULT_VIDEO_UI_PORT) -> Optional[set]:
-    """Channels vf currently receives RTP on, so a preview never lands on a live application stream.
-
-    None means vf did not answer: the caller must not read that as "every channel is free".
-    """
+def _ingest_stats(port: int = DEFAULT_VIDEO_UI_PORT) -> Optional[list]:
+    """vf's per-channel ingest counters, or None when vf does not answer."""
     # vf's own route, not Insight's /api proxy: vf answers unknown paths with the viewer page.
     url = f"https://127.0.0.1:{port}/ingest/stats?all=1"
     context = ssl.create_default_context()
@@ -131,10 +141,33 @@ def active_channels(port: int = DEFAULT_VIDEO_UI_PORT) -> Optional[set]:
     try:
         with urllib.request.urlopen(url, timeout=3, context=context) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        channels = payload["channels"]
-    except Exception:
+        return payload["channels"]
+    except Exception as exc:  # noqa: BLE001 - any failure means "unknown", never "all free"
+        logging.warning("vf ingest stats unavailable at %s: %s", url, exc)
+        return None
+
+
+def active_channels(port: int = DEFAULT_VIDEO_UI_PORT) -> Optional[set]:
+    """Channels vf currently receives RTP on, so a preview never lands on a live application stream.
+
+    None means vf did not answer: the caller must not read that as "every channel is free".
+    """
+    channels = _ingest_stats(port)
+    if channels is None:
         return None
     return {entry.get("channel") for entry in channels if entry.get("active")}
+
+
+def _channel_packets(channel: int) -> Optional[int]:
+    """RTP packets vf has counted on a channel, or None when it cannot be read."""
+    stats = _ingest_stats()
+    if stats is None:
+        return None
+    for entry in stats:
+        if entry.get("channel") == channel:
+            value = entry.get("packets_received")
+            return value if isinstance(value, int) else None
+    return None
 
 
 class PreviewManager:
@@ -143,6 +176,8 @@ class PreviewManager:
     def __init__(self):
         self._lock = threading.Lock()
         self._session: Optional[dict] = None
+        self._owner = None  # the board session that started the preview, so a stop reaches it
+        self._starting = False
 
     # ---- public API -------------------------------------------------------
 
@@ -159,7 +194,15 @@ class PreviewManager:
 
     def start(self, session_ctx, item: dict, mode: dict, request_host: str) -> dict:
         self.stop_stale()
+        # Starting takes seconds of board work. Claim the slot before doing any of it, or a second
+        # request slips through the gap and opens the same camera twice.
         with self._lock:
+            if self._starting:
+                raise BoardError(
+                    "preview_active",
+                    "A preview is already starting.",
+                    hint="Wait for it to appear, then stop it before starting another one.",
+                )
             if self._session is not None and self._session["generation"] == session_ctx.generation:
                 raise BoardError(
                     "preview_active",
@@ -167,9 +210,18 @@ class PreviewManager:
                     hint="Stop that preview before starting another one.",
                     camera_id=self._session["camera_id"],
                 )
+            self._starting = True
+        try:
+            return self._start_locked(session_ctx, item, mode, request_host)
+        finally:
+            with self._lock:
+                self._starting = False
+
+    def _start_locked(self, session_ctx, item: dict, mode: dict, request_host: str) -> dict:
         self._stop_current(session_ctx)
         _require_previewable(item, mode)
         channel = self._reserve_channel(session_ctx)
+        baseline = _channel_packets(channel)
         target_host, target_port = self._insight_endpoint(session_ctx, channel)
         session_id = uuid.uuid4().hex
         pipeline = _pipeline(item, mode, target_host, target_port)
@@ -188,16 +240,22 @@ class PreviewManager:
         }
         with self._lock:
             self._session = session
-        self._await_video(session_ctx, session)
+            self._owner = session_ctx
+        self._await_video(session_ctx, session, baseline)
         return dict(session)
 
-    def _await_video(self, session_ctx, session: dict) -> None:
+    def _await_video(self, session_ctx, session: dict, baseline: Optional[int] = None) -> None:
         deadline = time.monotonic() + VIDEO_ARRIVAL_TIMEOUT_SEC
+        channel = session["channel"]
         while time.monotonic() < deadline:
-            if session["channel"] in (active_channels() or ()):
-                return
+            if channel in (active_channels() or ()):
+                packets = _channel_packets(channel)
+                # "Active" alone could be someone else's stream that started on this channel in the
+                # meantime; a rising packet count on a channel that was idle is our own video.
+                if baseline is None or packets is None or packets > baseline:
+                    return
             time.sleep(1.0)
-        self._stop_current(session_ctx)
+        self._stop_current(session_ctx, session["id"])
         raise BoardError(
             "no_video",
             "The board started capturing, but no video reached Insight.",
@@ -212,7 +270,17 @@ class PreviewManager:
             if session is None or session["id"] != session_id:
                 raise _unknown_session()
             session = dict(session)
-        session_ctx.transport.exec(["touch", f"{WORKER_DIR}/{session_id}/heartbeat"], timeout=10)
+        directory = f"{WORKER_DIR}/{session_id}"
+        # The heartbeat must prove the worker is still there. Reporting a live preview because a
+        # touch on a deleted directory did not raise would leave the UI showing a dead stream.
+        beat = f"[ -d {directory} ] && touch {directory}/heartbeat && echo alive || true"
+        result = session_ctx.transport.exec(["sh", "-c", beat], timeout=10)
+        if b"alive" not in result.stdout:
+            with self._lock:
+                if self._session is not None and self._session["id"] == session_id:
+                    self._session = None
+                    self._owner = None
+            raise _unknown_session()
         session["expires_at"] = _iso(_now() + timedelta(seconds=SESSION_TTL_SEC))
         with self._lock:
             if self._session is not None and self._session["id"] == session_id:
@@ -224,7 +292,7 @@ class PreviewManager:
             session = self._session
             if session is None or session["id"] != session_id:
                 raise _unknown_session()
-        self._stop_current(session_ctx)
+        self._stop_current(session_ctx, session_id)
         session = dict(session)
         session["state"] = "stopped"
         return session
@@ -240,22 +308,39 @@ class PreviewManager:
             if session and _now() > datetime.fromisoformat(session["expires_at"]):
                 # The board worker frees the camera on its own; drop the reservation here.
                 self._session = None
+                self._owner = None
 
     # ---- internals --------------------------------------------------------
 
-    def _stop_current(self, session_ctx) -> None:
+    def _stop_current(self, session_ctx, session_id: Optional[str] = None) -> None:
+        """Stop the running preview, on the board that is actually running it.
+
+        `session_id` makes the stop specific: a caller that asked to stop one session must never
+        tear down a newer one that replaced it while the request was in flight.
+        """
         with self._lock:
             session = self._session
+            if session is None:
+                return
+            if session_id is not None and session["id"] != session_id:
+                return
+            # The session belongs to the board it was started on. After a board switch the caller's
+            # transport points somewhere else, and killing there would leave the real camera busy.
+            owner = self._owner or session_ctx
             self._session = None
-        if session is None:
-            return
+            self._owner = None
         directory = f"{WORKER_DIR}/{session['id']}"
-        script = f"pid=$(cat {directory}/pipeline.pid 2>/dev/null); [ -n \"$pid\" ] && kill $pid 2>/dev/null; rm -rf {directory}"
+        script = (
+            f"pid=$(cat {directory}/pipeline.pid 2>/dev/null); "
+            f'if [ -n "$pid" ]; then kill $pid 2>/dev/null; sleep 1; kill -9 $pid 2>/dev/null; fi; '
+            f"rm -rf {directory} {WORKER_DIR}/{session['id']}.log"
+        )
         try:
-            session_ctx.transport.exec(["sh", "-c", script], timeout=15)
+            owner.transport.exec(["sh", "-c", script], timeout=20)
         except BoardError:
             # The worker's heartbeat timeout still releases the camera.
-            pass
+            logging.warning("Preview %s could not be stopped on its board; its heartbeat will expire",
+                            session["id"])
 
     def _reserve_channel(self, session_ctx) -> int:
         if session_ctx.target.mode == "local":
@@ -294,6 +379,13 @@ class PreviewManager:
         result = session_ctx.transport.exec(["sh", "-c", "echo $SSH_CLIENT"], timeout=10)
         # The board tells us the address it reaches Insight on, which survives NAT and port mapping.
         client = result.stdout.decode("utf-8", errors="replace").split()
+        if client and not _is_ip(client[0]):
+            # $SSH_CLIENT is board-controlled input that ends up in the pipeline's udpsink host.
+            raise BoardError(
+                "command_failed",
+                f"The board reported an address Insight cannot use: {client[0][:60]}",
+                hint="Preview needs the board to send video back to Insight; check the SSH connection.",
+            )
         if not client:
             raise BoardError(
                 "command_failed",
@@ -309,7 +401,11 @@ class PreviewManager:
         session_ctx.transport.exec(["sh", "-c", setup], timeout=15, stdin=WORKER_SCRIPT.encode())
         launch = f"setsid nohup {script} {session_id} {int(SESSION_TTL_SEC)} {' '.join(shlex.quote(part) for part in pipeline)} > {directory}/worker.log 2>&1 < /dev/null &"
         session_ctx.transport.exec(["sh", "-c", launch], timeout=START_TIMEOUT_SEC)
-        check = f"sleep 3; cat {directory}/pipeline.pid 2>/dev/null; tail -c 800 {directory}/pipeline.log 2>/dev/null"
+        # A pipeline that dies at once takes its directory with it, so fall back to the tail the
+        # worker saved beside it; without that the failure would be reported with no reason at all.
+        check = (f"sleep 3; cat {directory}/pipeline.pid 2>/dev/null; "
+                 f"tail -c 800 {directory}/pipeline.log 2>/dev/null || "
+                 f"tail -c 800 {WORKER_DIR}/{session_id}.log 2>/dev/null")
         result = session_ctx.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC)
         output = result.stdout.decode("utf-8", errors="replace")
         if not output.strip().split("\n")[0].strip().isdigit():
@@ -336,12 +432,12 @@ def _unknown_session() -> BoardError:
     )
 
 
-def _require_previewable(item: dict, mode: dict) -> None:
-    if item["connection"] != "mipi":
-        raise _unsupported(
-            "Preview is available for MIPI cameras only in this release.",
-            "USB cameras are discovered and can be exported, but preview is not implemented for them yet.",
-        )
+def require_camera_free(item: dict) -> None:
+    """Refuse a busy camera by name.
+
+    This runs before Insight picks a mode: a busy camera reports no modes, and "no mode I can
+    preview" would hide the real reason, which is that something else is holding the sensor.
+    """
     if item["availability"]["state"] == "in_use":
         holders = item["availability"].get("reason") or "another process is using it"
         raise BoardError(
@@ -349,6 +445,15 @@ def _require_previewable(item: dict, mode: dict) -> None:
             f"{item['name']} is already in use: {holders}",
             hint="Stop the application using the camera, then start the preview.",
         )
+
+
+def _require_previewable(item: dict, mode: dict) -> None:
+    if item["connection"] != "mipi":
+        raise _unsupported(
+            "Preview is available for MIPI cameras only in this release.",
+            "USB cameras are discovered and can be exported, but preview is not implemented for them yet.",
+        )
+    require_camera_free(item)
     fmt = next((entry for entry in item["formats"] if entry["format"] == mode["format"]), None)
     if fmt is None or not fmt["exportable"]:
         raise _unsupported(
@@ -363,6 +468,14 @@ def _require_previewable(item: dict, mode: dict) -> None:
         raise _unsupported(
             f"{mode['width']}x{mode['height']} is not a size this camera reported.",
             "Pick a resolution from the list; other sizes fail to configure (see core#883).",
+        )
+    rates = [entry["value"] for entry in size.get("fps") or [] if isinstance(entry.get("value"), (int, float))]
+    if rates and mode["fps"] not in rates:
+        # An unreported rate is refused here rather than by a caps negotiation failure on the board.
+        listed = ", ".join(str(rate) for rate in sorted(rates))
+        raise _unsupported(
+            f"{mode['fps']} fps is not a rate this camera reported for {mode['width']}x{mode['height']}.",
+            f"Pick one of: {listed}.",
         )
 
 

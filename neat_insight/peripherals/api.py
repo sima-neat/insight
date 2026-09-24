@@ -7,7 +7,7 @@ from flask import Blueprint, request
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.peripherals import export
 from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
-from neat_insight.peripherals.preview import PreviewManager
+from neat_insight.peripherals.preview import PreviewManager, require_camera_free
 from neat_insight.peripherals.probe import BUDGET_SEC, SCHEMA
 
 peripherals_bp = Blueprint("peripherals", __name__)
@@ -161,6 +161,7 @@ def start_preview():
     try:
         session = get_board_manager().session()
         item = _camera_or_404(session, str(body.get("id") or ""))
+        require_camera_free(item)
         mode = item.get("default_selection")
         if any(key in body for key in ("format", "width", "height", "fps")):
             mode = export.parse_request({"id": item["id"], **{k: body.get(k) for k in ("format", "width", "height", "fps")}})
