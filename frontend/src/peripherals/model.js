@@ -13,13 +13,14 @@ const CONNECTIONS = [
 
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
 
-// Device kinds Insight knows a name for. Only "camera" has a view; the rest are
-// listed so the shape of the page does not change when the backend starts
-// reporting them (contract: build nothing for other kinds yet).
+// Device kinds Insight knows a name and an icon for. Only "camera" has a view;
+// the rest are listed so the shape of the page does not change when the backend
+// starts reporting them (contract: build nothing for other kinds yet). A kind
+// the backend invents gets the generic "device" icon.
 const DEVICE_KINDS = [
-  { id: 'camera', label: 'Cameras' },
-  { id: 'microphone', label: 'Microphones' },
-  { id: 'lidar', label: 'LiDAR' }
+  { id: 'camera', label: 'Cameras', icon: 'camera' },
+  { id: 'microphone', label: 'Microphones', icon: 'microphone' },
+  { id: 'lidar', label: 'LiDAR', icon: 'lidar' }
 ]
 
 const SUPPORTED_KINDS = new Set(['camera'])
@@ -120,7 +121,17 @@ function kindLabel(kind) {
   return text.charAt(0).toUpperCase() + text.slice(1) + (text.endsWith('s') ? '' : 's')
 }
 
-export function deviceTabs(items) {
+function kindCountBadge(count) {
+  if (!count) return ''
+  return count > 99 ? '99+' : String(count)
+}
+
+// One entry per device kind for the icon rail. A kind is selectable only when
+// Insight has a view for it AND the last scan found at least one; everything
+// else is greyed, and `note` says why (it becomes the tooltip and the
+// accessible description, so a greyed icon never leaves the user guessing).
+// `scanned: false` means there is no scan yet, so no count is claimed.
+export function deviceTabs(items, { scanned = true } = {}) {
   const counts = new Map()
   for (const item of items || []) {
     if (!item?.kind) continue
@@ -130,28 +141,43 @@ export function deviceTabs(items) {
   const extra = [...counts.keys()]
     .filter((kind) => !DEVICE_KINDS.some((known_) => known_.id === kind))
     .sort()
-    .map((kind) => ({ id: kind, label: kindLabel(kind), count: counts.get(kind) }))
+    .map((kind) => ({ id: kind, label: kindLabel(kind), icon: 'device', count: counts.get(kind) }))
   return [...known, ...extra].map((kind) => {
     const supported = SUPPORTED_KINDS.has(kind.id)
+    const noun = kind.label.toLowerCase()
+    let note = ''
+    if (!supported) {
+      note = kind.count
+        ? `${countLabel(kind.count, 'device')} detected; Insight cannot show ${noun} yet.`
+        : 'Not supported yet'
+    } else if (!scanned) {
+      note = 'Not scanned yet'
+    } else if (!kind.count) {
+      note = `No ${noun} detected`
+    }
+    const name = scanned || kind.count ? `${kind.label}, ${countLabel(kind.count, 'device')}` : kind.label
     return {
       id: kind.id,
       label: kind.label,
+      icon: kind.icon,
       count: kind.count,
       supported,
-      disabled: !supported,
-      note: supported
-        ? ''
-        : kind.count
-          ? `${countLabel(kind.count, 'device')} detected; Insight cannot show ${kind.label.toLowerCase()} yet.`
-          : 'Not supported yet'
+      disabled: Boolean(note),
+      note,
+      badge: kindCountBadge(kind.count),
+      name,
+      tooltip: note ? `${kind.label} — ${note}` : name
     }
   })
 }
 
 export function resolveDeviceKind(tabs, wanted) {
-  const usable = (tabs || []).filter((tab) => !tab.disabled)
+  const list = tabs || []
+  const usable = list.filter((tab) => !tab.disabled)
   if (wanted && usable.some((tab) => tab.id === wanted)) return wanted
-  return usable[0]?.id || null
+  // With nothing selectable (no scan yet, or no camera attached) the panel still
+  // shows the first kind Insight has a view for: that view explains what to do next.
+  return usable[0]?.id || list.find((tab) => tab.supported)?.id || null
 }
 
 export function cameraDeviceId(camera) {

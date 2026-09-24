@@ -3569,7 +3569,9 @@ button:disabled {
 .periph-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.6fr);
+  /* The camera list takes only what its rows need (capped at 280px, long names wrap);
+     the detail column gets the rest. */
+  grid-template-columns: fit-content(280px) minmax(0, 1fr);
   align-items: start;
   gap: 12px;
 }
@@ -3577,7 +3579,11 @@ button:disabled {
 .periph-list,
 .periph-group {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+}
+
+.periph-list {
+  min-width: 200px;
 }
 
 .periph-group-title,
@@ -3594,9 +3600,9 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 8px 8px;
+  padding: 6px 8px;
   display: grid;
-  gap: 4px;
+  gap: 2px;
   cursor: pointer;
   transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
 }
@@ -3627,6 +3633,11 @@ button:disabled {
 .periph-camera-id {
   font-size: 11px;
   color: var(--ink-soft);
+}
+
+.periph-camera-row .periph-pills {
+  gap: 4px;
+  margin-top: 2px;
 }
 
 .periph-detail {
@@ -3756,41 +3767,56 @@ button:disabled {
   background: transparent;
 }
 
-/* Peripherals: device sub-tabs */
+/* Peripherals: device-kind icon rail. 56px wide: 46px buttons + 4px padding + 1px border. */
 .periph-kind-layout {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
   align-items: start;
   gap: 12px;
 }
 
 .periph-kinds {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-}
-
-.periph-kind {
-  display: grid;
-  gap: 2px;
-  justify-items: start;
-  text-align: left;
-  width: 100%;
+  box-sizing: border-box;
+  width: 56px;
+  padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 8px 8px;
+}
+
+.periph-kind {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
   cursor: pointer;
-  transition: border-color 160ms ease, background-color 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
 }
 
 .periph-kind:hover:not([aria-disabled='true']) {
   border-color: var(--line-strong);
+  background: #fff;
+}
+
+/* No lift on hover (the global button rule): a transform would also re-anchor the phone-width tip. */
+.periph-kinds .periph-kind:hover {
+  transform: none;
 }
 
 .periph-kind.active {
   border-color: rgba(15, 122, 116, 0.55);
   background: #f1fbfa;
+  color: var(--accent-alt);
 }
 
 .periph-kind:focus-visible {
@@ -3799,25 +3825,75 @@ button:disabled {
   border-color: var(--accent);
 }
 
+/* Greyed: not supported, or nothing detected. #7a8a99 keeps 3.39:1 on the rail and 3.55:1 on white. */
 .periph-kind[aria-disabled='true'] {
   cursor: not-allowed;
+  color: #7a8a99;
+}
+
+.periph-kind.active[aria-disabled='true'] {
+  border-color: var(--line-strong);
   background: #fff;
-  color: var(--ink-soft);
 }
 
-.periph-kind-label {
-  font-size: 13px;
-  font-weight: 700;
+.periph-kind-icon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
 }
 
-.periph-kind[aria-disabled='true'] .periph-kind-label {
-  font-weight: 600;
+.periph-kind-svg {
+  display: block;
 }
 
-.periph-kind-count,
-.periph-kind-note {
+/* White on --accent-alt is 5.18:1; the greyed bubble (--ink-soft on #e8edf2) is 5.49:1. */
+.periph-kind-badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--surface-soft);
+  border-radius: 999px;
+  background: var(--accent-alt);
+  color: #fff;
   font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.periph-kind[aria-disabled='true'] .periph-kind-badge {
+  background: #e8edf2;
   color: var(--ink-soft);
+}
+
+.periph-kind-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: none;
+}
+
+.periph-kind:hover .periph-kind-tip,
+.periph-kind:focus-visible .periph-kind-tip {
+  display: block;
 }
 
 .periph-kind-panel {
@@ -3861,14 +3937,30 @@ button:disabled {
   margin-top: 4px;
 }
 
-@media (max-width: 980px) {
+/* Phones: the rail becomes a row of icons above the panel (RAIL_ROW_QUERY in PeripheralsView.jsx).
+   The tip anchors to the whole row, so it spans the row's width and never runs off-screen. */
+@media (max-width: 640px) {
   .periph-kind-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .periph-kinds {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(140px, 1fr);
-    overflow-x: auto;
+    position: relative;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+  }
+
+  .periph-kind {
+    position: static;
+  }
+
+  .periph-kind-tip {
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    transform: none;
+    width: auto;
+    max-width: none;
   }
 }

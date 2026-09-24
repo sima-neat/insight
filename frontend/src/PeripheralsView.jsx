@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CameraDetail, { cameraSubtitle } from './peripherals/CameraDetail.jsx'
+import KindIcon from './peripherals/KindIcon.jsx'
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
@@ -41,11 +42,29 @@ function IssueList({ issues }) {
   )
 }
 
+// Must match the breakpoint in styles.css where the rail turns into a row.
+const RAIL_ROW_QUERY = '(max-width: 640px)'
+
+function useMediaQuery(query) {
+  const get = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.(query).matches)
+  const [matches, setMatches] = useState(get)
+  useEffect(() => {
+    const list = typeof window !== 'undefined' ? window.matchMedia?.(query) : null
+    if (!list) return undefined
+    const update = () => setMatches(list.matches)
+    update()
+    list.addEventListener?.('change', update)
+    return () => list.removeEventListener?.('change', update)
+  }, [query])
+  return matches
+}
+
 function DeviceKindNav({ tabs, activeId, onSelect }) {
   const refs = useRef(new Map())
-  // Unbuilt kinds stay focusable (aria-disabled, not disabled) so a keyboard or
+  // Greyed kinds stay focusable (aria-disabled, not disabled) so a keyboard or
   // screen-reader user can read why they are not selectable.
   const [focused, setFocused] = useState(null)
+  const horizontal = useMediaQuery(RAIL_ROW_QUERY)
   const order = tabs.map((tab) => tab.id)
   const focusId = order.includes(focused) ? focused : order.includes(activeId) ? activeId : order[0]
 
@@ -58,14 +77,27 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
 
   function onKeyDown(event) {
     const index = order.indexOf(focusId)
-    const next = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: order.length - 1 }[event.key]
+    const next = {
+      ArrowDown: index + 1,
+      ArrowRight: index + 1,
+      ArrowUp: index - 1,
+      ArrowLeft: index - 1,
+      Home: 0,
+      End: order.length - 1
+    }[event.key]
     if (next === undefined || !order.length) return
     event.preventDefault()
     move(order[Math.max(0, Math.min(order.length - 1, next))])
   }
 
   return (
-    <div className="periph-kinds" role="tablist" aria-orientation="vertical" aria-label="Device kinds" onKeyDown={onKeyDown}>
+    <div
+      className="periph-kinds"
+      role="tablist"
+      aria-orientation={horizontal ? 'horizontal' : 'vertical'}
+      aria-label="Device kinds"
+      onKeyDown={onKeyDown}
+    >
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -76,16 +108,20 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
           ref={(node) => (node ? refs.current.set(tab.id, node) : refs.current.delete(tab.id))}
           aria-selected={tab.id === activeId}
           aria-disabled={tab.disabled ? 'true' : undefined}
+          aria-label={tab.name}
+          aria-describedby={tab.note ? `periph-kind-note-${tab.id}` : undefined}
           tabIndex={tab.id === focusId ? 0 : -1}
           className={tab.id === activeId ? 'periph-kind active' : 'periph-kind'}
           onClick={() => move(tab.id)}
         >
-          <span className="periph-kind-label">{tab.label}</span>
-          {tab.disabled ? (
-            <span className="periph-kind-note">{tab.note}</span>
-          ) : (
-            <span className="periph-kind-count">{countLabel(tab.count, 'device')}</span>
-          )}
+          <span className="periph-kind-icon">
+            <KindIcon icon={tab.icon} />
+            {tab.badge && <span className="periph-kind-badge" aria-hidden="true">{tab.badge}</span>}
+          </span>
+          {/* The tip is for sighted users (hover and keyboard focus); assistive tech gets the
+              same words from aria-label and the description below. */}
+          <span className="periph-kind-tip" aria-hidden="true">{tab.tooltip}</span>
+          {tab.note && <span id={`periph-kind-note-${tab.id}`} className="sr-only">{tab.note}</span>}
         </button>
       ))}
     </div>
@@ -163,7 +199,7 @@ export default function PeripheralsView({
   const autoRefreshed = useRef(false)
   const mounted = useRef(false)
 
-  const tabs = useMemo(() => deviceTabs(snapshot?.items), [snapshot])
+  const tabs = useMemo(() => deviceTabs(snapshot?.items, { scanned: Boolean(snapshot?.scanned_at) }), [snapshot])
   const activeKind = resolveDeviceKind(tabs, kind)
   const groups = useMemo(() => groupCameras(snapshot?.items), [snapshot])
   const activeId = resolveCameraId(snapshot, selectedId)

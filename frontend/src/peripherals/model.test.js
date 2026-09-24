@@ -382,7 +382,37 @@ test('a kind the backend invents appears automatically, after the known ones', (
   assert.equal(radar.label, 'Radars')
   assert.equal(radar.count, 2)
   assert.equal(radar.disabled, true)
-  assert.deepEqual(deviceTabs([]).map((t) => t.disabled), [false, true, true])
+  assert.equal(radar.icon, 'device', 'an unknown kind gets the generic icon')
+  assert.deepEqual(deviceTabs([]).map((t) => t.disabled), [true, true, true], 'no cameras detected greys cameras too')
+})
+
+test('each rail icon carries a count bubble, an accessible name and the reason it is greyed', () => {
+  const tabs = deviceTabs(snapshot.items)
+  assert.deepEqual(tabs.map((t) => t.icon), ['camera', 'microphone', 'lidar'])
+  assert.deepEqual(tabs.map((t) => t.badge), ['4', '1', ''], 'no bubble for a kind with nothing detected')
+  assert.deepEqual(tabs.map((t) => t.name), ['Cameras, 4 devices', 'Microphones, 1 device', 'LiDAR, 0 devices'])
+  assert.equal(tabs[0].note, '', 'a selectable kind needs no explanation')
+  assert.equal(tabs[0].tooltip, 'Cameras, 4 devices')
+  assert.equal(tabs[1].tooltip, 'Microphones — 1 device detected; Insight cannot show microphones yet.')
+  assert.equal(tabs[2].tooltip, 'LiDAR — Not supported yet')
+  const one = deviceTabs([{ kind: 'camera' }])[0]
+  assert.equal(one.name, 'Cameras, 1 device')
+  assert.equal(one.disabled, false)
+  assert.equal(deviceTabs(Array.from({ length: 120 }, () => ({ kind: 'camera' })))[0].badge, '99+')
+})
+
+test('a supported kind with nothing detected is greyed but says why', () => {
+  const [cameras] = deviceTabs([{ kind: 'microphone' }])
+  assert.equal(cameras.supported, true)
+  assert.equal(cameras.disabled, true)
+  assert.equal(cameras.note, 'No cameras detected')
+  assert.equal(cameras.name, 'Cameras, 0 devices')
+  assert.equal(cameras.tooltip, 'Cameras — No cameras detected')
+  const [unscanned, , lidar] = deviceTabs(undefined, { scanned: false })
+  assert.equal(unscanned.note, 'Not scanned yet', 'before a scan nothing is claimed about the count')
+  assert.equal(unscanned.name, 'Cameras')
+  assert.equal(unscanned.badge, '')
+  assert.equal(lidar.note, 'Not supported yet', 'unsupported wins over not scanned')
 })
 
 test('only an enabled sub-tab can be selected', () => {
@@ -391,6 +421,12 @@ test('only an enabled sub-tab can be selected', () => {
   assert.equal(resolveDeviceKind(tabs, 'microphone'), 'camera', 'disabled kinds fall back')
   assert.equal(resolveDeviceKind(tabs, 'nonsense'), 'camera')
   assert.equal(resolveDeviceKind([], 'camera'), null)
+})
+
+test('with nothing selectable the panel keeps showing the camera view', () => {
+  assert.equal(resolveDeviceKind(deviceTabs([]), 'camera'), 'camera', 'no cameras: the camera view explains it')
+  assert.equal(resolveDeviceKind(deviceTabs([], { scanned: false }), 'lidar'), 'camera')
+  assert.equal(resolveDeviceKind(deviceTabs([{ kind: 'radar' }]), 'radar'), 'camera', 'unsupported kinds never become the view')
 })
 
 test('blocked export formats collapse into one line', () => {
