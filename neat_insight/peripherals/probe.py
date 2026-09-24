@@ -87,7 +87,7 @@ def run(argv, timeout=COMMAND_TIMEOUT):
 
 
 def _tail(text, lines=3):
-    return "\n".join(line for line in text.strip().splitlines()[-lines:])
+    return "\n".join(text.strip().splitlines()[-lines:])
 
 
 def _read(path):
@@ -386,9 +386,12 @@ def discover_media(tools, failures):
     return devices
 
 
+def _reason(code, err):
+    return "out_of_time" if err == OUT_OF_TIME else "timeout" if code is None else "failed"
+
+
 def _failure(tool, code, err):
-    reason = "out_of_time" if err == OUT_OF_TIME else "timeout" if code is None else "failed"
-    return {"tool": tool, "reason": reason, "detail": _tail(err)}
+    return {"tool": tool, "reason": _reason(code, err), "detail": _tail(err)}
 
 
 def list_libcamera(tools, failures):
@@ -490,7 +493,7 @@ def _read_modes(tools, camera):
     code, out, err = run([tools["cam"], "-c", camera["id"], "-I"], SLOW_COMMAND_TIMEOUT)
     text = err + "\n" + out
     if code is None:
-        camera["acquire"] = "out_of_time" if err == OUT_OF_TIME else "timeout"
+        camera["acquire"] = _reason(code, err)
     elif acquire_failed(text):
         camera["acquire"] = "busy"
     elif code != 0:
@@ -592,8 +595,7 @@ def read_isp_sizes(tools):
         node = "/dev/" + name
         code, out, err = run([tools["v4l2-ctl"], "-d", node, "--info", "--list-formats-ext"])
         if code != 0:
-            reason = "out_of_time" if err == OUT_OF_TIME else "timeout" if code is None else "failed"
-            result.update(reason=reason, node=node, detail=_tail(err or out))
+            result.update(reason=_reason(code, err), node=node, detail=_tail(err or out))
             return result
         if ISP_OUTPUT_CARD not in _V4L2_CARD_RE.findall(out):
             continue
