@@ -40,6 +40,7 @@ import {
   staleFlags,
   staleNote,
   statusInfo,
+  statusOf,
   thresholdText,
   toggleSelection,
   traceModel,
@@ -49,6 +50,8 @@ import {
 // The comparison Sentinel main:80ab7de4da31 returned on a Modalix DevKit, trimmed to six
 // metrics; every value kept is exactly as the daemon sent it.
 const COMPARE = JSON.parse(readFileSync(new URL('./fixtures/compare-shape.json', import.meta.url), 'utf8'))
+// The same run read back from /api/sentinel/runs/<name>, trimmed to those six metrics.
+const RUN = JSON.parse(readFileSync(new URL('./fixtures/run-detail-shape.json', import.meta.url), 'utf8'))
 
 const daemon = (extra = {}) => ({
   installed: true,
@@ -382,30 +385,80 @@ test('a comparison shape Insight does not know is reported, not guessed at', () 
   assert.equal(compareTable(null), null)
 })
 
-test('a run is read from the metadata, metrics and samples the daemon sends', () => {
-  const run = runDetail({
-    generation: 4,
+test('the captured run is read from its own metadata, definitions and samples', () => {
+  const run = runDetail({ generation: 4, sentinel: RUN })
+  assert.equal(run.sampleCount, 4)
+  assert.equal(run.metricCount, 6)
+  assert.equal(run.firstSampleAt, '2026-09-23T15:27:13.270295197Z')
+  assert.equal(run.lastSampleAt, '2026-09-23T15:27:19.270569777Z')
+  assert.equal(run.metadata.id, '20260923T152712.952Z-insight-hw-1790177227')
+  assert.deepEqual(run.undefinedKeys, [])
+  assert.deepEqual(run.extras, [])
+
+  // Every metadata field the daemon sent, including the nested system block.
+  const facts = Object.fromEntries(run.facts)
+  assert.equal(facts.Name, 'insight-hw-1790177227')
+  assert.equal(facts['Sample interval ms'], '1989')
+  assert.equal(facts['Sentinel version'], 'main:80ab7de4da31')
+  assert.equal(facts['System hostname'], 'modalix')
+
+  // Labels, units and groups come from the definitions the run itself carries.
+  assert.deepEqual(run.metrics.map((metric) => metric.group), ['CPU', 'CPU', 'Disk', 'Memory', 'Power', 'TOP'])
+  const power = run.metrics.find((metric) => metric.key === 'power_current_watts')
+  assert.equal(power.label, 'Current board power')
+  assert.equal(power.unit, 'W')
+  assert.equal(formatValue(power.maximum, power.unit), '8.88 W')
+  assert.equal(power.count, 4)
+  const cpu = run.metrics.find((metric) => metric.key === 'cpu_core_0_usage_pct')
+  assert.deepEqual([cpu.warn, cpu.critical], [80, 95])
+  assert.equal(cpu.status, 'ok')
+  assert.equal(run.crossed, 0)
+})
+
+test('a run is summarised with the same numbers the daemon computes for it', () => {
+  // The captured run is the comparison's baseline, so Sentinel's own summary of it is
+  // known: the statistics computed here from its samples must be exactly those.
+  const run = runDetail({ sentinel: RUN })
+  assert.equal(run.metadata.id, COMPARE.baseline_id)
+  const daemon = COMPARE.summaries[COMPARE.baseline_id].metrics
+  for (const metric of run.metrics) {
+    assert.equal(metric.mean, daemon[metric.key].mean, `${metric.key} mean`)
+    assert.equal(metric.minimum, daemon[metric.key].minimum, `${metric.key} minimum`)
+    assert.equal(metric.maximum, daemon[metric.key].maximum, `${metric.key} maximum`)
+    assert.equal(metric.count, daemon[metric.key].count, `${metric.key} count`)
+  }
+})
+
+test('a run ranks its metrics against the thresholds it recorded, not today\'s', () => {
+  assert.equal(statusOf(90, 80, 95), 'warn')
+  assert.equal(statusOf(95, 80, 95), 'critical')
+  assert.equal(statusOf(12, 80, 95), 'ok')
+  assert.equal(statusOf(null, 80, 95), 'unavailable')
+  assert.equal(statusOf(1e6, null, null), 'ok')
+
+  // Thresholds and values here are not from the board; they exercise the ranking.
+  const hot = runDetail({
     sentinel: {
-      metadata: { id: 'r1', name: 'baseline', note: 'before', sample_interval_ms: 1989 },
-      metrics: [{ key: 'power_current_watts', label: 'Current board power', unit: 'W' }, { key: 'rtsn_6' }],
+      metadata: { id: 'r1' },
+      metrics: [
+        { key: 'rtsn_6', label: 'TOP RTSN-6', group: 'TOP', unit: 'C', warn: 70, critical: 85 },
+        { key: 'ghost', label: 'Never measured', group: 'TOP', unit: 'C', warn: 70, critical: 85 }
+      ],
       samples: [
-        { timestamp: '2026-09-23T15:27:14Z', values: { power_current_watts: 8.5 } },
-        { timestamp: '2026-09-23T15:27:16Z', values: { power_current_watts: 8.9 } }
+        { timestamp: '2026-09-23T15:27:14Z', values: { rtsn_6: 40, ghost: null } },
+        { timestamp: '2026-09-23T15:27:16Z', values: { rtsn_6: 88, ghost: null } }
       ]
     }
   })
-  assert.equal(run.metricCount, 2)
-  assert.equal(run.sampleCount, 2)
-  assert.equal(run.firstSampleAt, '2026-09-23T15:27:14Z')
-  assert.equal(run.lastSampleAt, '2026-09-23T15:27:16Z')
-  assert.deepEqual(run.facts, [
-    ['Id', 'r1'],
-    ['Name', 'baseline'],
-    ['Note', 'before'],
-    ['Sample interval ms', '1989']
-  ])
-  assert.deepEqual(run.definitions.map((metric) => metric.key), ['power_current_watts', 'rtsn_6'])
-  assert.deepEqual(run.extras, [])
+  const [ghost, rtsn] = hot.metrics
+  assert.equal(rtsn.status, 'critical')
+  assert.equal(rtsn.maximum, 88)
+  assert.equal(rtsn.mean, 64)
+  // A metric the run defined but never measured stays empty, never zero.
+  assert.equal(ghost.status, 'unavailable')
+  assert.deepEqual([ghost.count, ghost.mean, ghost.maximum], [0, null, null])
+  assert.equal(formatValue(ghost.mean, ghost.unit), '—')
+  assert.equal(hot.crossed, 1)
 })
 
 test('a run body without the three documented keys falls back instead of guessing', () => {
@@ -416,9 +469,14 @@ test('a run body without the three documented keys falls back instead of guessin
   const odd = runDetail({ sentinel: { metadata: null, metrics: { power_current_watts: { unit: 'W' } }, retention: 'kept' } })
   assert.equal(odd.metricCount, 1)
   assert.equal(odd.sampleCount, 0)
-  assert.deepEqual(odd.definitions, [])
+  assert.deepEqual(odd.metrics, [])
   assert.deepEqual(odd.facts, [])
   assert.deepEqual(odd.extras, [['Retention', 'kept']])
+  // A value with no definition of its own is counted rather than passed over silently.
+  const extra = runDetail({
+    sentinel: { metadata: {}, metrics: [{ key: 'rtsn_6' }], samples: [{ timestamp: 't', values: { rtsn_6: 1, mystery_metric: 2 } }] }
+  })
+  assert.deepEqual(extra.undefinedKeys, ['mystery_metric'])
 })
 
 test('every payload is judged stale on its own generation, not just the metrics', () => {

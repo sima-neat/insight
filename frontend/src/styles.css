@@ -4158,7 +4158,12 @@ button:disabled {
 }
 
 /* A run's metadata can carry a multi-line value, such as the board's os-release; keep
-   its lines rather than running them together. */
-.stats-run-detail .sysinfo-table td {
+   its lines rather than running them together. Scoped to the key/value tables so the
+   numbers in the metric table keep their own wrapping rules. */
+.stats-run-detail .sysinfo-table.key-value td {
   white-space: pre-wrap;
+}
+
+.stats-run-metrics td .sysinfo-pill {
+  margin-left: 6px;
 }

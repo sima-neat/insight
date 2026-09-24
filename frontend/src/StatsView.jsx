@@ -440,9 +440,60 @@ export function RunsPanel({
                     <time dateTime={run.lastSampleAt}>{formatTimestamp(run.lastSampleAt)}</time>
                   </>
                 )}
-                .
+                {run.crossed > 0 && `, ${run.crossed} of them crossing a threshold`}.
               </p>
-              {run.facts.length > 0 && <KeyValueTable rows={run.facts} caption={`Run ${openRef}`} />}
+              {run.metrics.length > 0 && (
+                <>
+                  <p className="hint">
+                    The smallest, largest and mean value of each metric over this run's samples, with the labels, units
+                    and thresholds the run itself recorded.
+                  </p>
+                  <table className="sysinfo-table stats-table stats-run-metrics">
+                    <thead>
+                      <tr>
+                        <th scope="col">Metric</th>
+                        <th scope="col">Group</th>
+                        <th scope="col">Mean</th>
+                        <th scope="col">Minimum</th>
+                        <th scope="col">Maximum</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {run.metrics.map((metric) => {
+                        const peak = statusInfo(metric.status)
+                        return (
+                          <tr key={metric.key}>
+                            <th scope="row">
+                              {metric.label}
+                              {metric.description && <span className="hint">{metric.description}</span>}
+                            </th>
+                            <td>{metric.group}</td>
+                            <td className="stats-cell-value">{formatValue(metric.mean, metric.unit)}</td>
+                            <td className="stats-cell-value">{formatValue(metric.minimum, metric.unit)}</td>
+                            <td className="stats-cell-value">
+                              {formatValue(metric.maximum, metric.unit)}
+                              {metric.status !== 'ok' && <Pill tone={peak.tone}>{peak.label}</Pill>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {run.undefinedKeys.length > 0 && (
+                <p className="hint">
+                  This run also recorded {run.undefinedKeys.length} value
+                  {run.undefinedKeys.length === 1 ? '' : 's'} it carries no definition for:{' '}
+                  {run.undefinedKeys.join(', ')}.
+                </p>
+              )}
+              {run.facts.length > 0 && (
+                <details className="stats-detail">
+                  <summary>Run metadata</summary>
+                  <KeyValueTable rows={run.facts} caption={`Run ${openRef}`} />
+                </details>
+              )}
               {run.facts.length === 0 && <p className="hint">Sentinel recorded no metadata for this run.</p>}
               {run.extras.length > 0 && (
                 <details className="stats-detail">

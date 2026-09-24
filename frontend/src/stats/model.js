@@ -14,6 +14,7 @@ export const MAX_TAGS = 16
 export const MIN_COMPARE_RUNS = 2
 export const MAX_COMPARE_RUNS = 8
 const FACT_LIMIT = 120
+const OTHER_GROUP = 'Other'
 
 // Board-level failures: the fix is in the Board panel, not in Sentinel.
 export const BOARD_PROBLEM_CODES = new Set([
@@ -622,31 +623,92 @@ export function definitionsByKey(metrics) {
 }
 
 /**
- * One saved run from /api/sentinel/runs/<id>. The daemon answers with exactly three
- * keys - metadata, metrics and samples - so each is read directly; anything inside them
- * is still shown as the board sent it, never assumed.
+ * Rank one value the way the backend ranks a live one, using the thresholds that were in
+ * force when the run was recorded.
+ */
+export function statusOf(value, warn, critical) {
+  if (!isNumber(value)) return 'unavailable'
+  if (isNumber(critical) && value >= critical) return 'critical'
+  if (isNumber(warn) && value >= warn) return 'warn'
+  return 'ok'
+}
+
+function seriesStats(values) {
+  const numbers = values.filter(isNumber)
+  if (!numbers.length) return { count: 0, minimum: null, maximum: null, mean: null, last: null }
+  return {
+    count: numbers.length,
+    minimum: Math.min(...numbers),
+    maximum: Math.max(...numbers),
+    mean: numbers.reduce((total, value) => total + value, 0) / numbers.length,
+    last: numbers[numbers.length - 1]
+  }
+}
+
+/**
+ * One saved run from /api/sentinel/runs/<id>, pinned against sentinel main:80ab7de4da31
+ * and captured in fixtures/run-detail-shape.json. The daemon answers with exactly three
+ * keys:
+ *
+ *   metadata  {id, name, note, tags, started_at, ended_at, sample_interval_ms,
+ *              sentinel_version, system}
+ *   metrics   the definitions that were in force for this run: a list of
+ *             {key, label, short, description, group, unit, warn, critical}
+ *   samples   a list of {timestamp, values{key: number|null}}
+ *
+ * A run therefore carries its own definitions, and those are the ones used to label,
+ * unit-format and rank it - not the definitions of whatever the board reports today,
+ * which may have changed since. The per-metric minimum, maximum and mean are computed
+ * here from the run's own samples, because the daemon publishes none for a single run;
+ * everything else is shown as the board sent it.
  */
 export function runDetail(payload) {
   const body = payload?.sentinel
   if (!body || typeof body !== 'object') return null
-  const known = 'metadata' in body || 'metrics' in body || 'samples' in body
-  if (!known) return null
+  if (!('metadata' in body) && !('metrics' in body) && !('samples' in body)) return null
   const samples = Array.isArray(body.samples) ? body.samples : []
   const stamps = samples.map((sample) => sample?.timestamp).filter((stamp) => typeof stamp === 'string')
-  const definitions = Array.isArray(body.metrics)
-    ? body.metrics
-    : Array.isArray(body.metrics?.metrics)
-      ? body.metrics.metrics
-      : []
+  const listed = Array.isArray(body.metrics) ? body.metrics : []
+  const definitions = listed.filter((metric) => metric && metric.key)
+  const valuesOf = (key) => samples.map((sample) => (sample?.values || {})[key])
+
+  const metrics = definitions.map((definition) => {
+    const stats = seriesStats(valuesOf(definition.key))
+    return {
+      key: definition.key,
+      label: definition.label || titleCase(definition.key),
+      short: definition.short || definition.label || titleCase(definition.key),
+      description: definition.description || null,
+      group: definition.group || OTHER_GROUP,
+      unit: definition.unit || null,
+      warn: isNumber(definition.warn) ? definition.warn : null,
+      critical: isNumber(definition.critical) ? definition.critical : null,
+      ...stats,
+      // The worst moment of the run, against the run's own thresholds.
+      status: statusOf(stats.maximum, definition.warn, definition.critical)
+    }
+  })
+  metrics.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label))
+
+  // A value the run recorded that its definitions never named is still counted, so the
+  // page never claims to show more of the run than it does.
+  const named = new Set(definitions.map((metric) => metric.key))
+  const undefinedKeys = [...new Set(samples.flatMap((sample) => Object.keys(sample?.values || {})))].filter(
+    (key) => !named.has(key)
+  )
+
   return {
     metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : null,
     facts: factRows(body.metadata, []),
-    definitions: definitions.filter((metric) => metric && metric.key),
-    // `metrics` may be a map of key -> definition rather than a list; count it either way.
+    definitions,
+    metrics,
+    undefinedKeys,
+    // `metrics` may be a map of key -> definition rather than the documented list.
     metricCount: definitions.length || (body.metrics && typeof body.metrics === 'object' ? Object.keys(body.metrics).length : 0),
     sampleCount: samples.length,
     firstSampleAt: stamps[0] || null,
     lastSampleAt: stamps.length ? stamps[stamps.length - 1] : null,
+    crossed: metrics.filter((metric) => metric.status === 'warn' || metric.status === 'critical').length,
     // Anything the daemon adds beyond the three documented keys is still listed.
     extras: factRows(
       Object.fromEntries(Object.entries(body).filter(([key]) => !['metadata', 'metrics', 'samples'].includes(key))),
@@ -654,7 +716,6 @@ export function runDetail(payload) {
     )
   }
 }
-
 
 // --- the Insight host --------------------------------------------------------
 // /api/metrics measures the machine Insight itself runs on - the SDK container or the
