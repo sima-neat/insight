@@ -149,9 +149,17 @@ While the tab is open and visible, Insight polls Sentinel's latest sample every 
 
 A trace records every sample around a workload. Name it, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. Saved runs are listed with their state, start time, duration, and sample count, and survive a daemon restart. Open a run to see its metadata, or select two to eight runs and **Compare selected** to see each run's statistics against the first, which is the baseline.
 
+### Values from a board you have left
+
+Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Insight keeps those values and labels them with the board they came from, with a way to read them again, rather than showing them as the current board's.
+
+### Insight host
+
+Below the runs, a compact panel reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the board telemetry above it, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so.
+
 ### NEAT profiling timeline
 
-Below the board telemetry, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
+Last on the tab, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
 
 ## System Information
 
