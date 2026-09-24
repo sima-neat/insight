@@ -13,12 +13,19 @@ import {
   stopTrace
 } from './stats/api.js'
 import {
+  ALL_GROUPS,
   HOST_POLL_MS,
   MAX_COMPARE_RUNS,
+  compareCsv,
+  compareCsvFilename,
+  compareGroups,
   compareHint,
   compareLegend,
   compareReady,
+  compareSummary,
   compareTable,
+  compareView,
+  compareViewText,
   countsSummary,
   createRequestGuard,
   daemonBusy,
@@ -57,6 +64,18 @@ import {
 } from './stats/model.js'
 import { ChipTabs, Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
 
+/** Hands the browser a file to save. The object URL is released once the click has used it. */
+function downloadText(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.hidden = true
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
 
 /**
  * Values that were read from a board that is no longer the selected one. They are kept
@@ -365,15 +384,26 @@ export function RunsPanel({
   compareError,
   compareBusy,
   compareStale,
+  compareOpen,
   now,
   onRefresh,
   onToggle,
   onOpen,
   onCompare,
   onClearCompare,
-  onDropMissing
+  onDropMissing,
+  onToggleCompare
 }) {
   const table = useMemo(() => (compare ? compareTable(compare, definitions) : null), [compare, definitions])
+  const [compareGroup, setCompareGroup] = useState(ALL_GROUPS)
+  const [changesOnly, setChangesOnly] = useState(false)
+  const groups = useMemo(() => compareGroups(table), [table])
+  const view = useMemo(() => compareView(table, { group: compareGroup, changesOnly }), [table, compareGroup, changesOnly])
+
+  // Everything the table holds, not what the filter shows: a filter is how it is being read.
+  function exportCsv() {
+    downloadText(compareCsvFilename(table), compareCsv(table), 'text/csv;charset=utf-8')
+  }
   // Why the em dashes in the table are there, counted from the comparison itself.
   const legend = useMemo(() => compareLegend(table), [table])
   // Runs that were selected and are no longer on the board: their checkbox is gone.
@@ -598,83 +628,137 @@ export function RunsPanel({
 
       <FailureCallout notice={compareError} />
       {compare && !compareError && (
-        <section className="stats-compare" aria-label="Run comparison">
-          <h3>Comparison</h3>
-          {compareStale && <StaleBanner what="This comparison" payload={compare} onRefresh={onCompare} refreshLabel="Compare again" />}
-          {table ? (
-            <>
-              <p className="hint">
-                Each value is that metric's {table.statistic} over the run, and the change beside it is against the
-                baseline{table.baselineLabel ? ` ${table.baselineLabel}` : ''}.
-                {table.generatedAt && (
-                  <>
-                    {' '}Compared <time dateTime={table.generatedAt}>{formatTimestamp(table.generatedAt)}</time>.
-                  </>
-                )}
-              </p>
-              {legend.length > 0 && (
-                <ul className="periph-notes stats-compare-legend">
-                  {legend.map((line) => <li key={line}>{line}</li>)}
-                </ul>
+        <section className="stats-compare" aria-labelledby="stats-compare-title">
+          <div className="stats-compare-head">
+            <h3 id="stats-compare-title">Comparison</h3>
+            <span className="hint">{compareSummary(table, compare)}</span>
+            <div className="periph-actions">
+              {table && (
+                <button type="button" className="btn-ghost" onClick={exportCsv} aria-describedby="stats-compare-export-note">
+                  Export CSV
+                </button>
               )}
-              {table.columns.some((column) => !column.summarised) && (
-                <Callout tone="warn" title="Sentinel summarised only some of these runs">
-                  <p>
-                    {table.columns.filter((column) => !column.summarised).map((column) => column.label).join(', ')} came back
-                    with no summary, so every value in that column is “—”. Re-record the run, or compare the runs Sentinel did
-                    summarise.
-                  </p>
-                </Callout>
-              )}
-              <table className="sysinfo-table stats-table stats-compare-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Metric</th>
-                    {table.columns.map((column) => (
-                      <th key={column.key} scope="col">
-                        {column.label}
-                        {column.baseline && <span className="hint">baseline</span>}
-                        {column.note && <span className="hint">{column.note}</span>}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {table.rows.map((row) => (
-                    <tr key={row.key}>
-                      <th scope="row">{row.label}</th>
-                      {row.cells.map((cell) => (
-                        <td key={`${row.key}-${cell.column}`} className="stats-cell-value">
-                          {formatValue(cell.value, row.unit)}
-                          {!cell.baseline && (
-                            <span
-                              className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}
-                              title={deltaAbsenceText(cell.deltaAbsence) || undefined}
-                            >
-                              {formatPercentDelta(cell.deltaPct)}
-                              {cell.deltaAbsence && (
-                                <span className="sr-only">
-                                  {` no change shown, because ${deltaAbsenceText(cell.deltaAbsence)}`}
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : (
-            <>
-              <p className="hint">
-                This Sentinel build returned a comparison Insight cannot lay out as a table. Its values are listed as they came
-                from the board.
-              </p>
-              <KeyValueTable rows={fallbackRows} caption="Comparison values" />
-            </>
+              <button
+                type="button"
+                className="btn-ghost"
+                aria-expanded={compareOpen}
+                aria-controls="stats-compare-body"
+                onClick={onToggleCompare}
+              >
+                {compareOpen ? 'Collapse' : 'Expand'}
+              </button>
+            </div>
+          </div>
+          {table && (
+            <p id="stats-compare-export-note" className="sr-only">
+              Exports all {table.rows.length} rows of the comparison, whichever group or changes filter is on screen.
+            </p>
           )}
+          {compareStale && <StaleBanner what="This comparison" payload={compare} onRefresh={onCompare} refreshLabel="Compare again" />}
+          <div id="stats-compare-body" hidden={!compareOpen}>
+            {table ? (
+              <>
+                <p className="hint">
+                  Each value is that metric's {table.statistic} over the run, and the change beside it is against the
+                  baseline{table.baselineLabel ? ` ${table.baselineLabel}` : ''}.
+                  {table.generatedAt && (
+                    <>
+                      {' '}Compared <time dateTime={table.generatedAt}>{formatTimestamp(table.generatedAt)}</time>.
+                    </>
+                  )}
+                </p>
+                {legend.length > 0 && (
+                  <ul className="periph-notes stats-compare-legend">
+                    {legend.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                )}
+                {table.columns.some((column) => !column.summarised) && (
+                  <Callout tone="warn" title="Sentinel summarised only some of these runs">
+                    <p>
+                      {table.columns.filter((column) => !column.summarised).map((column) => column.label).join(', ')} came back
+                      with no summary, so every value in that column is “—”. Re-record the run, or compare the runs Sentinel did
+                      summarise.
+                    </p>
+                  </Callout>
+                )}
+                <div className="stats-compare-filters">
+                  <ChipTabs
+                    label="Filter the comparison by metric group"
+                    items={groups}
+                    selected={view.group}
+                    onSelect={(id) => setCompareGroup(id || ALL_GROUPS)}
+                    idPrefix="stats-compare-tab"
+                    panelId="stats-compare-panel"
+                    noun="row"
+                    automatic
+                  />
+                  <label className="stats-toggle">
+                    <input type="checkbox" checked={changesOnly} onChange={(event) => setChangesOnly(event.target.checked)} />
+                    Changes only
+                  </label>
+                </div>
+                <p className="hint" role="status">
+                  {compareViewText(view)}
+                  {view.rows.length < view.total && ` Export CSV still writes all ${view.total}.`}
+                </p>
+                <div
+                  id="stats-compare-panel"
+                  role="tabpanel"
+                  aria-labelledby={`stats-compare-tab-${groups.findIndex((item) => item.id === view.group)}`}
+                >
+                  <div className="stats-table-scroll" role="region" aria-label="Comparison table" tabIndex={0}>
+                    <table className="sysinfo-table stats-table stats-compare-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Metric</th>
+                          {table.columns.map((column) => (
+                            <th key={column.key} scope="col">
+                              {column.label}
+                              {column.baseline && <span className="hint">baseline</span>}
+                              {column.note && <span className="hint">{column.note}</span>}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {view.rows.map((row) => (
+                          <tr key={row.key}>
+                            <th scope="row">{row.label}</th>
+                            {row.cells.map((cell) => (
+                              <td key={`${row.key}-${cell.column}`} className="stats-cell-value">
+                                {formatValue(cell.value, row.unit)}
+                                {!cell.baseline && (
+                                  <span
+                                    className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}
+                                    title={deltaAbsenceText(cell.deltaAbsence) || undefined}
+                                  >
+                                    {formatPercentDelta(cell.deltaPct)}
+                                    {cell.deltaAbsence && (
+                                      <span className="sr-only">
+                                        {` no change shown, because ${deltaAbsenceText(cell.deltaAbsence)}`}
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  This Sentinel build returned a comparison Insight cannot lay out as a table. Its values are listed as they came
+                  from the board.
+                </p>
+                <KeyValueTable rows={fallbackRows} caption="Comparison values" />
+              </>
+            )}
+          </div>
         </section>
       )}
     </section>
@@ -755,6 +839,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [compare, setCompare] = useState(null)
   const [compareError, setCompareError] = useState(null)
   const [compareBusy, setCompareBusy] = useState(false)
+  // Collapsing keeps the comparison; only Compare reads the board again.
+  const [compareOpen, setCompareOpen] = useState(true)
   const [host, setHost] = useState(null)
   const [hostError, setHostError] = useState(null)
   const [hostBusy, setHostBusy] = useState(false)
@@ -1020,7 +1106,10 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setCompareError(null)
     try {
       const data = await compareRuns(selected)
-      if (mounted.current) setCompare(data)
+      if (mounted.current) {
+        setCompare(data)
+        setCompareOpen(true)
+      }
     } catch (err) {
       if (mounted.current) {
         setCompare(null)
@@ -1202,6 +1291,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                 compareError={compareError}
                 compareBusy={compareBusy}
                 compareStale={stalePayloads.compare || stalePayloads.compareError}
+                compareOpen={compareOpen}
                 now={now}
                 onRefresh={() => loadRuns()}
                 onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
@@ -1213,6 +1303,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                   setCompareError(null)
                 }}
                 onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
+                onToggleCompare={() => setCompareOpen((open) => !open)}
               />
             </>
           )}

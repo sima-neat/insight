@@ -788,6 +788,8 @@ export function compareTable(payload, definitions = null) {
       const baselineValue = valueOf(baselineColumn)
       return {
         key: spec.key,
+        // A run total, not a metric: it has no metric group of its own.
+        kind: 'run',
         label: spec.label,
         unit: spec.unit,
         group: null,
@@ -802,6 +804,7 @@ export function compareTable(payload, definitions = null) {
     const baselineValue = meanOf(baselineColumn)
     return {
       key,
+      kind: 'metric',
       label: definition?.label || titleCase(key),
       unit: definition?.unit || null,
       group: definition?.group || null,
@@ -819,6 +822,158 @@ export function compareTable(payload, definitions = null) {
     generatedAt: body.generated_at || null,
     statistic: COMPARE_STATISTIC
   }
+}
+
+// --- viewing and exporting a comparison ---------------------------------------
+export const ALL_GROUPS = 'All'
+const RUN_TOTALS = 'Run totals'
+
+/** The group a comparison row is filtered and exported under. */
+export function compareRowGroup(row) {
+  if (row?.kind === 'run') return RUN_TOTALS
+  return row?.group || OTHER_GROUP
+}
+
+/** "All" first, then run totals, the metric groups by name, and unlabelled keys last. */
+export function compareGroups(table) {
+  const counts = new Map()
+  for (const row of table?.rows || []) {
+    const group = compareRowGroup(row)
+    counts.set(group, (counts.get(group) || 0) + 1)
+  }
+  const rank = (name) => (name === RUN_TOTALS ? 0 : name === OTHER_GROUP ? 2 : 1)
+  const names = [...counts.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  return [
+    { id: ALL_GROUPS, label: ALL_GROUPS, count: table?.rows?.length || 0 },
+    ...names.map((name) => ({ id: name, label: name, count: counts.get(name) }))
+  ]
+}
+
+/**
+ * Whether any run differs from the baseline on this row. A published change decides it.
+ * Where Sentinel publishes none - a run total, or a baseline that measured 0 - the two
+ * values are compared directly: a metric that went from 0 to 5.9% has changed even though
+ * there is no percentage to say by how much. A run with no value at all is not a change;
+ * there is nothing to say it moved.
+ */
+export function rowChanged(row) {
+  const cells = row?.cells || []
+  const base = cells.find((cell) => cell.baseline) || cells[0]
+  return cells.some((cell) => {
+    if (cell === base) return false
+    if (isNumber(cell.deltaPct)) return cell.deltaPct !== 0
+    return isNumber(cell.value) && isNumber(base?.value) && cell.value !== base.value
+  })
+}
+
+/**
+ * The rows a comparison shows under a group filter and the "changes only" toggle, with
+ * counts, so the view can say what it is not showing. A group the comparison does not
+ * have reads as All rather than as an empty table.
+ */
+export function compareView(table, { group = ALL_GROUPS, changesOnly = false } = {}) {
+  const all = table?.rows || []
+  const known = group !== ALL_GROUPS && all.some((row) => compareRowGroup(row) === group)
+  const active = known ? group : ALL_GROUPS
+  const inGroup = active === ALL_GROUPS ? all : all.filter((row) => compareRowGroup(row) === active)
+  const rows = changesOnly ? inGroup.filter(rowChanged) : inGroup
+  return {
+    group: active,
+    changesOnly: Boolean(changesOnly),
+    rows,
+    total: all.length,
+    inGroup: inGroup.length,
+    unchanged: inGroup.length - rows.length
+  }
+}
+
+/** What the filters leave out, in words, so a shorter table is never read as the whole one. */
+export function compareViewText(view) {
+  if (!view) return ''
+  const parts = []
+  if (view.rows.length < view.total) parts.push(`Showing ${view.rows.length} of ${view.total} rows.`)
+  if (view.changesOnly) {
+    const count = view.unchanged
+    parts.push(
+      count
+        ? `Changes only hides ${count} row${count === 1 ? '' : 's'} where no run differs from the baseline.`
+        : 'Every row shown differs from the baseline in at least one run, so Changes only hides nothing.'
+    )
+  }
+  return parts.join(' ')
+}
+
+/** The one line a collapsed comparison is summarised by. */
+export function compareSummary(table, payload = null) {
+  if (table) {
+    const runs = table.columns.length
+    const parts = [`${runs} runs`]
+    if (table.baselineLabel) parts.push(`baseline ${table.baselineLabel}`)
+    parts.push(`${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`)
+    return parts.join(' · ')
+  }
+  const listed = payload?.sentinel?.runs
+  return Array.isArray(listed) ? `${listed.length} runs` : ''
+}
+
+/**
+ * One CSV field (RFC 4180): quoted when it holds a quote, comma or line break, or would
+ * lose leading or trailing space. Numbers are written as they are; a missing value is an
+ * empty field. Text that a spreadsheet would run as a formula - a run named "=cmd|..." -
+ * is prefixed with an apostrophe, since run names are whatever someone typed on the board.
+ */
+export function csvField(value) {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''
+  let text = String(value)
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`
+  return /[",\r\n]/.test(text) || text !== text.trim() ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function csvColumnName(column) {
+  const marks = [column.baseline ? 'baseline' : '', column.note].filter(Boolean)
+  return marks.length ? `${column.label} (${marks.join('; ')})` : column.label
+}
+
+/**
+ * The comparison as CSV: every row the table holds, whatever filter is on screen. Per run,
+ * its value and its percent change against the baseline, unformatted, with an empty field
+ * wherever the table shows an em dash - never a dash or a zero, which a spreadsheet would
+ * read as a value. The baseline's own change column is always empty, for the same reason
+ * the table shows none. Units live in their own column, never inside a number.
+ */
+export function compareCsv(table) {
+  if (!table?.rows?.length) return ''
+  const header = ['metric_key', 'label', 'group', 'unit']
+  for (const column of table.columns) {
+    const name = csvColumnName(column)
+    header.push(`${name} ${table.statistic}`, `${name} change vs baseline (%)`)
+  }
+  const lines = [header]
+  for (const row of table.rows) {
+    const line = [row.key, row.label, compareRowGroup(row), unitSuffix(row.unit)]
+    for (const cell of row.cells) line.push(cell.value, cell.deltaPct)
+    lines.push(line)
+  }
+  return lines.map((line) => line.map(csvField).join(',')).join('\r\n') + '\r\n'
+}
+
+function localDay(date) {
+  const day = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`
+}
+
+/** `sentinel-compare-<baseline>-<YYYY-MM-DD>.csv`, safe on every filesystem. */
+export function compareCsvFilename(table, date = new Date()) {
+  const baseline = String(table?.baselineLabel || '')
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 80)
+    .replace(/[-.]+$/, '')
+  return `sentinel-compare-${baseline || 'runs'}-${localDay(date)}.csv`
 }
 
 /** Metric definitions from /api/sentinel/metrics, by key, for labelling saved runs. */
