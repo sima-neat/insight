@@ -202,8 +202,6 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc:
 
 
 def _py_value(value) -> str:
-    if isinstance(value, bool):
-        return "True" if value else "False"
     return repr(value)
 
 
