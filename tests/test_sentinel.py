@@ -3,10 +3,13 @@ import io
 import json
 import os
 import shlex
+import signal
 import socket
 import socketserver
+import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -545,6 +548,136 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(SentinelError) as raised:
             install.install(self.session)
         self.assertIn("is inactive", raised.exception.message)
+
+
+_FAKE_SUDO = """#!/bin/sh
+echo "$*" >> "$FAKE_SUDO_LOG"
+[ -n "$FAKE_SUDO_DENY" ] && exit 1
+[ "$1" = -n ] && shift
+if [ "$1" = rm ]; then
+  for target; do :; done
+  # Root is not stopped by directory permissions and this user is: the fake lends them.
+  [ -d "$target" ] && chmod -R u+w "$target"
+fi
+exec "$@"
+"""
+
+# Called as `sima-cli neat install sentinel -d DIR`, like the real one under sudo it leaves
+# a tree in DIR that this user cannot remove on its own.
+_FAKE_SIMA_CLI = """#!/bin/sh
+dir=$5
+printf '%s' "$dir" > "$FAKE_MARKER"
+mkdir -p "$dir/vulcan/sentinel"
+echo artifact > "$dir/vulcan/sentinel/sentinel.deb"
+chmod 555 "$dir/vulcan/sentinel" "$dir/vulcan"
+if [ -n "$FAKE_INSTALL_WAIT" ]; then
+  touch "$FAKE_MARKER.ready"
+  sleep 30
+fi
+exit "${FAKE_INSTALL_EXIT:-0}"
+"""
+
+
+class InstallScriptTests(unittest.TestCase):
+    """The generated installer script, run for real by sh and bash with a fake sudo and sima-cli."""
+
+    SHELLS = ("sh", "bash")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.bin = root / "bin"
+        self.bin.mkdir()
+        for name, text in (("sudo", _FAKE_SUDO), ("sima-cli", _FAKE_SIMA_CLI)):
+            (self.bin / name).write_text(text)
+            (self.bin / name).chmod(0o755)
+        self.marker = root / "install-dir"
+        self.sudo_log = root / "sudo.log"
+
+    def run_script(self, shell, stop=None, **env):
+        argv = install.install_command(str(self.bin / "sima-cli"))
+        self.assertEqual(argv[:2], ["sh", "-c"])
+        for path in (self.marker, Path(str(self.marker) + ".ready"), self.sudo_log):
+            if path.exists():
+                path.unlink()
+        environ = dict(
+            os.environ,
+            PATH="{}:{}".format(self.bin, os.environ.get("PATH", "")),
+            FAKE_SUDO_LOG=str(self.sudo_log),
+            FAKE_MARKER=str(self.marker),
+            **env,
+        )
+        process = subprocess.Popen(
+            [shell] + argv[1:], env=environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True
+        )
+        if stop is not None:
+            ready = Path(str(self.marker) + ".ready")
+            deadline = time.monotonic() + 10
+            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(ready.exists(), "the installer never started")
+            # What a closed SSH channel, a timeout or ^C delivers: the whole process group.
+            os.killpg(process.pid, stop)
+        _, stderr = process.communicate(timeout=30)
+        if self.marker.exists():
+            # Whatever the script leaves behind is removed by force, even when a test fails.
+            left = self.marker.read_text()
+            self.addCleanup(subprocess.run, ["sh", "-c", 'chmod -R u+w "$1" 2>/dev/null; rm -rf "$1"', "sh", left])
+        return process.returncode, stderr.decode()
+
+    def install_dir(self):
+        """Where the script unpacked the installer's download."""
+        path = Path(self.marker.read_text())
+        self.assertTrue(path.name.startswith("sentinel-install."))
+        return path
+
+    def test_a_board_with_passwordless_sudo_runs_the_installer(self):
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, stderr = self.run_script(shell)
+                self.assertEqual(code, 0, stderr)
+                self.assertIn("neat install sentinel -d", self.sudo_log.read_text())
+                self.install_dir()
+
+    def test_the_installers_exit_status_is_kept(self):
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, stderr = self.run_script(shell, FAKE_INSTALL_EXIT="3")
+                self.assertEqual(code, 3, stderr)
+                self.install_dir()
+
+    def test_the_root_owned_download_is_removed_after_a_successful_install(self):
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, stderr = self.run_script(shell)
+                self.assertEqual((code, stderr), (0, ""))
+                self.assertFalse(self.install_dir().exists())
+                self.assertIn("-n rm -rf -- /tmp/sentinel-install.", self.sudo_log.read_text())
+
+    def test_the_root_owned_download_is_removed_after_a_failed_install(self):
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, stderr = self.run_script(shell, FAKE_INSTALL_EXIT="3")
+                self.assertEqual((code, stderr), (3, ""))
+                self.assertFalse(self.install_dir().exists())
+
+    def test_the_root_owned_download_is_removed_when_the_install_is_interrupted(self):
+        cases = ((signal.SIGTERM, 143), (signal.SIGHUP, 129), (signal.SIGINT, 130))
+        for shell in self.SHELLS:
+            for stop, status in cases:
+                with self.subTest(shell=shell, signal=stop.name):
+                    code, stderr = self.run_script(shell, stop=stop, FAKE_INSTALL_WAIT="1")
+                    self.assertEqual(code, status, stderr)
+                    self.assertFalse(self.install_dir().exists())
+
+    def test_a_board_whose_sudo_needs_a_password_stops_before_anything_runs(self):
+        for shell in self.SHELLS:
+            with self.subTest(shell=shell):
+                code, stderr = self.run_script(shell, FAKE_SUDO_DENY="1")
+                self.assertEqual(code, 77)
+                self.assertEqual(stderr.strip(), "sudo: a password is required")
+                self.assertFalse(self.marker.exists())
 
 
 class MetricViewTests(unittest.TestCase):

@@ -28,11 +28,19 @@ command -v sima-cli 2>/dev/null || {{ [ -x "{fallback}" ] && printf '%s\\n' "{fa
     service=SERVICE, socket=SOCKET_PATH, fallback=FALLBACK_CLI
 )
 
+# Not a format string: it is passed as an argument, so its braces reach sh as written.
 _INSTALL_SCRIPT = """
 set -e
-sudo -n true 2>/dev/null || {{ echo 'sudo: a password is required' >&2; exit 77; }}
+sudo -n true 2>/dev/null || { echo 'sudo: a password is required' >&2; exit 77; }
 dir=$(mktemp -d /tmp/sentinel-install.XXXXXX)
-trap 'rm -rf "$dir"' EXIT
+# The installer runs as root and leaves root-owned trees in $dir that this user cannot
+# remove, so the directory goes with the same passwordless sudo the install runs under.
+cleanup() { sudo -n rm -rf -- "$dir"; }
+trap cleanup EXIT
+# dash skips the EXIT trap when a signal ends the shell; exiting from each one runs it.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 sudo -n env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 "$SIMA_CLI" neat install sentinel -d "$dir"
 """
 
@@ -94,10 +102,7 @@ def install(session) -> dict:
             ),
             tool="sima-cli",
         )
-    result = session.transport.exec(
-        ["sh", "-c", "SIMA_CLI={}\n{}".format(_quote(state["sima_cli"]), _INSTALL_SCRIPT)],
-        timeout=INSTALL_TIMEOUT_SEC,
-    )
+    result = session.transport.exec(install_command(state["sima_cli"]), timeout=INSTALL_TIMEOUT_SEC)
     log = _tail(result.stdout, result.stderr)
     if result.exit_code == 77:
         raise SentinelError(
@@ -122,6 +127,11 @@ def install(session) -> dict:
             detail=log,
         )
     return {"status": state, "log": log}
+
+
+def install_command(sima_cli: str) -> list:
+    """The board command that installs Sentinel with the `sima-cli` found at ``sima_cli``."""
+    return ["sh", "-c", "SIMA_CLI={}\n{}".format(_quote(sima_cli), _INSTALL_SCRIPT)]
 
 
 def _quote(value: str) -> str:
