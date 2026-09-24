@@ -84,8 +84,12 @@ decides which payload fields are valid.
 
 The `blazepose-3d` payload accepts `poses[]`; every pose contains an ID and named
 `keypoints[]` with finite `x`, `y`, and `z` world coordinates. `confidence` is
-optional and points below `0.3` are omitted. Multiple poses receive distinct
-colors.
+optional and points below `0.3` are omitted. Each pose uses anatomical colors:
+amber for the head, violet for the torso, coral for the
+subject's left side, and blue for the subject's right side. A compact legend is
+shown whenever the panel is wide enough to keep the labels readable. When a
+payload contains several poses, each skeleton also receives a distinct outline
+accent while retaining the anatomical palette.
 
 ## BlazePose camera controls
 
