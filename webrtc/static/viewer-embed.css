@@ -1,0 +1,79 @@
+/* static/viewer-embed.css
+ *
+ * Bare-video embed mode, opted into with `?embed=1` on viewer.html.
+ *
+ * The `viewer-embed` class is put on <html> by the inline bootstrap in
+ * viewer.html, before the app renders. Every rule below is scoped to that
+ * class, so without `embed=1` this stylesheet is inert and the viewer looks
+ * and behaves exactly as it does today.
+ *
+ * The chrome is hidden, never removed: viewer-react.js and settings.js still
+ * mount and query these nodes. `display: none` is used throughout (never
+ * opacity or off-screen positioning) so hidden controls stay out of the tab
+ * order and out of the accessibility tree.
+ *
+ * `!important` is used on the hiding rules because this file cannot rely on
+ * load order: css/settings.css and css/roi.css are linked at the end of
+ * <body>, after this one.
+ */
+
+/* --- Chrome ------------------------------------------------------------- */
+
+/* Top bar: "Videos Per Page" label, the layout preset buttons, Prev/Next,
+   the page summary and the page/channel jump forms. Insight picks the
+   channel, so none of it applies. */
+.viewer-embed #controls {
+  display: none !important;
+}
+
+/* The settings button in the top-right corner and the overlay/ROI modal it
+   opens. The overlay is hidden here as well as by its own `.hidden` class, so
+   a stray openSettingsForScope() call cannot pop it open inside the iframe. */
+.viewer-embed .viewer-settings-menu,
+.viewer-embed #viewerSettingsOverlay {
+  display: none !important;
+}
+
+/* Per-tile footer: the channel name and the per-channel settings button. */
+.viewer-embed .tile-banner-wrapper {
+  display: none !important;
+}
+
+/* --- Video surface ------------------------------------------------------ */
+
+/* With #controls gone, the grid is the only row in the body flex column.
+   Drop its padding, gap and scrolling so the tile meets the iframe edges and
+   neither axis can scroll. */
+.viewer-embed #videoGrid {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* Let the tile fill the pane instead of holding a 16/9 box capped at
+   1280x720. The video keeps `object-fit: contain`, so the source is
+   letterboxed inside the frame rather than cropped or stretched.
+   The `.single-tile` selector is listed first so that it, and not
+   `.single-tile .video-tile` in viewer.css, wins on specificity. */
+.viewer-embed .single-tile .video-tile,
+.viewer-embed .video-tile {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.viewer-embed .video-tile video,
+.viewer-embed .video-tile canvas {
+  border-radius: 0;
+}

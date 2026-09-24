@@ -99,7 +99,7 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Peripherals
 
-Peripherals lists the cameras connected to a board and shows the modes each camera reports. Discovery reads device information only: it does not publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes. The camera export API also works from the cached scan without touching the board.
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. Discovery reads device information only: it does not publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes. **Preview** is the one exception, and it only runs when you start it. The camera export API works from the cached scan without touching the board.
 
 ### Selected board
 
@@ -124,6 +124,14 @@ Select **Refresh** to scan the board. Insight finds MIPI cameras through libcame
 | Not supported | Core `CameraInput` cannot use it. This includes USB cameras, raw sensor formats, and formats other than NV12. |
 
 To read a MIPI camera's modes, Refresh briefly opens the camera through libcamera without streaming. Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Preview a camera
+
+Select **Start preview** to see what a camera sees. The board captures video, encodes it in hardware, and sends it to Insight's viewer; the preview appears in the page and reserves one viewer channel.
+
+A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. It also stops by itself shortly after Insight stops watching, so a lost browser or a restarted Insight cannot leave the camera busy.
+
+Preview is available for MIPI cameras on modes Insight lists as usable. USB cameras are discovered and can be exported, but preview is not available for them yet.
 
 ### Camera configuration API
 

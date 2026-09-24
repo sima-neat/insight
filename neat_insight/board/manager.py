@@ -2,7 +2,7 @@ import hashlib
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from flask import current_app
 
@@ -88,16 +88,23 @@ class BoardManager:
         self._store = TargetStore(self.data_dir / "board-target.json")
         self._known_hosts = self.data_dir / "known_hosts"
         self._lock = threading.RLock()
+        self._change_lock = threading.Lock()
         self._generation = 0
         self._session: Optional[BoardSession] = None
         self._status = {"state": "unknown", "checked_at": None, "error": None}
         self._board: Optional[dict] = None
+        self._before_session_close: Optional[Callable[[BoardSession], None]] = None
+
+    def set_before_session_close(self, callback: Callable[[BoardSession], None]) -> None:
+        """Register cleanup that must succeed before a board transport is replaced."""
+        with self._lock:
+            self._before_session_close = callback
 
     def target(self) -> Optional[BoardTarget]:
         return resolve_target(self._store.load(), self.on_board, sdk_env_target())
 
     def session(self) -> BoardSession:
-        with self._lock:
+        with self._change_lock:
             target = self.target()
             if target is None:
                 raise BoardError(
@@ -106,25 +113,31 @@ class BoardManager:
                     hint="Enter the board's address, pair the SDK with `sima-cli sdk setup --devkit <ip>`, "
                     "or run Insight on the board.",
                 )
-            self._replace_session(target)
-            return self._session
+            self._replace_session_under_change(target)
+            with self._lock:
+                return self._session
 
     def select(self, host, port, user) -> None:
-        with self._lock:
-            self._store.save(validate_ssh_target(host, port, user))
-            self._replace_session(self.target())
+        selected = validate_ssh_target(host, port, user)
+        target = resolve_target(selected, self.on_board, sdk_env_target())
+        self._replace_session(target, before_install=lambda: self._store.save(selected))
 
     def reset(self) -> None:
-        with self._lock:
-            self._store.clear()
-            self._replace_session(self.target())
+        target = resolve_target(None, self.on_board, sdk_env_target())
+        self._replace_session(target, before_install=self._store.clear)
 
     def test(self) -> None:
         self.session().identity()
 
     def trust_host_key(self, fingerprint: str) -> None:
-        with self._lock:
-            transport = self.session().raw_transport
+        session = self.session()
+        with self._change_lock:
+            with self._lock:
+                if self._session is not session:
+                    raise BoardError("stale_snapshot", "The selected board changed; test the connection again.")
+                transport = session.raw_transport
+                target = session.target
+                callback = self._before_session_close
             key = getattr(transport, "presented_host_key", None)
             if key is None or key_fingerprint(key) != fingerprint:
                 raise BoardError(
@@ -132,31 +145,58 @@ class BoardManager:
                     "That host key is not the one the board presented.",
                     hint="Test the connection again and confirm the fingerprint it reports.",
                 )
-            transport.replace_host_key(key)
-            # The trusted key may belong to a different board: start a new generation so its scans stay separate.
-            transport.close()
-            self._session = None
-            self._replace_session(self.target())
+            if callback is not None:
+                callback(session)
+            with self._lock:
+                if self._session is not session:
+                    raise BoardError("stale_snapshot", "The selected board changed; test the connection again.")
+                transport.replace_host_key(key)
+                # The trusted key may belong to a different board: start a new generation so its scans stay separate.
+                transport.close()
+                self._session = None
+                self._install_session(target)
 
     def state(self) -> dict:
-        with self._lock:
+        with self._change_lock:
             target = self.target()
-            self._replace_session(target)
-            sdk_env = sdk_env_target()
-            return {
-                "target": target.to_dict() if target else None,
-                "saved": self._store.load(),
-                "defaults": {"on_board": self.on_board, "sdk_env": sdk_env},
-                "generation": self._generation,
-                "status": dict(self._status),
-                "board": self._board,
-            }
+            self._replace_session_under_change(target)
+            with self._lock:
+                sdk_env = sdk_env_target()
+                return {
+                    "target": target.to_dict() if target else None,
+                    "saved": self._store.load(),
+                    "defaults": {"on_board": self.on_board, "sdk_env": sdk_env},
+                    "generation": self._generation,
+                    "status": dict(self._status),
+                    "board": self._board,
+                }
 
-    def _replace_session(self, target: Optional[BoardTarget]) -> None:
-        if (self._session.target if self._session else None) == target:
-            return
-        if self._session is not None:
-            self._session.raw_transport.close()
+    def _replace_session(self, target: Optional[BoardTarget], before_install=None) -> None:
+        # Preview cleanup can wait for an in-flight capture start and can itself report a transport
+        # error through `_record`. Run it without `_lock`, while `_change_lock` keeps target changes
+        # ordered, or those two paths can deadlock each other.
+        with self._change_lock:
+            self._replace_session_under_change(target, before_install)
+
+    def _replace_session_under_change(self, target: Optional[BoardTarget], before_install=None) -> None:
+        """Replace the selected session while `_change_lock` is held."""
+        with self._lock:
+            current = self._session
+            unchanged = (current.target if current else None) == target
+            callback = self._before_session_close
+        if not unchanged and current is not None and callback is not None:
+            callback(current)
+        with self._lock:
+            if before_install is not None:
+                before_install()
+            if unchanged:
+                return
+            if current is not None:
+                current.raw_transport.close()
+            self._install_session(target)
+
+    def _install_session(self, target: Optional[BoardTarget]) -> None:
+        """Install a new target while `_lock` and `_change_lock` are held."""
         self._generation += 1
         self._status = {"state": "unknown", "checked_at": None, "error": None}
         self._board = None
