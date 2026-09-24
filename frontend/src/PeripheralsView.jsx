@@ -373,7 +373,6 @@ export default function PeripheralsView({
     }
   }, [])
 
-
   // Stop the preview when the selected camera, the device kind, or the board changes.
   useEffect(() => {
     const session = previewRef.current.session
@@ -381,10 +380,8 @@ export default function PeripheralsView({
   }, [activeId])
 
   useEffect(() => {
-    if (activeKind !== 'camera') {
-      const session = previewRef.current.session
-      if (session) stopPreview(session.id)
-    }
+    const session = previewRef.current.session
+    if (session && activeKind !== 'camera') stopPreview(session.id)
   }, [activeKind])
 
   useEffect(() => {
