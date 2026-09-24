@@ -1729,9 +1729,11 @@ export default function App() {
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
         <div className="masthead-actions">
+          {/* One box for the board: which one, whether it answers, and the way in to everything
+              else about it — a shell on it, or a different board. */}
           <button
             type="button"
-            className="board-trigger"
+            className={['board-trigger', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}
             onClick={openBoardPanel}
             title={boardIndicatorInfo.title}
             aria-haspopup="dialog"
@@ -1742,21 +1744,6 @@ export default function App() {
               {boardIndicatorInfo.state.short}
             </span>
           </button>
-          {devkitShellInfo?.configured && (
-            <button
-              type="button"
-              className="devkit-trigger"
-              onClick={connectDevkitShell}
-              disabled={devkitShellBusy || !devkitShellInfo.available}
-              title={
-                devkitShellInfo.available
-                  ? `Open browser shell for ${devkitShellInfo.devkit_ip}`
-                  : 'webssh is not installed in this Insight environment'
-              }
-            >
-              {devkitShellBusy ? 'Opening DevKit...' : devkitShellInfo.button_label}
-            </button>
-          )}
           <button
             type="button"
             className="sysinfo-trigger"
@@ -2132,7 +2119,6 @@ export default function App() {
               boardError={boardError}
               onReloadBoard={loadBoard}
               onOpenBoardPanel={openBoardPanel}
-              onError={setError}
               onStatus={setUploadStatus}
             />
           </Suspense>
@@ -2698,6 +2684,9 @@ export default function App() {
             onStatus={setUploadStatus}
             onError={setError}
             onClose={closeBoardPanel}
+            shell={devkitShellInfo}
+            shellBusy={devkitShellBusy}
+            onOpenShell={connectDevkitShell}
           />
         </Suspense>
       )}

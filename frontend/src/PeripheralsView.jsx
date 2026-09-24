@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CameraDetail, { cameraSubtitle } from './peripherals/CameraDetail.jsx'
-import { copyText, downloadText, requestJson } from './peripherals/api.js'
+import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
   PREVIEW_IDLE,
@@ -159,7 +159,6 @@ export default function PeripheralsView({
   boardError = null,
   onReloadBoard,
   onOpenBoardPanel,
-  onError,
   onStatus
 }) {
   const [snapshot, setSnapshot] = useState(null)
@@ -168,17 +167,12 @@ export default function PeripheralsView({
   const [scanning, setScanning] = useState(false)
   const [scanStartedAt, setScanStartedAt] = useState(0)
   const [scanError, setScanError] = useState(null)
-  const [serverStale, setServerStale] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const [kind, setKind] = useState('camera')
   const [selectedId, setSelectedId] = useState(null)
   const [wanted, setWanted] = useState(null)
-  const [integrationOpen, setIntegrationOpen] = useState(false)
-  const [exportState, setExportState] = useState({ status: 'idle' })
-  const [exportAttempt, setExportAttempt] = useState(0)
   const [preview, setPreview] = useState(PREVIEW_IDLE)
   const autoRefreshed = useRef(false)
-  const exportSeq = useRef(0)
   const previewRef = useRef(PREVIEW_IDLE)
   const mounted = useRef(false)
 
@@ -197,13 +191,10 @@ export default function PeripheralsView({
     ? `${modeLabel(wanted)} is no longer offered; showing ${modeLabel(selection)}.`
     : ''
   const target = board?.target || null
-  const stale = serverStale || isSnapshotStale(board, snapshot)
+  const stale = isSnapshotStale(board, snapshot)
   const issues = useMemo(() => sortIssues(snapshot?.issues), [snapshot])
   const connectionError = scanError && CONNECTION_ERROR_CODES.has(scanError.code) ? scanError : null
   const scannedLabel = snapshot?.board?.label || target?.label || 'the board'
-  const exportKey = integrationOpen && selection && !stale
-    ? `${snapshot.generation}|${snapshot.scanned_at}|${selection.id}|${modeLabel(selection)}|${exportAttempt}`
-    : ''
 
   useEffect(() => {
     previewRef.current = preview
@@ -257,7 +248,6 @@ export default function PeripheralsView({
     try {
       const data = await requestJson('/api/peripherals/refresh', { method: 'POST' })
       setSnapshot(data)
-      setServerStale(false)
       setLoadError(null)
       const count = groupCameras(data.items).reduce((total, group) => total + group.items.length, 0)
       onStatus?.(`Scan complete: ${countLabel(count, 'camera')} on ${data.board?.label || 'the board'}.`)
@@ -272,15 +262,6 @@ export default function PeripheralsView({
   function changeSelection(partial) {
     const next = resolveSelection(camera, partial)
     setWanted(next ? { id: camera.id, ...next } : null)
-  }
-
-  function copyExport(item) {
-    copyText(item.content).then(() => onStatus?.(`Copied ${item.label} configuration.`), (err) => onError?.(err.message))
-  }
-
-  function downloadExport(item) {
-    downloadText(item.filename, item.content)
-    onStatus?.(`Downloaded ${item.filename}.`)
   }
 
   async function loadInitial() {
@@ -383,31 +364,6 @@ export default function PeripheralsView({
     return () => clearInterval(timer)
   }, [scanning])
 
-  useEffect(() => {
-    if (!exportKey) {
-      exportSeq.current += 1
-      setExportState({ status: 'idle' })
-      return
-    }
-    const seq = ++exportSeq.current
-    const { id, format, width, height, fps } = selection
-    setExportState((prev) => ({ status: 'loading', data: prev.data?.camera_id === id ? prev.data : null }))
-    requestJson('/api/peripherals/cameras/export', { method: 'POST', body: { id, format, width, height, fps } })
-      .then((data) => {
-        if (seq !== exportSeq.current) return
-        setExportState({ status: 'ready', data })
-      })
-      .catch((err) => {
-        if (seq !== exportSeq.current) return
-        const error = normalizeError(err)
-        if (error.code === 'stale_snapshot') {
-          setServerStale(true)
-          loadBoard()
-        }
-        setExportState({ status: 'error', error })
-      })
-  }, [exportKey])
-
   const elapsed = Math.max(0, Math.round((now - scanStartedAt) / 1000))
   const scannedAt = snapshot?.scanned_at
   const changes = changeSummary(snapshot?.changes)
@@ -452,13 +408,7 @@ export default function PeripheralsView({
             preview={preview}
             onStartPreview={startPreview}
             onStopPreview={() => stopPreview()}
-            exportState={exportState}
-            onCopy={copyExport}
-            onDownload={downloadExport}
-            onRetryExport={() => setExportAttempt((n) => n + 1)}
             onOpenBoardPanel={onOpenBoardPanel}
-            integrationOpen={integrationOpen}
-            onIntegrationToggle={setIntegrationOpen}
           />
         ) : (
           <div className="periph-detail">
@@ -494,7 +444,7 @@ export default function PeripheralsView({
         </div>
 
         <p className="sr-only" role="status">
-          {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh before exporting.' : ''}
+          {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh before starting a preview.' : ''}
         </p>
 
         {scannedAt && (
@@ -507,7 +457,7 @@ export default function PeripheralsView({
         )}
         {stale && (
           <Callout title="Board changed — refresh">
-            <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}. Export and preview are disabled until you refresh.</p>
+            <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}. Preview is disabled until you refresh.</p>
             {target && <button type="button" className="btn-tonal" onClick={() => !scanning && refresh()}>Refresh now</button>}
           </Callout>
         )}

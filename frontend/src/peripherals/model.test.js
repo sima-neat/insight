@@ -164,7 +164,7 @@ test('format options disable non-exportable formats and keep their reason', () =
   assert.equal(nv12.label, 'NV12 (YUV 4:2:0) — advertised')
   assert.deepEqual(nv12.range.max_width, 2432)
   assert.equal(rgb.disabled, true)
-  assert.equal(rgb.label, 'RGB888 — not exportable')
+  assert.equal(rgb.label, 'RGB888 — not usable')
   assert.equal(rgb.reason, 'Core CameraInput outputs NV12 only.')
 })
 
@@ -311,7 +311,7 @@ test('API errors keep code, hint, and extra fields', () => {
   assert.equal(normalizeError(null), null)
 })
 
-test('mode labels and selection equality drive the export key and the fallback notice', () => {
+test('mode labels and selection equality drive the fallback notice', () => {
   const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
   assert.equal(modeLabel(mode), 'NV12 1920×1080 @ 30 fps')
   assert.equal(modeLabel({ ...mode, fps: 59.94 }), 'NV12 1920×1080 @ 59.94 fps')
@@ -347,10 +347,22 @@ test('the masthead board indicator collapses board state into a label and a shor
   const none = boardIndicator({ target: null, status: { state: 'unknown' } })
   assert.equal(none.label, 'No board')
   assert.equal(none.state.short, 'Not selected')
-  const connected = boardIndicator({ target: { label: 'sima@192.168.2.2' }, status: { state: 'connected' } })
-  assert.equal(connected.label, 'sima@192.168.2.2')
+  // The masthead names the machine the way the SDK does; sima@host is a connection string and
+  // stays in the panel.
+  const connected = boardIndicator({
+    target: { label: 'sima@192.168.2.2', mode: 'ssh', source: 'sdk-env', host: '192.168.2.2' },
+    status: { state: 'connected' }
+  })
+  assert.equal(connected.label, 'DevKit: 192.168.2.2')
   assert.equal(connected.state.short, 'Connected')
   assert.equal(connected.state.tone, 'ok')
+  assert.match(connected.title, /^sima@192\.168\.2\.2 — Connected/, 'the full target stays in the tooltip')
+  const manual = boardIndicator({
+    target: { label: 'sima@10.0.0.4', mode: 'ssh', source: 'manual', host: '10.0.0.4' },
+    status: { state: 'connected' }
+  })
+  assert.equal(manual.label, 'Board: 10.0.0.4', 'a hand-entered board is not called a DevKit')
+  assert.equal(boardIndicator({ target: { label: 'This board', mode: 'local', source: 'on-board' }, status: null }).label, 'This board')
   const failed = boardIndicator({ target: { label: 'This board' }, status: { state: 'error' } })
   assert.equal(failed.state.short, 'Error')
   assert.equal(failed.state.label, 'Connection failed', 'the card keeps the long label')
@@ -390,10 +402,10 @@ test('only an enabled sub-tab can be selected', () => {
 
 test('blocked export formats collapse into one line', () => {
   assert.equal(blockedFormatSummary(formatOptions(imx477)), '')
-  assert.equal(blockedFormatSummary(formatOptions(imx568)), '1 format cannot be exported (RGB888)')
+  assert.equal(blockedFormatSummary(formatOptions(imx568)), '1 format cannot be used (RGB888)')
   assert.equal(
     blockedFormatSummary([{ value: 'A', disabled: true }, { value: 'B', disabled: true }, { value: 'C', disabled: false }]),
-    '2 formats cannot be exported (A, B)'
+    '2 formats cannot be used (A, B)'
   )
 })
 

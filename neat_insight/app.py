@@ -201,8 +201,23 @@ def _format_browser_https_url(host, port, path="", query=""):
     return f"{url}?{query}" if query else url
 
 
-def _build_devkit_shell_payload():
+def _shell_target():
+    """The board the shell should open on: the one Insight is using, not a separate env var.
+
+    Falls back to DEVKIT_SYNC_DEVKIT_IP so a board that was never selected still has a shell.
+    """
+    try:
+        target = board.get_board_manager().target()
+    except Exception:  # noqa: BLE001 - the shell must not depend on board resolution succeeding
+        target = None
+    if target is not None and target.mode == "ssh" and target.host:
+        return target.host, target.port or 22, target.user or DEFAULT_DEVKIT_SSH_USERNAME
     devkit_ip = get_devkit_sync_devkit_ip()
+    return (devkit_ip, 22, DEFAULT_DEVKIT_SSH_USERNAME) if devkit_ip else (None, 22, DEFAULT_DEVKIT_SSH_USERNAME)
+
+
+def _build_devkit_shell_payload():
+    devkit_ip, ssh_port, ssh_user = _shell_target()
     configured = bool(devkit_ip)
     webssh_port = get_webssh_port()
     webssh_host_port = _resolve_webssh_host_port()
@@ -213,8 +228,8 @@ def _build_devkit_shell_payload():
         params = urllib.parse.urlencode(
             {
                 "hostname": devkit_ip,
-                "port": 22,
-                "username": DEFAULT_DEVKIT_SSH_USERNAME,
+                "port": ssh_port,
+                "username": ssh_user,
                 "password": password_b64,
                 "title": f"DevKit {devkit_ip}",
             }

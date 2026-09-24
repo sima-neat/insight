@@ -5,6 +5,7 @@ import unittest
 import unittest.mock as mock
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55579")
 
@@ -166,7 +167,7 @@ class ViewerUrlTests(unittest.TestCase):
         ]
 
         with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"), \
+             mock.patch.object(app_module, "_shell_target", return_value=("10.42.0.175", 22, "sima")), \
              mock.patch.object(app_module, "webssh_is_available", return_value=True), \
              mock.patch.object(app_module, "is_webssh_running", return_value=False):
             response = self.client.get("/api/devkit-shell", headers={"Host": "10.0.0.23:20710"})
@@ -177,6 +178,20 @@ class ViewerUrlTests(unittest.TestCase):
         self.assertEqual(payload["webssh_host_port"], 26228)
         self.assertTrue(payload["launch_url"].startswith("https://10.0.0.23:26228/?"))
         self.assertIn("hostname=10.42.0.175", payload["launch_url"])
+
+    def test_the_shell_opens_on_the_selected_board_not_the_sdk_env(self):
+        """One control owns the board, so its shell must follow the board that control selected."""
+        target = SimpleNamespace(mode="ssh", source="manual", host="10.0.0.9", port=2222, user="dev")
+        manager = SimpleNamespace(target=lambda: target)
+        with mock.patch.object(app_module.board, "get_board_manager", return_value=manager), \
+             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
+            self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev"))
+
+        # Insight running on the board itself has no shell of its own to open; the SDK's DevKit stands in.
+        local = SimpleNamespace(mode="local", source="on-board", host=None, port=None, user=None)
+        with mock.patch.object(app_module.board, "get_board_manager", return_value=SimpleNamespace(target=lambda: local)), \
+             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
+            self.assertEqual(app_module._shell_target(), ("10.42.0.175", 22, "sima"))
 
     def test_devkit_shell_url_preserves_ipv6_host(self):
         ports = [

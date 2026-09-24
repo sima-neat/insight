@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import PreviewPane from './PreviewPane.jsx'
 import {
   availabilityInfo,
@@ -95,58 +94,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
   )
 }
 
-function ExportPanel({ camera, state, onCopy, onDownload, onRetry }) {
-  const [activeTab, setActiveTab] = useState('')
-  if (state.status === 'error') {
-    return (
-      <ErrorNotice error={state.error}>
-        <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>
-      </ErrorNotice>
-    )
-  }
-  const data = state.data?.camera_id === camera.id ? state.data : null
-  if (!data) return state.status === 'loading' ? <p className="hint" role="status">Preparing configuration…</p> : null
-  const busy = state.status === 'loading'
-  const { support, warnings = [], exports = [] } = data
-  const current = exports.find((item) => item.id === activeTab) || exports[0]
-  const coreUnsupported = camera.connection === 'usb' || support?.tier === 'unsupported'
-
-  return (
-    <div className="periph-export" aria-busy={busy}>
-      {coreUnsupported && (
-        <Callout tone="danger" title="Not a Core CameraInput config">
-          <p>
-            {support?.reason || 'Core CameraInput supports MIPI (libcamera) cameras only.'} This descriptor records the device and
-            mode for your own capture code; Neat applications cannot open it with CameraInput.
-          </p>
-          <SupportLinks links={support?.links} />
-        </Callout>
-      )}
-      {warnings.length > 0 && (
-        <ul className="periph-warnings">
-          {warnings.map((warning, index) => <li key={index}>{warning}</li>)}
-        </ul>
-      )}
-      <div className="periph-export-tabs" role="group" aria-label="Configuration format">
-        {exports.map((item) => (
-          <button key={item.id} type="button" aria-pressed={item.id === current?.id} onClick={() => setActiveTab(item.id)}>
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {current && (
-        <>
-          <pre className="periph-code" tabIndex={0} aria-label={`${current.label} configuration`}><code>{current.content}</code></pre>
-          <div className="periph-actions">
-            <button type="button" className="btn-tonal" onClick={() => onCopy(current)} disabled={busy}>Copy</button>
-            <button type="button" className="btn-ghost" onClick={() => onDownload(current)} disabled={busy}>Download {current.filename}</button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
 export default function CameraDetail({
   camera,
   stale,
@@ -157,13 +104,7 @@ export default function CameraDetail({
   preview,
   onStartPreview,
   onStopPreview,
-  exportState,
-  onCopy,
-  onDownload,
-  onRetryExport,
-  onOpenBoardPanel,
-  integrationOpen,
-  onIntegrationToggle
+  onOpenBoardPanel
 }) {
   const availability = availabilityInfo(camera.availability)
   const tier = tierInfo(camera.support?.tier)
@@ -223,19 +164,6 @@ export default function CameraDetail({
         onStop={onStopPreview}
         onOpenBoardPanel={onOpenBoardPanel}
       />
-
-      <details
-        className="periph-integration"
-        open={integrationOpen}
-        onToggle={(event) => onIntegrationToggle?.(event.currentTarget.open)}
-      >
-        <summary>View integration code</summary>
-        {stale ? (
-          <p className="hint">The board changed after this scan. Refresh to build a configuration for the current board.</p>
-        ) : (
-          <ExportPanel camera={camera} state={exportState} onCopy={onCopy} onDownload={onDownload} onRetry={onRetryExport} />
-        )}
-      </details>
     </section>
   )
 }

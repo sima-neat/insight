@@ -10,7 +10,10 @@ export default function BoardPanel({
   onReload,
   onStatus,
   onError,
-  onClose
+  onClose,
+  shell = null,
+  shellBusy = false,
+  onOpenShell
 }) {
   const cardRef = useRef(null)
   const closeRef = useRef(null)
@@ -83,6 +86,9 @@ export default function BoardPanel({
             onReload={onReload}
             onStatus={onStatus}
             onError={onError}
+            shell={shell}
+            shellBusy={shellBusy}
+            onOpenShell={onOpenShell}
           />
         </div>
       </div>

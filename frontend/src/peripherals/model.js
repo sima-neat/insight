@@ -82,7 +82,12 @@ export function boardIndicator(board) {
     }
   }
   const state = connectionStateInfo(board.status)
-  return { label: target.label, state, title: `${target.label} — ${state.label}. Open board settings.` }
+  // One control names the board and its state. "sima@host" is the connection string, which belongs
+  // in the panel; the masthead says which machine, in the words the rest of the SDK uses for it.
+  const label = target.mode === 'local'
+    ? 'This board'
+    : `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`
+  return { label, state, title: `${target.label} — ${state.label}. Open board settings.` }
 }
 
 export function availabilityInfo(availability) {
@@ -231,10 +236,10 @@ export function modeLabel(selection) {
 export function formatOptions(camera) {
   return (camera?.formats || []).map((f) => {
     const selectable = isSelectable(f)
-    const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be exported.')
+    const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
     return {
       value: f.format,
-      label: `${f.label || f.format} — ${selectable ? tierInfo(f.support?.tier).short : 'not exportable'}`,
+      label: `${f.label || f.format} — ${selectable ? tierInfo(f.support?.tier).short : 'not usable'}`,
       disabled: !selectable,
       reason: selectable ? '' : reason,
       range: f.range || null
@@ -265,7 +270,7 @@ export function cameraSummaryLine(camera) {
   const availability = availabilityInfo(camera?.availability)
   const tier = camera?.support?.tier
   if (camera?.availability?.state === 'in_use') {
-    return `${availability.label}. Stop that process on the board before an application opens this camera; exporting a configuration still works.`
+    return `${availability.label}. Stop that process on the board before an application, or a preview here, can open this camera.`
   }
   if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
@@ -279,8 +284,8 @@ export function blockedFormatSummary(options) {
   if (!blocked.length) return ''
   const names = blocked.map((option) => option.value).join(', ')
   return blocked.length === 1
-    ? `1 format cannot be exported (${names})`
-    : `${blocked.length} formats cannot be exported (${names})`
+    ? `1 format cannot be used (${names})`
+    : `${blocked.length} formats cannot be used (${names})`
 }
 
 export function selectionTier(camera, selection) {

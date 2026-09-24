@@ -36,7 +36,10 @@ export default function BoardTargetCard({
   onRetry,
   onReload,
   onStatus,
-  onError
+  onError,
+  shell = null,
+  shellBusy = false,
+  onOpenShell
 }) {
   const target = board?.target || null
   const [editing, setEditing] = useState(false)
@@ -122,9 +125,23 @@ export default function BoardTargetCard({
         </div>
         {target && (
           <div className="periph-actions">
-            <button type="button" className="btn-tonal" onClick={testConnection} disabled={Boolean(busy)}>
-              {busy === 'test' ? 'Testing…' : 'Test connection'}
-            </button>
+            {onOpenShell && shell?.configured && (
+              <button
+                type="button"
+                className="btn-tonal"
+                onClick={onOpenShell}
+                disabled={shellBusy || !shell.available}
+                title={shell.available ? undefined : 'webssh is not installed in this Insight environment'}
+              >
+                {shellBusy ? 'Opening shell…' : 'Open shell'}
+              </button>
+            )}
+            {/* A board that just answered needs no test; the button is for when it did not. */}
+            {state.tone !== 'ok' && (
+              <button type="button" className="btn-tonal" onClick={testConnection} disabled={Boolean(busy)}>
+                {busy === 'test' ? 'Testing…' : 'Test connection'}
+              </button>
+            )}
             <button type="button" className="btn-ghost" aria-expanded={formOpen} onClick={() => setEditing(!editing)}>
               Change board
             </button>
