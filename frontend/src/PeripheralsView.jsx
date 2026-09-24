@@ -274,16 +274,14 @@ export default function PeripheralsView({
       const latestSelection = selectionRef.current
       if (sessionMatches(data.session, activeIdRef.current, boardGenerationRef.current, latestSelection)) {
         dispatchPreview({ type: 'session', session: data.session })
-      } else {
-        const stopped = await stopPreview(data.session?.id, data.session)
+      } else if (await stopPreview(data.session?.id, data.session)) {
         if (
-          stopped &&
           activeIdRef.current === camera.id &&
           latestSelection?.id === camera.id &&
           !sameSelection(data.session?.mode, latestSelection)
         ) {
           await startPreview(latestSelection)
-        } else if (stopped) {
+        } else {
           dispatchPreview({ type: 'reset' })
         }
       }
