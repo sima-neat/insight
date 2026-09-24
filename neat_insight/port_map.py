@@ -4,6 +4,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -20,6 +21,55 @@ def request_host_name(host_header: str) -> str:
         if maybe_port.isdigit():
             host = name
     return host or "127.0.0.1"
+
+
+_HOST_LABEL = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$")
+
+
+def browser_host(host_header) -> Optional[str]:
+    """The hostname from a Host header when it is a plain hostname or IP literal, else None.
+
+    A viewer URL built from the Host header points the browser at that origin, so anything but
+    `name[:port]`, `a.b.c.d[:port]` or `[v6][:port]` is refused rather than echoed into a URL.
+    """
+    host = str(host_header or "").strip()
+    if not host:
+        return None
+    port = None
+    if host.startswith("["):
+        end = host.find("]")
+        if end < 0:
+            return None
+        name, rest = host[1:end], host[end + 1:]
+        if rest:
+            if not rest.startswith(":"):
+                return None
+            port = rest[1:]
+        try:
+            if ipaddress.ip_address(name).version != 6:
+                return None
+        except ValueError:
+            return None
+    else:
+        name = host
+        if ":" in host:
+            name, port = host.rsplit(":", 1)
+            if ":" in name:
+                return None
+        if not _is_hostname(name):
+            return None
+    if port is not None and not (port.isdigit() and valid_port(port)):
+        return None
+    return name
+
+
+def _is_hostname(name: str) -> bool:
+    try:
+        return ipaddress.ip_address(name).version == 4
+    except ValueError:
+        pass
+    labels = name[:-1].split(".") if name.endswith(".") else name.split(".")
+    return 0 < len(name) <= 253 and all(_HOST_LABEL.match(label) for label in labels)
 
 
 def format_browser_https_url(host, port, path="", query=""):

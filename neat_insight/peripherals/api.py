@@ -7,9 +7,9 @@ from flask import Blueprint, request
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.peripherals import export
 from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
-from neat_insight.peripherals.preview import PreviewManager, require_camera_free
+from neat_insight.peripherals.preview import PreviewManager, require_camera_free, viewer_url
 from neat_insight.peripherals.probe import BUDGET_SEC, SCHEMA
-from neat_insight.port_map import request_host_name
+from neat_insight.port_map import browser_host
 
 peripherals_bp = Blueprint("peripherals", __name__)
 
@@ -119,7 +119,22 @@ def export_camera():
 
 
 def _preview_host() -> str:
-    return request_host_name(request.host)
+    """The requesting browser's host, validated before it goes into a viewer URL."""
+    host = browser_host(request.host)
+    if host is None:
+        raise BoardError(
+            "invalid_request",
+            "Insight cannot build a viewer link for this request's Host header.",
+            hint="Open Insight by its hostname or IP address.",
+        )
+    return host
+
+
+def _for_browser(preview_session, host: str):
+    """Add the viewer URL for this browser; the shared session never stores one."""
+    if preview_session is None:
+        return None
+    return {**preview_session, "viewer_url": viewer_url(host, preview_session["channel"])}
 
 
 def _camera_or_404(session, camera_id: str):
@@ -145,11 +160,12 @@ def _camera_or_404(session, camera_id: str):
 def get_preview():
     """Return the current preview session for the selected board, or null; never contacts the board."""
     try:
+        host = _preview_host()
         session = get_board_manager().session()
     except BoardError as err:
         return err.to_dict(), err.status
     previews.stop_stale()
-    return {"session": previews.current(session.generation)}
+    return {"session": _for_browser(previews.current(session.generation), host)}
 
 
 # API: start an explicit, temporary camera preview on the selected board.
@@ -159,6 +175,7 @@ def start_preview():
     body = request.get_json(silent=True)
     body = body if isinstance(body, dict) else {}
     try:
+        host = _preview_host()
         session = get_board_manager().session()
         item = _camera_or_404(session, str(body.get("id") or ""))
         require_camera_free(item)
@@ -172,7 +189,7 @@ def start_preview():
                 "This camera has no mode Insight can preview.",
                 hint="Refresh; if the camera reports no usable modes, the errors on the camera say why.",
             )
-        return {"session": previews.start(session, item, mode, _preview_host())}
+        return {"session": _for_browser(previews.start(session, item, mode), host)}
     except BoardError as err:
         return err.to_dict(), err.status
 
@@ -182,8 +199,9 @@ def start_preview():
 def heartbeat_preview(session_id):
     """Extend the preview; without heartbeats the board-side worker stops capture on its own."""
     try:
+        host = _preview_host()
         session = get_board_manager().session()
-        return {"session": previews.heartbeat(session, session_id)}
+        return {"session": _for_browser(previews.heartbeat(session, session_id), host)}
     except BoardError as err:
         return err.to_dict(), err.status
 
@@ -193,7 +211,8 @@ def heartbeat_preview(session_id):
 def stop_preview(session_id):
     """Stop capture on the board; an older session id cannot stop a newer session."""
     try:
+        host = _preview_host()
         session = get_board_manager().session()
-        return {"session": previews.stop(session, session_id)}
+        return {"session": _for_browser(previews.stop(session, session_id), host)}
     except BoardError as err:
         return err.to_dict(), err.status

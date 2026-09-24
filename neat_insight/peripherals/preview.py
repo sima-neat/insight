@@ -190,7 +190,9 @@ class PreviewManager:
                 return None
             return dict(session)
 
-    def start(self, session_ctx, item: dict, mode: dict, request_host: str) -> dict:
+    def start(self, session_ctx, item: dict, mode: dict) -> dict:
+        """Start capture. The session is shared by every browser, so it holds no viewer URL: each
+        response builds one from its own request's host with `viewer_url`."""
         self.stop_stale()
         # Starting takes seconds of board work. Claim the slot before doing any of it, or a second
         # request slips through the gap and opens the same camera twice.
@@ -219,14 +221,14 @@ class PreviewManager:
             self._starting = True
             self._starting_camera = item["id"]
         try:
-            return self._start_locked(session_ctx, item, mode, request_host)
+            return self._start_locked(session_ctx, item, mode)
         finally:
             with self._lock:
                 self._starting = False
                 self._starting_camera = None
                 self._condition.notify_all()
 
-    def _start_locked(self, session_ctx, item: dict, mode: dict, request_host: str) -> dict:
+    def _start_locked(self, session_ctx, item: dict, mode: dict) -> dict:
         self._stop_current(session_ctx)
         _require_previewable(item, mode)
         channel = self._reserve_channel(session_ctx)
@@ -240,7 +242,6 @@ class PreviewManager:
             "camera_id": item["id"],
             "mode": mode,
             "channel": channel,
-            "viewer_url": _viewer_url(request_host, channel),
             "generation": session_ctx.generation,
             "started_at": _iso(_now()),
             "expires_at": _iso(_now() + timedelta(seconds=SESSION_TTL_SEC)),
@@ -580,12 +581,13 @@ def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
     ]
 
 
-def _viewer_url(request_host: str, channel: int) -> str:
+def viewer_url(host: str, channel: int) -> str:
+    """The viewer link for one browser; `host` must come from `port_map.browser_host`."""
     # embed=1 asks the viewer for the bare video surface: no page controls, no channel banner, no
     # settings. There is one camera here and Insight chose its channel, so none of that can be acted on.
     query = f"mode=light&src={channel}&max_channels={VIDEO_CHANNELS}&embed=1"
     return port_map.format_browser_https_url(
-        request_host,
+        host,
         video_ui_port(),
         "/static/viewer.html",
         query,

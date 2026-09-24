@@ -802,6 +802,7 @@
         "operationId": "getCameraPreview",
         "responses": {
           "200": {"description": "The current preview session, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"oneOf": [{"$ref": "#/components/schemas/PreviewSession"}, {"type": "null"}]}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
@@ -832,6 +833,7 @@
         "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {
           "200": {"description": "The extended session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "404": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -848,6 +850,7 @@
         "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {
           "200": {"description": "The stopped session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "404": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -1384,7 +1387,7 @@
           "camera_id": {"type": "string"},
           "mode": {"type": "object", "properties": {"format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}},
           "channel": {"type": "integer", "description": "Reserved viewer channel; never one already receiving video."},
-          "viewer_url": {"type": "string", "format": "uri", "description": "Existing vf viewer URL for that channel."},
+          "viewer_url": {"type": "string", "format": "uri", "description": "Existing vf viewer URL for that channel, built for the host this request used. It is not stored with the shared session, so each browser receives a URL for its own origin; a Host header that is not a hostname or IP literal is refused with 400."},
           "generation": {"type": "integer"},
           "started_at": {"type": "string", "format": "date-time"},
           "expires_at": {"type": "string", "format": "date-time", "description": "Without a heartbeat before this, the board stops capture."},

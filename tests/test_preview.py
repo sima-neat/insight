@@ -106,15 +106,17 @@ class PreviewManagerTests(unittest.TestCase):
 
     def start(self, session=None, item=None, mode=None):
         session = session or fake_session()
-        return session, self.manager.start(session, item or camera_item(), mode or dict(MODE), "insight.local")
+        return session, self.manager.start(session, item or camera_item(), mode or dict(MODE))
 
     def test_start_launches_the_pipeline_and_reserves_a_channel(self):
         session, started = self.start()
         self.assertEqual((started["camera_id"], started["state"], started["channel"]), (CAMERA_ID, "live", 3))
-        self.assertIn("src=3", started["viewer_url"])
+        self.assertNotIn("viewer_url", started)  # built per request; see PreviewViewerUrlTests
+        url = preview.viewer_url("insight.local", started["channel"])
+        self.assertIn("src=3", url)
         # The pane shows video only: without embed=1 the iframe carries the viewer's whole toolbar.
-        self.assertIn("embed=1", started["viewer_url"])
-        self.assertTrue(started["viewer_url"].startswith("https://insight.local:8081/static/viewer.html"))
+        self.assertIn("embed=1", url)
+        self.assertTrue(url.startswith("https://insight.local:8081/static/viewer.html"))
         launched = "\n".join(session.transport.commands())
         self.assertIn(f"camera-name={IMX477}", launched)
         self.assertIn("neatencoder", launched)
@@ -165,7 +167,7 @@ class PreviewManagerTests(unittest.TestCase):
     def test_second_preview_is_refused_while_one_runs(self):
         session, _ = self.start()
         with self.assertRaises(BoardError) as ctx:
-            self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+            self.manager.start(session, camera_item(), dict(MODE))
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("preview_active", 409))
 
     def test_worker_failure_reports_the_board_output_and_cleans_up(self):
@@ -315,7 +317,7 @@ class PreviewVideoArrivalTests(unittest.TestCase):
         session = fake_session()
         with mock.patch.object(preview, "active_channels", side_effect=[set(), set(), {3}]), \
                 mock.patch.object(preview, "_channel_packets", return_value=None):
-            started = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+            started = self.manager.start(session, camera_item(), dict(MODE))
         self.assertEqual(started["channel"], 3)
         self.assertIsNotNone(self.manager.current(1))
 
@@ -323,7 +325,7 @@ class PreviewVideoArrivalTests(unittest.TestCase):
         session = fake_session()
         with mock.patch.object(preview, "active_channels", return_value=set()):
             with self.assertRaises(BoardError) as ctx:
-                self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+                self.manager.start(session, camera_item(), dict(MODE))
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("no_video", 502))
         self.assertIn("firewall", ctx.exception.hint)
         self.assertIsNone(self.manager.current(1))
@@ -332,7 +334,7 @@ class PreviewVideoArrivalTests(unittest.TestCase):
     def test_a_remote_board_without_a_published_range_is_refused(self):
         with mock.patch.object(preview, "port_map_video_range", return_value=None):
             with self.assertRaises(BoardError) as ctx:
-                self.manager.start(fake_session(), camera_item(), dict(MODE), "insight.local")
+                self.manager.start(fake_session(), camera_item(), dict(MODE))
         self.assertEqual(ctx.exception.code, "no_channel")
         self.assertIn("neat --json", ctx.exception.hint)
 
@@ -434,6 +436,65 @@ class PreviewApiTests(unittest.TestCase):
         self.assertTrue(response.get_json()["session"]["viewer_url"].startswith("https://[fd00::23]:"))
 
 
+class PreviewViewerUrlTests(unittest.TestCase):
+    """The session is shared by every browser; its viewer URL must not be."""
+
+    setUp = PreviewApiTests.setUp
+    seed_scan = PreviewApiTests.seed_scan
+
+    def start_from(self, host):
+        return self.client.post("/api/peripherals/cameras/preview", json={"id": CAMERA_ID}, headers={"Host": host})
+
+    def test_a_forged_host_is_not_handed_to_other_browsers(self):
+        self.seed_scan()
+        forged = self.start_from("attacker.example")
+        self.assertEqual(forged.status_code, 200)
+        session_id = forged.get_json()["session"]["id"]
+        self.assertNotIn("viewer_url", api.previews._session)
+        for action in ("", f"/{session_id}/heartbeat"):
+            with self.subTest(action=action or "get"):
+                if action:
+                    response = self.client.post(f"/api/peripherals/cameras/preview{action}",
+                                                headers={"Host": "insight.local:9900"})
+                else:
+                    response = self.client.get("/api/peripherals/preview", headers={"Host": "insight.local:9900"})
+                url = response.get_json()["session"]["viewer_url"]
+                self.assertTrue(url.startswith("https://insight.local:"), url)
+                self.assertNotIn("attacker", url)
+
+    def test_each_browser_gets_a_url_for_the_host_it_used(self):
+        self.seed_scan()
+        self.start_from("localhost:9900")
+        by_ip = self.client.get("/api/peripherals/preview", headers={"Host": "192.168.2.10:9900"})
+        self.assertTrue(by_ip.get_json()["session"]["viewer_url"].startswith("https://192.168.2.10:"))
+
+    def test_a_host_that_is_not_a_hostname_or_ip_is_refused(self):
+        self.seed_scan()
+        for host in ("evil.example/x", "evil.example:80:81", "a b", "evil.example:0", "[not-v6]:1", "@evil"):
+            with self.subTest(host=host):
+                response = self.start_from(host)
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+        self.assertIsNone(api.previews._session)
+        self.assertEqual(self.transport.calls, [])
+
+
+class BrowserHostTests(unittest.TestCase):
+    def test_hostnames_and_ip_literals_pass_with_or_without_a_port(self):
+        from neat_insight import port_map
+        cases = {"insight.local": "insight.local", "localhost:9900": "localhost", "10.0.0.5:9900": "10.0.0.5",
+                 "[fd00::23]:19900": "fd00::23", "[::1]": "::1", "devkit_1.lan": "devkit_1.lan"}
+        for header, expected in cases.items():
+            with self.subTest(header=header):
+                self.assertEqual(port_map.browser_host(header), expected)
+
+    def test_anything_else_is_refused(self):
+        from neat_insight import port_map
+        for header in ("", "evil.example/x", "a b", "evil:1:2", "evil:99999", "evil:+80", "[1.2.3.4]:80",
+                       "[::1]x", "-bad.example", "evil\"onload=", "x" * 300):
+            with self.subTest(header=header):
+                self.assertIsNone(port_map.browser_host(header))
+
+
 class PreviewOwnershipTests(unittest.TestCase):
     """A preview belongs to the board that runs it, and to the id that started it."""
 
@@ -451,9 +512,9 @@ class PreviewOwnershipTests(unittest.TestCase):
 
     def test_a_preview_is_stopped_on_the_board_that_is_running_it(self):
         board_a = fake_session(generation=1)
-        started = self.manager.start(board_a, camera_item(), dict(MODE), "insight.local")
+        started = self.manager.start(board_a, camera_item(), dict(MODE))
         board_b = fake_session(generation=2)
-        self.manager.start(board_b, camera_item(), dict(MODE), "insight.local")
+        self.manager.start(board_b, camera_item(), dict(MODE))
         killed_on_a = [cmd for cmd in board_a.transport.commands() if started["id"] in cmd and "kill" in cmd]
         killed_on_b = [cmd for cmd in board_b.transport.commands() if started["id"] in cmd and "kill" in cmd]
         self.assertTrue(killed_on_a, "the first board should have been told to stop its own preview")
@@ -462,10 +523,10 @@ class PreviewOwnershipTests(unittest.TestCase):
     def test_a_stop_in_flight_never_tears_down_the_session_that_replaced_it(self):
         """The stop reached `_stop_current` before a newer session took the slot."""
         session = fake_session()
-        first = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+        first = self.manager.start(session, camera_item(), dict(MODE))
         self.manager._session = None  # the first session ended while the stop was in flight
         self.manager._owner = None
-        second = self.manager.start(session, camera_item(), dict(MODE), "insight.local")
+        second = self.manager.start(session, camera_item(), dict(MODE))
         self.manager._stop_current(session, first["id"])
         self.assertEqual((self.manager.current(1) or {}).get("id"), second["id"])
         self.assertFalse([cmd for cmd in session.transport.commands()
@@ -482,11 +543,11 @@ class PreviewOwnershipTests(unittest.TestCase):
             gate.wait(5)
 
         with mock.patch.object(preview.PreviewManager, "_start_worker", slow_worker):
-            first = threading.Thread(target=lambda: self.manager.start(session, camera_item(), dict(MODE), "h"))
+            first = threading.Thread(target=lambda: self.manager.start(session, camera_item(), dict(MODE)))
             first.start()
             self.assertTrue(worker_entered.wait(2))
             try:
-                self.manager.start(session, camera_item(), dict(MODE), "h")
+                self.manager.start(session, camera_item(), dict(MODE))
             except BoardError as exc:
                 errors.append(exc)
             gate.set()
@@ -504,7 +565,7 @@ class PreviewOwnershipTests(unittest.TestCase):
             worker_gate.wait(5)
 
         with mock.patch.object(preview.PreviewManager, "_start_worker", slow_worker):
-            starter = threading.Thread(target=lambda: self.manager.start(session, camera_item(), dict(MODE), "h"))
+            starter = threading.Thread(target=lambda: self.manager.start(session, camera_item(), dict(MODE)))
             starter.start()
             self.assertTrue(worker_entered.wait(2))
 
@@ -534,7 +595,7 @@ class PreviewStartFailureTests(unittest.TestCase):
                 mock.patch.object(preview, "_channel_packets", return_value=0), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
             with self.assertRaises(BoardError) as ctx:
-                manager.start(session, camera_item(), dict(MODE), "insight.local")
+                manager.start(session, camera_item(), dict(MODE))
         self.assertEqual(ctx.exception.code, "command_failed")
         self.assertIn("doesn't want to pause", ctx.exception.extra.get("detail", ""))
         self.assertIsNone(manager.current(1))
@@ -548,7 +609,7 @@ class PreviewStartFailureTests(unittest.TestCase):
                 mock.patch.object(preview, "_channel_packets", return_value=0), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
             with self.assertRaises(BoardError):
-                manager.start(session, camera_item(), dict(MODE), "insight.local")
+                manager.start(session, camera_item(), dict(MODE))
         setup = next(cmd for cmd in transport.commands() if "worker.sh" in cmd and "mkdir -p" in cmd)
         session_id = setup.split(f"{preview.WORKER_DIR}/", 1)[1].split("/", 1)[0].split()[0]
         removals = [cmd for cmd in transport.commands() if cmd.startswith("sh\n-c\nrm -rf")]
@@ -566,7 +627,7 @@ class PreviewHeartbeatTests(unittest.TestCase):
                 mock.patch.object(preview, "_channel_packets", return_value=0), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)), \
                 mock.patch.object(preview.PreviewManager, "_await_video", lambda *a, **k: None):
-            started = manager.start(session, camera_item(), dict(MODE), "insight.local")
+            started = manager.start(session, camera_item(), dict(MODE))
         transport.worker_alive = False  # the board-side worker died or was cleaned up
         with self.assertRaises(BoardError) as ctx:
             manager.heartbeat(session, started["id"])
@@ -612,7 +673,7 @@ class PreviewModeValidationTests(unittest.TestCase):
         with mock.patch.object(preview, "active_channels", return_value=set()), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
             with self.assertRaises(BoardError) as ctx:
-                manager.start(session, item, {**MODE, "fps": 59.94}, "insight.local")
+                manager.start(session, item, {**MODE, "fps": 59.94})
         self.assertEqual(ctx.exception.code, "invalid_request")
         self.assertFalse([cmd for cmd in session.transport.commands() if "gst-launch" in cmd])
 
@@ -684,7 +745,7 @@ class ActiveChannelTests(unittest.TestCase):
         with mock.patch.object(preview, "active_channels", return_value=None), \
                 mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
             with self.assertRaises(BoardError) as ctx:
-                manager.start(fake_session(), camera_item(), dict(MODE), "insight.local")
+                manager.start(fake_session(), camera_item(), dict(MODE))
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("viewer_unavailable", 502))
 
 
