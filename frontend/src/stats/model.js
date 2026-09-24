@@ -89,7 +89,8 @@ const RUN_FIELDS = {
   tags: ['tags', 'labels'],
   samples: ['samples', 'sample_count', 'sample_counts', 'count'],
   durationSec: ['duration_sec', 'duration_s', 'duration_seconds', 'elapsed_sec', 'elapsed_s'],
-  durationMs: ['duration_ms', 'elapsed_ms']
+  durationMs: ['duration_ms', 'elapsed_ms'],
+  energyJoules: ['energy_joules', 'energy_j']
 }
 
 function pick(source, keys) {
@@ -435,6 +436,9 @@ export function runList(payload) {
         startedAt: pick(source, RUN_FIELDS.startedAt),
         endedAt: pick(source, RUN_FIELDS.endedAt),
         durationSec: durationOf(source),
+        // Sentinel is power telemetry, and this is the number a run is judged on. It is
+        // in every /runs entry, so it belongs in the list, not only in a comparison.
+        energyJoules: pick(source, RUN_FIELDS.energyJoules),
         samples: pick(source, RUN_FIELDS.samples),
         note: pick(source, RUN_FIELDS.note),
         tags: Array.isArray(tags) ? tags.map(String) : [],
@@ -451,6 +455,7 @@ export function runSubtitle(run, now) {
   if (run.startedAt) parts.push(`started ${formatRelativeTime(run.startedAt, now)}`)
   const duration = formatSeconds(run.durationSec)
   if (duration) parts.push(duration)
+  if (isNumber(run.energyJoules)) parts.push(formatValue(run.energyJoules, 'J'))
   if (isNumber(run.samples)) parts.push(`${run.samples} samples`)
   return parts.join(' · ')
 }

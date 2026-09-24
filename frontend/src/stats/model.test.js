@@ -293,6 +293,33 @@ test('run summaries survive the field names the daemon happens to use', () => {
   assert.equal(runSubtitle({ label: 'x' }, Date.now()), '')
 })
 
+test('a run carries the energy Sentinel measured for it, not only its duration', () => {
+  // /api/sentinel/runs on the DevKit, verbatim: every entry reports energy_joules, and
+  // Sentinel is power telemetry, so that is the number a run is judged on. It was only
+  // reachable by selecting two runs and comparing them.
+  const runs = runList({
+    sentinel: {
+      runs: [
+        {
+          id: '20260923T152712.952Z-insight-hw-1790177227',
+          name: 'insight-hw-1790177227',
+          started_at: '2026-09-23T15:27:12.952702307Z',
+          ended_at: '2026-09-23T15:27:19.620064802Z',
+          duration_ms: 6667,
+          energy_joules: 51.533604984375,
+          samples: 4
+        },
+        { id: 'r2', name: 'no-energy', duration_ms: 1000, samples: 2 }
+      ]
+    }
+  })
+  assert.equal(runs[0].energyJoules, 51.533604984375)
+  assert.match(runSubtitle(runs[0], Date.parse('2026-09-23T15:28:00Z')), / · 6.7 s · 51.5 J · 4 samples$/)
+  // A daemon that reports no energy says nothing about it rather than reading as 0 J.
+  assert.equal(runs[1].energyJoules, null)
+  assert.equal(runSubtitle(runs[1], Date.now()), '1 s · 2 samples')
+})
+
 test('an unknown body is flattened into bounded label/value rows, never raw JSON', () => {
   const rows = factRows({
     id: 'r1',
