@@ -2088,7 +2088,7 @@ export default function App() {
                         <p className="section-note">Select metrics to visualize profiling trends.</p>
                       </div>
                     </div>
-  
+
                     <div className="profile-filter-bar">
                       {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
                       {availableProfileKeys.map((key) => {
@@ -2110,16 +2110,16 @@ export default function App() {
                         )
                       })}
                     </div>
-  
+
                     <div className="series-grid">
                       {selectedProfileSeries.length === 0 && (
                         <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
-                  )}
-                  {selectedProfileSeries.map((key) => (
-                    <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
-                  ))}
-                </div>
-              </section>
+                      )}
+                      {selectedProfileSeries.map((key) => (
+                        <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
+                      ))}
+                    </div>
+                  </section>
                 )}
               />
             </Suspense>
