@@ -136,6 +136,13 @@ body {
 }
 
 .auxiliary-panel {
+  --auxiliary-panel-background: rgba(15, 23, 42, 0.84);
+  --auxiliary-header-background: rgba(2, 6, 23, 0.74);
+  --auxiliary-tabs-background: rgba(15, 23, 42, 0.64);
+  --auxiliary-content-glow: rgba(14, 165, 233, 0.07);
+  --auxiliary-content-top: rgba(15, 23, 42, 0.25);
+  --auxiliary-content-bottom: rgba(2, 6, 23, 0.52);
+  --auxiliary-controls-background: rgba(2, 6, 23, 0.78);
   position: absolute;
   top: 8px;
   right: 8px;
@@ -147,7 +154,7 @@ body {
   aspect-ratio: 1 / 1;
   overflow: hidden;
   color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.92);
+  background: var(--auxiliary-panel-background);
   border: 1px solid rgba(125, 211, 252, 0.34);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.04);
@@ -159,10 +166,19 @@ body {
 }
 
 .auxiliary-panel-expanded {
+  --auxiliary-panel-background: rgba(2, 6, 23, 0.16);
+  --auxiliary-header-background: rgba(2, 6, 23, 0.54);
+  --auxiliary-tabs-background: rgba(2, 6, 23, 0.46);
+  --auxiliary-content-glow: rgba(14, 165, 233, 0.035);
+  --auxiliary-content-top: rgba(15, 23, 42, 0.04);
+  --auxiliary-content-bottom: rgba(2, 6, 23, 0.12);
+  --auxiliary-controls-background: rgba(2, 6, 23, 0.54);
   inset: 8px 8px 38px 8px;
   width: auto;
   max-width: none;
   aspect-ratio: auto;
+  border-color: rgba(125, 211, 252, 0.24);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), inset 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .auxiliary-panel-collapsed {
@@ -189,7 +205,7 @@ body {
   min-height: 28px;
   padding: 3px 4px 3px 9px;
   gap: 4px;
-  background: rgba(2, 6, 23, 0.78);
+  background: var(--auxiliary-header-background);
   border-bottom: 1px solid rgba(148, 163, 184, 0.28);
 }
 
@@ -248,7 +264,7 @@ body {
   display: flex;
   flex: 0 0 auto;
   overflow-x: auto;
-  background: rgba(15, 23, 42, 0.7);
+  background: var(--auxiliary-tabs-background);
   border-bottom: 1px solid rgba(148, 163, 184, 0.22);
 }
 
@@ -272,8 +288,8 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   background:
-    radial-gradient(circle at 50% 42%, rgba(14, 165, 233, 0.09), transparent 55%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.35), rgba(2, 6, 23, 0.62));
+    radial-gradient(circle at 50% 42%, var(--auxiliary-content-glow), transparent 55%),
+    linear-gradient(180deg, var(--auxiliary-content-top), var(--auxiliary-content-bottom));
 }
 
 .auxiliary-panel-content canvas {
@@ -301,7 +317,7 @@ body {
   overflow: hidden;
   flex-wrap: wrap;
   gap: 5px 8px;
-  background: rgba(2, 6, 23, 0.86);
+  background: var(--auxiliary-controls-background);
   border-top: 1px solid rgba(148, 163, 184, 0.28);
   font-size: 10px;
   white-space: nowrap;
