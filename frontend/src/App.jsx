@@ -709,6 +709,11 @@ export default function App() {
   const [mediaFilter, setMediaFilter] = useState('')
   const [sources, setSources] = useState([])
   const [webcamDevices, setWebcamDevices] = useState([])
+  // Explicit camera opt-in lives on the Media Sources tab (a camera is a kind
+  // of media source). Requesting access from a real button click is also the
+  // user gesture Chrome needs to expose Continuity Camera (an iPhone).
+  const [cameraProbing, setCameraProbing] = useState(false)
+  const [cameraError, setCameraError] = useState(null)
   const [webcamAssignments, setWebcamAssignments] = useState({})
   const [webcamBusy, setWebcamBusy] = useState({})
   const [webcamPreviewStream, setWebcamPreviewStream] = useState(null)
@@ -1000,8 +1005,8 @@ export default function App() {
 
   useEffect(() => {
     if (!navigator.mediaDevices?.enumerateDevices) return
-    // Only reflects devices already permitted; a fresh grant still needs the
-    // explicit "Detect webcam" getUserMedia() prompt to populate labels.
+    // Lists devices already permitted; labels stay blank until access is
+    // granted, which the Streaming-tab effect below prompts for.
     refreshWebcamDevices()
     navigator.mediaDevices.addEventListener('devicechange', refreshWebcamDevices)
     return () => navigator.mediaDevices.removeEventListener('devicechange', refreshWebcamDevices)
@@ -1625,6 +1630,28 @@ export default function App() {
     if (clearAssignments) setWebcamAssignments({})
   }
 
+  // Media Sources opt-in: an explicit click asks the browser for camera access
+  // and lists what it found. Being a real user gesture is what makes Chrome
+  // reveal Continuity Camera (an iPhone), which a background probe does not.
+  // Doubles as a re-scan when a camera is plugged in later.
+  async function enableCameraAccess() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('This browser cannot access cameras.')
+      return
+    }
+    setCameraError(null)
+    setCameraProbing(true)
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+      probe.getTracks().forEach((track) => track.stop())
+      await refreshWebcamDevices()
+    } catch (e) {
+      setCameraError(describeWebcamError(e))
+    } finally {
+      setCameraProbing(false)
+    }
+  }
+
   async function refreshWebcamDevices() {
     let devices
     try {
@@ -1667,16 +1694,6 @@ export default function App() {
     if (lostSessions.length) await loadSources().catch(() => {})
   }
 
-  async function detectWebcams() {
-    try {
-      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
-      probe.getTracks().forEach((track) => track.stop())
-    } catch (e) {
-      setError(describeWebcamError(e))
-      return
-    }
-    await refreshWebcamDevices()
-  }
 
   async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false, publisherSession = null } = {}) {
     // The caller has just invalidated the slot (teardown), so this generation
@@ -2287,6 +2304,34 @@ export default function App() {
               </div>
               <p className="meta-count">{filteredFiles.length} files</p>
 
+              <div className="camera-optin">
+                <div className="camera-optin-head">
+                  <span className="camera-optin-title">Local cameras</span>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={enableCameraAccess}
+                    disabled={cameraProbing}
+                    title="Ask this browser for camera access, then use a camera as a live source in Streaming"
+                  >
+                    {cameraProbing ? 'Requesting…' : (webcamDevices.length ? 'Refresh cameras' : 'Enable camera access')}
+                  </button>
+                </div>
+                <p className="section-note">
+                  A webcam or connected phone can be a live streaming source. Enable access here, then pick it in a Streaming slot.
+                </p>
+                {cameraError && <p className="camera-optin-error">{cameraError}</p>}
+                {webcamDevices.length > 0 ? (
+                  <ul className="camera-list">
+                    {webcamDevices.map((device) => (
+                      <li key={device.deviceId}>{device.label}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  !cameraError && <p className="hint">No cameras enabled yet.</p>
+                )}
+              </div>
+
               <div className="media-toolbar">
                 <input className="search-input" placeholder="Filter files..." value={mediaFilter} onChange={(e) => setMediaFilter(e.target.value)} />
               </div>
@@ -2366,13 +2411,6 @@ export default function App() {
                   <p className="section-note">Assign media, choose an available transport, and control source playback.</p>
                 </div>
                 <div className="rtsp-actions">
-                  <button
-                    className="btn-ghost"
-                    onClick={detectWebcams}
-                    title="Ask the browser for camera permission and list connected webcams in every source dropdown"
-                  >
-                    Detect webcam
-                  </button>
                   <button className="btn-ghost" onClick={autoAssignAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle || 'Auto assign unique media files to all sources'}>
                     Auto Assign
                   </button>
@@ -2388,6 +2426,11 @@ export default function App() {
                 </div>
               </div>
               <p className="hint">Default RTSP base: <code>{rtspBase}</code></p>
+              {webcamDevices.length === 0 && (
+                <p className="hint">
+                  To use a webcam, enable camera access under <strong>Media Sources</strong> first.
+                </p>
+              )}
 
               <div className="sources">
                 {sources.map((src) => (
@@ -2421,15 +2464,25 @@ export default function App() {
                             disabled={rowBusy}
                             onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
                           >
-                            <option value="">{isWebcam ? 'Webcam (reselect)' : 'Not assigned'}</option>
-                            {webcamDevices.map((device) => (
-                              <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
-                                {device.label} {'<webcam>'}
-                              </option>
-                            ))}
-                            {videoFiles.map((file) => (
-                              <option key={file} value={file}>{file}</option>
-                            ))}
+                            <option value="">Not assigned</option>
+                            {/* Grouped and tagged so a camera reads differently
+                                from a file at a glance (per review feedback). */}
+                            {webcamDevices.length > 0 && (
+                              <optgroup label="Cameras">
+                                {webcamDevices.map((device) => (
+                                  <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
+                                    {'<cam>'} {device.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {videoFiles.length > 0 && (
+                              <optgroup label="Video files">
+                                {videoFiles.map((file) => (
+                                  <option key={file} value={file}>{'<vid>'} {file}</option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                           <select
                             value={transportValue}
