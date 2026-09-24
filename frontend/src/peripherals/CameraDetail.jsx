@@ -80,7 +80,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
         </label>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
-      <BlockedFormats options={formats} />
     </fieldset>
   )
 }
