@@ -589,12 +589,32 @@ class PreviewModeValidationTests(unittest.TestCase):
         # videorate sits between the camera and the encoder, or the encoder would see the surplus.
         self.assertLess(command.index("videorate"), command.index("neatencoder"))
 
-    def test_a_fractional_rate_keeps_its_exact_fraction(self):
-        """59.94 fps is 60000/1001; truncating it to 59 would ask the sensor for a rate it has not got."""
-        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 59.94}, "127.0.0.1", 9003))
-        self.assertIn("framerate=2997/50", command)
-        # max-rate is a whole number and must round up, or every frame would be dropped as surplus.
-        self.assertIn("videorate max-rate=60", command)
+    def test_caps_videorate_and_encoder_all_get_the_same_rate(self):
+        command = " ".join(preview._pipeline(camera_item(), {**MODE, "fps": 30.0}, "127.0.0.1", 9003))
+        self.assertIn("framerate=30/1", command)
+        self.assertIn("max-rate=30 ", command)
+        self.assertIn("enc-frame-rate=30 ", command)
+
+    def test_a_fractional_rate_is_refused_not_given_to_the_encoder_truncated(self):
+        """enc-frame-rate and max-rate are integers; 29.97 caps with a 29 fps encoder is inconsistent."""
+        with self.assertRaises(BoardError) as ctx:
+            preview._pipeline(camera_item(), {**MODE, "fps": 29.97}, "127.0.0.1", 9003)
+        self.assertEqual((ctx.exception.code, ctx.exception.status), ("invalid_request", 400))
+        self.assertIn("whole-number", ctx.exception.message)
+
+    def test_a_fractional_rate_is_refused_before_any_board_work(self):
+        """A size that lists no rates would otherwise let any rate through to the board."""
+        size = {"width": 1920, "height": 1080, "fps": []}
+        item = camera_item()
+        item["formats"][0]["sizes"] = [size]
+        manager = preview.PreviewManager()
+        session = fake_session()
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
+            with self.assertRaises(BoardError) as ctx:
+                manager.start(session, item, {**MODE, "fps": 59.94}, "insight.local")
+        self.assertEqual(ctx.exception.code, "invalid_request")
+        self.assertFalse([cmd for cmd in session.transport.commands() if "gst-launch" in cmd])
 
     def test_an_address_the_board_reports_is_not_trusted_blindly(self):
         manager = preview.PreviewManager()

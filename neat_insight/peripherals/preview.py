@@ -10,7 +10,6 @@ Insight restarts, the browser never fires unload, or the SSH connection dies.
 import ipaddress
 import json
 import logging
-import math
 import shlex
 import ssl
 import subprocess
@@ -20,7 +19,6 @@ import urllib.request
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from fractions import Fraction
 from typing import Optional
 
 from neat_insight.board import BoardError
@@ -499,6 +497,7 @@ def _require_previewable(item: dict, mode: dict) -> None:
             "USB cameras are discovered and can be exported, but preview is not implemented for them yet.",
         )
     require_camera_free(item)
+    _whole_fps(mode["fps"])
     fmt = next((entry for entry in item["formats"] if entry["format"] == mode["format"]), None)
     if fmt is None or not fmt["exportable"]:
         raise _unsupported(
@@ -524,15 +523,25 @@ def _require_previewable(item: dict, mode: dict) -> None:
         )
 
 
-def _framerate(fps) -> str:
-    """The rate as an exact GStreamer fraction: 59.94 is 60000/1001, not 59."""
-    fraction = Fraction(str(fps)).limit_denominator(1001)
-    return f"{fraction.numerator}/{fraction.denominator}"
+def _whole_fps(fps) -> int:
+    """The rate as the whole number every pipeline element can take.
+
+    neatencoder's enc-frame-rate and videorate's max-rate are integers, so a fractional rate such as
+    29.97 cannot be given to all three of caps, videorate and the encoder consistently. Refuse it
+    rather than configure the encoder for a rate its input does not have. Camera scans list whole
+    rates only (`cameras.fps_choices`), so this guards the API, not a mode the UI offers.
+    """
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0 or fps != int(fps):
+        raise _unsupported(
+            f"{fps} fps cannot be previewed: preview needs a whole-number frame rate.",
+            "Pick one of the rates Insight lists for this size.",
+        )
+    return int(fps)
 
 
 def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
-    rate = _framerate(mode["fps"])
-    caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={rate}"
+    fps = _whole_fps(mode["fps"])
+    caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={fps}/1"
     return [
         "gst-launch-1.0",
         "-q",
@@ -546,9 +555,7 @@ def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
         # not a promise. max-rate drops the surplus so the stream really runs at the chosen rate.
         # It only drops: a sensor slower than the request still passes through at its own rate.
         "videorate",
-        # max-rate is a whole number, so a fractional rate rounds up: 59.94 must pass, not be
-        # clamped to 59.
-        f"max-rate={math.ceil(float(mode['fps']))}",
+        f"max-rate={fps}",
         "!",
         "neatencoder",
         "enc-type=h264",
@@ -556,7 +563,7 @@ def _pipeline(item: dict, mode: dict, host: str, port: int) -> list:
         f"enc-width={mode['width']}",
         f"enc-height={mode['height']}",
         f"enc-bitrate={BITRATE_KBPS}",
-        f"enc-frame-rate={int(mode['fps'])}",
+        f"enc-frame-rate={fps}",
         "!",
         "h264parse",
         "config-interval=1",
