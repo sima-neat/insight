@@ -9,6 +9,7 @@
     "build:viewer": "vite build --config viewer.vite.config.js",
     "test:viewer": "node --test src/viewer/*.test.js",
     "test:peripherals": "node --test src/peripherals/*.test.js",
+    "test:stats": "node --test src/stats/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
