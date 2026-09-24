@@ -39,7 +39,6 @@ const TORSO_CONNECTIONS = new Set([
   "right_shoulder:right_hip",
   "left_hip:right_hip",
 ]);
-const MIN_CONFIDENCE = 0.3;
 const DEFAULT_YAW = -Math.PI / 4;
 const DEFAULT_PITCH = Math.PI / 9;
 const MIN_PITCH = -Math.PI * 0.48;
@@ -94,6 +93,10 @@ function normalizeWorldPoint(point) {
   return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
 }
 
+function confidenceAlpha(confidence) {
+  return 0.18 + 0.82 * clamp(finiteOr(confidence, 1), 0, 1);
+}
+
 export function blazePoseBodyRegion(name) {
   if (HEAD_LANDMARKS.has(name)) return "head";
   if (typeof name === "string" && name.startsWith("left_")) return "left";
@@ -145,9 +148,12 @@ function normalizedPoses(payload) {
     const points = new Map();
     if (Array.isArray(pose?.keypoints)) {
       for (const point of pose.keypoints) {
-        if (typeof point?.name !== "string" || (point.confidence ?? 1) < MIN_CONFIDENCE) continue;
+        if (typeof point?.name !== "string") continue;
         const normalized = normalizeWorldPoint(point);
-        if (normalized) points.set(point.name, normalized);
+        if (normalized) points.set(point.name, {
+          ...normalized,
+          confidence: clamp(finiteOr(point.confidence, 1), 0, 1),
+        });
       }
     }
     return {
@@ -286,7 +292,7 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
     ...pose,
     points: new Map([...pose.points].map(([name, point]) => [
       name,
-      projectNormalizedPoint(point, camera),
+      { ...projectNormalizedPoint(point, camera), confidence: point.confidence },
     ])),
   }));
   const projectedCube = referenceCube(referenceFrame(payload))
@@ -294,7 +300,10 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   const projection = fitProjection(projectedCube, width, height);
   const screenPoses = projectedPoses.map((pose) => ({
     ...pose,
-    points: new Map([...pose.points].map(([name, point]) => [name, projection.point(point)])),
+    points: new Map([...pose.points].map(([name, point]) => [
+      name,
+      { ...projection.point(point), confidence: point.confidence },
+    ])),
   }));
 
   if (frame.showReferenceCube !== false) {
@@ -313,6 +322,7 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
         color,
         accent: pose.accent,
         depth: (from.depth + to.depth) / 2,
+        confidence: Math.min(from.confidence, to.confidence),
       });
     }
   }
@@ -325,14 +335,14 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
     ctx.moveTo(segment.from.x, segment.from.y);
     ctx.lineTo(segment.to.x, segment.to.y);
     ctx.strokeStyle = distinguishPoses ? segment.accent : "rgba(2, 6, 23, 0.74)";
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = confidenceAlpha(segment.confidence) * 0.82;
     ctx.lineWidth = 4.8;
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(segment.from.x, segment.from.y);
     ctx.lineTo(segment.to.x, segment.to.y);
     ctx.strokeStyle = segment.color;
-    ctx.globalAlpha = 0.9;
+    ctx.globalAlpha = confidenceAlpha(segment.confidence) * 0.9;
     ctx.lineWidth = 2.35;
     ctx.stroke();
   }
@@ -350,7 +360,7 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
     ctx.fillStyle = point.color;
     ctx.strokeStyle = distinguishPoses ? point.accent : "rgba(2, 6, 23, 0.9)";
     ctx.lineWidth = 1.2;
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = confidenceAlpha(point.confidence);
     ctx.fill();
     ctx.stroke();
   }

@@ -87,7 +87,8 @@ for the generic message contract and the built-in BlazePose 3D renderer. The
 BlazePose panel includes an optional reference cube and a fixed camera that can
 be adjusted with pointer drag, persisted independently per channel and view.
 The 3D skeleton uses each frame's world landmarks directly, so its motion stays
-aligned with the corresponding 2D pose overlay. Head, torso, subject-left, and
+aligned with the corresponding 2D pose overlay. Low-confidence 2D and 3D links
+fade rather than blinking at a hard cutoff. Head, torso, subject-left, and
 subject-right landmarks use a consistent color palette with an in-panel legend.
 
 ## Build from source
