@@ -147,7 +147,9 @@ While the tab is open and visible, Insight polls Sentinel's latest sample every 
 
 ### Traces and runs
 
-A trace records every sample around a workload. Name it, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. Saved runs are listed with their state, start time, duration, and sample count, and survive a daemon restart. Open a run to see its metadata, or select two to eight runs and **Compare selected** to see each run's statistics against the first, which is the baseline.
+A trace records every sample around a workload. Name it, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. Saved runs are listed with their state, start time, duration, and sample count, and survive a daemon restart. Open a run to see its metadata, the metrics it recorded, and how many samples it holds.
+
+Select two to eight runs and **Compare selected** to put the metrics in rows and the runs in columns. Sentinel measures the comparison against one baseline run, which is marked in the header; every other cell shows that metric's mean over the run with its percentage change against the baseline beside it. A metric the baseline never measured has nothing to compare against and shows “—”, and a change too small to print shows as “<0.01%” rather than as no change at all. Run totals such as duration and energy have no percentage because Sentinel reports none for them.
 
 ### Values from a board you have left
 
