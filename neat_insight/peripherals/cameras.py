@@ -133,6 +133,12 @@ def _error(code: str, message: str, hint: str) -> dict:
     return {"code": code, "message": message, "hint": hint}
 
 
+def _command_error(show: str, detail: str) -> dict:
+    if _permission_denied(detail):
+        return _error("permission_denied", f"`{show}` was denied access to the camera: {detail}", PERMISSION_HINT)
+    return _error("command_failed", f"`{show}` failed: {detail}", f"Run `{show}` on the board to see why.")
+
+
 def _selection(fmt: str, size: dict, fps) -> dict:
     return {"format": fmt, "width": size["width"], "height": size["height"], "fps": fps}
 
@@ -400,10 +406,7 @@ def _mipi_modes_error(camera: dict, probe: dict) -> dict:
         message = "The discovery probe ran out of time before reading this camera's modes."
         return _error("timeout", message, OUT_OF_TIME_HINT)
     if acquire == "failed":
-        detail = camera.get("detail") or "no output"
-        if _permission_denied(detail):
-            return _error("permission_denied", f"`{show}` was denied access to the camera: {detail}", PERMISSION_HINT)
-        return _error("command_failed", f"`{show}` failed: {detail}", f"Run `{show}` on the board to see why.")
+        return _command_error(show, camera.get("detail") or "no output")
     if acquire == "ok":
         return _error("no_modes", "libcamera reported no formats for this camera.", f"Run `{show}` on the board.")
     if not (probe.get("tools") or {}).get("cam"):
@@ -433,12 +436,8 @@ def _usb_item(camera: dict, platform: dict) -> dict:
             if camera["detail"] == OUT_OF_TIME:
                 message = "The discovery probe ran out of time before listing this camera's modes."
                 errors.append(_error("timeout", message, OUT_OF_TIME_HINT))
-            elif _permission_denied(camera["detail"]):
-                message = f"`{show}` was denied access to the camera: {camera['detail']}"
-                errors.append(_error("permission_denied", message, PERMISSION_HINT))
             else:
-                message = f"`{show}` failed: {camera['detail']}"
-                errors.append(_error("command_failed", message, f"Run `{show}` on the board to see why."))
+                errors.append(_command_error(show, camera["detail"]))
         else:
             message = "`v4l2-ctl` is missing, so this camera's modes cannot be listed."
             errors.append(_error("tool_missing", message, TOOL_ISSUES["v4l2-ctl"][1]))
