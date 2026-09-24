@@ -362,6 +362,14 @@ test('the captured comparison is read as a table of metrics against the baseline
     ['insight-hw-1790177227', true],
     ['insight-hw-1790177178', false]
   ])
+  // The note is what tells two runs of the same workload apart, and /compare sends one
+  // per run. The runs table shows it; the comparison dropped it.
+  assert.deepEqual(table.columns.map((column) => column.note), [
+    'Insight hardware validation',
+    'Insight hardware validation'
+  ])
+  assert.deepEqual(compareTable({ sentinel: { ...COMPARE, runs: COMPARE.runs.map(({ note, ...rest }) => rest) } })
+    .columns.map((column) => column.note), ['', ''])
   assert.equal(table.baselineId, COMPARE.baseline_id)
   assert.equal(table.baselineLabel, 'insight-hw-1790177227')
   assert.equal(table.generatedAt, '2026-09-23T15:27:56.138344320Z')

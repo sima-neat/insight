@@ -561,6 +561,7 @@ export function RunsPanel({
                       <th key={column.key} scope="col">
                         {column.label}
                         {column.baseline && <span className="hint">baseline</span>}
+                        {column.note && <span className="hint">{column.note}</span>}
                       </th>
                     ))}
                   </tr>

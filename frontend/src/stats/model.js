@@ -590,6 +590,9 @@ function compareColumns(runs, baselineId, summaries) {
     return {
       key: id,
       label: String(run?.name || run?.id || `Run ${index + 1}`),
+      // What tells two runs of the same workload apart. The runs table shows it, and a
+      // comparison is exactly where "which of these was the baseline again" is asked.
+      note: String(run?.note || ''),
       baseline: id === String(baselineId),
       // A run the daemon listed but summarised nothing for: its column is all em dashes,
       // and saying so beats letting it read as a run that measured nothing.
