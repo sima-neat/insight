@@ -180,9 +180,10 @@ def start_preview():
         item = _camera_or_404(session, str(body.get("id") or ""))
         require_camera_free(item)
         mode = item.get("default_selection")
-        if any(key in body for key in ("format", "width", "height", "fps")):
-            mode = export.parse_request({"id": item["id"], **{k: body.get(k) for k in ("format", "width", "height", "fps")}})
-            mode = {key: mode[key] for key in ("format", "width", "height", "fps")}
+        keys = ("format", "width", "height", "fps")
+        if any(key in body for key in keys):
+            mode = export.parse_request({"id": item["id"], **{key: body.get(key) for key in keys}})
+            mode = {key: mode[key] for key in keys}
         if not mode:
             raise BoardError(
                 "invalid_request",
