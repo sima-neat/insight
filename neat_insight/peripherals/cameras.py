@@ -91,6 +91,10 @@ AVAILABILITY_ISSUES = {
     ),
 }
 NO_SENSOR_HINT = "Check the camera ribbon cable and that the camera's device-tree overlay is enabled, then Refresh."
+OUT_OF_TIME_HINT = (
+    "Other board tools were slow (see the warnings above). Refresh again; if it keeps happening, "
+    "check those tools on the board."
+)
 PERMISSION_HINT = (
     "Add the account Insight connects as to the board's `video` group (`sudo usermod -aG video <user>`, then "
     "reconnect), or connect as root; then Refresh."
@@ -327,6 +331,9 @@ def _mipi_modes_error(camera: dict, probe: dict) -> dict:
         )
     if acquire == "timeout":
         return _error("timeout", f"`{show}` timed out.", "Refresh again; if it keeps timing out, reboot the board.")
+    if acquire == "out_of_time":
+        message = "The discovery probe ran out of time before reading this camera's modes."
+        return _error("timeout", message, OUT_OF_TIME_HINT)
     if acquire == "failed":
         detail = camera.get("detail") or "no output"
         if _permission_denied(detail):
@@ -453,6 +460,9 @@ def _issues(probe: dict, platform: dict, media: dict) -> list:
         hint = f"Refresh again; if it keeps failing, run `{tool}` on the board to see the full error."
         if failure.get("reason") == "timeout":
             code, message = "timeout", f"`{tool}` timed out on the board."
+        elif failure.get("reason") == "out_of_time":
+            code, message = "timeout", f"`{tool}` was skipped: the discovery probe ran out of time."
+            hint = OUT_OF_TIME_HINT
         elif _permission_denied(failure.get("detail")):
             code, message, hint = "permission_denied", f"`{tool}` was denied access: {failure['detail']}", PERMISSION_HINT
         else:

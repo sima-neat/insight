@@ -23,6 +23,7 @@ SLOW_COMMAND_TIMEOUT = 15
 BUDGET_SEC = 70
 TOOLS = ("cam", "media-ctl", "v4l2-ctl", "gst-inspect-1.0", "fuser", "sudo")
 _deadline = None
+OUT_OF_TIME = "skipped: the probe's time budget was used up"
 SEARCH_PATH = os.pathsep.join(
     [os.environ.get("PATH") or "/usr/bin:/bin", "/usr/local/bin", "/usr/sbin", "/sbin"]
 )
@@ -62,7 +63,7 @@ def run(argv, timeout=COMMAND_TIMEOUT):
     if _deadline is not None:
         timeout = min(timeout, _deadline - time.monotonic())
         if timeout <= 0:
-            return None, "", "skipped: the probe's time budget was used up"
+            return None, "", OUT_OF_TIME
     try:
         proc = subprocess.run(
             argv,
@@ -342,7 +343,8 @@ def discover_media(tools, failures):
 
 
 def _failure(tool, code, err):
-    return {"tool": tool, "reason": "timeout" if code is None else "failed", "detail": _tail(err)}
+    reason = "out_of_time" if err == OUT_OF_TIME else "timeout" if code is None else "failed"
+    return {"tool": tool, "reason": reason, "detail": _tail(err)}
 
 
 def list_libcamera(tools, failures):
@@ -410,7 +412,7 @@ def _read_modes(tools, camera):
     code, out, err = run([tools["cam"], "-c", camera["id"], "-I"], SLOW_COMMAND_TIMEOUT)
     text = err + "\n" + out
     if code is None:
-        camera["acquire"] = "timeout"
+        camera["acquire"] = "out_of_time" if err == OUT_OF_TIME else "timeout"
     elif acquire_failed(text):
         camera["acquire"] = "busy"
     elif code != 0:

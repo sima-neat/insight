@@ -57,9 +57,16 @@ class TargetResolutionTests(unittest.TestCase):
         env = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.7", "DEVKIT_SYNC_DEVKIT_USER": "dev", "DEVKIT_SYNC_DEVKIT_PORT": "2222"}
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(target_module.sdk_env_target(), {"host": "192.168.2.7", "port": 2222, "user": "dev"})
-        with mock.patch.dict(os.environ, {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local"}, clear=True):
-            with self.assertLogs(level="WARNING"):
+        with mock.patch.dict(os.environ, {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local"}, clear=True), \
+             mock.patch.object(target_module, "_WARNED", set()):
+            with self.assertLogs(level="WARNING") as logs:
                 self.assertIsNone(target_module.sdk_env_target())
+                self.assertIsNone(target_module.sdk_env_target())
+            self.assertEqual(len(logs.records), 1)
+        env = {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local", "SIMA_DEVKIT_IP": "192.168.2.9"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(target_module, "_WARNED", set()):
+            with self.assertLogs(level="WARNING"):
+                self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
         with mock.patch.dict(os.environ, {"SIMA_DEVKIT_IP": "192.168.2.9"}, clear=True):
             self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
         with mock.patch.dict(os.environ, {}, clear=True):

@@ -383,7 +383,7 @@ export default function PeripheralsView({ onError, onStatus }) {
       )
     ])
     if (!mounted.current) return
-    setSnapshot(snap)
+    setSnapshot((prev) => snap || prev)
     setLoading(false)
     if (snap && !snap.scanned_at && boardData?.target && !autoRefreshed.current) {
       autoRefreshed.current = true

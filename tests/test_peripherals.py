@@ -220,6 +220,10 @@ class ProbeParsingTests(unittest.TestCase):
         with mock.patch.object(probe, "_deadline", time.monotonic() - 1):
             self.assertEqual(probe.run(["true"]), (None, "", "skipped: the probe's time budget was used up"))
 
+    def test_budget_skips_are_not_reported_as_timeouts(self):
+        self.assertEqual(probe._failure("cam", None, probe.OUT_OF_TIME)["reason"], "out_of_time")
+        self.assertEqual(probe._failure("cam", None, "timed out after 10 s")["reason"], "timeout")
+
     def test_real_imx477_output_from_the_devkit(self):
         listing = probe.parse_cam_list(fixture("cam_list_imx477_real.txt"))
         self.assertEqual([(c["index"], c["model"], c["id"]) for c in listing["cameras"]], [(1, None, IMX477)])
@@ -426,6 +430,17 @@ class SnapshotTests(unittest.TestCase):
         issue = next(i for i in snapshot["issues"] if i["code"] == "permission_denied")
         self.assertEqual(issue["hint"], cameras.PERMISSION_HINT)
         self.assertEqual(item(snapshot, "mipi:" + IMX477)["errors"][0]["code"], "permission_denied")
+
+    def test_out_of_time_camera_and_tool_point_at_slow_tools(self):
+        output = camera_board(self.tmp.name, usb=False).collect()
+        output["mipi"][0].update(acquire="out_of_time", formats=[])
+        output["failures"] = [{"tool": "cam", "reason": "out_of_time", "detail": probe.OUT_OF_TIME}]
+        snapshot = snapshot_of(output)
+        error = item(snapshot, "mipi:" + IMX477)["errors"][0]
+        self.assertEqual((error["code"], error["hint"]), ("timeout", cameras.OUT_OF_TIME_HINT))
+        issue = next(i for i in snapshot["issues"] if i["code"] == "timeout")
+        self.assertIn("ran out of time", issue["message"])
+        self.assertNotIn("reboot", issue["hint"] + error["hint"])
 
     def test_unchecked_libcamerasrc_is_unknown_not_absent(self):
         output = camera_board(self.tmp.name, usb=False).collect()
@@ -696,6 +711,8 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertFalse(parse_yaml_block(exports["yaml"])["strict_zero_copy"])
         self.assertEqual(body["support"]["tier"], "advertised")
         self.assertEqual(len(body["warnings"]), 3)
+        self.assertTrue(any("strict zero-copy is unavailable" in w for w in body["warnings"]))
+        self.assertNotIn(export.ZERO_COPY_WARNING, body["warnings"])
 
     def test_export_for_media_graph_name_warns_to_confirm_it(self):
         root = Path(self.tmp.name) / "a"

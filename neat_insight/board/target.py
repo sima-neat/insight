@@ -14,6 +14,13 @@ DEFAULT_SSH_USER = "sima"
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,252})$")
 _USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
+_WARNED = set()
+
+
+def _warn_once(message: str) -> None:
+    if message not in _WARNED:
+        _WARNED.add(message)
+        logging.warning("Ignoring SDK DevKit target from the environment: %s", message)
 
 
 @dataclass(frozen=True)
@@ -54,10 +61,11 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
 def sdk_env_target() -> Optional[dict]:
     """The DevKit paired through `sima-cli sdk setup` / devkit.sh, exported as DEVKIT_SYNC_* variables."""
     try:
-        host = get_devkit_sync_devkit_ip() or (os.getenv("SIMA_DEVKIT_IP") or "").strip()
+        host = get_devkit_sync_devkit_ip()
     except RuntimeError as exc:
-        logging.warning("Ignoring SDK DevKit target from the environment: %s", exc)
-        return None
+        _warn_once(str(exc))
+        host = ""
+    host = host or (os.getenv("SIMA_DEVKIT_IP") or "").strip()
     if not host:
         return None
     try:
@@ -67,7 +75,7 @@ def sdk_env_target() -> Optional[dict]:
             os.getenv("DEVKIT_SYNC_DEVKIT_USER") or DEFAULT_SSH_USER,
         )
     except BoardError as exc:
-        logging.warning("Ignoring SDK DevKit target from the environment: %s", exc.message)
+        _warn_once(exc.message)
         return None
 
 

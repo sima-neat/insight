@@ -191,7 +191,13 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc:
     if not libcamerasrc or not libcamerasrc["present"]:
         warnings.append(item["support"]["reason"])
         return warnings
-    warnings.append(ZERO_COPY_WARNING)
+    if libcamerasrc["external_buffer_mode"]:
+        warnings.append(ZERO_COPY_WARNING)
+    else:
+        warnings.append(
+            "The export allows CPU fallback: libcamerasrc on this board has no external-buffer-mode property, "
+            "so strict zero-copy is unavailable."
+        )
     if not libcamerasrc["buffer_count"]:
         warnings.append(
             "libcamerasrc on this board has no buffer-count property, so the code omits capture_buffer_count "
