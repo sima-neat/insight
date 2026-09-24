@@ -3,7 +3,6 @@ import { copyText, requestJson } from './api.js'
 import {
   connectionStateInfo,
   defaultTargetText,
-  extractCommand,
   formatRelativeTime,
   initialBoardForm,
   normalizeError,
@@ -35,6 +34,7 @@ export default function BoardTargetCard({
   description = 'Insight discovers peripherals on this board.',
   onBoardChange,
   onRetry,
+  onReload,
   onStatus,
   onError
 }) {
@@ -66,7 +66,7 @@ export default function BoardTargetCard({
     } catch (err) {
       if (kind === 'select') setFormError(normalizeError(err))
       else setActionError(normalizeError(err))
-      if (kind === 'test') requestJson('/api/board').then(onBoardChange).catch(() => {})
+      if (kind === 'test') onReload?.()
       return null
     } finally {
       setBusy('')
@@ -161,14 +161,16 @@ export default function BoardTargetCard({
       )}
 
       {target && problem && (
-        <Callout tone="danger" title={problem.message} role="alert">
-          {problem.code === 'auth_failed' && problem.hint ? (
+        <p className="sr-only" role="alert">{problem.message}</p>
+      )}
+      {target && problem && (
+        <Callout tone="danger" title={problem.message}>
+          {problem.hint && <p>{problem.hint}</p>}
+          {problem.code === 'auth_failed' && problem.details?.command && (
             <div className="periph-command">
-              <pre className="periph-code"><code>{problem.hint}</code></pre>
-              <button type="button" className="btn-ghost" onClick={() => copyCommand(extractCommand(problem.hint))}>Copy command</button>
+              <pre className="periph-code"><code>{problem.details.command}</code></pre>
+              <button type="button" className="btn-ghost" onClick={() => copyCommand(problem.details.command)}>Copy command</button>
             </div>
-          ) : (
-            problem.hint && <p>{problem.hint}</p>
           )}
           {problem.code === 'host_key_changed' && (
             <>

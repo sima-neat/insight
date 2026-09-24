@@ -8,7 +8,6 @@ import {
   changeSummary,
   defaultTargetText,
   deviceRows,
-  extractCommand,
   formatDuration,
   formatOptions,
   formatRelativeTime,
@@ -16,10 +15,12 @@ import {
   groupCameras,
   initialBoardForm,
   isSnapshotStale,
+  modeLabel,
   normalizeError,
   resolveCameraId,
   resolveSelection,
   safeHref,
+  sameSelection,
   sizeOptions,
   sortIssues,
   sourceLabel,
@@ -174,6 +175,14 @@ test('a missing or non-exportable default falls back to the best exportable mode
 
 test('changing one level keeps the rest of the selection when it is still offered', () => {
   assert.deepEqual(resolveSelection(usb, { format: 'YUYV' }), { format: 'YUYV', width: 640, height: 480, fps: 30 })
+  assert.deepEqual(
+    resolveSelection(usb, { format: 'YUYV', width: 640, height: 480, fps: 30 }),
+    { format: 'YUYV', width: 640, height: 480, fps: 30 }
+  )
+  assert.deepEqual(
+    resolveSelection(usb, { format: 'YUYV', width: 1280, height: 720, fps: 30 }),
+    { format: 'YUYV', width: 640, height: 480, fps: 30 }
+  )
   assert.deepEqual(resolveSelection(usb, { format: 'MJPG' }), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
   assert.deepEqual(
     resolveSelection(imx477, { format: 'NV12', width: 1280, height: 720, fps: 30 }),
@@ -279,10 +288,16 @@ test('API errors keep code, hint, and extra fields', () => {
   assert.equal(normalizeError(null), null)
 })
 
-test('the ssh-copy-id command is extracted from an auth hint', () => {
-  assert.equal(extractCommand('Install your key: ssh-copy-id -p 22 sima@192.168.2.2.'), 'ssh-copy-id -p 22 sima@192.168.2.2')
-  assert.equal(extractCommand('Run `ssh-copy-id sima@10.0.0.5` then retry.'), 'ssh-copy-id sima@10.0.0.5')
-  assert.equal(extractCommand('Check the cable.'), 'Check the cable.')
+test('mode labels and selection equality drive the export key and the fallback notice', () => {
+  const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+  assert.equal(modeLabel(mode), 'NV12 1920×1080 @ 30 fps')
+  assert.equal(modeLabel({ ...mode, fps: 59.94 }), 'NV12 1920×1080 @ 59.94 fps')
+  assert.equal(modeLabel(null), '')
+  assert.ok(sameSelection(mode, { ...mode, fps: '30' }))
+  assert.ok(!sameSelection(mode, { ...mode, width: 1280, height: 720 }))
+  assert.ok(!sameSelection(mode, { ...mode, format: 'YUYV' }))
+  assert.ok(sameSelection(null, null))
+  assert.ok(!sameSelection(null, mode))
 })
 
 test('board form defaults and validation', () => {

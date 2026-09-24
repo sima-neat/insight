@@ -256,14 +256,6 @@ export function safeHref(url) {
   return /^https?:\/\//i.test(String(url || '')) ? url : null
 }
 
-export function extractCommand(text) {
-  const value = String(text || '').trim()
-  const quoted = value.match(/`([^`]+)`/)
-  if (quoted) return quoted[1].trim()
-  const command = value.match(/\bssh(?:-copy-id|-keygen)?\s[^\n]*/)
-  return command ? command[0].trim().replace(/[.;,]$/, '') : value
-}
-
 export function apiError(body, status) {
   const data = body && typeof body === 'object' ? body : {}
   const err = new Error(data.error || data.message || `Request failed${status ? `: ${status}` : ''}`)

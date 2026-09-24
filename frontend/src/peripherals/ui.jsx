@@ -16,10 +16,13 @@ export function Callout({ tone = 'warn', title, role, children }) {
 export function ErrorNotice({ error, children }) {
   if (!error) return null
   return (
-    <Callout tone="danger" title={error.message} role="alert">
-      {error.hint && <p>{error.hint}</p>}
-      {children}
-    </Callout>
+    <>
+      <p className="sr-only" role="alert">{error.message}</p>
+      <Callout tone="danger" title={error.message}>
+        {error.hint && <p>{error.hint}</p>}
+        {children}
+      </Callout>
+    </>
   )
 }
 
