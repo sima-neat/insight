@@ -4398,6 +4398,58 @@ button:disabled {
   margin: 0 0 0 10px;
 }
 
+/* The em dash of a cell with no change is a button so Tab and a tap can reach its reason,
+   but it must read as the same quiet dash: no chrome, only a dotted underline that says
+   there is more, and the reason beside it while it is hovered or focused. */
+.stats-delta-why {
+  position: relative;
+  display: inline-block;
+}
+
+.stats-delta-why-button {
+  border: 0;
+  background: none;
+  padding: 0 1px;
+  border-radius: 4px;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.stats-delta-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  max-width: 16rem;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
+.stats-delta-why:hover .stats-delta-tip,
+.stats-delta-why-button:focus + .stats-delta-tip {
+  display: block;
+}
+
+.stats-delta-tip[hidden] {
+  display: none !important;
+}
+
 /* An em dash where a change should be needs a reason, and the reason belongs once under
    the table rather than repeated in every cell it applies to. */
 .stats-compare-legend {

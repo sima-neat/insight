@@ -4,6 +4,44 @@ import { useRef, useState } from 'react'
 import { Callout, Pill } from '../peripherals/ui.jsx'
 import { chipKeyTarget, formatValue, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
 
+/**
+ * The em dash of a comparison cell that has no change, and why. The reason used to sit in a
+ * `title`, which only a mouse can raise; the dash is now a quiet button, so Tab, a tap or
+ * a hover shows the reason beside it, and Escape puts it away again without moving focus.
+ * Screen readers read the reason as the button's own name, so the visible copy is hidden
+ * from them rather than read twice.
+ */
+export function DeltaReason({ reason }) {
+  const [dismissed, setDismissed] = useState(false)
+  const sentence = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : ''
+  return (
+    <span className="stats-delta-why">
+      <button
+        type="button"
+        className="stats-delta-why-button"
+        onClick={(event) => {
+          // Safari does not focus a button it was tapped on; the reason shows while focused.
+          event.currentTarget.focus()
+          setDismissed(false)
+        }}
+        onBlur={() => setDismissed(false)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !dismissed) {
+            event.preventDefault()
+            event.stopPropagation()
+            setDismissed(true)
+          }
+        }}
+      >
+        —<span className="sr-only">{` no change shown, because ${reason}`}</span>
+      </button>
+      <span className="stats-delta-tip" aria-hidden="true" hidden={dismissed || undefined}>
+        {sentence}
+      </span>
+    </span>
+  )
+}
+
 export function Facts({ rows, className = 'periph-facts' }) {
   if (!rows?.length) return null
   return (

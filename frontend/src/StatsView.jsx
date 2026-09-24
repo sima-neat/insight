@@ -73,7 +73,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
-import { ChipTabs, Facts, FailureCallout, KeyValueTable, MetricCard, SegmentedTabs, Sparkline } from './stats/ui.jsx'
+import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, MetricCard, SegmentedTabs, Sparkline } from './stats/ui.jsx'
 
 /** Hands the browser a file to save. The object URL is released once the click has used it. */
 // How often the saved-runs list is re-read while the Stats tab is visible.
@@ -914,7 +914,7 @@ export function RunsPanel({
           <div id="stats-compare-body" hidden={!compareOpen}>
             {table ? (
               <>
-                {/* Each “—” carries its reason on hover, so the table needs no paragraph explaining them. */}
+                {/* Each “—” shows its reason on hover, focus or tap, so the table needs no paragraph explaining them. */}
                 {table.columns.some((column) => !column.summarised) && (
                   <Callout tone="warn" title="Sentinel summarised only some of these runs">
                     <p>
@@ -971,15 +971,11 @@ export function RunsPanel({
                               <td key={`${row.key}-${cell.column}`} className="stats-cell-value">
                                 {formatValue(cell.value, row.unit)}
                                 {!cell.baseline && (
-                                  <span
-                                    className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}
-                                    title={deltaAbsenceText(cell.deltaAbsence) || undefined}
-                                  >
-                                    {formatPercentDelta(cell.deltaPct)}
-                                    {cell.deltaAbsence && (
-                                      <span className="sr-only">
-                                        {` no change shown, because ${deltaAbsenceText(cell.deltaAbsence)}`}
-                                      </span>
+                                  <span className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}>
+                                    {cell.deltaAbsence ? (
+                                      <DeltaReason reason={deltaAbsenceText(cell.deltaAbsence)} />
+                                    ) : (
+                                      formatPercentDelta(cell.deltaPct)
                                     )}
                                   </span>
                                 )}
