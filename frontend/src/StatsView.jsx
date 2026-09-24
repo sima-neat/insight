@@ -43,7 +43,7 @@ import { Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './s
 
 const BOARD_DESCRIPTION = 'Sentinel telemetry is read from this board over its own API socket.'
 
-function DaemonPanel({ info, health, busy, log, error, onInstall, onRetry }) {
+function DaemonPanel({ info, health, busy, log, error, blocked, onInstall, onRetry }) {
   return (
     <section className="panel stats-daemon" aria-labelledby="stats-daemon-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -72,7 +72,13 @@ function DaemonPanel({ info, health, busy, log, error, onInstall, onRetry }) {
       <div className="periph-board-summary">
         <Pill tone={info.tone}>{info.label}</Pill>
         {info.version && <span className="stats-version">{info.version}</span>}
-        {info.state === 'unknown' && <span className="hint">Sentinel has not been checked on this board yet.</span>}
+        {info.state === 'unknown' && (
+          <span className="hint">
+            {blocked
+              ? 'Sentinel cannot be checked until the board answers; the Board panel above says why.'
+              : 'Sentinel has not been checked on this board yet.'}
+          </span>
+        )}
       </div>
       {info.state !== 'unknown' && <Facts rows={[...daemonFacts(info), ...healthFacts(health)]} />}
 
@@ -785,6 +791,7 @@ export default function StatsView({ onError, onStatus }) {
             busy={installBusy || (stateBusy && Boolean(state))}
             log={installLog}
             error={installError || sentinelProblem}
+            blocked={Boolean(boardProblem)}
             onInstall={install}
             onRetry={() => loadState()}
           />
