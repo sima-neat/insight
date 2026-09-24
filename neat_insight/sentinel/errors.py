@@ -12,6 +12,7 @@ _HTTP_STATUS = {
     "sentinel_denied": 502,
     "sentinel_schema": 502,
     "sentinel_failed": 502,
+    "response_too_large": 502,
 }
 UPSTREAM_CODES = {400: "invalid_request", 404: "not_found", 409: "trace_conflict", 413: "request_too_large"}
 

@@ -256,6 +256,12 @@ test('every backend failure becomes a title, a sentence and a place to fix it', 
   const failed = failureNotice({ error: 'installer failed', code: 'sentinel_failed', detail: 'exit 1\nlog tail' })
   assert.equal(failed.detail, 'exit 1\nlog tail')
 
+  // A run too long to read is named as that, not as Sentinel failing to answer.
+  const tooLarge = failureNotice({ error: 'larger than the 12 MiB Insight reads', code: 'response_too_large', limit_bytes: 12582912 })
+  assert.equal(tooLarge.title, 'Sentinel answered with more than Insight reads')
+  assert.equal(tooLarge.board, false)
+  assert.equal(tooLarge.daemon, false)
+
   assert.equal(failureNotice({ error: 'boom', code: 'unheard_of' }).title, 'Something went wrong')
   assert.equal(failureNotice(null), null)
   for (const code of ['no_target', 'unreachable', 'auth_failed', 'host_key_changed', 'timeout']) {

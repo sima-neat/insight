@@ -896,7 +896,7 @@
       "get": {
         "tags": ["Sentinel"],
         "summary": "Get one saved run",
-        "description": "Returns one run by unique name or stable id, with its metadata, metric definitions and raw samples, in `sentinel`. An unknown or ambiguous name returns `404 not_found` with Sentinel's message.",
+        "description": "Returns one run by unique name or stable id, with its metadata, metric definitions and raw samples, in `sentinel`. An unknown or ambiguous name returns `404 not_found` with Sentinel's message. A run whose answer exceeds the 12 MiB Insight reads from the daemon (about three hours of samples) returns `502 response_too_large` with the limit in `limit_bytes`, rather than a truncated body.",
         "operationId": "getSentinelRun",
         "parameters": [
           {"name": "run_id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "The run's unique name or stable id."}

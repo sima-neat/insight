@@ -64,6 +64,7 @@ const FAILURE_TITLES = {
   not_found: 'That run is not on this board',
   invalid_request: 'The request was rejected',
   request_too_large: 'The request was too large',
+  response_too_large: 'Sentinel answered with more than Insight reads',
   network: 'Insight is not answering',
   bad_response: 'Insight answered something unexpected'
 }

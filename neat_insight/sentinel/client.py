@@ -170,6 +170,8 @@ class SentinelClient:
     def _call_local(self, method: str, path: str, body):
         try:
             return socket_client.request(method, path, body, socket_path=self.socket_path)
+        except socket_client.ResponseTooLarge as exc:
+            raise self._too_large(exc.limit, str(exc)) from exc
         except OSError as exc:
             raise self._socket_error(socket_client.socket_failure(exc), str(exc)) from exc
 
@@ -185,6 +187,8 @@ class SentinelClient:
                 tool="python3",
             )
         envelope = self._envelope(result.stdout, result.exit_code, stderr)
+        if envelope.get("failure") == socket_client.TOO_LARGE:
+            raise self._too_large(envelope.get("limit"), envelope.get("detail", ""))
         if "failure" in envelope:
             raise self._socket_error(envelope["failure"], envelope.get("detail", ""))
         return int(envelope["status"]), envelope.get("text", "")
@@ -203,6 +207,19 @@ class SentinelClient:
             )
         return envelope
 
+    def _too_large(self, limit, detail: str) -> SentinelError:
+        limit = limit if isinstance(limit, int) and limit > 0 else socket_client.MAX_BODY_BYTES
+        return SentinelError(
+            "response_too_large",
+            "Sentinel's answer on {} is larger than the {} Insight reads from the board, so it was not read.".format(
+                self.session.target.label, _size(limit)
+            ),
+            hint="A saved run carries every sample it recorded; open or compare shorter runs, or record "
+            "shorter traces.",
+            detail=detail[:DETAIL_LIMIT],
+            limit_bytes=limit,
+        )
+
     def _socket_error(self, failure: str, detail: str) -> SentinelError:
         code, message, hint = _FAILURE_ERRORS.get(failure, _FAILURE_ERRORS[socket_client.FAILED])
         return SentinelError(
@@ -211,3 +228,10 @@ class SentinelClient:
             hint=hint,
             detail=detail[:DETAIL_LIMIT],
         )
+
+
+def _size(count: int) -> str:
+    for unit, scale in (("MiB", 1024 * 1024), ("KiB", 1024)):
+        if count >= scale and count % scale == 0:
+            return "{} {}".format(count // scale, unit)
+    return "{} bytes".format(count)

@@ -197,7 +197,12 @@ class _Handler(BaseHTTPRequestHandler):
         encoded = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(encoded)))
+        if self.server.omit_length:
+            # A body delimited by the connection closing, which declares no size up front.
+            self.send_header("Connection", "close")
+            self.close_connection = True
+        else:
+            self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -212,6 +217,7 @@ class _UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
         socketserver.ThreadingUnixStreamServer.__init__(self, path, _Handler)
         self.answers = {"/v1/health": (200, HEALTH), "/v1/runs/nope": (404, {"error": "unknown run 'nope'"})}
         self.requests = []
+        self.omit_length = False
 
 
 class SocketClientTests(unittest.TestCase):
@@ -270,6 +276,64 @@ class SocketClientTests(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertEqual(envelope["failure"], socket_client.MISSING)
         self.assertIn(self.path + ".gone", envelope["detail"])
+
+    def long_run(self, limit=4096):
+        """A run whose JSON is larger than `limit`, which the client is patched down to."""
+        self.addCleanup(setattr, socket_client, "MAX_BODY_BYTES", socket_client.MAX_BODY_BYTES)
+        socket_client.MAX_BODY_BYTES = limit
+        samples = [{"timestamp": "2026-09-23T15:27:%02dZ" % (i % 60), "values": {"rtsn_0": 40.5}} for i in range(200)]
+        self.server.answers["/v1/runs/long"] = (200, {"schema": 1, "metadata": {"name": "long"}, "samples": samples})
+        self.assertGreater(len(json.dumps(self.server.answers["/v1/runs/long"][1])), limit)
+
+    def test_a_body_over_the_limit_is_refused_by_name_never_truncated(self):
+        self.long_run()
+        for omit_length in (False, True):
+            with self.subTest(declared_length=not omit_length):
+                self.server.omit_length = omit_length
+                with self.assertRaises(socket_client.ResponseTooLarge) as raised:
+                    socket_client.request("GET", "/v1/runs/long", socket_path=self.path)
+                self.assertEqual(raised.exception.limit, 4096)
+                self.assertIn("4096", str(raised.exception))
+
+    def test_a_body_at_the_limit_is_read_whole(self):
+        body = json.dumps(HEALTH)
+        self.addCleanup(setattr, socket_client, "MAX_BODY_BYTES", socket_client.MAX_BODY_BYTES)
+        socket_client.MAX_BODY_BYTES = len(body)
+        for omit_length in (False, True):
+            with self.subTest(declared_length=not omit_length):
+                self.server.omit_length = omit_length
+                status, text = socket_client.request("GET", "/v1/health", socket_path=self.path)
+                self.assertEqual((status, json.loads(text)), (200, HEALTH))
+
+    def test_main_reports_a_body_over_the_limit_as_its_own_failure(self):
+        self.long_run()
+        code, envelope = self.main("GET", "/v1/runs/long", "", self.path)
+        self.assertEqual((code, envelope["failure"], envelope["limit"]), (4, socket_client.TOO_LARGE, 4096))
+        self.assertNotIn("text", envelope)
+
+    def test_an_on_board_client_names_a_body_over_the_limit(self):
+        self.long_run()
+        client = SentinelClient(FakeSession(FakeSentinel(), mode="local"), socket_path=self.path)
+        with self.assertRaises(SentinelError) as raised:
+            client.run("long")
+        self.assertEqual((raised.exception.code, raised.exception.status), ("response_too_large", 502))
+        self.assertIn("4 KiB", raised.exception.message)
+
+    def test_the_limit_leaves_room_for_the_envelope_under_the_board_output_cap(self):
+        # Over SSH the body travels JSON-escaped inside the envelope, and the transport
+        # refuses more than MAX_OUTPUT_BYTES of output. A run at the limit, shaped like the
+        # ones the DevKit records (59 metrics a sample), must still fit.
+        from neat_insight.board import transport
+
+        self.assertGreaterEqual(socket_client.MAX_BODY_BYTES, 12 * 1024 * 1024)
+        live = json.loads((Path(__file__).parents[1] / "frontend/src/stats/fixtures/metrics-live.json").read_text())
+        keys = [metric["key"] for group in live["groups"] for metric in group["metrics"]]
+        one = json.dumps({"timestamp": "2026-09-23T15:27:13.270295197Z", "values": {k: 8.812681752827412 for k in keys}})
+        count = socket_client.MAX_BODY_BYTES // (len(one) + 2)
+        text = json.dumps({"schema": 1, "metadata": {}, "samples": [json.loads(one)] * count})
+        self.assertLessEqual(len(text), socket_client.MAX_BODY_BYTES)
+        envelope = json.dumps({"status": 200, "text": text})
+        self.assertLess(len(envelope), transport.MAX_OUTPUT_BYTES)
 
 
 class ClientTests(unittest.TestCase):
@@ -351,6 +415,15 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, code)
                 self.assertIn(hint, raised.exception.hint)
                 self.assertIn(socket_client.SOCKET_PATH, raised.exception.message)
+
+    def test_a_body_over_the_limit_on_the_board_is_named_with_the_limit(self):
+        envelope = json.dumps({"failure": "too_large", "detail": "boom", "limit": 12 * 1024 * 1024}).encode()
+        self.transport.exec = lambda *a, **k: ExecResult(4, envelope, b"")
+        with self.assertRaises(SentinelError) as raised:
+            self.client.run("long")
+        self.assertEqual((raised.exception.code, raised.exception.status), ("response_too_large", 502))
+        self.assertIn("12 MiB", raised.exception.message)
+        self.assertEqual(raised.exception.to_dict()["limit_bytes"], 12 * 1024 * 1024)
 
     def test_a_board_without_python3_reports_the_missing_tool(self):
         self.transport.exec = lambda *a, **k: ExecResult(127, b"", b"python3: command not found")

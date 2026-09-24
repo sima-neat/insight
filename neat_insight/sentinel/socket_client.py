@@ -16,13 +16,29 @@ from http.client import HTTPConnection
 SOCKET_PATH = "/run/simaai-sentinel/api.sock"
 # The daemon answers from a cache, so every call is fast; a slow one means it is wedged.
 TIMEOUT_SEC = 20.0
-MAX_BODY_BYTES = 8 * 1024 * 1024
+# The largest answer read from the daemon. A saved run carries every sample (about 2.4 kB
+# each on a Modalix, one every 2 s), so this is about three hours of trace. Over SSH the
+# body travels JSON-escaped inside the envelope below, and the board transport refuses
+# more than 16 MiB of output, so the limit leaves that envelope room to fit. An answer
+# over it is refused by name, never truncated into JSON that cannot be parsed.
+MAX_BODY_BYTES = 12 * 1024 * 1024
 
 # What went wrong at the socket, for a message that names the cause instead of errno.
 MISSING = "missing"
 REFUSED = "refused"
 DENIED = "denied"
 FAILED = "failed"
+TOO_LARGE = "too_large"
+
+
+class ResponseTooLarge(Exception):
+    """The daemon answered with more than ``limit`` bytes; nothing of it is returned."""
+
+    def __init__(self, limit, declared=None):
+        self.limit = limit
+        self.declared = declared
+        size = "{} bytes".format(declared) if declared is not None else "more than that"
+        Exception.__init__(self, "Sentinel's answer is larger than {} bytes ({}).".format(limit, size))
 
 
 class _UnixHTTPConnection(HTTPConnection):
@@ -56,7 +72,10 @@ def socket_failure(exc):
 
 
 def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SEC):
-    """Return ``(status, text)`` for one Sentinel API call; raises OSError on socket failure."""
+    """Return ``(status, text)`` for one Sentinel API call.
+
+    Raises OSError on socket failure, and ResponseTooLarge for an answer over MAX_BODY_BYTES.
+    """
     connection = _UnixHTTPConnection(socket_path, timeout)
     try:
         headers = {"Host": "localhost", "Accept": "application/json"}
@@ -67,7 +86,15 @@ def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SE
             headers["Content-Length"] = str(len(payload))
         connection.request(method, path, body=payload, headers=headers)
         response = connection.getresponse()
-        return response.status, response.read(MAX_BODY_BYTES).decode("utf-8", errors="replace")
+        limit = MAX_BODY_BYTES
+        declared = response.getheader("Content-Length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise ResponseTooLarge(limit, int(declared))
+        # One byte past the limit tells a body that fills it from one that does not fit.
+        data = response.read(limit + 1)
+        if len(data) > limit:
+            raise ResponseTooLarge(limit)
+        return response.status, data.decode("utf-8", errors="replace")
     finally:
         connection.close()
 
@@ -90,6 +117,9 @@ def main(argv):
         detail = "{}: {}".format(socket_path, exc)
         sys.stdout.write(json.dumps({"failure": socket_failure(exc), "detail": detail}))
         return 3
+    except ResponseTooLarge as exc:
+        sys.stdout.write(json.dumps({"failure": TOO_LARGE, "detail": str(exc), "limit": exc.limit}))
+        return 4
     sys.stdout.write(json.dumps({"status": status, "text": text}))
     return 0
 
