@@ -1,0 +1,30 @@
+Driver Info:
+	Driver name      : uvcvideo
+	Card type        : HD Pro Webcam C920
+	Bus info         : usb-xhci-hcd.0.auto-1.2
+	Driver version   : 6.18.3
+	Capabilities     : 0x84a00001
+		Video Capture
+		Metadata Capture
+		Streaming
+		Extended Pix Format
+		Device Capabilities
+	Device Caps      : 0x04a00000
+		Metadata Capture
+		Streaming
+		Extended Pix Format
+Media Driver Info:
+	Driver name      : uvcvideo
+	Model            : HD Pro Webcam C920
+	Serial           : A1B2C3D4
+	Bus info         : usb-xhci-hcd.0.auto-1.2
+	Media version    : 6.18.3
+	Hardware revision: 0x00000011 (17)
+	Driver version   : 6.18.3
+Interface Info:
+	ID               : 0x03000005
+	Type             : V4L Video
+Entity Info:
+	ID               : 0x00000004 (4)
+	Name             : HD Pro Webcam C920
+	Function         : V4L2 I/O

@@ -1,0 +1,85 @@
+Factory Details:
+  Rank                     primary (256)
+  Long-name                libcamera Source
+  Klass                    Source/Video
+  Description              Linux Camera source using libcamera
+  Author                   Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+Plugin Details:
+  Name                     libcamera
+  Description              libcamera capture plugin
+  Filename                 /lib/aarch64-linux-gnu/gstreamer-1.0/libgstlibcamera.so
+  Version                  0.7.0+2085-00bb435a-dirty (2026-08-19T19:22:32UTC)-nvm
+  License                  LGPL
+  Source module            libcamera
+  Binary package           libcamera
+  Origin URL               https://libcamera.org
+
+GObject
+ +----GInitiallyUnowned
+       +----GstObject
+             +----GstElement
+                   +----GstLibcameraSrc
+
+Implemented Interfaces:
+  GstChildProxy
+
+Pad Templates:
+  SRC template: 'src'
+    Availability: Always
+    Capabilities:
+      video/x-raw
+      image/jpeg
+      video/x-bayer
+    Type: GstLibcameraPad
+    Pad Properties:
+      stream-role         : The selected stream role
+                            flags: readable, writable, changeable only in NULL or READY state
+                            Enum "GstLibcameraStreamRole" Default: 2, "video-recording"
+                               (0): raw              - libcamera::Raw
+                               (1): still-capture    - libcamera::StillCapture
+                               (2): video-recording  - libcamera::VideoRecording
+                               (3): view-finder      - libcamera::Viewfinder
+  
+  SRC template: 'src_%u'
+    Availability: On request
+    Capabilities:
+      video/x-raw
+      image/jpeg
+      video/x-bayer
+    Type: GstLibcameraPad
+    Pad Properties:
+      stream-role         : The selected stream role
+                            flags: readable, writable, changeable only in NULL or READY state
+                            Enum "GstLibcameraStreamRole" Default: 2, "video-recording"
+                               (0): raw              - libcamera::Raw
+                               (1): still-capture    - libcamera::StillCapture
+                               (2): video-recording  - libcamera::VideoRecording
+                               (3): view-finder      - libcamera::Viewfinder
+
+Element has no clocking capabilities.
+Element has no URI handling capabilities.
+
+Pads:
+  SRC: 'src'
+    Pad Template: 'src'
+
+Element Properties:
+  buffer-count        : Requested application capture queue depth; zero uses the camera default, and unsupported values may be adjusted by the camera.
+                        flags: readable, writable, changeable only in NULL or READY state
+                        Unsigned Integer. Range: 0 - 4294967295 Default: 0 
+  camera-name         : Select by name which camera to use.
+                        flags: readable, writable, changeable only in NULL or READY state
+                        String. Default: null
+  external-buffer-mode: Control direct capture into compatible downstream DMA-BUF pools.
+                        flags: readable, writable, changeable only in NULL or READY state
+                        Enum "GstLibcameraExternalBufferMode" Default: 1, "preferred"
+                           (0): disabled         - Disabled
+                           (1): preferred        - Preferred
+                           (2): required         - Required
+  name                : The name of the object
+                        flags: readable, writable
+                        String. Default: "libcamerasrc0"
+  parent              : The parent of the object
+                        flags: readable, writable
+                        Object of type "GstObject"
