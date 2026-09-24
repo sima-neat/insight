@@ -749,23 +749,6 @@ export function deltaAbsenceText(code) {
   return DELTA_ABSENCE[code] || ''
 }
 
-/** One sentence per reason a change is missing in this comparison, with how often. */
-export function compareLegend(table) {
-  const counts = new Map()
-  for (const row of table?.rows || []) {
-    for (const cell of row.cells) {
-      if (cell.deltaAbsence) counts.set(cell.deltaAbsence, (counts.get(cell.deltaAbsence) || 0) + 1)
-    }
-  }
-  return Object.keys(DELTA_ABSENCE)
-    .filter((code) => counts.has(code))
-    .map((code) => {
-      const count = counts.get(code)
-      const one = count === 1
-      return `${count} value${one ? '' : 's'} show${one ? 's' : ''} “—” instead of a change because ${DELTA_ABSENCE[code]}`
-    })
-}
-
 function compareColumns(runs, baselineId, summaries) {
   return runs.map((run, index) => {
     const id = String(run?.id ?? index)
@@ -946,19 +929,6 @@ export function compareViewText(view) {
     )
   }
   return parts.join(' ')
-}
-
-/** The one line a collapsed comparison is summarised by. */
-export function compareSummary(table, payload = null) {
-  if (table) {
-    const runs = table.columns.length
-    const parts = [`${runs} runs`]
-    if (table.baselineLabel) parts.push(`baseline ${table.baselineLabel}`)
-    parts.push(`${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`)
-    return parts.join(' · ')
-  }
-  const listed = payload?.sentinel?.runs
-  return Array.isArray(listed) ? `${listed.length} runs` : ''
 }
 
 /**

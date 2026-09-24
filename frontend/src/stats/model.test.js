@@ -10,7 +10,6 @@ import {
   NAME_LIMIT,
   POLL_MS,
   compareHint,
-  compareLegend,
   compareQuery,
   compareReady,
   compareTable,
@@ -463,12 +462,10 @@ test('a change Sentinel withholds says which of its four reasons applies', () =>
   assert.equal(rtsn.cells[1].value, partial.summaries[others[0]].metrics.rtsn_6.mean)
   assert.equal(rtsn.cells[1].deltaAbsence, 'no_baseline')
 
-  // Every reason present is counted once, under the table, rather than per cell.
-  const legend = compareLegend(table)
-  assert.equal(legend.length, 2)
-  assert.match(legend.join(' '), /3 values show “—” instead of a change because Sentinel publishes no change for it\./)
-  assert.match(legend.join(' '), /2 values show “—” instead of a change because the baseline measured 0/)
-  assert.deepEqual(compareLegend(null), [])
+  // No legend under the table: each “—” carries its own reason, shown on hover.
+  for (const reason of ['not_published', 'baseline_zero', 'no_baseline', 'no_value']) {
+    assert.ok(deltaAbsenceText(reason).length > 0, reason)
+  }
 })
 
 test('a run the daemon listed but summarised nothing for is marked, not read as empty', () => {
@@ -1003,10 +1000,6 @@ test('a metric only one run of a comparison measured is placed on the right side
   assert.deepEqual(rowOf('shared').cells.map((cell) => [cell.value, cell.deltaPct, cell.deltaAbsence]),
     [[10, null, null], [12, 20, null]])
 
-  assert.deepEqual(compareLegend(table), [
-    '1 value shows “—” instead of a change because the baseline run has no value for that metric.',
-    '1 value shows “—” instead of a change because this run has no value for that metric.'
-  ])
 })
 
 test('a run name long enough to break the tables is carried intact and wrapped', () => {

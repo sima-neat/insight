@@ -11,7 +11,6 @@ import {
   compareCsvFilename,
   compareGroups,
   compareRowGroup,
-  compareSummary,
   compareTable,
   compareView,
   compareViewText,
@@ -190,13 +189,6 @@ test('what the filters hide is said, never left silent', () => {
     'Showing 1 of 10 rows. Every row shown differs from the baseline in at least one run, so Changes only hides nothing.'
   )
   assert.equal(compareViewText(null), '')
-})
-
-test('a collapsed comparison is summarised in one line', () => {
-  assert.equal(compareSummary(table()), '2 runs · baseline insight-hw-1790177227 · 10 rows')
-  // A shape Insight cannot tabulate still says how many runs it holds.
-  assert.equal(compareSummary(null, { sentinel: { runs: [{}, {}, {}] } }), '3 runs')
-  assert.equal(compareSummary(null, null), '')
 })
 
 test('a CSV field is quoted and escaped only when it has to be', () => {

@@ -20,9 +20,7 @@ import {
   compareCsvFilename,
   compareGroups,
   compareHint,
-  compareLegend,
   compareReady,
-  compareSummary,
   compareTable,
   compareView,
   compareViewText,
@@ -183,7 +181,7 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
         <div>
           <h2 id="stats-metrics-title">Live metrics</h2>
           <p className="section-note">
-            Every value comes from Sentinel's latest sample; one it cannot measure shows as “—”, never as zero.
+            Live readings from the board. “—” means Sentinel could not measure it.
           </p>
         </div>
         <div className="periph-actions">
@@ -433,7 +431,6 @@ export function RunsPanel({
     downloadText(compareCsvFilename(table), compareCsv(table), 'text/csv;charset=utf-8')
   }
   // Why the em dashes in the table are there, counted from the comparison itself.
-  const legend = useMemo(() => compareLegend(table), [table])
   // Runs that were selected and are no longer on the board: their checkbox is gone.
   const missing = useMemo(() => missingSelection(selected, runs), [selected, runs])
   // Runs whose own name breaks the comma-separated compare query.
@@ -687,7 +684,6 @@ export function RunsPanel({
         <section className="stats-compare" aria-labelledby="stats-compare-title">
           <div className="stats-compare-head">
             <h3 id="stats-compare-title">Comparison</h3>
-            <span className="hint">{compareSummary(table, compare)}</span>
             <div className="periph-actions">
               {table && (
                 <button type="button" className="btn-ghost" onClick={exportCsv} aria-describedby="stats-compare-export-note">
@@ -714,20 +710,7 @@ export function RunsPanel({
           <div id="stats-compare-body" hidden={!compareOpen}>
             {table ? (
               <>
-                <p className="hint">
-                  Each value is that metric's {table.statistic} over the run, and the change beside it is against the
-                  baseline{table.baselineLabel ? ` ${table.baselineLabel}` : ''}.
-                  {table.generatedAt && (
-                    <>
-                      {' '}Compared <time dateTime={table.generatedAt}>{formatTimestamp(table.generatedAt)}</time>.
-                    </>
-                  )}
-                </p>
-                {legend.length > 0 && (
-                  <ul className="periph-notes stats-compare-legend">
-                    {legend.map((line) => <li key={line}>{line}</li>)}
-                  </ul>
-                )}
+                {/* Each “—” carries its reason on hover, so the table needs no paragraph explaining them. */}
                 {table.columns.some((column) => !column.summarised) && (
                   <Callout tone="warn" title="Sentinel summarised only some of these runs">
                     <p>
