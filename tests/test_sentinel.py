@@ -513,6 +513,38 @@ class BoardCacheTests(unittest.TestCase):
         self.cache.add_sample(key, {"timestamp": "t4", "values": {}})
         self.assertEqual([s["timestamp"] for s in self.cache.history(key)], ["t2", "t3", "t4"])
 
+    def test_a_break_in_the_polling_starts_the_history_again(self):
+        # Verbatim from the sandbox on 2026-09-23: the Stats page was open at 17:54, closed,
+        # and reopened at 19:39. /api/sentinel/metrics?history=60 answered with all three
+        # samples, so the sparklines drew a 105-minute gap as one step between neighbours.
+        key = (1, "fp-1")
+        for stamp in ("2026-09-23T17:54:19.918200185Z", "2026-09-23T17:54:21.908397571Z"):
+            self.cache.add_sample(key, {"timestamp": stamp, "values": {"cpu_usage_pct": 1.0}})
+        after = self.cache.add_sample(
+            key, {"timestamp": "2026-09-23T19:39:58.301197766Z", "values": {"cpu_usage_pct": 2.0}}
+        )
+        self.assertEqual([s["timestamp"] for s in after], ["2026-09-23T19:39:58.301197766Z"])
+
+        # Sentinel's own cadence, and Insight's slowest backed-off poll, are not a break.
+        self.cache.add_sample(key, {"timestamp": "2026-09-23T19:40:00.301197766Z", "values": {}})
+        self.cache.add_sample(key, {"timestamp": "2026-09-23T19:40:30.301197766Z", "values": {}})
+        self.assertEqual(len(self.cache.history(key)), 3)
+
+        # A board whose clock jumped backwards is just as much a break as one that jumped on.
+        back = self.cache.add_sample(key, {"timestamp": "2026-09-23T18:00:00Z", "values": {}})
+        self.assertEqual([s["timestamp"] for s in back], ["2026-09-23T18:00:00Z"])
+
+    def test_a_timestamp_that_cannot_be_read_never_discards_the_history(self):
+        key = (1, "fp-1")
+        for stamp in ("2026-09-23T19:40:00Z", "not-a-timestamp", "2026-09-23T19:40:02Z"):
+            self.cache.add_sample(key, {"timestamp": stamp, "values": {}})
+        self.assertEqual(len(self.cache.history(key)), 3)
+        self.assertIsNone(state.moment("not-a-timestamp"))
+        self.assertIsNone(state.moment(None))
+        self.assertIsNone(state.moment(""))
+        # Nanoseconds are truncated to the microseconds a datetime carries, never rounded.
+        self.assertEqual(state.moment("2026-09-23T19:39:58.301197766Z").microsecond, 301197)
+
     def test_an_expired_value_is_not_served(self):
         key = (1, "fp-1")
         self.cache.record(key, "daemon", {"healthy": True}, 60)
