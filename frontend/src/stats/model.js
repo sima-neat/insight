@@ -289,6 +289,21 @@ export function telemetryVisible(info, read = {}) {
   return Boolean(read.metrics || read.traces || read.runs)
 }
 
+/**
+ * Whether the daemon section has anything to say.
+ *
+ * A working daemon is the normal case and needs no panel: its version, service name and socket
+ * path are plumbing, and the telemetry below is the proof it is running. The section appears only
+ * when something is wrong or was just attempted — not ready, a failure to report, collector errors
+ * the daemon itself raised, or installer output to read.
+ */
+export function daemonNoticeNeeded(info, { error = null, health = null, install = null } = {}) {
+  if (!info || info.state !== 'ready') return true
+  if (error) return true
+  if (healthProblems(health).length > 0) return true
+  return Boolean(install?.log)
+}
+
 export function daemonFacts(info) {
   const rows = [['Service', info.service]]
   if (info.version) rows.push(['Version', info.version])

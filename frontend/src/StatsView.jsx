@@ -26,6 +26,7 @@ import {
   daemonBusy,
   daemonFacts,
   daemonInfo,
+  daemonNoticeNeeded,
   definitionsByKey,
   deltaAbsenceText,
   factRows,
@@ -1120,6 +1121,8 @@ export default function StatsView({ onError, onStatus }) {
         </Callout>
       ) : (
         <>
+          {/* Nothing to say about a daemon that is working: the telemetry below is the proof. */}
+          {daemonNoticeNeeded(info, { error: installError || sentinelProblem, health: state?.health || null, install: installResult }) && (
           <DaemonPanel
             info={info}
             health={state?.health || null}
@@ -1132,6 +1135,7 @@ export default function StatsView({ onError, onStatus }) {
             onInstall={install}
             onRetry={() => loadState()}
           />
+          )}
 
           {/* Sentinel not answering now does not unmake what this board already gave. */}
           {telemetryVisible(info, { metrics, traces, runs }) && (

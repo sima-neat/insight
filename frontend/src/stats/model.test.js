@@ -19,6 +19,7 @@ import {
   daemonBusy,
   daemonFacts,
   daemonInfo,
+  daemonNoticeNeeded,
   definitionsByKey,
   deltaAbsenceText,
   factRows,
@@ -103,6 +104,22 @@ const METRICS = {
     series: { rtsn_0: [70, 72], power_current_watts: [null, null] }
   }
 }
+
+test('the daemon section appears only when it has something to say', () => {
+  const ready = { state: 'ready' }
+  // The normal case: a working daemon renders nothing, and the telemetry below is the proof.
+  assert.equal(daemonNoticeNeeded(ready), false)
+  assert.equal(daemonNoticeNeeded(ready, { error: null, health: null, install: null }), false)
+  // Not ready is the whole point of the section: it carries the reason and the Install button.
+  assert.equal(daemonNoticeNeeded({ state: 'missing' }), true)
+  assert.equal(daemonNoticeNeeded({ state: 'unknown' }), true)
+  assert.equal(daemonNoticeNeeded(null), true)
+  // A working daemon can still have something to report.
+  assert.equal(daemonNoticeNeeded(ready, { error: { message: 'Sentinel could not be installed' } }), true)
+  assert.equal(daemonNoticeNeeded(ready, { health: { errors: ['power collector: read failed'] } }), true)
+  assert.equal(daemonNoticeNeeded(ready, { install: { log: 'sima-cli neat install sentinel\n' } }), true)
+  assert.equal(daemonNoticeNeeded(ready, { install: { log: '' } }), false)
+})
 
 test('a value Sentinel could not measure never reads as zero', () => {
   assert.equal(formatValue(72, 'C'), '72 °C')
