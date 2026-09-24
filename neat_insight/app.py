@@ -222,11 +222,7 @@ def _shell_target():
             target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
         )
     devkit_ip = get_devkit_sync_devkit_ip()
-    return (
-        (devkit_ip, 22, DEFAULT_DEVKIT_SSH_USERNAME, True)
-        if devkit_ip
-        else (None, 22, DEFAULT_DEVKIT_SSH_USERNAME, False)
-    )
+    return devkit_ip or None, 22, DEFAULT_DEVKIT_SSH_USERNAME, bool(devkit_ip)
 
 
 def _build_devkit_shell_payload():
