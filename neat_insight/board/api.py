@@ -11,6 +11,17 @@ def _board_error(exc: BoardError):
     return jsonify(exc.to_dict()), exc.status
 
 
+@board_bp.after_request
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _json_body() -> dict:
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else {}
+
+
 # API: report the selected board without connecting to it.
 @board_bp.get("/api/board")
 def board_state():
@@ -22,7 +33,7 @@ def board_state():
 @board_bp.post("/api/board/select")
 def select_board():
     """Accept JSON {host, port, user} to save a manual target, or {reset: true} to clear it."""
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     manager = get_board_manager()
     if body.get("reset"):
         manager.reset()
@@ -44,7 +55,7 @@ def test_board():
 @board_bp.post("/api/board/trust-host-key")
 def trust_board_host_key():
     """Accept JSON {fingerprint}; replace the stored host key when it matches the key the board presented."""
-    body = request.get_json(silent=True) or {}
+    body = _json_body()
     manager = get_board_manager()
     manager.trust_host_key(str(body.get("fingerprint") or ""))
     return manager.state()

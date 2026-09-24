@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from neat_insight.board.errors import BoardError
+from neat_insight.utils import get_devkit_sync_devkit_ip
 
 DEFAULT_SSH_PORT = 22
 DEFAULT_SSH_USER = "sima"
@@ -52,7 +53,11 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
 
 def sdk_env_target() -> Optional[dict]:
     """The DevKit paired through `sima-cli sdk setup` / devkit.sh, exported as DEVKIT_SYNC_* variables."""
-    host = (os.getenv("DEVKIT_SYNC_DEVKIT_IP") or os.getenv("SIMA_DEVKIT_IP") or "").strip()
+    try:
+        host = get_devkit_sync_devkit_ip() or (os.getenv("SIMA_DEVKIT_IP") or "").strip()
+    except RuntimeError as exc:
+        logging.warning("Ignoring SDK DevKit target from the environment: %s", exc)
+        return None
     if not host:
         return None
     try:

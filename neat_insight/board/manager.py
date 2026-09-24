@@ -45,16 +45,22 @@ class BoardSession:
         self.raw_transport = transport
         self.transport = _ReportingTransport(manager, generation, transport)
         self._manager = manager
-        self._identity: Optional[dict] = None
-        self._lock = threading.Lock()
 
     def identity(self) -> dict:
-        with self._lock:
-            if self._identity is None:
-                result = self.transport.exec(["sh", "-c", _IDENTITY_SCRIPT], timeout=IDENTITY_TIMEOUT_SEC)
-                self._identity = self._parse_identity(result.stdout.decode("utf-8", errors="replace"))
-                self._manager._record(self.generation, board=self._identity)
-            return self._identity
+        # Read on every call: after a host-key change the same address can be a different board.
+        result = self.transport.exec(["sh", "-c", _IDENTITY_SCRIPT], timeout=IDENTITY_TIMEOUT_SEC)
+        text = result.stdout.decode("utf-8", errors="replace")
+        if not text.replace("@@", "").strip():
+            error = BoardError(
+                "command_failed",
+                "Could not read the board's identity.",
+                hint="Check that `sh`, `hostname` and `cat` run for this user on the board over SSH.",
+            )
+            self._manager._record(self.generation, error=error)
+            raise error
+        identity = self._parse_identity(text)
+        self._manager._record(self.generation, board=identity)
+        return identity
 
     def _parse_identity(self, text: str) -> dict:
         hostname, machine_id, build = (text.split("@@", 2) + ["", ""])[:3]
@@ -114,10 +120,7 @@ class BoardManager:
             self._replace_session(self.target())
 
     def test(self) -> None:
-        session = self.session()
-        with session._lock:
-            session._identity = None
-        session.identity()
+        self.session().identity()
 
     def trust_host_key(self, fingerprint: str) -> None:
         with self._lock:
@@ -130,6 +133,9 @@ class BoardManager:
                     hint="Test the connection again and confirm the fingerprint it reports.",
                 )
             transport.replace_host_key(key)
+            # The trusted key may belong to a different board: start a new generation so its scans stay separate.
+            transport.close()
+            self._session = None
             self._replace_session(self.target())
 
     def state(self) -> dict:

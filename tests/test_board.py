@@ -12,9 +12,10 @@ from flask import Flask
 
 from neat_insight import board
 from neat_insight.board import manager as manager_module
+from neat_insight.board import transport as transport_module
 from neat_insight.board import target as target_module
 from neat_insight.board.errors import BoardError
-from neat_insight.board.transport import ExecResult, LocalTransport, SshTransport
+from neat_insight.board.transport import ExecResult, LocalTransport, SshTransport, key_fingerprint
 
 SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "sima", "DEVKIT_SYNC_DEVKIT_PORT": "22"}
 IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
@@ -52,9 +53,13 @@ class TargetResolutionTests(unittest.TestCase):
         self.assertEqual((env.source, env.label), ("sdk-env", "sima@192.168.2.2"))
         self.assertIsNone(target_module.resolve_target(None, False, None))
 
-    def test_sdk_env_accepts_host_names_and_falls_back_to_sima_ip(self):
+    def test_sdk_env_reads_devkit_sync_like_the_rest_of_insight(self):
+        env = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.7", "DEVKIT_SYNC_DEVKIT_USER": "dev", "DEVKIT_SYNC_DEVKIT_PORT": "2222"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(target_module.sdk_env_target(), {"host": "192.168.2.7", "port": 2222, "user": "dev"})
         with mock.patch.dict(os.environ, {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local"}, clear=True):
-            self.assertEqual(target_module.sdk_env_target(), {"host": "devkit.local", "port": 22, "user": "sima"})
+            with self.assertLogs(level="WARNING"):
+                self.assertIsNone(target_module.sdk_env_target())
         with mock.patch.dict(os.environ, {"SIMA_DEVKIT_IP": "192.168.2.9"}, clear=True):
             self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -162,6 +167,41 @@ class BoardApiTests(unittest.TestCase):
         response = self.client.post("/api/board/trust-host-key", json={"fingerprint": "SHA256:x"})
         self.assertEqual(response.status_code, 400)
 
+    def test_trusting_a_new_host_key_starts_a_new_board_generation(self):
+        before = self.client.post("/api/board/test").get_json()
+        old = self.transports[-1]
+        key = paramiko.RSAKey.generate(1024)
+        old.presented_host_key = key
+        old.replace_host_key = mock.Mock()
+        response = self.client.post("/api/board/trust-host-key", json={"fingerprint": key_fingerprint(key)})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        old.replace_host_key.assert_called_once_with(key)
+        self.assertTrue(old.closed)
+        self.assertIsNot(self.transports[-1], old)
+        self.assertGreater(body["generation"], before["generation"])
+        self.assertEqual((body["status"]["state"], body["board"]), ("unknown", None))
+
+    def test_identity_is_read_on_every_call(self):
+        with self.app.app_context():
+            session = board.get_board_manager().session()
+            session.identity()
+            session.identity()
+        self.assertEqual(len(self.transports[-1].calls), 2)
+
+    def test_empty_identity_output_is_an_error(self):
+        self.client.get("/api/board")
+        self.transports[-1].results = [ExecResult(0, b"", b"")]
+        response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (502, "command_failed"))
+
+    def test_non_object_bodies_get_the_json_error_shape(self):
+        response = self.client.post("/api/board/select", json=[1])
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
+    def test_board_state_is_not_cached(self):
+        self.assertEqual(self.client.get("/api/board").headers["Cache-Control"], "no-store")
+
 
 class LocalTransportTests(unittest.TestCase):
     def test_exec_captures_output_stdin_and_missing_commands(self):
@@ -188,6 +228,19 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         return ctx.exception
 
+    def test_auth_failure_command_uses_sudo_when_insight_runs_as_root(self):
+        with mock.patch.object(transport_module, "_local_account", return_value="root"):
+            error = self._connect_raising(paramiko.AuthenticationException("denied"))
+        self.assertEqual(error.extra["command"], "sudo -H ssh-copy-id -p 22 sima@192.168.2.2")
+
+    def test_closed_transport_never_connects(self):
+        self.transport.close()
+        with mock.patch.object(paramiko.SSHClient, "connect") as connect:
+            with self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=1)
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
+        connect.assert_not_called()
+
     def test_auth_failure_suggests_ssh_copy_id(self):
         error = self._connect_raising(paramiko.AuthenticationException("denied"))
         self.assertEqual(error.code, "auth_failed")
@@ -204,11 +257,11 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(stored.lookup("192.168.2.2")["ssh-rsa"], new)
 
     def test_close_during_connect_returns_at_once_and_discards_the_connection(self):
-        started, errors = threading.Event(), []
+        started, closed, errors = threading.Event(), threading.Event(), []
 
         def slow_connect(*args, **kwargs):
             started.set()
-            time.sleep(0.5)
+            closed.wait(2)
 
         def run():
             try:
@@ -225,6 +278,7 @@ class SshTransportErrorTests(unittest.TestCase):
             begin = time.monotonic()
             self.transport.close()
             self.assertLess(time.monotonic() - begin, 0.2)
+            closed.set()
             worker.join(2)
         self.assertEqual(errors, ["stale_snapshot"])
         self.assertTrue(close.called)

@@ -148,6 +148,8 @@ class SshTransport:
 
     def _open_channel(self):
         with self._lock:
+            if self._closed:
+                raise self._stale()
             client = self._client
             transport = client.get_transport() if client else None
             if transport is None or not transport.is_active():
@@ -155,11 +157,7 @@ class SshTransport:
                 client = self._connect()
                 if self._closed:
                     client.close()
-                    raise BoardError(
-                        "stale_snapshot",
-                        "The selected board changed while this request was running.",
-                        hint="Retry to use the newly selected board.",
-                    )
+                    raise self._stale()
                 self._client = client
             try:
                 return client.get_transport().open_session(timeout=self.connect_timeout)
@@ -224,6 +222,13 @@ class SshTransport:
             raise self._unreachable(f"Could not connect to {self.host}:{self.port}: {exc}") from exc
         client.get_transport().set_keepalive(15)
         return client
+
+    def _stale(self) -> BoardError:
+        return BoardError(
+            "stale_snapshot",
+            "The selected board changed while this request was running.",
+            hint="Retry to use the newly selected board.",
+        )
 
     def _unreachable(self, message: str) -> BoardError:
         return BoardError(
