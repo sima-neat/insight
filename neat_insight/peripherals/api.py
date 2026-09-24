@@ -7,15 +7,21 @@ from flask import Blueprint, request
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.peripherals import export
 from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
-from neat_insight.peripherals.probe import SCHEMA
+from neat_insight.peripherals.probe import BUDGET_SEC, SCHEMA
 
 peripherals_bp = Blueprint("peripherals", __name__)
 
 PROBE_PATH = Path(__file__).with_name("probe.py")
-PROBE_TIMEOUT_SEC = 90.0
+PROBE_TIMEOUT_SEC = BUDGET_SEC + 20.0
 DETAIL_LIMIT = 2000
 
 scans = ScanCache()
+
+
+@peripherals_bp.after_request
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _board_summary(session, identity=None) -> dict:

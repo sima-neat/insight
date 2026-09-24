@@ -91,6 +91,14 @@ AVAILABILITY_ISSUES = {
     ),
 }
 NO_SENSOR_HINT = "Check the camera ribbon cable and that the camera's device-tree overlay is enabled, then Refresh."
+PERMISSION_HINT = (
+    "Add the account Insight connects as to the board's `video` group (`sudo usermod -aG video <user>`, then "
+    "reconnect), or connect as root; then Refresh."
+)
+
+
+def _permission_denied(text: Optional[str]) -> bool:
+    return "permission denied" in (text or "").lower()
 
 
 def now_iso() -> str:
@@ -116,8 +124,8 @@ def _selection(fmt: str, size: dict, fps) -> dict:
 def fps_choices(max_fps: Optional[float]) -> List[int]:
     if not max_fps:
         return [30]
-    choices = [fps for fps in STANDARD_FPS if fps <= max_fps + FPS_SNAP_TOLERANCE]
-    return choices or [max(1, int(round(max_fps)))]
+    limit = max(1, int(max_fps + FPS_SNAP_TOLERANCE))
+    return sorted({limit, *(fps for fps in STANDARD_FPS if fps <= limit)}, reverse=True)
 
 
 def empty_snapshot(board: dict, generation: int) -> dict:
@@ -162,9 +170,9 @@ def _platform(probe: dict) -> dict:
     libcamerasrc = probe.get("libcamerasrc") or {}
     return {
         "tools": {name: bool(tools.get(name)) for name in PLATFORM_TOOLS},
-        "libcamerasrc": {
-            key: bool(libcamerasrc.get(key)) for key in ("present", "external_buffer_mode", "buffer_count")
-        },
+        "libcamerasrc": None
+        if probe.get("libcamerasrc") is None
+        else {key: bool(libcamerasrc.get(key)) for key in ("present", "external_buffer_mode", "buffer_count")},
         "availability_method": probe.get("availability_method") or "none",
     }
 
@@ -208,7 +216,10 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
     if formats:
         modes_source, default = "live", _mipi_default(formats)
         if camera.get("max_fps"):
-            notes.append(f"libcamera limits this sensor mode to {camera['max_fps']:g} fps; faster requests snap to it.")
+            notes.append(
+                f"libcamera reports {camera['max_fps']:g} fps for the sensor's fastest mode. The delivered frame "
+                "rate follows the sensor mode libcamera picks and can differ from the requested rate."
+            )
         else:
             notes.append("libcamera did not report a maximum frame rate, so only 30 fps is offered.")
     else:
@@ -318,6 +329,8 @@ def _mipi_modes_error(camera: dict, probe: dict) -> dict:
         return _error("timeout", f"`{show}` timed out.", "Refresh again; if it keeps timing out, reboot the board.")
     if acquire == "failed":
         detail = camera.get("detail") or "no output"
+        if _permission_denied(detail):
+            return _error("permission_denied", f"`{show}` was denied access to the camera: {detail}", PERMISSION_HINT)
         return _error("command_failed", f"`{show}` failed: {detail}", f"Run `{show}` on the board to see why.")
     if acquire == "ok":
         return _error("no_modes", "libcamera reported no formats for this camera.", f"Run `{show}` on the board.")
@@ -345,8 +358,12 @@ def _usb_item(camera: dict, platform: dict) -> dict:
     if camera.get("formats") is None:
         if camera.get("detail"):
             show = f"v4l2-ctl -d {camera['node']} --list-formats-ext"
-            message = f"`{show}` failed: {camera['detail']}"
-            errors.append(_error("command_failed", message, f"Run `{show}` on the board to see why."))
+            if _permission_denied(camera["detail"]):
+                message = f"`{show}` was denied access to the camera: {camera['detail']}"
+                errors.append(_error("permission_denied", message, PERMISSION_HINT))
+            else:
+                message = f"`{show}` failed: {camera['detail']}"
+                errors.append(_error("command_failed", message, f"Run `{show}` on the board to see why."))
         else:
             message = "`v4l2-ctl` is missing, so this camera's modes cannot be listed."
             errors.append(_error("tool_missing", message, TOOL_ISSUES["v4l2-ctl"][1]))
@@ -433,11 +450,13 @@ def _issues(probe: dict, platform: dict, media: dict) -> list:
         issues.append(_issue("info", "no_sensor", f"No MIPI sensor detected on {where}.", NO_SENSOR_HINT))
     for failure in probe.get("failures") or []:
         tool = failure.get("tool")
+        hint = f"Refresh again; if it keeps failing, run `{tool}` on the board to see the full error."
         if failure.get("reason") == "timeout":
             code, message = "timeout", f"`{tool}` timed out on the board."
+        elif _permission_denied(failure.get("detail")):
+            code, message, hint = "permission_denied", f"`{tool}` was denied access: {failure['detail']}", PERMISSION_HINT
         else:
             code, message = "command_failed", f"`{tool}` failed: {failure.get('detail') or 'no output'}"
-        hint = f"Refresh again; if it keeps failing, run `{tool}` on the board to see the full error."
         issues.append(_issue("warning", code, message, hint))
     return issues
 

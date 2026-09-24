@@ -92,6 +92,7 @@ def _yaml_block(rows, comment: Optional[str] = None) -> str:
 
 def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> dict:
     libcamerasrc = snapshot["platform"]["libcamerasrc"]
+    mode = _verified_mode(item, choice, selection)
     rate = _rate(selection["fps"])
     options = {
         "camera_name": item["device"]["camera_name"],
@@ -102,10 +103,10 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
         "format": selection["format"],
         "buffer_name": BUFFER_NAME,
         "queue_depth": QUEUE_DEPTH,
-        "allow_cpu_fallback": not libcamerasrc["external_buffer_mode"],
+        "allow_cpu_fallback": True,
     }
     # Core rejects capture_buffer_count > 0 when libcamerasrc lacks buffer-count.
-    capture_buffers = CAPTURE_BUFFERS if libcamerasrc["buffer_count"] else 0
+    capture_buffers = CAPTURE_BUFFERS if libcamerasrc and libcamerasrc["buffer_count"] else 0
     descriptor = {
         "kind": "neat.camera-input",
         "version": 1,
@@ -130,8 +131,8 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
     return {
         "camera_id": item["id"],
         "selection": selection,
-        "support": _mode_support(item, choice, selection),
-        "warnings": _mipi_warnings(item, choice, libcamerasrc),
+        "support": _mode_support(item, choice, mode),
+        "warnings": _mipi_warnings(item, choice, mode, libcamerasrc),
         "exports": [
             _export("python", "Python (pyneat)", "camera_input.py", "python", _python(options, capture_buffers)),
             _export("cpp", "C++ (Neat)", "camera_input.cpp", "cpp", _cpp(options, capture_buffers)),
@@ -141,25 +142,41 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
     }
 
 
-def _mode_support(item: dict, choice: dict, selection: dict) -> dict:
-    if choice["tier"] == "verified":
-        mode = compat.verified_mode(
-            compat.model_token(item["device"]["camera_name"]),
-            selection["format"],
-            selection["width"],
-            selection["height"],
-            selection["fps"],
-        )
+ZERO_COPY_WARNING = (
+    "The export allows CPU fallback (allow_cpu_fallback = True, strict_zero_copy: false). Strict zero-copy "
+    "failed to start on a Modalix DevKit (Neat 0.4.0); switch to it only after it runs on your board."
+)
+
+
+def _verified_mode(item: dict, choice: dict, selection: dict) -> Optional[dict]:
+    if choice["tier"] != "verified":
+        return None
+    model = compat.model_token(item["device"]["camera_name"])
+    return compat.verified_mode(model, selection["format"], selection["width"], selection["height"], selection["fps"])
+
+
+def _mode_support(item: dict, choice: dict, mode: Optional[dict]) -> dict:
+    if mode:
         return {"tier": "verified", "reason": f"Validated with Core CameraInput: {mode['evidence']}.", "links": []}
     if choice["tier"] == "unsupported":
         return dict(item["support"])
     return {"tier": "advertised", "reason": ADVERTISED_REASON, "links": [CORE_883]}
 
 
-def _mipi_warnings(item: dict, choice: dict, libcamerasrc: dict) -> list:
+def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc: Optional[dict]) -> list:
     warnings = []
     if choice["tier"] == "advertised":
-        warnings.append("This mode is advertised by libcamera but not validated with Core CameraInput (core#883).")
+        warnings.append(
+            "This mode is advertised by libcamera but not validated with Core CameraInput; advertised sizes can "
+            "fail to start (core#883). The delivered frame rate follows the sensor mode libcamera picks and can "
+            "differ from the request; measure it."
+        )
+    if mode and mode.get("delivered_fps") and mode["delivered_fps"] != choice["value"]:
+        warnings.append(
+            f"Measured on a DevKit, this mode delivered about {mode['delivered_fps']} fps regardless of the "
+            "requested rate: CameraInput's frame rate does not slow the sensor. Drop frames downstream if you "
+            "need fewer."
+        )
     if item["device"]["camera_name_source"] == "media-graph":
         warnings.append(
             "camera_name was read from the media graph because libcamera did not list the camera; "
@@ -168,16 +185,13 @@ def _mipi_warnings(item: dict, choice: dict, libcamerasrc: dict) -> list:
     if item["modes_source"] == "previous-scan":
         warnings.append("These modes come from an earlier scan; the last refresh could not enumerate the camera.")
     if item["availability"]["state"] == "in_use":
-        reason = item["availability"]["reason"]
-        warnings.append(f"The camera is in use ({reason}); CameraInput cannot acquire it until it is released.")
-    if not libcamerasrc["present"]:
+        users = item["availability"]["users"]
+        holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users) or "another process"
+        warnings.append(f"The camera is in use by {holders}; CameraInput cannot acquire it until it is released.")
+    if not libcamerasrc or not libcamerasrc["present"]:
         warnings.append(item["support"]["reason"])
         return warnings
-    if not libcamerasrc["external_buffer_mode"]:
-        warnings.append(
-            "libcamerasrc on this board has no external-buffer-mode property, so strict zero-copy is unavailable; "
-            "the export sets allow_cpu_fallback (strict_zero_copy: false)."
-        )
+    warnings.append(ZERO_COPY_WARNING)
     if not libcamerasrc["buffer_count"]:
         warnings.append(
             "libcamerasrc on this board has no buffer-count property, so the code omits capture_buffer_count "

@@ -1,11 +1,9 @@
-import os
-
-os.environ.setdefault("NEAT_METRICS_ZMQ_ENDPOINT", "tcp://127.0.0.1:55591")
-
 import ast
 import json
+import os
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -14,7 +12,7 @@ from types import SimpleNamespace
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult
-from neat_insight.peripherals import api, cameras, probe
+from neat_insight.peripherals import api, cameras, export, probe
 from neat_insight.peripherals.api import peripherals_bp
 
 FIXTURES = Path(__file__).parent / "fixtures" / "peripherals"
@@ -218,6 +216,23 @@ class ProbeParsingTests(unittest.TestCase):
         self.assertFalse(probe.acquire_failed(text))
         self.assertTrue(probe.acquire_failed(fixture("cam_info_busy_synthetic.txt")))
 
+    def test_commands_past_the_time_budget_are_skipped(self):
+        with mock.patch.object(probe, "_deadline", time.monotonic() - 1):
+            self.assertEqual(probe.run(["true"]), (None, "", "skipped: the probe's time budget was used up"))
+
+    def test_real_imx477_output_from_the_devkit(self):
+        listing = probe.parse_cam_list(fixture("cam_list_imx477_real.txt"))
+        self.assertEqual([(c["index"], c["model"], c["id"]) for c in listing["cameras"]], [(1, None, IMX477)])
+        self.assertEqual(listing["rates"], {IMX477: 66.1857})
+        formats = {f["format"]: f for f in probe.parse_cam_info(fixture("cam_info_imx477_real.txt"))}
+        self.assertEqual(set(formats), {"SRGGB10", "SRGGB12", "SRGGB8", "NV12", "BGR888", "RGB888", "YUYV"})
+        self.assertEqual(list(formats["NV12"]["range"].values()), [48, 32, 4056, 3040, 2, 2])
+        self.assertEqual(len(formats["NV12"]["sizes"]), 49)
+        graph = probe.parse_media_ctl(fixture("media_ctl_imx477_real.txt"))
+        sensor = next(e for e in graph["entities"] if "subtype Sensor" in e["type"])
+        self.assertEqual((sensor["name"], sensor["node"]), (IMX477, "/dev/v4l-subdev2"))
+        self.assertEqual(graph["bus_info"], "platform:csi2video@1")
+
     def test_gst_inspect_reports_element_properties_only(self):
         properties = probe.parse_gst_properties(fixture("gst_inspect_libcamerasrc.txt"))
         self.assertIn("external-buffer-mode", properties)
@@ -387,10 +402,47 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertIn("29.9742 fps", camera["notes"][0])
 
+    def test_real_imx477_rate_limit_is_described_as_the_fastest_mode(self):
+        board = devkit_board(self.tmp.name)
+        board.media("media0", fixture("media_ctl_imx477_real.txt"))
+        board.command("cam", "-l", text=fixture("cam_list_imx477_real.txt"))
+        board.command("cam", "-c", IMX477, "-I", text=fixture("cam_info_imx477_real.txt"))
+        snapshot = snapshot_of(board.collect())
+        camera = item(snapshot, "mipi:" + IMX477)
+        self.assertEqual((camera["support"]["tier"], camera["default_selection"]["fps"]), ("verified", 30))
+        self.assertIn("66.1857 fps for the sensor's fastest mode", camera["notes"][0])
+        largest = max(fmt_of(camera, "NV12")["sizes"], key=lambda s: s["width"] * s["height"])
+        request = {"id": camera["id"], "format": "NV12", "width": largest["width"], "height": largest["height"]}
+        rendered = export.render(snapshot, dict(request, fps=60))
+        self.assertEqual(rendered["support"]["tier"], "advertised")
+        self.assertTrue(any("can differ from the request" in warning for warning in rendered["warnings"]))
+
+    def test_permission_failures_name_the_video_group(self):
+        board = camera_board(self.tmp.name, usb=False)
+        board.media("media0", fixture("media_ctl_imx477_synthetic.txt"))
+        board.command("media-ctl", "-d", "/dev/media0", "-p", code=1, err="Failed to open /dev/media0: Permission denied")
+        board.command("cam", "-c", IMX477, "-I", code=1, err="Failed to open /dev/video0: Permission denied")
+        snapshot = snapshot_of(board.collect())
+        issue = next(i for i in snapshot["issues"] if i["code"] == "permission_denied")
+        self.assertEqual(issue["hint"], cameras.PERMISSION_HINT)
+        self.assertEqual(item(snapshot, "mipi:" + IMX477)["errors"][0]["code"], "permission_denied")
+
+    def test_unchecked_libcamerasrc_is_unknown_not_absent(self):
+        output = camera_board(self.tmp.name, usb=False).collect()
+        output["libcamerasrc"] = None
+        snapshot = snapshot_of(output)
+        self.assertIsNone(snapshot["platform"]["libcamerasrc"])
+        request = {"id": "mipi:" + IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
+        rendered = export.render(snapshot, request)
+        descriptor = json.loads(next(e for e in rendered["exports"] if e["id"] == "json")["content"])
+        self.assertEqual(descriptor["capture_buffer_count"], 0)
+        self.assertIn(cameras.UNCHECKED_LIBCAMERASRC_REASON, rendered["warnings"])
+
     def test_fps_choices_follow_the_rate_limit(self):
         self.assertEqual(cameras.fps_choices(59.94), [60, 30, 25, 20, 15, 10, 5])
         self.assertEqual(cameras.fps_choices(29.9742)[0], 30)
-        self.assertEqual(cameras.fps_choices(24.0), [20, 15, 10, 5])
+        self.assertEqual(cameras.fps_choices(24.0), [24, 20, 15, 10, 5])
+        self.assertEqual(cameras.fps_choices(66.1857)[:3], [66, 60, 30])
         self.assertEqual(cameras.fps_choices(None), [30])
 
     def test_unknown_max_fps_offers_30_with_a_note(self):
@@ -502,6 +554,10 @@ class PeripheralsApiTests(unittest.TestCase):
         body = {"id": "mipi:" + IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30, **body}
         return self.client.post("/api/peripherals/cameras/export", json=body)
 
+    def test_scan_responses_are_not_cached(self):
+        self.use()
+        self.assertEqual(self.client.get("/api/peripherals").headers["Cache-Control"], "no-store")
+
     def test_get_before_refresh_is_empty_and_never_connects(self):
         transport = self.use()
         response = self.client.get("/api/peripherals")
@@ -545,7 +601,22 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertIn("could not be read during this refresh", second["notes"][0])
         warnings = self.export().get_json()["warnings"]
         self.assertTrue(any("earlier scan" in w for w in warnings))
-        self.assertTrue(any("in use" in w for w in warnings))
+        self.assertIn("The camera is in use by another process; CameraInput cannot acquire it until it is released.", warnings)
+
+    def test_in_use_warning_names_the_holding_processes(self):
+        self.use(self.board("a", usb=False))
+        snapshot = self.refresh().get_json()
+        snapshot["items"][0]["availability"] = {
+            "state": "in_use",
+            "users": [{"pid": 4242, "command": "gst-launch-1.0"}],
+            "reason": "Open in gst-launch-1.0 (pid 4242).",
+        }
+        request = {"id": "mipi:" + IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
+        warnings = export.render(snapshot, request)["warnings"]
+        self.assertIn(
+            "The camera is in use by gst-launch-1.0 (pid 4242); CameraInput cannot acquire it until it is released.",
+            warnings,
+        )
 
     def test_modes_are_not_carried_across_boards(self):
         self.use(self.board("a", usb=False))
@@ -563,7 +634,10 @@ class PeripheralsApiTests(unittest.TestCase):
         body = response.get_json()
         self.assertEqual(body["selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(body["support"]["tier"], "verified")
-        self.assertEqual(body["warnings"], [])
+        warnings = body["warnings"]
+        self.assertEqual(warnings[-1], export.ZERO_COPY_WARNING)
+        self.assertIn("delivered about 66 fps", warnings[0])
+        self.assertEqual(len(warnings), 2)
         exports = {e["id"]: e for e in body["exports"]}
         self.assertEqual(list(exports), ["python", "cpp", "yaml", "json"])
 
@@ -574,7 +648,7 @@ class PeripheralsApiTests(unittest.TestCase):
             "camera.framerate_num = 30",
             "camera.framerate_den = 1",
             "camera.buffer_name = 'camera0'",
-            "camera.allow_cpu_fallback = False",
+            "camera.allow_cpu_fallback = True",
             "graph.add(pyneat.nodes.camera_input(camera, capture_buffer_count=32))",
         ):
             self.assertIn(line, python)
@@ -594,7 +668,7 @@ class PeripheralsApiTests(unittest.TestCase):
                 "fps_den": 1,
                 "format": "NV12",
                 "capture_buffers": 32,
-                "strict_zero_copy": True,
+                "strict_zero_copy": False,
                 "queue_depth": 2,
             },
         )

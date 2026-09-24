@@ -10,6 +10,7 @@ import platform
 import re
 import shutil
 import subprocess
+import time
 
 SCHEMA = 1
 SYSFS_ROOT = "/sys"
@@ -18,7 +19,10 @@ DEV_ROOT = "/dev"
 COMMAND_TIMEOUT = 10
 # cam -I opens the sensor and gst-inspect may rebuild the plugin registry.
 SLOW_COMMAND_TIMEOUT = 15
+# The backend waits BUDGET_SEC + a margin; commands past the budget are skipped, not waited for.
+BUDGET_SEC = 70
 TOOLS = ("cam", "media-ctl", "v4l2-ctl", "gst-inspect-1.0", "fuser", "sudo")
+_deadline = None
 SEARCH_PATH = os.pathsep.join(
     [os.environ.get("PATH") or "/usr/bin:/bin", "/usr/local/bin", "/usr/sbin", "/sbin"]
 )
@@ -55,6 +59,10 @@ def which(name):
 
 def run(argv, timeout=COMMAND_TIMEOUT):
     """Run argv without a shell; return (exit code, stdout, stderr), exit code None on timeout."""
+    if _deadline is not None:
+        timeout = min(timeout, _deadline - time.monotonic())
+        if timeout <= 0:
+            return None, "", "skipped: the probe's time budget was used up"
     try:
         proc = subprocess.run(
             argv,
@@ -491,6 +499,8 @@ def collect_usb(tools, check_users):
 
 
 def collect():
+    global _deadline
+    _deadline = time.monotonic() + BUDGET_SEC
     tools = {name: which(name) for name in TOOLS}
     failures = []
     method = availability_method(tools)

@@ -1218,6 +1218,8 @@
           "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout"]},
           "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
+          "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
+          "detail": {"type": "string", "description": "`command_failed` from a refresh: the tail of the discovery script's error output."},
           "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
           "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},
           "presented_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint the board presented."}

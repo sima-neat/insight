@@ -13,7 +13,10 @@ VERIFIED_MODES = (
         "width": 1920,
         "height": 1080,
         "fps": 30,
-        "evidence": "Core tutorial 023_run_mipi_camera_model and the Apps mipi-camera-capture example",
+        "evidence": "captured with CPU fallback allowed on a Modalix DevKit (Neat 0.4.0, 2026-09-22); "
+        "also Core tutorial 023_run_mipi_camera_model and the Apps mipi-camera-capture example",
+        # Measured on that DevKit with 15 and 30 fps requested: the sensor mode sets the rate.
+        "delivered_fps": 66,
     },
 )
 
