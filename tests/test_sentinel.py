@@ -949,6 +949,24 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(body["sentinel"], {"run": {"id": "r1"}})
         self.assertEqual(self.transport.api_paths[-1], ("POST", "/v1/traces/stop"))
 
+    def test_stopping_a_trace_read_from_another_board_is_refused_before_anything_runs(self):
+        # The page showed board A's trace; the selected board is now generation 1, not 7.
+        response = self.post("/api/sentinel/traces/stop?generation=7")
+        self.assertEqual(response.status_code, 409)
+        body = response.get_json()
+        self.assertEqual((body["code"], body["expected_generation"]), ("stale_snapshot", 7))
+        self.assertIn("no trace was stopped", body["error"])
+        self.assertEqual(self.transport.api_paths, [])
+
+    def test_stopping_a_trace_read_from_this_board_stops_it(self):
+        self.transport.answer("POST", "/v1/traces/stop", 200, {"schema": 1, "run": {"id": "r1"}})
+        response = self.post("/api/sentinel/traces/stop?generation=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.transport.api_paths[-1], ("POST", "/v1/traces/stop"))
+        malformed = self.post("/api/sentinel/traces/stop?generation=latest")
+        self.assertEqual((malformed.status_code, malformed.get_json()["code"]), (400, "invalid_request"))
+        self.assertIn("the active trace", malformed.get_json()["hint"])
+
     def test_runs_are_listed_and_read_by_name(self):
         self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [{"id": "r1", "name": "baseline"}]})
         self.transport.answer("GET", "/v1/runs/baseline", 200, {"schema": 1, "run": {"id": "r1"}})

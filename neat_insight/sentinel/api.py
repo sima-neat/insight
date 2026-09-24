@@ -120,7 +120,7 @@ def _compare_runs(raw) -> list:
     return runs
 
 
-def _expected_generation(raw):
+def _expected_generation(raw, read: str = "the run list"):
     """The board generation the caller judged its request against, or None when it names none."""
     if raw in (None, ""):
         return None
@@ -129,19 +129,19 @@ def _expected_generation(raw):
     except (TypeError, ValueError):
         raise _invalid(
             "`generation` must be the whole-number board generation.",
-            "Send the `generation` of the payload the run list came from, or omit it.",
+            "Send the `generation` of the payload {} came from, or omit it.".format(read),
         ) from None
 
 
-def _same_board(context: "_Context", expected) -> None:
+def _same_board(
+    context: "_Context",
+    expected,
+    message: str = "The selected board changed since this run list was read, so nothing was deleted.",
+    hint: str = "Read the runs of the board selected now, then delete again.",
+) -> None:
     """Refuse a destructive request aimed at a board that is no longer the selected one."""
     if expected is not None and expected != context.session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The selected board changed since this run list was read, so nothing was deleted.",
-            hint="Read the runs of the board selected now, then delete again.",
-            expected_generation=expected,
-        )
+        raise BoardError("stale_snapshot", message, hint=hint, expected_generation=expected)
 
 
 def _passthrough(body: dict) -> dict:
@@ -232,9 +232,16 @@ def start_trace():
 # API: stop the active trace on the selected board.
 @sentinel_bp.post("/api/sentinel/traces/stop")
 def stop_trace():
-    """Stop and persist the active trace; 409 when no trace is active."""
+    """Stop and persist the active trace; 409 when no trace is active or the board changed since `generation`."""
     try:
+        expected = _expected_generation(request.args.get("generation"), read="the active trace")
         context = _Context()
+        _same_board(
+            context,
+            expected,
+            "The selected board changed since this trace was read, so no trace was stopped.",
+            "Read the active trace of the board selected now, then stop it again.",
+        )
         return context.payload(sentinel=_passthrough(context.client.stop_trace()))
     except BoardError as err:
         return err.to_dict(), err.status

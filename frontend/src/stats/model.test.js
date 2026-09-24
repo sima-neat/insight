@@ -21,6 +21,7 @@ import {
   definitionsByKey,
   deletePrompt,
   deleteRunQuery,
+  stopTraceQuery,
   deleteStops,
   deleteSummary,
   deltaAbsenceText,
@@ -649,14 +650,79 @@ test('a failure that lands after a board switch carries the generation it was is
 
 test('the request guard admits one call per key until it ends', () => {
   const guard = createRequestGuard()
-  assert.equal(guard.begin('state'), true)
+  guard.switchTo(1)
+  const state = guard.begin('state')
+  assert.ok(state)
   assert.equal(guard.running('state'), true)
-  assert.equal(guard.begin('state'), false)
-  assert.equal(guard.begin('runs'), true)
-  guard.end('state')
+  assert.equal(guard.begin('state'), null)
+  assert.ok(guard.begin('runs'))
+  guard.end(state)
   assert.equal(guard.running('state'), false)
-  assert.equal(guard.begin('state'), true)
-  guard.end('missing')
+  assert.ok(guard.begin('state'))
+  guard.end(null)
+})
+
+test('a board switch is not blocked by a request still out to the previous board', () => {
+  // Board A's /api/sentinel is slow; the masthead selects board B meanwhile.
+  const guard = createRequestGuard()
+  guard.switchTo(3)
+  const onA = guard.begin('state')
+  assert.equal(guard.switchTo(4), true)
+  // B is checked at once instead of being refused because A's check is still out...
+  const onB = guard.begin('state')
+  assert.ok(onB)
+  assert.equal(onB.generation, 4)
+  // ...and when A finally answers, its state is dropped, not applied as B's.
+  assert.equal(guard.current(onA), false)
+  assert.equal(guard.current(onB), true)
+  // A's request ending does not end B's.
+  guard.end(onA)
+  assert.equal(guard.running('state'), true)
+  assert.equal(guard.begin('state'), null)
+})
+
+test('every board-scoped answer is judged against the board it was asked of', () => {
+  // An active-trace read for A lands after the page reset for B: it must not bring A's
+  // trace back, whose Stop button would then stop B's.
+  const guard = createRequestGuard()
+  guard.switchTo(3)
+  const tickets = ['traces', 'runs', 'metrics', 'compare', 'trace-action', 'install', 'delete'].map((key) => guard.begin(key))
+  guard.switchTo(4)
+  for (const ticket of tickets) assert.equal(guard.current(ticket), false, ticket.key)
+  for (const ticket of tickets) assert.ok(guard.begin(ticket.key), ticket.key)
+  // Selecting the same board again is not a switch and cancels nothing.
+  const kept = guard.begin('host')
+  assert.equal(guard.switchTo(4), false)
+  assert.equal(guard.current(kept), true)
+})
+
+test('requests out before the first board arrives belong to that board', () => {
+  const guard = createRequestGuard()
+  const early = guard.begin('state')
+  assert.equal(early.generation, null)
+  // The board state loading is not a switch: the check already out went to this board.
+  assert.equal(guard.switchTo(7), false)
+  assert.equal(guard.current(early), true)
+  assert.equal(guard.begin('state'), null)
+})
+
+test('opening another run supersedes the read of the one opened before it', () => {
+  // Open run A, then run B before A answers: B is read, and A's answer is dropped rather
+  // than drawn under B's heading.
+  const guard = createRequestGuard()
+  guard.switchTo(1)
+  const runA = guard.begin('run', { supersede: true })
+  const runB = guard.begin('run', { supersede: true })
+  assert.ok(runB)
+  assert.equal(guard.current(runA), false)
+  assert.equal(guard.current(runB), true)
+  guard.end(runA)
+  assert.equal(guard.running('run'), true)
+  // Closing the run, or deleting it, cancels its read outright.
+  guard.cancel('run')
+  assert.equal(guard.current(runB), false)
+  assert.equal(guard.running('run'), false)
+  guard.cancel('never-started')
 })
 
 test('the daemon panel is busy during the first check, before any state exists', () => {
@@ -1020,6 +1086,13 @@ test('a delete names one run and the board generation its list came from', () =>
   assert.equal(deleteRunQuery('a', '3'), '/api/sentinel/runs/a')
   assert.equal(deletePrompt(1), 'Delete 1 run?')
   assert.equal(deletePrompt(3), 'Delete 3 runs?')
+})
+
+test('stopping a trace names the board generation the trace was read under', () => {
+  assert.equal(stopTraceQuery(3), '/api/sentinel/traces/stop?generation=3')
+  assert.equal(stopTraceQuery(0), '/api/sentinel/traces/stop?generation=0')
+  assert.equal(stopTraceQuery(), '/api/sentinel/traces/stop')
+  assert.equal(stopTraceQuery('3'), '/api/sentinel/traces/stop')
 })
 
 test('a failure about the board stops the remaining deletes; one about the run does not', () => {

@@ -1,6 +1,7 @@
-// The comparison table as React renders it, for what markup alone decides: whether a
-// keyboard or touch reader can reach the reason a cell shows no change. StatsView.jsx is
-// bundled with the esbuild that Vite already ships, and rendered to static markup.
+// The Runs panel as React renders it, for what markup alone decides: whether a keyboard
+// or touch reader can reach the reason a comparison cell shows no change, and whether a
+// trace from another board can be stopped. StatsView.jsx is bundled with the esbuild that
+// Vite already ships, and rendered to static markup.
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import test from 'node:test'
@@ -11,6 +12,12 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { DELTA_ABSENCE, runList, traceModel } from './model.js'
+
+const RECORDING = {
+  generation: 3,
+  board: { label: 'sima@192.168.2.2' },
+  sentinel: { trace: { name: 'baseline', started_at: '2026-09-24T11:59:00Z' }, summary: { samples: 4 } }
+}
 
 const COMPARE = JSON.parse(readFileSync(new URL('./fixtures/compare-shape.json', import.meta.url), 'utf8'))
 
@@ -101,7 +108,7 @@ test('the reason a comparison cell shows no change can be reached without a poin
   const cells = compareCells(runsPanel(RunsPanel))
   const withoutChange = cells.filter((cell) => cell.includes('—') && !visible(cell).includes('%'))
   assert.ok(withoutChange.length > 0)
-  // The four reasons the fixture exercises, each at least once.
+  // Every reason the fixture exercises is checked; 0 against 5.9% must be among them.
   const seen = new Set()
   for (const cell of withoutChange) {
     const reason = Object.entries(DELTA_ABSENCE).find(([, text]) => cell.includes(text))
@@ -127,4 +134,14 @@ test('the table stays as calm as it was: no legend, and changes still read as nu
   const changed = cells.filter((cell) => /[+−-]\d/.test(visible(cell)) && cell.includes('stats-delta'))
   assert.ok(changed.length > 0)
   for (const cell of changed) assert.doesNotMatch(cell, /<button/)
+})
+
+test('a trace read from a board no longer selected cannot be stopped from here', () => {
+  const stopOf = (html) => html.match(/<button[^>]*>(?:Stop trace|Stopping…)<\/button>/)?.[0] || ''
+  const current = stopOf(runsPanel(RunsPanel, { trace: traceModel(RECORDING), compare: null }))
+  assert.ok(current, 'no Stop button for a recording trace')
+  assert.doesNotMatch(current, /disabled/)
+  // Stop acts on the board selected now, which is not the one this trace was read from.
+  const stale = stopOf(runsPanel(RunsPanel, { trace: traceModel(RECORDING), traceStale: true, compare: null }))
+  assert.match(stale, /disabled/)
 })

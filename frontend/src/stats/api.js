@@ -2,7 +2,7 @@
 // it turns a non-JSON answer or a dead server into the same error shape the board and
 // Sentinel blueprints return, so the view has a single failure vocabulary.
 import { requestJson } from '../peripherals/api.js'
-import { HISTORY_SAMPLES, compareQuery, deleteRunQuery } from './model.js'
+import { HISTORY_SAMPLES, compareQuery, deleteRunQuery, stopTraceQuery } from './model.js'
 
 export { requestJson }
 
@@ -35,8 +35,10 @@ export function startTrace(body) {
   return requestJson('/api/sentinel/traces', { method: 'POST', body })
 }
 
-export function stopTrace() {
-  return requestJson('/api/sentinel/traces/stop', { method: 'POST' })
+// `generation` is the one the shown trace was read under, so a board switched in between is
+// refused with 409 stale_snapshot instead of stopping a trace on the board selected now.
+export function stopTrace(generation = null) {
+  return requestJson(stopTraceQuery(generation), { method: 'POST' })
 }
 
 export function fetchRuns() {

@@ -868,9 +868,13 @@
       "post": {
         "tags": ["Sentinel"],
         "summary": "Stop the active trace",
-        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active.",
+        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active, and `409 stale_snapshot` without touching the board when `generation` names a board that is no longer selected.",
         "operationId": "stopSentinelTrace",
+        "parameters": [
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped. Recommended: a request that outlives a board switch is refused instead of stopping a trace on another board."}
+        ],
         "responses": {
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "200": {"description": "The run Sentinel saved.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},

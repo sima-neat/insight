@@ -170,7 +170,7 @@ A comparison asks for its runs as one comma-separated list of names, so a trace 
 
 ### Values from a board you have left
 
-Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Insight keeps those values and labels them with the board they came from, with a way to read them again, rather than showing them as the current board's.
+Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Selecting it cancels everything still on its way from the previous board: the new board is checked at once, and a late answer from the old one is dropped rather than shown as the new board's. **Stop trace** names the board its trace was read from, and is refused rather than stopping a trace on another board. When the selected board changes somewhere else — another browser tab, or an API client — the values already on the page are labelled with the board they came from, with a way to read them again.
 
 ### Insight host
 

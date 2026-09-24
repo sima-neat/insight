@@ -232,21 +232,59 @@ export function payloadBoardLabel(payload) {
 }
 
 /**
- * One in-flight request per key. React state settles a tick later than a click, so a
- * second Re-check, Refresh or Compare can start before the first has set its busy flag;
- * each of those is a command on the board, so the guard is synchronous.
+ * One in-flight request per key, each bound to the board it was asked of. React state
+ * settles a tick later than a click, so a second Re-check, Refresh or Compare can start
+ * before the first has set its busy flag; each of those is a command on the board, so the
+ * guard is synchronous.
+ *
+ * `begin` returns a ticket, or null while the key is taken. The view applies an answer
+ * only while `current(ticket)` holds: the request has not been superseded or cancelled,
+ * and the board it was asked of is still the selected one. `switchTo` follows the board
+ * selection; moving to another board cancels everything still out, so a request to the
+ * new board is never refused because the old one has not answered, and the old board's
+ * answer is dropped instead of being applied as the new board's.
  */
 export function createRequestGuard() {
-  const active = new Set()
+  const active = new Map()
+  let generation = null
   return {
     running: (key) => active.has(key),
-    begin(key) {
-      if (active.has(key)) return false
-      active.add(key)
+    /** True when the selected board changed to another one, not when it first arrived. */
+    switchTo(next = null) {
+      const value = next ?? null
+      if (value === generation) return false
+      const first = generation === null
+      generation = value
+      if (first) {
+        // Requests sent before the page knew the board went to that board.
+        for (const ticket of active.values()) ticket.generation = value
+        return false
+      }
+      for (const ticket of active.values()) ticket.cancelled = true
+      active.clear()
       return true
     },
-    end(key) {
+    // `supersede` is for reads where only the latest matters (opening a run): the new
+    // request replaces the one still out, whose answer is then dropped.
+    begin(key, { supersede = false } = {}) {
+      const running = active.get(key)
+      if (running && !supersede) return null
+      if (running) running.cancelled = true
+      const ticket = { key, generation, cancelled: false }
+      active.set(key, ticket)
+      return ticket
+    },
+    current(ticket) {
+      return Boolean(ticket) && !ticket.cancelled && ticket.generation === generation
+    },
+    cancel(key) {
+      const running = active.get(key)
+      if (!running) return
+      running.cancelled = true
       active.delete(key)
+    },
+    end(ticket) {
+      if (ticket && active.get(ticket.key) === ticket) active.delete(ticket.key)
     }
   }
 }
@@ -789,6 +827,12 @@ export function compareReady(refs) {
 /** The request that deletes one run, bound to the board generation its run list came from. */
 export function deleteRunQuery(ref, generation = null) {
   const path = `/api/sentinel/runs/${encodeURIComponent(String(ref))}`
+  return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
+}
+
+/** The request that stops the active trace, bound to the board generation it was read under. */
+export function stopTraceQuery(generation = null) {
+  const path = '/api/sentinel/traces/stop'
   return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
 }
 

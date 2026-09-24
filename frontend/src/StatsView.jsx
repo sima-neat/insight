@@ -370,7 +370,7 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, onTogg
  * recording and the control that stops it. The note and tags fields it can unfold, and
  * what a recording trace was started with, are rendered below the header by `TraceDetails`.
  */
-function TraceBar({ bar, busy, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
+function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
   if (bar.recording) {
     return (
       <div className="stats-trace-bar">
@@ -386,7 +386,8 @@ function TraceBar({ bar, busy, form, extras, extrasShown, onToggleExtras, onForm
             {bar.tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}
           </span>
         )}
-        <button type="button" className="btn-tonal" onClick={onStop} disabled={busy}>{bar.stopLabel}</button>
+        {/* A trace read from a board no longer selected is not this board's to stop. */}
+        <button type="button" className="btn-tonal" onClick={onStop} disabled={busy || stale}>{bar.stopLabel}</button>
       </div>
     )
   }
@@ -594,6 +595,7 @@ export function RunsPanel({
         <TraceBar
           bar={bar}
           busy={traceBusy}
+          stale={traceStale}
           form={form}
           extras={extras}
           extrasShown={extrasShown}
@@ -1101,13 +1103,13 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
 
   const mounted = useRef(false)
   // One in-flight request per endpoint: a second click must not run a second command
-  // on the board while the first is still out.
+  // on the board while the first is still out. Every request carries a ticket for the
+  // board it was asked of, and its answer is applied only while that ticket is current:
+  // a board switch cancels them all, so nothing the previous board says lands on this one.
   const guard = useRef(createRequestGuard())
+  // The Insight host is not the board, so its reads never follow a board switch.
+  const hostGuard = useRef(createRequestGuard())
   const tick = useRef(() => {})
-  const detailSeq = useRef(0)
-  // Bumped when a delete answers with the run list: a read that was already out answers
-  // from before the delete and must not bring the deleted runs back.
-  const runsSeq = useRef(0)
   // The open run and comparison as they are now, not as they were when a delete started.
   const openRefNow = useRef(openRef)
   openRefNow.current = openRef
@@ -1144,7 +1146,23 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const delay = pollDelay(failures)
   const generation = board?.generation ?? null
 
+  // An answer is applied only while the view is mounted and its request still belongs to
+  // the selected board and has not been superseded.
+  function fresh(ticket) {
+    return mounted.current && guard.current.current(ticket)
+  }
+
   function reset() {
+    // Requests to the previous board were cancelled by the switch and will not clear
+    // their own busy flags.
+    setStateBusy(false)
+    setInstallBusy(false)
+    setMetricsBusy(false)
+    setTraceBusy(false)
+    setRunsBusy(false)
+    setDetailBusy(false)
+    setCompareBusy(false)
+    setDeleteBusy(false)
     setMetrics(null)
     setMetricsError(null)
     setTraces(null)
@@ -1169,11 +1187,12 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   }
 
   async function loadState({ quiet = false } = {}) {
-    if (!guard.current.begin('state')) return null
+    const ticket = guard.current.begin('state')
+    if (!ticket) return null
     if (!quiet) setStateBusy(true)
     try {
       const data = await fetchSentinel()
-      if (!mounted.current) return null
+      if (!fresh(ticket)) return null
       setState(data)
       setStateError(null)
       if (data.available) {
@@ -1183,52 +1202,54 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       }
       return data
     } catch (err) {
-      if (mounted.current) {
+      if (fresh(ticket)) {
         setState(null)
-        setStateError(failureNotice(err, generation))
+        setStateError(failureNotice(err, ticket.generation))
       }
       return null
     } finally {
-      guard.current.end('state')
-      if (mounted.current && !quiet) setStateBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket) && !quiet) setStateBusy(false)
     }
   }
 
   async function loadTraces({ quiet = false } = {}) {
-    if (!guard.current.begin('traces')) return
+    const ticket = guard.current.begin('traces')
+    if (!ticket) return
     if (!quiet) setTraceBusy(true)
     try {
       const data = await fetchActiveTrace()
-      if (!mounted.current) return
+      if (!fresh(ticket)) return
       setTraces(data)
       setTraceError(null)
     } catch (err) {
-      if (mounted.current) setTraceError(failureNotice(err, generation))
+      if (fresh(ticket)) setTraceError(failureNotice(err, ticket.generation))
     } finally {
-      guard.current.end('traces')
-      if (mounted.current && !quiet) setTraceBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket) && !quiet) setTraceBusy(false)
     }
   }
 
   async function loadRuns() {
-    if (!guard.current.begin('runs')) return
-    const seq = runsSeq.current
+    const ticket = guard.current.begin('runs')
+    if (!ticket) return
     setRunsBusy(true)
     try {
       const data = await fetchRuns()
-      if (!mounted.current || seq !== runsSeq.current) return
+      if (!fresh(ticket)) return
       setRuns(data)
       setRunsError(null)
     } catch (err) {
-      if (mounted.current && seq === runsSeq.current) setRunsError(failureNotice(err, generation))
+      if (fresh(ticket)) setRunsError(failureNotice(err, ticket.generation))
     } finally {
-      guard.current.end('runs')
-      if (mounted.current) setRunsBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setRunsBusy(false)
     }
   }
 
   async function loadHost() {
-    if (!guard.current.begin('host')) return
+    const ticket = hostGuard.current.begin('host')
+    if (!ticket) return
     setHostBusy(true)
     try {
       const data = await fetchHostMetrics()
@@ -1240,7 +1261,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       // The host snapshot belongs to Insight itself, so a board generation means nothing here.
       if (mounted.current) setHostError(failureNotice(err))
     } finally {
-      guard.current.end('host')
+      hostGuard.current.end(ticket)
       if (mounted.current) setHostBusy(false)
     }
   }
@@ -1249,18 +1270,19 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     if (manual) setMetricsBusy(true)
     // A refresh asked for while a poll is already out is that poll: it clears the busy
     // flag when it lands, so the button reports the wait instead of doing nothing.
-    if (!guard.current.begin('metrics')) return
+    const ticket = guard.current.begin('metrics')
+    if (!ticket) return
     try {
       const data = await fetchMetrics()
-      if (!mounted.current) return
+      if (!fresh(ticket)) return
       setMetrics(data)
       setMetricsError(null)
       setFailures(0)
       setHalted(false)
       if (trace.active) loadTraces({ quiet: true })
     } catch (err) {
-      if (!mounted.current) return
-      const notice = failureNotice(err, generation)
+      if (!fresh(ticket)) return
+      const notice = failureNotice(err, ticket.generation)
       setMetricsError(notice)
       setFailures((count) => count + 1)
       // A missing board or a stopped daemon will not answer the next tick either:
@@ -1270,32 +1292,33 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         loadState({ quiet: true })
       }
     } finally {
-      guard.current.end('metrics')
-      if (mounted.current) setMetricsBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setMetricsBusy(false)
     }
   }
 
   async function install() {
-    if (!guard.current.begin('install')) return
+    const ticket = guard.current.begin('install')
+    if (!ticket) return
     setInstallBusy(true)
     setInstallError(null)
     setInstallResult(null)
     try {
       const data = await installSentinel()
-      if (!mounted.current) return
+      if (!fresh(ticket)) return
       setInstallResult(data)
       onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
       await loadState({ quiet: true })
-      if (mounted.current) pollMetrics({ manual: true })
+      if (fresh(ticket)) pollMetrics({ manual: true })
     } catch (err) {
-      if (!mounted.current) return
-      const notice = failureNotice(err, generation, { action: 'install' })
+      if (!fresh(ticket)) return
+      const notice = failureNotice(err, ticket.generation, { action: 'install' })
       setInstallError(notice)
       onError?.(notice.message)
       loadState({ quiet: true })
     } finally {
-      guard.current.end('install')
-      if (mounted.current) setInstallBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setInstallBusy(false)
     }
   }
 
@@ -1307,79 +1330,91 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       return
     }
     setFormError('')
-    if (!guard.current.begin('trace-action')) return
+    const ticket = guard.current.begin('trace-action')
+    if (!ticket) return
     setTraceBusy(true)
     setTraceError(null)
     try {
       const data = await startTrace(result.body)
-      if (!mounted.current) return
+      if (!fresh(ticket)) return
       setTraces(data)
       setForm({ name: '', note: '', tags: '' })
       onStatus?.(`Recording trace “${result.body.name}”.`)
       loadRuns()
     } catch (err) {
-      if (mounted.current) setTraceError(failureNotice(err, generation))
+      if (fresh(ticket)) setTraceError(failureNotice(err, ticket.generation))
     } finally {
-      guard.current.end('trace-action')
-      if (mounted.current) setTraceBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setTraceBusy(false)
     }
   }
 
   async function onStopTrace() {
-    if (!guard.current.begin('trace-action')) return
+    // Stop the board the shown trace was read from: a board switched since is refused
+    // with 409 stale_snapshot instead of ending a trace on the board selected now.
+    const traceGeneration = Number.isInteger(traces?.generation) ? traces.generation : generation
+    const ticket = guard.current.begin('trace-action')
+    if (!ticket) return
     setTraceBusy(true)
     setTraceError(null)
     try {
-      await stopTrace()
-      if (!mounted.current) return
+      await stopTrace(traceGeneration)
+      if (!fresh(ticket)) return
       onStatus?.('Trace stopped and saved as a run.')
       await loadTraces({ quiet: true })
       loadRuns()
     } catch (err) {
-      if (mounted.current) setTraceError(failureNotice(err, generation))
+      if (fresh(ticket)) setTraceError(failureNotice(err, ticket.generation))
     } finally {
-      guard.current.end('trace-action')
-      if (mounted.current) setTraceBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setTraceBusy(false)
     }
   }
 
+  // Opening a run replaces the read of the run opened before it, whose answer would
+  // otherwise be drawn under this run's heading; closing it cancels the read.
   async function openRun(ref) {
     setOpenRef(ref)
     setDetail(null)
     setDetailError(null)
-    if (!ref || !guard.current.begin('run')) return
-    const seq = ++detailSeq.current
+    if (!ref) {
+      guard.current.cancel('run')
+      setDetailBusy(false)
+      return
+    }
+    const ticket = guard.current.begin('run', { supersede: true })
     setDetailBusy(true)
     try {
       const data = await fetchRun(ref)
-      if (!mounted.current || seq !== detailSeq.current) return
+      if (!fresh(ticket)) return
       setDetail(data)
     } catch (err) {
-      if (mounted.current && seq === detailSeq.current) setDetailError(failureNotice(err, generation))
+      if (fresh(ticket)) setDetailError(failureNotice(err, ticket.generation))
     } finally {
-      guard.current.end('run')
-      if (mounted.current && seq === detailSeq.current) setDetailBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setDetailBusy(false)
     }
   }
 
   async function runCompare() {
-    if (!guard.current.begin('compare')) return
+    const ticket = guard.current.begin('compare')
+    if (!ticket) return
     setCompareBusy(true)
     setCompareError(null)
     try {
       const data = await compareRuns(selected)
-      if (mounted.current) {
+      if (fresh(ticket)) {
         setCompare(data)
         setCompareOpen(true)
       }
     } catch (err) {
-      if (mounted.current) {
+      if (fresh(ticket)) {
         setCompare(null)
-        setCompareError(failureNotice(err, generation))
+        setCompareError(failureNotice(err, ticket.generation))
       }
     } finally {
-      guard.current.end('compare')
-      if (mounted.current) setCompareBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setCompareBusy(false)
     }
   }
 
@@ -1391,7 +1426,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
    */
   async function deleteSelected() {
     const refs = [...selected]
-    if (!refs.length || !guard.current.begin('delete')) return null
+    const ticket = refs.length ? guard.current.begin('delete') : null
+    if (!ticket) return null
     setDeleteBusy(true)
     setDeleteResult(null)
     const listGeneration = Number.isInteger(runs?.generation) ? runs.generation : generation
@@ -1408,21 +1444,22 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
           latest = data
           results.push({ ref, deleted: data?.deleted || { id: null, name: null } })
         } catch (err) {
-          const notice = failureNotice(err, generation, { action: 'delete' })
+          const notice = failureNotice(err, ticket.generation, { action: 'delete' })
           results.push({ ref, notice, stop: deleteStops(notice) })
         }
-        if (!mounted.current) return null
+        // A board switch ends the batch: the rest were chosen from the previous board's list.
+        if (!fresh(ticket)) return null
       }
     } finally {
-      guard.current.end('delete')
-      if (mounted.current) setDeleteBusy(false)
+      guard.current.end(ticket)
+      if (fresh(ticket)) setDeleteBusy(false)
     }
     const summary = deleteSummary(results)
     const { gone } = summary
     if (gone.size) {
       setSelected((current) => current.filter((ref) => !gone.has(String(ref))))
       if (openRefNow.current && gone.has(openRefNow.current)) {
-        detailSeq.current += 1
+        guard.current.cancel('run')
         setOpenRef('')
         setDetail(null)
         setDetailError(null)
@@ -1433,9 +1470,11 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         setCompareError(null)
       }
     }
-    // The last successful delete answered with the list as the board holds it afterwards.
+    // The last successful delete answered with the list as the board holds it afterwards;
+    // a read that was already out answers from before the delete and must not bring the
+    // deleted runs back.
     if (latest) {
-      runsSeq.current += 1
+      guard.current.cancel('runs')
       setRuns(latest)
       setRunsError(null)
     }
@@ -1446,16 +1485,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   }
 
   // The masthead changes the board; this page follows it. Another board means another daemon,
-  // other runs and another history, so nothing read from the previous one is kept.
-  const seenGeneration = useRef(generation)
+  // other runs and another history, so nothing read from the previous one is kept, and
+  // nothing still on its way from it is let in: the switch cancels every request out to it,
+  // so the new board is checked at once instead of waiting for the old one to answer.
   useEffect(() => {
-    if (seenGeneration.current === generation) return
-    const first = seenGeneration.current === null
-    seenGeneration.current = generation
-    if (first) return
+    if (!guard.current.switchTo(generation)) return
     setState(null)
     reset()
-    loadState({ quiet: true })
+    loadState()
   }, [generation])
 
   useEffect(() => {
