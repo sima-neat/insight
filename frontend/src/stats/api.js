@@ -2,7 +2,7 @@
 // it turns a non-JSON answer or a dead server into the same error shape the board and
 // Sentinel blueprints return, so the view has a single failure vocabulary.
 import { requestJson } from '../peripherals/api.js'
-import { HISTORY_SAMPLES, compareQuery } from './model.js'
+import { HISTORY_SAMPLES, compareQuery, deleteRunQuery } from './model.js'
 
 export { requestJson }
 
@@ -45,6 +45,12 @@ export function fetchRuns() {
 
 export function fetchRun(ref) {
   return requestJson(`/api/sentinel/runs/${encodeURIComponent(ref)}`)
+}
+
+// `generation` is the one the run list was read under: a board switched in between is
+// refused with 409 stale_snapshot instead of deleting a same-named run on the new board.
+export function deleteRun(ref, generation = null) {
+  return requestJson(deleteRunQuery(ref, generation), { method: 'DELETE' })
 }
 
 export function compareRuns(refs) {

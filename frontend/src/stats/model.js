@@ -93,6 +93,21 @@ const INSTALL_TITLES = {
   timeout: 'The installer did not finish in time'
 }
 
+/**
+ * What DELETE /api/sentinel/runs/<run> failures mean. The codes are shared with reading and
+ * starting a trace, but here `trace_conflict` is the CLI refusing a run that is still
+ * recording, and `stale_snapshot` is the board changing between reading the list and
+ * deleting from it, so nothing was deleted on the other board.
+ */
+const DELETE_TITLES = {
+  trace_conflict: 'That run is still recording',
+  not_found: 'That run is not on this board',
+  stale_snapshot: 'The selected board changed',
+  sentinel_failed: 'Sentinel did not delete the run',
+  sentinel_denied: 'The board user may not delete runs',
+  tool_missing: 'The Sentinel CLI is missing on the board'
+}
+
 const INSTALL_HINTS = {
   timeout: 'Run the install in a shell on the board, where it can take as long as it needs.',
   sentinel_failed: 'Check the installer output below, or run the install in a shell on the board.'
@@ -338,12 +353,14 @@ export function failureNotice(error, generation = null, { action = 'read' } = {}
   if (!normalized) return null
   const code = normalized.code || ''
   const installing = action === 'install'
+  const deleting = action === 'delete'
   return {
     code,
     generation,
     // What the failure came out of, so the view can label its attached output.
     action,
-    title: (installing && INSTALL_TITLES[code]) || FAILURE_TITLES[code] || 'Something went wrong',
+    title:
+      (installing && INSTALL_TITLES[code]) || (deleting && DELETE_TITLES[code]) || FAILURE_TITLES[code] || 'Something went wrong',
     message: normalized.message,
     hint: normalized.hint || (installing && INSTALL_HINTS[code]) || FALLBACK_HINTS[code] || '',
     detail: typeof normalized.details?.detail === 'string' ? normalized.details.detail : '',
@@ -767,6 +784,62 @@ export function compareReady(refs) {
   const list = refs || []
   if (list.length < MIN_COMPARE_RUNS || list.length > MAX_COMPARE_RUNS) return false
   return uncomparableRefs(list).length === 0
+}
+
+/** The request that deletes one run, bound to the board generation its run list came from. */
+export function deleteRunQuery(ref, generation = null) {
+  const path = `/api/sentinel/runs/${encodeURIComponent(String(ref))}`
+  return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
+}
+
+export function deletePrompt(count) {
+  return `Delete ${count} run${count === 1 ? '' : 's'}?`
+}
+
+/**
+ * Whether the runs still to delete would fail the same way: the fault is the board, the
+ * daemon, Insight or a board switch, not the run. They are then reported as not attempted
+ * rather than sent one by one into the same failure.
+ */
+export function deleteStops(notice) {
+  if (!notice) return false
+  return Boolean(notice.board || notice.daemon || ['stale_snapshot', 'network', 'bad_response'].includes(notice.code))
+}
+
+/**
+ * The outcome of deleting the selected runs, one result per ref in the order they were sent:
+ * `{ref, deleted}` when the board deleted it, `{ref, notice}` when it failed, `{ref, skipped}`
+ * when an earlier failure made trying pointless. `gone` holds every name a deleted run went
+ * by - the ref the selection held and the id and name the backend reports - because a
+ * selection, an open run and a comparison may each hold either.
+ */
+export function deleteSummary(results) {
+  const list = results || []
+  const deleted = list.filter((result) => result.deleted)
+  const failed = list.filter((result) => result.notice)
+  const skipped = list.filter((result) => result.skipped).map((result) => result.ref)
+  const gone = new Set()
+  for (const result of deleted) {
+    for (const value of [result.ref, result.deleted?.id, result.deleted?.name]) if (value) gone.add(String(value))
+  }
+  const count = deleted.length
+  const status = count ? `Deleted ${count} run${count === 1 ? '' : 's'} from the board.` : ''
+  let title = ''
+  if (failed.length || skipped.length) {
+    const notDeleted = failed.length + skipped.length
+    title =
+      notDeleted === 1 && failed.length === 1
+        ? `Run ${failed[0].ref} was not deleted`
+        : `${notDeleted} of ${list.length} runs were not deleted`
+  }
+  return { deleted: deleted.map((result) => result.ref), failed, skipped, gone, status, title }
+}
+
+/** Whether a comparison includes a run that has been deleted, by the id or name it reports. */
+export function compareIncludes(compare, gone) {
+  const runs = compare?.sentinel?.runs
+  if (!Array.isArray(runs) || !gone || !gone.size) return false
+  return runs.some((run) => run && typeof run === 'object' && [run.id, run.name].some((value) => value && gone.has(String(value))))
 }
 
 /**

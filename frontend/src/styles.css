@@ -4133,6 +4133,50 @@ button:disabled {
   margin-top: 10px;
 }
 
+/* "Delete selected" becomes this in place: the question, then Delete and Cancel. */
+.stats-delete-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.stats-delete-prompt {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8f2f45;
+}
+
+.stats-delete-failure {
+  margin-top: 10px;
+}
+
+.stats-delete-failure:focus {
+  outline: none;
+}
+
+.stats-delete-failure:focus-visible .periph-callout {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.stats-delete-failures {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+#stats-runs-title:focus {
+  outline: none;
+}
+
+#stats-runs-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .stats-run-detail,
 .stats-compare {
   margin-top: 14px;

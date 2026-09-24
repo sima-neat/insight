@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import socket
 import socketserver
 import tempfile
@@ -14,7 +15,7 @@ from types import SimpleNamespace
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult
-from neat_insight.sentinel import api, install, metrics, socket_client, state
+from neat_insight.sentinel import api, install, metrics, runs, socket_client, state
 from neat_insight.sentinel.api import sentinel_bp
 from neat_insight.sentinel.client import SentinelClient
 from neat_insight.sentinel.errors import SentinelError
@@ -96,6 +97,9 @@ class FakeSentinel:
         }
         self.calls = []
         self.exec_error = None
+        # None deletes the run from the /v1/runs answer, as the CLI would; an ExecResult
+        # is returned as the CLI's answer and deletes nothing.
+        self.delete_result = None
 
     def answer(self, method, path, status, body):
         self.api[(method, path)] = (status, body)
@@ -106,7 +110,9 @@ class FakeSentinel:
             raise self.exec_error
         if argv[0] == "python3":
             return self._api_call(argv)
-        script = argv[-1]
+        script = argv[2]
+        if "runs delete" in script:
+            return self._delete(argv[4])
         if "neat install sentinel" in script:
             return self.install_result
         return ExecResult(0, "@@".join(self.status_fields).encode(), b"")
@@ -120,13 +126,27 @@ class FakeSentinel:
         text = body if isinstance(body, str) else json.dumps(body)
         return ExecResult(0, json.dumps({"status": status, "text": text}).encode(), b"")
 
+    def _delete(self, target):
+        if self.delete_result is not None:
+            return self.delete_result
+        status, body = self.api[("GET", "/v1/runs")]
+        kept = [run for run in body["runs"] if target not in (run.get("id"), run.get("name"))]
+        if len(kept) == len(body["runs"]):
+            return ExecResult(0, b"", "Error: unknown completed run '{}'\n".format(target).encode())
+        self.api[("GET", "/v1/runs")] = (status, dict(body, runs=kept))
+        return ExecResult(0, "Deleted run {}\n".format(target).encode(), b"")
+
+    @property
+    def deletes(self):
+        return [argv for argv, _, _ in self.calls if argv[0] == "sh" and "runs delete" in argv[2]]
+
     @property
     def api_paths(self):
         return [(argv[2], argv[3]) for argv, _, _ in self.calls if argv[0] == "python3"]
 
     @property
     def scripts(self):
-        return [argv[-1] for argv, _, _ in self.calls if argv[0] == "sh"]
+        return [argv[2] for argv, _, _ in self.calls if argv[0] == "sh"]
 
 
 class FakeSession:
@@ -408,7 +428,7 @@ class InstallTests(unittest.TestCase):
 
         def exec_once(argv, *, timeout, stdin=None):
             result = FakeSentinel.exec(self.transport, argv, timeout=timeout, stdin=stdin)
-            if "neat install sentinel" in argv[-1]:
+            if "neat install sentinel" in argv[2]:
                 self.transport.status_fields = after
             return result
 
@@ -566,7 +586,9 @@ class BoardCacheTests(unittest.TestCase):
         self.assertEqual(other.identity_calls, 1)
 
 
-class SentinelApiTests(unittest.TestCase):
+class _ApiCase(unittest.TestCase):
+    """The Sentinel blueprint on a Flask test client, against a fake board."""
+
     def setUp(self):
         cache = unittest.mock.patch.object(api, "cache", state.BoardCache())
         cache.start()
@@ -589,6 +611,13 @@ class SentinelApiTests(unittest.TestCase):
         self.addCleanup(response.close)
         return response
 
+    def delete(self, path):
+        response = self.client.delete(path)
+        self.addCleanup(response.close)
+        return response
+
+
+class SentinelApiTests(_ApiCase):
     def test_availability_reports_the_daemon_and_the_board(self):
         response = self.get("/api/sentinel")
         body = response.get_json()
@@ -737,7 +766,7 @@ class SentinelApiTests(unittest.TestCase):
 
         def exec_once(argv, *, timeout, stdin=None):
             result = FakeSentinel.exec(self.transport, argv, timeout=timeout, stdin=stdin)
-            if argv[0] == "sh" and "neat install sentinel" in argv[-1]:
+            if argv[0] == "sh" and "neat install sentinel" in argv[2]:
                 self.transport.status_fields = list(STATUS_FIELDS)
             return result
 
@@ -746,6 +775,176 @@ class SentinelApiTests(unittest.TestCase):
         self.assertEqual(body["daemon"]["healthy"], True)
         self.assertEqual(body["log"], "Sentinel installed")
         self.assertTrue(self.get("/api/sentinel").get_json()["available"])
+
+
+RUN_A = {"id": "20260924T175231.958Z-baseline", "name": "baseline", "samples": 4}
+RUN_B = {"id": "20260924T174111.540Z-optimized", "name": "optimized", "samples": 4}
+
+
+class DeleteRunTests(_ApiCase):
+    """DELETE /api/sentinel/runs/<run>: resolved against the daemon's list, then the CLI."""
+
+    def setUp(self):
+        super().setUp()
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [RUN_A, RUN_B]})
+
+    def listed(self):
+        return self.transport.api[("GET", "/v1/runs")][1]["runs"]
+
+    def test_a_run_is_deleted_by_name_with_the_id_sentinel_reports(self):
+        response = self.delete("/api/sentinel/runs/baseline?generation=1")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["deleted"], {"id": RUN_A["id"], "name": "baseline"})
+        self.assertEqual(body["sentinel"], {"runs": [RUN_B]})
+        self.assertEqual((body["generation"], body["board"]["fingerprint"]), (1, "fp-1"))
+        self.assertEqual(self.transport.deletes, [["sh", "-c", runs.DELETE_SCRIPT, "sh", RUN_A["id"]]])
+        timeout = [t for argv, t, _ in self.transport.calls if argv[0] == "sh" and "runs delete" in argv[2]][0]
+        self.assertEqual(timeout, runs.DELETE_TIMEOUT_SEC)
+        # The list is read before the delete to validate the ref, and after it to confirm it.
+        self.assertEqual(self.transport.api_paths, [("GET", "/v1/runs"), ("GET", "/v1/runs")])
+        self.assertEqual(self.listed(), [RUN_B])
+
+    def test_a_run_is_deleted_by_id(self):
+        body = self.delete("/api/sentinel/runs/" + RUN_B["id"]).get_json()
+        self.assertEqual(body["deleted"], {"id": RUN_B["id"], "name": "optimized"})
+        self.assertEqual(self.transport.deletes[0][4], RUN_B["id"])
+
+    def test_the_script_finds_the_cli_off_a_non_login_path(self):
+        script = runs.DELETE_SCRIPT
+        self.assertIn("command -v simaai-sentinel", script)
+        self.assertIn("/usr/local/bin/simaai-sentinel", script)
+        self.assertIn('exec "$cli" runs delete "$1"', script)
+
+    def test_an_unknown_run_is_a_not_found_and_nothing_runs(self):
+        response = self.delete("/api/sentinel/runs/nope")
+        self.assertEqual(response.status_code, 404)
+        body = response.get_json()
+        self.assertEqual((body["code"], body["error"], body["run"]), ("not_found", "unknown run 'nope'", "nope"))
+        self.assertEqual(self.transport.deletes, [])
+        self.assertEqual(self.listed(), [RUN_A, RUN_B])
+
+    def test_a_hostile_name_never_reaches_a_shell(self):
+        hostile = "x'; rm -rf / #$(reboot)`id` && \"$HOME\" | tee /tmp/p; *"
+        # Not on the board: refused before anything runs.
+        response = self.delete("/api/sentinel/runs/" + quote_path(hostile))
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()["run"], hostile)
+        self.assertEqual(self.transport.deletes, [])
+
+        # On the board, under that name and an equally hostile id: the id travels as "$1",
+        # outside the script text, and survives the SSH transport's quoting unchanged.
+        evil = {"id": "$(reboot);'`id`\nreboot", "name": hostile}
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [evil, RUN_B]})
+        response = self.delete("/api/sentinel/runs/" + quote_path(hostile))
+        self.assertEqual(response.status_code, 200)
+        argv = self.transport.deletes[0]
+        self.assertEqual(argv, ["sh", "-c", runs.DELETE_SCRIPT, "sh", evil["id"]])
+        self.assertNotIn(evil["id"], argv[2])
+        self.assertNotIn(hostile, argv[2])
+        self.assertEqual(shlex.split(shlex.join(argv)), argv)
+        self.assertEqual(self.listed(), [RUN_B])
+
+    def test_an_id_that_would_read_as_an_option_is_refused(self):
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [{"id": "--all", "name": "sneaky"}]})
+        response = self.delete("/api/sentinel/runs/sneaky")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "invalid_request")
+        self.assertEqual(self.transport.deletes, [])
+
+    def test_a_name_two_runs_share_is_refused_in_favour_of_the_id(self):
+        twin = dict(RUN_B, name="baseline")
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [RUN_A, twin]})
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("by its id", response.get_json()["hint"])
+        self.assertEqual(self.transport.deletes, [])
+
+    def test_a_recording_run_is_a_conflict_before_anything_runs(self):
+        recording = dict(RUN_A, state="recording")
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [recording]})
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual(response.status_code, 409)
+        body = response.get_json()
+        self.assertEqual(body["code"], "trace_conflict")
+        self.assertIn("Stop the trace", body["hint"])
+        self.assertEqual(self.transport.deletes, [])
+
+    def test_the_clis_active_run_refusal_is_a_conflict_even_with_exit_zero(self):
+        self.transport.delete_result = ExecResult(0, b"", b"Error: cannot delete active run 'baseline'\n")
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual(response.status_code, 409)
+        body = response.get_json()
+        self.assertEqual((body["code"], body["error"]), ("trace_conflict", "cannot delete active run 'baseline'"))
+        self.assertEqual(body["hint"], runs.STOP_HINT)
+        self.assertIn("cannot delete active run", body["detail"])
+
+    def test_the_clis_unknown_run_is_a_not_found(self):
+        self.transport.delete_result = ExecResult(0, b"Error: unknown completed run 'x'\n", b"")
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()["error"], "unknown completed run 'x'")
+
+    def test_an_error_line_fails_the_delete_whatever_the_exit_status(self):
+        for exit_code in (0, 1):
+            with self.subTest(exit_code=exit_code):
+                self.transport.delete_result = ExecResult(exit_code, b"", b"Error: disk on fire\n")
+                response = self.delete("/api/sentinel/runs/baseline")
+                self.assertEqual(response.status_code, 502)
+                body = response.get_json()
+                self.assertEqual((body["code"], body["error"], body["run"]), ("sentinel_failed", "disk on fire", "baseline"))
+
+    def test_a_nonzero_exit_without_an_error_line_still_fails(self):
+        self.transport.delete_result = ExecResult(2, b"usage: ...", b"")
+        body = self.delete("/api/sentinel/runs/baseline").get_json()
+        self.assertEqual(body["code"], "sentinel_failed")
+        self.assertIn("exit 2", body["error"])
+        self.assertEqual(body["detail"], "usage: ...")
+
+    def test_a_missing_cli_names_the_tool(self):
+        self.transport.delete_result = ExecResult(127, b"", b"simaai-sentinel: not found\n")
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual(response.status_code, 502)
+        body = response.get_json()
+        self.assertEqual((body["code"], body["tool"]), ("tool_missing", "simaai-sentinel"))
+
+    def test_a_permission_failure_is_denied(self):
+        self.transport.delete_result = ExecResult(
+            1, b"", b"Error: remove /var/lib/simaai-sentinel/runs/x.json: Permission denied\n"
+        )
+        body = self.delete("/api/sentinel/runs/baseline").get_json()
+        self.assertEqual(body["code"], "sentinel_denied")
+        self.assertIn(runs.RUNS_DIR, body["hint"])
+
+    def test_a_run_still_listed_after_a_quiet_cli_is_a_failure(self):
+        self.transport.delete_result = ExecResult(0, b"", b"")
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("still lists run 'baseline'", response.get_json()["error"])
+
+    def test_another_board_generation_is_refused_before_anything_runs(self):
+        response = self.delete("/api/sentinel/runs/baseline?generation=7")
+        self.assertEqual(response.status_code, 409)
+        body = response.get_json()
+        self.assertEqual((body["code"], body["expected_generation"]), ("stale_snapshot", 7))
+        self.assertEqual(self.transport.calls, [])
+
+    def test_a_malformed_generation_is_refused_before_the_board_is_touched(self):
+        response = self.delete("/api/sentinel/runs/baseline?generation=latest")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "invalid_request")
+        self.assertEqual(self.transport.calls, [])
+
+    def test_an_unreachable_board_keeps_its_status(self):
+        self.transport.exec_error = BoardError("timeout", "too slow")
+        response = self.delete("/api/sentinel/runs/baseline")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (504, "timeout"))
+
+
+def quote_path(value):
+    from urllib.parse import quote
+
+    return quote(value, safe="")
 
 
 if __name__ == "__main__":

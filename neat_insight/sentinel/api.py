@@ -2,7 +2,7 @@
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.sentinel import install, metrics as metric_view
+from neat_insight.sentinel import install, metrics as metric_view, runs as saved_runs
 from neat_insight.sentinel.client import SCHEMA, SentinelClient
 from neat_insight.sentinel.errors import SentinelError
 from neat_insight.sentinel.state import DEFINITIONS_TTL_SEC, HISTORY_LIMIT, STATUS_TTL_SEC, BoardCache
@@ -111,6 +111,30 @@ def _compare_runs(raw) -> list:
             "Compare fewer runs.",
         )
     return runs
+
+
+def _expected_generation(raw):
+    """The board generation the caller judged its request against, or None when it names none."""
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise _invalid(
+            "`generation` must be the whole-number board generation.",
+            "Send the `generation` of the payload the run list came from, or omit it.",
+        ) from None
+
+
+def _same_board(context: "_Context", expected) -> None:
+    """Refuse a destructive request aimed at a board that is no longer the selected one."""
+    if expected is not None and expected != context.session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The selected board changed since this run list was read, so nothing was deleted.",
+            hint="Read the runs of the board selected now, then delete again.",
+            expected_generation=expected,
+        )
 
 
 def _passthrough(body: dict) -> dict:
@@ -227,6 +251,25 @@ def get_run(run_id):
     try:
         context = _Context()
         return context.payload(sentinel=_passthrough(context.client.run(run_id)))
+    except BoardError as err:
+        return err.to_dict(), err.status
+
+
+# API: delete one saved run.
+@sentinel_bp.delete("/api/sentinel/runs/<path:run_id>")
+def delete_run(run_id):
+    """Delete one completed run by name or id and return Sentinel's run list afterwards.
+
+    404 for a run Sentinel does not list, 409 for a run still recording or a board that
+    changed since `generation`. The daemon's API has no delete, so this runs
+    `simaai-sentinel runs delete` on the board with the id the daemon reported.
+    """
+    try:
+        expected = _expected_generation(request.args.get("generation"))
+        context = _Context()
+        _same_board(context, expected)
+        deleted, listing = saved_runs.delete(context.session, context.client, run_id)
+        return context.payload(deleted=deleted, sentinel=_passthrough(listing))
     except BoardError as err:
         return err.to_dict(), err.status
 

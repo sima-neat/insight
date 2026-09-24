@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Callout, Pill } from './peripherals/ui.jsx'
 import {
   compareRuns,
+  deleteRun,
   fetchActiveTrace,
   fetchHostMetrics,
   fetchMetrics,
@@ -19,6 +20,7 @@ import {
   compareCsv,
   compareCsvFilename,
   compareGroups,
+  compareIncludes,
   compareReady,
   compareTable,
   compareView,
@@ -29,6 +31,9 @@ import {
   daemonInfo,
   daemonNoticeNeeded,
   definitionsByKey,
+  deletePrompt,
+  deleteStops,
+  deleteSummary,
   deltaAbsenceText,
   factRows,
   failureNotice,
@@ -489,11 +494,14 @@ export function RunsPanel({
   compareBusy,
   compareStale,
   compareOpen,
+  deleteBusy,
+  deleteResult,
   now,
   onRefresh,
   onToggle,
   onOpen,
   onCompare,
+  onDelete,
   onClearCompare,
   onDropMissing,
   onToggleCompare
@@ -525,10 +533,63 @@ export function RunsPanel({
   // A refused note or tag list is shown where it can be fixed, not behind the fold.
   const extrasShown = extrasOpen || Boolean(formError && extras)
 
+  // Deleting is irreversible, so "Delete selected" first turns into an inline confirmation.
+  const [confirming, setConfirming] = useState(false)
+  // Where focus goes once the confirmation or the delete has rendered: the control that
+  // replaced the one that had it, never the page body.
+  const focusNext = useRef('')
+  const headingRef = useRef(null)
+  const deleteRef = useRef(null)
+  const cancelRef = useRef(null)
+  const deleteFailureRef = useRef(null)
+  const deleteDisabled = selected.length === 0 || deleteBusy || compareBusy || stale
+  useEffect(() => {
+    const target = focusNext.current
+    if (!target) return
+    focusNext.current = ''
+    const element = {
+      cancel: cancelRef.current,
+      delete: deleteRef.current,
+      heading: headingRef.current,
+      failure: deleteFailureRef.current
+    }[target]
+    element?.focus()
+  })
+  // Nothing selected (or a board switch) leaves nothing to confirm.
+  useEffect(() => {
+    if (confirming && deleteDisabled) setConfirming(false)
+  }, [confirming, deleteDisabled])
+
+  function askDelete() {
+    focusNext.current = 'cancel'
+    setConfirming(true)
+  }
+
+  function cancelDelete() {
+    focusNext.current = 'delete'
+    setConfirming(false)
+  }
+
+  async function confirmDelete() {
+    setConfirming(false)
+    focusNext.current = 'heading'
+    const summary = await onDelete()
+    // The heading keeps focus while the list is rewritten; a failure takes it to its report.
+    if (summary?.title) {
+      // The report may already be on the page, or arrive with the next render.
+      if (deleteFailureRef.current) {
+        focusNext.current = ''
+        deleteFailureRef.current.focus()
+      } else {
+        focusNext.current = 'failure'
+      }
+    }
+  }
+
   return (
     <section className="panel stats-runs" aria-labelledby="stats-runs-title" aria-busy={busy || traceBusy}>
       <div className="stats-runs-head">
-        <h2 id="stats-runs-title">Runs</h2>
+        <h2 id="stats-runs-title" ref={headingRef} tabIndex={-1}>Runs</h2>
         <TraceBar
           bar={bar}
           busy={traceBusy}
@@ -580,9 +641,9 @@ export function RunsPanel({
                         type="checkbox"
                         checked={selected.includes(run.ref)}
                         onChange={() => onToggle(run.ref)}
-                        disabled={!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS}
+                        disabled={deleteBusy || (!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS)}
                       />
-                      <span className="sr-only">Compare {run.label}</span>
+                      <span className="sr-only">Select {run.label}</span>
                     </label>
                   </td>
                   <th scope="row">
@@ -611,12 +672,42 @@ export function RunsPanel({
           </table>
 
           <div className="periph-actions stats-compare-bar">
-            <button type="button" className="btn-tonal" onClick={onCompare} disabled={!compareReady(selected) || compareBusy}>
+            <button
+              type="button"
+              className="btn-tonal"
+              onClick={onCompare}
+              disabled={!compareReady(selected) || compareBusy || deleteBusy}
+            >
               {compareBusy ? 'Comparing…' : 'Compare selected'}
             </button>
-            {selected.length > 0 && (
-              <button type="button" className="btn-ghost" onClick={onClearCompare}>Clear selection</button>
+            {confirming ? (
+              <span
+                className="stats-delete-confirm"
+                role="group"
+                aria-labelledby="stats-delete-prompt"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    cancelDelete()
+                  }
+                }}
+              >
+                <span id="stats-delete-prompt" className="stats-delete-prompt">
+                  {deletePrompt(selected.length)}
+                  <span className="sr-only"> This removes {selected.length === 1 ? 'it' : 'them'} from the board and cannot be undone.</span>
+                </span>
+                <button type="button" className="btn-ghost danger" onClick={confirmDelete}>Delete</button>
+                <button type="button" className="btn-ghost" ref={cancelRef} onClick={cancelDelete}>Cancel</button>
+              </span>
+            ) : (
+              <button type="button" className="btn-ghost danger" ref={deleteRef} onClick={askDelete} disabled={deleteDisabled}>
+                {deleteBusy ? 'Deleting…' : 'Delete selected'}
+              </button>
             )}
+            {selected.length > 0 && !confirming && (
+              <button type="button" className="btn-ghost" onClick={onClearCompare} disabled={deleteBusy}>Clear selection</button>
+            )}
+            <span className="sr-only" role="status">{deleteBusy ? `Deleting ${selected.length} run${selected.length === 1 ? '' : 's'}…` : ''}</span>
           </div>
 
           {uncomparable.length > 0 && (
@@ -647,6 +738,41 @@ export function RunsPanel({
             </Callout>
           )}
         </>
+      )}
+
+      {deleteResult?.title && (
+        <div className="stats-delete-failure" ref={deleteFailureRef} tabIndex={-1}>
+          <p className="sr-only" role="alert">{deleteResult.title}.</p>
+          <Callout tone="danger" title={deleteResult.title}>
+            <ul className="stats-delete-failures">
+              {deleteResult.failed.map(({ ref, notice }) => (
+                <li key={ref}>
+                  <strong>{ref}</strong>: {notice.title}. {notice.message}
+                  {notice.hint && <span className="hint"> {notice.hint}</span>}
+                  {notice.detail && (
+                    <details className="stats-detail">
+                      <summary>Output from the board</summary>
+                      <pre className="periph-code" tabIndex={0}><code>{notice.detail}</code></pre>
+                    </details>
+                  )}
+                </li>
+              ))}
+              {deleteResult.skipped.length > 0 && (
+                <li>
+                  <strong>{deleteResult.skipped.join(', ')}</strong>: not tried, because the failure above would stop{' '}
+                  {deleteResult.skipped.length === 1 ? 'it' : 'them'} too. {deleteResult.skipped.length === 1 ? 'It is' : 'They are'} still
+                  selected.
+                </li>
+              )}
+            </ul>
+            {deleteResult.deleted.length > 0 && (
+              <p className="hint">
+                {deleteResult.deleted.join(', ')} {deleteResult.deleted.length === 1 ? 'was' : 'were'} deleted and{' '}
+                {deleteResult.deleted.length === 1 ? 'stays' : 'stay'} deleted.
+              </p>
+            )}
+          </Callout>
+        </div>
       )}
 
       {openRef && (
@@ -956,6 +1082,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [compareBusy, setCompareBusy] = useState(false)
   // Collapsing keeps the comparison; only Compare reads the board again.
   const [compareOpen, setCompareOpen] = useState(true)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteResult, setDeleteResult] = useState(null)
   const [host, setHost] = useState(null)
   const [hostError, setHostError] = useState(null)
   const [hostBusy, setHostBusy] = useState(false)
@@ -978,6 +1106,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const guard = useRef(createRequestGuard())
   const tick = useRef(() => {})
   const detailSeq = useRef(0)
+  // Bumped when a delete answers with the run list: a read that was already out answers
+  // from before the delete and must not bring the deleted runs back.
+  const runsSeq = useRef(0)
+  // The open run and comparison as they are now, not as they were when a delete started.
+  const openRefNow = useRef(openRef)
+  openRefNow.current = openRef
+  const compareNow = useRef(compare)
+  compareNow.current = compare
 
   const info = useMemo(() => daemonInfo(state), [state])
   const model = useMemo(() => metricsModel(metrics), [metrics])
@@ -1022,6 +1158,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setSelected([])
     setCompare(null)
     setCompareError(null)
+    setDeleteResult(null)
     setInstallResult(null)
     setInstallError(null)
     setFailures(0)
@@ -1076,14 +1213,15 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
 
   async function loadRuns() {
     if (!guard.current.begin('runs')) return
+    const seq = runsSeq.current
     setRunsBusy(true)
     try {
       const data = await fetchRuns()
-      if (!mounted.current) return
+      if (!mounted.current || seq !== runsSeq.current) return
       setRuns(data)
       setRunsError(null)
     } catch (err) {
-      if (mounted.current) setRunsError(failureNotice(err, generation))
+      if (mounted.current && seq === runsSeq.current) setRunsError(failureNotice(err, generation))
     } finally {
       guard.current.end('runs')
       if (mounted.current) setRunsBusy(false)
@@ -1244,6 +1382,68 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       guard.current.end('compare')
       if (mounted.current) setCompareBusy(false)
     }
+  }
+
+  /**
+   * Deletes the selected runs one at a time, each bound to the generation the run list was
+   * read under. A run that fails is named with its reason and stays selected; runs that
+   * were deleted stay deleted. A failure that would stop the rest too (the board, the
+   * daemon, a board switch) ends the batch, and the runs not tried are named as such.
+   */
+  async function deleteSelected() {
+    const refs = [...selected]
+    if (!refs.length || !guard.current.begin('delete')) return null
+    setDeleteBusy(true)
+    setDeleteResult(null)
+    const listGeneration = Number.isInteger(runs?.generation) ? runs.generation : generation
+    const results = []
+    let latest = null
+    try {
+      for (const ref of refs) {
+        if (results.some((result) => result.stop)) {
+          results.push({ ref, skipped: true })
+          continue
+        }
+        try {
+          const data = await deleteRun(ref, listGeneration)
+          latest = data
+          results.push({ ref, deleted: data?.deleted || { id: null, name: null } })
+        } catch (err) {
+          const notice = failureNotice(err, generation, { action: 'delete' })
+          results.push({ ref, notice, stop: deleteStops(notice) })
+        }
+        if (!mounted.current) return null
+      }
+    } finally {
+      guard.current.end('delete')
+      if (mounted.current) setDeleteBusy(false)
+    }
+    const summary = deleteSummary(results)
+    const { gone } = summary
+    if (gone.size) {
+      setSelected((current) => current.filter((ref) => !gone.has(String(ref))))
+      if (openRefNow.current && gone.has(openRefNow.current)) {
+        detailSeq.current += 1
+        setOpenRef('')
+        setDetail(null)
+        setDetailError(null)
+        setDetailBusy(false)
+      }
+      if (compareIncludes(compareNow.current, gone)) {
+        setCompare(null)
+        setCompareError(null)
+      }
+    }
+    // The last successful delete answered with the list as the board holds it afterwards.
+    if (latest) {
+      runsSeq.current += 1
+      setRuns(latest)
+      setRunsError(null)
+    }
+    setDeleteResult(summary.title ? summary : null)
+    if (summary.status) onStatus?.(summary.status)
+    loadRuns()
+    return summary
   }
 
   // The masthead changes the board; this page follows it. Another board means another daemon,
@@ -1453,11 +1653,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                   compareBusy={compareBusy}
                   compareStale={stalePayloads.compare || stalePayloads.compareError}
                   compareOpen={compareOpen}
+                  deleteBusy={deleteBusy}
+                  deleteResult={deleteResult}
                   now={now}
                   onRefresh={() => loadRuns()}
                   onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
                   onOpen={openRun}
                   onCompare={runCompare}
+                  onDelete={deleteSelected}
                   onClearCompare={() => {
                     setSelected([])
                     setCompare(null)

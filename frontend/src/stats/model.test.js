@@ -9,6 +9,7 @@ import {
   MAX_POLL_MS,
   NAME_LIMIT,
   POLL_MS,
+  compareIncludes,
   compareQuery,
   compareReady,
   compareTable,
@@ -18,6 +19,10 @@ import {
   daemonInfo,
   daemonNoticeNeeded,
   definitionsByKey,
+  deletePrompt,
+  deleteRunQuery,
+  deleteStops,
+  deleteSummary,
   deltaAbsenceText,
   factRows,
   failureNotice,
@@ -995,4 +1000,70 @@ test('a run name long enough to break the tables is carried intact and wrapped',
   // The cells that carry it are header cells, which do not wrap the way `td` already does.
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
   assert.match(css, /\.stats-run-table tbody th,\n\.stats-compare-table thead th \{\n\s*overflow-wrap: anywhere;/)
+})
+
+test('a delete names one run and the board generation its list came from', () => {
+  assert.equal(deleteRunQuery('baseline', 3), '/api/sentinel/runs/baseline?generation=3')
+  assert.equal(deleteRunQuery("x'; rm -rf /?a=b#c", 0), "/api/sentinel/runs/x'%3B%20rm%20-rf%20%2F%3Fa%3Db%23c?generation=0")
+  // Without a generation the backend deletes on whatever board is selected, so none is invented.
+  assert.equal(deleteRunQuery('a/b'), '/api/sentinel/runs/a%2Fb')
+  assert.equal(deleteRunQuery('a', '3'), '/api/sentinel/runs/a')
+  assert.equal(deletePrompt(1), 'Delete 1 run?')
+  assert.equal(deletePrompt(3), 'Delete 3 runs?')
+})
+
+test('a failure about the board stops the remaining deletes; one about the run does not', () => {
+  const notice = (code) => failureNotice({ code, error: 'x' }, 1, { action: 'delete' })
+  for (const code of ['unreachable', 'timeout', 'tool_missing', 'sentinel_denied', 'stale_snapshot', 'network']) {
+    assert.equal(deleteStops(notice(code)), true, code)
+  }
+  for (const code of ['not_found', 'trace_conflict', 'sentinel_failed', 'invalid_request']) {
+    assert.equal(deleteStops(notice(code)), false, code)
+  }
+  assert.equal(deleteStops(null), false)
+})
+
+test('delete failures are titled for deleting, not for reading or starting a trace', () => {
+  const notice = (code) => failureNotice({ code, error: 'x' }, 1, { action: 'delete' })
+  assert.equal(notice('trace_conflict').title, 'That run is still recording')
+  assert.equal(notice('stale_snapshot').title, 'The selected board changed')
+  assert.equal(notice('sentinel_failed').title, 'Sentinel did not delete the run')
+  assert.equal(notice('unreachable').title, 'The board could not be reached')
+  // Reading keeps its own wording.
+  assert.equal(failureNotice({ code: 'trace_conflict', error: 'x' }).title, 'That trace cannot start')
+})
+
+test('the delete summary keeps what was deleted and names what failed and why', () => {
+  const conflict = failureNotice({ code: 'trace_conflict', error: "cannot delete active run 'b'" }, 1, { action: 'delete' })
+  const summary = deleteSummary([
+    { ref: 'a', deleted: { id: '20260924T175231.958Z-a', name: 'a' } },
+    { ref: 'b', notice: conflict },
+    { ref: 'c', skipped: true }
+  ])
+  assert.deepEqual(summary.deleted, ['a'])
+  assert.deepEqual(summary.failed.map((result) => [result.ref, result.notice.message]), [['b', "cannot delete active run 'b'"]])
+  assert.deepEqual(summary.skipped, ['c'])
+  assert.deepEqual([...summary.gone].sort(), ['20260924T175231.958Z-a', 'a'])
+  assert.equal(summary.status, 'Deleted 1 run from the board.')
+  assert.equal(summary.title, '2 of 3 runs were not deleted')
+
+  const one = deleteSummary([{ ref: 'b', notice: conflict }])
+  assert.equal(one.title, 'Run b was not deleted')
+  assert.equal(one.status, '')
+  assert.equal(one.gone.size, 0)
+
+  const clean = deleteSummary([{ ref: 'a', deleted: { id: 'i-a', name: 'a' } }, { ref: 'i-b', deleted: { id: 'i-b', name: 'b' } }])
+  assert.equal(clean.title, '')
+  assert.equal(clean.status, 'Deleted 2 runs from the board.')
+  assert.deepEqual([...clean.gone].sort(), ['a', 'b', 'i-a', 'i-b'])
+})
+
+test('a comparison that included a deleted run is recognised by its id or name', () => {
+  const compare = { sentinel: { runs: [{ id: 'i-a', name: 'a' }, { id: 'i-b', name: 'b' }] } }
+  assert.equal(compareIncludes(compare, new Set(['a'])), true)
+  assert.equal(compareIncludes(compare, new Set(['i-b'])), true)
+  assert.equal(compareIncludes(compare, new Set(['c'])), false)
+  assert.equal(compareIncludes(compare, new Set()), false)
+  assert.equal(compareIncludes(null, new Set(['a'])), false)
+  assert.equal(compareIncludes({ sentinel: { runs: ['a'] } }, new Set(['a'])), false)
 })

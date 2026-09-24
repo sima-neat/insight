@@ -908,6 +908,24 @@
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
           "504": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
+      },
+      "delete": {
+        "tags": ["Sentinel"],
+        "summary": "Delete one saved run",
+        "description": "Permanently deletes one completed run from the board and returns the deleted run's `id` and `name` in `deleted`, with Sentinel's run list afterwards in `sentinel`. Sentinel's API has no delete, so Insight resolves the name or id against the daemon's run list first and then runs `simaai-sentinel runs delete <id>` on the board with the id the daemon reported; the path value itself is never passed to the board. A run Sentinel does not list returns `404 not_found` without running anything. A run that is still recording returns `409 trace_conflict`; stop the trace first. When `generation` is sent and the selected board has changed since, `409 stale_snapshot` is returned and nothing is deleted. A CLI failure keeps its output in `detail`: `tool_missing` when `simaai-sentinel` is not on the board, `sentinel_denied` when the board user may not remove the file, and `sentinel_failed` otherwise, including when the run is still listed afterwards.",
+        "operationId": "deleteSentinelRun",
+        "parameters": [
+          {"name": "run_id", "in": "path", "required": true, "schema": {"type": "string"}, "description": "The run's unique name or stable id, as `GET /api/sentinel/runs` reports it."},
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the run list the run was chosen from. Recommended: a request that outlives a board switch is refused instead of deleting a run of the same name on another board."}
+        ],
+        "responses": {
+          "200": {"description": "The run was deleted. `deleted` names it; `sentinel.runs` is the run list after the delete.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
       }
     },
     "/api/sentinel/compare": {
