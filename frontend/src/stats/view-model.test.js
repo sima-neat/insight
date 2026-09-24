@@ -17,10 +17,14 @@ import {
   compareViewText,
   csvField,
   definitionsByKey,
+  hostMetricsModel,
+  hostSummary,
   metricGroupChips,
   metricsModel,
   openGroup,
-  rowChanged
+  rowChanged,
+  traceExtrasSummary,
+  traceModel
 } from './model.js'
 
 const COMPARE = JSON.parse(readFileSync(new URL('./fixtures/compare-shape.json', import.meta.url), 'utf8'))
@@ -261,4 +265,36 @@ test('the CSV is named after the baseline and the day, safely', () => {
   assert.equal(compareCsvFilename({ baselineLabel: '///' }, day), 'sentinel-compare-runs-2026-09-24.csv')
   assert.equal(compareCsvFilename({ baselineLabel: 'x'.repeat(300) }, day).length, 'sentinel-compare--2026-09-24.csv'.length + 80)
   assert.match(compareCsvFilename(null, new Date('nonsense')), /^sentinel-compare-runs-\d{4}-\d{2}-\d{2}\.csv$/)
+})
+
+test('the collapsed host panel keeps CPU, memory and disk in its summary line', () => {
+  const model = hostMetricsModel({ cpu_load: 1, memory: { percent: 42.8 }, disk: { percent: 3.5 }, temperature_celsius_avg: 51 })
+  assert.deepEqual(hostSummary(model).map((item) => [item.label, item.text]), [
+    ['CPU load', '1%'],
+    ['Memory', '42.8%'],
+    ['Disk', '3.5%']
+  ])
+  // A missing reading is an em dash, not zero.
+  assert.equal(hostSummary(hostMetricsModel({ cpu_load: null, memory: { percent: 10 }, disk: {} }))[0].text, '—')
+  // Nothing to summarise: the panel's notice says why instead.
+  assert.deepEqual(hostSummary(hostMetricsModel({ REMOTE: true, memory: {}, disk: {} })), [])
+  assert.deepEqual(hostSummary(hostMetricsModel(null)), [])
+})
+
+test('a note or tags typed into the collapsed fields are still said out loud', () => {
+  assert.equal(traceExtrasSummary({ name: 'x', note: '', tags: '' }), '')
+  assert.equal(traceExtrasSummary({ note: '  ', tags: ' , ' }), '')
+  assert.equal(traceExtrasSummary({ note: 'before NMS' }), 'a note will be saved with this trace')
+  assert.equal(traceExtrasSummary({ note: 'x', tags: 'a, b' }), 'a note and 2 tags will be saved with this trace')
+  assert.equal(traceExtrasSummary({ tags: 'a' }), '1 tag will be saved with this trace')
+})
+
+test('a recording trace says what it was started with', () => {
+  const model = traceModel({ sentinel: { trace: { name: 'baseline', note: 'before NMS', tags: ['yolo26', 'v2'] }, summary: null } })
+  assert.equal(model.note, 'before NMS')
+  assert.deepEqual(model.tags, ['yolo26', 'v2'])
+  const bare = traceModel({ sentinel: { trace: { name: 'baseline' }, summary: null } })
+  assert.equal(bare.note, '')
+  assert.deepEqual(bare.tags, [])
+  assert.deepEqual(traceModel(null).tags, [])
 })

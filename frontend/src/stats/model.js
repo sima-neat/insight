@@ -469,6 +469,9 @@ export function traceModel(payload) {
     trace,
     name: trace ? String(pick(trace, RUN_FIELDS.name) || pick(trace, RUN_FIELDS.id) || 'trace') : '',
     startedAt: trace ? pick(trace, RUN_FIELDS.startedAt) : null,
+    // What the trace was started with, shown while it records.
+    note: trace ? String(pick(trace, RUN_FIELDS.note) || '') : '',
+    tags: trace && Array.isArray(pick(trace, RUN_FIELDS.tags)) ? pick(trace, RUN_FIELDS.tags).map(String) : [],
     summary: body.summary || null,
     facts: factRows(body.summary, [])
   }
@@ -500,6 +503,19 @@ export function validateTrace({ name, note, tags }) {
   if (text) body.note = text
   if (list.length) body.tags = list
   return { body }
+}
+
+/**
+ * What the collapsed "Add note and tags" fields hold, so text typed into them is never
+ * saved with a trace without being on screen. Empty when there is nothing in them.
+ */
+export function traceExtrasSummary(form) {
+  const note = String(form?.note || '').trim()
+  const tags = parseTags(form?.tags)
+  const parts = []
+  if (note) parts.push('a note')
+  if (tags.length) parts.push(`${tags.length} tag${tags.length === 1 ? '' : 's'}`)
+  return parts.length ? `${parts.join(' and ')} will be saved with this trace` : ''
 }
 
 function durationOf(source) {
@@ -1187,4 +1203,15 @@ export function hostNotice(model, read = false) {
   return read
     ? 'Insight answered with no CPU, memory or disk reading for this machine, so none is shown rather than zeros.'
     : 'Reading this machine…'
+}
+
+/**
+ * The three values the collapsed host panel shows in its summary line: CPU, memory and
+ * disk use. None when the panel has a notice to show instead of readings.
+ */
+export function hostSummary(model) {
+  if (!model || model.offline || model.empty) return []
+  return (model.rows || [])
+    .filter((row) => ['cpu_load', 'memory', 'disk'].includes(row.key))
+    .map((row) => ({ key: row.key, label: row.label, text: formatValue(row.value, row.unit) }))
 }

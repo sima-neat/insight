@@ -3924,6 +3924,7 @@ button:disabled {
 .stats-detail summary:focus-visible,
 .stats-check input:focus-visible,
 .stats-chip:focus-visible,
+.stats-disclosure:focus-visible,
 .stats-toggle input:focus-visible,
 .stats-table-scroll:focus-visible {
   outline: 2px solid var(--accent);
@@ -4142,12 +4143,44 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-.stats-trace-fields {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
+.stats-trace-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.stats-trace-name {
+  flex: 1 1 240px;
+  max-width: 420px;
+}
+
+.stats-trace-row .hint {
+  align-self: center;
+}
+
+.stats-trace-extras {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
+.stats-trace-note {
+  margin: 6px 0 8px;
+  overflow-wrap: anywhere;
+}
+
+/* Rows carry an Open button each; at the page's default button size that button, not the
+   run, set every row's height. */
+.stats-run-table td .btn-ghost {
+  padding: 4px 10px;
+}
+
+.stats-run-table th,
+.stats-run-table td {
+  vertical-align: middle;
 }
 
 @media (max-width: 700px) {
-  .stats-trace-fields {
+  .stats-trace-extras {
     grid-template-columns: 1fr;
   }
 
@@ -4276,7 +4309,8 @@ button:disabled {
   margin-left: auto;
 }
 
-.stats-compare-head .btn-ghost {
+.stats-compare-head .btn-ghost,
+.stats-host-refresh {
   padding: 5px 10px;
 }
 
@@ -4313,4 +4347,74 @@ button:disabled {
   max-width: 100%;
   overflow-x: auto;
   border-radius: var(--radius-sm);
+}
+
+/* The host panel folds to one line that still carries its three headline values. */
+.stats-view .stats-host {
+  padding: 10px 16px;
+}
+
+.stats-host-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.stats-host-head .hint {
+  margin: 0;
+}
+
+.stats-host-refresh {
+  margin-left: auto;
+}
+
+.stats-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+}
+
+.stats-disclosure::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  transition: transform 0.15s ease;
+}
+
+.stats-disclosure[aria-expanded='true']::before {
+  transform: rotate(90deg);
+}
+
+.stats-disclosure:hover:not(:disabled) {
+  transform: none;
+  text-decoration: underline;
+}
+
+.stats-host-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.stats-host-summary .stats-host-value {
+  font-size: 13px;
+}
+
+#stats-host-body {
+  margin-top: 8px;
 }

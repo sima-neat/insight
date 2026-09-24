@@ -44,6 +44,7 @@ import {
   healthProblems,
   hostMetricsModel,
   hostNotice,
+  hostSummary,
   metricGroupChips,
   metricsModel,
   missingSelection,
@@ -58,6 +59,7 @@ import {
   statusInfo,
   telemetryVisible,
   toggleSelection,
+  traceExtrasSummary,
   traceModel,
   uncomparableRefs,
   validateTrace
@@ -285,6 +287,11 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
 
 function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, onStart, onStop, onRefreshTrace, now }) {
   const running = trace.active
+  const [extrasOpen, setExtrasOpen] = useState(false)
+  // Text left in the folded note and tags fields is still sent, so it is still said.
+  const extras = traceExtrasSummary(form)
+  // A refused note or tag list is shown where it can be fixed, not behind the fold.
+  const extrasShown = extrasOpen || Boolean(formError && extras)
   return (
     <section className="panel stats-trace" aria-labelledby="stats-trace-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -292,6 +299,7 @@ function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, 
           <h2 id="stats-trace-title">Trace capture</h2>
           <p className="section-note">
             A trace records every sample around a workload and is saved on the board as a run you can reopen and compare.
+            Sentinel records one trace at a time and refuses a name a saved run already uses.
           </p>
         </div>
         {running && (
@@ -314,13 +322,19 @@ function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, 
                 started <time dateTime={trace.startedAt} title={formatTimestamp(trace.startedAt)}>{formatRelativeTime(trace.startedAt, now)}</time>
               </span>
             )}
+            {trace.tags.length > 0 && (
+              <span className="periph-pills">
+                {trace.tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}
+              </span>
+            )}
           </div>
+          {trace.note && <p className="hint stats-trace-note">{trace.note}</p>}
           <KeyValueTable rows={trace.facts} caption="Running trace summary" />
         </>
       ) : (
         <form className="periph-form" onSubmit={onStart} aria-label="Start a trace">
-          <div className="periph-form-fields stats-trace-fields">
-            <label>
+          <div className="stats-trace-row">
+            <label className="stats-trace-name">
               Trace name
               <input
                 value={form.name}
@@ -331,6 +345,19 @@ function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, 
                 required
               />
             </label>
+            <button type="submit" className="btn-tonal" disabled={busy}>{busy ? 'Starting…' : 'Start trace'}</button>
+            <button
+              type="button"
+              className="btn-ghost"
+              aria-expanded={extrasShown}
+              aria-controls="stats-trace-extras"
+              onClick={() => setExtrasOpen(!extrasShown)}
+            >
+              Add note and tags
+            </button>
+            {!extrasShown && extras && <span className="hint">{extras}</span>}
+          </div>
+          <div id="stats-trace-extras" className="periph-form-fields stats-trace-extras" hidden={!extrasShown}>
             <label>
               Note (optional)
               <input
@@ -351,16 +378,12 @@ function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, 
               />
             </label>
           </div>
-          <p className="hint">Sentinel records one trace at a time and refuses a name a saved run already uses.</p>
           {formError && (
             <>
               <p className="sr-only" role="alert">{formError}</p>
               <Callout tone="danger" title={formError} />
             </>
           )}
-          <div className="periph-actions">
-            <button type="submit" className="btn-tonal" disabled={busy}>{busy ? 'Starting…' : 'Start trace'}</button>
-          </div>
         </form>
       )}
     </section>
@@ -774,38 +797,62 @@ export function RunsPanel({
 function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
   // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
   const notice = hostNotice(model, updatedAt > 0)
+  const summary = hostSummary(model)
+  // Secondary on a board telemetry page, so it starts folded; its headline numbers stay in
+  // the summary line either way.
+  const [open, setOpen] = useState(false)
   return (
     <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
-      <div className="panel-topbar">
-        <div>
-          <h2 id="stats-host-title">Insight host</h2>
-          <p className="section-note">{model.sourceLabel}, not the board above.</p>
-        </div>
-        <button type="button" className="btn-ghost" onClick={onRefresh} disabled={busy}>
+      <div className="stats-host-head">
+        <h2 id="stats-host-title">
+          <button
+            type="button"
+            className="stats-disclosure"
+            aria-expanded={open}
+            aria-controls="stats-host-body"
+            onClick={() => setOpen((value) => !value)}
+          >
+            Insight host
+          </button>
+        </h2>
+        {summary.length > 0 ? (
+          <ul className="stats-host-summary" aria-label="Insight host at a glance">
+            {summary.map((item) => (
+              <li key={item.key}>
+                <span className="stats-host-label">{item.label}</span> <span className="stats-host-value">{item.text}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="hint">{notice}</span>
+        )}
+        <span className="hint">{model.sourceLabel}, not the board.</span>
+        <button type="button" className="btn-ghost stats-host-refresh" onClick={onRefresh} disabled={busy}>
           {busy ? 'Reading…' : 'Refresh'}
         </button>
       </div>
 
       <FailureCallout notice={error} />
-      {notice ? (
-        <p className="hint">{notice}</p>
-      ) : (
-        <ul className="stats-host-rows">
-          {model.rows.map((row) => (
-            <li key={row.key}>
-              <span className="stats-host-label">{row.label}</span>
-              <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
-              {row.percent !== null && (
-                <span className="stats-host-bar" aria-hidden="true">
-                  <span style={{ width: `${row.percent}%` }} />
-                </span>
-              )}
-              {row.detail && <span className="hint">{row.detail}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-      {updatedAt > 0 && <p className="hint">Read {formatRelativeTime(new Date(updatedAt).toISOString(), now)}.</p>}
+      <div id="stats-host-body" hidden={!open}>
+        {/* Without readings the notice is already in the summary line above. */}
+        {!notice && (
+          <ul className="stats-host-rows">
+            {model.rows.map((row) => (
+              <li key={row.key}>
+                <span className="stats-host-label">{row.label}</span>
+                <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
+                {row.percent !== null && (
+                  <span className="stats-host-bar" aria-hidden="true">
+                    <span style={{ width: `${row.percent}%` }} />
+                  </span>
+                )}
+                {row.detail && <span className="hint">{row.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {updatedAt > 0 && <p className="hint">Read {formatRelativeTime(new Date(updatedAt).toISOString(), now)}.</p>}
+      </div>
     </section>
   )
 }
