@@ -544,11 +544,11 @@ export function createFocusReturn() {
 export const PREVIEW_IDLE = Object.freeze({ status: 'idle', session: null, error: null })
 
 const PREVIEW_STATUS = {
-  idle: { label: 'Not running', tone: '', busy: false },
-  starting: { label: 'Starting…', tone: 'periph-info', busy: true },
-  live: { label: 'Live', tone: 'ok', busy: false },
-  stopping: { label: 'Stopping…', tone: 'periph-info', busy: true },
-  error: { label: 'Could not start', tone: 'periph-danger', busy: false }
+  idle: { label: 'Not running', tone: '' },
+  starting: { label: 'Starting…', tone: 'periph-info' },
+  live: { label: 'Live', tone: 'ok' },
+  stopping: { label: 'Stopping…', tone: 'periph-info' },
+  error: { label: 'Could not start', tone: 'periph-danger' }
 }
 
 const PREVIEW_ERROR_ACTIONS = {
