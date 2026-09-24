@@ -539,6 +539,23 @@ class PreviewStartFailureTests(unittest.TestCase):
         self.assertIn("doesn't want to pause", ctx.exception.extra.get("detail", ""))
         self.assertIsNone(manager.current(1))
 
+    def test_a_failed_start_removes_the_saved_failure_log_too(self):
+        """The saved tail has been read into the error; nothing else would remove it for an hour."""
+        manager = preview.PreviewManager()
+        transport = FakeTransport(pid=None, saved_log=b"ERROR: Pipeline doesn't want to pause\n")
+        session = fake_session(transport=transport)
+        with mock.patch.object(preview, "active_channels", return_value=set()), \
+                mock.patch.object(preview, "_channel_packets", return_value=0), \
+                mock.patch.object(preview, "port_map_video_range", return_value=(9000, 4)):
+            with self.assertRaises(BoardError):
+                manager.start(session, camera_item(), dict(MODE), "insight.local")
+        setup = next(cmd for cmd in transport.commands() if "worker.sh" in cmd and "mkdir -p" in cmd)
+        session_id = setup.split(f"{preview.WORKER_DIR}/", 1)[1].split("/", 1)[0].split()[0]
+        removals = [cmd for cmd in transport.commands() if cmd.startswith("sh\n-c\nrm -rf")]
+        self.assertTrue(removals, "a failed start must clean up on the board")
+        self.assertIn(f"{preview.WORKER_DIR}/{session_id}.log", removals[-1])
+        self.assertIn(f"{preview.WORKER_DIR}/{session_id} ", removals[-1])
+
 
 class PreviewHeartbeatTests(unittest.TestCase):
     def test_a_heartbeat_that_finds_no_worker_reports_the_preview_as_gone(self):

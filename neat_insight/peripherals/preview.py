@@ -451,7 +451,7 @@ class PreviewManager:
         result = session_ctx.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC)
         output = result.stdout.decode("utf-8", errors="replace")
         if not output.strip().split("\n")[0].strip().isdigit():
-            self._stop_pipeline_dir(session_ctx, directory)
+            self._stop_pipeline_dir(session_ctx, session_id)
             raise BoardError(
                 "command_failed",
                 "The preview pipeline did not start on the board.",
@@ -459,9 +459,12 @@ class PreviewManager:
                 detail=output[-1000:],
             )
 
-    def _stop_pipeline_dir(self, session_ctx, directory: str) -> None:
+    def _stop_pipeline_dir(self, session_ctx, session_id: str) -> None:
+        # The failure log the worker saved beside the directory has been read by now; leaving it
+        # would litter the board until a later preview happens to prune it.
+        remove = f"rm -rf {WORKER_DIR}/{session_id} {WORKER_DIR}/{session_id}.log"
         try:
-            session_ctx.transport.exec(["sh", "-c", f"rm -rf {directory}"], timeout=10)
+            session_ctx.transport.exec(["sh", "-c", remove], timeout=10)
         except BoardError:
             pass
 
