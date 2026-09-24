@@ -170,6 +170,27 @@ export function isStale(board, payload) {
   return Number(board.generation) !== Number(payload.generation)
 }
 
+/**
+ * Which of the view's payloads were read from a board that is no longer the selected
+ * one. Every Sentinel answer carries the generation it was read under, and an SSH round
+ * trip can outlive a board switch, so each payload is judged on its own: values from the
+ * previous board are kept and labelled rather than silently rendered as current ones.
+ */
+export function staleFlags(board, payloads = {}) {
+  const flags = {}
+  for (const [name, payload] of Object.entries(payloads)) flags[name] = isStale(board, payload)
+  return flags
+}
+
+export function staleNote(what, label) {
+  return `${what} below: read from ${label || 'a board that is no longer selected'}, not from the board selected now.`
+}
+
+/** The board a payload was actually read from, for a stale label. */
+export function payloadBoardLabel(payload) {
+  return payload?.board?.label || ''
+}
+
 /** What /api/sentinel says about the daemon, and whether this page can install it. */
 export function daemonInfo(state) {
   const daemon = state?.daemon || null
@@ -228,13 +249,18 @@ export function healthProblems(health) {
     .filter(Boolean)
 }
 
-/** One readable failure: a title, the backend's sentence, its hint, and where the fix is. */
-export function failureNotice(error) {
+/**
+ * One readable failure: a title, the backend's sentence, its hint, and where the fix is.
+ * `generation` is the board generation the request was issued under, so a failure that
+ * lands after a board switch can be labelled like a stale payload.
+ */
+export function failureNotice(error, generation = null) {
   const normalized = normalizeError(error)
   if (!normalized) return null
   const code = normalized.code || ''
   return {
     code,
+    generation,
     title: FAILURE_TITLES[code] || 'Something went wrong',
     message: normalized.message,
     hint: normalized.hint || FALLBACK_HINTS[code] || '',
@@ -315,6 +341,8 @@ export function traceModel(payload) {
   const body = payload?.sentinel || {}
   const trace = body.trace || null
   return {
+    // Kept so a trace read before a board switch can be labelled with the board it came from.
+    payload: payload || null,
     active: Boolean(trace),
     trace,
     name: trace ? String(pick(trace, RUN_FIELDS.name) || pick(trace, RUN_FIELDS.id) || 'trace') : '',

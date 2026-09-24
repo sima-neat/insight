@@ -32,8 +32,11 @@ import {
   isStale,
   metricsModel,
   pollDelay,
+  payloadBoardLabel,
   runList,
   runSubtitle,
+  staleFlags,
+  staleNote,
   statusInfo,
   toggleSelection,
   traceModel,
@@ -43,7 +46,21 @@ import { Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './s
 
 const BOARD_DESCRIPTION = 'Sentinel telemetry is read from this board over its own API socket.'
 
-function DaemonPanel({ info, health, busy, log, error, blocked, onInstall, onRetry }) {
+/**
+ * Values that were read from a board that is no longer the selected one. They are kept
+ * and labelled rather than hidden: a request in flight during a board switch resolves
+ * afterwards, and nobody should read the previous board's numbers as the current ones.
+ */
+export function StaleBanner({ what, payload, onRefresh, refreshLabel = 'Refresh' }) {
+  return (
+    <Callout tone="warn" title="From the previous board" role="status">
+      <p>{staleNote(what, payloadBoardLabel(payload))}</p>
+      {onRefresh && <button type="button" className="btn-tonal" onClick={onRefresh}>{refreshLabel}</button>}
+    </Callout>
+  )
+}
+
+function DaemonPanel({ info, health, busy, install, installStale, error, blocked, onInstall, onRetry }) {
   return (
     <section className="panel stats-daemon" aria-labelledby="stats-daemon-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -102,11 +119,14 @@ function DaemonPanel({ info, health, busy, log, error, blocked, onInstall, onRet
           </ul>
         </Callout>
       )}
-      {log && (
-        <details className="stats-detail">
-          <summary>Installer output</summary>
-          <pre className="periph-code" tabIndex={0}><code>{log}</code></pre>
-        </details>
+      {install?.log && (
+        <>
+          {installStale && <StaleBanner what="This installer output" payload={install} />}
+          <details className="stats-detail">
+            <summary>Installer output</summary>
+            <pre className="periph-code" tabIndex={0}><code>{install.log}</code></pre>
+          </details>
+        </>
       )}
     </section>
   )
@@ -203,7 +223,7 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
   )
 }
 
-function TracePanel({ trace, busy, form, formError, error, onFormChange, onStart, onStop, now }) {
+function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, onStart, onStop, onRefreshTrace, now }) {
   const running = trace.active
   return (
     <section className="panel stats-trace" aria-labelledby="stats-trace-title" aria-busy={busy}>
@@ -222,6 +242,7 @@ function TracePanel({ trace, busy, form, formError, error, onFormChange, onStart
       </div>
 
       <FailureCallout notice={error} />
+      {stale && <StaleBanner what="This trace" payload={trace.payload} onRefresh={onRefreshTrace} />}
 
       {running ? (
         <>
@@ -288,6 +309,8 @@ function TracePanel({ trace, busy, form, formError, error, onFormChange, onStart
 
 function RunsPanel({
   runs,
+  runsPayload,
+  stale,
   busy,
   error,
   selected,
@@ -295,9 +318,11 @@ function RunsPanel({
   detail,
   detailError,
   detailBusy,
+  detailStale,
   compare,
   compareError,
   compareBusy,
+  compareStale,
   now,
   onRefresh,
   onToggle,
@@ -321,6 +346,7 @@ function RunsPanel({
       </div>
 
       <FailureCallout notice={error} />
+      {stale && <StaleBanner what="These runs" payload={runsPayload} onRefresh={onRefresh} />}
 
       {runs.length === 0 && !error && (
         <p className="hint">{busy ? 'Reading runs from the board…' : 'No runs yet. Start a trace above to record one.'}</p>
@@ -392,6 +418,7 @@ function RunsPanel({
         <section className="stats-run-detail" aria-label={`Run ${openRef}`} aria-busy={detailBusy}>
           <h3>{openRef}</h3>
           <FailureCallout notice={detailError} />
+          {detailStale && <StaleBanner what="This run" payload={detail} onRefresh={() => onOpen(openRef)} refreshLabel="Read it again" />}
           {detailBusy && <p className="hint" role="status">Reading the run from the board…</p>}
           {detail && !detailError && (
             detailRows.length > 0 ? (
@@ -407,6 +434,7 @@ function RunsPanel({
       {compare && !compareError && (
         <section className="stats-compare" aria-label="Run comparison">
           <h3>Comparison</h3>
+          {compareStale && <StaleBanner what="This comparison" payload={compare} onRefresh={onCompare} refreshLabel="Compare again" />}
           {table ? (
             <table className="sysinfo-table stats-table">
               <thead>
@@ -460,7 +488,7 @@ export default function StatsView({ onError, onStatus }) {
   const [stateBusy, setStateBusy] = useState(true)
   const [installBusy, setInstallBusy] = useState(false)
   const [installError, setInstallError] = useState(null)
-  const [installLog, setInstallLog] = useState('')
+  const [installResult, setInstallResult] = useState(null)
   const [metrics, setMetrics] = useState(null)
   const [metricsError, setMetricsError] = useState(null)
   const [metricsBusy, setMetricsBusy] = useState(false)
@@ -494,9 +522,27 @@ export default function StatsView({ onError, onStatus }) {
   const model = useMemo(() => metricsModel(metrics), [metrics])
   const trace = useMemo(() => traceModel(traces), [traces])
   const runRows = useMemo(() => runList(runs), [runs])
-  const stale = isStale(board, metrics) || isStale(board, state)
+  // Everything the board answered is judged against the board selected now, including
+  // the failures: an SSH round trip can outlive a board switch.
+  const stalePayloads = staleFlags(board, {
+    state,
+    metrics,
+    metricsError,
+    traces,
+    traceError,
+    runs,
+    runsError,
+    detail,
+    detailError,
+    compare,
+    compareError,
+    install: installResult,
+    installError
+  })
+  const stale = stalePayloads.metrics || stalePayloads.state
   const polling = info.available && live && !halted && !stale
   const delay = pollDelay(failures)
+  const generation = board?.generation ?? null
 
   function reset() {
     setMetrics(null)
@@ -511,7 +557,7 @@ export default function StatsView({ onError, onStatus }) {
     setSelected([])
     setCompare(null)
     setCompareError(null)
-    setInstallLog('')
+    setInstallResult(null)
     setInstallError(null)
     setFailures(0)
     setHalted(false)
@@ -525,7 +571,7 @@ export default function StatsView({ onError, onStatus }) {
       setBoardError(null)
       return data
     } catch (err) {
-      if (mounted.current) setBoardError(failureNotice(err))
+      if (mounted.current) setBoardError(failureNotice(err, generation))
       return null
     }
   }
@@ -546,7 +592,7 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current) {
         setState(null)
-        setStateError(failureNotice(err))
+        setStateError(failureNotice(err, generation))
       }
       return null
     } finally {
@@ -562,7 +608,7 @@ export default function StatsView({ onError, onStatus }) {
       setTraces(data)
       setTraceError(null)
     } catch (err) {
-      if (mounted.current) setTraceError(failureNotice(err))
+      if (mounted.current) setTraceError(failureNotice(err, generation))
     } finally {
       if (mounted.current && !quiet) setTraceBusy(false)
     }
@@ -576,7 +622,7 @@ export default function StatsView({ onError, onStatus }) {
       setRuns(data)
       setRunsError(null)
     } catch (err) {
-      if (mounted.current) setRunsError(failureNotice(err))
+      if (mounted.current) setRunsError(failureNotice(err, generation))
     } finally {
       if (mounted.current) setRunsBusy(false)
     }
@@ -596,7 +642,7 @@ export default function StatsView({ onError, onStatus }) {
       if (trace.active) loadTraces({ quiet: true })
     } catch (err) {
       if (!mounted.current) return
-      const notice = failureNotice(err)
+      const notice = failureNotice(err, generation)
       setMetricsError(notice)
       setFailures((count) => count + 1)
       // A missing board or a stopped daemon will not answer the next tick either:
@@ -614,17 +660,17 @@ export default function StatsView({ onError, onStatus }) {
   async function install() {
     setInstallBusy(true)
     setInstallError(null)
-    setInstallLog('')
+    setInstallResult(null)
     try {
       const data = await installSentinel()
       if (!mounted.current) return
-      setInstallLog(data.log || '')
+      setInstallResult(data)
       onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
       await loadState({ quiet: true })
       if (mounted.current) pollMetrics({ manual: true })
     } catch (err) {
       if (!mounted.current) return
-      const notice = failureNotice(err)
+      const notice = failureNotice(err, generation)
       setInstallError(notice)
       onError?.(notice.message)
       loadState({ quiet: true })
@@ -651,7 +697,7 @@ export default function StatsView({ onError, onStatus }) {
       onStatus?.(`Recording trace “${result.body.name}”.`)
       loadRuns()
     } catch (err) {
-      if (mounted.current) setTraceError(failureNotice(err))
+      if (mounted.current) setTraceError(failureNotice(err, generation))
     } finally {
       if (mounted.current) setTraceBusy(false)
     }
@@ -667,7 +713,7 @@ export default function StatsView({ onError, onStatus }) {
       await loadTraces({ quiet: true })
       loadRuns()
     } catch (err) {
-      if (mounted.current) setTraceError(failureNotice(err))
+      if (mounted.current) setTraceError(failureNotice(err, generation))
     } finally {
       if (mounted.current) setTraceBusy(false)
     }
@@ -685,7 +731,7 @@ export default function StatsView({ onError, onStatus }) {
       if (!mounted.current || seq !== detailSeq.current) return
       setDetail(data)
     } catch (err) {
-      if (mounted.current && seq === detailSeq.current) setDetailError(failureNotice(err))
+      if (mounted.current && seq === detailSeq.current) setDetailError(failureNotice(err, generation))
     } finally {
       if (mounted.current && seq === detailSeq.current) setDetailBusy(false)
     }
@@ -700,7 +746,7 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current) {
         setCompare(null)
-        setCompareError(failureNotice(err))
+        setCompareError(failureNotice(err, generation))
       }
     } finally {
       if (mounted.current) setCompareBusy(false)
@@ -789,7 +835,8 @@ export default function StatsView({ onError, onStatus }) {
             info={info}
             health={state?.health || null}
             busy={installBusy || (stateBusy && Boolean(state))}
-            log={installLog}
+            install={installResult}
+            installStale={stalePayloads.install}
             error={installError || sentinelProblem}
             blocked={Boolean(boardProblem)}
             onInstall={install}
@@ -821,6 +868,7 @@ export default function StatsView({ onError, onStatus }) {
 
               <TracePanel
                 trace={trace}
+                stale={stalePayloads.traces || stalePayloads.traceError}
                 busy={traceBusy}
                 form={form}
                 formError={formError}
@@ -829,10 +877,13 @@ export default function StatsView({ onError, onStatus }) {
                 onFormChange={setForm}
                 onStart={onStartTrace}
                 onStop={onStopTrace}
+                onRefreshTrace={() => loadTraces()}
               />
 
               <RunsPanel
                 runs={runRows}
+                runsPayload={runs}
+                stale={stalePayloads.runs || stalePayloads.runsError}
                 busy={runsBusy}
                 error={runsError}
                 selected={selected}
@@ -840,9 +891,11 @@ export default function StatsView({ onError, onStatus }) {
                 detail={detail}
                 detailError={detailError}
                 detailBusy={detailBusy}
+                detailStale={stalePayloads.detail || stalePayloads.detailError}
                 compare={compare}
                 compareError={compareError}
                 compareBusy={compareBusy}
+                compareStale={stalePayloads.compare || stalePayloads.compareError}
                 now={now}
                 onRefresh={() => loadRuns()}
                 onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}

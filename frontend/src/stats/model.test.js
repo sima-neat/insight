@@ -23,11 +23,14 @@ import {
   isStale,
   metricsModel,
   parseTags,
+  payloadBoardLabel,
   pollDelay,
   runList,
   runSubtitle,
   sparkline,
   sparklineLabel,
+  staleFlags,
+  staleNote,
   statusInfo,
   thresholdText,
   toggleSelection,
@@ -225,6 +228,8 @@ test('the active trace and its running summary are read from the daemon body', (
   assert.equal(model.name, 'baseline')
   assert.equal(model.startedAt, '2026-09-22T20:50:00Z')
   assert.deepEqual(model.facts, [['Samples', '12'], ['Peak power watts', '9.5']])
+  assert.equal(model.payload.sentinel.trace.name, 'baseline')
+  assert.equal(traceModel(null).payload, null)
   const idle = traceModel({ sentinel: { trace: null, summary: null } })
   assert.equal(idle.active, false)
   assert.deepEqual(idle.facts, [])
@@ -330,4 +335,41 @@ test('a comparison shape Insight does not know is reported, not guessed at', () 
   assert.equal(compareTable({ sentinel: { runs: [{ name: 'a' }], metrics: [] } }), null)
   assert.equal(compareTable({ sentinel: { runs: ['a', 'b'], metrics: [{ key: 'x', runs: [null, null] }] } }), null)
   assert.equal(compareTable(null), null)
+})
+
+test('every payload is judged stale on its own generation, not just the metrics', () => {
+  const board = { generation: 4 }
+  const onA = (extra = {}) => ({ generation: 3, board: { label: 'sima@192.168.2.2' }, ...extra })
+  const onB = (extra = {}) => ({ generation: 4, board: { label: 'sima@10.0.0.9' }, ...extra })
+  const flags = staleFlags(board, {
+    metrics: onA(),
+    traces: onA({ sentinel: { trace: { name: 'baseline' } } }),
+    runs: onA({ sentinel: { runs: [{ name: 'baseline' }] } }),
+    detail: onA({ sentinel: { run: { id: 'r1' } } }),
+    compare: onA({ sentinel: { runs: ['baseline'] } }),
+    install: onB({ log: 'installed' })
+  })
+  assert.deepEqual(flags, { metrics: true, traces: true, runs: true, detail: true, compare: true, install: false })
+  // Nothing is dropped: the caller still has the values to render under the label.
+  assert.deepEqual(staleFlags(board, {}), {})
+  assert.deepEqual(staleFlags(null, { compare: onA() }), { compare: false })
+  assert.equal(payloadBoardLabel(onA()), 'sima@192.168.2.2')
+  assert.equal(payloadBoardLabel({}), '')
+  assert.equal(
+    staleNote('These runs', 'sima@192.168.2.2'),
+    'These runs below: read from sima@192.168.2.2, not from the board selected now.'
+  )
+  assert.equal(
+    staleNote('This comparison'),
+    'This comparison below: read from a board that is no longer selected, not from the board selected now.'
+  )
+})
+
+test('a failure that lands after a board switch carries the generation it was issued under', () => {
+  const notice = failureNotice({ error: 'ssh: connect failed', code: 'unreachable' }, 3)
+  assert.equal(notice.generation, 3)
+  assert.equal(isStale({ generation: 4 }, notice), true)
+  assert.equal(isStale({ generation: 3 }, notice), false)
+  // Without a generation - no board state yet - a failure is never labelled stale.
+  assert.equal(isStale({ generation: 4 }, failureNotice({ error: 'boom', code: 'timeout' })), false)
 })
