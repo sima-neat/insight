@@ -10,6 +10,9 @@ export default function AssignMediaDialog({ sourceIndex, currentFile, tree, onAs
   const [filter, setFilter] = useState('')
   const [picked, setPicked] = useState(currentFile || '')
   const [busy, setBusy] = useState(false)
+  // The folder can disappear while the dialog is open (a delete elsewhere); browse its nearest
+  // surviving ancestor rather than an empty view.
+  const view = nearestExistingFolder(tree, folder)
 
   function navigate(path) {
     setFolder(path)
@@ -27,13 +30,13 @@ export default function AssignMediaDialog({ sourceIndex, currentFile, tree, onAs
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Assign media to src${sourceIndex}`} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Assign media to src${sourceIndex}`}>
       <div className="modal-card assign-dialog-card" data-testid="assign-dialog">
         <h3>Assign media to src{sourceIndex}</h3>
         <p className="hint">Selected: <span className="assign-target" data-testid="assign-picked">{picked || 'Not assigned'}</span></p>
         <FolderBrowser
           tree={tree}
-          folder={folder}
+          folder={view}
           onNavigate={navigate}
           filter={filter}
           onFilterChange={setFilter}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { breadcrumbs, childrenAt, listFolder, nearestExistingFolder, parentPath, searchFolder, streamableFiles } from './mediaTree.js'
+import { breadcrumbs, childrenAt, listFolder, nearestExistingFolder, parentPath, searchFolder, streamableFiles, streamableOnly } from './mediaTree.js'
 
 const file = (path, streamable = true) => ({ name: path.split('/').pop(), path, type: 'file', streamable })
 const folder = (path, children) => ({
@@ -31,16 +31,28 @@ test('childrenAt walks nested folders and reports a missing folder as null', () 
   assert.equal(childrenAt(undefined, '').length, 0)
 })
 
-test('listFolder lists folders with counts, then streamable files, and counts hidden files', () => {
+test('listFolder lists folders with counts, then every file, and counts the unsupported ones', () => {
   const root = listFolder(tree, '')
   assert.deepEqual(root.folders.map((f) => [f.name, f.count]), [['120FPS-720p-h264', 1], ['30FPS', 3], ['empty', 0]])
-  assert.deepEqual(root.files.map((f) => f.path), ['video.mp4'])
+  assert.deepEqual(root.files, [
+    { name: 'readme.md', path: 'readme.md', streamable: false },
+    { name: 'video.mp4', path: 'video.mp4', streamable: true },
+  ])
+  assert.deepEqual(streamableOnly(root.files).map((f) => f.path), ['video.mp4'])
   assert.equal(root.hidden, 1)
   const indoor = listFolder(tree, '30FPS/indoor')
   assert.deepEqual(indoor.folders.map((f) => f.path), ['30FPS/indoor/cam-a'])
-  assert.deepEqual(indoor.files.map((f) => f.path), ['30FPS/indoor/lobby.mp4'])
+  assert.deepEqual(indoor.files, [
+    { name: 'lobby.mp4', path: '30FPS/indoor/lobby.mp4', streamable: true },
+    { name: 'notes.txt', path: '30FPS/indoor/notes.txt', streamable: false },
+  ])
   assert.equal(indoor.hidden, 1)
   assert.deepEqual(listFolder(tree, 'nope'), { folders: [], files: [], hidden: 0 })
+})
+
+test('streamableOnly keeps the files Insight can play and drops the rest', () => {
+  assert.deepEqual(streamableOnly(listFolder(tree, '30FPS/indoor').files).map((f) => f.name), ['lobby.mp4'])
+  assert.deepEqual(streamableOnly([]), [])
 })
 
 test('breadcrumbs start at Media Root and accumulate one segment per level', () => {

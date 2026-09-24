@@ -6,7 +6,7 @@ import {
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
-import { nearestExistingFolder, streamableFiles } from './media/mediaTree.js'
+import { listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -751,6 +751,7 @@ export default function App() {
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
   const [mediaFolder, setMediaFolder] = useState('')
+  const mediaFolderRef = useRef('') // so async reloads read the current folder, not a stale closure
   const [sources, setSources] = useState([])
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
@@ -834,7 +835,7 @@ export default function App() {
 
   // Only streamable files are listed anywhere (issue #113); the server marks them.
   const allFiles = useMemo(() => streamableFiles(mediaTree), [mediaTree])
-  const videoFiles = allFiles
+  const videoFiles = allFiles // streamable files only; Bulk Start needs at least one
   const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
   const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
   const catalogSourcesById = useMemo(() => {
@@ -920,24 +921,35 @@ export default function App() {
     const data = await fetchJson('/api/media-files')
     setMediaTree(data)
     // A folder can vanish between loads (its last file deleted); fall back to the nearest ancestor.
-    setMediaFolder((current) => {
-      const next = nearestExistingFolder(data, current)
-      if (next !== current) setMediaFilter('')
-      return next
-    })
-    const flat = streamableFiles(data)
+    const current = mediaFolderRef.current
+    const folder = nearestExistingFolder(data, current)
+    if (folder !== current) {
+      setMediaFolder(folder)
+      setMediaFilter('')
+    }
     if (forceSelectFirst) {
-      setSelectedFile(flat[0] || '')
+      // Prefer something the user can see: the first streamable file in the folder they are in.
+      const here = listFolder(data, folder).files.find((f) => f.streamable)
+      setSelectedFile(here ? here.path : '')
       return
     }
-    if (!selectedFile && flat.length > 0) {
-      setSelectedFile(flat[0])
+    if (!selectedFile) {
+      const flat = streamableFiles(data)
+      if (flat.length > 0) setSelectedFile(flat[0])
     }
   }
 
   function navigateMediaFolder(path) {
     setMediaFolder(path)
     setMediaFilter('') // a scoped search never silently carries over to another folder
+  }
+
+  // Show the folder that holds `path` and select it (imports and uploads land outside the
+  // folder the user is browsing).
+  function revealMediaFile(path) {
+    setMediaFolder(parentPath(path))
+    setMediaFilter('')
+    setSelectedFile(path)
   }
 
   async function loadSources() {
@@ -1030,6 +1042,10 @@ export default function App() {
       setError(e.message)
     }
   }
+
+  useEffect(() => {
+    mediaFolderRef.current = mediaFolder
+  }, [mediaFolder])
 
   useEffect(() => {
     Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
@@ -1358,7 +1374,7 @@ export default function App() {
       const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved YouTube media to '))
       const savedPath = savedLine ? savedLine.replace(/^Saved YouTube media to\s+/, '').trim() : ''
       await loadMedia()
-      if (savedPath) setSelectedFile(savedPath)
+      if (savedPath) revealMediaFile(savedPath)
       setUploadProgress(null)
       setUploadStatus('Imported YouTube video.')
       setImportDialogOpen(false)
@@ -1429,7 +1445,7 @@ export default function App() {
         if (savedPath) lastSavedPath = savedPath
       }
       await loadMedia()
-      if (lastSavedPath) setSelectedFile(lastSavedPath)
+      if (lastSavedPath) revealMediaFile(lastSavedPath)
       setUploadProgress(null)
       setUploadStatus(`Imported ${assetsToImport.length} catalog asset(s).`)
       setImportDialogOpen(false)
@@ -1517,6 +1533,8 @@ export default function App() {
       }
 
       await loadMedia()
+      // Uploads always land at the top of the library, so show it if we are browsing elsewhere.
+      if (mediaFolderRef.current) navigateMediaFolder('')
       if (!failed.length) {
         setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
@@ -2195,6 +2213,7 @@ export default function App() {
                 onFilterChange={setMediaFilter}
                 selectedPath={selectedFile}
                 onSelect={setSelectedFile}
+                showUnsupported
                 fileRowClass={(path) => (selectedMediaPaths.includes(path) ? 'selected' : '')}
                 renderFileLead={(path) => (
                   <input
@@ -2336,7 +2355,7 @@ export default function App() {
                             <button
                               type="button"
                               className={src.file ? 'source-file-btn' : 'source-file-btn unassigned'}
-                              onClick={(e) => { e.stopPropagation(); setAssignTarget(src.index) }}
+                              onClick={(e) => { e.stopPropagation(); selectSource(src.index); setAssignTarget(src.index) }}
                               disabled={Boolean(encodeProgress[src.index])}
                               aria-label={`Assign media to src${src.index}`}
                               title={src.file || 'Not assigned'}

@@ -292,7 +292,9 @@ select:focus-visible,
   position: fixed;
   top: 18px;
   right: 18px;
-  z-index: 50;
+  /* above .modal-backdrop (60) and the workspace JSON modal (70): an error raised by a
+     dialog action must stay visible */
+  z-index: 80;
   max-width: min(480px, calc(100vw - 36px));
   display: grid;
   gap: 8px;
@@ -3653,4 +3655,17 @@ button:disabled {
 .src-file-cell .source-file-btn {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.media-row.unsupported .media-name {
+  color: #7d8da0;
+}
+
+.unsupported-tag {
+  color: #8b5a00;
+  background: #fff4e0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
 }
