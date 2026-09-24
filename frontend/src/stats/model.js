@@ -191,6 +191,31 @@ export function payloadBoardLabel(payload) {
   return payload?.board?.label || ''
 }
 
+/**
+ * One in-flight request per key. React state settles a tick later than a click, so a
+ * second Re-check, Refresh or Compare can start before the first has set its busy flag;
+ * each of those is a command on the board, so the guard is synchronous.
+ */
+export function createRequestGuard() {
+  const active = new Set()
+  return {
+    running: (key) => active.has(key),
+    begin(key) {
+      if (active.has(key)) return false
+      active.add(key)
+      return true
+    },
+    end(key) {
+      active.delete(key)
+    }
+  }
+}
+
+/** The daemon panel is busy during the first check too, when no state has arrived yet. */
+export function daemonBusy({ installBusy = false, stateBusy = false } = {}) {
+  return Boolean(installBusy || stateBusy)
+}
+
 /** What /api/sentinel says about the daemon, and whether this page can install it. */
 export function daemonInfo(state) {
   const daemon = state?.daemon || null
@@ -469,9 +494,14 @@ export function compareReady(refs) {
 }
 
 export function compareHint(refs) {
-  const count = (refs || []).length
+  const list = refs || []
+  const count = list.length
   if (count < MIN_COMPARE_RUNS) return `Select ${MIN_COMPARE_RUNS - count} more run to compare; the first is the baseline.`
-  return `Comparing ${count} runs against ${(refs || [])[0]}.`
+  const comparing = `Comparing ${count} runs against ${list[0]}.`
+  // At the limit the checkboxes go disabled; say why, since that hint is what they point at.
+  return count >= MAX_COMPARE_RUNS
+    ? `${comparing} Sentinel compares at most ${MAX_COMPARE_RUNS} runs at once, so clear one to select another.`
+    : comparing
 }
 
 function statValue(stat) {

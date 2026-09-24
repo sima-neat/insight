@@ -19,6 +19,8 @@ import {
   compareReady,
   compareTable,
   countsSummary,
+  createRequestGuard,
+  daemonBusy,
   daemonFacts,
   daemonInfo,
   factRows,
@@ -60,7 +62,7 @@ export function StaleBanner({ what, payload, onRefresh, refreshLabel = 'Refresh'
   )
 }
 
-function DaemonPanel({ info, health, busy, install, installStale, error, blocked, onInstall, onRetry }) {
+function DaemonPanel({ info, health, busy, installing, install, installStale, error, blocked, onInstall, onRetry }) {
   return (
     <section className="panel stats-daemon" aria-labelledby="stats-daemon-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -80,7 +82,7 @@ function DaemonPanel({ info, health, busy, install, installStale, error, blocked
               disabled={busy || !info.canInstall}
               title={info.canInstall ? undefined : info.installBlocked || undefined}
             >
-              {busy ? 'Installing…' : 'Install Sentinel'}
+              {installing ? 'Installing…' : 'Install Sentinel'}
             </button>
           )}
         </div>
@@ -99,7 +101,7 @@ function DaemonPanel({ info, health, busy, install, installStale, error, blocked
       </div>
       {info.state !== 'unknown' && <Facts rows={[...daemonFacts(info), ...healthFacts(health)]} />}
 
-      {busy && (
+      {installing && (
         <p className="hint" role="status">
           Running <code>sima-cli neat install sentinel</code> on the board. This downloads and unpacks an artifact and can take
           several minutes.
@@ -373,6 +375,7 @@ function RunsPanel({
                         checked={selected.includes(run.ref)}
                         onChange={() => onToggle(run.ref)}
                         disabled={!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS}
+                        aria-describedby="stats-compare-hint"
                       />
                       <span className="sr-only">Compare {run.label}</span>
                     </label>
@@ -409,7 +412,7 @@ function RunsPanel({
             {selected.length > 0 && (
               <button type="button" className="btn-ghost" onClick={onClearCompare}>Clear selection</button>
             )}
-            <span className="hint">{compareHint(selected)}</span>
+            <span className="hint" id="stats-compare-hint">{compareHint(selected)}</span>
           </div>
         </>
       )}
@@ -514,7 +517,9 @@ export default function StatsView({ onError, onStatus }) {
   const [now, setNow] = useState(() => Date.now())
 
   const mounted = useRef(false)
-  const inFlight = useRef(false)
+  // One in-flight request per endpoint: a second click must not run a second command
+  // on the board while the first is still out.
+  const guard = useRef(createRequestGuard())
   const tick = useRef(() => {})
   const detailSeq = useRef(0)
 
@@ -577,6 +582,7 @@ export default function StatsView({ onError, onStatus }) {
   }
 
   async function loadState({ quiet = false } = {}) {
+    if (!guard.current.begin('state')) return null
     if (!quiet) setStateBusy(true)
     try {
       const data = await fetchSentinel()
@@ -596,11 +602,13 @@ export default function StatsView({ onError, onStatus }) {
       }
       return null
     } finally {
+      guard.current.end('state')
       if (mounted.current && !quiet) setStateBusy(false)
     }
   }
 
   async function loadTraces({ quiet = false } = {}) {
+    if (!guard.current.begin('traces')) return
     if (!quiet) setTraceBusy(true)
     try {
       const data = await fetchActiveTrace()
@@ -610,11 +618,13 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current) setTraceError(failureNotice(err, generation))
     } finally {
+      guard.current.end('traces')
       if (mounted.current && !quiet) setTraceBusy(false)
     }
   }
 
   async function loadRuns() {
+    if (!guard.current.begin('runs')) return
     setRunsBusy(true)
     try {
       const data = await fetchRuns()
@@ -624,14 +634,16 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current) setRunsError(failureNotice(err, generation))
     } finally {
+      guard.current.end('runs')
       if (mounted.current) setRunsBusy(false)
     }
   }
 
   async function pollMetrics({ manual = false } = {}) {
-    if (inFlight.current) return
-    inFlight.current = true
     if (manual) setMetricsBusy(true)
+    // A refresh asked for while a poll is already out is that poll: it clears the busy
+    // flag when it lands, so the button reports the wait instead of doing nothing.
+    if (!guard.current.begin('metrics')) return
     try {
       const data = await fetchMetrics()
       if (!mounted.current) return
@@ -652,12 +664,13 @@ export default function StatsView({ onError, onStatus }) {
         loadState({ quiet: true })
       }
     } finally {
-      inFlight.current = false
-      if (mounted.current && manual) setMetricsBusy(false)
+      guard.current.end('metrics')
+      if (mounted.current) setMetricsBusy(false)
     }
   }
 
   async function install() {
+    if (!guard.current.begin('install')) return
     setInstallBusy(true)
     setInstallError(null)
     setInstallResult(null)
@@ -675,6 +688,7 @@ export default function StatsView({ onError, onStatus }) {
       onError?.(notice.message)
       loadState({ quiet: true })
     } finally {
+      guard.current.end('install')
       if (mounted.current) setInstallBusy(false)
     }
   }
@@ -687,6 +701,7 @@ export default function StatsView({ onError, onStatus }) {
       return
     }
     setFormError('')
+    if (!guard.current.begin('trace-action')) return
     setTraceBusy(true)
     setTraceError(null)
     try {
@@ -699,11 +714,13 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current) setTraceError(failureNotice(err, generation))
     } finally {
+      guard.current.end('trace-action')
       if (mounted.current) setTraceBusy(false)
     }
   }
 
   async function onStopTrace() {
+    if (!guard.current.begin('trace-action')) return
     setTraceBusy(true)
     setTraceError(null)
     try {
@@ -715,6 +732,7 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current) setTraceError(failureNotice(err, generation))
     } finally {
+      guard.current.end('trace-action')
       if (mounted.current) setTraceBusy(false)
     }
   }
@@ -723,7 +741,7 @@ export default function StatsView({ onError, onStatus }) {
     setOpenRef(ref)
     setDetail(null)
     setDetailError(null)
-    if (!ref) return
+    if (!ref || !guard.current.begin('run')) return
     const seq = ++detailSeq.current
     setDetailBusy(true)
     try {
@@ -733,11 +751,13 @@ export default function StatsView({ onError, onStatus }) {
     } catch (err) {
       if (mounted.current && seq === detailSeq.current) setDetailError(failureNotice(err, generation))
     } finally {
+      guard.current.end('run')
       if (mounted.current && seq === detailSeq.current) setDetailBusy(false)
     }
   }
 
   async function runCompare() {
+    if (!guard.current.begin('compare')) return
     setCompareBusy(true)
     setCompareError(null)
     try {
@@ -749,6 +769,7 @@ export default function StatsView({ onError, onStatus }) {
         setCompareError(failureNotice(err, generation))
       }
     } finally {
+      guard.current.end('compare')
       if (mounted.current) setCompareBusy(false)
     }
   }
@@ -834,7 +855,8 @@ export default function StatsView({ onError, onStatus }) {
           <DaemonPanel
             info={info}
             health={state?.health || null}
-            busy={installBusy || (stateBusy && Boolean(state))}
+            busy={daemonBusy({ installBusy, stateBusy })}
+            installing={installBusy}
             install={installResult}
             installStale={stalePayloads.install}
             error={installError || sentinelProblem}

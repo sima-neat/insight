@@ -11,6 +11,8 @@ import {
   compareReady,
   compareTable,
   countsSummary,
+  createRequestGuard,
+  daemonBusy,
   daemonFacts,
   daemonInfo,
   factRows,
@@ -372,4 +374,29 @@ test('a failure that lands after a board switch carries the generation it was is
   assert.equal(isStale({ generation: 3 }, notice), false)
   // Without a generation - no board state yet - a failure is never labelled stale.
   assert.equal(isStale({ generation: 4 }, failureNotice({ error: 'boom', code: 'timeout' })), false)
+})
+
+test('the request guard admits one call per key until it ends', () => {
+  const guard = createRequestGuard()
+  assert.equal(guard.begin('state'), true)
+  assert.equal(guard.running('state'), true)
+  assert.equal(guard.begin('state'), false)
+  assert.equal(guard.begin('runs'), true)
+  guard.end('state')
+  assert.equal(guard.running('state'), false)
+  assert.equal(guard.begin('state'), true)
+  guard.end('missing')
+})
+
+test('the daemon panel is busy during the first check, before any state exists', () => {
+  assert.equal(daemonBusy({ installBusy: false, stateBusy: true }), true)
+  assert.equal(daemonBusy({ installBusy: true, stateBusy: false }), true)
+  assert.equal(daemonBusy({ installBusy: false, stateBusy: false }), false)
+  assert.equal(daemonBusy(), false)
+})
+
+test('the compare hint explains the limit that disables the checkboxes', () => {
+  const full = Array.from({ length: MAX_COMPARE_RUNS }, (_, i) => `r${i}`)
+  assert.match(compareHint(full), /at most 8 runs at once/)
+  assert.ok(!/at most/.test(compareHint(['a', 'b'])))
 })
