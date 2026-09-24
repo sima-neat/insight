@@ -518,6 +518,36 @@ export function traceExtrasSummary(form) {
   return parts.length ? `${parts.join(' and ')} will be saved with this trace` : ''
 }
 
+/**
+ * The one note the Runs panel carries. It stands for the two the separate trace and saved
+ * runs panels had; the baseline rule it no longer repeats is said beside Compare instead.
+ */
+export const RUNS_NOTE =
+  'A trace records every sample around a workload and is saved on the board as a run you can reopen and compare, ' +
+  'even after a daemon restart; Sentinel records one trace at a time and refuses a name a saved run already uses.'
+
+/**
+ * The Runs panel's header row. Idle, it is the trace form; while a trace records, the same
+ * row says what is recording and carries the control that stops it, so starting a trace
+ * swaps the row's contents instead of adding one. `busy` is a start or stop in flight.
+ */
+export function traceBar(trace, { busy = false, now = Date.now() } = {}) {
+  if (!trace?.active) {
+    return { recording: false, submitLabel: busy ? 'Starting…' : 'Start trace' }
+  }
+  const startedAt = trace.startedAt || null
+  const started = startedAt ? formatRelativeTime(startedAt, now) : ''
+  return {
+    recording: true,
+    name: trace.name,
+    startedAt,
+    started,
+    tags: trace.tags || [],
+    note: trace.note || '',
+    stopLabel: busy ? 'Stopping…' : 'Stop trace'
+  }
+}
+
 function durationOf(source) {
   const seconds = pick(source, RUN_FIELDS.durationSec)
   if (isNumber(seconds)) return seconds
@@ -1203,15 +1233,4 @@ export function hostNotice(model, read = false) {
   return read
     ? 'Insight answered with no CPU, memory or disk reading for this machine, so none is shown rather than zeros.'
     : 'Reading this machine…'
-}
-
-/**
- * The three values the collapsed host panel shows in its summary line: CPU, memory and
- * disk use. None when the panel has a notice to show instead of readings.
- */
-export function hostSummary(model) {
-  if (!model || model.offline || model.empty) return []
-  return (model.rows || [])
-    .filter((row) => ['cpu_load', 'memory', 'disk'].includes(row.key))
-    .map((row) => ({ key: row.key, label: row.label, text: formatValue(row.value, row.unit) }))
 }

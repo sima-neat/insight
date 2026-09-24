@@ -17,12 +17,12 @@ import {
   compareViewText,
   csvField,
   definitionsByKey,
-  hostMetricsModel,
-  hostSummary,
+  RUNS_NOTE,
   metricGroupChips,
   metricsModel,
   openGroup,
   rowChanged,
+  traceBar,
   traceExtrasSummary,
   traceModel
 } from './model.js'
@@ -267,18 +267,42 @@ test('the CSV is named after the baseline and the day, safely', () => {
   assert.match(compareCsvFilename(null, new Date('nonsense')), /^sentinel-compare-runs-\d{4}-\d{2}-\d{2}\.csv$/)
 })
 
-test('the collapsed host panel keeps CPU, memory and disk in its summary line', () => {
-  const model = hostMetricsModel({ cpu_load: 1, memory: { percent: 42.8 }, disk: { percent: 3.5 }, temperature_celsius_avg: 51 })
-  assert.deepEqual(hostSummary(model).map((item) => [item.label, item.text]), [
-    ['CPU load', '1%'],
-    ['Memory', '42.8%'],
-    ['Disk', '3.5%']
-  ])
-  // A missing reading is an em dash, not zero.
-  assert.equal(hostSummary(hostMetricsModel({ cpu_load: null, memory: { percent: 10 }, disk: {} }))[0].text, '—')
-  // Nothing to summarise: the panel's notice says why instead.
-  assert.deepEqual(hostSummary(hostMetricsModel({ REMOTE: true, memory: {}, disk: {} })), [])
-  assert.deepEqual(hostSummary(hostMetricsModel(null)), [])
+test('the Runs header row is the trace form until a trace records', () => {
+  assert.deepEqual(traceBar(traceModel(null)), { recording: false, submitLabel: 'Start trace' })
+  assert.deepEqual(traceBar(traceModel({ sentinel: { trace: null, summary: null } }), { busy: true }), {
+    recording: false,
+    submitLabel: 'Starting…'
+  })
+})
+
+test('while a trace records, the same row says what is recording and offers Stop', () => {
+  const now = Date.parse('2026-09-24T12:05:00Z')
+  const trace = traceModel({
+    sentinel: {
+      trace: { name: 'baseline', started_at: '2026-09-24T12:00:00Z', note: 'before NMS', tags: ['yolo26'] },
+      summary: { samples: 150 }
+    }
+  })
+  const bar = traceBar(trace, { now })
+  assert.equal(bar.recording, true)
+  assert.equal(bar.name, 'baseline')
+  assert.equal(bar.startedAt, '2026-09-24T12:00:00Z')
+  assert.equal(bar.started, '5 min ago')
+  assert.deepEqual(bar.tags, ['yolo26'])
+  assert.equal(bar.note, 'before NMS')
+  assert.equal(bar.stopLabel, 'Stop trace')
+  assert.equal(traceBar(trace, { busy: true, now }).stopLabel, 'Stopping…')
+  // A trace the daemon reports without a start time is still named, and nothing is invented.
+  const bare = traceBar(traceModel({ sentinel: { trace: { name: 'x' } } }), { now })
+  assert.equal(bare.started, '')
+  assert.equal(bare.startedAt, null)
+})
+
+test('the Runs panel keeps one sentence of note that still says what both panels said', () => {
+  assert.equal(RUNS_NOTE.match(/[.!?](\s|$)/g).length, 1)
+  for (const fact of ['every sample', 'saved on the board', 'reopen and compare', 'daemon restart', 'one trace at a time', 'already uses']) {
+    assert.ok(RUNS_NOTE.includes(fact), fact)
+  }
 })
 
 test('a note or tags typed into the collapsed fields are still said out loud', () => {

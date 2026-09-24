@@ -44,13 +44,13 @@ import {
   healthProblems,
   hostMetricsModel,
   hostNotice,
-  hostSummary,
   metricGroupChips,
   metricsModel,
   missingSelection,
   openGroup,
   payloadBoardLabel,
   pollDelay,
+  RUNS_NOTE,
   runDetail,
   runList,
   runSubtitle,
@@ -59,6 +59,7 @@ import {
   statusInfo,
   telemetryVisible,
   toggleSelection,
+  traceBar,
   traceExtrasSummary,
   traceModel,
   uncomparableRefs,
@@ -285,112 +286,116 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
   )
 }
 
-function TracePanel({ trace, stale, busy, form, formError, error, onFormChange, onStart, onStop, onRefreshTrace, now }) {
-  const running = trace.active
-  const [extrasOpen, setExtrasOpen] = useState(false)
-  // Text left in the folded note and tags fields is still sent, so it is still said.
-  const extras = traceExtrasSummary(form)
-  // A refused note or tag list is shown where it can be fixed, not behind the fold.
-  const extrasShown = extrasOpen || Boolean(formError && extras)
-  return (
-    <section className="panel stats-trace" aria-labelledby="stats-trace-title" aria-busy={busy}>
-      <div className="panel-topbar">
-        <div>
-          <h2 id="stats-trace-title">Trace capture</h2>
-          <p className="section-note">
-            A trace records every sample around a workload and is saved on the board as a run you can reopen and compare.
-            Sentinel records one trace at a time and refuses a name a saved run already uses.
-          </p>
-        </div>
-        {running && (
-          <button type="button" className="btn-tonal" onClick={onStop} disabled={busy}>
-            {busy ? 'Stopping…' : 'Stop trace'}
-          </button>
+/**
+ * The Runs panel's header row, less its title and Refresh: the trace form, or what is
+ * recording and the control that stops it. The note and tags fields it can unfold, and
+ * what a recording trace was started with, are rendered below the header by `TraceDetails`.
+ */
+function TraceBar({ bar, busy, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
+  if (bar.recording) {
+    return (
+      <div className="stats-trace-bar">
+        <Pill tone="ok">Recording</Pill>
+        <span className="stats-trace-running">{bar.name}</span>
+        {bar.started && (
+          <span className="hint">
+            started <time dateTime={bar.startedAt} title={formatTimestamp(bar.startedAt)}>{bar.started}</time>
+          </span>
         )}
+        {bar.tags.length > 0 && (
+          <span className="periph-pills">
+            {bar.tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}
+          </span>
+        )}
+        <button type="button" className="btn-tonal" onClick={onStop} disabled={busy}>{bar.stopLabel}</button>
       </div>
+    )
+  }
+  return (
+    <form id="stats-trace-form" className="stats-trace-bar" onSubmit={onStart} aria-label="Start a trace">
+      <label className="stats-trace-name">
+        <span>Trace name</span>
+        <input
+          value={form.name}
+          onChange={(event) => onFormChange({ ...form, name: event.target.value })}
+          placeholder="baseline"
+          autoComplete="off"
+          spellCheck={false}
+          required
+        />
+      </label>
+      <button type="submit" className="btn-tonal" disabled={busy}>{bar.submitLabel}</button>
+      <button
+        type="button"
+        className="btn-ghost"
+        aria-expanded={extrasShown}
+        aria-controls="stats-trace-extras"
+        onClick={onToggleExtras}
+      >
+        Add note and tags
+      </button>
+      {!extrasShown && extras && <span className="hint">{extras}</span>}
+    </form>
+  )
+}
 
-      <FailureCallout notice={error} />
-      {stale && <StaleBanner what="This trace" payload={trace.payload} onRefresh={onRefreshTrace} />}
-
-      {running ? (
+/** What sits under the header row: the unfolded note and tags, or a recording trace's note and summary. */
+function TraceDetails({ bar, trace, form, formError, extrasShown, onFormChange }) {
+  if (bar.recording) {
+    return (
+      <>
+        {bar.note && <p className="hint stats-trace-note">{bar.note}</p>}
+        <KeyValueTable rows={trace.facts} caption="Running trace summary" />
+      </>
+    )
+  }
+  return (
+    <>
+      {/* Outside the form element so the header row stays one row; `form` keeps them in it. */}
+      <div id="stats-trace-extras" className="periph-form stats-trace-extras" hidden={!extrasShown}>
+        <label>
+          Note (optional)
+          <input
+            form="stats-trace-form"
+            value={form.note}
+            onChange={(event) => onFormChange({ ...form, note: event.target.value })}
+            placeholder="before the NMS change"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Tags (optional, comma separated)
+          <input
+            form="stats-trace-form"
+            value={form.tags}
+            onChange={(event) => onFormChange({ ...form, tags: event.target.value })}
+            placeholder="compiler-v2, yolo26"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+      </div>
+      {formError && (
         <>
-          <div className="periph-board-summary">
-            <Pill tone="ok">Recording</Pill>
-            <span className="periph-board-label">{trace.name}</span>
-            {trace.startedAt && (
-              <span className="hint">
-                started <time dateTime={trace.startedAt} title={formatTimestamp(trace.startedAt)}>{formatRelativeTime(trace.startedAt, now)}</time>
-              </span>
-            )}
-            {trace.tags.length > 0 && (
-              <span className="periph-pills">
-                {trace.tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}
-              </span>
-            )}
-          </div>
-          {trace.note && <p className="hint stats-trace-note">{trace.note}</p>}
-          <KeyValueTable rows={trace.facts} caption="Running trace summary" />
+          <p className="sr-only" role="alert">{formError}</p>
+          <Callout tone="danger" title={formError} />
         </>
-      ) : (
-        <form className="periph-form" onSubmit={onStart} aria-label="Start a trace">
-          <div className="stats-trace-row">
-            <label className="stats-trace-name">
-              Trace name
-              <input
-                value={form.name}
-                onChange={(event) => onFormChange({ ...form, name: event.target.value })}
-                placeholder="baseline"
-                autoComplete="off"
-                spellCheck={false}
-                required
-              />
-            </label>
-            <button type="submit" className="btn-tonal" disabled={busy}>{busy ? 'Starting…' : 'Start trace'}</button>
-            <button
-              type="button"
-              className="btn-ghost"
-              aria-expanded={extrasShown}
-              aria-controls="stats-trace-extras"
-              onClick={() => setExtrasOpen(!extrasShown)}
-            >
-              Add note and tags
-            </button>
-            {!extrasShown && extras && <span className="hint">{extras}</span>}
-          </div>
-          <div id="stats-trace-extras" className="periph-form-fields stats-trace-extras" hidden={!extrasShown}>
-            <label>
-              Note (optional)
-              <input
-                value={form.note}
-                onChange={(event) => onFormChange({ ...form, note: event.target.value })}
-                placeholder="before the NMS change"
-                autoComplete="off"
-              />
-            </label>
-            <label>
-              Tags (optional, comma separated)
-              <input
-                value={form.tags}
-                onChange={(event) => onFormChange({ ...form, tags: event.target.value })}
-                placeholder="compiler-v2, yolo26"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-          </div>
-          {formError && (
-            <>
-              <p className="sr-only" role="alert">{formError}</p>
-              <Callout tone="danger" title={formError} />
-            </>
-          )}
-        </form>
       )}
-    </section>
+    </>
   )
 }
 
 export function RunsPanel({
+  trace,
+  traceStale,
+  traceBusy,
+  traceError,
+  form,
+  formError,
+  onFormChange,
+  onStart,
+  onStop,
+  onRefreshTrace,
   runs,
   runsPayload,
   definitions,
@@ -438,21 +443,47 @@ export function RunsPanel({
   // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
   const detailRows = useMemo(() => (detail && !run ? factRows(detail.sentinel, ['samples']) : []), [detail, run])
 
-  return (
-    <section className="panel stats-runs" aria-labelledby="stats-runs-title" aria-busy={busy}>
-      <div className="panel-topbar">
-        <div>
-          <h2 id="stats-runs-title">Saved runs</h2>
-          <p className="section-note">Runs live on the board and survive a daemon restart. The first run selected is the comparison baseline.</p>
-        </div>
-        <button type="button" className="btn-ghost" onClick={onRefresh} disabled={busy}>Refresh</button>
-      </div>
+  const bar = traceBar(trace, { busy: traceBusy, now })
+  const [extrasOpen, setExtrasOpen] = useState(false)
+  // Text left in the folded note and tags fields is still sent, so it is still said.
+  const extras = traceExtrasSummary(form)
+  // A refused note or tag list is shown where it can be fixed, not behind the fold.
+  const extrasShown = extrasOpen || Boolean(formError && extras)
 
+  return (
+    <section className="panel stats-runs" aria-labelledby="stats-runs-title" aria-busy={busy || traceBusy}>
+      <div className="stats-runs-head">
+        <h2 id="stats-runs-title">Runs</h2>
+        <TraceBar
+          bar={bar}
+          busy={traceBusy}
+          form={form}
+          extras={extras}
+          extrasShown={extrasShown}
+          onToggleExtras={() => setExtrasOpen(!extrasShown)}
+          onFormChange={onFormChange}
+          onStart={onStart}
+          onStop={onStop}
+        />
+        <button type="button" className="btn-ghost stats-runs-refresh" onClick={onRefresh} disabled={busy}>Refresh</button>
+      </div>
+      <TraceDetails
+        bar={bar}
+        trace={trace}
+        form={form}
+        formError={formError}
+        extrasShown={extrasShown}
+        onFormChange={onFormChange}
+      />
+      <p className="section-note stats-runs-note">{RUNS_NOTE}</p>
+
+      <FailureCallout notice={traceError} />
+      {traceStale && <StaleBanner what="This trace" payload={trace.payload} onRefresh={onRefreshTrace} />}
       <FailureCallout notice={error} />
       {stale && <StaleBanner what="These runs" payload={runsPayload} onRefresh={onRefresh} />}
 
       {runs.length === 0 && !error && (
-        <p className="hint">{busy ? 'Reading runs from the board…' : 'No runs yet. Start a trace above to record one.'}</p>
+        <p className="hint">{busy ? 'Reading runs from the board…' : 'No runs yet. Start a trace to record one.'}</p>
       )}
 
       {runs.length > 0 && (
@@ -792,67 +823,45 @@ export function RunsPanel({
  * The machine Insight runs on, from /api/metrics. It is deliberately the smallest panel
  * in this view and sits below the board's: it answers "is my SDK container out of disk",
  * which is a different question from what the board is doing, and the two must not be
- * read as one set of numbers.
+ * read as one set of numbers. Its readings are always on screen, as one short row.
  */
 function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
   // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
   const notice = hostNotice(model, updatedAt > 0)
-  const summary = hostSummary(model)
-  // Secondary on a board telemetry page, so it starts folded; its headline numbers stay in
-  // the summary line either way.
-  const [open, setOpen] = useState(false)
   return (
     <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
       <div className="stats-host-head">
-        <h2 id="stats-host-title">
-          <button
-            type="button"
-            className="stats-disclosure"
-            aria-expanded={open}
-            aria-controls="stats-host-body"
-            onClick={() => setOpen((value) => !value)}
-          >
-            Insight host
-          </button>
-        </h2>
-        {summary.length > 0 ? (
-          <ul className="stats-host-summary" aria-label="Insight host at a glance">
-            {summary.map((item) => (
-              <li key={item.key}>
-                <span className="stats-host-label">{item.label}</span> <span className="stats-host-value">{item.text}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <span className="hint">{notice}</span>
-        )}
+        <h2 id="stats-host-title">Insight host</h2>
         <span className="hint">{model.sourceLabel}, not the board.</span>
+        {updatedAt > 0 && (
+          <span className="hint">
+            Read <time dateTime={new Date(updatedAt).toISOString()}>{formatRelativeTime(new Date(updatedAt).toISOString(), now)}</time>.
+          </span>
+        )}
         <button type="button" className="btn-ghost stats-host-refresh" onClick={onRefresh} disabled={busy}>
           {busy ? 'Reading…' : 'Refresh'}
         </button>
       </div>
 
       <FailureCallout notice={error} />
-      <div id="stats-host-body" hidden={!open}>
-        {/* Without readings the notice is already in the summary line above. */}
-        {!notice && (
-          <ul className="stats-host-rows">
-            {model.rows.map((row) => (
-              <li key={row.key}>
-                <span className="stats-host-label">{row.label}</span>
-                <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
-                {row.percent !== null && (
-                  <span className="stats-host-bar" aria-hidden="true">
-                    <span style={{ width: `${row.percent}%` }} />
-                  </span>
-                )}
-                {row.detail && <span className="hint">{row.detail}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {updatedAt > 0 && <p className="hint">Read {formatRelativeTime(new Date(updatedAt).toISOString(), now)}.</p>}
-      </div>
+      {notice ? (
+        <p className="hint stats-host-notice">{notice}</p>
+      ) : (
+        <ul className="stats-host-rows" aria-label="Insight host readings">
+          {model.rows.map((row) => (
+            <li key={row.key}>
+              <span className="stats-host-label">{row.label}</span>
+              <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
+              {row.detail && <span className="hint">{row.detail}</span>}
+              {row.percent !== null && (
+                <span className="stats-host-bar" aria-hidden="true">
+                  <span style={{ width: `${row.percent}%` }} />
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }
@@ -1307,21 +1316,17 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                 }}
               />
 
-              <TracePanel
+              <RunsPanel
                 trace={trace}
-                stale={stalePayloads.traces || stalePayloads.traceError}
-                busy={traceBusy}
+                traceStale={stalePayloads.traces || stalePayloads.traceError}
+                traceBusy={traceBusy}
+                traceError={traceError}
                 form={form}
                 formError={formError}
-                error={traceError}
-                now={now}
                 onFormChange={setForm}
                 onStart={onStartTrace}
                 onStop={onStopTrace}
                 onRefreshTrace={() => loadTraces()}
-              />
-
-              <RunsPanel
                 runs={runRows}
                 runsPayload={runs}
                 definitions={definitions}

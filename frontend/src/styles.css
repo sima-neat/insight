@@ -3924,7 +3924,6 @@ button:disabled {
 .stats-detail summary:focus-visible,
 .stats-check input:focus-visible,
 .stats-chip:focus-visible,
-.stats-disclosure:focus-visible,
 .stats-toggle input:focus-visible,
 .stats-table-scroll:focus-visible {
   outline: 2px solid var(--accent);
@@ -3945,12 +3944,12 @@ button:disabled {
 .stats-metric-card {
   min-width: 0;
   display: grid;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface-soft);
-  padding: 10px 12px;
+  padding: 8px 12px;
 }
 
 .stats-metric-card.tone-ok {
@@ -3995,13 +3994,13 @@ button:disabled {
 
 .stats-spark {
   width: 100%;
-  height: 30px;
+  height: 24px;
   color: var(--accent);
 }
 
 .stats-spark-empty {
   display: block;
-  height: 30px;
+  height: 24px;
 }
 
 .stats-metric-card.tone-warn .stats-spark,
@@ -4143,20 +4142,58 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-.stats-trace-row {
+/* The Runs header: the title, the trace form or what is recording, and Refresh share one
+   line, and wrap onto further lines rather than squeeze when the page is narrow. */
+.stats-runs-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.stats-runs-refresh {
+  margin-left: auto;
+}
+
+.stats-trace-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
-.stats-trace-name {
-  flex: 1 1 240px;
-  max-width: 420px;
+.stats-trace-bar .hint {
+  margin: 0;
 }
 
-.stats-trace-row .hint {
-  align-self: center;
+.stats-trace-name {
+  flex: 1 1 300px;
+  max-width: 400px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+.stats-trace-name span {
+  white-space: nowrap;
+}
+
+.stats-trace-name input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.stats-trace-running {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .stats-trace-extras {
@@ -4164,14 +4201,25 @@ button:disabled {
 }
 
 .stats-trace-note {
-  margin: 6px 0 8px;
+  margin: 8px 0 0;
   overflow-wrap: anywhere;
+}
+
+/* A recording trace's running summary, under the header row. */
+.stats-runs-head ~ .sysinfo-table.key-value {
+  margin-top: 8px;
+}
+
+.stats-runs-note {
+  margin: 6px 0 10px;
 }
 
 /* Rows carry an Open button each; at the page's default button size that button, not the
    run, set every row's height. */
 .stats-run-table td .btn-ghost {
   padding: 4px 10px;
+  /* At phone width the column is narrow enough to break "Open" one letter per line. */
+  white-space: nowrap;
 }
 
 .stats-run-table th,
@@ -4189,24 +4237,45 @@ button:disabled {
   }
 }
 
-/* The Insight host panel: the machine Insight runs on, kept visually quieter than the
-   board telemetry above it so the two are never read as one set of numbers. */
+/* The Insight host panel: the machine Insight runs on. It is quieter than the board
+   telemetry above it - a flat tinted panel, plain readings rather than cards - so the two
+   are never read as one set of numbers. Its readings sit in one short row. */
+.stats-view .stats-host {
+  padding: 10px 16px 12px;
+  background: var(--surface-soft);
+  box-shadow: none;
+}
+
+.stats-host-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.stats-host .hint {
+  margin: 0;
+}
+
+.stats-host-refresh {
+  margin-left: auto;
+}
+
 .stats-host-rows {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
 .stats-host-rows li {
   min-width: 0;
-  display: grid;
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
 }
 
 .stats-host-label {
@@ -4217,11 +4286,16 @@ button:disabled {
 
 .stats-host-value {
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
 }
 
+.stats-host-rows .hint {
+  overflow-wrap: anywhere;
+}
+
 .stats-host-bar {
+  flex: 1 0 100%;
   display: block;
   height: 4px;
   border-radius: 999px;
@@ -4235,8 +4309,8 @@ button:disabled {
   background: var(--accent);
 }
 
-.stats-host .hint {
-  margin: 0;
+.stats-host .stats-host-notice {
+  margin-top: 6px;
 }
 
 /* Run comparison: the change against the baseline sits under each value, and a metric
@@ -4347,74 +4421,4 @@ button:disabled {
   max-width: 100%;
   overflow-x: auto;
   border-radius: var(--radius-sm);
-}
-
-/* The host panel folds to one line that still carries its three headline values. */
-.stats-view .stats-host {
-  padding: 10px 16px;
-}
-
-.stats-host-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 16px;
-}
-
-.stats-host-head .hint {
-  margin: 0;
-}
-
-.stats-host-refresh {
-  margin-left: auto;
-}
-
-.stats-disclosure {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: none;
-  padding: 2px 0;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  color: inherit;
-}
-
-.stats-disclosure::before {
-  content: '';
-  width: 0;
-  height: 0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 6px solid currentColor;
-  transition: transform 0.15s ease;
-}
-
-.stats-disclosure[aria-expanded='true']::before {
-  transform: rotate(90deg);
-}
-
-.stats-disclosure:hover:not(:disabled) {
-  transform: none;
-  text-decoration: underline;
-}
-
-.stats-host-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-}
-
-.stats-host-summary .stats-host-value {
-  font-size: 13px;
-}
-
-#stats-host-body {
-  margin-top: 8px;
 }
