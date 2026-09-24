@@ -37,6 +37,7 @@ import {
   healthFacts,
   healthProblems,
   hostMetricsModel,
+  hostNotice,
   metricsModel,
   missingSelection,
   payloadBoardLabel,
@@ -49,6 +50,7 @@ import {
   statusInfo,
   toggleSelection,
   traceModel,
+  uncomparableRefs,
   validateTrace
 } from './stats/model.js'
 import { Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
@@ -346,6 +348,8 @@ export function RunsPanel({
   const legend = useMemo(() => compareLegend(table), [table])
   // Runs that were selected and are no longer on the board: their checkbox is gone.
   const missing = useMemo(() => missingSelection(selected, runs), [selected, runs])
+  // Runs whose own name breaks the comma-separated compare query.
+  const uncomparable = useMemo(() => uncomparableRefs(selected), [selected])
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
   const run = useMemo(() => runDetail(detail), [detail])
   // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
@@ -428,6 +432,21 @@ export function RunsPanel({
             )}
             <span className="hint" id="stats-compare-hint">{compareHint(selected)}</span>
           </div>
+
+          {uncomparable.length > 0 && (
+            <Callout tone="warn" title="Some selected runs cannot be compared by name">
+              <p>
+                Sentinel compares runs from one comma-separated list of names, so a name that contains a comma is read
+                as two runs the board does not have. {uncomparable.join(' · ')}{' '}
+                {uncomparable.length === 1 ? 'carries one' : 'carry one'}, so comparing would fail on a run nobody
+                selected. Clear {uncomparable.length === 1 ? 'it' : 'them'}, or read{' '}
+                {uncomparable.length === 1 ? 'that run' : 'those runs'} one at a time with Open.
+              </p>
+              <button type="button" className="btn-tonal" onClick={() => onDropMissing(uncomparable)}>
+                {uncomparable.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
+              </button>
+            </Callout>
+          )}
 
           {missing.length > 0 && (
             <Callout tone="warn" title="Some selected runs are no longer on the board">
@@ -632,6 +651,8 @@ export function RunsPanel({
  * read as one set of numbers.
  */
 function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
+  // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
+  const notice = hostNotice(model, updatedAt > 0)
   return (
     <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -645,12 +666,9 @@ function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
       </div>
 
       <FailureCallout notice={error} />
-      {model.offline && (
-        <p className="hint">
-          A remote DevKit is configured for this endpoint but is not connected, so it reports nothing.
-        </p>
-      )}
-      {!model.offline && (
+      {notice ? (
+        <p className="hint">{notice}</p>
+      ) : (
         <ul className="stats-host-rows">
           {model.rows.map((row) => (
             <li key={row.key}>

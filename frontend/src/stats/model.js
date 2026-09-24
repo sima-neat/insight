@@ -328,7 +328,7 @@ export function countsSummary(counts) {
   const total = counts?.total || 0
   const parts = [`${total} metric${total === 1 ? '' : 's'}`]
   if (counts?.critical) parts.push(`${counts.critical} critical`)
-  if (counts?.warn) parts.push(`${counts.warn} warning`)
+  if (counts?.warn) parts.push(`${counts.warn} warning${counts.warn === 1 ? '' : 's'}`)
   if (counts?.unavailable) parts.push(`${counts.unavailable} not measured`)
   return parts.join(' · ')
 }
@@ -396,6 +396,12 @@ export function validateTrace({ name, note, tags }) {
   if (trimmed.length > NAME_LIMIT) return { error: `The name can be at most ${NAME_LIMIT} characters.` }
   const text = String(note || '').trim()
   if (text.length > NOTE_LIMIT) return { error: `The note can be at most ${NOTE_LIMIT} characters.` }
+  // /api/sentinel/compare carries its runs as one comma-separated list, so a comma in a
+  // name splits that run into runs the board does not have. Refusing it here is what keeps
+  // a trace from being recorded under a name it could never be compared by.
+  if (trimmed.includes(',')) {
+    return { error: 'The name cannot contain a comma; runs are compared by a comma-separated list of names.' }
+  }
   const list = Array.isArray(tags) ? tags.filter(Boolean) : parseTags(tags)
   if (list.length > MAX_TAGS) return { error: `At most ${MAX_TAGS} tags can be attached to a trace.` }
   const body = { name: trimmed }
@@ -516,15 +522,34 @@ export function compareQuery(refs) {
   return `/api/sentinel/compare?runs=${encodeURIComponent((refs || []).join(','))}`
 }
 
+/**
+ * Selected runs the compare query cannot carry. `/api/sentinel/compare` takes its runs as
+ * one comma-separated list, and percent-encoding does not help: the backend splits the
+ * decoded value, so a run named `before, after` is read as two runs. On this board that
+ * answers 404 `{"code":"not_found","error":"unknown run 'before'"}`, naming a run nobody
+ * selected and that never existed. Insight no longer records such a name, but a run
+ * already saved on the board can still carry one, so the selection says so instead.
+ */
+export function uncomparableRefs(refs) {
+  return (refs || []).filter((ref) => String(ref).includes(','))
+}
+
 export function compareReady(refs) {
   const list = refs || []
-  return list.length >= MIN_COMPARE_RUNS && list.length <= MAX_COMPARE_RUNS
+  if (list.length < MIN_COMPARE_RUNS || list.length > MAX_COMPARE_RUNS) return false
+  return uncomparableRefs(list).length === 0
 }
 
 export function compareHint(refs) {
   const list = refs || []
   const count = list.length
-  if (count < MIN_COMPARE_RUNS) return `Select ${MIN_COMPARE_RUNS - count} more run to compare; the first is the baseline.`
+  if (count < MIN_COMPARE_RUNS) {
+    const wanted = MIN_COMPARE_RUNS - count
+    // Nothing selected yet is not "more" of anything, and two runs are not "1 run".
+    return count === 0
+      ? `Select ${MIN_COMPARE_RUNS} runs to compare; the first is the baseline.`
+      : `Select ${wanted} more run${wanted === 1 ? '' : 's'} to compare; the first is the baseline.`
+  }
   const comparing = `Comparing ${count} runs against ${list[0]}.`
   // At the limit the checkboxes go disabled; say why, since that hint is what they point at.
   return count >= MAX_COMPARE_RUNS
@@ -892,4 +917,21 @@ export function hostMetricsModel(payload) {
     rows: offline ? [] : rows,
     empty: !offline && rows.every((row) => row.value === null)
   }
+}
+
+/**
+ * What the host panel says in place of its rows, or '' when it has rows to show. A
+ * snapshot with no readings at all was being rendered as three labels against three em
+ * dashes and nothing else, which reads as a machine whose load could not be measured
+ * rather than as an endpoint that answered with nothing. `read` is whether /api/metrics
+ * has answered at least once, so the first paint says it is still reading.
+ */
+export function hostNotice(model, read = false) {
+  if (model?.offline) {
+    return 'A remote DevKit is configured for this endpoint but is not connected, so it reports nothing.'
+  }
+  if (!model?.empty) return ''
+  return read
+    ? 'Insight answered with no CPU, memory or disk reading for this machine, so none is shown rather than zeros.'
+    : 'Reading this machine…'
 }

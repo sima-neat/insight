@@ -162,13 +162,15 @@ Run totals are shown in the units the rest of the view uses: a duration Sentinel
 
 If a run is deleted on the board while it is selected, its row leaves the list and there is no longer a checkbox to clear it with, so every comparison fails on it. Insight names any selected run Sentinel no longer lists and offers to drop it from the selection.
 
+A comparison asks for its runs as one comma-separated list of names, so a trace name cannot contain a comma: the request would be read as two runs the board does not have, and fail naming a run nobody selected. Insight refuses such a name when you start a trace, and names any already-saved run that carries one rather than letting Compare fail on it.
+
 ### Values from a board you have left
 
 Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Insight keeps those values and labels them with the board they came from, with a way to read them again, rather than showing them as the current board's.
 
 ### Insight host
 
-Below the runs, a compact panel reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the board telemetry above it, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so.
+Below the runs, a compact panel reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the board telemetry above it, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so. When the endpoint answers with no reading at all, the panel says that rather than listing its labels against em dashes.
 
 ### NEAT profiling timeline
 

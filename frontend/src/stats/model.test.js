@@ -26,6 +26,7 @@ import {
   formatPercentDelta,
   formatSeconds,
   formatValue,
+  hostNotice,
   healthFacts,
   healthProblems,
   hostMetricsModel,
@@ -47,6 +48,7 @@ import {
   thresholdText,
   toggleSelection,
   traceModel,
+  uncomparableRefs,
   validateTrace
 } from './model.js'
 
@@ -755,4 +757,48 @@ test('the empty and refused states Sentinel actually returns are read as such', 
   assert.equal(missing.available, false)
   assert.equal(missing.canInstall, true)
   assert.equal(failureNotice(missing.error).daemon, true)
+})
+
+test('the compare hint counts the runs it asks for', () => {
+  // The hint the Saved runs panel shows beside a disabled Compare on every first load.
+  assert.equal(compareHint([]), 'Select 2 runs to compare; the first is the baseline.')
+  assert.equal(compareHint(['a']), 'Select 1 more run to compare; the first is the baseline.')
+  assert.match(compareHint(['a', 'b']), /^Comparing 2 runs against a\./)
+})
+
+test('a warning count is not reported in the singular', () => {
+  assert.equal(countsSummary({ total: 59, unavailable: 0, warn: 2, critical: 0 }), '59 metrics · 2 warnings')
+  assert.equal(countsSummary({ total: 59, unavailable: 0, warn: 1, critical: 0 }), '59 metrics · 1 warning')
+  assert.equal(countsSummary({ total: 1, unavailable: 3, warn: 0, critical: 2 }), '1 metric · 2 critical · 3 not measured')
+})
+
+test('a run whose name holds a comma is named, not sent into a 404', () => {
+  // /api/sentinel/compare splits its runs on commas after decoding, so the query for a run
+  // named `before, after` is indistinguishable from two runs. Driven against the sandbox:
+  //   GET /api/sentinel/compare?runs=before%2C%20after,insight-hw-1790177227
+  //   404 {"code":"not_found","error":"unknown run 'before'", ...}
+  const selected = ['before, after', 'insight-hw-1790177227']
+  assert.deepEqual(uncomparableRefs(selected), ['before, after'])
+  assert.equal(compareReady(selected), false, 'Compare must not be offered for a query that cannot say what it means')
+  assert.deepEqual(uncomparableRefs(['insight-hw-1790177227', 'insight-hw-1790177178']), [])
+  assert.equal(compareReady(['insight-hw-1790177227', 'insight-hw-1790177178']), true)
+
+  // And Insight stops recording such a name in the first place.
+  assert.match(validateTrace({ name: 'before, after' }).error, /cannot contain a comma/)
+  assert.equal(validateTrace({ name: 'before, after' }).body, undefined)
+  assert.deepEqual(validateTrace({ name: 'before-after' }).body, { name: 'before-after' })
+})
+
+test('a host snapshot with no readings says so instead of showing three em dashes', () => {
+  // /api/metrics answering with nothing measurable: the rows are all null, and before the
+  // panel had a sentence for it they rendered as three labels against three “—”.
+  const empty = hostMetricsModel({ REMOTE: false })
+  assert.equal(empty.empty, true)
+  assert.match(hostNotice(empty, true), /no CPU, memory or disk reading/)
+  // Before the first answer the same model means "not read yet", not "measured nothing".
+  assert.equal(hostNotice(hostMetricsModel(null), false), 'Reading this machine…')
+  // A configured but disconnected remote DevKit keeps its own sentence.
+  assert.match(hostNotice(hostMetricsModel({ REMOTE: true, memory: {}, disk: {} }), true), /not connected/)
+  // A machine Insight can read has rows, so it has no notice.
+  assert.equal(hostNotice(hostMetricsModel({ REMOTE: false, cpu_load: 2.9, memory: { percent: 37.3 }, disk: { percent: 3.4 } }), true), '')
 })
