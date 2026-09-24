@@ -118,13 +118,24 @@ export default function BoardTargetCard({
 
   return (
     <section className="panel periph-board" aria-labelledby="periph-board-title">
-      <div className="panel-topbar">
-        <div>
-          <h2 id="periph-board-title">Board</h2>
+      <h2 id="periph-board-title" className="sr-only">Selected board</h2>
+
+      {loading && !board && <p className="hint" role="status">Loading board…</p>}
+      <ErrorNotice error={error}>
+        {onRetry && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
+      </ErrorNotice>
+
+      {target && (
+        <>
+          <div className="periph-board-summary">
+            <span className="periph-board-label">{target.label}</span>
+            {sourceLabel(target.source) && <Pill tone="periph-info">{sourceLabel(target.source)}</Pill>}
+            <Pill tone={state.tone}>{state.label}</Pill>
+          </div>
           <p className="section-note">{description}</p>
-        </div>
-        {target && (
-          <div className="periph-actions">
+          {/* Identity and the last check read as one list rather than a line of prose and a grid. */}
+          <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
+          <div className="periph-actions periph-board-actions">
             {onOpenShell && shell?.configured && (
               <button
                 type="button"
@@ -146,23 +157,6 @@ export default function BoardTargetCard({
               Change board
             </button>
           </div>
-        )}
-      </div>
-
-      {loading && !board && <p className="hint" role="status">Loading board…</p>}
-      <ErrorNotice error={error}>
-        {onRetry && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
-      </ErrorNotice>
-
-      {target && (
-        <>
-          <div className="periph-board-summary">
-            <span className="periph-board-label">{target.label}</span>
-            {sourceLabel(target.source) && <Pill tone="periph-info">{sourceLabel(target.source)}</Pill>}
-            <Pill tone={state.tone}>{state.label}</Pill>
-            {checked && <span className="hint">checked {checked}</span>}
-          </div>
-          {identity.length > 0 && <Facts rows={identity} />}
         </>
       )}
 

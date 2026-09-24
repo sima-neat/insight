@@ -8,7 +8,6 @@ import {
   formatOptions,
   fpsOptions,
   sizeKey,
-  sizeLabel,
   sizeOptions,
   tierInfo
 } from './model.js'
@@ -36,7 +35,6 @@ function BlockedFormats({ options }) {
 
 function ModePicker({ camera, selection, notice, onChange }) {
   const formats = formatOptions(camera)
-  const range = formats.find((f) => f.value === selection?.format)?.range
   const sizes = selection ? sizeOptions(camera, selection.format) : []
   const rates = selection ? fpsOptions(camera, selection.format, selection.width, selection.height) : []
 
@@ -83,13 +81,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
         </label>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
-      {range && (
-        <p className="hint">
-          This format also accepts sizes from {sizeLabel(range.min_width, range.min_height)} to {sizeLabel(range.max_width, range.max_height)};
-          only the listed sizes can be used.
-        </p>
-      )}
-      <BlockedFormats options={formats} />
     </fieldset>
   )
 }

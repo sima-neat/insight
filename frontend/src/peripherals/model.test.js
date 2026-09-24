@@ -27,6 +27,7 @@ import {
   normalizeError,
   previewBlock,
   previewErrorInfo,
+  previewNeedsRestart,
   previewStatusInfo,
   resolveCameraId,
   resolveDeviceKind,
@@ -270,6 +271,22 @@ test('a subtitle never repeats what the name already says', () => {
   assert.equal(cameraSubtitle(usb), usb.device.by_id)
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
+})
+
+test('changing the mode restarts a preview, but only the one it belongs to', () => {
+  const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+  const live = { status: 'live', session: { id: 's1', camera_id: 'cam-a', mode } }
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, fps: 60 }), true, 'a different rate needs a restart')
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, width: 1280, height: 720 }), true)
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, format: 'RGB888' }), true)
+  // Re-selecting the mode it is already streaming must not interrupt the picture.
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode }), false)
+  // A preview belongs to one camera; another camera's menus must not touch it.
+  assert.equal(previewNeedsRestart(live, 'cam-b', { ...mode, fps: 60 }), false)
+  assert.equal(previewNeedsRestart({ status: 'starting', session: live.session }, 'cam-a', { ...mode, fps: 60 }), true)
+  assert.equal(previewNeedsRestart({ status: 'idle', session: null }, 'cam-a', { ...mode, fps: 60 }), false)
+  assert.equal(previewNeedsRestart({ status: 'stopping', session: live.session }, 'cam-a', { ...mode, fps: 60 }), false)
+  assert.equal(previewNeedsRestart(live, 'cam-a', null), false)
 })
 
 test('issues sort by severity and changes read as sentences', () => {

@@ -56,7 +56,6 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
 
       {!running && (
         <>
-          {/* No explanation before the fact: the running state already says the camera is held, where it is true. */}
           <div className="periph-actions">
             <button
               type="button"
@@ -75,10 +74,9 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
 
       {running && (
         <>
-          <p className="hint">
-            {sessionMode ? `${sessionMode} · ` : ''}
-            The preview holds this camera open, so applications on the board cannot open it until you stop it.
-          </p>
+          {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
+              describes a state the reader cannot walk away from. */}
+          {sessionMode && <p className="hint">{sessionMode}</p>}
           <div className="periph-actions">
             <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}

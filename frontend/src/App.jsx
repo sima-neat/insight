@@ -59,7 +59,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'intro',
     tab: null,
-    eyebrow: 'Step 1 of 6',
     title: 'What is Insight?',
     summary: 'Insight helps developers inspect a workspace, set up test streams, view inference results, and watch system performance while they test an application.',
     details:
@@ -68,7 +67,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'workspace',
     tab: 'workspace',
-    eyebrow: 'Step 2 of 6',
     title: 'Explore the Workspace',
     summary: 'Workspace is for browsing the shared files a developer works with across the SDK container, host, and paired DevKit.',
     details:
@@ -77,7 +75,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'media',
     tab: 'media',
-    eyebrow: 'Step 3 of 6',
     title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
@@ -86,7 +83,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'rtsp',
     tab: 'rtsp',
-    eyebrow: 'Step 4 of 6',
     title: 'Set up streaming sources',
     summary: 'This tab turns files from the library into live source slots such as src1, src2, and src3.',
     details:
@@ -95,16 +91,22 @@ const ONBOARDING_STEPS = [
   {
     id: 'viewer',
     tab: 'viewer',
-    eyebrow: 'Step 5 of 6',
     title: 'Live viewer',
     summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
     details:
       'Your application can send video into UDP ports 9000-9079, where each port maps to one viewer channel. It can also send matching metadata into UDP ports 9100-9179 so overlays appear on the same channel. For setup guidance and application examples, see docs.sima-neat.com.'
   },
   {
+    id: 'peripherals',
+    tab: 'peripherals',
+    title: 'See what is attached to the board',
+    summary: 'Peripherals detects the devices connected to the board you have selected and shows what each one reports.',
+    details:
+      'Insight reads a camera\'s identity, the pixel formats, resolutions and frame rates it offers, and whether another process is already using it, and marks which of those modes Core has actually been run with. Start a preview to confirm the camera works before you build anything around it, and take away a CameraInput configuration for your application. Cameras work today; microphones and LiDAR are listed for when Insight can read them.'
+  },
+  {
     id: 'visualizer',
     tab: 'visualizer',
-    eyebrow: 'Step 6 of 6',
     title: 'Check system stats',
     summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
     details:
@@ -1767,7 +1769,7 @@ export default function App() {
       {tourOpen && (
         <section className="onboarding-panel" aria-label="Insight quick tour">
           <div className="onboarding-copy">
-            <p className="onboarding-eyebrow">{activeTourStep.eyebrow}</p>
+            <p className="onboarding-eyebrow">Step {tourStep + 1} of {ONBOARDING_STEPS.length}</p>
             <h2 className="onboarding-title">{activeTourStep.title}</h2>
             <p className="onboarding-summary">{activeTourStep.summary}</p>
             <p className="onboarding-detail">{activeTourStep.details}</p>

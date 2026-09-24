@@ -8,13 +8,13 @@ import {
   changeSummary,
   countLabel,
   deviceTabs,
-  formatRelativeTime,
   groupCameras,
   heartbeatDelay,
   isSnapshotStale,
   modeLabel,
   nextPreviewState,
   normalizeError,
+  previewNeedsRestart,
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
@@ -215,13 +215,13 @@ export default function PeripheralsView({
     dispatchPreview({ type: 'stopped', for: sessionId })
   }
 
-  async function startPreview() {
-    if (!camera || !selection) return
+  async function startPreview(mode = selection) {
+    if (!camera || !mode) return
     dispatchPreview({ type: 'start' })
     try {
       const data = await requestJson(PREVIEW_BASE, {
         method: 'POST',
-        body: { id: camera.id, format: selection.format, width: selection.width, height: selection.height, fps: selection.fps }
+        body: { id: camera.id, format: mode.format, width: mode.width, height: mode.height, fps: mode.fps }
       })
       // The user can select another camera while the board is starting this one. Adopting the
       // session anyway would label camera A's video as camera B's.
@@ -259,9 +259,14 @@ export default function PeripheralsView({
     }
   }
 
-  function changeSelection(partial) {
+  async function changeSelection(partial) {
     const next = resolveSelection(camera, partial)
     setWanted(next ? { id: camera.id, ...next } : null)
+    // A running preview was started with the old mode and keeps streaming it, so the picture would
+    // disagree with the menus above it. Restart it on the mode that is now selected.
+    if (!previewNeedsRestart(previewRef.current, camera.id, next)) return
+    await stopPreview(previewRef.current.session.id)
+    await startPreview(next)
   }
 
   async function loadInitial() {
@@ -360,7 +365,9 @@ export default function PeripheralsView({
   }, [beating, beatSessionId, beatMs])
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), scanning ? 1000 : 30000)
+    // Only the "Scanning… N s" counter needs a clock now that nothing on the page shows a relative time.
+    if (!scanning) return undefined
+    const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [scanning])
 
@@ -428,7 +435,7 @@ export default function PeripheralsView({
           <div>
             <h2 id="periph-scan-title">Peripherals</h2>
             <p className="section-note">
-              Discovery only reads device information. Preview is the one action that opens a camera, and only while you run it.
+              Detect devices attached to the board and see what they report.
             </p>
           </div>
           <button
@@ -447,14 +454,6 @@ export default function PeripheralsView({
           {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh before starting a preview.' : ''}
         </p>
 
-        {scannedAt && (
-          <p className="periph-meta">
-            Scanned <time dateTime={scannedAt} title={new Date(scannedAt).toLocaleString()}>{formatRelativeTime(scannedAt, now)}</time>
-            {/* The board is named only when it is not the one selected now; the masthead shows that one, and
-                a mismatch already raises the "Board changed" callout below. */}
-            {stale ? <> from <strong>{scannedLabel}</strong></> : ''}.
-          </p>
-        )}
         {stale && (
           <Callout title="Board changed — refresh">
             <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}. Preview is disabled until you refresh.</p>

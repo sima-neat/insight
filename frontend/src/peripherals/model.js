@@ -315,6 +315,16 @@ export function sameSelection(a, b) {
   return a.format === b.format && a.width === b.width && a.height === b.height && Number(a.fps) === Number(b.fps)
 }
 
+// A preview streams the mode it was started with. When the menus move, the picture and the menus
+// disagree until it is restarted on the new one.
+export function previewNeedsRestart(state, cameraId, next) {
+  const session = state?.session
+  if (!next || !session) return false
+  if (state.status !== 'starting' && state.status !== 'live') return false
+  if (session.camera_id !== cameraId) return false
+  return !sameSelection(session.mode, next)
+}
+
 export function resolveCameraId(snapshot, previousId) {
   const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items)
   if (previousId && cameras.some((c) => c.id === previousId)) return previousId
