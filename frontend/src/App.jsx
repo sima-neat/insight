@@ -100,9 +100,9 @@ const ONBOARDING_STEPS = [
     id: 'peripherals',
     tab: 'peripherals',
     title: 'See what is attached to the board',
-    summary: 'Peripherals detects the devices connected to the board you have selected and shows what each one reports.',
+    summary: 'Peripherals detects devices on the selected board and shows what each one reports.',
     details:
-      'Insight reads a camera\'s identity, the pixel formats, resolutions and frame rates it offers, and whether another process is already using it, and marks which of those modes Core has actually been run with. Start a preview to confirm the camera works before you build anything around it, and take away a CameraInput configuration for your application. Cameras work today; microphones and LiDAR are listed for when Insight can read them.'
+      'Confirm a device works before you build around it, then take away a configuration your application can open it with. Cameras work today; other kinds appear as Insight learns to read them.'
   },
   {
     id: 'visualizer',
