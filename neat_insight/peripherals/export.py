@@ -142,12 +142,6 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
     }
 
 
-ZERO_COPY_WARNING = (
-    "The export allows CPU fallback (allow_cpu_fallback = True, strict_zero_copy: false). Strict zero-copy "
-    "failed to start on a Modalix DevKit (Neat 0.4.0); switch to it only after it runs on your board."
-)
-
-
 def _verified_mode(item: dict, choice: dict, selection: dict) -> Optional[dict]:
     if choice["tier"] != "verified":
         return None
@@ -165,12 +159,8 @@ def _mode_support(item: dict, choice: dict, mode: Optional[dict]) -> dict:
 
 def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc: Optional[dict]) -> list:
     warnings = []
-    if choice["tier"] == "advertised":
-        warnings.append(
-            "This mode is advertised by libcamera but not validated with Core CameraInput; advertised sizes can "
-            "fail to start (core#883). The delivered frame rate follows the sensor mode libcamera picks and can "
-            "differ from the request; measure it."
-        )
+    # An advertised mode says so on its own menu entry and on the tier pill; a paragraph repeating it
+    # above the code belongs to neither.
     if mode and mode.get("delivered_fps") and mode["delivered_fps"] != choice["value"]:
         warnings.append(
             f"Measured on a DevKit, this mode delivered about {mode['delivered_fps']} fps regardless of the "
@@ -191,9 +181,9 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc:
     if not libcamerasrc or not libcamerasrc["present"]:
         warnings.append(item["support"]["reason"])
         return warnings
-    if libcamerasrc["external_buffer_mode"]:
-        warnings.append(ZERO_COPY_WARNING)
-    else:
+    # Nothing is said when the board can do zero-copy: the exported code sets allow_cpu_fallback
+    # where anyone reading it will see it. Only its absence needs explaining.
+    if not libcamerasrc["external_buffer_mode"]:
         warnings.append(
             "The export allows CPU fallback: libcamerasrc on this board has no external-buffer-mode property, "
             "so strict zero-copy is unavailable."

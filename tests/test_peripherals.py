@@ -419,7 +419,8 @@ class SnapshotTests(unittest.TestCase):
         request = {"id": camera["id"], "format": "NV12", "width": largest["width"], "height": largest["height"]}
         rendered = export.render(snapshot, dict(request, fps=60))
         self.assertEqual(rendered["support"]["tier"], "advertised")
-        self.assertTrue(any("can differ from the request" in warning for warning in rendered["warnings"]))
+        # The tier says "advertised" on its own; the export adds no paragraph repeating it.
+        self.assertFalse(any("advertised by libcamera" in warning for warning in rendered["warnings"]))
 
     def test_permission_failures_name_the_video_group(self):
         board = camera_board(self.tmp.name, usb=False)
@@ -657,9 +658,10 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(body["selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(body["support"]["tier"], "verified")
         warnings = body["warnings"]
-        self.assertEqual(warnings[-1], export.ZERO_COPY_WARNING)
+        # A board that can do zero-copy, on a verified mode, has nothing to warn about beyond the
+        # measured rate: the advertised-mode and CPU-fallback paragraphs were noise on every export.
         self.assertIn("delivered about 66 fps", warnings[0])
-        self.assertEqual(len(warnings), 2)
+        self.assertEqual(len(warnings), 1)
         exports = {e["id"]: e for e in body["exports"]}
         self.assertEqual(list(exports), ["python", "cpp", "yaml", "json"])
 
@@ -717,9 +719,8 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(parse_yaml_block(exports["yaml"])["name"], hostile)
         self.assertFalse(parse_yaml_block(exports["yaml"])["strict_zero_copy"])
         self.assertEqual(body["support"]["tier"], "advertised")
-        self.assertEqual(len(body["warnings"]), 3)
+        self.assertEqual(len(body["warnings"]), 2)
         self.assertTrue(any("strict zero-copy is unavailable" in w for w in body["warnings"]))
-        self.assertNotIn(export.ZERO_COPY_WARNING, body["warnings"])
 
     def test_export_for_media_graph_name_warns_to_confirm_it(self):
         root = Path(self.tmp.name) / "a"
