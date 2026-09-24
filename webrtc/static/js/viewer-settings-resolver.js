@@ -1,6 +1,6 @@
 (() => {
-  const SETTINGS_VERSION = 4;
-  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, SETTINGS_VERSION]);
+  const SETTINGS_VERSION = 5;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, SETTINGS_VERSION]);
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -11,10 +11,12 @@
   ];
   const TYPE_DEFAULTS = {
     "object-detection": {
+      visible: true,
       confidenceThreshold: 0,
       objects: DEFAULT_OBJECTS
     },
     tracking: {
+      visible: true,
       confidenceThreshold: 0,
       history: {
         enabled: true,
@@ -22,13 +24,14 @@
         lostTrackTtlMs: 2000
       }
     },
-    "pose-estimation": {},
+    "pose-estimation": { visible: true },
     segmentation: {
+      visible: true,
       confidenceThreshold: 0,
       maskOpacity: 0.4,
       objects: DEFAULT_OBJECTS
     },
-    classification: {}
+    classification: { visible: true }
   };
   const GENERAL_DEFAULTS = {
     videoSyncBufferMs: 350,
@@ -42,7 +45,8 @@
       panelMode: "compact",
       yawDegrees: -45,
       pitchDegrees: 20,
-      showReferenceBox: true
+      showReferenceBox: true,
+      stabilizePose: true
     }
   };
   const PANEL_MODES = new Set(["compact", "collapsed", "expanded"]);
@@ -134,6 +138,9 @@
 
   function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
+    if (Object.prototype.hasOwnProperty.call(rawType, "visible")) {
+      type.visible = rawType.visible !== false;
+    }
     if (metadataType === "object-detection" || metadataType === "segmentation") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
         type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
@@ -190,6 +197,9 @@
       }
       if (Object.prototype.hasOwnProperty.call(rawSettings, "showReferenceBox")) {
         settings.showReferenceBox = rawSettings.showReferenceBox !== false;
+      }
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "stabilizePose")) {
+        settings.stabilizePose = rawSettings.stabilizePose !== false;
       }
     }
     return settings;
@@ -329,6 +339,7 @@
     let typeSettings;
     if (type === "object-detection" || type === "segmentation") {
       typeSettings = {
+        visible: channelType.visible ?? globalType.visible ?? TYPE_DEFAULTS[type].visible,
         confidenceThreshold:
           channelType.confidenceThreshold ?? globalType.confidenceThreshold ?? TYPE_DEFAULTS[type].confidenceThreshold,
         objects: mergeObjectStyles(TYPE_DEFAULTS[type].objects, globalType.objects || [], channelType.objects || [])
@@ -342,6 +353,7 @@
       const globalHistory = globalType.history || {};
       const channelHistory = channelType.history || {};
       typeSettings = {
+        visible: channelType.visible ?? globalType.visible ?? TYPE_DEFAULTS[type].visible,
         confidenceThreshold:
           channelType.confidenceThreshold ?? globalType.confidenceThreshold ?? TYPE_DEFAULTS[type].confidenceThreshold,
         history: {
@@ -409,6 +421,21 @@
     return clone(next.auxiliary[renderer]);
   }
 
+  function hasScopeAuxiliarySettings(scope, renderer) {
+    const raw = readRawSettings(scope);
+    return Boolean(raw?.auxiliary?.[renderer] && typeof raw.auxiliary[renderer] === "object");
+  }
+
+  function clearScopeAuxiliarySettings(scope, renderer) {
+    const raw = readRawSettings(scope);
+    if (!raw || typeof raw !== "object") return;
+    const next = SUPPORTED_SETTINGS_VERSIONS.has(raw.version) ? clone(raw) : normalizeSettings(raw);
+    if (!next.auxiliary || typeof next.auxiliary !== "object") return;
+    delete next.auxiliary[renderer];
+    next.version = SETTINGS_VERSION;
+    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(next));
+  }
+
   window.viewerSettingsApi = {
     version: SETTINGS_VERSION,
     metadataTypes: METADATA_TYPES,
@@ -420,6 +447,8 @@
     readScopeSettings,
     writeScopeSettings,
     writeScopeAuxiliarySettings,
+    hasScopeAuxiliarySettings,
+    clearScopeAuxiliarySettings,
     normalizeSettings,
     resolveTypeSettings,
     resolveAuxiliarySettings

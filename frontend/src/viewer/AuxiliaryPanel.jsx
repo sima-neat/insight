@@ -93,6 +93,7 @@ function settingsForSession(channelIndex, view) {
   return {
     ...(stored || {}),
     showReferenceCube: configured.showReferenceBox !== false,
+    stabilizePose: configured.stabilizePose !== false,
     yaw: configured.yawDegrees * Math.PI / 180,
     pitch: configured.pitchDegrees * Math.PI / 180,
   };
@@ -101,6 +102,7 @@ function settingsForSession(channelIndex, view) {
 function rendererSettingsPatch(settings) {
   return {
     showReferenceCube: settings.showReferenceBox !== false,
+    stabilizePose: settings.stabilizePose !== false,
     yaw: settings.yawDegrees * Math.PI / 180,
     pitch: settings.pitchDegrees * Math.PI / 180,
   };
@@ -114,6 +116,7 @@ function saveSessionToViewerSettings(channelIndex, view, settings) {
   settingsApi.writeScopeAuxiliarySettings(targetScope, view.renderer, {
     ...current,
     showReferenceBox: settings.showReferenceCube !== false,
+    stabilizePose: settings.stabilizePose !== false,
     yawDegrees: Math.round(settings.yaw * 180 / Math.PI),
     pitchDegrees: Math.round(settings.pitch * 180 / Math.PI),
   });

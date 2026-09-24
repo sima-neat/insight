@@ -62,16 +62,13 @@ function getSynchronizationSettings(channelIndex) {
   };
 }
 
-function getObjectConfidenceThreshold(channelIndex) {
-  const settings = getResolvedViewerSettings(channelIndex, "object-detection");
-  return settings.type.confidenceThreshold ?? 0;
-}
-
 function hasDrawableMetadata(message, channelIndex) {
   const data = message?.data;
+  const settings = getResolvedViewerSettings(channelIndex, message?.type);
+  if (settings.type.visible === false) return false;
   switch (message?.type) {
     case "object-detection": {
-      const threshold = getObjectConfidenceThreshold(channelIndex);
+      const threshold = settings.type.confidenceThreshold ?? 0;
       return Array.isArray(data?.objects) && data.objects.some((obj) => (obj?.confidence ?? 1) >= threshold);
     }
     case "classification":

@@ -68,14 +68,22 @@ that channel independently. The panel can be shown or hidden, rendered compact,
 collapsed, or expanded, and given an initial camera yaw and pitch. The reference
 cube can also be hidden when only the skeleton is wanted. Global Viewer
 Configuration establishes defaults, while settings opened from a tile apply to
-that channel. The tile's collapse, expand, and hide buttons update the same
-channel setting.
+that channel. Select **Use Global Settings** to discard a channel override and
+resume inheriting global changes. The tile's collapse, expand, and hide buttons
+update the same channel setting.
+
+Temporal stabilization is enabled by default. It applies a low-latency adaptive
+filter to each world landmark: small stationary noise is damped strongly, while
+fast motion increases the cutoff so the 3D pose follows the current 2D frame.
+Disable **Stabilize Pose** in Viewer Configuration or **Stabilize** below the
+panel when raw world-landmark output is needed.
 
 The BlazePose view orbits around the world-landmark skeleton by default so depth
 and limb placement are visible from more than one angle. The controls below the
 canvas can:
 
 - show or hide the labeled reference cube;
+- enable or disable temporal stabilization;
 - enable or disable automatic orbit;
 - change the orbit speed;
 - pause or resume the current orbit; and
