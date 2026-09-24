@@ -109,9 +109,9 @@ const ONBOARDING_STEPS = [
     id: 'visualizer',
     tab: 'visualizer',
     title: 'Check system stats',
-    summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
+    summary: 'The Stats tab reads power, temperature, CPU, memory and storage from the Sentinel daemon on the board you have selected.',
     details:
-      'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
+      'Watch the board’s live metrics while an application runs, and record a trace around a workload to keep it on the board as a named run. Open a saved run to see each metric’s minimum, mean and maximum, or compare runs against a baseline to see what changed between them.'
   }
 ]
 
