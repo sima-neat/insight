@@ -3298,3 +3298,392 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.periph-view {
+  display: grid;
+  gap: 14px;
+}
+
+.periph-view a {
+  color: var(--accent-alt);
+  font-weight: 700;
+}
+
+.periph-view code,
+.periph-code,
+.periph-camera-id,
+.periph-facts dd,
+.periph-detail-head .hint {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.periph-actions,
+.periph-board-summary,
+.periph-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.periph-board-summary .hint,
+.periph-issues p,
+.periph-form .hint,
+.periph-form .periph-callout,
+.periph-export .periph-callout {
+  margin: 0;
+}
+
+.periph-board-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-facts {
+  margin: 10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: 12px;
+}
+
+.periph-facts dt {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.periph-facts dd {
+  margin: 2px 0 0;
+}
+
+.periph-pill {
+  min-width: 0;
+  white-space: normal;
+}
+
+.sysinfo-pill.periph-danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+  color: #8f2f45;
+}
+
+.sysinfo-pill.periph-info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.periph-callout {
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 10px 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-callout.warn {
+  border-color: #eed39a;
+  background: #fff8e7;
+}
+
+.periph-callout.danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+}
+
+.periph-callout.info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+}
+
+.periph-callout p,
+.periph-callout ol,
+.periph-callout ul {
+  margin: 0 0 6px;
+}
+
+.periph-callout > :last-child {
+  margin-bottom: 0;
+}
+
+.periph-callout ol {
+  padding-left: 20px;
+}
+
+.periph-callout-title {
+  font-weight: 700;
+}
+
+.periph-code {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #d9e5ee;
+  border-radius: 10px;
+  background: #f4f8fb;
+  color: #20384f;
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: normal;
+}
+
+.periph-command {
+  margin-top: 6px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.periph-command .periph-code {
+  justify-self: stretch;
+  background: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.periph-confirm,
+.periph-form {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form-fields,
+.periph-mode-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.periph-form label,
+.periph-modes label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+.periph-refresh[aria-disabled='true'] {
+  opacity: 0.7;
+  cursor: progress;
+  transform: none;
+}
+
+.periph-meta {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.periph-issues {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.periph-issues li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-notes,
+.periph-warnings,
+.periph-blocked {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.periph-warnings {
+  color: #795514;
+}
+
+.periph-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.6fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.periph-list,
+.periph-group {
+  display: grid;
+  gap: 8px;
+}
+
+.periph-group-title,
+.periph-identity summary,
+.periph-modes legend {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-camera-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 9px 10px;
+  display: grid;
+  gap: 5px;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.periph-camera-row:hover {
+  border-color: var(--line-strong);
+}
+
+.periph-camera-row.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+}
+
+.periph-camera-row:focus-visible,
+.periph-code:focus-visible,
+.periph-identity summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+.periph-camera-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-camera-id {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.periph-detail {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  padding: 14px;
+}
+
+.periph-detail-head,
+.periph-export-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.periph-detail h3,
+.periph-export h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.periph-detail-head .hint {
+  margin: 2px 0 8px;
+}
+
+.periph-identity {
+  margin: 10px 0;
+}
+
+.periph-identity summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.periph-identity table {
+  margin-top: 8px;
+}
+
+.periph-detail .sysinfo-table.key-value tbody th {
+  width: 140px;
+}
+
+.periph-modes {
+  min-width: 0;
+  margin: 14px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px 12px;
+}
+
+.periph-modes legend {
+  padding: 0 6px;
+}
+
+.periph-mode-fields {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+}
+
+.periph-modes .hint {
+  margin: 8px 0 0;
+}
+
+.periph-export {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.periph-export[aria-busy='true'] .periph-code {
+  opacity: 0.6;
+}
+
+.periph-export-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.periph-export-tabs button {
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.periph-export-tabs button[aria-pressed='true'] {
+  border-color: rgba(15, 122, 116, 0.5);
+  background: var(--accent-soft);
+  color: #174f4c;
+}
+
+@media (max-width: 980px) {
+  .periph-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .periph-form-fields,
+  .periph-mode-fields {
+    grid-template-columns: 1fr;
+  }
+}

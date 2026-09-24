@@ -1,0 +1,303 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import {
+  apiError,
+  availabilityInfo,
+  cameraDeviceId,
+  changeSummary,
+  defaultTargetText,
+  deviceRows,
+  extractCommand,
+  formatDuration,
+  formatOptions,
+  formatRelativeTime,
+  fpsOptions,
+  groupCameras,
+  initialBoardForm,
+  isSnapshotStale,
+  normalizeError,
+  resolveCameraId,
+  resolveSelection,
+  safeHref,
+  sizeOptions,
+  sortIssues,
+  sourceLabel,
+  tierInfo,
+  validateBoardForm
+} from './model.js'
+
+const CORE_838 = { label: 'core#838', url: 'https://github.com/sima-neat/core/issues/838' }
+const support = (tier, reason = '', links = []) => ({ tier, reason, links })
+const rates = (...pairs) => pairs.map(([value, tier]) => ({ value, tier }))
+const size = (width, height, ...pairs) => ({ width, height, fps: rates(...pairs) })
+const format = (name, label, exportable, formatSupport, sizes, range = null) => ({ format: name, label, exportable, support: formatSupport, range, sizes })
+const available = { state: 'available', users: [], reason: null }
+
+const imx477 = {
+  id: 'mipi:/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
+  kind: 'camera',
+  connection: 'mipi',
+  name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
+  model: 'imx477',
+  device: {
+    camera_name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
+    camera_name_source: 'libcamera',
+    media_device: '/dev/media0',
+    bus_info: 'platform:csi2video@1',
+    csi: 'csidev-40c3000.csi',
+    video_node: '/dev/video3'
+  },
+  availability: available,
+  support: support('verified', 'imx477 NV12 1920x1080 at 30 fps is verified with Core CameraInput.'),
+  modes_source: 'live',
+  formats: [
+    format('NV12', 'NV12 (YUV 4:2:0)', true, support('verified'), [
+      size(1920, 1080, [30, 'verified'], [60, 'advertised']),
+      size(1280, 720, [60, 'advertised'])
+    ])
+  ],
+  default_selection: { format: 'NV12', width: 1920, height: 1080, fps: 30 },
+  notes: [],
+  errors: []
+}
+
+const imx568 = {
+  id: 'mipi:econ-imx568-fpga 5-0042',
+  kind: 'camera',
+  connection: 'mipi',
+  name: 'econ-imx568-fpga 5-0042',
+  model: 'imx568',
+  device: { camera_name: 'econ-imx568-fpga 5-0042', camera_name_source: 'media-graph', media_device: '/dev/media0' },
+  availability: { state: 'unknown', users: [], reason: 'fuser is not installed on the board.' },
+  support: support('advertised', 'imx568 is enumerated by libcamera but not verified with Core.', [CORE_838]),
+  modes_source: 'live',
+  formats: [
+    format('NV12', 'NV12 (YUV 4:2:0)', true, support('advertised'), [
+      size(2432, 2048, [30, 'advertised']),
+      size(1920, 1080, [30, 'advertised'], [59.94, 'advertised'])
+    ], { min_width: 64, min_height: 64, max_width: 2432, max_height: 2048, step_width: 2, step_height: 2 }),
+    format('RGB888', 'RGB888', false, support('unsupported', 'Core CameraInput outputs NV12 only.'), [size(1920, 1080, [30, 'unsupported'])])
+  ],
+  default_selection: null,
+  notes: ['Sensor crop rectangle could not be read; defaults were used.'],
+  errors: []
+}
+
+const inUse = {
+  ...imx477,
+  id: 'mipi:/base/axi/i2c@88000/imx477@1a',
+  name: '/base/axi/i2c@88000/imx477@1a',
+  device: { camera_name: '/base/axi/i2c@88000/imx477@1a', camera_name_source: 'libcamera' },
+  availability: { state: 'in_use', users: [{ pid: 812, command: 'gst-launch-1.0' }], reason: null },
+  modes_source: 'previous-scan'
+}
+
+const usb = {
+  id: 'usb:046d:0825:1-1.2',
+  kind: 'camera',
+  connection: 'usb',
+  name: 'HD Webcam C270',
+  model: 'HD Webcam C270',
+  device: {
+    video_node: '/dev/video0',
+    by_id: '/dev/v4l/by-id/usb-046d_0825_2F6D4A10-video-index0',
+    usb: { vendor_id: '046d', product_id: '0825', manufacturer: 'Logitech', product: 'HD Webcam C270', serial: null, bus_path: '1-1.2', speed_mbps: 480 }
+  },
+  availability: available,
+  support: support('unsupported', 'Core CameraInput supports MIPI (libcamera) cameras only.', [CORE_838]),
+  modes_source: 'live',
+  formats: [
+    format('MJPG', 'Motion-JPEG', true, support('unsupported'), [size(1280, 720, [30, 'unsupported']), size(640, 480, [30, 'unsupported'])]),
+    format('YUYV', 'YUYV 4:2:2', true, support('unsupported'), [size(640, 480, [30, 'unsupported'], [15, 'unsupported'])])
+  ],
+  default_selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 },
+  notes: [],
+  errors: []
+}
+
+const snapshot = {
+  board: { label: 'sima@192.168.2.2', source: 'sdk-env', hostname: 'modalix', machine: 'aarch64', build_version: '2.0.0', fingerprint: 'SHA256:abc' },
+  generation: 3,
+  scanned_at: '2026-09-21T10:00:00Z',
+  scan_ms: 3400,
+  platform: {
+    tools: { cam: true, 'v4l2-ctl': false, 'media-ctl': true, 'gst-inspect-1.0': true, fuser: false },
+    libcamerasrc: { present: true, external_buffer_mode: true, buffer_count: true },
+    availability_method: 'proc-user'
+  },
+  items: [usb, imx477, { id: 'mic:0', kind: 'microphone', connection: 'usb', name: 'USB mic' }, imx568, inUse],
+  issues: [
+    { severity: 'info', code: 'no_usb_power', message: 'USB hub reports low power.', hint: 'Use a powered hub.' },
+    { severity: 'error', code: 'tool_missing', message: 'v4l2-ctl is missing.', hint: 'Install v4l-utils on the board.' },
+    { severity: 'warning', code: 'no_fuser', message: 'Availability is unknown.', hint: 'Install psmisc.' }
+  ],
+  changes: { added: [{ id: usb.id, name: usb.name }], removed: [{ id: 'mipi:gone', name: 'imx219' }] }
+}
+
+test('cameras are grouped MIPI first, then USB, and other kinds are ignored', () => {
+  const groups = groupCameras(snapshot.items)
+  assert.deepEqual(groups.map((g) => g.label), ['MIPI (libcamera)', 'USB (V4L2)'])
+  assert.deepEqual(groups[0].items.map((c) => c.id), [imx477.id, imx568.id, inUse.id])
+  assert.deepEqual(groups[1].items.map((c) => c.id), [usb.id])
+  assert.deepEqual(groupCameras([]), [])
+})
+
+test('format options disable non-exportable formats and keep their reason', () => {
+  const [nv12, rgb] = formatOptions(imx568)
+  assert.equal(nv12.disabled, false)
+  assert.equal(nv12.label, 'NV12 (YUV 4:2:0) — advertised')
+  assert.deepEqual(nv12.range.max_width, 2432)
+  assert.equal(rgb.disabled, true)
+  assert.equal(rgb.label, 'RGB888 — not exportable')
+  assert.equal(rgb.reason, 'Core CameraInput outputs NV12 only.')
+})
+
+test('size and fps options are labelled with their best support tier', () => {
+  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => o.label), ['1920×1080 — verified', '1280×720 — advertised'])
+  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => o.label), ['30 fps — verified', '60 fps — advertised'])
+  assert.deepEqual(fpsOptions(imx568, 'NV12', 1920, 1080).map((o) => o.value), ['30', '59.94'])
+  assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
+})
+
+test('the default selection is preselected when it is exportable', () => {
+  assert.deepEqual(resolveSelection(imx477, null), { format: 'NV12', width: 1920, height: 1080, fps: 30 })
+  assert.deepEqual(resolveSelection(usb, null), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
+})
+
+test('a missing or non-exportable default falls back to the best exportable mode', () => {
+  assert.deepEqual(resolveSelection(imx568, null), { format: 'NV12', width: 2432, height: 2048, fps: 30 })
+  const rgbDefault = { ...imx568, default_selection: { format: 'RGB888', width: 1920, height: 1080, fps: 30 } }
+  assert.equal(resolveSelection(rgbDefault, null).format, 'NV12')
+  assert.equal(resolveSelection({ ...imx568, formats: [imx568.formats[1]] }, null), null)
+})
+
+test('changing one level keeps the rest of the selection when it is still offered', () => {
+  assert.deepEqual(resolveSelection(usb, { format: 'YUYV' }), { format: 'YUYV', width: 640, height: 480, fps: 30 })
+  assert.deepEqual(resolveSelection(usb, { format: 'MJPG' }), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
+  assert.deepEqual(
+    resolveSelection(imx477, { format: 'NV12', width: 1280, height: 720, fps: 30 }),
+    { format: 'NV12', width: 1280, height: 720, fps: 60 }
+  )
+  assert.deepEqual(
+    resolveSelection(imx568, { format: 'NV12', width: 1920, height: 1080, fps: 59.94 }),
+    { format: 'NV12', width: 1920, height: 1080, fps: 59.94 }
+  )
+})
+
+test('a selection that disappears after refresh falls back instead of clearing', () => {
+  const refreshed = { ...imx477, formats: [{ ...imx477.formats[0], sizes: [imx477.formats[0].sizes[0]] }] }
+  assert.deepEqual(
+    resolveSelection(refreshed, { format: 'NV12', width: 1280, height: 720, fps: 60 }),
+    { format: 'NV12', width: 1920, height: 1080, fps: 60 }
+  )
+  assert.deepEqual(
+    resolveSelection(refreshed, { format: 'NV12', width: 1280, height: 720, fps: 15 }),
+    { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+  )
+  assert.equal(resolveSelection(usb, { format: 'H264', width: 1920, height: 1080, fps: 30 }).format, 'MJPG')
+})
+
+test('the selected camera id survives refreshes and removals', () => {
+  assert.equal(resolveCameraId(snapshot, null), imx477.id)
+  assert.equal(resolveCameraId(snapshot, usb.id), usb.id)
+  assert.equal(resolveCameraId(snapshot, 'mipi:gone'), 'mipi:gone', 'removed cameras stay selected so the UI can explain')
+  assert.equal(resolveCameraId(snapshot, 'usb:unknown'), imx477.id)
+  assert.equal(resolveCameraId({ items: [] }, 'usb:unknown'), null)
+  assert.equal(resolveCameraId(null, null), null)
+})
+
+test('a snapshot is stale only when it was scanned for another board generation', () => {
+  assert.equal(isSnapshotStale({ generation: 3 }, snapshot), false)
+  assert.equal(isSnapshotStale({ generation: 4 }, snapshot), true)
+  assert.equal(isSnapshotStale({ generation: 4 }, { ...snapshot, scanned_at: null }), false)
+  assert.equal(isSnapshotStale(null, snapshot), false)
+})
+
+test('labels for tiers, availability, sources, and defaults', () => {
+  assert.equal(tierInfo('verified').label, 'Verified with Core')
+  assert.equal(tierInfo('advertised').label, 'Advertised, unverified')
+  assert.equal(tierInfo('unsupported').label, 'Not supported by Core CameraInput')
+  assert.equal(tierInfo('bogus').short, 'unknown')
+  assert.equal(availabilityInfo(inUse.availability).label, 'In use by gst-launch-1.0 (pid 812)')
+  assert.deepEqual(availabilityInfo(imx568.availability), { label: 'Availability unknown', tone: '', reason: 'fuser is not installed on the board.' })
+  assert.equal(availabilityInfo(available).label, 'Available')
+  assert.equal(sourceLabel('on-board'), 'On this board')
+  assert.equal(sourceLabel('sdk-env'), 'SDK DevKit')
+  assert.equal(sourceLabel('manual'), 'Manual')
+  assert.equal(defaultTargetText({ on_board: false, sdk_env: { host: '192.168.2.2', port: 22, user: 'sima' } }), 'sima@192.168.2.2:22 (paired SDK DevKit)')
+  assert.equal(defaultTargetText({ on_board: false, sdk_env: null }), '')
+})
+
+test('identity rows list only known device fields', () => {
+  assert.equal(cameraDeviceId(imx477), imx477.device.camera_name)
+  assert.equal(cameraDeviceId(usb), usb.device.by_id)
+  const rows = Object.fromEntries(deviceRows(usb))
+  assert.equal(rows['USB ID'], '046d:0825')
+  assert.equal(rows['USB speed'], '480 Mb/s')
+  assert.equal('Serial' in rows, false)
+  assert.equal('Media device' in rows, false)
+  assert.equal(Object.fromEntries(deviceRows(imx568))['Name source'], 'media-graph')
+})
+
+test('issues sort by severity and changes read as sentences', () => {
+  assert.deepEqual(sortIssues(snapshot.issues).map((i) => i.severity), ['error', 'warning', 'info'])
+  assert.deepEqual(changeSummary(snapshot.changes), ['Disconnected since last refresh: imx219', 'New: HD Webcam C270'])
+  assert.deepEqual(changeSummary(null), [])
+})
+
+test('relative times and durations', () => {
+  const now = Date.parse('2026-09-21T10:00:00Z')
+  assert.equal(formatRelativeTime('2026-09-21T09:59:58Z', now), 'just now')
+  assert.equal(formatRelativeTime('2026-09-21T09:59:30Z', now), '30 s ago')
+  assert.equal(formatRelativeTime('2026-09-21T09:55:00Z', now), '5 min ago')
+  assert.equal(formatRelativeTime('2026-09-21T07:00:00Z', now), '3 h ago')
+  assert.equal(formatRelativeTime('2026-09-19T10:00:00Z', now), '2 d ago')
+  assert.equal(formatRelativeTime(null, now), '')
+  assert.equal(formatDuration(3400), '3.4 s')
+  assert.equal(formatDuration(250), '250 ms')
+})
+
+test('API errors keep code, hint, and extra fields', () => {
+  const body = {
+    error: 'Host key changed',
+    code: 'host_key_changed',
+    hint: 'Confirm the board was reflashed.',
+    host: '192.168.2.2',
+    expected_fingerprint: 'SHA256:old',
+    presented_fingerprint: 'SHA256:new'
+  }
+  const err = apiError(body, 409)
+  assert.equal(err.message, 'Host key changed')
+  const normalized = normalizeError(err)
+  assert.equal(normalized.code, 'host_key_changed')
+  assert.equal(normalized.hint, 'Confirm the board was reflashed.')
+  assert.equal(normalized.details.presented_fingerprint, 'SHA256:new')
+  assert.deepEqual(normalizeError(body), normalized)
+  assert.equal(apiError(null, 502).message, 'Request failed: 502')
+  assert.deepEqual(normalizeError('boom'), { message: 'boom', code: '', hint: '', details: {} })
+  assert.equal(normalizeError(null), null)
+})
+
+test('the ssh-copy-id command is extracted from an auth hint', () => {
+  assert.equal(extractCommand('Install your key: ssh-copy-id -p 22 sima@192.168.2.2.'), 'ssh-copy-id -p 22 sima@192.168.2.2')
+  assert.equal(extractCommand('Run `ssh-copy-id sima@10.0.0.5` then retry.'), 'ssh-copy-id sima@10.0.0.5')
+  assert.equal(extractCommand('Check the cable.'), 'Check the cable.')
+})
+
+test('board form defaults and validation', () => {
+  const board = { target: { mode: 'local' }, saved: null, defaults: { on_board: false, sdk_env: { host: '192.168.2.2', port: 22, user: 'sima' } } }
+  assert.deepEqual(initialBoardForm(board), { host: '192.168.2.2', port: '22', user: 'sima' })
+  assert.deepEqual(initialBoardForm(null), { host: '', port: '22', user: 'sima' })
+  assert.deepEqual(validateBoardForm({ host: ' devkit.local ', port: '2222', user: 'sima' }), { body: { host: 'devkit.local', port: 2222, user: 'sima' } })
+  assert.ok(validateBoardForm({ host: '', port: '22', user: 'sima' }).error)
+  assert.ok(validateBoardForm({ host: 'a b', port: '22', user: 'sima' }).error)
+  assert.ok(validateBoardForm({ host: 'devkit', port: '70000', user: 'sima' }).error)
+  assert.ok(validateBoardForm({ host: 'devkit', port: '22', user: ' ' }).error)
+})
+
+test('only http(s) links are rendered', () => {
+  assert.equal(safeHref(CORE_838.url), CORE_838.url)
+  assert.equal(safeHref('javascript:alert(1)'), null)
+  assert.equal(safeHref(undefined), null)
+})
