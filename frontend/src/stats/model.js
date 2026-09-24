@@ -1,7 +1,7 @@
 // Pure derivation for the Stats view: it turns the Sentinel endpoints' bodies into the
 // text, ranks and rows the view renders, and maps every failure the backend can return
 // into a sentence a developer can act on. Nothing here touches the DOM or the network.
-import { formatRelativeTime, normalizeError } from '../peripherals/model.js'
+import { countLabel, formatRelativeTime, normalizeError } from '../peripherals/model.js'
 
 export { formatRelativeTime, normalizeError }
 
@@ -662,7 +662,7 @@ export function traceExtrasSummary(form) {
   const tags = parseTags(form?.tags)
   const parts = []
   if (note) parts.push('a note')
-  if (tags.length) parts.push(`${tags.length} tag${tags.length === 1 ? '' : 's'}`)
+  if (tags.length) parts.push(countLabel(tags.length, 'tag'))
   return parts.length ? `${parts.join(' and ')} will be saved with this trace` : ''
 }
 
@@ -837,7 +837,7 @@ export function stopTraceQuery(generation = null) {
 }
 
 export function deletePrompt(count) {
-  return `Delete ${count} run${count === 1 ? '' : 's'}?`
+  return `Delete ${countLabel(count, 'run')}?`
 }
 
 /**
@@ -867,7 +867,7 @@ export function deleteSummary(results) {
     for (const value of [result.ref, result.deleted?.id, result.deleted?.name]) if (value) gone.add(String(value))
   }
   const count = deleted.length
-  const status = count ? `Deleted ${count} run${count === 1 ? '' : 's'} from the board.` : ''
+  const status = count ? `Deleted ${countLabel(count, 'run')} from the board.` : ''
   let title = ''
   if (failed.length || skipped.length) {
     const notDeleted = failed.length + skipped.length
@@ -1116,7 +1116,7 @@ export function compareViewText(view) {
     const count = view.unchanged
     parts.push(
       count
-        ? `Changes only hides ${count} row${count === 1 ? '' : 's'} where no run differs from the baseline.`
+        ? `Changes only hides ${countLabel(count, 'row')} where no run differs from the baseline.`
         : 'Every row shown differs from the baseline in at least one run, so Changes only hides nothing.'
     )
   }
