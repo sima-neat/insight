@@ -18,6 +18,7 @@ cfg.json
 .vscode/
 *_mpk.tar.gz
 mipi-sweep-*.log
+folder-navigation-insight.log
 mipi-util/vendor/
 
 # Superpowers brainstorming sessions

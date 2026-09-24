@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 // The nested tree from the design spec. Video files are generated with ffmpeg at seed time.
+// The folder names ("30FPS", "120FPS-720p-h264") are deliberately meaningless labels: the browser
+// must not read anything into them. Every generated clip is 320x240 at 15 fps.
 export const TREE = {
   videos: ['30FPS/highway.mp4', '30FPS/indoor/lobby.mp4', '30FPS/indoor/cam-a/deep.mp4', '120FPS-720p-h264/drone.mp4'],
   others: ['30FPS/indoor/notes.txt', 'readme.md'],
@@ -38,7 +40,9 @@ export function seedTree() {
     }
     for (const rel of TREE.emptyFolders) fs.mkdirSync(path.join(dir, rel), { recursive: true })
   } catch (err) {
-    fs.rmSync(dir, { recursive: true, force: true })
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+    } catch {}
     throw err
   }
   return { name, dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) }
