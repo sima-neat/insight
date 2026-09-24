@@ -24,7 +24,6 @@ import {
   compareTable,
   compareView,
   compareViewText,
-  countsSummary,
   createRequestGuard,
   daemonBusy,
   daemonFacts,
@@ -169,7 +168,6 @@ function DaemonPanel({ info, health, busy, installing, install, installStale, er
 }
 
 function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, onToggleLive, onRefresh, onRetry }) {
-  const sampled = model.sampledAt ? formatRelativeTime(model.sampledAt, now) : ''
   // Held by name, not by the group object: every poll builds new groups, and a refresh must
   // not close what the user opened.
   const [openName, setOpenName] = useState(null)
@@ -179,10 +177,12 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
     <section className="panel stats-metrics" aria-labelledby="stats-metrics-title" aria-busy={busy}>
       <div className="panel-topbar">
         <div>
-          <h2 id="stats-metrics-title">Live metrics</h2>
-          <p className="section-note">
-            Live readings from the board. “—” means Sentinel could not measure it.
-          </p>
+          {/* The pill is the only update state the section shows: Live, Paused, or Not updating. */}
+          <div className="stats-title-row">
+            <h2 id="stats-metrics-title">Live metrics</h2>
+            <Pill tone={polling ? 'ok' : ''}>{polling ? 'Live' : paused ? 'Paused' : 'Not updating'}</Pill>
+          </div>
+          <p className="section-note">Sentinel live readings from the board.</p>
         </div>
         <div className="periph-actions">
           <button type="button" className="btn-ghost" onClick={onRefresh} disabled={busy}>Refresh now</button>
@@ -192,15 +192,6 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
         </div>
       </div>
 
-      <div className="periph-board-summary">
-        <Pill tone={polling ? 'ok' : ''}>{polling ? 'Live' : paused ? 'Paused' : 'Not updating'}</Pill>
-        {sampled && (
-          <span className="hint">
-            sampled <time dateTime={model.sampledAt} title={formatTimestamp(model.sampledAt)}>{sampled}</time>
-          </span>
-        )}
-        {model.groups.length > 0 && <span className="hint">{countsSummary(model.counts)}</span>}
-      </div>
       <p className="sr-only" role="status">
         {polling ? 'Metrics are updating live.' : paused ? 'Metric updates are paused.' : 'Metric updates are stopped.'}
       </p>

@@ -376,15 +376,6 @@ export function metricsModel(payload) {
   }
 }
 
-export function countsSummary(counts) {
-  const total = counts?.total || 0
-  const parts = [`${total} metric${total === 1 ? '' : 's'}`]
-  if (counts?.critical) parts.push(`${counts.critical} critical`)
-  if (counts?.warn) parts.push(`${counts.warn} warning${counts.warn === 1 ? '' : 's'}`)
-  if (counts?.unavailable) parts.push(`${counts.unavailable} not measured`)
-  return parts.join(' · ')
-}
-
 /**
  * The live metric groups as chips: name, how many metrics, and how many of them are past a
  * threshold. Every group starts closed, so the count of warnings and criticals is carried on

@@ -4431,3 +4431,10 @@ button:disabled {
   overflow-x: auto;
   border-radius: var(--radius-sm);
 }
+
+/* Live metrics: the update state sits beside the title instead of on a line of its own. */
+.stats-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

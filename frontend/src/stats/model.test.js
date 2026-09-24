@@ -13,7 +13,6 @@ import {
   compareQuery,
   compareReady,
   compareTable,
-  countsSummary,
   createRequestGuard,
   daemonBusy,
   daemonFacts,
@@ -169,9 +168,8 @@ test('the metrics payload becomes highlights, groups and a summary line', () => 
   assert.deepEqual(model.highlights.map((metric) => metric.key), ['power_current_watts', 'rtsn_0'])
   assert.equal(model.sampledAt, '2026-09-22T20:55:47Z')
   assert.deepEqual(model.series.rtsn_0, [70, 72])
-  assert.equal(countsSummary(model.counts), '4 metrics · 1 warning · 1 not measured')
-  assert.equal(countsSummary({ total: 1 }), '1 metric')
-  assert.equal(countsSummary(null), '0 metrics')
+  // The counts still reach the group chips, which carry the warnings and criticals.
+  assert.deepEqual([model.counts.total, model.counts.warn, model.counts.unavailable], [4, 1, 1])
 })
 
 test('a metrics payload with no highlights still leads with something', () => {
@@ -786,12 +784,6 @@ test('the compare hint counts the runs it asks for', () => {
   assert.equal(compareHint([]), 'Select 2 runs to compare; the first is the baseline.')
   assert.equal(compareHint(['a']), 'Select 1 more run to compare; the first is the baseline.')
   assert.match(compareHint(['a', 'b']), /^Comparing 2 runs against a\./)
-})
-
-test('a warning count is not reported in the singular', () => {
-  assert.equal(countsSummary({ total: 59, unavailable: 0, warn: 2, critical: 0 }), '59 metrics · 2 warnings')
-  assert.equal(countsSummary({ total: 59, unavailable: 0, warn: 1, critical: 0 }), '59 metrics · 1 warning')
-  assert.equal(countsSummary({ total: 1, unavailable: 3, warn: 0, critical: 2 }), '1 metric · 2 critical · 3 not measured')
 })
 
 test('a run whose name holds a comma is named, not sent into a 404', () => {
