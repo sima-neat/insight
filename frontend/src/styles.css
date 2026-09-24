@@ -3649,3 +3649,8 @@ button:disabled {
   opacity: 0.55;
   cursor: default;
 }
+
+.src-file-cell .source-file-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
