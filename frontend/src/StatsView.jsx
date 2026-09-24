@@ -286,7 +286,7 @@ function ThermalSummary({ summary }) {
  * System are peer tabs beside it, each showing all of its metrics under Sentinel's group names,
  * so any metric is one click from the default view and only one section is on screen at once.
  */
-function MetricsPanel({ model, live, polling, paused, stale, error, busy, onToggleLive, onRefresh, onRetry }) {
+function MetricsPanel({ model, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry }) {
   const [sectionId, setSectionId] = useState(METRIC_SECTIONS[0].id)
   const section = metricSectionFrom(sectionId)
   const sections = useMemo(() => metricSections(model.groups), [model.groups])
@@ -299,7 +299,7 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, onTogg
           {/* The pill is the only update state the section shows: Live, Paused, or Not updating. */}
           <div className="stats-title-row">
             <h2 id="stats-metrics-title">Live metrics</h2>
-            <Pill tone={polling ? 'ok' : ''}>{polling ? 'Live' : paused ? 'Paused' : 'Not updating'}</Pill>
+            <Pill tone={polling ? 'ok' : ''}>{polling ? 'Live' : live ? 'Not updating' : 'Paused'}</Pill>
           </div>
           <p className="section-note">Sentinel live readings from the board.</p>
         </div>
@@ -312,7 +312,7 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, onTogg
       </div>
 
       <p className="sr-only" role="status">
-        {polling ? 'Metrics are updating live.' : paused ? 'Metric updates are paused.' : 'Metric updates are stopped.'}
+        {polling ? 'Metrics are updating live.' : live ? 'Metric updates are stopped.' : 'Metric updates are paused.'}
       </p>
 
       {stale && (
@@ -1460,13 +1460,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     const { gone } = summary
     if (gone.size) {
       setSelected((current) => current.filter((ref) => !gone.has(String(ref))))
-      if (openRefNow.current && gone.has(openRefNow.current)) {
-        guard.current.cancel('run')
-        setOpenRef('')
-        setDetail(null)
-        setDetailError(null)
-        setDetailBusy(false)
-      }
+      if (openRefNow.current && gone.has(openRefNow.current)) openRun('')
       if (compareIncludes(compareNow.current, gone)) {
         setCompare(null)
         setCompareError(null)
@@ -1611,7 +1605,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                   model={model}
                   live={live}
                   polling={polling}
-                  paused={!live}
                   stale={stale}
                   error={metricsError}
                   busy={metricsBusy}
