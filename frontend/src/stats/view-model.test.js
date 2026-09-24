@@ -300,7 +300,7 @@ test('while a trace records, the same row says what is recording and offers Stop
 
 test('the Runs panel keeps one sentence of note that still says what both panels said', () => {
   assert.equal(RUNS_NOTE.match(/[.!?](\s|$)/g).length, 1)
-  for (const fact of ['every sample', 'saved on the board', 'reopen and compare', 'daemon restart', 'one trace at a time', 'already uses']) {
+  for (const fact of ['trace', 'saved on the board', 'reopen and compare']) {
     assert.ok(RUNS_NOTE.includes(fact), fact)
   }
 })

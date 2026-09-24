@@ -519,12 +519,11 @@ export function traceExtrasSummary(form) {
 }
 
 /**
- * The one note the Runs panel carries. It stands for the two the separate trace and saved
- * runs panels had; the baseline rule it no longer repeats is said beside Compare instead.
+ * The one note the Runs panel carries: what a trace is for. The rules Sentinel enforces -- one
+ * trace at a time, no reused name -- are said where they bite, in the refusal next to the form,
+ * rather than read by everyone up front.
  */
-export const RUNS_NOTE =
-  'A trace records every sample around a workload and is saved on the board as a run you can reopen and compare, ' +
-  'even after a daemon restart; Sentinel records one trace at a time and refuses a name a saved run already uses.'
+export const RUNS_NOTE = 'Record a trace around a workload; it is saved on the board as a run you can reopen and compare.'
 
 /**
  * The Runs panel's header row. Idle, it is the trace form; while a trace records, the same
