@@ -1,6 +1,8 @@
 import base64
 import getpass
 import hashlib
+import os
+import selectors
 import shlex
 import socket
 import subprocess
@@ -44,18 +46,76 @@ def _timeout_error(argv: List[str], timeout: float, where: str) -> BoardError:
     )
 
 
+def _output_too_large(argv: List[str]) -> BoardError:
+    return BoardError("command_failed", f"`{argv[0]}` produced more than {MAX_OUTPUT_BYTES} bytes of output.")
+
+
 class LocalTransport:
     """Runs commands on the machine Insight runs on (Insight installed on the board)."""
 
     def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
-        stdin_kwargs = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
+        deadline = time.monotonic() + timeout
         try:
-            proc = subprocess.run(argv, capture_output=True, timeout=timeout, check=False, **stdin_kwargs)
+            proc = subprocess.Popen(
+                argv,
+                stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
         except FileNotFoundError:
             return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
-        except subprocess.TimeoutExpired:
-            raise _timeout_error(argv, timeout, "this board") from None
-        return ExecResult(proc.returncode, proc.stdout, proc.stderr)
+        try:
+            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout)
+            try:
+                exit_code = proc.wait(max(deadline - time.monotonic(), 0))
+            except subprocess.TimeoutExpired:
+                raise _timeout_error(argv, timeout, "this board") from None
+            return ExecResult(exit_code, stdout, stderr)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe and not pipe.closed:
+                    pipe.close()
+
+    @staticmethod
+    def _collect(proc, argv, stdin, deadline, timeout):
+        # Read as the output arrives, so the SSH transport's output limit holds here too.
+        chunks = {proc.stdout: [], proc.stderr: []}
+        pending = memoryview(stdin or b"")
+        size = 0
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            selector.register(proc.stderr, selectors.EVENT_READ)
+            if proc.stdin:
+                if pending:
+                    selector.register(proc.stdin, selectors.EVENT_WRITE)
+                else:
+                    proc.stdin.close()
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _timeout_error(argv, timeout, "this board")
+                for key, _ in selector.select(remaining):
+                    if key.fileobj is proc.stdin:
+                        try:
+                            pending = pending[os.write(key.fd, pending[:65536]):]
+                        except BrokenPipeError:
+                            pending = pending[:0]
+                        if not pending:
+                            selector.unregister(proc.stdin)
+                            proc.stdin.close()
+                        continue
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    chunks[key.fileobj].append(chunk)
+                    size += len(chunk)
+                    if size > MAX_OUTPUT_BYTES:
+                        raise _output_too_large(argv)
+        return b"".join(chunks[proc.stdout]), b"".join(chunks[proc.stderr])
 
     def remote_host_key_fingerprint(self) -> Optional[str]:
         return None
@@ -141,7 +201,7 @@ class SshTransport:
                 size += len(stderr[-1])
                 progressed = True
             if size > MAX_OUTPUT_BYTES:
-                raise BoardError("command_failed", f"`{argv[0]}` produced more than {MAX_OUTPUT_BYTES} bytes of output.")
+                raise _output_too_large(argv)
             # Exit status is sent after all output, so both buffers are complete once it arrives.
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 return ExecResult(channel.recv_exit_status(), b"".join(stdout), b"".join(stderr))

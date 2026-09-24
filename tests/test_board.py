@@ -224,6 +224,23 @@ class LocalTransportTests(unittest.TestCase):
             LocalTransport().exec(["sleep", "5"], timeout=0.2)
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("timeout", 504))
 
+    def test_exec_stops_a_command_at_the_output_limit_like_ssh(self):
+        started = time.monotonic()
+        with mock.patch.object(transport_module, "MAX_OUTPUT_BYTES", 4096), self.assertRaises(BoardError) as ctx:
+            LocalTransport().exec(["yes"], timeout=10)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertIn("more than 4096 bytes", ctx.exception.message)
+        self.assertLess(time.monotonic() - started, 5, "the command is killed at the limit, not left to the timeout")
+
+    def test_exec_streams_stdin_larger_than_a_pipe_buffer(self):
+        payload = os.urandom(1 << 20)
+        self.assertEqual(LocalTransport().exec(["cat"], timeout=10, stdin=payload).stdout, payload)
+
+    def test_exec_timeout_covers_a_command_that_closed_its_output(self):
+        with self.assertRaises(BoardError) as ctx:
+            LocalTransport().exec(["sh", "-c", "exec >&- 2>&-; sleep 5"], timeout=0.3)
+        self.assertEqual(ctx.exception.code, "timeout")
+
 
 class SshTransportErrorTests(unittest.TestCase):
     def setUp(self):
