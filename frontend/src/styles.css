@@ -4087,3 +4087,53 @@ button:disabled {
     display: none;
   }
 }
+
+/* The Insight host panel: the machine Insight runs on, kept visually quieter than the
+   board telemetry above it so the two are never read as one set of numbers. */
+.stats-host-rows {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.stats-host-rows li {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.stats-host-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #274155;
+}
+
+.stats-host-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.stats-host-bar {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  overflow: hidden;
+}
+
+.stats-host-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.stats-host .hint {
+  margin: 0;
+}

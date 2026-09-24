@@ -10,6 +10,11 @@ export function fetchBoard() {
   return requestJson('/api/board')
 }
 
+// Not a Sentinel route: /api/metrics is the machine Insight itself runs on.
+export function fetchHostMetrics() {
+  return requestJson('/api/metrics')
+}
+
 export function fetchSentinel() {
   return requestJson('/api/sentinel')
 }

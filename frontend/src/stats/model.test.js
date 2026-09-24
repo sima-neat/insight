@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   BOARD_PROBLEM_CODES,
+  HOST_POLL_MS,
   MAX_COMPARE_RUNS,
   MAX_POLL_MS,
   POLL_MS,
@@ -17,11 +18,13 @@ import {
   daemonInfo,
   factRows,
   failureNotice,
+  formatBytes,
   formatDelta,
   formatSeconds,
   formatValue,
   healthFacts,
   healthProblems,
+  hostMetricsModel,
   isStale,
   metricsModel,
   parseTags,
@@ -399,4 +402,45 @@ test('the compare hint explains the limit that disables the checkboxes', () => {
   const full = Array.from({ length: MAX_COMPARE_RUNS }, (_, i) => `r${i}`)
   assert.match(compareHint(full), /at most 8 runs at once/)
   assert.ok(!/at most/.test(compareHint(['a', 'b'])))
+})
+
+test('byte sizes read in the unit that fits', () => {
+  assert.equal(formatBytes(0), '0 B')
+  assert.equal(formatBytes(2048), '2 kB')
+  assert.equal(formatBytes(8 * 1024 ** 3), '8 GB')
+  assert.equal(formatBytes(1536 * 1024 ** 2), '1.5 GB')
+  assert.equal(formatBytes(null), '')
+  assert.equal(formatBytes(-1), '')
+})
+
+test('the Insight host snapshot is modelled apart from the board telemetry', () => {
+  const model = hostMetricsModel({
+    cpu_load: 12.5,
+    memory: { total: 16 * 1024 ** 3, used: 8 * 1024 ** 3, percent: 50 },
+    disk: { mount: '/home/docker', total: 100 * 1024 ** 3, used: 91 * 1024 ** 3, free: 9 * 1024 ** 3, percent: 91 },
+    temperature_celsius_avg: null,
+    REMOTE: false
+  })
+  assert.equal(model.source, 'local')
+  assert.equal(model.offline, false)
+  assert.deepEqual(model.rows.map((row) => [row.key, row.value]), [['cpu_load', 12.5], ['memory', 50], ['disk', 91]])
+  assert.equal(model.rows[1].detail, '8 GB of 16 GB')
+  assert.equal(model.rows[2].detail, '91 GB of 100 GB · /home/docker')
+  assert.equal(HOST_POLL_MS >= 10000, true)
+})
+
+test('a host reading the endpoint does not give stays absent instead of reading as zero', () => {
+  const partial = hostMetricsModel({ cpu_load: 5, memory: {}, disk: null, temperature_celsius_avg: 46.5, REMOTE: false })
+  assert.deepEqual(partial.rows.map((row) => [row.key, row.value]), [['cpu_load', 5], ['memory', null], ['disk', null], ['temperature', 46.5]])
+  assert.equal(partial.rows[1].detail, '')
+
+  const offline = hostMetricsModel({ cpu_load: '', memory: {}, disk: {}, temperature_celsius_avg: 0, REMOTE: true })
+  assert.equal(offline.source, 'remote')
+  assert.equal(offline.offline, true)
+  assert.deepEqual(offline.rows, [])
+  assert.match(offline.sourceLabel, /REMOTE_DEVKIT/)
+
+  const nothing = hostMetricsModel(null)
+  assert.equal(nothing.empty, true)
+  assert.deepEqual(nothing.rows.map((row) => row.value), [null, null, null])
 })

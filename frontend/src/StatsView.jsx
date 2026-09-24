@@ -5,6 +5,7 @@ import {
   compareRuns,
   fetchActiveTrace,
   fetchBoard,
+  fetchHostMetrics,
   fetchMetrics,
   fetchRun,
   fetchRuns,
@@ -14,6 +15,7 @@ import {
   stopTrace
 } from './stats/api.js'
 import {
+  HOST_POLL_MS,
   MAX_COMPARE_RUNS,
   compareHint,
   compareReady,
@@ -31,6 +33,7 @@ import {
   formatValue,
   healthFacts,
   healthProblems,
+  hostMetricsModel,
   isStale,
   metricsModel,
   pollDelay,
@@ -483,6 +486,52 @@ function RunsPanel({
   )
 }
 
+/**
+ * The machine Insight runs on, from /api/metrics. It is deliberately the smallest panel
+ * in this view and sits below the board's: it answers "is my SDK container out of disk",
+ * which is a different question from what the board is doing, and the two must not be
+ * read as one set of numbers.
+ */
+function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
+  return (
+    <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
+      <div className="panel-topbar">
+        <div>
+          <h2 id="stats-host-title">Insight host</h2>
+          <p className="section-note">{model.sourceLabel}, not the board above.</p>
+        </div>
+        <button type="button" className="btn-ghost" onClick={onRefresh} disabled={busy}>
+          {busy ? 'Reading…' : 'Refresh'}
+        </button>
+      </div>
+
+      <FailureCallout notice={error} />
+      {model.offline && (
+        <p className="hint">
+          A remote DevKit is configured for this endpoint but is not connected, so it reports nothing.
+        </p>
+      )}
+      {!model.offline && (
+        <ul className="stats-host-rows">
+          {model.rows.map((row) => (
+            <li key={row.key}>
+              <span className="stats-host-label">{row.label}</span>
+              <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
+              {row.percent !== null && (
+                <span className="stats-host-bar" aria-hidden="true">
+                  <span style={{ width: `${row.percent}%` }} />
+                </span>
+              )}
+              {row.detail && <span className="hint">{row.detail}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {updatedAt > 0 && <p className="hint">Read {formatRelativeTime(new Date(updatedAt).toISOString(), now)}.</p>}
+    </section>
+  )
+}
+
 export default function StatsView({ onError, onStatus }) {
   const [board, setBoard] = useState(null)
   const [boardError, setBoardError] = useState(null)
@@ -514,6 +563,10 @@ export default function StatsView({ onError, onStatus }) {
   const [compare, setCompare] = useState(null)
   const [compareError, setCompareError] = useState(null)
   const [compareBusy, setCompareBusy] = useState(false)
+  const [host, setHost] = useState(null)
+  const [hostError, setHostError] = useState(null)
+  const [hostBusy, setHostBusy] = useState(false)
+  const [hostReadAt, setHostReadAt] = useState(0)
   const [now, setNow] = useState(() => Date.now())
 
   const mounted = useRef(false)
@@ -527,6 +580,7 @@ export default function StatsView({ onError, onStatus }) {
   const model = useMemo(() => metricsModel(metrics), [metrics])
   const trace = useMemo(() => traceModel(traces), [traces])
   const runRows = useMemo(() => runList(runs), [runs])
+  const hostModel = useMemo(() => hostMetricsModel(host), [host])
   // Everything the board answered is judged against the board selected now, including
   // the failures: an SSH round trip can outlive a board switch.
   const stalePayloads = staleFlags(board, {
@@ -636,6 +690,24 @@ export default function StatsView({ onError, onStatus }) {
     } finally {
       guard.current.end('runs')
       if (mounted.current) setRunsBusy(false)
+    }
+  }
+
+  async function loadHost() {
+    if (!guard.current.begin('host')) return
+    setHostBusy(true)
+    try {
+      const data = await fetchHostMetrics()
+      if (!mounted.current) return
+      setHost(data)
+      setHostError(null)
+      setHostReadAt(Date.now())
+    } catch (err) {
+      // The host snapshot belongs to Insight itself, so a board generation means nothing here.
+      if (mounted.current) setHostError(failureNotice(err))
+    } finally {
+      guard.current.end('host')
+      if (mounted.current) setHostBusy(false)
     }
   }
 
@@ -818,6 +890,30 @@ export default function StatsView({ onError, onStatus }) {
     }
   }, [polling, delay])
 
+  // The host moves slowly and costs a psutil read, so it is polled far less often than
+  // the board, and like the board poll it stops with the view and with a hidden tab.
+  useEffect(() => {
+    let timer = null
+    const run = () => loadHost()
+    const start = () => {
+      if (timer !== null) return
+      run()
+      timer = setInterval(run, HOST_POLL_MS)
+    }
+    const stop = () => {
+      if (timer === null) return
+      clearInterval(timer)
+      timer = null
+    }
+    const onVisibility = () => (document.visibilityState === 'hidden' ? stop() : start())
+    onVisibility()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 10000)
     return () => clearInterval(timer)
@@ -933,6 +1029,15 @@ export default function StatsView({ onError, onStatus }) {
           )}
         </>
       )}
+
+      <HostPanel
+        model={hostModel}
+        error={hostError}
+        updatedAt={hostReadAt}
+        busy={hostBusy}
+        now={now}
+        onRefresh={loadHost}
+      />
     </div>
   )
 }

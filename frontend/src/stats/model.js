@@ -558,3 +558,88 @@ export function compareTable(payload) {
     .filter(Boolean)
   return rows.length ? { columns, rows } : null
 }
+
+// --- the Insight host --------------------------------------------------------
+// /api/metrics measures the machine Insight itself runs on - the SDK container or the
+// board Insight is installed on - or, when the legacy REMOTE_DEVKIT configuration is
+// set, that separate connection. It is not the selected board and never mixes with
+// Sentinel's numbers, so it is modelled and labelled apart.
+export const HOST_POLL_MS = 15000
+
+const BYTE_UNITS = ['B', 'kB', 'MB', 'GB', 'TB', 'PB']
+
+export function formatBytes(value) {
+  if (!isNumber(value) || value < 0) return ''
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < BYTE_UNITS.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${formatNumber(size)} ${BYTE_UNITS[unit]}`
+}
+
+function numberOf(value) {
+  if (value === '' || value === null || value === undefined) return null
+  const number = typeof value === 'string' ? Number(value) : value
+  return isNumber(number) ? number : null
+}
+
+function percentOf(value) {
+  const number = numberOf(value)
+  return number === null ? null : Math.max(0, Math.min(100, number))
+}
+
+function usageDetail(usage) {
+  const used = formatBytes(usage?.used)
+  const total = formatBytes(usage?.total)
+  return used && total ? `${used} of ${total}` : ''
+}
+
+/**
+ * The host snapshot as rows the panel renders: a percentage where the endpoint gives
+ * one, the bytes behind it, and `null` - never zero - where it gives nothing. A remote
+ * DevKit that is configured but not connected answers with empty fields; that is
+ * reported as offline instead of as a machine at 0%.
+ */
+export function hostMetricsModel(payload) {
+  const remote = Boolean(payload?.REMOTE)
+  const cpu = percentOf(payload?.cpu_load)
+  const memory = payload?.memory || {}
+  const disk = payload?.disk || {}
+  const temperature = numberOf(payload?.temperature_celsius_avg)
+  const offline = remote && cpu === null && !isNumber(memory.percent)
+  const rows = [
+    { key: 'cpu_load', label: 'CPU load', percent: cpu, value: cpu, unit: '%', detail: '' },
+    {
+      key: 'memory',
+      label: 'Memory',
+      percent: percentOf(memory.percent),
+      value: percentOf(memory.percent),
+      unit: '%',
+      detail: usageDetail(memory)
+    },
+    {
+      key: 'disk',
+      label: 'Disk',
+      percent: percentOf(disk.percent),
+      value: percentOf(disk.percent),
+      unit: '%',
+      detail: [usageDetail(disk), disk.mount].filter(Boolean).join(' · ')
+    }
+  ]
+  // The backend only reads a temperature on a Davinci board, and sends 0 for a remote
+  // DevKit it cannot reach; either way an absent reading is left out rather than shown.
+  if (isNumber(temperature) && !(remote && temperature === 0)) {
+    rows.push({ key: 'temperature', label: 'Temperature', percent: null, value: temperature, unit: 'C', detail: '' })
+  }
+  return {
+    source: remote ? 'remote' : 'local',
+    sourceLabel: remote
+      ? 'Remote DevKit from the legacy REMOTE_DEVKIT configuration'
+      : 'The machine Insight runs on',
+    offline,
+    rows: offline ? [] : rows,
+    empty: !offline && rows.every((row) => row.value === null)
+  }
+}
