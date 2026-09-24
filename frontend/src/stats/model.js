@@ -824,16 +824,18 @@ export function compareReady(refs) {
   return uncomparableRefs(list).length === 0
 }
 
+function withGeneration(path, generation) {
+  return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
+}
+
 /** The request that deletes one run, bound to the board generation its run list came from. */
 export function deleteRunQuery(ref, generation = null) {
-  const path = `/api/sentinel/runs/${encodeURIComponent(String(ref))}`
-  return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
+  return withGeneration(`/api/sentinel/runs/${encodeURIComponent(String(ref))}`, generation)
 }
 
 /** The request that stops the active trace, bound to the board generation it was read under. */
 export function stopTraceQuery(generation = null) {
-  const path = '/api/sentinel/traces/stop'
-  return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
+  return withGeneration('/api/sentinel/traces/stop', generation)
 }
 
 export function deletePrompt(count) {
