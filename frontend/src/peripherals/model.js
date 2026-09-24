@@ -403,7 +403,9 @@ const PREVIEW_ERROR_ACTIONS = {
   no_channel: 'Every published viewer channel is taken. Stop a stream on the Streaming page, then start the preview again.',
   invalid_request: 'Choose a mode Insight lists as verified or advertised; this one was rejected by the board.',
   command_failed: 'The capture worker could not start on the board. The board output below says why.',
-  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.'
+  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.',
+  no_video: 'The board captured, but its video never reached Insight. The UDP port Insight listens on has to be reachable from the board; a host firewall is the usual reason it is not.',
+  viewer_unavailable: 'Insight could not reach its own video viewer, which the preview plays through. Reload the page; if it keeps failing, Insight needs restarting.'
 }
 
 export function previewStatusInfo(state) {

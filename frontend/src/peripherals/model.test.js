@@ -538,6 +538,9 @@ test('every preview failure carries a recovery action and nothing destructive', 
   assert.equal(flat.otherCamera, usb.id)
 
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_channel' }, 409))).action, /Stop a stream on the Streaming page/)
+  // The two failures that come from the network between the board and Insight must say so.
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_video' }, 502))).action, /firewall/)
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'viewer_unavailable' }, 502))).action, /video viewer/)
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /verified or advertised/)
 
   const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
