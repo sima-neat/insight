@@ -24,17 +24,23 @@ export function folderExists(tree, folderPath) {
   return childrenAt(tree, folderPath) !== null
 }
 
-// Folders first (server order), then streamable files. Unsupported files are counted, not listed.
+// Folders first (server order), then every file in server order. `streamable` says whether
+// Insight can play the file; `hidden` counts the ones it cannot, for callers that omit them.
 export function listFolder(tree, folderPath) {
   const nodes = childrenAt(tree, folderPath) || []
   const folders = nodes
     .filter((node) => node.type === 'folder')
     .map((node) => ({ name: folderName(node), path: node.path, count: Number(node.streamable_count || 0) }))
   const files = nodes
-    .filter((node) => node.type === 'file' && node.streamable)
-    .map((node) => ({ name: node.name, path: node.path }))
-  const hidden = nodes.filter((node) => node.type === 'file' && !node.streamable).length
+    .filter((node) => node.type === 'file')
+    .map((node) => ({ name: node.name, path: node.path, streamable: Boolean(node.streamable) }))
+  const hidden = files.filter((file) => !file.streamable).length
   return { folders, files, hidden }
+}
+
+// The subset of a listFolder() file list that Insight can stream.
+export function streamableOnly(files) {
+  return files.filter((f) => f.streamable)
 }
 
 export function parentPath(folderPath) {
