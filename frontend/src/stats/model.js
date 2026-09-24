@@ -79,6 +79,25 @@ const FALLBACK_HINTS = {
   sentinel_failed: 'Check `systemctl status simaai-sentinel` on the board.'
 }
 
+/**
+ * The same codes mean something else when they come back from POST /api/sentinel/install.
+ * Nothing was being read there, so "Sentinel could not answer" is not what failed and not
+ * where the fix is: `sentinel_failed` is how the backend reports a missing `sima-cli`, an
+ * installer that exited non-zero, and an installer that finished with the service still
+ * down; `sentinel_denied` is how it reports that the board's user has no passwordless
+ * sudo; and a `timeout` is the 15-minute installer budget, not an unresponsive board.
+ */
+const INSTALL_TITLES = {
+  sentinel_failed: 'Sentinel could not be installed',
+  sentinel_denied: 'Installing Sentinel needs sudo on the board',
+  timeout: 'The installer did not finish in time'
+}
+
+const INSTALL_HINTS = {
+  timeout: 'Run the install in a shell on the board, where it can take as long as it needs.',
+  sentinel_failed: 'Check the installer output below, or run the install in a shell on the board.'
+}
+
 const RUN_FIELDS = {
   id: ['id', 'run_id', 'uid'],
   name: ['name', 'label', 'title'],
@@ -284,16 +303,19 @@ export function healthProblems(health) {
  * `generation` is the board generation the request was issued under, so a failure that
  * lands after a board switch can be labelled like a stale payload.
  */
-export function failureNotice(error, generation = null) {
+export function failureNotice(error, generation = null, { action = 'read' } = {}) {
   const normalized = normalizeError(error)
   if (!normalized) return null
   const code = normalized.code || ''
+  const installing = action === 'install'
   return {
     code,
     generation,
-    title: FAILURE_TITLES[code] || 'Something went wrong',
+    // What the failure came out of, so the view can label its attached output.
+    action,
+    title: (installing && INSTALL_TITLES[code]) || FAILURE_TITLES[code] || 'Something went wrong',
     message: normalized.message,
-    hint: normalized.hint || FALLBACK_HINTS[code] || '',
+    hint: normalized.hint || (installing && INSTALL_HINTS[code]) || FALLBACK_HINTS[code] || '',
     detail: typeof normalized.details?.detail === 'string' ? normalized.details.detail : '',
     // Kept so the Board card can still offer its host-key recovery from a Sentinel failure.
     details: normalized.details || {},

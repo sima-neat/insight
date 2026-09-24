@@ -141,6 +141,8 @@ Stats works on the selected board, chosen in the same **Board** panel the Periph
 
 The page first reports whether Sentinel is installed and running on that board, and its version. When it is missing, select **Install Sentinel**: Insight runs `sima-cli neat install sentinel` on the board itself, which needs `sima-cli` there and passwordless `sudo`. When either is missing, the page names the command to run in a shell on the board instead. An installed and running daemon is never reinstalled from here, because the installer restarts it and would end a trace in flight.
 
+An install that is refused or fails is reported as an install rather than as a failed read: the page says the install did not happen, gives the board's own sentence for why — no `sima-cli`, no passwordless `sudo`, an installer that exited non-zero, or one that finished with the service still down — and keeps the installer's output behind **Installer output**.
+
 ### Live metrics
 
 While the tab is open and visible, Insight polls Sentinel's latest sample every two seconds and shows each value with the label, unit, group, and thresholds Sentinel defines for it, ranked as normal, warning, or critical. A metric the board cannot measure reads as an em dash, never as zero. Recent samples are drawn as a sparkline beside each value. Use **Pause updates** to stop polling; it also stops on its own when the browser tab is hidden or the view is left.

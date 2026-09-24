@@ -57,6 +57,12 @@ import {
 const COMPARE = JSON.parse(readFileSync(new URL('./fixtures/compare-shape.json', import.meta.url), 'utf8'))
 // The same run read back from /api/sentinel/runs/<name>, trimmed to those six metrics.
 const RUN = JSON.parse(readFileSync(new URL('./fixtures/run-detail-shape.json', import.meta.url), 'utf8'))
+// Every answer POST /api/sentinel/install and GET /api/sentinel can give when Sentinel is
+// not usable, captured from neat_insight.sentinel.api itself rather than written by hand.
+// The install path has never been run against a board — the daemon was already there and
+// removing it would take the board off stock software — so these are what the UI is built
+// against.
+const INSTALL = JSON.parse(readFileSync(new URL('./fixtures/install-failures.json', import.meta.url), 'utf8'))
 
 const daemon = (extra = {}) => ({
   installed: true,
@@ -801,4 +807,95 @@ test('a host snapshot with no readings says so instead of showing three em dashe
   assert.match(hostNotice(hostMetricsModel({ REMOTE: true, memory: {}, disk: {} }), true), /not connected/)
   // A machine Insight can read has rows, so it has no notice.
   assert.equal(hostNotice(hostMetricsModel({ REMOTE: false, cpu_load: 2.9, memory: { percent: 37.3 }, disk: { percent: 3.4 } }), true), '')
+})
+
+test('a daemon that is not there offers the one thing that fixes it', () => {
+  const absent = INSTALL.daemon_absent
+  assert.equal(absent.status, 200, 'a board without Sentinel is not itself a failure')
+  const info = daemonInfo(absent.body)
+  assert.equal(info.state, 'missing')
+  assert.equal(info.label, 'Not installed')
+  assert.equal(info.available, false)
+  assert.equal(info.canInstall, true)
+  assert.equal(info.installBlocked, '')
+  assert.equal(failureNotice(info.error).title, 'Sentinel is not running on this board')
+  assert.match(failureNotice(info.error).hint, /sima-cli neat install sentinel/)
+
+  // An installed unit that is not running is a different sentence and a different fix.
+  const stopped = daemonInfo(INSTALL.daemon_stopped.body)
+  assert.equal(stopped.state, 'stopped')
+  assert.equal(stopped.label, 'Installed but stopped')
+  assert.equal(failureNotice(stopped.error).title, 'The Sentinel service is stopped')
+})
+
+test('an install this page cannot run says so before it is attempted', () => {
+  // `sima-cli` is what the installer runs; without it the button is dead, and the reason
+  // has to be on the page rather than only in the tooltip of a disabled button.
+  const info = daemonInfo(INSTALL.sima_cli_missing_state.body)
+  assert.equal(info.simaCli, null)
+  assert.equal(info.canInstall, false)
+  assert.match(info.installBlocked, /sima-cli was not found on the board/)
+
+  // A healthy daemon is never reinstalled from here: the installer restarts it.
+  const healthy = daemonInfo({ available: true, status: { state: 'ready' }, daemon: { installed: true, healthy: true, service: 'active', socket: true, sima_cli: '/usr/bin/sima-cli' } })
+  assert.equal(healthy.canInstall, false)
+  assert.match(healthy.installBlocked, /would restart it and end a trace in flight/)
+
+  // And a board that has not answered at all cannot be installed onto either.
+  assert.equal(daemonInfo(null).canInstall, false)
+  assert.match(daemonInfo(null).installBlocked, /state is unknown/)
+})
+
+test('an install that is refused or fails is titled as an install, not as a read', () => {
+  const notice = (name) => failureNotice(INSTALL[name].body, 7, { action: 'install' })
+
+  // Refused: Sentinel is already running, and reinstalling would end a trace in flight.
+  const refused = notice('already_installed')
+  assert.equal(INSTALL.already_installed.status, 409)
+  assert.equal(refused.title, 'Sentinel is already installed')
+  assert.match(refused.hint, /would end a trace in flight/)
+  assert.equal(refused.detail, '')
+
+  // `sima-cli` missing: nothing was read, so "Sentinel could not answer" is not the failure.
+  const noCli = notice('sima_cli_missing')
+  assert.equal(noCli.code, 'sentinel_failed')
+  assert.equal(noCli.title, 'Sentinel could not be installed')
+  assert.match(noCli.message, /`sima-cli` was not found on the board/)
+  assert.match(noCli.hint, /Install sima-cli on the board/)
+
+  // The board refusing sudo is not Sentinel refusing this user.
+  const sudo = notice('sudo_denied')
+  assert.equal(sudo.code, 'sentinel_denied')
+  assert.equal(sudo.title, 'Installing Sentinel needs sudo on the board')
+  assert.equal(sudo.detail, 'sudo: a password is required')
+  assert.match(sudo.hint, /in a shell on the board/)
+
+  // Failing part way: the installer's own output is what says why, and it is kept.
+  const failed = notice('installer_failed')
+  assert.equal(failed.title, 'Sentinel could not be installed')
+  assert.match(failed.message, /failed on the board \(exit 1\)/)
+  assert.match(failed.detail, /vulcan: not found/)
+
+  // Finishing with the service still down is a failure too, not a successful install.
+  const down = notice('installer_left_it_down')
+  assert.equal(down.title, 'Sentinel could not be installed')
+  assert.match(down.message, /the simaai-sentinel service is inactive/)
+  assert.match(down.hint, /systemctl status simaai-sentinel/)
+
+  // Every one of them is the daemon's problem to fix, never the Board panel's, and every
+  // one of them is worth retrying once the board has been put right.
+  for (const name of ['already_installed', 'sima_cli_missing', 'sudo_denied', 'installer_failed']) {
+    assert.equal(notice(name).board, false, name)
+    assert.equal(notice(name).retryable, true, name)
+    assert.equal(notice(name).action, 'install', name)
+    assert.equal(notice(name).generation, 7, name)
+  }
+
+  // An installer that runs past its 15-minute budget is not an unresponsive board.
+  const slow = failureNotice({ code: 'timeout', error: 'The board took too long to answer.' }, null, { action: 'install' })
+  assert.equal(slow.title, 'The installer did not finish in time')
+  assert.match(slow.hint, /as long as it needs/)
+  // The same code read from the board keeps the reading title and the reading fix.
+  assert.equal(failureNotice({ code: 'timeout', error: 'The board took too long to answer.' }).title, 'The board took too long to answer')
+  assert.equal(failureNotice({ code: 'timeout', error: 'x' }).action, 'read')
 })

@@ -116,7 +116,11 @@ function DaemonPanel({ info, health, busy, installing, install, installStale, er
           several minutes.
         </p>
       )}
-      <FailureCallout notice={error} detailLabel="Installer output" />
+      {/* Only an install attaches installer output; a failed read attaches the board's own. */}
+      <FailureCallout
+        notice={error}
+        detailLabel={error?.action === 'install' ? 'Installer output' : 'Output from the board'}
+      />
       {!error && info.error && (
         <Callout tone={info.state === 'error' ? 'danger' : 'warn'} title={info.error.message}>
           {info.error.hint && <p>{info.error.hint}</p>}
@@ -915,7 +919,7 @@ export default function StatsView({ onError, onStatus }) {
       if (mounted.current) pollMetrics({ manual: true })
     } catch (err) {
       if (!mounted.current) return
-      const notice = failureNotice(err, generation)
+      const notice = failureNotice(err, generation, { action: 'install' })
       setInstallError(notice)
       onError?.(notice.message)
       loadState({ quiet: true })
