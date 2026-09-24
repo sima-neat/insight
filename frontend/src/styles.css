@@ -3971,10 +3971,6 @@ button:disabled {
   border-left-color: var(--danger);
 }
 
-.stats-metric-card.tone-unavailable {
-  border-left-color: var(--line-strong);
-}
-
 .stats-metric-head {
   display: flex;
   align-items: flex-start;
@@ -4082,10 +4078,6 @@ button:disabled {
   color: #8f2f45;
 }
 
-.stats-group-panel {
-  margin-top: 10px;
-}
-
 .stats-table th .hint,
 .stats-table td .hint {
   display: block;
@@ -4100,10 +4092,6 @@ button:disabled {
 .stats-cell-spark {
   width: 150px;
   color: var(--accent);
-}
-
-.stats-cell-spark .stats-spark {
-  height: 24px;
 }
 
 /* A run is named by whoever recorded it, and Sentinel keeps names of up to 128 characters
@@ -4193,17 +4181,13 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-/* The Runs header: the title, the trace form or what is recording, and Refresh share one
+/* The Runs header: the title and the trace form or what is recording share one
    line, and wrap onto further lines rather than squeeze when the page is narrow. */
 .stats-runs-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
-}
-
-.stats-runs-refresh {
-  margin-left: auto;
 }
 
 .stats-trace-bar {
@@ -4308,10 +4292,6 @@ button:disabled {
   margin: 0;
 }
 
-.stats-host-refresh {
-  margin-left: auto;
-}
-
 .stats-host-rows {
   margin: 8px 0 0;
   padding: 0;
@@ -4412,7 +4392,6 @@ button:disabled {
   padding: 0 1px;
   border-radius: 4px;
   font: inherit;
-  font-weight: inherit;
   color: inherit;
   cursor: help;
   text-decoration: underline dotted;
@@ -4450,12 +4429,6 @@ button:disabled {
   display: none !important;
 }
 
-/* An em dash where a change should be needs a reason, and the reason belongs once under
-   the table rather than repeated in every cell it applies to. */
-.stats-compare-legend {
-  margin: 4px 0 10px;
-}
-
 /* A run's metadata can carry a multi-line value, such as the board's os-release; keep
    its lines rather than running them together. Scoped to the key/value tables so the
    numbers in the metric table keep their own wrapping rules. */
@@ -4488,8 +4461,7 @@ button:disabled {
   margin-left: auto;
 }
 
-.stats-compare-head .btn-ghost,
-.stats-host-refresh {
+.stats-compare-head .btn-ghost {
   padding: 5px 10px;
 }
 
