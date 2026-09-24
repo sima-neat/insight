@@ -127,6 +127,8 @@ To read a MIPI camera's modes, Refresh briefly opens the camera through libcamer
 
 Choose a format, resolution, and frame rate, then copy or download the configuration as Python (`pyneat.CameraInputOptions`), C++, an Apps `config.yaml` `camera:` block, or JSON. Exports always name the camera explicitly. For USB cameras the export is a device descriptor, not a `CameraInput` configuration.
 
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
+
 ## Stats
 
 The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.
