@@ -73,7 +73,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
-import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, MetricCard, SegmentedTabs, Sparkline } from './stats/ui.jsx'
+import { AlertBadge, ChipTabs, CountBadge, DeltaReason, Facts, FailureCallout, KeyValueTable, MetricCard, OutputDetails, SegmentedTabs, Sparkline } from './stats/ui.jsx'
 
 /** Hands the browser a file to save. The object URL is released once the click has used it. */
 // How often the saved-runs list is re-read while the Stats tab is visible.
@@ -193,14 +193,16 @@ function DaemonPanel({ info, health, busy, installing, install, installStale, er
       {install?.log && (
         <>
           {installStale && <StaleBanner what="This installer output" payload={install} />}
-          <details className="stats-detail">
-            <summary>Installer output</summary>
-            <pre className="periph-code" tabIndex={0}><code>{install.log}</code></pre>
-          </details>
+          <OutputDetails label="Installer output" text={install.log} />
         </>
       )}
     </section>
   )
+}
+
+function TagPills({ tags }) {
+  if (!tags.length) return null
+  return <span className="periph-pills">{tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}</span>
 }
 
 const SECTION_EMPTY = {
@@ -216,15 +218,8 @@ function MetricGroupTable({ group, headingId, series }) {
     <section className="stats-group-block" aria-labelledby={headingId}>
       <h3 id={headingId} className="stats-group-head">
         <span>{group.name}</span>
-        <span className="stats-segment-count">
-          {group.metrics.length}
-          <span className="sr-only">{` metric${group.metrics.length === 1 ? '' : 's'}`}</span>
-        </span>
-        {alert && (
-          <span className={`stats-chip-alert tone-${alert.tone}`}>
-            {alert.count} {alert.tone === 'critical' ? 'critical' : `warning${alert.count === 1 ? '' : 's'}`}
-          </span>
-        )}
+        <CountBadge className="stats-segment-count" count={group.metrics.length} noun="metric" />
+        <AlertBadge alert={alert} />
       </h3>
       <table className="sysinfo-table stats-table">
         <caption className="sr-only">{group.name} metrics</caption>
@@ -403,11 +398,7 @@ function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggl
             started <time dateTime={bar.startedAt} title={formatTimestamp(bar.startedAt)}>{bar.started}</time>
           </span>
         )}
-        {bar.tags.length > 0 && (
-          <span className="periph-pills">
-            {bar.tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}
-          </span>
-        )}
+        <TagPills tags={bar.tags} />
         {/* A trace read from a board no longer selected is not this board's to stop. */}
         <button type="button" className="btn-tonal" onClick={onStop} disabled={busy || stale}>{bar.stopLabel}</button>
       </div>
@@ -674,11 +665,7 @@ export function RunsPanel({
                   <th scope="row">
                     {run.label}
                     {run.note && <span className="hint">{run.note}</span>}
-                    {run.tags.length > 0 && (
-                      <span className="periph-pills">
-                        {run.tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}
-                      </span>
-                    )}
+                    <TagPills tags={run.tags} />
                   </th>
                   <td>{runSubtitle(run, now) || '—'}</td>
                   <td>
@@ -776,12 +763,7 @@ export function RunsPanel({
                 <li key={ref}>
                   <strong>{ref}</strong>: {notice.title}. {notice.message}
                   {notice.hint && <span className="hint"> {notice.hint}</span>}
-                  {notice.detail && (
-                    <details className="stats-detail">
-                      <summary>Output from the board</summary>
-                      <pre className="periph-code" tabIndex={0}><code>{notice.detail}</code></pre>
-                    </details>
-                  )}
+                  {notice.detail && <OutputDetails label="Output from the board" text={notice.detail} />}
                 </li>
               ))}
               {deleteResult.skipped.length > 0 && (

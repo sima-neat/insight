@@ -42,6 +42,36 @@ export function DeltaReason({ reason }) {
   )
 }
 
+/** Command output the backend attached, behind a disclosure. */
+export function OutputDetails({ label, text }) {
+  return (
+    <details className="stats-detail">
+      <summary>{label}</summary>
+      <pre className="periph-code" tabIndex={0}><code>{text}</code></pre>
+    </details>
+  )
+}
+
+/** How many metrics are past a threshold, in the worst tone among them. */
+export function AlertBadge({ alert }) {
+  if (!alert) return null
+  return (
+    <span className={`stats-chip-alert tone-${alert.tone}`}>
+      {alert.count} {alert.tone === 'critical' ? 'critical' : `warning${alert.count === 1 ? '' : 's'}`}
+    </span>
+  )
+}
+
+/** A count, followed for screen readers by the noun it counts. */
+export function CountBadge({ className, count, noun = '' }) {
+  return (
+    <span className={className}>
+      {count}
+      {noun && <span className="sr-only">{` ${noun}${count === 1 ? '' : 's'}`}</span>}
+    </span>
+  )
+}
+
 export function Facts({ rows, className = 'periph-facts' }) {
   if (!rows?.length) return null
   return (
@@ -86,12 +116,7 @@ export function FailureCallout({ notice, detailLabel = 'Output from the board', 
       <Callout tone="danger" title={notice.title}>
         <p>{notice.message}</p>
         {notice.hint && <p className="hint">{notice.hint}</p>}
-        {notice.detail && (
-          <details className="stats-detail">
-            <summary>{detailLabel}</summary>
-            <pre className="periph-code" tabIndex={0}><code>{notice.detail}</code></pre>
-          </details>
-        )}
+        {notice.detail && <OutputDetails label={detailLabel} text={notice.detail} />}
         {children}
       </Callout>
     </>
@@ -167,15 +192,8 @@ export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, 
             onClick={() => onSelect(collapsible && active ? null : item.id)}
           >
             <span className="stats-chip-label">{item.label}</span>
-            <span className="stats-chip-count">
-              {item.count}
-              {noun && <span className="sr-only">{` ${noun}${item.count === 1 ? '' : 's'}`}</span>}
-            </span>
-            {item.alert && (
-              <span className={`stats-chip-alert tone-${item.alert.tone}`}>
-                {item.alert.count} {item.alert.tone === 'critical' ? 'critical' : `warning${item.alert.count === 1 ? '' : 's'}`}
-              </span>
-            )}
+            <CountBadge className="stats-chip-count" count={item.count} noun={noun} />
+            <AlertBadge alert={item.alert} />
           </button>
         )
       })}
@@ -222,17 +240,8 @@ export function SegmentedTabs({ label, items, selected, onSelect, idPrefix, pane
           >
             <span className="stats-segment-label">{item.label}</span>
             {item.hint && <span className="stats-segment-hint">{item.hint}</span>}
-            {item.count !== undefined && (
-              <span className="stats-segment-count">
-                {item.count}
-                {noun && <span className="sr-only">{` ${noun}${item.count === 1 ? '' : 's'}`}</span>}
-              </span>
-            )}
-            {item.alert && (
-              <span className={`stats-chip-alert tone-${item.alert.tone}`}>
-                {item.alert.count} {item.alert.tone === 'critical' ? 'critical' : `warning${item.alert.count === 1 ? '' : 's'}`}
-              </span>
-            )}
+            {item.count !== undefined && <CountBadge className="stats-segment-count" count={item.count} noun={noun} />}
+            <AlertBadge alert={item.alert} />
           </button>
         )
       })}
