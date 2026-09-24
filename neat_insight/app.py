@@ -496,15 +496,18 @@ def build_media_tree(base_path: Path, rel_path: str = "") -> list:
     result = []
     full_path = base_path / rel_path
     try:
-        entries = [e for e in os.listdir(full_path) if not e.startswith(".") and not e.startswith("__MACOSX")]
-    except OSError:
+        entries = [e for e in os.listdir(full_path) if not e.startswith(".") and e != "__MACOSX"]
+    except (OSError, RecursionError):
         return result
-    entries.sort(key=lambda e: (not os.path.isdir(full_path / e), e.lower()))
+    entries.sort(key=lambda e: (not (os.path.isdir(full_path / e) and not os.path.islink(full_path / e)), e.lower()))
     for entry in entries:
         abs_entry_path = full_path / entry
         rel_entry_path = os.path.join(rel_path, entry).replace(os.path.sep, "/")
         if abs_entry_path.is_dir() and not abs_entry_path.is_symlink():
-            children = build_media_tree(base_path, rel_entry_path)
+            try:
+                children = build_media_tree(base_path, rel_entry_path)
+            except RecursionError:
+                children = []
             count = sum(
                 child["streamable_count"] if child["type"] == "folder" else int(child["streamable"])
                 for child in children
@@ -520,7 +523,12 @@ def build_media_tree(base_path: Path, rel_path: str = "") -> list:
             )
         else:
             result.append(
-                {"name": entry, "path": rel_entry_path, "type": "file", "streamable": _is_streamable_media(entry)}
+                {
+                    "name": entry,
+                    "path": rel_entry_path,
+                    "type": "file",
+                    "streamable": _is_streamable_media(entry) and not abs_entry_path.is_dir(),
+                }
             )
     return result
 
@@ -2053,7 +2061,7 @@ def list_video_files():
 def _collect_video_files():
     video_files = []
     for root, dirs, files in os.walk(MEDIA_DIR):
-        dirs[:] = [d for d in dirs if not d.startswith(".") and not d.startswith("__MACOSX")]
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__MACOSX"]
         for fname in files:
             if fname.startswith("."):
                 continue

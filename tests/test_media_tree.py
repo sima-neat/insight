@@ -38,6 +38,9 @@ class MediaTreeTests(unittest.TestCase):
         touch(self.root / ".hidden.mp4")
         touch(self.root / "__MACOSX" / "shadow.mp4")
         touch(self.root / "zeta.mp4")
+        touch(self.root / "Beta.mp4")
+        touch(self.root / "alpha.mp4")
+        (self.root / "Zulu").mkdir()
 
     def by_name(self, nodes, name):
         for node in nodes:
@@ -74,7 +77,10 @@ class MediaTreeTests(unittest.TestCase):
     def test_folders_sort_before_files_case_insensitively(self):
         self.seed()
         names = [node["name"] for node in app_module.build_media_tree(self.root)]
-        self.assertEqual(names, ["/120FPS-720p-h264", "/30FPS", "/docs-only", "/empty", "readme.md", "zeta.mp4"])
+        self.assertEqual(
+            names,
+            ["/120FPS-720p-h264", "/30FPS", "/docs-only", "/empty", "/Zulu", "alpha.mp4", "Beta.mp4", "readme.md", "zeta.mp4"],
+        )
 
     def test_paths_are_relative_posix_paths(self):
         self.seed()
@@ -108,14 +114,45 @@ class MediaTreeTests(unittest.TestCase):
 
         self.assertEqual(walk(app_module.build_media_tree(self.root), set()), listed)
 
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unsupported")
     def test_symlinked_directories_are_not_descended(self):
         touch(self.root / "real" / "clip.mp4")
-        (self.root / "real" / "loop").symlink_to(self.root / "real", target_is_directory=True)
+        try:
+            (self.root / "real" / "loop").symlink_to(self.root / "real", target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks unsupported")
         tree = app_module.build_media_tree(self.root)
         real = self.by_name(tree, "/real")
         self.assertEqual(real["streamable_count"], 1)
         names = [node["name"] for node in real["children"]]
         self.assertNotIn("/loop", names)
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unsupported")
+    def test_symlinked_directory_named_like_a_video_is_not_streamable(self):
+        touch(self.root / "real" / "clip.mp4")
+        try:
+            (self.root / "real" / "alias.mp4").symlink_to(self.root / "real", target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks unsupported")
+        tree = app_module.build_media_tree(self.root)
+        real = self.by_name(tree, "/real")
+        self.assertEqual(real["streamable_count"], 1)
+        alias = self.by_name(real["children"], "alias.mp4")
+        self.assertFalse(alias["streamable"])
+        listed = set(self.client.get("/api/mediasrc/videos").get_json())
+        self.assertNotIn("real/alias.mp4", listed)
+
+    def test_macosx_prefix_folders_are_kept(self):
+        touch(self.root / "__MACOSX" / "junk.mp4")
+        touch(self.root / "__MACOSX_backup" / "keep.mp4")
+        tree = app_module.build_media_tree(self.root)
+        names = [node["name"] for node in tree]
+        self.assertNotIn("/__MACOSX", names)
+        backup = self.by_name(tree, "/__MACOSX_backup")
+        self.assertEqual(backup["streamable_count"], 1)
+        listed = set(self.client.get("/api/mediasrc/videos").get_json())
+        self.assertIn("__MACOSX_backup/keep.mp4", listed)
+        self.assertNotIn("__MACOSX/junk.mp4", listed)
 
 
 if __name__ == "__main__":
