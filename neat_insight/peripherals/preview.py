@@ -637,9 +637,4 @@ def viewer_url(host: str, channel: int) -> str:
     # embed=1 asks the viewer for the bare video surface: no page controls, no channel banner, no
     # settings. There is one camera here and Insight chose its channel, so none of that can be acted on.
     query = f"mode=light&src={channel}&max_channels={VIDEO_CHANNELS}&embed=1"
-    return port_map.format_browser_https_url(
-        host,
-        video_ui_port(),
-        "/static/viewer.html",
-        query,
-    )
+    return port_map.format_browser_https_url(host, video_ui_port(), "/static/viewer.html", query)
