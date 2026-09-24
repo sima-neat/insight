@@ -4157,6 +4157,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* An em dash where a change should be needs a reason, and the reason belongs once under
+   the table rather than repeated in every cell it applies to. */
+.stats-compare-legend {
+  margin: 4px 0 10px;
+}
+
 /* A run's metadata can carry a multi-line value, such as the board's os-release; keep
    its lines rather than running them together. Scoped to the key/value tables so the
    numbers in the metric table keep their own wrapping rules. */

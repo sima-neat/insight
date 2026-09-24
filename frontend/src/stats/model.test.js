@@ -9,6 +9,7 @@ import {
   MAX_POLL_MS,
   POLL_MS,
   compareHint,
+  compareLegend,
   compareQuery,
   compareReady,
   compareTable,
@@ -18,6 +19,7 @@ import {
   daemonFacts,
   daemonInfo,
   definitionsByKey,
+  deltaAbsenceText,
   factRows,
   failureNotice,
   formatBytes,
@@ -339,10 +341,16 @@ test('the captured comparison is read as a table of metrics against the baseline
   assert.equal(table.statistic, 'mean')
 
   // The run scalars Sentinel reports alongside the metric summaries, which carry no delta.
+  // A duration arrives in milliseconds and is read in seconds, as everywhere else here.
   const duration = table.rows.find((row) => row.key === 'duration_ms')
-  assert.equal(duration.label, 'Duration ms')
-  assert.deepEqual(duration.cells.map((cell) => cell.value), [6667, 34379])
+  assert.equal(duration.label, 'Duration')
+  assert.equal(duration.unit, 's')
+  assert.deepEqual(duration.cells.map((cell) => cell.value), [6.667, 34.379])
   assert.deepEqual(duration.cells.map((cell) => cell.deltaPct), [null, null])
+  assert.equal(formatValue(duration.cells[1].value, duration.unit), '34.4 s')
+  const energy = table.rows.find((row) => row.key === 'energy_joules')
+  assert.equal(energy.label, 'Energy')
+  assert.equal(formatValue(energy.cells[1].value, energy.unit), '275 J')
 
   // A metric cell carries the mean, because that is the statistic the delta is measured on.
   const power = table.rows.find((row) => row.key === 'power_current_watts')
@@ -352,11 +360,68 @@ test('the captured comparison is read as a table of metrics against the baseline
   // The baseline is what the rest are measured against, so it shows no change of its own.
   assert.equal(power.cells[0].deltaPct, null)
 
-  // A metric the baseline never measured has nothing to compare against.
+  // A metric whose baseline mean was 0: Sentinel sends no delta, because there is no
+  // percentage change from 0. The baseline did measure it, so it is not "never measured".
   const idle = table.rows.find((row) => row.key === 'cpu_core_11_usage_pct')
   assert.deepEqual(idle.cells.map((cell) => cell.value), [0, 0])
   assert.equal(idle.cells[1].deltaPct, null)
   assert.equal(formatPercentDelta(idle.cells[1].deltaPct), '—')
+})
+
+test('a change Sentinel withholds says which of its four reasons applies', () => {
+  const table = compareTable({ sentinel: COMPARE })
+
+  // The case that made the old wording wrong. cpu_core_13_usage_pct came back with a
+  // null delta although the baseline measured it four times: its mean was 0, and the
+  // other run averaged 5.9%. Reading that em dash as "the baseline never measured it"
+  // hides the one change in the table that went from nothing to something.
+  const busy = table.rows.find((row) => row.key === 'cpu_core_13_usage_pct')
+  assert.equal(COMPARE.summaries[COMPARE.baseline_id].metrics.cpu_core_13_usage_pct.count, 4)
+  assert.deepEqual(busy.cells.map((cell) => cell.value), [0, 5.91190441525744])
+  assert.equal(busy.cells[1].deltaPct, null)
+  assert.equal(busy.cells[1].deltaAbsence, 'baseline_zero')
+  assert.match(deltaAbsenceText('baseline_zero'), /no percentage change from 0/)
+
+  // A run scalar has no delta because the daemon publishes none, which is a different
+  // statement from the baseline having measured 0.
+  assert.equal(table.rows.find((row) => row.key === 'energy_joules').cells[1].deltaAbsence, 'not_published')
+  // The baseline carries the others' changes, so it never claims a reason of its own.
+  assert.equal(table.rows.find((row) => row.key === 'power_current_watts').cells[0].deltaAbsence, null)
+  assert.equal(table.rows.find((row) => row.key === 'power_current_watts').cells[1].deltaAbsence, null)
+
+  // A metric this comparison's baseline has no value for at all: the one case the old
+  // wording described, and now the only one that claims it.
+  const partial = JSON.parse(JSON.stringify(COMPARE))
+  const others = Object.keys(partial.summaries).filter((id) => id !== partial.baseline_id)
+  delete partial.summaries[partial.baseline_id].metrics.rtsn_6
+  for (const id of Object.keys(partial.baseline_deltas_pct)) delete partial.baseline_deltas_pct[id].rtsn_6
+  const rtsn = compareTable({ sentinel: partial }).rows.find((row) => row.key === 'rtsn_6')
+  assert.equal(rtsn.cells[0].value, null)
+  assert.equal(rtsn.cells[1].value, partial.summaries[others[0]].metrics.rtsn_6.mean)
+  assert.equal(rtsn.cells[1].deltaAbsence, 'no_baseline')
+
+  // Every reason present is counted once, under the table, rather than per cell.
+  const legend = compareLegend(table)
+  assert.equal(legend.length, 2)
+  assert.match(legend.join(' '), /3 values show “—” instead of a change because Sentinel publishes no change for it\./)
+  assert.match(legend.join(' '), /2 values show “—” instead of a change because the baseline measured 0/)
+  assert.deepEqual(compareLegend(null), [])
+})
+
+test('a run the daemon listed but summarised nothing for is marked, not read as empty', () => {
+  const partial = JSON.parse(JSON.stringify(COMPARE))
+  const other = Object.keys(partial.summaries).find((id) => id !== partial.baseline_id)
+  delete partial.summaries[other]
+  const table = compareTable({ sentinel: partial })
+  assert.deepEqual(table.columns.map((column) => column.summarised), [true, false])
+  // Its cells are empty, and empty because there is no value, not because of a baseline.
+  const power = table.rows.find((row) => row.key === 'power_current_watts')
+  assert.equal(power.cells[1].value, null)
+  assert.equal(power.cells[1].deltaAbsence, 'no_value')
+  // The daemon still published a change for that run. A change printed beside an em dash
+  // would describe a number this table does not show, so it is withheld with the value.
+  assert.equal(partial.baseline_deltas_pct[other].power_current_watts, -0.35731427657192105)
+  assert.equal(power.cells[1].deltaPct, null)
 })
 
 test('a comparison is labelled from the board definitions, and never from invented ones', () => {

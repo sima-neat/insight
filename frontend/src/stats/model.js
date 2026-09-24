@@ -528,18 +528,67 @@ export function compareHint(refs) {
  * definitions name that key, and a run-level scalar has no delta because the daemon
  * publishes none. A body that does not match this shape returns null, and the view falls
  * back to listing the values as they came.
+ *
+ * A cell with no delta also carries `deltaAbsence`, the reason it has none. The daemon's
+ * null is not one thing: on this board 10 of 59 metrics come back null because the
+ * baseline's mean was 0 - `cpu_core_13_usage_pct` is null although the baseline measured
+ * it four times and the other run averaged 5.9% - and that is a different statement from
+ * "the baseline never measured it". The view reports the reason rather than leaving one
+ * undifferentiated em dash to be read as the metric being absent.
  */
 export const COMPARE_STATISTIC = 'mean'
-// Sentinel reports these per run alongside the metric summaries; they have no deltas.
-const RUN_SCALARS = ['duration_ms', 'energy_joules', 'samples']
+// Sentinel reports these per run alongside the metric summaries. They carry no delta of
+// its own, and it sends a duration in milliseconds, which is not the unit the rest of
+// this view reads a duration in; `scale` converts it once, here.
+const RUN_SCALARS = [
+  { key: 'duration_ms', label: 'Duration', unit: 's', scale: 0.001 },
+  { key: 'energy_joules', label: 'Energy', unit: 'J', scale: 1 },
+  { key: 'samples', label: 'Samples', unit: null, scale: 1 }
+]
 
-function compareColumns(runs, baselineId) {
+/**
+ * Why a cell shows no change. An em dash on its own reads as "nothing here", but the
+ * daemon withholds a delta for four different reasons and only one of them means the
+ * metric was never measured. Keeping them apart is what stops the table claiming, of a
+ * metric that went from 0 to 5.9%, that there was nothing to compare.
+ */
+export const DELTA_ABSENCE = {
+  not_published: 'Sentinel publishes no change for it.',
+  no_baseline: 'the baseline run has no value for that metric.',
+  baseline_zero: 'the baseline measured 0, and there is no percentage change from 0.',
+  no_value: 'this run has no value for that metric.'
+}
+
+export function deltaAbsenceText(code) {
+  return DELTA_ABSENCE[code] || ''
+}
+
+/** One sentence per reason a change is missing in this comparison, with how often. */
+export function compareLegend(table) {
+  const counts = new Map()
+  for (const row of table?.rows || []) {
+    for (const cell of row.cells) {
+      if (cell.deltaAbsence) counts.set(cell.deltaAbsence, (counts.get(cell.deltaAbsence) || 0) + 1)
+    }
+  }
+  return Object.keys(DELTA_ABSENCE)
+    .filter((code) => counts.has(code))
+    .map((code) => {
+      const count = counts.get(code)
+      return `${count} value${count === 1 ? '' : 's'} show “—” instead of a change because ${DELTA_ABSENCE[code]}`
+    })
+}
+
+function compareColumns(runs, baselineId, summaries) {
   return runs.map((run, index) => {
     const id = String(run?.id ?? index)
     return {
       key: id,
       label: String(run?.name || run?.id || `Run ${index + 1}`),
       baseline: id === String(baselineId),
+      // A run the daemon listed but summarised nothing for: its column is all em dashes,
+      // and saying so beats letting it read as a run that measured nothing.
+      summarised: Boolean(summaries?.[id]),
       run: run || null
     }
   })
@@ -555,14 +604,21 @@ function metricKeysOf(summaries, columns) {
   return keys.sort()
 }
 
-function compareCell(column, value, delta) {
-  return {
-    column: column.key,
-    baseline: column.baseline,
-    value: isNumber(value) ? value : null,
-    // The baseline is what the others are measured against, so it shows no change.
-    deltaPct: column.baseline || !isNumber(delta) ? null : delta
+function compareCell(column, value, delta, baselineValue, published = true) {
+  const has = isNumber(value)
+  // The baseline is what the others are measured against, so it shows no change. Neither
+  // does a cell with no value: a change beside an em dash describes a number that is not
+  // on the page, so the value the daemon has is what decides whether a change is shown.
+  const deltaPct = column.baseline || !has || !isNumber(delta) ? null : delta
+  let deltaAbsence = null
+  if (!column.baseline && deltaPct === null) {
+    if (!has) deltaAbsence = 'no_value'
+    else if (!published) deltaAbsence = 'not_published'
+    else if (!isNumber(baselineValue)) deltaAbsence = 'no_baseline'
+    else if (baselineValue === 0) deltaAbsence = 'baseline_zero'
+    else deltaAbsence = 'not_published'
   }
+  return { column: column.key, baseline: column.baseline, value: has ? value : null, deltaPct, deltaAbsence }
 }
 
 export function compareTable(payload, definitions = null) {
@@ -571,31 +627,40 @@ export function compareTable(payload, definitions = null) {
   const runs = Array.isArray(body.runs) ? body.runs : null
   const summaries = body.summaries
   if (!runs || !summaries || typeof summaries !== 'object') return null
-  const columns = compareColumns(runs, body.baseline_id)
+  const columns = compareColumns(runs, body.baseline_id, summaries)
   if (columns.length < MIN_COMPARE_RUNS || !columns.some((column) => summaries[column.key])) return null
   const deltas = body.baseline_deltas_pct && typeof body.baseline_deltas_pct === 'object' ? body.baseline_deltas_pct : {}
   const define = (key) => (definitions instanceof Map ? definitions.get(key) : null) || null
+  // Every delta is measured against this column, so it also decides why one is missing.
+  const baselineColumn = columns.find((column) => column.baseline) || columns[0]
 
-  const scalarRows = RUN_SCALARS.filter((key) => columns.some((column) => isNumber(summaries[column.key]?.[key]))).map(
-    (key) => ({
-      key,
-      label: titleCase(key),
-      unit: null,
-      // The daemon publishes no delta for a run scalar, so none is shown for it.
-      cells: columns.map((column) => compareCell(column, summaries[column.key]?.[key], null))
+  const scalarRows = RUN_SCALARS.filter((spec) => columns.some((column) => isNumber(summaries[column.key]?.[spec.key])))
+    .map((spec) => {
+      const valueOf = (column) => {
+        const raw = summaries[column.key]?.[spec.key]
+        return isNumber(raw) ? raw * spec.scale : null
+      }
+      const baselineValue = valueOf(baselineColumn)
+      return {
+        key: spec.key,
+        label: spec.label,
+        unit: spec.unit,
+        group: null,
+        // The daemon publishes no delta for a run scalar, so none is shown for it.
+        cells: columns.map((column) => compareCell(column, valueOf(column), null, baselineValue, false))
+      }
     })
-  )
 
   const metricRows = metricKeysOf(summaries, columns).map((key) => {
     const definition = define(key)
+    const meanOf = (column) => summaries[column.key]?.metrics?.[key]?.[COMPARE_STATISTIC]
+    const baselineValue = meanOf(baselineColumn)
     return {
       key,
       label: definition?.label || titleCase(key),
       unit: definition?.unit || null,
       group: definition?.group || null,
-      cells: columns.map((column) =>
-        compareCell(column, summaries[column.key]?.metrics?.[key]?.[COMPARE_STATISTIC], deltas[column.key]?.[key])
-      )
+      cells: columns.map((column) => compareCell(column, meanOf(column), deltas[column.key]?.[key], baselineValue))
     }
   })
 

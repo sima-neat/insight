@@ -18,6 +18,7 @@ import {
   HOST_POLL_MS,
   MAX_COMPARE_RUNS,
   compareHint,
+  compareLegend,
   compareReady,
   compareTable,
   countsSummary,
@@ -26,6 +27,7 @@ import {
   daemonFacts,
   daemonInfo,
   definitionsByKey,
+  deltaAbsenceText,
   factRows,
   failureNotice,
   formatPercentDelta,
@@ -338,6 +340,8 @@ export function RunsPanel({
   onClearCompare
 }) {
   const table = useMemo(() => (compare ? compareTable(compare, definitions) : null), [compare, definitions])
+  // Why the em dashes in the table are there, counted from the comparison itself.
+  const legend = useMemo(() => compareLegend(table), [table])
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
   const run = useMemo(() => runDetail(detail), [detail])
   // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
@@ -528,14 +532,27 @@ export function RunsPanel({
             <>
               <p className="hint">
                 Each value is that metric's {table.statistic} over the run, and the change beside it is against the
-                baseline{table.baselineLabel ? ` ${table.baselineLabel}` : ''}. A metric the baseline never measured has
-                nothing to compare against and shows “—”.
+                baseline{table.baselineLabel ? ` ${table.baselineLabel}` : ''}.
                 {table.generatedAt && (
                   <>
                     {' '}Compared <time dateTime={table.generatedAt}>{formatTimestamp(table.generatedAt)}</time>.
                   </>
                 )}
               </p>
+              {legend.length > 0 && (
+                <ul className="periph-notes stats-compare-legend">
+                  {legend.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              )}
+              {table.columns.some((column) => !column.summarised) && (
+                <Callout tone="warn" title="Sentinel summarised only some of these runs">
+                  <p>
+                    {table.columns.filter((column) => !column.summarised).map((column) => column.label).join(', ')} came back
+                    with no summary, so every value in that column is “—”. Re-record the run, or compare the runs Sentinel did
+                    summarise.
+                  </p>
+                </Callout>
+              )}
               <table className="sysinfo-table stats-table stats-compare-table">
                 <thead>
                   <tr>
@@ -556,8 +573,16 @@ export function RunsPanel({
                         <td key={`${row.key}-${cell.column}`} className="stats-cell-value">
                           {formatValue(cell.value, row.unit)}
                           {!cell.baseline && (
-                            <span className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}>
+                            <span
+                              className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}
+                              title={deltaAbsenceText(cell.deltaAbsence) || undefined}
+                            >
                               {formatPercentDelta(cell.deltaPct)}
+                              {cell.deltaAbsence && (
+                                <span className="sr-only">
+                                  {` no change shown, because ${deltaAbsenceText(cell.deltaAbsence)}`}
+                                </span>
+                              )}
                             </span>
                           )}
                         </td>

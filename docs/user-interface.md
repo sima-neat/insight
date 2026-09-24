@@ -149,7 +149,16 @@ While the tab is open and visible, Insight polls Sentinel's latest sample every 
 
 A trace records every sample around a workload. Name it, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. Saved runs are listed with their state, start time, duration, and sample count, and survive a daemon restart. Open a run to see it summarised: every metric it recorded, with the label, unit, group and thresholds that were in force at the time, and the smallest, largest and mean value over that run's samples. A metric that crossed its warning or critical threshold at any point in the run is marked. The run's metadata — its name, note, sample interval, Sentinel version, and the board it ran on — sits below that.
 
-Select two to eight runs and **Compare selected** to put the metrics in rows and the runs in columns. Sentinel measures the comparison against one baseline run, which is marked in the header; every other cell shows that metric's mean over the run with its percentage change against the baseline beside it. A metric the baseline never measured has nothing to compare against and shows “—”, and a change too small to print shows as “<0.01%” rather than as no change at all. Run totals such as duration and energy have no percentage because Sentinel reports none for them.
+Select two to eight runs and **Compare selected** to put the metrics in rows and the runs in columns. Sentinel measures the comparison against one baseline run, which is marked in the header; every other cell shows that metric's mean over the run with its percentage change against the baseline beside it. A change too small to print shows as “<0.01%” rather than as no change at all.
+
+Where a cell shows “—” in place of a change, Sentinel withheld one, and the table says which of its reasons applies rather than leaving one em dash to stand for all of them. A list under the table counts each reason, and every “—” carries the same sentence for a pointer or a screen reader. The reasons are:
+
+- **Sentinel publishes no change for it.** Run totals — duration, energy and sample count — are reported per run without a percentage.
+- **The baseline measured 0, and there is no percentage change from 0.** The baseline did measure the metric; there is simply no percentage from zero. This is common for per-core CPU usage on an idle baseline, and it is where the change is often largest: a core that averaged 0% in the baseline and 5.9% in the other run shows “—” here, so read the two values rather than the change.
+- **The baseline run has no value for that metric.** The only case in which the baseline never measured it.
+- **This run has no value for that metric.** Where a run was listed but Sentinel summarised nothing for it, the whole column reads this way and is called out above the table.
+
+Run totals are shown in the units the rest of the view uses: a duration Sentinel reports in milliseconds reads in seconds, and energy in joules.
 
 ### Values from a board you have left
 
