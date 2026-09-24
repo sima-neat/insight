@@ -414,7 +414,7 @@ export function failureNotice(error, generation = null, { action = 'read' } = {}
 
 export function metricsModel(payload) {
   const groups = (payload?.groups || []).map((group) => ({
-    name: group?.name || 'Other',
+    name: group?.name || OTHER_GROUP,
     metrics: (group?.metrics || []).filter((metric) => metric && metric.key)
   })).filter((group) => group.metrics.length)
   const byKey = new Map()
@@ -547,14 +547,12 @@ export function thermalSummary(groups) {
     const [only] = values
     return values.size === 1 && only !== null ? only : null
   }
-  const warn = shared('warn')
-  const critical = shared('critical')
   const unit = metrics[0]?.unit ?? 'C'
   return {
     count: metrics.length,
     reporting: metrics.filter((metric) => isNumber(metric.value)).length,
     hottest,
-    limits: thresholdText({ warn, critical, unit })
+    limits: thresholdText({ warn: shared('warn'), critical: shared('critical'), unit })
   }
 }
 
@@ -610,6 +608,7 @@ export function thresholdText(metric) {
 export function traceModel(payload) {
   const body = payload?.sentinel || {}
   const trace = body.trace || null
+  const tags = trace ? pick(trace, RUN_FIELDS.tags) : null
   return {
     // Kept so a trace read before a board switch can be labelled with the board it came from.
     payload: payload || null,
@@ -619,7 +618,7 @@ export function traceModel(payload) {
     startedAt: trace ? pick(trace, RUN_FIELDS.startedAt) : null,
     // What the trace was started with, shown while it records.
     note: trace ? String(pick(trace, RUN_FIELDS.note) || '') : '',
-    tags: trace && Array.isArray(pick(trace, RUN_FIELDS.tags)) ? pick(trace, RUN_FIELDS.tags).map(String) : [],
+    tags: Array.isArray(tags) ? tags.map(String) : [],
     summary: body.summary || null,
     facts: factRows(body.summary, [])
   }
@@ -1333,6 +1332,11 @@ function usageDetail(usage) {
   return used && total ? `${used} of ${total}` : ''
 }
 
+function usageRow(key, label, usage, detail) {
+  const percent = percentOf(usage.percent)
+  return { key, label, percent, value: percent, unit: '%', detail }
+}
+
 /**
  * The host snapshot as rows the panel renders: a percentage where the endpoint gives
  * one, the bytes behind it, and `null` - never zero - where it gives nothing. A remote
@@ -1348,22 +1352,8 @@ export function hostMetricsModel(payload) {
   const offline = remote && cpu === null && !isNumber(memory.percent)
   const rows = [
     { key: 'cpu_load', label: 'CPU load', percent: cpu, value: cpu, unit: '%', detail: '' },
-    {
-      key: 'memory',
-      label: 'Memory',
-      percent: percentOf(memory.percent),
-      value: percentOf(memory.percent),
-      unit: '%',
-      detail: usageDetail(memory)
-    },
-    {
-      key: 'disk',
-      label: 'Disk',
-      percent: percentOf(disk.percent),
-      value: percentOf(disk.percent),
-      unit: '%',
-      detail: [usageDetail(disk), disk.mount].filter(Boolean).join(' · ')
-    }
+    usageRow('memory', 'Memory', memory, usageDetail(memory)),
+    usageRow('disk', 'Disk', disk, [usageDetail(disk), disk.mount].filter(Boolean).join(' · '))
   ]
   // The backend only reads a temperature on a Davinci board, and sends 0 for a remote
   // DevKit it cannot reach; either way an absent reading is left out rather than shown.
