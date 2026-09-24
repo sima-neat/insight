@@ -4,6 +4,7 @@ import { auxiliaryRendererRegistry, shouldAnimateAuxiliaryView } from "./auxilia
 import "./blazePose3DRenderer.js";
 
 const VALID_MODES = new Set(["compact", "collapsed", "expanded", "hidden"]);
+const DEFAULT_RENDERER = "blazepose-3d";
 const drawWarnings = new Set();
 
 function preferenceKey(channelIndex) {
@@ -48,6 +49,77 @@ function saveRendererPreference(channelIndex, view, settings) {
   } catch (_err) {
     // Renderer preferences are optional; private browsing can reject storage.
   }
+}
+
+function resolveRendererSettings(channelIndex, renderer = DEFAULT_RENDERER) {
+  const resolved = window.viewerSettingsApi?.resolveAuxiliarySettings?.(channelIndex, renderer);
+  return {
+    enabled: resolved?.enabled !== false,
+    panelMode: VALID_MODES.has(resolved?.panelMode) && resolved.panelMode !== "hidden"
+      ? resolved.panelMode
+      : "compact",
+    ...(resolved || {}),
+  };
+}
+
+function hasExplicitRendererSettings(channelIndex, renderer = DEFAULT_RENDERER) {
+  try {
+    return ["global", `channel_${channelIndex}`].some((scope) => {
+      const raw = JSON.parse(window.localStorage.getItem(`viewerSettings_${scope}`) || "null");
+      return raw?.auxiliary?.[renderer] && typeof raw.auxiliary[renderer] === "object";
+    });
+  } catch (_err) {
+    return false;
+  }
+}
+
+function displayMode(settings) {
+  return settings.enabled === false ? "hidden" : settings.panelMode;
+}
+
+function rendererForSelection(selectedId, payloads, knownViews) {
+  return payloads.get(selectedId)?.renderer
+    ?? knownViews.find((view) => view.id === selectedId)?.renderer
+    ?? knownViews[0]?.renderer
+    ?? DEFAULT_RENDERER;
+}
+
+function settingsForSession(channelIndex, view) {
+  const stored = loadRendererPreference(channelIndex, view);
+  if (view.renderer !== DEFAULT_RENDERER || !hasExplicitRendererSettings(channelIndex, view.renderer)) {
+    return stored;
+  }
+  const configured = resolveRendererSettings(channelIndex, view.renderer);
+  return {
+    ...(stored || {}),
+    showReferenceCube: configured.showReferenceBox !== false,
+    yaw: configured.yawDegrees * Math.PI / 180,
+    pitch: configured.pitchDegrees * Math.PI / 180,
+  };
+}
+
+function rendererSettingsPatch(settings) {
+  return {
+    showReferenceCube: settings.showReferenceBox !== false,
+    yaw: settings.yawDegrees * Math.PI / 180,
+    pitch: settings.pitchDegrees * Math.PI / 180,
+  };
+}
+
+function saveSessionToViewerSettings(channelIndex, view, settings) {
+  const settingsApi = window.viewerSettingsApi;
+  if (view.renderer !== DEFAULT_RENDERER || !settingsApi?.writeScopeAuxiliarySettings) return;
+  const targetScope = `channel_${channelIndex}`;
+  const current = resolveRendererSettings(channelIndex, view.renderer);
+  settingsApi.writeScopeAuxiliarySettings(targetScope, view.renderer, {
+    ...current,
+    showReferenceBox: settings.showReferenceCube !== false,
+    yawDegrees: Math.round(settings.yaw * 180 / Math.PI),
+    pitchDegrees: Math.round(settings.pitch * 180 / Math.PI),
+  });
+  window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
+    detail: { scope: targetScope, auxiliaryRenderer: view.renderer },
+  }));
 }
 
 function descriptorSignature(views) {
@@ -123,7 +195,14 @@ function RendererControls({ controls, onControl }) {
 
 const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref) {
   const initialPreference = useRef(loadPreference(channelIndex));
-  const [mode, setMode] = useState(initialPreference.current.mode);
+  const initialRendererSettings = useRef(resolveRendererSettings(channelIndex));
+  const [mode, setMode] = useState(() => {
+    const resolvedMode = displayMode(initialRendererSettings.current);
+    const stored = initialPreference.current.mode;
+    return !hasExplicitRendererSettings(channelIndex) && resolvedMode === "compact" && stored !== "compact"
+      ? stored
+      : resolvedMode;
+  });
   const [knownViews, setKnownViews] = useState([]);
   const [selectedId, setSelectedId] = useState(initialPreference.current.selectedId);
   const [rendererControls, setRendererControls] = useState([]);
@@ -163,9 +242,10 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     let session;
     if (typeof renderer.createSession === "function") {
       session = renderer.createSession({
-        initialSettings: loadRendererPreference(channelIndex, view),
+        initialSettings: settingsForSession(channelIndex, view),
         onSettingsChange(settings) {
           saveRendererPreference(channelIndex, view, settings);
+          saveSessionToViewerSettings(channelIndex, view, settings);
           if (selectedIdRef.current === view.id) {
             updateControls(sessionsRef.current.get(view.id)?.session);
           }
@@ -213,6 +293,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         frameId: current.frameId,
         rtpTimestamp: current.rtpTimestamp,
         animationTimeMs,
+        settings: resolveRendererSettings(channelIndex, current.renderer),
       });
     } catch (error) {
       const warningKey = `${channelIndex}:${current.renderer}`;
@@ -253,6 +334,9 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         if (!selectedIdRef.current || !byId.has(selectedIdRef.current)) {
           selectedIdRef.current = views[0].id;
           setSelectedId(views[0].id);
+          const nextMode = displayMode(resolveRendererSettings(channelIndex, views[0].renderer));
+          modeRef.current = nextMode;
+          setMode(nextMode);
         }
       }
       scheduleDraw();
@@ -275,6 +359,33 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     savePreference(channelIndex, mode, selectedId);
     scheduleDraw();
   }, [channelIndex, mode, scheduleDraw, selectedId]);
+
+  useEffect(() => {
+    const refreshSettings = (event) => {
+      const changedScope = event?.detail?.scope;
+      if (changedScope && changedScope !== "global" && changedScope !== `channel_${channelIndex}`) return;
+      const renderer = rendererForSelection(
+        selectedIdRef.current,
+        payloadsRef.current,
+        knownViewsRef.current,
+      );
+      const changedRenderer = event?.detail?.auxiliaryRenderer;
+      if (changedRenderer && changedRenderer !== renderer) return;
+
+      const resolved = resolveRendererSettings(channelIndex, renderer);
+      const nextMode = displayMode(resolved);
+      modeRef.current = nextMode;
+      setMode(nextMode);
+      const current = sessionsRef.current.get(selectedIdRef.current)?.session;
+      if (renderer === DEFAULT_RENDERER) {
+        current?.applySettings?.(rendererSettingsPatch(resolved));
+      }
+      updateControls(current);
+      scheduleDraw();
+    };
+    window.addEventListener("viewer-settings-changed", refreshSettings);
+    return () => window.removeEventListener("viewer-settings-changed", refreshSettings);
+  }, [channelIndex, scheduleDraw, updateControls]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -333,6 +444,20 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   };
   const setPanelMode = (nextMode) => {
     if (!VALID_MODES.has(nextMode)) return;
+    const renderer = selected?.renderer ?? DEFAULT_RENDERER;
+    const settingsApi = window.viewerSettingsApi;
+    if (settingsApi?.writeScopeAuxiliarySettings) {
+      const targetScope = `channel_${channelIndex}`;
+      const current = resolveRendererSettings(channelIndex, renderer);
+      settingsApi.writeScopeAuxiliarySettings(targetScope, renderer, {
+        ...current,
+        enabled: nextMode !== "hidden",
+        panelMode: nextMode === "hidden" ? current.panelMode : nextMode,
+      });
+      window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
+        detail: { scope: targetScope, auxiliaryRenderer: renderer },
+      }));
+    }
     modeRef.current = nextMode;
     if (nextMode === "collapsed" || nextMode === "hidden") {
       if (drawFrameRef.current != null) {

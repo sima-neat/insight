@@ -1,5 +1,6 @@
 (() => {
-  const SETTINGS_VERSION = 3;
+  const SETTINGS_VERSION = 4;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, SETTINGS_VERSION]);
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -35,6 +36,16 @@
     showRoi: true,
     applyRoiFiltering: true
   };
+  const AUXILIARY_DEFAULTS = {
+    "blazepose-3d": {
+      enabled: true,
+      panelMode: "compact",
+      yawDegrees: -45,
+      pitchDegrees: 20,
+      showReferenceBox: true
+    }
+  };
+  const PANEL_MODES = new Set(["compact", "collapsed", "expanded"]);
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -156,6 +167,46 @@
     return type;
   }
 
+  function normalizeAuxiliarySettings(renderer, rawSettings = {}, fillDefaults = true) {
+    const defaults = AUXILIARY_DEFAULTS[renderer] || {
+      enabled: true,
+      panelMode: "compact"
+    };
+    const settings = fillDefaults ? clone(defaults) : {};
+    if (!rawSettings || typeof rawSettings !== "object") return settings;
+
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "enabled")) {
+      settings.enabled = rawSettings.enabled !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "panelMode")) {
+      settings.panelMode = PANEL_MODES.has(rawSettings.panelMode) ? rawSettings.panelMode : defaults.panelMode;
+    }
+    if (renderer === "blazepose-3d") {
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "yawDegrees")) {
+        settings.yawDegrees = Math.round(clampNumber(rawSettings.yawDegrees, -180, 180, defaults.yawDegrees));
+      }
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "pitchDegrees")) {
+        settings.pitchDegrees = Math.round(clampNumber(rawSettings.pitchDegrees, -60, 60, defaults.pitchDegrees));
+      }
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "showReferenceBox")) {
+        settings.showReferenceBox = rawSettings.showReferenceBox !== false;
+      }
+    }
+    return settings;
+  }
+
+  function normalizeAuxiliaryMap(rawAuxiliary = {}, fillDefaults = true) {
+    const auxiliary = {};
+    const renderers = new Set([
+      ...(fillDefaults ? Object.keys(AUXILIARY_DEFAULTS) : []),
+      ...Object.keys(rawAuxiliary && typeof rawAuxiliary === "object" ? rawAuxiliary : {})
+    ]);
+    renderers.forEach((renderer) => {
+      auxiliary[renderer] = normalizeAuxiliarySettings(renderer, rawAuxiliary?.[renderer], fillDefaults);
+    });
+    return auxiliary;
+  }
+
   function readRawSettings(scope) {
     try {
       const raw = window.localStorage.getItem(`viewerSettings_${scope}`);
@@ -169,7 +220,8 @@
     const settings = {
       version: SETTINGS_VERSION,
       general: clone(GENERAL_DEFAULTS),
-      types: {}
+      types: {},
+      auxiliary: normalizeAuxiliaryMap()
     };
     METADATA_TYPES.forEach((type) => {
       settings.types[type.value] = clone(TYPE_DEFAULTS[type.value] || {});
@@ -177,11 +229,12 @@
 
     if (!rawSettings || typeof rawSettings !== "object") return settings;
 
-    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
+    if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
       settings.general = normalizeGeneral(rawSettings.general);
       METADATA_TYPES.forEach((type) => {
         settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value]);
       });
+      settings.auxiliary = normalizeAuxiliaryMap(rawSettings.auxiliary);
       return settings;
     }
 
@@ -206,10 +259,10 @@
   }
 
   function settingsOverrides(rawSettings) {
-    const overrides = { general: {}, types: {} };
+    const overrides = { general: {}, types: {}, auxiliary: {} };
     if (!rawSettings || typeof rawSettings !== "object") return overrides;
 
-    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
+    if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
       overrides.general = normalizeGeneral(rawSettings.general, false);
       METADATA_TYPES.forEach((type) => {
         const rawType = rawSettings.types?.[type.value];
@@ -217,6 +270,7 @@
           overrides.types[type.value] = normalizeTypeSettings(type.value, rawType, false);
         }
       });
+      overrides.auxiliary = normalizeAuxiliaryMap(rawSettings.auxiliary, false);
       return overrides;
     }
 
@@ -311,6 +365,17 @@
     };
   }
 
+  function resolveAuxiliarySettings(channelIndex, renderer) {
+    const defaults = normalizeAuxiliarySettings(renderer);
+    const globalOverrides = settingsOverrides(readRawSettings("global"));
+    const channelOverrides = settingsOverrides(readRawSettings(`channel_${channelIndex}`));
+    return {
+      ...defaults,
+      ...(globalOverrides.auxiliary[renderer] || {}),
+      ...(channelOverrides.auxiliary[renderer] || {})
+    };
+  }
+
   function readScopeSettings(scope) {
     return normalizeSettings(readRawSettings(scope));
   }
@@ -321,17 +386,44 @@
     return normalized;
   }
 
+  function writeScopeAuxiliarySettings(scope, renderer, auxiliarySettings) {
+    const raw = readRawSettings(scope);
+    let next;
+    if (!raw || typeof raw !== "object") {
+      next = { version: SETTINGS_VERSION, auxiliary: {} };
+    } else if (SUPPORTED_SETTINGS_VERSIONS.has(raw.version)) {
+      next = clone(raw);
+      next.version = SETTINGS_VERSION;
+      next.auxiliary = raw.auxiliary && typeof raw.auxiliary === "object" ? clone(raw.auxiliary) : {};
+    } else {
+      next = normalizeSettings(raw);
+    }
+    const existing = next.auxiliary[renderer] && typeof next.auxiliary[renderer] === "object"
+      ? next.auxiliary[renderer]
+      : {};
+    next.auxiliary[renderer] = normalizeAuxiliarySettings(
+      renderer,
+      { ...existing, ...auxiliarySettings },
+    );
+    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(next));
+    return clone(next.auxiliary[renderer]);
+  }
+
   window.viewerSettingsApi = {
     version: SETTINGS_VERSION,
     metadataTypes: METADATA_TYPES,
     defaults: {
       general: GENERAL_DEFAULTS,
-      types: TYPE_DEFAULTS
+      types: TYPE_DEFAULTS,
+      auxiliary: AUXILIARY_DEFAULTS
     },
     readScopeSettings,
     writeScopeSettings,
+    writeScopeAuxiliarySettings,
     normalizeSettings,
-    resolveTypeSettings
+    resolveTypeSettings,
+    resolveAuxiliarySettings
   };
   window.resolveTypeSettings = resolveTypeSettings;
+  window.resolveAuxiliarySettings = resolveAuxiliarySettings;
 })();

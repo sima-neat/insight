@@ -38,7 +38,7 @@ test("viewer synchronization settings preserve configured values", () => {
   const api = loadSettingsApi();
 
   const settings = api.normalizeSettings({
-    version: 3,
+    version: 4,
     general: { videoSyncBufferMs: 700, metadataRetentionMs: 2500 },
   });
 
@@ -56,10 +56,98 @@ test("version two settings migrate without retaining overlay delay", () => {
   });
 
   const settings = api.readScopeSettings("global");
-  assert.equal(settings.version, 3);
+  assert.equal(settings.version, 4);
   assert.equal(settings.general.videoSyncBufferMs, 350);
   assert.equal(settings.general.metadataRetentionMs, 0);
   assert.equal(settings.general.showRoi, false);
   assert.equal(settings.types["object-detection"].confidenceThreshold, 0.5);
   assert.equal("metadataDelay" in settings.general, false);
+});
+
+test("BlazePose 3D settings have visible reference-box defaults", () => {
+  const api = loadSettingsApi();
+
+  assert.deepEqual(
+    { ...api.defaults.auxiliary["blazepose-3d"] },
+    {
+      enabled: true,
+      panelMode: "compact",
+      yawDegrees: -45,
+      pitchDegrees: 20,
+      showReferenceBox: true,
+    },
+  );
+});
+
+test("BlazePose 3D settings resolve independently for each channel", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 4,
+      auxiliary: {
+        "blazepose-3d": { yawDegrees: -20, pitchDegrees: 10, panelMode: "compact" },
+      },
+    }),
+    viewerSettings_channel_2: JSON.stringify({
+      version: 4,
+      auxiliary: {
+        "blazepose-3d": { enabled: false, yawDegrees: 75, panelMode: "expanded" },
+      },
+    }),
+  });
+
+  assert.deepEqual(
+    { ...api.resolveAuxiliarySettings(1, "blazepose-3d") },
+    {
+      enabled: true,
+      panelMode: "compact",
+      yawDegrees: -20,
+      pitchDegrees: 10,
+      showReferenceBox: true,
+    },
+  );
+  assert.deepEqual(
+    { ...api.resolveAuxiliarySettings(2, "blazepose-3d") },
+    {
+      enabled: false,
+      panelMode: "expanded",
+      yawDegrees: 75,
+      pitchDegrees: 10,
+      showReferenceBox: true,
+    },
+  );
+});
+
+test("BlazePose 3D settings clamp camera angles and reject invalid panel modes", () => {
+  const api = loadSettingsApi();
+  const settings = api.normalizeSettings({
+    version: 4,
+    auxiliary: {
+      "blazepose-3d": {
+        panelMode: "floating",
+        yawDegrees: 999,
+        pitchDegrees: -999,
+      },
+    },
+  });
+
+  assert.equal(settings.auxiliary["blazepose-3d"].panelMode, "compact");
+  assert.equal(settings.auxiliary["blazepose-3d"].yawDegrees, 180);
+  assert.equal(settings.auxiliary["blazepose-3d"].pitchDegrees, -60);
+});
+
+test("panel shortcuts do not create unrelated channel overrides", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 4,
+      types: { "object-detection": { confidenceThreshold: 0.8 } },
+    }),
+  });
+
+  api.writeScopeAuxiliarySettings("channel_3", "blazepose-3d", {
+    enabled: true,
+    panelMode: "expanded",
+  });
+
+  assert.equal(api.resolveTypeSettings(3, "object-detection").type.confidenceThreshold, 0.8);
+  assert.equal(api.resolveAuxiliarySettings(3, "blazepose-3d").panelMode, "expanded");
 });

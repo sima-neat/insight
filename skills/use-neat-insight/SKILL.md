@@ -169,6 +169,10 @@ and source PTS identical to the corresponding video and overlay messages. The
 built-in `blazepose-3d` renderer expects `payload.poses[].keypoints[]` with named
 finite `x`, `y`, and `z` world coordinates. Unknown versions/renderers are
 ignored and warned once in the browser console.
+Viewer Configuration has a **3D Pose** tab. Open it globally to set defaults or
+from a tile menu to control that channel's panel visibility, panel size, camera
+yaw/pitch, and 3D reference cube independently. Cube and camera changes from the
+panel controls stay synchronized with the corresponding channel configuration.
 The BlazePose panel can show a labeled reference cube and orbit around the world
 landmarks. Its panel-local controls toggle the cube and orbit, set orbit speed,
 pause or resume, and reset the camera; dragging the canvas pauses orbit for
