@@ -70,6 +70,13 @@ def _trace_request(body) -> dict:
             "A trace needs a name of 1 to {} characters.".format(NAME_LIMIT),
             "Send a unique name; Sentinel rejects a name another run already uses.",
         )
+    # /api/sentinel/compare takes its runs as one comma-separated list, so a run named
+    # "before,after" could be recorded but never compared: it always reads as two runs.
+    if "," in name:
+        raise _invalid(
+            "A trace name cannot contain a comma.",
+            "Runs are compared by a comma-separated list of names; use another separator such as `-`.",
+        )
     note = body.get("note")
     if note is not None and (not isinstance(note, str) or len(note) > NOTE_LIMIT):
         raise _invalid(

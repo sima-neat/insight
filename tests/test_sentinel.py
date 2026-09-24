@@ -717,6 +717,18 @@ class SentinelApiTests(_ApiCase):
                 self.assertEqual(response.get_json()["code"], "invalid_request")
         self.assertEqual(self.transport.calls, [])
 
+    def test_a_trace_name_with_a_comma_is_refused_before_the_board_is_touched(self):
+        # /api/sentinel/compare splits its runs on commas, so a run named "before,after"
+        # could be recorded but never compared: it always reads as two runs.
+        for name in ("before,after", "a, b", ","):
+            with self.subTest(name=name):
+                response = self.post("/api/sentinel/traces", json={"name": name})
+                self.assertEqual(response.status_code, 400)
+                body = response.get_json()
+                self.assertEqual(body["code"], "invalid_request")
+                self.assertIn("comma", body["error"])
+        self.assertEqual(self.transport.calls, [])
+
     def test_a_conflicting_trace_keeps_the_daemons_conflict(self):
         self.transport.answer("POST", "/v1/traces", 409, {"error": "a trace is already active"})
         response = self.post("/api/sentinel/traces", json={"name": "baseline"})

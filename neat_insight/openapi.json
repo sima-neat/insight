@@ -852,7 +852,7 @@
       "post": {
         "tags": ["Sentinel"],
         "summary": "Start a named trace",
-        "description": "Starts recording a named trace around a workload. Only one trace can be active and names must be unique, so a second start returns `409 trace_conflict` with Sentinel's own message. The request is validated before it reaches the board: a missing or empty name, an over-long note, or tags that are not a list of non-empty strings return `400 invalid_request` without touching it.",
+        "description": "Starts recording a named trace around a workload. Only one trace can be active and names must be unique, so a second start returns `409 trace_conflict` with Sentinel's own message. The request is validated before it reaches the board: a missing or empty name, a name containing a comma, an over-long note, or tags that are not a list of non-empty strings return `400 invalid_request` without touching it.",
         "operationId": "startSentinelTrace",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceRequest"}, "example": {"name": "baseline", "note": "before optimization", "tags": ["compiler-v1"]}}}},
         "responses": {
@@ -1599,7 +1599,7 @@
         "type": "object",
         "required": ["name"],
         "properties": {
-          "name": {"type": "string", "minLength": 1, "maxLength": 128, "description": "Unique trace name; Sentinel rejects a name a run already uses."},
+          "name": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^,]*$", "description": "Unique trace name, without a comma (`/api/sentinel/compare` separates runs with commas); Sentinel rejects a name a run already uses."},
           "note": {"type": ["string", "null"], "maxLength": 512},
           "tags": {"type": ["array", "null"], "maxItems": 16, "items": {"type": "string", "minLength": 1}}
         }
