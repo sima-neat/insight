@@ -65,6 +65,9 @@ import {
 import { ChipTabs, Facts, FailureCallout, KeyValueTable, MetricCard, Sparkline } from './stats/ui.jsx'
 
 /** Hands the browser a file to save. The object URL is released once the click has used it. */
+// How often the saved-runs list is re-read while the Stats tab is visible.
+const RUNS_POLL_MS = 30000
+
 function downloadText(filename, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }))
   const link = document.createElement('a')
@@ -185,7 +188,7 @@ function MetricsPanel({ model, live, polling, paused, stale, error, busy, now, o
           <p className="section-note">Sentinel live readings from the board.</p>
         </div>
         <div className="periph-actions">
-          <button type="button" className="btn-ghost" onClick={onRefresh} disabled={busy}>Refresh now</button>
+          {/* Live metrics poll on their own; pausing is the only control they need. */}
           <button type="button" className="btn-tonal" onClick={onToggleLive}>
             {live ? 'Pause updates' : 'Resume updates'}
           </button>
@@ -303,11 +306,13 @@ function TraceBar({ bar, busy, form, extras, extrasShown, onToggleExtras, onForm
   return (
     <form id="stats-trace-form" className="stats-trace-bar" onSubmit={onStart} aria-label="Start a trace">
       <label className="stats-trace-name">
-        <span>Trace name</span>
+        {/* One label, inside the box: a visible "Trace name" beside a "baseline" example said it twice.
+            Screen readers still get the name from the hidden text, not from the placeholder. */}
+        <span className="sr-only">Trace name</span>
         <input
           value={form.name}
           onChange={(event) => onFormChange({ ...form, name: event.target.value })}
-          placeholder="baseline"
+          placeholder="Trace name (e.g. baseline)"
           autoComplete="off"
           spellCheck={false}
           required
@@ -453,7 +458,6 @@ export function RunsPanel({
           onStart={onStart}
           onStop={onStop}
         />
-        <button type="button" className="btn-ghost stats-runs-refresh" onClick={onRefresh} disabled={busy}>Refresh</button>
       </div>
       <TraceDetails
         bar={bar}
@@ -801,22 +805,22 @@ export function RunsPanel({
  * which is a different question from what the board is doing, and the two must not be
  * read as one set of numbers. Its readings are always on screen, as one short row.
  */
-function HostPanel({ model, error, updatedAt, busy, now, onRefresh }) {
+function HostPanel({ model, error, updatedAt, busy, now }) {
   // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
   const notice = hostNotice(model, updatedAt > 0)
   return (
     <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
       <div className="stats-host-head">
         <h2 id="stats-host-title">Insight host</h2>
-        <span className="hint">{model.sourceLabel}, not the board.</span>
-        {updatedAt > 0 && (
-          <span className="hint">
-            Read <time dateTime={new Date(updatedAt).toISOString()}>{formatRelativeTime(new Date(updatedAt).toISOString(), now)}</time>.
-          </span>
-        )}
-        <button type="button" className="btn-ghost stats-host-refresh" onClick={onRefresh} disabled={busy}>
-          {busy ? 'Reading…' : 'Refresh'}
-        </button>
+        {/* One run of text: the flex gap between two spans left a hole mid-sentence. */}
+        <span className="hint">
+          {model.sourceLabel}, not the board.
+          {updatedAt > 0 && (
+            <>
+              {' '}Read <time dateTime={new Date(updatedAt).toISOString()}>{formatRelativeTime(new Date(updatedAt).toISOString(), now)}</time>.
+            </>
+          )}
+        </span>
       </div>
 
       <FailureCallout notice={error} />
@@ -1231,6 +1235,19 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     return () => clearInterval(timer)
   }, [])
 
+  // The run list keeps itself current, so the panel needs no Refresh button. Insight's own traces
+  // already re-read it when they start and stop; this catches runs recorded or deleted elsewhere
+  // (another Insight, the Sentinel CLI). Paused while the tab is hidden: each read runs on the board.
+  const sentinelAvailable = Boolean(state?.available)
+  useEffect(() => {
+    if (!sentinelAvailable) return undefined
+    const timer = setInterval(() => {
+      if (!document.hidden) loadRuns()
+    }, RUNS_POLL_MS)
+    return () => clearInterval(timer)
+  }, [sentinelAvailable, generation])
+
+
   const boardProblem = boardError || (stateError?.board ? stateError : null)
   const sentinelProblem = stateError && !stateError.board ? stateError : null
 
@@ -1344,7 +1361,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         updatedAt={hostReadAt}
         busy={hostBusy}
         now={now}
-        onRefresh={loadHost}
       />
     </div>
   )
