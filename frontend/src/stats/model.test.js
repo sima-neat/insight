@@ -7,6 +7,7 @@ import {
   HOST_POLL_MS,
   MAX_COMPARE_RUNS,
   MAX_POLL_MS,
+  NAME_LIMIT,
   POLL_MS,
   compareHint,
   compareLegend,
@@ -45,6 +46,7 @@ import {
   staleNote,
   statusInfo,
   statusOf,
+  telemetryVisible,
   thresholdText,
   toggleSelection,
   traceModel,
@@ -898,4 +900,113 @@ test('an install that is refused or fails is titled as an install, not as a read
   // The same code read from the board keeps the reading title and the reading fix.
   assert.equal(failureNotice({ code: 'timeout', error: 'The board took too long to answer.' }).title, 'The board took too long to answer')
   assert.equal(failureNotice({ code: 'timeout', error: 'x' }).action, 'read')
+})
+
+test('a board that goes away mid-view keeps what it already gave, and says why', () => {
+  // The poll fails, /api/sentinel fails behind it, and the daemon state is set back to
+  // null. Hiding the panels on that alone drops the samples, the trace and the runs that
+  // were on screen a second ago — and the failure's own sentence, which lives in them.
+  const info = daemonInfo(null)
+  assert.equal(info.available, false)
+  assert.equal(telemetryVisible(info, { metrics: METRICS, traces: null, runs: null }), true)
+  assert.equal(telemetryVisible(info, { metrics: null, traces: { sentinel: {} }, runs: null }), true)
+  assert.equal(telemetryVisible(info, { metrics: null, traces: null, runs: { sentinel: { runs: [] } } }), true)
+
+  // Nothing read yet and nothing answering: there is nothing to keep.
+  assert.equal(telemetryVisible(info, { metrics: null, traces: null, runs: null }), false)
+  assert.equal(telemetryVisible(info, {}), false)
+  // A working daemon shows the panels whether or not anything has been read.
+  assert.equal(telemetryVisible({ available: true }, {}), true)
+
+  // The failure the panels then carry is the board's, and the Board panel owns the fix.
+  const gone = failureNotice({ code: 'unreachable', error: 'The board could not be reached.' })
+  assert.equal(gone.board, true)
+  assert.equal(gone.retryable, true)
+})
+
+test('a run of one sample is a moment, not a range of no length', () => {
+  const one = {
+    generation: 1,
+    sentinel: {
+      metadata: { id: 'r1', name: 'one-shot' },
+      metrics: [{ key: 'power_current_watts', label: 'Current board power', unit: 'W', group: 'Power', warn: 20, critical: 30 }],
+      samples: [{ timestamp: '2026-09-23T15:27:12.952702307Z', values: { power_current_watts: 7.7 } }]
+    }
+  }
+  const run = runDetail(one)
+  assert.equal(run.sampleCount, 1)
+  assert.equal(run.single, true)
+  assert.equal(run.sampledAt, '2026-09-23T15:27:12.952702307Z')
+  // Mean, minimum and maximum are all that one value, and it is ranked on its own.
+  assert.deepEqual(
+    [run.metrics[0].mean, run.metrics[0].minimum, run.metrics[0].maximum, run.metrics[0].status],
+    [7.7, 7.7, 7.7, 'ok']
+  )
+  // One point draws no sparkline rather than a flat line implying a measured trend.
+  assert.equal(sparkline([7.7]), null)
+
+  // The real four-sample run from the board is a range, and keeps both ends of it.
+  const many = runDetail({ sentinel: RUN })
+  assert.equal(many.single, false)
+  assert.equal(many.sampledAt, null)
+  assert.ok(many.firstSampleAt && many.lastSampleAt && many.firstSampleAt !== many.lastSampleAt)
+
+  // A run with no samples at all is neither a moment nor a range.
+  const none = runDetail({ sentinel: { metadata: { id: 'r0' }, metrics: [], samples: [] } })
+  assert.equal(none.sampleCount, 0)
+  assert.equal(none.single, false)
+  assert.equal(none.sampledAt, null)
+})
+
+test('a metric only one run of a comparison measured is placed on the right side', () => {
+  // Two runs where each measured something the other did not. Both directions have to be
+  // told apart: a missing baseline value and a missing value in this run are different
+  // statements, and neither is "Sentinel publishes no change for it".
+  const table = compareTable({
+    sentinel: {
+      baseline_id: 'base',
+      runs: [{ id: 'base', name: 'baseline' }, { id: 'other', name: 'after' }],
+      summaries: {
+        base: { metrics: { shared: { mean: 10 }, baseline_only: { mean: 4 } } },
+        other: { metrics: { shared: { mean: 12 }, other_only: { mean: 9 } } }
+      },
+      baseline_deltas_pct: { other: { shared: 20, other_only: null } }
+    }
+  })
+  const rowOf = (key) => table.rows.find((row) => row.key === key)
+  assert.deepEqual(table.rows.map((row) => row.key), ['baseline_only', 'other_only', 'shared'])
+
+  // Measured only by the baseline: the other column has no value, so no change either.
+  assert.deepEqual(rowOf('baseline_only').cells.map((cell) => [cell.value, cell.deltaPct, cell.deltaAbsence]),
+    [[4, null, null], [null, null, 'no_value']])
+  // Measured only by the other run: there is a value, but nothing to measure it against.
+  assert.deepEqual(rowOf('other_only').cells.map((cell) => [cell.value, cell.deltaPct, cell.deltaAbsence]),
+    [[null, null, null], [9, null, 'no_baseline']])
+  // Measured by both: the daemon's change is shown and no reason is needed.
+  assert.deepEqual(rowOf('shared').cells.map((cell) => [cell.value, cell.deltaPct, cell.deltaAbsence]),
+    [[10, null, null], [12, 20, null]])
+
+  assert.deepEqual(compareLegend(table), [
+    '1 value shows “—” instead of a change because the baseline run has no value for that metric.',
+    '1 value shows “—” instead of a change because this run has no value for that metric.'
+  ])
+})
+
+test('a run name long enough to break the tables is carried intact and wrapped', () => {
+  // Sentinel keeps a name of up to 128 characters, and nothing makes it breakable text.
+  const name = 'a'.repeat(NAME_LIMIT)
+  const runs = runList({ sentinel: { runs: [{ id: 'id-1', name }, { id: 'id-2', name: 'short' }] } })
+  assert.equal(runs[0].label, name)
+  assert.equal(runs[0].ref, name, 'the name is the reference, so it must not be shortened')
+  assert.equal(validateTrace({ name }).body.name, name)
+  assert.match(validateTrace({ name: `${name}a` }).error, /at most 128 characters/)
+
+  // It survives the compare query and the selection whole.
+  assert.equal(compareQuery([name, 'short']), `/api/sentinel/compare?runs=${encodeURIComponent(`${name},short`)}`)
+  assert.deepEqual(missingSelection([name], runs), [])
+  assert.deepEqual(uncomparableRefs([name]), [])
+
+  // The cells that carry it are header cells, which do not wrap the way `td` already does.
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+  assert.match(css, /\.stats-run-table tbody th,\n\.stats-compare-table thead th \{\n\s*overflow-wrap: anywhere;/)
 })

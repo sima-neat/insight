@@ -48,6 +48,7 @@ import {
   staleFlags,
   staleNote,
   statusInfo,
+  telemetryVisible,
   toggleSelection,
   traceModel,
   uncomparableRefs,
@@ -478,7 +479,12 @@ export function RunsPanel({
               <p className="hint">
                 {run.sampleCount} sample{run.sampleCount === 1 ? '' : 's'} of {run.metricCount} metric
                 {run.metricCount === 1 ? '' : 's'}
-                {run.firstSampleAt && run.lastSampleAt && (
+                {run.single && run.sampledAt && (
+                  <>
+                    {' '}taken <time dateTime={run.sampledAt}>{formatTimestamp(run.sampledAt)}</time>
+                  </>
+                )}
+                {!run.single && run.firstSampleAt && run.lastSampleAt && (
                   <>
                     {' '}from <time dateTime={run.firstSampleAt}>{formatTimestamp(run.firstSampleAt)}</time> to{' '}
                     <time dateTime={run.lastSampleAt}>{formatTimestamp(run.lastSampleAt)}</time>
@@ -489,8 +495,10 @@ export function RunsPanel({
               {run.metrics.length > 0 && (
                 <>
                   <p className="hint">
-                    The smallest, largest and mean value of each metric over this run's samples, with the labels, units
-                    and thresholds the run itself recorded.
+                    {run.single
+                      ? "This run holds one sample, so each metric's mean, minimum and maximum are that one value."
+                      : "The smallest, largest and mean value of each metric over this run's samples."}{' '}
+                    The labels, units and thresholds are the ones the run itself recorded.
                   </p>
                   <table className="sysinfo-table stats-table stats-run-metrics">
                     <thead>
@@ -1125,7 +1133,8 @@ export default function StatsView({ onError, onStatus }) {
             onRetry={() => loadState()}
           />
 
-          {info.available && (
+          {/* Sentinel not answering now does not unmake what this board already gave. */}
+          {telemetryVisible(info, { metrics, traces, runs }) && (
             <>
               <MetricsPanel
                 model={model}

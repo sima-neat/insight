@@ -4040,6 +4040,15 @@ button:disabled {
   height: 24px;
 }
 
+/* A run is named by whoever recorded it, and Sentinel keeps names of up to 128 characters
+   with no spaces to break at. `.sysinfo-table td` already wraps anywhere; the cells that
+   carry a run's name are header cells, which do not, so they are given the same rule
+   rather than letting one long name push the table past the panel. */
+.stats-run-table tbody th,
+.stats-compare-table thead th {
+  overflow-wrap: anywhere;
+}
+
 .stats-run-table tbody th {
   width: 32%;
 }

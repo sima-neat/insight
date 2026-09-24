@@ -274,6 +274,21 @@ export function daemonInfo(state) {
   }
 }
 
+/**
+ * Whether the telemetry panels stay on the page when Sentinel stops answering.
+ *
+ * A board that goes away mid-view fails the next poll, `/api/sentinel` fails behind it,
+ * and the daemon state becomes unknown. Hiding the panels on that alone takes the samples,
+ * the trace and the runs already read off the page — and with them the failure's own
+ * sentence, which is rendered inside those panels. They stay, stop updating, and carry the
+ * failure. Selecting another board is different: that clears what was read first, so
+ * nothing here can show one board's numbers under another board's name.
+ */
+export function telemetryVisible(info, read = {}) {
+  if (info?.available) return true
+  return Boolean(read.metrics || read.traces || read.runs)
+}
+
 export function daemonFacts(info) {
   const rows = [['Service', info.service]]
   if (info.version) rows.push(['Version', info.version])
@@ -646,7 +661,8 @@ export function compareLegend(table) {
     .filter((code) => counts.has(code))
     .map((code) => {
       const count = counts.get(code)
-      return `${count} value${count === 1 ? '' : 's'} show “—” instead of a change because ${DELTA_ABSENCE[code]}`
+      const one = count === 1
+      return `${count} value${one ? '' : 's'} show${one ? 's' : ''} “—” instead of a change because ${DELTA_ABSENCE[code]}`
     })
 }
 
@@ -845,6 +861,11 @@ export function runDetail(payload) {
     // `metrics` may be a map of key -> definition rather than the documented list.
     metricCount: definitions.length || (body.metrics && typeof body.metrics === 'object' ? Object.keys(body.metrics).length : 0),
     sampleCount: samples.length,
+    // A run of one sample is a moment, not an interval. "from 15:27:12 to 15:27:12" reads
+    // as a range that was measured and turned out to be nothing, and a mean, minimum and
+    // maximum of one value are three columns of the same number: both are said plainly.
+    single: samples.length === 1,
+    sampledAt: stamps.length === 1 ? stamps[0] : null,
     firstSampleAt: stamps[0] || null,
     lastSampleAt: stamps.length ? stamps[stamps.length - 1] : null,
     crossed: metrics.filter((metric) => metric.status === 'warn' || metric.status === 'critical').length,
