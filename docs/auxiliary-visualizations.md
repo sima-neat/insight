@@ -99,6 +99,12 @@ resume inheriting global changes. The tile's collapse, expand, and hide buttons
 update the same channel setting. Expanded mode uses a translucent surface so the
 source video remains visible behind the larger 3D skeleton.
 
+**Panel Transparency** adds transparency to the panel's existing compact or
+expanded surface treatment. It affects only background surfaces: the rendered
+pose, title, and controls remain fully visible. Set it in global Viewer
+Configuration to update every channel that does not have a channel-specific 3D
+Pose override.
+
 The BlazePose view renders the current frame's world landmarks directly. It does
 not smooth pose coordinates or animate the camera independently, so its motion
 stays aligned with the frame-correlated 2D pose overlay. Camera fitting uses a
@@ -144,10 +150,12 @@ can expose declarative controls through `getControls()` and `applyControl()`,
 pointer handlers, and `isAnimating()`. A renderer that participates in Viewer
 Configuration may also expose `viewerSettings.toSession()` and
 `viewerSettings.toViewer()` adapters. The generic panel never branches on a
-renderer name. It owns animation-frame scheduling and browser persistence, calls
-the session `draw()` method, and calls `destroy()` when the view is hidden,
-collapsed, replaced, switched away from, reset, or unmounted. A renderer must
-not start its own animation loop.
+renderer name. Generic auxiliary settings such as `backgroundTransparency` are
+applied by the panel shell and remain available to future renderers without
+changing their payload contract. The panel owns animation-frame scheduling and
+browser persistence, calls the session `draw()` method, and calls `destroy()`
+when the view is hidden, collapsed, replaced, switched away from, reset, or
+unmounted. A renderer must not start its own animation loop.
 
 Run the reusable viewer checks after changing the protocol or a renderer:
 

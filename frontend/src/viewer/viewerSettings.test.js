@@ -56,7 +56,7 @@ test("version two settings migrate without retaining overlay delay", () => {
   });
 
   const settings = api.readScopeSettings("global");
-  assert.equal(settings.version, 7);
+  assert.equal(settings.version, 8);
   assert.equal(settings.general.videoSyncBufferMs, 350);
   assert.equal(settings.general.metadataRetentionMs, 0);
   assert.equal(settings.general.showRoi, false);
@@ -72,6 +72,7 @@ test("BlazePose 3D settings have visible reference-box defaults", () => {
     {
       enabled: true,
       panelMode: "compact",
+      backgroundTransparency: 0,
       yawDegrees: -45,
       pitchDegrees: 20,
       showReferenceBox: true,
@@ -95,7 +96,7 @@ test("legacy animation and stabilization settings are discarded", () => {
   });
   const pose3D = settings.auxiliary["blazepose-3d"];
 
-  assert.equal(settings.version, 7);
+  assert.equal(settings.version, 8);
   assert.equal(pose3D.yawDegrees, 35);
   assert.equal("autoRotate" in pose3D, false);
   assert.equal("rotationSpeed" in pose3D, false);
@@ -108,13 +109,23 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
     viewerSettings_global: JSON.stringify({
       version: 4,
       auxiliary: {
-        "blazepose-3d": { yawDegrees: -20, pitchDegrees: 10, panelMode: "compact" },
+        "blazepose-3d": {
+          yawDegrees: -20,
+          pitchDegrees: 10,
+          panelMode: "compact",
+          backgroundTransparency: 0.35,
+        },
       },
     }),
     viewerSettings_channel_2: JSON.stringify({
       version: 4,
       auxiliary: {
-        "blazepose-3d": { enabled: false, yawDegrees: 75, panelMode: "expanded" },
+        "blazepose-3d": {
+          enabled: false,
+          yawDegrees: 75,
+          panelMode: "expanded",
+          backgroundTransparency: 0.8,
+        },
       },
     }),
   });
@@ -124,6 +135,7 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
     {
       enabled: true,
       panelMode: "compact",
+      backgroundTransparency: 0.35,
       yawDegrees: -20,
       pitchDegrees: 10,
       showReferenceBox: true,
@@ -134,6 +146,7 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
     {
       enabled: false,
       panelMode: "expanded",
+      backgroundTransparency: 0.8,
       yawDegrees: 75,
       pitchDegrees: 10,
       showReferenceBox: true,
@@ -141,13 +154,14 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
   );
 });
 
-test("BlazePose 3D settings clamp camera angles and reject invalid panel modes", () => {
+test("BlazePose 3D settings clamp transparency and camera angles and reject invalid panel modes", () => {
   const api = loadSettingsApi();
   const settings = api.normalizeSettings({
     version: 4,
     auxiliary: {
       "blazepose-3d": {
         panelMode: "floating",
+        backgroundTransparency: 3,
         yawDegrees: 999,
         pitchDegrees: -999,
       },
@@ -155,6 +169,7 @@ test("BlazePose 3D settings clamp camera angles and reject invalid panel modes",
   });
 
   assert.equal(settings.auxiliary["blazepose-3d"].panelMode, "compact");
+  assert.equal(settings.auxiliary["blazepose-3d"].backgroundTransparency, 1);
   assert.equal(settings.auxiliary["blazepose-3d"].yawDegrees, 180);
   assert.equal(settings.auxiliary["blazepose-3d"].pitchDegrees, -60);
 });

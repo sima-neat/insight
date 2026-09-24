@@ -1,6 +1,6 @@
 (() => {
-  const SETTINGS_VERSION = 7;
-  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, SETTINGS_VERSION]);
+  const SETTINGS_VERSION = 8;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, 7, SETTINGS_VERSION]);
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -47,6 +47,7 @@
     "blazepose-3d": {
       enabled: true,
       panelMode: "compact",
+      backgroundTransparency: 0,
       yawDegrees: -45,
       pitchDegrees: 20,
       showReferenceBox: true
@@ -197,6 +198,9 @@
     }
     if (Object.prototype.hasOwnProperty.call(rawSettings, "panelMode")) {
       settings.panelMode = PANEL_MODES.has(rawSettings.panelMode) ? rawSettings.panelMode : defaults.panelMode;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "backgroundTransparency")) {
+      settings.backgroundTransparency = clampNumber(rawSettings.backgroundTransparency, 0, 1, 0);
     }
     if (renderer === "blazepose-3d") {
       if (Object.prototype.hasOwnProperty.call(rawSettings, "yawDegrees")) {
