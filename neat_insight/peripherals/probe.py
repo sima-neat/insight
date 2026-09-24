@@ -50,6 +50,10 @@ _V4L2_RANGE_SIZE_RE = re.compile(
 )
 _V4L2_DISCRETE_INTERVAL_RE = re.compile(r"^\s*Interval:\s*Discrete\s.*\(([\d.]+)\s*fps\)")
 _V4L2_RANGE_INTERVAL_RE = re.compile(r"^\s*Interval:\s*(?:Stepwise|Continuous)\s.*\(([\d.]+)-([\d.]+)\s*fps\)")
+_V4L2_CARD_RE = re.compile(r"^\s*Card type\s*:\s*(.*?)\s*$", re.MULTILINE)
+# The Modalix ISP's output nodes: sysfs name and V4L2 card.
+ISP_OUTPUT_NAME = "isp_v4l2-vid-cap-out"
+ISP_OUTPUT_CARD = "arm-isp-out"
 # libcamera's UVC pipeline ids end in "<vid>:<pid>"; those cameras are reported through V4L2.
 _USB_CAMERA_ID_RE = re.compile(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$")
 
@@ -500,6 +504,41 @@ def collect_usb(tools, check_users):
     return cameras
 
 
+def read_isp_sizes(tools):
+    """Discrete sizes every ISP output node lists, or the reason they could not be read."""
+    result = {"nodes": [], "sizes": None, "differs": False, "reason": None, "node": None, "detail": None}
+    if not tools.get("v4l2-ctl"):
+        result["reason"] = "tool_missing"
+        return result
+    class_root = os.path.join(SYSFS_ROOT, "class", "video4linux")
+    common = None
+    for name in _names(class_root, r".+"):
+        if _read(os.path.join(class_root, name, "name")) != ISP_OUTPUT_NAME:
+            continue
+        node = "/dev/" + name
+        code, out, err = run([tools["v4l2-ctl"], "-d", node, "--info", "--list-formats-ext"])
+        if code != 0:
+            reason = "out_of_time" if err == OUT_OF_TIME else "timeout" if code is None else "failed"
+            result.update(reason=reason, node=node, detail=_tail(err or out))
+            return result
+        if ISP_OUTPUT_CARD not in _V4L2_CARD_RE.findall(out):
+            continue
+        sizes = {(size["width"], size["height"]) for fmt in parse_v4l2_formats(out) for size in fmt["sizes"]}
+        if not sizes:
+            result.update(reason="unparseable", node=node)
+            return result
+        result["nodes"].append(node)
+        result["differs"] = result["differs"] or (common is not None and sizes != common)
+        common = sizes if common is None else common & sizes
+    if common is None:
+        result["reason"] = "no_nodes"
+    elif not common:
+        result["reason"] = "no_common_sizes"
+    else:
+        result["sizes"] = [{"width": w, "height": h} for w, h in sorted(common)]
+    return result
+
+
 def collect():
     global _deadline
     _deadline = time.monotonic() + BUDGET_SEC
@@ -510,6 +549,7 @@ def collect():
     check_users = user_checker(method, tools)
     media = discover_media(tools, failures)
     listing = list_libcamera(tools, failures)
+    mipi = collect_mipi(tools, media, listing, check_users)
     return {
         "schema": SCHEMA,
         "python": platform.python_version(),
@@ -519,7 +559,9 @@ def collect():
         "availability_method": method,
         "media_devices": media,
         "libcamera": listing,
-        "mipi": collect_mipi(tools, media, listing, check_users),
+        "mipi": mipi,
+        # Only needed to gate libcamera's modes, so skipped when no camera reported any.
+        "isp": read_isp_sizes(tools) if any(camera["formats"] for camera in mipi) else None,
         "usb": collect_usb(tools, check_users),
         "failures": failures,
     }

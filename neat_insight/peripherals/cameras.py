@@ -66,7 +66,7 @@ TOOL_ISSUES = {
         "Install v4l-utils (media-ctl) on the board, then Refresh.",
     ),
     "v4l2-ctl": (
-        "`v4l2-ctl` was not found, so USB camera modes cannot be listed.",
+        "`v4l2-ctl` was not found, so USB camera modes and the ISP's output sizes cannot be listed.",
         "Install v4l-utils (v4l2-ctl) on the board, then Refresh.",
     ),
     "gst-inspect-1.0": (
@@ -93,6 +93,16 @@ OUT_OF_TIME_HINT = (
     "Other board tools were slow (see the warnings above). Refresh again; if it keeps happening, "
     "check those tools on the board."
 )
+ISP_SIZE_CAUSES = {
+    "not_read": "the discovery probe did not read them",
+    "tool_missing": "`v4l2-ctl` was not found",
+    "no_nodes": "no ISP output node (arm-isp-out) was found",
+    "no_common_sizes": "the ISP output nodes list no size in common",
+    "timeout": "`{show}` timed out",
+    "out_of_time": "the discovery probe ran out of time",
+    "unparseable": "`{show}` listed no discrete sizes",
+    "failed": "`{show}` failed: {detail}",
+}
 PERMISSION_HINT = (
     "Add the account Insight connects as to the board's `video` group (`sudo usermod -aG video <user>`, then "
     "reconnect), or connect as root; then Refresh."
@@ -148,12 +158,14 @@ def build_snapshot(probe: dict, board: dict, generation: int, previous: Optional
     platform = _platform(probe)
     modes = dict(previous["modes"]) if previous else {}
     media = {device["path"]: device for device in probe.get("media_devices") or []}
-    items = [_mipi_item(camera, probe, platform, media, modes) for camera in probe.get("mipi") or []]
+    isp_sizes = _isp_sizes(probe)
+    items = [_mipi_item(camera, probe, platform, media, modes, isp_sizes) for camera in probe.get("mipi") or []]
     items += [_usb_item(camera, platform) for camera in probe.get("usb") or []]
     for item in items:
         if item["modes_source"] == "live":
             modes[item["id"]] = {key: item[key] for key in ("formats", "default_selection")}
             modes[item["id"]]["scanned_at"] = scanned_at
+    isp_unread = isp_sizes is None and any(i["connection"] == "mipi" and i["modes_source"] == "live" for i in items)
     snapshot = {
         "board": board,
         "generation": generation,
@@ -161,7 +173,7 @@ def build_snapshot(probe: dict, board: dict, generation: int, previous: Optional
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _issues(probe, platform, media),
+        "issues": _issues(probe, platform, media, isp_unread),
         "changes": _changes(previous["snapshot"]["items"], items) if previous else None,
     }
     return snapshot, modes
@@ -177,6 +189,13 @@ def _platform(probe: dict) -> dict:
         else {key: bool(libcamerasrc.get(key)) for key in ("present", "external_buffer_mode", "buffer_count")},
         "availability_method": probe.get("availability_method") or "none",
     }
+
+
+def _isp_sizes(probe: dict) -> Optional[set]:
+    isp = probe.get("isp") or {}
+    if isp.get("reason") or not isp.get("sizes"):
+        return None
+    return {(size["width"], size["height"]) for size in isp["sizes"]}
 
 
 def _libcamerasrc_state(probe: dict) -> Optional[bool]:
@@ -202,7 +221,7 @@ def _availability(users: Optional[list], method: str, acquire: Optional[str] = N
     return {"state": state, "users": [], "reason": reason}
 
 
-def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: dict) -> dict:
+def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: dict, isp_sizes: Optional[set]) -> dict:
     camera_id = camera["id"]
     item_id = "mipi:" + camera_id
     model = compat.model_token(camera_id)
@@ -213,8 +232,16 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         if graph.get(graph_key):
             device[key] = graph[graph_key]
 
-    formats = [_mipi_format(fmt, model, camera.get("max_fps"), libcamerasrc) for fmt in camera.get("formats") or []]
     notes, errors = [], []
+    formats, hidden = [], 0
+    for fmt in camera.get("formats") or []:
+        sizes = fmt["sizes"]
+        # libcamera advertises any size the sensor can be scaled to, but the ISP only outputs its preset
+        # sizes; for any other the ISP keeps its current size and libcamera aborts the stream (core#883).
+        if isp_sizes is not None and not _RAW_BAYER_RE.match(fmt["format"]):
+            sizes = [size for size in sizes if (size["width"], size["height"]) in isp_sizes]
+            hidden += len(fmt["sizes"]) - len(sizes)
+        formats.append(_mipi_format(dict(fmt, sizes=sizes), model, camera.get("max_fps"), libcamerasrc))
     if formats:
         modes_source, default = "live", _mipi_default(formats)
         if camera.get("max_fps"):
@@ -224,6 +251,12 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
             )
         else:
             notes.append("libcamera did not report a maximum frame rate, so only 30 fps is offered.")
+        if hidden:
+            offered = ", ".join(f"{w}x{h}" for w, h in sorted(isp_sizes))
+            notes.append(
+                f"Only sizes the ISP can output ({offered}) are offered; libcamera also advertises sizes the ISP "
+                "cannot produce, which fail to start (core#883)."
+            )
     else:
         errors.append(_mipi_modes_error(camera, probe))
         previous = modes.get(item_id)
@@ -312,10 +345,14 @@ def _mipi_default(formats: list) -> Optional[dict]:
     for size in nv12["sizes"]:
         if (size["width"], size["height"]) == (1920, 1080) and any(c["value"] == 30 for c in size["fps"]):
             return _selection("NV12", size, 30)
-    fitting = [s for s in nv12["sizes"] if s["width"] <= 1920 and s["height"] <= 1080 and s["fps"]]
-    if not fitting:
+    offered = [s for s in nv12["sizes"] if s["fps"]]
+    fitting = [s for s in offered if s["width"] <= 1920 and s["height"] <= 1080]
+    if fitting:
+        best = max(fitting, key=lambda s: s["width"] * s["height"])
+    elif offered:
+        best = min(offered, key=lambda s: s["width"] * s["height"])
+    else:
         return None
-    best = max(fitting, key=lambda s: s["width"] * s["height"])
     return _selection("NV12", best, max(choice["value"] for choice in best["fps"]))
 
 
@@ -444,7 +481,26 @@ def _no_sensor_devices(probe: dict, media: dict) -> list:
     return sorted(path for path, device in media.items() if device.get("csi") and not device.get("sensors"))
 
 
-def _issues(probe: dict, platform: dict, media: dict) -> list:
+def _isp_issue(probe: dict) -> dict:
+    isp = probe.get("isp") or {}
+    reason = isp.get("reason") or "not_read"
+    show = f"v4l2-ctl -d {isp.get('node') or '/dev/video0out'} --list-formats-ext"
+    cause = ISP_SIZE_CAUSES.get(reason, ISP_SIZE_CAUSES["failed"])
+    cause = cause.format(show=show, detail=isp.get("detail") or "no output")
+    message = (
+        f"The ISP's output sizes could not be read ({cause}), so MIPI cameras offer every size libcamera "
+        "advertises; sizes the ISP cannot produce fail to start (core#883)."
+    )
+    if reason == "tool_missing":
+        hint = TOOL_ISSUES["v4l2-ctl"][1]
+    elif reason == "no_nodes":
+        hint = "Run `v4l2-ctl --list-devices` on the board and look for arm-isp-out nodes, then Refresh."
+    else:
+        hint = f"Run `{show}` on the board, then Refresh."
+    return _issue("warning", "isp_sizes_unavailable", message, hint)
+
+
+def _issues(probe: dict, platform: dict, media: dict, isp_unread: bool) -> list:
     tools = probe.get("tools") or {}
     issues = [_issue("warning", "tool_missing", *TOOL_ISSUES[tool]) for tool in TOOL_ISSUES if not tools.get(tool)]
     if _libcamerasrc_state(probe) is False:
@@ -470,6 +526,8 @@ def _issues(probe: dict, platform: dict, media: dict) -> list:
         else:
             code, message = "command_failed", f"`{tool}` failed: {failure.get('detail') or 'no output'}"
         issues.append(_issue("warning", code, message, hint))
+    if isp_unread:
+        issues.append(_isp_issue(probe))
     return issues
 
 

@@ -17,6 +17,7 @@ from neat_insight.peripherals.api import peripherals_bp
 
 FIXTURES = Path(__file__).parent / "fixtures" / "peripherals"
 IMX477 = "imx477 5-001a"
+ISP_QUERY = ("v4l2-ctl", "-d", "/dev/video0out", "--info", "--list-formats-ext")
 
 
 def fixture(name: str) -> str:
@@ -115,6 +116,7 @@ def devkit_board(root) -> FakeBoard:
     board.video_node("video0", "platform/csi2video@1", 0, "raw-capture.1.0")
     board.video_node("video0raw", "platform/4220000.isp", 0, "isp_v4l2-vid-cap-raw")
     board.video_node("video0out", "platform/4220000.isp", 1, "isp_v4l2-vid-cap-out")
+    board.command(*ISP_QUERY, out=fixture("v4l2_isp_out_real.txt"))
     board.video_node("video5", "platform/4220000.isp", 4, "modalix-isp-stats-ctx0")
     return board
 
@@ -144,6 +146,15 @@ def camera_board(root, cam_info: str = "cam_info_imx477_synthetic.txt", usb: boo
             "v4l2-ctl", "-d", "/dev/video2", "--list-formats-ext", out=fixture("v4l2_formats_c920_synthetic.txt")
         )
         board.command("v4l2-ctl", "-d", "/dev/video3", "--info", out=fixture("v4l2_info_uvc_meta_synthetic.txt"))
+    return board
+
+
+def real_imx477_board(root) -> FakeBoard:
+    """The DevKit with the imx477 as captured on it: libcamera lists 49 NV12 sizes, the ISP outputs three."""
+    board = devkit_board(root)
+    board.media("media0", fixture("media_ctl_imx477_real.txt"))
+    board.command("cam", "-l", text=fixture("cam_list_imx477_real.txt"))
+    board.command("cam", "-c", IMX477, "-I", text=fixture("cam_info_imx477_real.txt"))
     return board
 
 
@@ -299,8 +310,10 @@ class ProbeCollectTests(unittest.TestCase):
         board = camera_board(self.tmp.name)
         output = board.collect()
         self.assertEqual([c["node"] for c in output["usb"]], ["/dev/video2"])
-        probed = {call[2] for call in board.calls if call[0] == "v4l2-ctl"}
-        self.assertEqual(probed, {"/dev/video2"})
+        probed = {call for call in board.calls if call[0] == "v4l2-ctl"}
+        usb_queries = {("v4l2-ctl", "-d", "/dev/video2", "--info"), ("v4l2-ctl", "-d", "/dev/video2", "--list-formats-ext")}
+        # The ISP output node is read once, for its output sizes, never probed as a camera.
+        self.assertEqual(probed, usb_queries | {ISP_QUERY})
         usb = output["usb"][0]
         self.assertEqual(usb["by_id"], "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_A1B2C3D4-video-index0")
         self.assertEqual(usb["usb"]["bus_path"], "1-1.2")
@@ -386,7 +399,8 @@ class SnapshotTests(unittest.TestCase):
         fps_1080 = size_of(nv12, 1920, 1080)["fps"]
         self.assertEqual([c["value"] for c in fps_1080], [30, 25, 20, 15, 10, 5])
         self.assertEqual(fps_1080[0], {"value": 30, "tier": "verified"})
-        self.assertEqual(size_of(nv12, 1280, 720)["fps"][0]["tier"], "advertised")
+        # The ISP outputs 1920x1080 and 2048x1080 only; the synthetic sensor lists just the first.
+        self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080)])
         rgb = fmt_of(camera, "RGB888")
         self.assertEqual((rgb["exportable"], rgb["support"]["tier"]), (False, "unsupported"))
         self.assertIn("NV12 only", rgb["support"]["reason"])
@@ -407,11 +421,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("29.9742 fps", camera["notes"][0])
 
     def test_real_imx477_rate_limit_is_described_as_the_fastest_mode(self):
-        board = devkit_board(self.tmp.name)
-        board.media("media0", fixture("media_ctl_imx477_real.txt"))
-        board.command("cam", "-l", text=fixture("cam_list_imx477_real.txt"))
-        board.command("cam", "-c", IMX477, "-I", text=fixture("cam_info_imx477_real.txt"))
-        snapshot = snapshot_of(board.collect())
+        snapshot = snapshot_of(real_imx477_board(self.tmp.name).collect())
         camera = item(snapshot, "mipi:" + IMX477)
         self.assertEqual((camera["support"]["tier"], camera["default_selection"]["fps"]), ("verified", 30))
         self.assertIn("66.1857 fps for the sensor's fastest mode", camera["notes"][0])
@@ -421,6 +431,90 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(rendered["support"]["tier"], "advertised")
         # The tier says "advertised" on its own; the export adds no paragraph repeating it.
         self.assertFalse(any("advertised by libcamera" in warning for warning in rendered["warnings"]))
+
+    def test_real_imx477_offers_only_sizes_the_isp_outputs(self):
+        board = real_imx477_board(self.tmp.name)
+        output = board.collect()
+        self.assertEqual(board.calls.count(ISP_QUERY), 1)
+        isp = output["isp"]
+        self.assertEqual((isp["nodes"], isp["reason"], isp["differs"]), (["/dev/video0out"], None, False))
+        self.assertEqual([(s["width"], s["height"]) for s in isp["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
+        snapshot = snapshot_of(output)
+        camera = item(snapshot, "mipi:" + IMX477)
+        for name in ("NV12", "BGR888", "RGB888", "YUYV"):
+            sizes = {(s["width"], s["height"]) for s in fmt_of(camera, name)["sizes"]}
+            self.assertEqual(sizes, {(1920, 1080), (2048, 1080)}, name)
+        # Raw Bayer is captured before the ISP, so its sensor sizes stay as reported.
+        self.assertEqual(len(fmt_of(camera, "SRGGB12")["sizes"]), 20)
+        fps = [c["value"] for c in size_of(fmt_of(camera, "NV12"), 2048, 1080)["fps"]]
+        self.assertEqual(fps, cameras.fps_choices(66.1857))
+        self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        self.assertIn("Only sizes the ISP can output (1920x1080, 2048x1080, 2432x2048)", camera["notes"][1])
+        self.assertNotIn("isp_sizes_unavailable", [i["code"] for i in snapshot["issues"]])
+
+    def test_isp_nodes_that_disagree_offer_the_sizes_common_to_all(self):
+        board = real_imx477_board(self.tmp.name)
+        board.video_node("video1out", "platform/4220000.isp", 7, "isp_v4l2-vid-cap-out")
+        only_1080p = "\n".join(
+            line for line in fixture("v4l2_isp_out_real.txt").splitlines() if "2048x1080" not in line
+        )
+        board.command("v4l2-ctl", "-d", "/dev/video1out", "--info", "--list-formats-ext", out=only_1080p)
+        output = board.collect()
+        self.assertEqual((output["isp"]["nodes"], output["isp"]["differs"]), (["/dev/video0out", "/dev/video1out"], True))
+        camera = item(snapshot_of(output), "mipi:" + IMX477)
+        self.assertEqual([(s["width"], s["height"]) for s in fmt_of(camera, "NV12")["sizes"]], [(1920, 1080)])
+
+    def test_default_is_an_offered_size_when_the_isp_drops_1080p(self):
+        board = real_imx477_board(self.tmp.name)
+        no_1080p = "\n".join(line for line in fixture("v4l2_isp_out_real.txt").splitlines() if "1920x1080" not in line)
+        board.command(*ISP_QUERY, out=no_1080p)
+        camera = item(snapshot_of(board.collect()), "mipi:" + IMX477)
+        self.assertEqual([(s["width"], s["height"]) for s in fmt_of(camera, "NV12")["sizes"]], [(2048, 1080)])
+        self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 2048, "height": 1080, "fps": 66})
+
+    def test_unreadable_isp_sizes_fall_back_to_libcamera_sizes_with_a_warning(self):
+        info_only = fixture("v4l2_isp_out_real.txt").split("ioctl:")[0]
+        other_card = fixture("v4l2_isp_out_real.txt").replace("arm-isp-out", "arm-isp-raw")
+        cases = {
+            "tool_missing": ("`v4l2-ctl` was not found", None),
+            "no_nodes": ("no ISP output node (arm-isp-out) was found", other_card),
+            "failed": ("failed: Cannot open device /dev/video0out: Permission denied", "denied"),
+            "timeout": ("timed out", "timeout"),
+            "unparseable": ("listed no discrete sizes", info_only),
+        }
+        for reason, (cause, answer) in cases.items():
+            with self.subTest(reason=reason):
+                root = Path(self.tmp.name) / reason
+                root.mkdir()
+                board = real_imx477_board(root)
+                if reason == "tool_missing":
+                    board.tools["v4l2-ctl"] = None
+                elif answer == "denied":
+                    board.command(*ISP_QUERY, code=2, err="Cannot open device /dev/video0out: Permission denied")
+                elif answer == "timeout":
+                    board.command(*ISP_QUERY, code=None, err="timed out after 10 s")
+                else:
+                    board.command(*ISP_QUERY, out=answer)
+                output = board.collect()
+                self.assertEqual((output["isp"]["reason"], output["isp"]["sizes"]), (reason, None))
+                snapshot = snapshot_of(output)
+                camera = item(snapshot, "mipi:" + IMX477)
+                self.assertEqual(camera["modes_source"], "live")
+                self.assertEqual(len(fmt_of(camera, "NV12")["sizes"]), 49)
+                self.assertEqual(len(camera["notes"]), 1)
+                self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+                issue = next(i for i in snapshot["issues"] if i["code"] == "isp_sizes_unavailable")
+                self.assertEqual(issue["severity"], "warning")
+                self.assertIn(cause, issue["message"])
+                self.assertIn("offer every size libcamera advertises", issue["message"])
+
+    def test_isp_is_not_read_without_camera_modes(self):
+        board = devkit_board(self.tmp.name)
+        output = board.collect()
+        self.assertIsNone(output["isp"])
+        self.assertNotIn(ISP_QUERY, board.calls)
+        busy = camera_board(Path(self.tmp.name) / "busy", cam_info="cam_info_busy_synthetic.txt", usb=False)
+        self.assertIsNone(busy.collect()["isp"])
 
     def test_permission_failures_name_the_video_group(self):
         board = camera_board(self.tmp.name, usb=False)
@@ -472,7 +566,7 @@ class SnapshotTests(unittest.TestCase):
         output = camera_board(self.tmp.name, usb=False).collect()
         output["mipi"][0]["max_fps"] = None
         camera = item(snapshot_of(output), "mipi:" + IMX477)
-        self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "NV12"), 640, 480)["fps"]], [30])
+        self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]], [30])
         self.assertIn("did not report a maximum frame rate", camera["notes"][0])
 
     def test_missing_libcamerasrc_makes_mipi_unsupported(self):
@@ -707,7 +801,7 @@ class PeripheralsApiTests(unittest.TestCase):
         output["libcamerasrc"].update(external_buffer_mode=False, buffer_count=False)
         self.use(output)
         self.refresh()
-        body = self.export(id="mipi:" + hostile, width=1280, height=720).get_json()
+        body = self.export(id="mipi:" + hostile).get_json()
         exports = {e["id"]: e["content"] for e in body["exports"]}
         self.assertEqual(list(exports), ["python", "cpp", "json"])
         namespace = {}
@@ -756,6 +850,20 @@ class PeripheralsApiTests(unittest.TestCase):
         body = self.export(id="usb:046d:082d:A1B2C3D4", format="YUYV", width=640, height=480, fps=30).get_json()
         self.assertEqual(json.loads(body["exports"][1]["content"])["device"], "/dev/video2")
         self.assertTrue(any("not stable" in w for w in body["warnings"]))
+
+    def test_export_refuses_sizes_the_isp_cannot_output(self):
+        root = Path(self.tmp.name) / "real"
+        root.mkdir()
+        self.use(real_imx477_board(root).collect())
+        self.refresh()
+        self.assertEqual(self.export(width=2048, height=1080).status_code, 200)
+        for width, height in ((1280, 720), (3840, 2160)):
+            with self.subTest(size=f"{width}x{height}"):
+                response = self.export(width=width, height=height)
+                self.assertEqual(response.status_code, 400)
+                body = response.get_json()
+                self.assertEqual((body["code"], body["hint"]), ("invalid_request", export.MODE_HINT))
+                self.assertIn(f"{width}x{height} at 30 fps is not a mode this camera reported", body["error"])
 
     def test_export_rejects_invalid_requests(self):
         self.use(self.board("a"))
