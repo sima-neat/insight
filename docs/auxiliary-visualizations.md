@@ -93,17 +93,18 @@ Open a tile's menu and select **3D Pose** in Viewer Configuration to control
 that channel independently. The panel can be shown or hidden, rendered compact,
 collapsed, or expanded, and given an initial camera yaw and pitch. The reference
 cube can also be hidden when only the skeleton is wanted. Global Viewer
-Configuration establishes defaults, while settings opened from a tile apply to
-that channel. Select **Use Global Settings** to discard a channel override and
-resume inheriting global changes. The tile's collapse, expand, and hide buttons
-update the same channel setting. Expanded mode uses a translucent surface so the
-source video remains visible behind the larger 3D skeleton.
+Configuration applies to every channel and clears stale channel overrides when
+saved, while settings opened from a tile apply only to that channel. Select
+**Use Global Settings** to discard a channel override without changing the
+global configuration. The tile's collapse, expand, and hide buttons update the
+same channel setting. Expanded mode uses a translucent surface so the source
+video remains visible behind the larger 3D skeleton.
 
 **Panel Transparency** adds transparency to the panel's existing compact or
 expanded surface treatment. It affects only background surfaces: the rendered
 pose, title, and controls remain fully visible. Set it in global Viewer
-Configuration to update every channel that does not have a channel-specific 3D
-Pose override.
+Configuration to update every channel. A later channel-specific edit can still
+override it for that channel.
 
 The BlazePose view renders the current frame's world landmarks directly. It does
 not smooth pose coordinates or animate the camera independently, so its motion
