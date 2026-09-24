@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult
-from neat_insight.peripherals import api, cameras, export, probe
+from neat_insight.peripherals import api, cameras, compat, export, probe
 from neat_insight.peripherals.api import peripherals_bp
 
 FIXTURES = Path(__file__).parent / "fixtures" / "peripherals"
@@ -420,6 +420,44 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertIn("29.9742 fps", camera["notes"][0])
 
+    def test_sensor_model_is_read_from_every_libcamera_id_style(self):
+        # libcamera names a camera by its entity ("imx477 5-001a", this DevKit) or, when the sensor
+        # has a firmware node, by its device-tree path; `cam -l` may or may not add the model.
+        cases = [
+            ("imx477 5-001a", None, "imx477"),
+            ("imx477 5-001a", "imx477", "imx477"),
+            ("/base/axi/pcie@120000/rp1/i2c@88000/imx477@1a", None, "imx477"),
+            ("/base/axi/pcie@120000/rp1/i2c@88000/imx477@1a", "imx477", "imx477"),
+            ("/base/soc/i2c0mux/i2c@1/imx477@1a", "", "imx477"),
+            ("imx477@1a", None, "imx477"),
+            ("IMX477 5-001a", None, "imx477"),
+            ("econ-imx568-fpga 5-0042", "econ-imx568-fpga", "econ-imx568-fpga"),
+            ("", None, ""),
+        ]
+        for camera_id, model, expected in cases:
+            with self.subTest(camera_id=camera_id, model=model):
+                self.assertEqual(compat.model_token(camera_id, model), expected)
+
+    def test_a_verified_sensor_named_by_device_tree_path_stays_verified(self):
+        path_id = "/base/axi/pcie@120000/rp1/i2c@88000/imx477@1a"
+        request = {"id": "mipi:" + path_id, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
+        for listing in ("cam_list_imx477_synthetic.txt", "cam_list_imx477_real.txt"):
+            with self.subTest(listing=listing):
+                root = Path(self.tmp.name) / listing
+                root.mkdir()
+                board = devkit_board(root)
+                board.media("media0", fixture("media_ctl_imx477_synthetic.txt"))
+                board.command("cam", "-l", text=fixture(listing).replace(IMX477, path_id))
+                board.command("cam", "-c", path_id, "-I", text=fixture("cam_info_imx477_synthetic.txt").replace(IMX477, path_id))
+                snapshot = snapshot_of(board.collect())
+                camera = item(snapshot, "mipi:" + path_id)
+                self.assertEqual(camera["model"], "imx477")
+                self.assertEqual(camera["support"]["tier"], "verified")
+                self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"][0], {"value": 30, "tier": "verified"})
+                body = export.render(snapshot, request)
+                self.assertEqual(body["support"]["tier"], "verified")
+                self.assertTrue(any("delivered about 66 fps" in w for w in body["warnings"]))
+
     def test_real_imx477_rate_limit_is_described_as_the_fastest_mode(self):
         snapshot = snapshot_of(real_imx477_board(self.tmp.name).collect())
         camera = item(snapshot, "mipi:" + IMX477)
@@ -797,7 +835,8 @@ class PeripheralsApiTests(unittest.TestCase):
     def test_export_escapes_device_strings_and_follows_libcamerasrc_features(self):
         output = self.board("a", usb=False)
         hostile = 'cam"\n\\ 5-001a'
-        output["mipi"][0]["id"] = hostile
+        # An unknown sensor: the model `cam -l` parsed would otherwise identify it as the imx477.
+        output["mipi"][0].update(id=hostile, model=None)
         output["libcamerasrc"].update(external_buffer_mode=False, buffer_count=False)
         self.use(output)
         self.refresh()

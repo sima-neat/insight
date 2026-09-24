@@ -150,7 +150,7 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
 def _verified_mode(item: dict, choice: dict, selection: dict) -> Optional[dict]:
     if choice["tier"] != "verified":
         return None
-    model = compat.model_token(item["device"]["camera_name"])
+    model = compat.model_token(item["device"]["camera_name"], item.get("model"))
     return compat.verified_mode(model, selection["format"], selection["width"], selection["height"], selection["fps"])
 
 

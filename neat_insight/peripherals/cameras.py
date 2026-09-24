@@ -224,7 +224,7 @@ def _availability(users: Optional[list], method: str, acquire: Optional[str] = N
 def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: dict, isp_sizes: Optional[set]) -> dict:
     camera_id = camera["id"]
     item_id = "mipi:" + camera_id
-    model = compat.model_token(camera_id)
+    model = compat.model_token(camera_id, camera.get("model"))
     libcamerasrc = _libcamerasrc_state(probe)
     device = {"camera_name": camera_id, "camera_name_source": camera["source"]}
     graph = media.get(camera.get("media_device")) or {}
@@ -272,7 +272,7 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         "kind": "camera",
         "connection": "mipi",
         "name": camera_id,
-        "model": camera.get("model") or model or None,
+        "model": model or None,
         "device": device,
         "availability": _availability(camera.get("users"), platform["availability_method"], camera.get("acquire")),
         "support": _mipi_support(model, libcamerasrc),
