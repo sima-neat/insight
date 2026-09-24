@@ -585,7 +585,7 @@ export function heartbeatFailureEvent(error, sessionId) {
 export function sessionMatches(session, cameraId, generation, selection = null) {
   if (!session || !cameraId) return false
   if (session.camera_id !== cameraId) return false
-  if (generation !== undefined && generation !== null && session.generation !== undefined && Number(session.generation) !== Number(generation)) return false
+  if (generation != null && session.generation !== undefined && Number(session.generation) !== Number(generation)) return false
   return !selection || sameSelection(session.mode, selection)
 }
 
@@ -621,14 +621,14 @@ export function previewBlock({ camera, selection, stale = false, session = null,
   if (camera.availability?.state === 'in_use') {
     return { blocked: true, reason: `${availabilityInfo(camera.availability).label}. Stop that process on the board, then refresh.` }
   }
-  if (session && session.camera_id && session.camera_id !== camera.id) {
+  if (session?.camera_id && session.camera_id !== camera.id) {
     return { blocked: true, reason: `A preview is already running on ${session.camera_id}. Stop it before starting this one.` }
   }
   return { blocked: false, reason: '' }
 }
 
 function outOfDate(state, event) {
-  if (event.for === undefined || event.for === null) return false
+  if (event.for == null) return false
   // A preview that is still starting holds no session id yet, so an event tagged with one cannot
   // be matched. The only preview it can refer to is that one: discarding it would strand the page
   // in "Starting…" with a Stop button that has nothing to stop.
@@ -667,7 +667,6 @@ export function nextPreviewState(state, event) {
       if (outOfDate(current, event)) return current
       return { status: 'live', session: current.session || event.session || null, error: event.error || null }
     case 'expired':
-      // A 404 for an id we no longer hold must not stop a newer session.
       if (outOfDate(current, event)) return current
       return {
         status: 'idle',
