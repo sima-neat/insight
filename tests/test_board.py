@@ -1,5 +1,6 @@
 import os
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -290,6 +291,95 @@ class SshTransportErrorTests(unittest.TestCase):
             worker.join(2)
         self.assertEqual(errors, ["stale_snapshot"])
         self.assertTrue(close.called)
+
+    def test_close_at_any_point_before_the_command_is_sent_stops_it(self):
+        # close() does not take the transport lock, so it can land between any two lines of
+        # exec()/_open_channel(). Wherever it lands before the command is sent, the command must
+        # not run, the error must say the board changed, and no connection may stay attached.
+        targets = {SshTransport.exec.__code__, SshTransport._open_channel.__code__}
+
+        class FakeClient:
+            def __init__(self):
+                self.closed, self.commands = False, []
+                client = self
+
+                class Channel:
+                    def settimeout(self, timeout):
+                        pass
+
+                    def exec_command(self, command):
+                        if client.closed:
+                            raise paramiko.SSHException("Channel is not open")
+                        client.commands.append(command)
+
+                    def shutdown_write(self):
+                        pass
+
+                    def close(self):
+                        pass
+
+                class Transport:
+                    def is_active(self):
+                        return not client.closed
+
+                    def open_session(self, timeout=None):
+                        if client.closed:
+                            raise paramiko.SSHException("SSH session not active")
+                        return Channel()
+
+                self._transport = Transport()
+
+            def get_transport(self):
+                return self._transport
+
+            def close(self):
+                self.closed = True
+
+        def run(connected, close_at):
+            transport = SshTransport("192.168.2.2", 22, "sima", Path(self.tmp.name) / "known_hosts")
+            client = FakeClient()
+            if connected:
+                transport._client = client
+            seen = [0]
+
+            def local(frame, event, arg):
+                if event == "line" and not client.commands and not transport._closed:
+                    if seen[0] == close_at:
+                        transport.close()
+                    seen[0] += 1
+                return local
+
+            def global_trace(frame, event, arg):
+                return local if frame.f_code in targets else None
+
+            error = None
+            with mock.patch.object(SshTransport, "_connect", return_value=client) as connect, \
+                 mock.patch.object(SshTransport, "_collect", return_value=ExecResult(0, b"", b"")):
+                sys.settrace(global_trace)
+                try:
+                    transport.exec(["true"], timeout=1)
+                except BoardError as exc:
+                    error = exc
+                finally:
+                    sys.settrace(None)
+            return transport, client, error, seen[0], connected or connect.called
+
+        for connected in (False, True):
+            close_at = 0
+            while True:
+                transport, client, error, lines, handed_out = run(connected, close_at)
+                if close_at >= lines:
+                    # close() never fired: the command ran normally.
+                    self.assertEqual(client.commands, ["true"])
+                    break
+                with self.subTest(connected=connected, close_at=close_at):
+                    self.assertEqual(client.commands, [])
+                    self.assertIsNotNone(error)
+                    self.assertEqual(error.code, "stale_snapshot")
+                    # A connection that was made (or already open) is closed, not left on the transport.
+                    self.assertEqual(client.closed, handed_out)
+                    self.assertIsNone(transport._client)
+                close_at += 1
 
     def test_network_failures_are_unreachable(self):
         self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")

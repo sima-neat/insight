@@ -99,6 +99,8 @@ class SshTransport:
             raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
         except (paramiko.SSHException, OSError, EOFError) as exc:
             self._drop()
+            if self._closed:
+                raise self._stale() from exc
             raise self._unreachable(f"The SSH session to {self.host} failed: {exc}") from exc
         finally:
             channel.close()
@@ -120,6 +122,8 @@ class SshTransport:
 
     def close(self) -> None:
         # Not under the lock: a connect to an unreachable board may hold it for the full timeout.
+        # Set the flag before dropping the client; _open_channel stores its client before checking
+        # the flag, so one of the two always sees the other and the connection is never kept.
         self._closed = True
         self._drop()
 
@@ -155,14 +159,18 @@ class SshTransport:
             if transport is None or not transport.is_active():
                 self._drop()
                 client = self._connect()
-                if self._closed:
-                    client.close()
-                    raise self._stale()
+                # Store first, then check: a close() that ran before the store saw no client to
+                # close, so this check has to catch it (see close()).
                 self._client = client
+                if self._closed:
+                    self._drop()
+                    raise self._stale()
             try:
                 return client.get_transport().open_session(timeout=self.connect_timeout)
             except (paramiko.SSHException, OSError, EOFError, AttributeError) as exc:
                 self._drop()
+                if self._closed:
+                    raise self._stale() from exc
                 raise self._unreachable(f"Could not open an SSH session on {self.host}: {exc}") from exc
 
     def _connect(self) -> paramiko.SSHClient:
