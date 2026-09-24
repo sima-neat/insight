@@ -471,20 +471,18 @@ class PreviewManager:
         result = session_ctx.transport.exec(["sh", "-c", "echo $SSH_CLIENT"], timeout=10)
         # The board tells us the address it reaches Insight on, which survives NAT and port mapping.
         client = result.stdout.decode("utf-8", errors="replace").split()
-        if client and not _is_ip(client[0]):
-            # $SSH_CLIENT is board-controlled input that ends up in the pipeline's udpsink host.
-            raise BoardError(
-                "command_failed",
-                f"The board reported an address Insight cannot use: {client[0][:60]}",
-                hint="Preview needs the board to send video back to Insight; check the SSH connection.",
-            )
         if not client:
-            raise BoardError(
-                "command_failed",
-                "The board could not report the address Insight connects from.",
-                hint="Preview needs the board to send video back to Insight; check the SSH connection.",
-            )
-        return client[0], base + channel
+            message = "The board could not report the address Insight connects from."
+        elif not _is_ip(client[0]):
+            # $SSH_CLIENT is board-controlled input that ends up in the pipeline's udpsink host.
+            message = f"The board reported an address Insight cannot use: {client[0][:60]}"
+        else:
+            return client[0], base + channel
+        raise BoardError(
+            "command_failed",
+            message,
+            hint="Preview needs the board to send video back to Insight; check the SSH connection.",
+        )
 
     def _start_worker(self, session_ctx, session_id: str, pipeline: list) -> None:
         directory = f"{WORKER_DIR}/{session_id}"
