@@ -3491,7 +3491,10 @@ button:disabled {
 }
 
 .periph-refresh[aria-disabled='true'] {
-  opacity: 0.7;
+  /* Dim the surface, never the label: fading both drops "Scanning… N s" below AA contrast,
+     and that state is on screen for the whole scan. */
+  background: #eef3fb;
+  border-color: rgba(23, 79, 76, 0.25);
   cursor: progress;
   transform: none;
 }

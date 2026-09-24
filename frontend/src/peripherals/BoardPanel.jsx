@@ -16,15 +16,42 @@ export default function BoardPanel({
   const closeRef = useRef(null)
 
   useEffect(() => {
+    // aria-modal tells assistive technology the page behind is inert, so keyboard focus has to
+    // behave that way too: keep Tab inside the panel and give focus back where it came from.
+    const opener = document.activeElement
     closeRef.current?.focus()
+
+    function focusable() {
+      const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      return Array.from(cardRef.current?.querySelectorAll(selector) || []).filter((el) => el.offsetParent !== null)
+    }
+
     function onKeyDown(event) {
       if (event.key === 'Escape') {
         event.stopPropagation()
         onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      const current = document.activeElement
+      if (event.shiftKey && (current === first || !cardRef.current?.contains(current))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (current === last || !cardRef.current?.contains(current))) {
+        event.preventDefault()
+        first.focus()
       }
     }
+
     document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (opener instanceof HTMLElement && document.contains(opener)) opener.focus()
+    }
   }, [onClose])
 
   return (

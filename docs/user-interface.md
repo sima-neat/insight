@@ -99,7 +99,7 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Peripherals
 
-Peripherals lists the cameras connected to a board and prepares the camera input configuration for your application. Discovery and export read device information only: they never capture frames, change sensor controls, or publish a stream, so cameras stay available to your applications. **Preview** is the one exception, and it only runs when you start it.
+Peripherals lists the cameras connected to a board and prepares the camera input configuration for your application. Discovery and export read device information only: they never capture frames, change sensor controls, or publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes. **Preview** is the one exception, and it only runs when you start it.
 
 ### Selected board
 

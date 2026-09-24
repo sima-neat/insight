@@ -21,6 +21,7 @@ import {
   resolveDeviceKind,
   resolveSelection,
   sameSelection,
+  sessionMatches,
   severityInfo,
   sortIssues,
   tierInfo
@@ -176,7 +177,6 @@ export default function PeripheralsView({
   const [exportState, setExportState] = useState({ status: 'idle' })
   const [exportAttempt, setExportAttempt] = useState(0)
   const [preview, setPreview] = useState(PREVIEW_IDLE)
-  const [paneHidden, setPaneHidden] = useState(() => typeof document !== 'undefined' && document.hidden)
   const autoRefreshed = useRef(false)
   const exportSeq = useRef(0)
   const previewRef = useRef(PREVIEW_IDLE)
@@ -186,6 +186,8 @@ export default function PeripheralsView({
   const activeKind = resolveDeviceKind(tabs, kind)
   const groups = useMemo(() => groupCameras(snapshot?.items), [snapshot])
   const activeId = resolveCameraId(snapshot, selectedId)
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
   const camera = groups.flatMap((group) => group.items).find((item) => item.id === activeId) || null
   const selection = useMemo(() => {
     const resolved = camera && resolveSelection(camera, wanted?.id === camera.id ? wanted : null)
@@ -231,7 +233,13 @@ export default function PeripheralsView({
         method: 'POST',
         body: { id: camera.id, format: selection.format, width: selection.width, height: selection.height, fps: selection.fps }
       })
-      dispatchPreview({ type: 'session', session: data.session })
+      // The user can select another camera while the board is starting this one. Adopting the
+      // session anyway would label camera A's video as camera B's.
+      if (sessionMatches(data.session, activeIdRef.current, board?.generation)) {
+        dispatchPreview({ type: 'session', session: data.session })
+      } else {
+        stopPreview(data.session?.id)
+      }
     } catch (err) {
       dispatchPreview({ type: 'failed', error: normalizeError(err) })
     }
@@ -313,21 +321,15 @@ export default function PeripheralsView({
     }
   }, [])
 
-  // Best effort only: the backend expires the session without heartbeats.
   useEffect(() => () => {
     const session = previewRef.current.session
     if (session?.id) {
+      // Best effort on unmount: there is no UI left to report a failure to, and the board stops
+      // capturing by itself once the heartbeats stop, so a lost stop cannot strand the camera.
       fetch(previewUrl(session.id, 'stop'), { method: 'POST' }).catch(() => {})
     }
   }, [])
 
-  useEffect(() => {
-    function onVisibility() {
-      setPaneHidden(document.hidden)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [])
 
   // Stop the preview when the selected camera, the device kind, or the board changes.
   useEffect(() => {
@@ -353,7 +355,9 @@ export default function PeripheralsView({
   const beating = Boolean(beatSessionId) && (preview.status === 'starting' || preview.status === 'live')
 
   useEffect(() => {
-    if (!beating || paneHidden) return
+    // A hidden tab keeps beating on purpose: the board frees the camera 45 s after the last
+    // heartbeat, so pausing here would kill a preview the user only briefly switched away from.
+    if (!beating) return
     let cancelled = false
     async function beat() {
       try {
@@ -372,7 +376,7 @@ export default function PeripheralsView({
       cancelled = true
       clearInterval(timer)
     }
-  }, [beating, beatSessionId, beatMs, paneHidden])
+  }, [beating, beatSessionId, beatMs])
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), scanning ? 1000 : 30000)
