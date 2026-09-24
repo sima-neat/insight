@@ -191,11 +191,11 @@ def build_snapshot(probe: dict, board: dict, generation: int, previous: Optional
 
 def _platform(probe: dict) -> dict:
     tools = probe.get("tools") or {}
-    libcamerasrc = probe.get("libcamerasrc") or {}
+    libcamerasrc = probe.get("libcamerasrc")
     return {
         "tools": {name: bool(tools.get(name)) for name in PLATFORM_TOOLS},
         "libcamerasrc": None
-        if probe.get("libcamerasrc") is None
+        if libcamerasrc is None
         else {key: bool(libcamerasrc.get(key)) for key in ("present", "external_buffer_mode", "buffer_count")},
         "availability_method": probe.get("availability_method") or "none",
     }
