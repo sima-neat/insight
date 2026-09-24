@@ -4038,3 +4038,27 @@ button:disabled {
     max-width: none;
   }
 }
+
+/* Preview mode: format, size and rate as one segmented tag group. */
+.periph-mode-badges {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+  white-space: nowrap;
+}
+
+.periph-mode-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+}
+
+.periph-mode-badges > span + span {
+  border-left: 1px solid var(--line);
+}

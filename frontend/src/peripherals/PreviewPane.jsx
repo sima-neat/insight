@@ -1,9 +1,11 @@
 import {
+  fpsLabel,
   modeLabel,
   previewBlock,
   previewErrorInfo,
   previewStatusInfo,
-  safeHref
+  safeHref,
+  sizeLabel
 } from './model.js'
 import { Callout, Pill } from './ui.jsx'
 
@@ -26,13 +28,25 @@ function PreviewError({ error, onOpenBoardPanel }) {
   )
 }
 
+// The mode as three tags -- format, size, rate -- rather than one run of text, so each reads at a
+// glance. Screen readers get the same sentence the text used to be.
+function ModeBadges({ mode, label }) {
+  if (!mode) return null
+  return (
+    <span className="periph-mode-badges" role="group" aria-label={`${label}: ${modeLabel(mode)}`}>
+      <span>{mode.format}</span>
+      <span>{sizeLabel(mode.width, mode.height)}</span>
+      <span>{fpsLabel(mode.fps)} fps</span>
+    </span>
+  )
+}
+
 export default function PreviewPane({ camera, selection, stale, target, state, onStart, onStop, onOpenBoardPanel }) {
   const block = previewBlock({ camera, selection, stale, target, session: state?.session })
   const status = previewStatusInfo(state)
   const session = state?.session || null
   const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
   const frameUrl = state?.status === 'live' ? safeHref(session?.viewer_url) : null
-  const sessionMode = session?.mode ? modeLabel(session.mode) : ''
 
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
@@ -40,6 +54,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
         <h4 id="periph-preview-title">Preview</h4>
         {/* The channel is Insight's own bookkeeping, not something to act on, so it is not shown. */}
         <span className="periph-pills">
+          {running && <ModeBadges mode={session?.mode} label="Streaming" />}
           <Pill tone={status.tone}>{status.label}</Pill>
         </span>
       </div>
@@ -66,7 +81,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
             >
               Start preview
             </button>
-            {selection && !block.blocked && <span className="hint">{modeLabel(selection)}</span>}
+            {!block.blocked && <ModeBadges mode={selection} label="Mode" />}
           </div>
           {block.blocked && <p className="hint periph-preview-reason" id="periph-preview-reason">{block.reason}</p>}
         </>
@@ -76,7 +91,6 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
         <>
           {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
               describes a state the reader cannot walk away from. */}
-          {sessionMode && <p className="hint">{sessionMode}</p>}
           <div className="periph-actions">
             <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
