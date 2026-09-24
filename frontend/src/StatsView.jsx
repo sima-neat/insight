@@ -91,6 +91,28 @@ function downloadText(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
+/** Calls `run` now and every `ms` after, only while the browser tab is visible; returns the cleanup. */
+function pollWhileVisible(run, ms) {
+  let timer = null
+  const start = () => {
+    if (timer !== null) return
+    run()
+    timer = setInterval(run, ms)
+  }
+  const stop = () => {
+    if (timer === null) return
+    clearInterval(timer)
+    timer = null
+  }
+  const onVisibility = () => (document.visibilityState === 'hidden' ? stop() : start())
+  onVisibility()
+  document.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    stop()
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
+}
+
 /**
  * Values that were read from a board that is no longer the selected one. They are kept
  * and labelled rather than hidden: a request in flight during a board switch resolves
@@ -1509,26 +1531,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
 
   useEffect(() => {
     if (!polling) return undefined
-    let timer = null
-    const run = () => tick.current()
-    const start = () => {
-      if (timer !== null) return
-      run()
-      timer = setInterval(run, delay)
-    }
-    const stop = () => {
-      if (timer === null) return
-      clearInterval(timer)
-      timer = null
-    }
     // A hidden tab must not keep running commands on the board.
-    const onVisibility = () => (document.visibilityState === 'hidden' ? stop() : start())
-    onVisibility()
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      stop()
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
+    return pollWhileVisible(() => tick.current(), delay)
   }, [polling, delay])
 
   useEffect(() => {
@@ -1542,25 +1546,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   // stops with the view and with a hidden browser tab. Opening it reads it at once.
   useEffect(() => {
     if (!hostShown) return undefined
-    let timer = null
-    const run = () => loadHost()
-    const start = () => {
-      if (timer !== null) return
-      run()
-      timer = setInterval(run, HOST_POLL_MS)
-    }
-    const stop = () => {
-      if (timer === null) return
-      clearInterval(timer)
-      timer = null
-    }
-    const onVisibility = () => (document.visibilityState === 'hidden' ? stop() : start())
-    onVisibility()
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      stop()
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
+    return pollWhileVisible(() => loadHost(), HOST_POLL_MS)
   }, [hostShown])
 
   useEffect(() => {
