@@ -11,6 +11,7 @@ import {
   cameraSummaryLine,
   changeSummary,
   createBoardSync,
+  createFocusReturn,
   defaultTargetText,
   deviceRows,
   deviceTabs,
@@ -527,4 +528,41 @@ test('a board read sent after a change applies normally', async () => {
   assert.equal(await load, boardB)
   assert.equal(state.board, boardB)
   assert.equal(state.loading, false)
+})
+
+function fakeControl(name, { disabled = false, connected = true } = {}) {
+  return { name, disabled, isConnected: connected, focused: 0, focus() { this.focused += 1 } }
+}
+
+test('collapsing a disclosure gives focus back to the control that opened it', () => {
+  const refs = { trust: null, change: fakeControl('change'), section: fakeControl('section') }
+  const focusReturn = createFocusReturn()
+  // Cancel is pressed while the confirmation is open: its opener is not rendered yet.
+  focusReturn.request(() => [refs.trust, refs.change, refs.section])
+  refs.trust = fakeControl('trust') // the re-render puts "Trust new key…" back
+  assert.equal(focusReturn.flush(), refs.trust)
+  assert.equal(refs.trust.focused, 1)
+  assert.equal(refs.change.focused, 0)
+})
+
+test('when the opener is gone too, focus goes to the next control still on the page', () => {
+  const change = fakeControl('change')
+  const section = fakeControl('section')
+  const focusReturn = createFocusReturn()
+  focusReturn.request(() => [null, fakeControl('test', { disabled: true }), fakeControl('old', { connected: false }), change, section])
+  assert.equal(focusReturn.flush(), change)
+  assert.equal(change.focused, 1)
+  focusReturn.request(() => [null])
+  assert.equal(focusReturn.flush(), null)
+})
+
+test('renders without a collapse leave focus where it is', () => {
+  const change = fakeControl('change')
+  const focusReturn = createFocusReturn()
+  assert.equal(focusReturn.flush(), null)
+  focusReturn.request(() => [change])
+  focusReturn.flush()
+  // The effect runs after every render, e.g. each keystroke in the board form.
+  assert.equal(focusReturn.flush(), null)
+  assert.equal(change.focused, 1)
 })

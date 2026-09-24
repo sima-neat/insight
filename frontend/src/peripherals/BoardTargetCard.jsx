@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { copyText, requestJson } from './api.js'
 import {
   connectionStateInfo,
+  createFocusReturn,
   defaultTargetText,
   formatRelativeTime,
   initialBoardForm,
@@ -48,6 +49,23 @@ export default function BoardTargetCard({
   const [actionError, setActionError] = useState(null)
   const [formError, setFormError] = useState(null)
   const [confirmTrust, setConfirmTrust] = useState(false)
+  const sectionRef = useRef(null)
+  const changeRef = useRef(null)
+  const trustRef = useRef(null)
+  const testRef = useRef(null)
+  const hostRef = useRef(null)
+  const focusReturn = useRef(null)
+  if (!focusReturn.current) focusReturn.current = createFocusReturn()
+
+  // Cancel, Save and Trust remove the button that has focus; give it back to the opener (or the
+  // nearest control still shown) so the next Tab continues from there, not from the panel's top.
+  useEffect(() => {
+    focusReturn.current.flush()
+  })
+
+  function returnFocus(...refs) {
+    focusReturn.current.request(() => [...refs, sectionRef].map((ref) => ref.current))
+  }
 
   const values = form || initialBoardForm(board)
   const formOpen = Boolean(board) && (editing || !target)
@@ -101,6 +119,7 @@ export default function BoardTargetCard({
     const data = await post('trust', '/api/board/trust-host-key', { fingerprint: presented })
     if (data) {
       setConfirmTrust(false)
+      returnFocus(trustRef, testRef, changeRef)
       onStatus?.('Host key updated. Test the connection or refresh.')
     }
   }
@@ -109,7 +128,21 @@ export default function BoardTargetCard({
     setEditing(false)
     setForm(null)
     setConfirmTrust(false)
+    // With no board left to use, the form stays open: continue in it.
+    returnFocus(changeRef, hostRef)
     onStatus?.(message)
+  }
+
+  function cancelForm() {
+    setEditing(false)
+    setForm(null)
+    setFormError(null)
+    returnFocus(changeRef)
+  }
+
+  function cancelTrust() {
+    setConfirmTrust(false)
+    returnFocus(trustRef, changeRef)
   }
 
   function copyCommand(text) {
@@ -117,7 +150,7 @@ export default function BoardTargetCard({
   }
 
   return (
-    <section className="panel periph-board" aria-labelledby="periph-board-title">
+    <section className="panel periph-board" aria-labelledby="periph-board-title" ref={sectionRef} tabIndex={-1}>
       <h2 id="periph-board-title" className="sr-only">Selected board</h2>
 
       {loading && !board && <p className="hint" role="status">Loading board…</p>}
@@ -149,11 +182,11 @@ export default function BoardTargetCard({
             )}
             {/* A board that just answered needs no test; the button is for when it did not. */}
             {state.tone !== 'ok' && (
-              <button type="button" className="btn-tonal" onClick={testConnection} disabled={Boolean(busy)}>
+              <button type="button" className="btn-tonal" ref={testRef} onClick={testConnection} disabled={Boolean(busy)}>
                 {busy === 'test' ? 'Testing…' : 'Test connection'}
               </button>
             )}
-            <button type="button" className="btn-ghost" aria-expanded={formOpen} onClick={() => setEditing(!editing)}>
+            <button type="button" className="btn-ghost" ref={changeRef} aria-expanded={formOpen} onClick={() => setEditing(!editing)}>
               Change board
             </button>
           </div>
@@ -194,11 +227,11 @@ export default function BoardTargetCard({
                   </p>
                   <div className="periph-actions">
                     <button type="button" className="btn-ghost danger" onClick={trustKey} disabled={Boolean(busy)}>Trust new key</button>
-                    <button type="button" className="btn-ghost" onClick={() => setConfirmTrust(false)} autoFocus>Cancel</button>
+                    <button type="button" className="btn-ghost" onClick={cancelTrust} autoFocus>Cancel</button>
                   </div>
                 </div>
               ) : (
-                <button type="button" className="btn-ghost" onClick={() => setConfirmTrust(true)} disabled={!presented}>Trust new key…</button>
+                <button type="button" className="btn-ghost" ref={trustRef} onClick={() => setConfirmTrust(true)} disabled={!presented}>Trust new key…</button>
               )}
             </>
           )}
@@ -210,7 +243,7 @@ export default function BoardTargetCard({
           <div className="periph-form-fields">
             <label>
               Host or IP address
-              <input value={values.host} onChange={(e) => setForm({ ...values, host: e.target.value })} placeholder="192.168.2.2" autoComplete="off" spellCheck={false} />
+              <input ref={hostRef} value={values.host} onChange={(e) => setForm({ ...values, host: e.target.value })} placeholder="192.168.2.2" autoComplete="off" spellCheck={false} />
             </label>
             <label>
               SSH port
@@ -228,7 +261,7 @@ export default function BoardTargetCard({
           <div className="periph-actions">
             <button type="submit" className="btn-tonal" disabled={Boolean(busy)}>{busy === 'select' ? 'Saving…' : 'Save'}</button>
             {board?.saved && <button type="button" className="btn-ghost" onClick={useDefault} disabled={Boolean(busy)}>Use default</button>}
-            {target && <button type="button" className="btn-ghost" onClick={() => { setEditing(false); setForm(null); setFormError(null) }}>Cancel</button>}
+            {target && <button type="button" className="btn-ghost" onClick={cancelForm}>Cancel</button>}
           </div>
         </form>
       )}

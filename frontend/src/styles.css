@@ -3767,6 +3767,11 @@ button:disabled {
   background: transparent;
 }
 
+/* The card only takes focus as a last resort, when a collapse removed every nearer control. */
+.periph-board:focus {
+  outline: none;
+}
+
 /* Peripherals: device-kind icon rail. 56px wide: 46px buttons + 4px padding + 1px border. */
 .periph-kind-layout {
   margin-top: 12px;

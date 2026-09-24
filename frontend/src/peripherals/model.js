@@ -473,3 +473,25 @@ export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
 
   return { load, apply }
 }
+
+// When a disclosure collapses, the control that had focus is removed, and focus would fall to the
+// page body. request() is called when it collapses; flush() runs after the next render, so the
+// candidates (usually refs) are read once the opener is back on the page. The first candidate
+// still rendered and enabled gets focus. flush() does nothing without a pending request: it runs
+// after every render, including each keystroke in a form.
+export function createFocusReturn() {
+  let pending = null
+  return {
+    request(candidates) {
+      pending = candidates
+    },
+    flush() {
+      if (!pending) return null
+      const candidates = pending
+      pending = null
+      const target = candidates().find((el) => el && el.isConnected !== false && !el.disabled) || null
+      target?.focus()
+      return target
+    }
+  }
+}
