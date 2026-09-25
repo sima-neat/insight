@@ -44,7 +44,7 @@ apiAddress: 127.0.0.1:9997
 
 
 # Webcam ingest + normalization. A browser WHIP-publishes its camera to
-# cam{N} (see neat_insight/mediasrc.py webcam_path_name), NOT to src{N}. A
+# cam{N} (see neat_insight/mediasrc.py webcam_ingest_path_name), NOT to src{N}. A
 # browser's WebRTC stream is encoded for a video call: sparse keyframes and
 # whatever H.264 profile it negotiates, which the board's hardware decoder and
 # GStreamer rtspsrc cannot consume (rtspsrc fails waiting for a keyframe; the
@@ -64,6 +64,10 @@ paths:
   # command without a full shell, so `-g 30 -keyint_min 30` is used to force a
   # keyframe every second rather than `-force_key_frames "expr:..."`. -profile:v
   # baseline matches what the browser already emits and what the decoder accepts.
+  # The 127.0.0.1:8554 in the command is the container-internal rtspAddress (fixed
+  # above), reached over loopback from inside the container — not a browser-facing
+  # URL, so it is deliberately NOT resolved through the SDK host port map (which
+  # remaps only the published host port, not this internal bind).
   "~^cam([1-9]|[1-3][0-9]|4[0-8])$":
     runOnReady: >
       ffmpeg -nostdin -hide_banner -loglevel error

@@ -333,11 +333,11 @@ def stop_media_stream_if(index: int, identity: Optional[int]) -> bool:
         return True
 
 
-def webcam_path_name(index: int) -> str:
-    """The MediaMTX path a browser WHIP-publishes to and Insight monitors.
+def webcam_ingest_path_name(index: int) -> str:
+    """The MediaMTX path a browser WHIP-publishes its camera to.
 
     This is the *ingest* path (``cam{index}``), deliberately distinct from the
-    *consumer* path (``src{index}``, built by app._source_url) that the viewer
+    *consumer* path (``src{index}``, see webcam_output_path_name) that the viewer
     and detection apps read. A browser's WebRTC stream is encoded for a video
     call — sparse keyframes, and whatever H.264 profile it negotiates — which
     the board's hardware decoder and rtspsrc cannot consume. So MediaMTX runs a
@@ -346,13 +346,29 @@ def webcam_path_name(index: int) -> str:
     ``src{index}``, exactly the shape a file source's ffmpeg already produces.
     File sources push straight to ``src{index}`` and never touch the ingest path.
 
-    Everything Insight tracks about the *browser* — readiness, the publishing
-    session's identity, kicking it — is about this ingest path, because that is
-    where the WebRTC session lives; the normalized ``src{index}`` is fed by
-    ffmpeg, not the browser. Consumers are unaffected: they still read
-    ``src{index}``.
+    The publishing *session's* identity — what a stop/kick must name — lives on
+    this ingest path, because that is where the WebRTC session is. Ongoing
+    liveness (app._sync_source_runtime_states) also tracks this path: whether the
+    camera is still connected. Whether the normalizer has actually produced the
+    ``src{index}`` output is confirmed separately, once, at start (see
+    webcam_output_path_name and webcam_is_publishing).
     """
     return f"cam{index}"
+
+
+def webcam_output_path_name(index: int) -> str:
+    """The MediaMTX path the viewer and detection apps read for a webcam slot.
+
+    This is the *consumer* path (``src{index}``): the normalized, decoder-ready
+    stream the ingest-path normalizer produces (see webcam_ingest_path_name). It
+    is what app._source_url advertises, and what /api/mediasrc/start confirms via
+    webcam_is_publishing before marking a slot playing — so a normalizer that
+    cannot produce it at all (e.g. ffmpeg missing) surfaces as "not publishing
+    yet" rather than a slot marked live over a source nothing can read. Ongoing
+    liveness does NOT poll this path: it blinks not-ready on each runOnReadyRestart
+    of the normalizer, and demoting on that would strand a live camera stopped.
+    """
+    return f"src{index}"
 
 
 # A 404 from MediaMTX is an answer, not a failure: the path or session is not
@@ -399,15 +415,23 @@ def _mediamtx_request(path: str, method: str = "GET"):
 
 
 def webcam_is_publishing(index: int) -> bool:
-    """Whether a browser is currently WHIP-publishing to this slot.
+    """Whether this webcam slot's consumable stream is ready (start confirmation).
+
+    Deliberately checks the *output* path (webcam_output_path_name / src{index}),
+    not the ingest path the browser publishes to. Used by /api/mediasrc/start to
+    confirm the whole chain — browser -> ingest -> normalizer -> output — before
+    marking a slot playing, so a normalizer that cannot produce src{index} at all
+    (e.g. ffmpeg missing) is caught here rather than leaving apps pointed at a
+    dead source. Ongoing liveness is a separate question tracked against the
+    ingest path (see webcam_ingest_path_name), because the output blinks on every
+    normalizer restart.
 
     A webcam source has no Python-managed process to poll (unlike a file
-    source's ffmpeg push), so liveness comes from MediaMTX's own path state
-    rather than pipeline_registry.
-
-    Raises MediaServerUnreachable when that cannot be established.
+    source's ffmpeg push), so this comes from MediaMTX's own path state rather
+    than pipeline_registry. Raises MediaServerUnreachable when that cannot be
+    established.
     """
-    data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_output_path_name(index)}")
     if data is _MEDIAMTX_NOT_FOUND:
         return False
     return bool(data.get("ready"))
@@ -434,10 +458,12 @@ def webcam_publisher_session(index: int) -> Optional[str]:
     This is the identity a stop has to be bound to. Two browsers can hold the
     same slot in quick succession — one reassigns it, the other's connection
     drops a few seconds later — and a stop that only names the slot would act
-    on whichever session is there by then. Raises MediaServerUnreachable when
-    MediaMTX cannot say.
+    on whichever session is there by then. Asked of the *ingest* path, where the
+    WebRTC session lives (the output path's publisher is the normalizer's rtsp
+    session, not the browser). Raises MediaServerUnreachable when MediaMTX cannot
+    say.
     """
-    data = _mediamtx_request(f"/v3/paths/get/{webcam_path_name(index)}")
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_ingest_path_name(index)}")
     if data is _MEDIAMTX_NOT_FOUND:
         return None
     source = data.get("source") or {}

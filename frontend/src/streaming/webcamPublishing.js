@@ -94,10 +94,13 @@ export async function publishWebcamOffer(peerConnection, whipUrl, fetchRequest =
 export async function confirmWebcamPublishing(attempt, options = {}) {
   const {
     // Longer than MediaMTX's webrtcTrackGatherTimeout (10s) plus the ICE
-    // handshake. A slow-starting camera is accepted by MediaMTX up to that
-    // point, and giving up here first would tear down a publish that was
-    // about to succeed.
-    timeoutMs = 15000,
+    // handshake, AND the extra hop before the slot reports ready: start now
+    // confirms the normalized output path (src{N}), which only appears once the
+    // browser is publishing to the ingest path AND MediaMTX's runOnReady ffmpeg
+    // has spun up and produced its first frames (~1-3s on the DevKit). A
+    // slow-starting camera or normalizer is still within this window, and giving
+    // up first would tear down a publish that was about to succeed.
+    timeoutMs = 20000,
     intervalMs = 250,
     sleep = defaultSleep,
     now = () => Date.now(),

@@ -57,7 +57,7 @@ from neat_insight.mediasrc import (
     webcam_is_publishing,
     webcam_publisher_session,
     webcam_ready_paths,
-    webcam_path_name,
+    webcam_ingest_path_name,
     webcam_publisher_sessions,
     stop_media_stream_if,
 )
@@ -2187,7 +2187,7 @@ def _webcam_whip_url(src):
     return _format_browser_https_url(
         _request_host_name(),
         _resolve_webcam_whip_port(),
-        f"/{webcam_path_name(index)}/whip",
+        f"/{webcam_ingest_path_name(index)}/whip",
     )
 
 
@@ -2396,7 +2396,7 @@ class _BulkReleaser:
             return set(), set(self.released)
         replaced = {
             index for index, released in self.released.items()
-            if current.get(webcam_path_name(index)) not in (None, released)
+            if current.get(webcam_ingest_path_name(index)) not in (None, released)
         }
         return replaced, set()
 
@@ -2420,7 +2420,16 @@ def _sync_source_runtime_states(sources):
             # back to playing, so treating "could not tell" as "stopped" would
             # leave a live camera showing Idle for good.
             return set()
-        return {i for i in candidates if webcam_path_name(i) not in ready}
+        # Ongoing liveness tracks the browser ingest (cam{i}), not the output
+        # src{i}. The normalizer runs under MediaMTX's runOnReadyRestart, so
+        # src{i} blinks not-ready for a second or two on any ffmpeg restart while
+        # the camera keeps publishing; demoting on that would mark a live webcam
+        # stopped for good, since nothing re-promotes a slot. The output is
+        # instead confirmed once, at /api/mediasrc/start (webcam_is_publishing),
+        # which is where a normalizer that cannot produce src{i} at all — e.g.
+        # ffmpeg missing — is caught. A slot can only be playing if that check
+        # passed, so a healthy ingest here means a genuinely live source.
+        return {i for i in candidates if webcam_ingest_path_name(i) not in ready}
 
     playing_webcams = [
         src["index"] for src in sources

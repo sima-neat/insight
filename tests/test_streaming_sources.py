@@ -407,7 +407,7 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(source["allowed_transports"], ["rtsp"])
         self.assertEqual(source["urls"]["rtsp"], "rtsp://localhost:8554/src1")
         # The browser publishes to the cam{N} ingest path, which MediaMTX
-        # normalizes onto the src{N} consumer path above (see webcam_path_name).
+        # normalizes onto the src{N} consumer path above (webcam_ingest_path_name).
         self.assertEqual(source["urls"]["whip"], "https://localhost:8889/cam1/whip")
 
     def test_assign_webcam_requires_an_index(self):
@@ -616,6 +616,28 @@ class WebcamSourceTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"cam1"}):
+            response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
+
+        self.assertEqual(response.get_json()[0]["state"], "playing")
+
+    def test_a_normalizer_blip_does_not_demote_a_still_connected_webcam(self):
+        """Ongoing liveness tracks the ingest, so a normalizer restart is tolerated.
+
+        The normalizer runs under runOnReadyRestart, so the output src1 blinks
+        not-ready for a second or two whenever ffmpeg restarts while the camera
+        keeps publishing to cam1. Demoting on that would strand a live webcam
+        stopped (nothing re-promotes it). Whether the normalizer can produce src1
+        at all is instead confirmed once at start (see
+        test_start_rejects_a_webcam_that_is_not_publishing_yet, which gates on the
+        output). Here cam1 is ready but src1 is absent — the slot must stay live.
+        """
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]',
+            encoding="utf-8",
+        )
+
+        # Only cam1 (ingest) is ready; src1 (output) is mid-restart and absent.
         with mock.patch.object(app_module, "webcam_ready_paths", return_value={"cam1"}):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
@@ -1593,9 +1615,10 @@ class WebcamPublishStateTests(unittest.TestCase):
             self.assertTrue(mediasrc.webcam_is_publishing(1))
 
         request = urlopen.call_args[0][0]
-        # The browser publishes to the cam{N} ingest path, so liveness and
-        # session questions are asked about cam{N}, not the src{N} consumer path.
-        self.assertIn("/v3/paths/get/cam1", request.full_url)
+        # Start confirmation asks about the consumable OUTPUT path (src{N}) — the
+        # whole chain being up — not the cam{N} ingest the browser publishes to.
+        # Ongoing liveness and session identity key off the ingest path instead.
+        self.assertIn("/v3/paths/get/src1", request.full_url)
         self.assertEqual(request.get_method(), "GET")
 
     def test_reports_not_publishing_when_the_path_is_not_ready(self):
@@ -1794,9 +1817,14 @@ class WebcamNormalizationTests(unittest.TestCase):
     viewer and apps ever read.
     """
 
-    def test_webcam_path_name_is_the_ingest_path_not_the_consumer_path(self):
-        self.assertEqual(mediasrc.webcam_path_name(1), "cam1")
-        self.assertEqual(mediasrc.webcam_path_name(12), "cam12")
+    def test_ingest_and_output_paths_are_distinct(self):
+        # The browser publishes to cam{N}; the viewer and apps read the
+        # normalized src{N}. Keeping these separate is what lets liveness track
+        # the consumable output while session identity tracks the browser.
+        self.assertEqual(mediasrc.webcam_ingest_path_name(1), "cam1")
+        self.assertEqual(mediasrc.webcam_ingest_path_name(12), "cam12")
+        self.assertEqual(mediasrc.webcam_output_path_name(1), "src1")
+        self.assertEqual(mediasrc.webcam_output_path_name(12), "src12")
 
     def test_mediamtx_config_normalizes_cam_ingest_onto_the_src_consumer_path(self):
         cfg = Path(__file__).resolve().parent.parent / "webrtc" / "mediamtx.yml"
