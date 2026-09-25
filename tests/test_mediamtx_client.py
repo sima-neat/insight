@@ -495,5 +495,118 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(client._probes["pub-2"], {"width": 640, "height": 480, "fps": 30})
 
 
+PULLED_READY = {"name": "src7", "confName": "src7", "source": {"type": "rtspSource", "id": ""}, "ready": True,
+                "readyTime": "2026-09-24T15:16:24.085Z", "tracks": ["H265"], "bytesReceived": 209_429, "bytesSent": 0, "readers": []}
+PULLED_DOWN = {"name": "src8", "confName": "src8", "source": {"type": "rtspSource", "id": ""}, "ready": False,
+               "readyTime": None, "tracks": [], "bytesReceived": 0, "bytesSent": 0, "readers": []}
+
+
+def _fake_patch_request(paths=PATHS, sessions=SESSIONS, patches=None, patch_status=200, fail=False):
+    inner = _fake_request(paths=paths, sessions=sessions, fail=fail)
+    def request(method, url, body=None):
+        if method == "PATCH":
+            if fail:
+                raise OSError("connection refused")
+            patches.append((url.split("/v3/", 1)[1], body))
+            return patch_status, b"" if patch_status == 200 else b'{"error":"x"}'
+        return inner(method, url)
+    return request
+
+
+class PullPathTests(unittest.TestCase):
+    def test_pulled_path_is_not_external(self):
+        snapshot = mediamtx.build_snapshot(PATHS + [PULLED_READY, PULLED_DOWN], SESSIONS)
+        self.assertTrue(snapshot["src7"].pulled)
+        self.assertFalse(snapshot["src7"].external)
+        self.assertEqual(snapshot["src7"].codec, "h265")
+        self.assertTrue(snapshot["src8"].pulled)
+        self.assertFalse(snapshot["src8"].ready)
+        self.assertTrue(snapshot["src2"].external)   # unchanged for session publishers
+
+    def test_stream_key_per_path_and_ready_time(self):
+        ready = mediamtx.build_snapshot([PULLED_READY], {})["src7"]
+        down = mediamtx.build_snapshot([PULLED_DOWN], {})["src8"]
+        self.assertEqual(mediamtx.stream_key(ready), "pull:src7:2026-09-24T15:16:24.085Z")
+        self.assertIsNone(mediamtx.stream_key(down))
+        self.assertEqual(mediamtx.stream_key(mediamtx.build_snapshot(PATHS, SESSIONS)["src2"]), "pub-2")
+
+    def test_pull_cache_key_changes_with_ready_time(self):
+        clock = FakeClock()
+        first = [dict(PULLED_READY, bytesReceived=1_000)]
+        second = [dict(PULLED_READY, bytesReceived=251_000)]
+        reconnected = [dict(PULLED_READY, readyTime="2026-09-24T15:20:00.000Z", bytesReceived=10)]
+        state = {"paths": first}
+        probes = []
+        def probe(url):
+            probes.append(url)
+            return {"width": 2560, "height": 1440, "fps": 25}
+        def request(method, url):
+            return _fake_request(paths=state["paths"])(method, url)
+        client = mediamtx.MediamtxClient(request=request, clock=clock, probe=probe, probe_async=False)
+        info = client.pull_info(client.snapshot()["src7"])
+        self.assertEqual((info["width"], info["height"], info["fps"], info["bitrate_bps"]), (2560, 1440, 25, None))
+        self.assertTrue(info["codec_supported"])
+        self.assertEqual(info["since"], "2026-09-24T15:16:24.085Z")
+        state["paths"] = second
+        clock.now += 2
+        info = client.pull_info(client.snapshot()["src7"])
+        self.assertEqual(info["bitrate_bps"], 1_000_000)
+        self.assertEqual(len(probes), 1)
+        state["paths"] = reconnected
+        clock.now += 2
+        info = client.pull_info(client.snapshot()["src7"])
+        self.assertIsNone(info["bitrate_bps"])   # fresh key after the reconnect
+        self.assertEqual(len(probes), 2)         # probed again
+        self.assertEqual(probes[0], "rtsp://127.0.0.1:8554/src7?reader=insight-probe")
+
+    def test_pull_info_for_a_down_path_has_no_stats_and_no_probe(self):
+        probes = []
+        client = mediamtx.MediamtxClient(request=_fake_request(paths=[PULLED_DOWN]), clock=FakeClock(),
+                                         probe=lambda url: probes.append(url), probe_async=False)
+        info = client.pull_info(client.snapshot()["src8"])
+        self.assertEqual(info, {"since": None, "codec_supported": False, "width": None, "height": None, "fps": None, "bitrate_bps": None})
+        self.assertEqual(probes, [])
+
+    def test_set_and_clear_pull_source_patch_the_path_config(self):
+        patches = []
+        client = mediamtx.MediamtxClient(request=_fake_patch_request(patches=patches), clock=FakeClock())
+        client.snapshot()
+        client.set_pull_source("src3", "rtsp://u:p@10.0.0.5:554/x")
+        self.assertEqual(patches[-1], ("config/paths/patch/src3", {"source": "rtsp://u:p@10.0.0.5:554/x", "sourceOnDemand": False, "rtspTransport": "tcp"}))
+        self.assertIsNone(client._snapshot_at)  # cache invalidated
+        client.clear_pull_source("src3")
+        self.assertEqual(patches[-1], ("config/paths/patch/src3", {"source": "publisher"}))
+
+    def test_set_pull_source_errors(self):
+        client = mediamtx.MediamtxClient(request=_fake_patch_request(patches=[], patch_status=400), clock=FakeClock())
+        with self.assertRaises(mediamtx.MediamtxError):
+            client.set_pull_source("src3", "rtsp://10.0.0.5/x")
+        client = mediamtx.MediamtxClient(request=_fake_patch_request(patches=[], fail=True), clock=FakeClock())
+        with self.assertRaises(mediamtx.MediamtxError):
+            client.set_pull_source("src3", "rtsp://10.0.0.5/x")
+        with mock.patch.object(mediamtx, "api_disabled_at_launch", True):
+            with self.assertRaises(mediamtx.MediamtxError) as ctx:
+                mediamtx.MediamtxClient(request=_fake_patch_request(patches=[]), clock=FakeClock()).set_pull_source("src3", "rtsp://10.0.0.5/x")
+            self.assertIn("unavailable", str(ctx.exception))
+
+    def test_clear_pull_source_treats_404_as_success(self):
+        client = mediamtx.MediamtxClient(request=_fake_patch_request(patches=[], patch_status=404), clock=FakeClock())
+        client.clear_pull_source("src3")  # no exception
+
+    def test_default_request_sends_json_body_for_patch(self):
+        captured = {}
+        class Resp:
+            status = 200
+            def read(self): return b""
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        def fake_urlopen(req, timeout):
+            captured["method"], captured["data"], captured["ctype"] = req.get_method(), req.data, req.get_header("Content-type")
+            return Resp()
+        with mock.patch.object(mediamtx.urllib.request, "urlopen", fake_urlopen):
+            mediamtx._default_request("PATCH", "http://127.0.0.1:9997/v3/config/paths/patch/src1", body={"source": "publisher"})
+        self.assertEqual(captured, {"method": "PATCH", "data": b'{"source": "publisher"}', "ctype": "application/json"})
+
+
 if __name__ == "__main__":
     unittest.main()
