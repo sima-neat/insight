@@ -150,6 +150,19 @@ test("metric camera framing does not move a keypoint when pose bounds change", (
     .some((call) => call[1] === stablePoint[0] && call[2] === stablePoint[1]));
 });
 
+test("custom reference centers use the same coordinate normalization as landmarks", () => {
+  const ctx = recordingContext();
+  drawBlazePose3D(ctx, { width: 200, height: 160 }, {
+    view: { center: { x: 0, y: 1, z: 0 }, half_extent: 0.5 },
+    poses: [{ keypoints: [{ name: "nose", x: 0, y: 1, z: 0 }] }],
+  }, { showReferenceCube: false, camera: { yaw: 0, pitch: 0 } });
+
+  const landmark = ctx.calls.find(([name, , , radius]) => name === "arc" && radius === 3.1);
+  assert.ok(landmark);
+  assert.equal(landmark[1], 100);
+  assert.equal(landmark[2], 80);
+});
+
 test("BlazePose 3D renderer draws an optional labeled reference cube", () => {
   const payload = {
     poses: [{

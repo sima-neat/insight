@@ -166,11 +166,11 @@ function normalizedPoses(payload) {
 
 function referenceFrame(payload) {
   const requested = payload?.view;
-  const center = {
+  const center = normalizeWorldPoint({
     x: finiteOr(requested?.center?.x, 0),
     y: finiteOr(requested?.center?.y, 0),
     z: finiteOr(requested?.center?.z, 0),
-  };
+  });
   const halfExtent = clamp(
     finiteOr(requested?.half_extent, DEFAULT_REFERENCE_HALF_EXTENT),
     CUBE_MIN_EXTENT,

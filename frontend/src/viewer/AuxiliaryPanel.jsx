@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 
 import {
   auxiliaryRendererRegistry,
+  mergeAuxiliarySessionSettings,
   shouldAnimateAuxiliaryView,
   shouldHoldLastAuxiliaryFrame,
 } from "./auxiliaryVisualization.js";
@@ -101,26 +102,10 @@ function settingsForSession(channelIndex, view) {
   if (typeof toSession !== "function" || !hasExplicitRendererSettings(channelIndex, view.renderer)) {
     return stored;
   }
-  return {
-    ...(stored || {}),
-    ...toSession(resolveRendererSettings(channelIndex, view.renderer)),
-  };
-}
-
-function saveSessionToViewerSettings(channelIndex, view, settings) {
-  const settingsApi = window.viewerSettingsApi;
-  const toViewer = auxiliaryRendererRegistry.get(view.renderer)?.viewerSettings?.toViewer;
-  if (typeof toViewer !== "function" || !settingsApi?.writeScopeAuxiliarySettings) return;
-  const targetScope = `channel_${channelIndex}`;
-  const current = resolveRendererSettings(channelIndex, view.renderer);
-  settingsApi.writeScopeAuxiliarySettings(
-    targetScope,
-    view.renderer,
-    toViewer(settings, current),
+  return mergeAuxiliarySessionSettings(
+    toSession(resolveRendererSettings(channelIndex, view.renderer)),
+    stored,
   );
-  window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
-    detail: { scope: targetScope, auxiliaryRenderer: view.renderer },
-  }));
 }
 
 function descriptorSignature(views) {
@@ -267,7 +252,6 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         initialSettings: settingsForSession(channelIndex, view),
         onSettingsChange(settings) {
           saveRendererPreference(channelIndex, view, settings);
-          saveSessionToViewerSettings(channelIndex, view, settings);
           if (selectedIdRef.current === view.id) {
             updateControls(sessionsRef.current.get(view.id)?.session);
           }
