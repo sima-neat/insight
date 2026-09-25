@@ -915,6 +915,77 @@ class PullSourceTests(_SourceFixture):
         record.probed_at = 0.0
         self.assertEqual(self._slot(3)["pull"]["status"], "auth_failed")  # not re-probed
 
+    def test_stop_then_pull_replaces_record(self):
+        self._pull()
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
+        self.assertEqual(self._pull(url="rtsp://10.0.0.9:554/b").status_code, 200)
+        self.assertEqual(app_module.pull_registry.get(3).host, "10.0.0.9:554")
+
+    def test_stop_releases_the_pull_and_restores_the_stored_file(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull()
+        self.mtx.paths["src3"] = pulled_path(3)
+        response = self.client.post("/api/mediasrc/stop", json={"index": 3})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertIsNone(app_module.pull_registry.get(3))
+        slot = self._slot(3)
+        self.assertEqual((slot["state"], slot["file"]), ("stopped", "clip.mp4"))
+        self.assertNotIn("pull", slot)
+
+    def test_stop_removes_registry_entry_even_when_mediamtx_fails(self):
+        self._pull()
+        self.mtx.fail_patch = True
+        response = self.client.post("/api/mediasrc/stop", json={"index": 3})
+        self.assertEqual(response.status_code, 502)
+        self.assertIsNone(app_module.pull_registry.get(3))
+        self.assertEqual(self._slot(3)["state"], "stopped")
+
+    def test_assign_start_prepare_and_takeover_are_409_on_a_pulled_slot(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull()
+        expected = "src3 is pulling from 172.18.51.40:554. Stop it first."
+        for endpoint, payload in (("assign", {"index": 3, "file": "clip.mp4"}), ("start", {"index": 3}),
+                                  ("prepare", {"index": 3}), ("takeover", {"index": 3})):
+            with self.subTest(endpoint=endpoint):
+                response = self.client.post(f"/api/mediasrc/{endpoint}", json=payload)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.get_json()["error"], expected)
+
+    def test_bulk_endpoints_skip_pulled_slots(self):
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},'
+            ' {"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull(index=2)
+        with mock.patch.object(app_module, "_collect_video_files", return_value=["a.mp4", "b.mp4"]), \
+             mock.patch.object(app_module, "_start_source_slot", return_value=(True, None, 200)), \
+             mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("rtsp", "h264", ["rtsp"])):
+            auto = self.client.post("/api/mediasrc/auto-assign-all").get_json()
+            self.assertEqual(auto["skipped_pulled"], [2])
+            self.assertIn("Skipped pulled: src2.", auto["message"])
+            self.assertEqual(self._slot(2)["file"], "b.mp4")      # untouched
+            bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).get_json()
+            self.assertEqual((bulk["started"], bulk["skipped_pulled"]), ([1], [2]))
+            self.assertIn("Skipped pulled: src2.", bulk["message"])
+            stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
+            self.assertEqual(stop_all["skipped_pulled"], [2])
+            self.assertIn("Pulled stream(s) left running: src2.", stop_all["message"])
+            reset = self.client.post("/api/mediasrc/reset").get_json()
+            self.assertEqual(reset["skipped_pulled"], [2])
+        self.assertEqual(self.mtx.cleared, [])
+        self.assertEqual(self._slot(2)["state"], "pulled")
+        self.assertEqual(self._slot(2)["file"], "")             # reset still clears the stored record
+
+    def test_bulk_start_with_only_a_pulled_slot_answers_in_result_shape(self):
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.sources_file.write_text('[{"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull(index=2)
+        bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
+        self.assertEqual(bulk.status_code, 200)
+        self.assertEqual((bulk.get_json()["targeted"], bulk.get_json()["skipped_pulled"]), (0, [2]))
+
 
 if __name__ == "__main__":
     unittest.main()

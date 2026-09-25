@@ -2171,6 +2171,7 @@ def _index_error(index):
 
 
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
+PULLED_LEFT_RUNNING = "Pulled stream(s) left running"
 
 
 def _external_conflict_message(index, path) -> str:
@@ -2233,6 +2234,10 @@ def _skipped_suffix(skipped_external, phrase="Skipped external"):
     if not skipped_external:
         return ""
     return f" {phrase}: " + ", ".join(f"src{i}" for i in skipped_external) + "."
+
+
+def _skipped_suffixes(skipped_external, skipped_pulled, external_phrase="Skipped external", pulled_phrase="Skipped pulled") -> str:
+    return _skipped_suffix(skipped_external, external_phrase) + _skipped_suffix(skipped_pulled, pulled_phrase)
 
 
 def _source_native_fps(file_name: str) -> Optional[int]:
@@ -2368,6 +2373,9 @@ def assign_source():
     index_error = _index_error(index)
     if index_error:
         return index_error
+    record = _pull_record(index)
+    if record:
+        return _pull_conflict_error(index, record)
     holder = _external_holder(index)
     if holder:
         return _external_conflict_error(index, holder)
@@ -2419,12 +2427,16 @@ def auto_assign_all_sources():
     with _slot_lock:
         sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
         skipped_external = [src.get("index") for src in sources if _external_holder(src.get("index"), snapshot)]
-        # An external slot keeps its file, so that file is not available to the other slots.
-        kept = {src.get("file") for src in sources if src.get("index") in skipped_external}
+        skipped_pulled = [src.get("index") for src in sources if _pull_record(src.get("index"))]
+        # An external or pulled slot keeps its file, so that file is not available to the other slots.
+        kept = {src.get("file") for src in sources if src.get("index") in skipped_external or src.get("index") in skipped_pulled}
         remaining = iter(name for name in video_files if name not in kept)
         assigned_count = 0
         for src in sources:
             source_index = src.get("index")
+            if source_index in skipped_pulled:
+                # A pulled slot is left entirely untouched: no bump, no stop, its stored record unchanged.
+                continue
             _bump_slot(source_index)
             # Insight's own HTTP/MJPEG stream can share an index with an external publisher:
             # it is stopped like every other active source.
@@ -2448,7 +2460,8 @@ def auto_assign_all_sources():
         "source_count": len(sources),
         "available_files": len(video_files),
         "skipped_external": skipped_external,
-        "message": f"Assigned {assigned_count} source(s) with unique media file(s)." + _skipped_suffix(skipped_external),
+        "skipped_pulled": skipped_pulled,
+        "message": f"Assigned {assigned_count} source(s) with unique media file(s)." + _skipped_suffixes(skipped_external, skipped_pulled),
     }
 
 
@@ -2606,6 +2619,9 @@ def prepare_source():
     index = data.get("index")
     if index is None:
         return _json_error("Missing index")
+    record = _pull_record(index)
+    if record:
+        return _pull_conflict_error(index, record)
 
     src = next((s for s in load_sources() if s["index"] == index), None)
     if src is None:
@@ -2690,6 +2706,9 @@ def start_source():
     index_error = _index_error(index)
     if index_error:
         return index_error
+    record = _pull_record(index)
+    if record:
+        return _pull_conflict_error(index, record)
     holder = _external_holder(index)
     if holder:
         return _external_conflict_error(index, holder)
@@ -2729,7 +2748,8 @@ def start_sources_bulk():
     # is neither skipped nor a reason to suppress the "nothing assigned" error.
     candidates = [src for src in sources if src.get("file")]
     skipped_external = [src["index"] for src in candidates if _external_holder(src["index"], snapshot)]
-    assigned_sources = [src for src in candidates if src["index"] not in skipped_external]
+    skipped_pulled = [src["index"] for src in candidates if _pull_record(src["index"])]
+    assigned_sources = [src for src in candidates if src["index"] not in skipped_external and src["index"] not in skipped_pulled]
     # A run where every assigned slot is external still answers in the result shape, so
     # a client can tell that apart from "nothing assigned".
     if not candidates:
@@ -2768,9 +2788,10 @@ def start_sources_bulk():
         "already_running": already_running,
         "errors": errors,
         "skipped_external": skipped_external,
+        "skipped_pulled": skipped_pulled,
         "message": (
             f"Started {len(started)} source(s), {len(already_running)} already running, "
-            f"{len(errors)} failed." + _skipped_suffix(skipped_external)
+            f"{len(errors)} failed." + _skipped_suffixes(skipped_external, skipped_pulled)
         ),
         "started_or_running": started_or_running,
     }
@@ -2785,6 +2806,17 @@ def stop_source():
     index_error = _index_error(index)
     if index_error:
         return index_error
+    record = pull_registry.remove(index)
+    if record:
+        with _slot_lock:
+            _bump_slot(index)
+        logging.info("src%s: pull from %s stopped", index, record.host)
+        try:
+            mediamtx_client.clear_pull_source(f"src{index}")
+        except MediamtxError as exc:
+            # The registry entry is already gone so the UI is never stuck on a dead pull.
+            return _json_error(f"src{index} released, but mediamtx did not confirm: {exc}", 502)
+        return {"success": True}
     # Insight's own HTTP/MJPEG stream can share an index with an external publisher; it
     # stays stoppable, and only a slot holding nothing of ours is a conflict.
     holder = _external_holder(index)
@@ -2812,9 +2844,14 @@ def stop_all_sources():
     with _slot_lock:
         sources = load_sources()
         skipped_external = []
+        skipped_pulled = []
         stopped_count = 0
         for src in sources:
             source_index = src.get("index")
+            if _pull_record(source_index):
+                # A pulled slot is left running: stop-all never touches an active pull.
+                skipped_pulled.append(source_index)
+                continue
             # Classify before stopping: _external_holder only discounts a path while our own
             # publisher is alive, so stopping first would report our just-stopped slot as external.
             holder = _external_holder(source_index, snapshot)
@@ -2833,7 +2870,8 @@ def stop_all_sources():
         "success": True,
         "stopped_count": stopped_count,
         "skipped_external": skipped_external,
-        "message": f"Stopped {stopped_count} source(s)." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING),
+        "skipped_pulled": skipped_pulled,
+        "message": f"Stopped {stopped_count} source(s)." + _skipped_suffixes(skipped_external, skipped_pulled, EXTERNAL_LEFT_RUNNING, PULLED_LEFT_RUNNING),
     }
 
 
@@ -2843,6 +2881,7 @@ def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     snapshot = _path_snapshot()
     skipped_external = []
+    skipped_pulled = []
     # Stop and rewrite under the slot lock so a start cannot launch between the two and leave a
     # live process attached to a slot that reset just reported as empty.
     with _slot_lock:
@@ -2852,11 +2891,14 @@ def reset_all_sources():
             # publisher is alive, so stopping first would report our just-stopped slot as external.
             if _external_holder(source_index, snapshot):
                 skipped_external.append(source_index)
-            # Reset clears every stored record; the external stream itself is never touched.
+            # A pulled slot is left running: reset never releases an active pull.
+            if _pull_record(source_index):
+                skipped_pulled.append(source_index)
+            # Reset clears every stored record; the external stream and any active pull are never touched.
             stop_media_stream(source_index)
         reset_sources()
-    return {"success": True, "skipped_external": skipped_external,
-            "message": "Reset all source assignments." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)}
+    return {"success": True, "skipped_external": skipped_external, "skipped_pulled": skipped_pulled,
+            "message": "Reset all source assignments." + _skipped_suffixes(skipped_external, skipped_pulled, EXTERNAL_LEFT_RUNNING, PULLED_LEFT_RUNNING)}
 
 
 # API: disconnect an external publisher so the slot can be assigned again.
@@ -2868,6 +2910,9 @@ def takeover_source():
     index_error = _index_error(index)
     if index_error:
         return index_error
+    record = _pull_record(index)
+    if record:
+        return _pull_conflict_error(index, record)
     if not _find_source(index):
         return _json_error("Source not found", 404)
     if mediamtx_client.snapshot() is None:
