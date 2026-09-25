@@ -149,8 +149,8 @@ The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sent
 
 - **Overview**: charts of the hottest temperature sensor, current board power, CPU, memory, MLA memory, and network traffic, with **All metrics** listing every metric in Sentinel's order.
 - **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
-- **Power**: current and session-average power, the session peak with the current draw and the average marked against it, and the power rails stacked so the top edge is the board total.
-- **System**: a heatmap of CPU load, a row per core and a column per 10 seconds of the window in one blue, with each core's one-minute average and the busiest core; an average past a core's limits turns amber or red. Beside it: CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use.
+- **Power**: current, session-average, and session-peak power as figures, board power over the window with the session average marked, and the power rails stacked so the top edge is the board total.
+- **System**: **CPU & memory** charts CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use. **Per-core CPU** is a heatmap of load, a row per core and a column per 10 seconds of the window in one blue, with each core's one-minute average and the busiest core; an average past a core's limits turns amber or red.
 - **Storage & Network**: eMMC use, network receive and transmit, eMMC reads and writes, and their metrics.
 - **Runs**: record a trace, and open, compare, or delete saved runs. Comparing overlays one series (total power, thermal maximum, CPU, load, RAM, MLA memory, or EV74 CMA) for every selected run over the time they all cover, on a scale fitted to the runs, with each run's minimum, mean, median, P95, maximum, change against the baseline, and energy; the full per-metric comparison follows it.
 

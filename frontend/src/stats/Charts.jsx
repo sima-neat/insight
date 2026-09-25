@@ -3,6 +3,7 @@ import {
   agoLabel,
   axisLabel,
   coreSummary,
+  fixedValue,
   loadColor,
   elapsedPath,
   indexAt,
@@ -64,7 +65,7 @@ function Frame({ title, headline, scale, unit, timestamps, compact, tone, label,
     <figure className={`dash-chart tone-${tone || 'ok'}${compact ? ' compact' : ''}`} aria-label={label}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">{title}</span>
-        {headline !== undefined && <span className="dash-chart-value">{headline}</span>}
+        {headline !== undefined && headline !== null && headline !== '' && <span className="dash-chart-value">{headline}</span>}
         {!compact && (
           <span className="dash-chart-scale">Scale {scaleText(scale, unit)}</span>
         )}
@@ -149,8 +150,8 @@ export function TimeChart({ title, headline, series, scale, unit, timestamps, th
       {thresholds
         .filter((line) => line.value > scale.min && line.value < scale.max)
         .map((line) => (
-          <span key={line.tone} className={`dash-threshold ${line.tone}`} style={{ bottom: `${percentOf(line.value, scale)}%` }} aria-hidden="true">
-            {!compact && <span>{THRESHOLD_NAMES[line.tone] || line.tone} {axisLabel(line.value)}{unitAfter(unit)}</span>}
+          <span key={line.label || line.tone} className={`dash-threshold ${line.tone}`} style={{ bottom: `${percentOf(line.value, scale)}%` }} aria-hidden="true">
+            {!compact && <span>{line.label || THRESHOLD_NAMES[line.tone] || line.tone} {axisLabel(line.value)}{unitAfter(unit)}</span>}
           </span>
         ))}
       {paths.map((path, index) => path.last && (
@@ -193,7 +194,7 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
               <li key={item.key} style={{ '--series': item.color }}>
                 <span className="dash-swatch" aria-hidden="true" />
                 <span>{item.label}</span>
-                <strong>{formatValue(value ?? null, unit)}</strong>
+                <strong>{fixedValue(value ?? null, unit, 2)}</strong>
                 {share !== null && <span className="dash-share">{share}%</span>}
               </li>
             )
@@ -202,12 +203,12 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
       )}
       tooltip={(
         <>
-          <span className="dash-tooltip-row dash-tooltip-total">Total {formatValue(totals[hover.index] ?? null, unit)}</span>
+          <span className="dash-tooltip-row dash-tooltip-total">Total {fixedValue(totals[hover.index] ?? null, unit, 2)}</span>
           {series.map((item) => (
             <span key={item.key} className="dash-tooltip-row" style={{ '--series': item.color }}>
               <span className="dash-swatch" />
               <span className="dash-tooltip-label">{item.label}</span>
-              {formatValue(item.values[hover.index] ?? null, unit)}
+              {fixedValue(item.values[hover.index] ?? null, unit, 2)}
             </span>
           ))}
         </>
@@ -254,6 +255,11 @@ export function CoreHeatmap({ cores, series, timestamps }) {
         <span className="dash-core-meta">
           1-minute average of {rows.length} cores{busiest ? ` · busiest ${busiest.name} at ${formatValue(busiest.recent, '%')}` : ''}
         </span>
+        <span className="dash-heat-scale" aria-hidden="true">
+          0%
+          <span className="dash-heat-ramp" style={{ background: `linear-gradient(90deg, ${loadColor(0)}, ${loadColor(50)}, ${loadColor(100)})` }} />
+          100%
+        </span>
       </figcaption>
       <div className="dash-heat" style={{ '--rows': rows.length }}>
         <div className="dash-heat-names" aria-hidden="true">
@@ -286,45 +292,18 @@ export function CoreHeatmap({ cores, series, timestamps }) {
           <span>{span}</span>
           <span>Now</span>
         </span>
-        <span className="dash-heat-scale">
-          0%
-          <span className="dash-heat-ramp" style={{ background: `linear-gradient(90deg, ${loadColor(0)}, ${loadColor(50)}, ${loadColor(100)})` }} />
-          100%
-        </span>
       </div>
     </figure>
   )
 }
 
-/**
- * The session peak with where the board runs against it: a bar from zero to the peak, filled to
- * the current draw, with a tick at the session average. A share of the chart's own axis would say
- * nothing; a share of the peak says how much headroom the workload is using.
- */
-export function PeakGauge({ title, peak, current, average, unit }) {
-  const share = (value) => (typeof value === 'number' && typeof peak === 'number' && peak > 0 ? Math.min(100, Math.max(0, (value / peak) * 100)) : null)
-  const now = share(current)
-  const mean = share(average)
+/** One figure with its name: a headline number for a dashboard's top row. */
+export function StatTile({ title, value, unit, digits = 1, tone }) {
+  const text = fixedValue(value, unit, digits)
   return (
-    <figure className="dash-chart dash-peak" aria-label={`${title}: ${formatValue(peak, unit)}; current ${formatValue(current, unit)}, average ${formatValue(average, unit)}`}>
-      <figcaption className="dash-chart-head">
-        <span className="dash-chart-title">{title}</span>
-      </figcaption>
-      <strong className="dash-peak-value">{formatValue(peak, unit)}</strong>
-      <span className="dash-peak-track" aria-hidden="true">
-        {now !== null && <span className="dash-peak-fill" style={{ width: `${now}%` }} />}
-        {mean !== null && <span className="dash-peak-tick" style={{ left: `${mean}%` }} />}
-      </span>
-      <dl className="dash-peak-stats">
-        <div>
-          <dt><span className="dash-peak-key current" aria-hidden="true" />Current</dt>
-          <dd>{formatValue(current, unit)}</dd>
-        </div>
-        <div>
-          <dt><span className="dash-peak-key average" aria-hidden="true" />Average</dt>
-          <dd>{formatValue(average, unit)}</dd>
-        </div>
-      </dl>
+    <figure className={`dash-chart dash-stat tone-${tone || 'ok'}`} aria-label={`${title}: ${text}`}>
+      <figcaption className="dash-chart-title">{title}</figcaption>
+      <strong className="dash-stat-value">{text}</strong>
     </figure>
   )
 }

@@ -227,6 +227,12 @@ export function unitAfter(unit) {
   return suffix === '%' ? '%' : ` ${suffix}`
 }
 
+/** A value to fixed decimals with its unit, so figures in a row line up: "12.0 W", "0.56 W". */
+export function fixedValue(value, unit, digits) {
+  if (!isNumber(value)) return '—'
+  return `${value.toFixed(digits)}${unitAfter(unit)}`
+}
+
 /** "0–100%", "40–90 °C", "0–1,000 MB": a scale as a reader says it. */
 export function scaleText(scale, unit) {
   return `${axisLabel(scale.min)}–${axisLabel(scale.max)}${unitAfter(unit)}`

@@ -14,6 +14,7 @@ import {
   scaleText,
   tightScale,
   elapsedPath,
+  fixedValue,
   axisLabel,
   dashTabFrom,
   indexAt,
@@ -186,4 +187,9 @@ test('per-core heatmap: column means over the window, a one-minute average per c
   assert.equal(loadColor(100), 'rgb(12 64 140)')
   assert.equal(loadColor(null), 'var(--surface-soft)')
   assert.deepEqual(coreSummary([], {}), { rows: [], average: null, busiest: null })
+})
+
+test('figures in a row share their decimals', () => {
+  assert.deepEqual([fixedValue(12, 'W', 1), fixedValue(13.66, 'W', 1), fixedValue(0.5625, 'W', 2), fixedValue(null, 'W', 1), fixedValue(55.12, 'C', 1)],
+    ['12.0 W', '13.7 W', '0.56 W', '—', '55.1 °C'])
 })

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Callout } from '../peripherals/ui.jsx'
-import { CoreHeatmap, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
+import { CoreHeatmap, StackedChart, StatTile, TimeChart } from './Charts.jsx'
 import {
   DASH_TABS,
   DASH_TAB_KEY,
@@ -52,7 +52,7 @@ function saveTab(tab) {
 }
 
 /** A chart for one metric, or nothing when the board does not report it. */
-function MetricChart({ model, metricKey, title, ceiling, headline, height, compact }) {
+function MetricChart({ model, metricKey, title, ceiling, headline, height, compact, references = [] }) {
   const metric = metricByKey(model, metricKey)
   if (!metric) return null
   const values = seriesOf(model, metricKey)
@@ -66,7 +66,7 @@ function MetricChart({ model, metricKey, title, ceiling, headline, height, compa
       scale={scaleFor(metric.unit, [values, [metric.value]], ceiling)}
       unit={metric.unit}
       timestamps={model.timestamps}
-      thresholds={thresholdLines(metric)}
+      thresholds={[...thresholdLines(metric), ...references]}
       tone={metric.status}
       height={height}
       compact={compact}
@@ -234,30 +234,38 @@ function ThermalView({ model }) {
 
 function PowerView({ model }) {
   const ceiling = powerCeiling(model)
+  const current = metricByKey(model, 'power_current_watts')
+  const average = metricByKey(model, 'power_average_watts')
   const peak = metricByKey(model, 'power_peak_watts')
   const rails = metricsMatching(model, /^power_rail_/)
   const railSeries = rails.map((metric, index) => ({ key: metric.key, label: metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index % COLORS.length] }))
   const railTotal = rails.reduce((sum, metric) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
   const totals = stackTotals(railSeries.map((item) => item.values))
+  const stats = [
+    { metric: current, title: 'Current' },
+    { metric: average, title: 'Session average' },
+    { metric: peak, title: 'Session peak' }
+  ].filter((entry) => entry.metric)
   return (
     <>
-      <div className="dash-grid three">
-        <MetricChart model={model} metricKey="power_current_watts" title="Current" ceiling={ceiling} />
-        <MetricChart model={model} metricKey="power_average_watts" title="Session average" ceiling={ceiling} />
-        {peak && (
-          <PeakGauge
-            title="Session peak"
-            peak={peak.value}
-            current={metricByKey(model, 'power_current_watts')?.value ?? null}
-            average={metricByKey(model, 'power_average_watts')?.value ?? null}
-            unit="W"
-          />
-        )}
-      </div>
+      {stats.length > 0 && (
+        <div className="dash-grid three dash-stats">
+          {stats.map(({ metric, title }) => <StatTile key={metric.key} title={title} value={metric.value} unit="W" />)}
+        </div>
+      )}
+      <MetricChart
+        model={model}
+        metricKey="power_current_watts"
+        title="Board power"
+        headline=""
+        ceiling={ceiling}
+        height={150}
+        references={typeof average?.value === 'number' ? [{ value: average.value, tone: 'reference', label: 'Session average' }] : []}
+      />
       {rails.length > 0 && (
         <StackedChart
           title="Power rails"
-          headline={`${formatValue(railTotal, 'W')} across ${rails.length} rails`}
+          headline={`${railTotal.toFixed(2)} W across ${rails.length} rails`}
           series={railSeries}
           scale={scaleFor('W', [totals])}
           unit="W"
@@ -268,36 +276,60 @@ function PowerView({ model }) {
   )
 }
 
+const SYSTEM_VIEWS = [
+  { id: 'summary', label: 'CPU & memory' },
+  { id: 'cores', label: 'Per-core CPU' }
+]
+
 function SystemView({ model }) {
+  const [view, setView] = useState('summary')
   const cores = metricsMatching(model, /^cpu_core_\d+_usage_pct$/)
   const load = metricByKey(model, 'cpu_load_1')
   const memMb = metricByKey(model, 'linux_mem_used_mb')
   const cmaTotal = metricByKey(model, 'ev74_cma_total_mb')
   const loadPct = metricByKey(model, 'cpu_load_1_pct')
   const memPct = metricByKey(model, 'linux_mem_used_pct')
+  // Per-core CPU is its own view: sixteen rows beside five charts was more than one glance holds.
+  const views = cores.length ? SYSTEM_VIEWS.map((entry) => (entry.id === 'cores' ? { ...entry, count: cores.length } : entry)) : SYSTEM_VIEWS.slice(0, 1)
+  const shown = views.some((entry) => entry.id === view) ? view : 'summary'
   return (
-    <div className="dash-grid system">
-      {cores.length > 0 && <CoreHeatmap cores={cores} series={model.series} timestamps={model.timestamps} />}
-      <div className="dash-stack">
-        <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" height={56} />
-        <MetricChart
-          model={model}
-          metricKey="cpu_load_1_pct"
-          title="Load average (1 minute)"
-          headline={load && loadPct ? `${formatValue(load.value, '')} (${formatValue(loadPct.value, '%')})` : undefined}
-          height={56}
+    <>
+      {views.length > 1 && (
+        <SegmentedTabs
+          label="System views"
+          items={views}
+          selected={shown}
+          onSelect={setView}
+          idPrefix="dash-system-tab"
+          panelPrefix="dash-system"
+          className="dash-subtabs"
+          noun="core"
         />
-        <MetricChart
-          model={model}
-          metricKey="linux_mem_used_pct"
-          title="Linux memory"
-          headline={memMb && memPct ? `${formatValue(memPct.value, '%')} (${formatValue(memMb.value, 'MB')})` : undefined}
-          height={56}
-        />
-        <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" height={56} />
-        <MetricChart model={model} metricKey="ev74_cma_used_mb" title="EV74 CMA used" ceiling={cmaTotal?.value} height={56} />
+      )}
+      <div id={`dash-system-${shown}`} role="tabpanel" aria-labelledby={`dash-system-tab-${shown}`} className="dash-panel">
+        {shown === 'cores' ? (
+          <CoreHeatmap cores={cores} series={model.series} timestamps={model.timestamps} />
+        ) : (
+          <div className="dash-grid three">
+            <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" />
+            <MetricChart
+              model={model}
+              metricKey="cpu_load_1_pct"
+              title="Load average (1 minute)"
+              headline={load && loadPct ? `${formatValue(load.value, '')} (${formatValue(loadPct.value, '%')})` : undefined}
+            />
+            <MetricChart
+              model={model}
+              metricKey="linux_mem_used_pct"
+              title="Linux memory"
+              headline={memMb && memPct ? `${formatValue(memPct.value, '%')} (${formatValue(memMb.value, 'MB')})` : undefined}
+            />
+            <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
+            <MetricChart model={model} metricKey="ev74_cma_used_mb" title="EV74 CMA used" ceiling={cmaTotal?.value} />
+          </div>
+        )}
       </div>
-    </div>
+    </>
   )
 }
 
