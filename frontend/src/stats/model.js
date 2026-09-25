@@ -655,7 +655,7 @@ export function traceExtrasSummary(form) {
  * trace at a time, no reused name -- are said where they bite, in the refusal next to the form,
  * rather than read by everyone up front.
  */
-export const RUNS_NOTE = 'Record a trace around a workload; it is saved on the board as a run you can reopen and compare.'
+export const RUNS_NOTE = 'A trace records a workload and is saved on the board as a run you can reopen and compare.'
 
 /**
  * The Runs panel's header row. Idle, it is the trace form; while a trace records, the same
