@@ -158,30 +158,33 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
     except OSError as exc:
         return ProbeResult("unreachable", exc.strerror or str(exc))
     try:
-        with sock:
-            sock.settimeout(timeout)
-            if parsed.scheme == "rtsps":
-                try:
-                    sock = ssl.create_default_context().wrap_socket(sock, server_hostname=parsed.hostname)
-                except ssl.SSLCertVerificationError:
-                    return ProbeResult("unreachable", "Certificate is not trusted (TLS)")
-                except (ssl.SSLError, OSError):
-                    return ProbeResult("unreachable", "TLS handshake failed")
-            status, reason, headers = _describe(sock, uri, 1, None)
-            if status == 401 and "www-authenticate" in headers:
-                if not username:
-                    return ProbeResult("auth_failed", AUTH_REQUIRED_MESSAGE)
-                scheme, params = _parse_challenge(headers["www-authenticate"])
-                authorization = _authorization(scheme, params, username, password, uri)
-                if authorization is None:
-                    return ProbeResult("unreachable", f"Unsupported authentication scheme {scheme}")
-                status, reason, headers = _describe(sock, uri, 2, authorization)
-            if 200 <= status < 300:
-                return ProbeResult("ok")
-            if status in (401, 403):
-                return ProbeResult("auth_failed", AUTH_REJECTED_MESSAGE)
-            return ProbeResult("unreachable", f"Camera answered {status} {reason}".rstrip())
+        sock.settimeout(timeout)
+        if parsed.scheme == "rtsps":
+            try:
+                # wrap_socket() detaches the raw fd from `sock` and returns a new socket
+                # object holding it; rebind so the finally below closes whichever is live.
+                sock = ssl.create_default_context().wrap_socket(sock, server_hostname=parsed.hostname)
+            except ssl.SSLCertVerificationError:
+                return ProbeResult("unreachable", "Certificate is not trusted (TLS)")
+            except (ssl.SSLError, OSError):
+                return ProbeResult("unreachable", "TLS handshake failed")
+        status, reason, headers = _describe(sock, uri, 1, None)
+        if status == 401 and "www-authenticate" in headers:
+            if not username:
+                return ProbeResult("auth_failed", AUTH_REQUIRED_MESSAGE)
+            scheme, params = _parse_challenge(headers["www-authenticate"])
+            authorization = _authorization(scheme, params, username, password, uri)
+            if authorization is None:
+                return ProbeResult("unreachable", f"Unsupported authentication scheme {scheme}")
+            status, reason, headers = _describe(sock, uri, 2, authorization)
+        if 200 <= status < 300:
+            return ProbeResult("ok")
+        if status in (401, 403):
+            return ProbeResult("auth_failed", AUTH_REJECTED_MESSAGE)
+        return ProbeResult("unreachable", f"Camera answered {status} {reason}".rstrip())
     except socket.timeout:
         return ProbeResult("unreachable", f"Timed out after {timeout:g} s")
     except (ConnectionError, OSError, ValueError):
         return ProbeResult("unreachable", "The camera closed the connection")
+    finally:
+        sock.close()

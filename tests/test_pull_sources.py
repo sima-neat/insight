@@ -1,7 +1,9 @@
 import hashlib
 import socket
+import ssl
 import threading
 import unittest
+from unittest import mock
 
 from neat_insight import pull_sources
 
@@ -220,6 +222,37 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.status, "unreachable")
         self.assertIn("TLS", result.error)
 
+    def test_rtsps_closes_the_socket_returned_by_wrap_socket(self):
+        # wrap_socket() rebinds the local `sock` variable; whichever object ends up live must
+        # still be closed deterministically (not just the pre-wrap object the with-block saw).
+        server = self._server(mode="ok")
+        closed = []
+
+        class FakeTlsSocket:
+            def __init__(self, raw):
+                self._raw = raw
+
+            def settimeout(self, value):
+                self._raw.settimeout(value)
+
+            def sendall(self, data):
+                self._raw.sendall(data)
+
+            def recv(self, size):
+                return self._raw.recv(size)
+
+            def close(self):
+                closed.append(True)
+                self._raw.close()
+
+        def fake_wrap_socket(self, sock, server_hostname=None, **kwargs):
+            return FakeTlsSocket(sock)
+
+        with mock.patch.object(ssl.SSLContext, "wrap_socket", fake_wrap_socket):
+            result = pull_sources.probe_rtsp(f"rtsps://127.0.0.1:{server.port}/live", timeout=2)
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(closed, [True])
 
 if __name__ == "__main__":
     unittest.main()
