@@ -3669,3 +3669,9 @@ button:disabled {
   font-size: 10px;
   letter-spacing: 0.04em;
 }
+
+/* Disabled Back / Media Root at the library root: keep the standard cursor; the global
+   not-allowed cursor renders as no cursor at all on some desktop themes. */
+.folder-nav-actions .btn-ghost:disabled {
+  cursor: default;
+}
