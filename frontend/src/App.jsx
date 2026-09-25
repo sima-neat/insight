@@ -2455,7 +2455,14 @@ export default function App() {
                         : (src.file || '')
                       return (
                         <>
-                          <span className="src-label">src{src.index}</span>
+                          <span className="src-label">
+                            <span className="src-id">src{src.index}</span>
+                            {(isWebcam || src.file) && (
+                              <span className={`src-type ${isWebcam ? 'cam' : 'vid'}`}>
+                                {isWebcam ? '[CAM]' : '[VID]'}
+                              </span>
+                            )}
+                          </span>
                           <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
                             {src.state === 'playing' ? 'Live' : 'Idle'}
                           </span>
@@ -2465,13 +2472,14 @@ export default function App() {
                             onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
                           >
                             <option value="">Not assigned</option>
-                            {/* Grouped and tagged so a camera reads differently
-                                from a file at a glance (per review feedback). */}
+                            {/* Grouped so a camera reads differently from a file
+                                at a glance; the selected type shows as a
+                                [CAM]/[VID] badge on the row (per review feedback). */}
                             {webcamDevices.length > 0 && (
                               <optgroup label="Cameras">
                                 {webcamDevices.map((device) => (
                                   <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
-                                    {'<cam>'} {device.label}
+                                    {device.label}
                                   </option>
                                 ))}
                               </optgroup>
@@ -2479,7 +2487,7 @@ export default function App() {
                             {videoFiles.length > 0 && (
                               <optgroup label="Video files">
                                 {videoFiles.map((file) => (
-                                  <option key={file} value={file}>{'<vid>'} {file}</option>
+                                  <option key={file} value={file}>{file}</option>
                                 ))}
                               </optgroup>
                             )}
