@@ -7,6 +7,8 @@ import {
   agoLabel,
   compareOverlay,
   compareSeriesAvailable,
+  coreSummary,
+  scaleText,
   tightScale,
   elapsedPath,
   axisLabel,
@@ -31,7 +33,7 @@ import { compareTable, metricsModel } from './model.js'
 const LIVE = JSON.parse(readFileSync(new URL('./fixtures/metrics-live.json', import.meta.url), 'utf8'))
 
 test('the dashboard has Sentinel ops view tabs, and a saved tab is trusted only when it exists', () => {
-  assert.deepEqual(DASH_TABS.map((tab) => tab.label), ['Overview', 'Thermal', 'Power', 'System', 'Storage/Net', 'Runs'])
+  assert.deepEqual(DASH_TABS.map((tab) => tab.label), ['Overview', 'Thermal', 'Power', 'System', 'Storage & Network', 'Runs'])
   assert.equal(dashTabFrom('power'), 'power')
   assert.equal(dashTabFrom('compare'), 'overview')
   assert.equal(dashTabFrom(null), 'overview')
@@ -83,9 +85,9 @@ test('stacked areas sit on each other and the top edge is the total', () => {
 
 test('time labels use board timestamps only', () => {
   const stamps = ['2026-09-25T00:08:37Z', '2026-09-25T00:12:37Z', '2026-09-25T00:16:35Z']
-  assert.equal(spanLabel(stamps), '7m ago')
-  assert.equal(agoLabel(stamps, 1), '3m 58s ago')
-  assert.equal(agoLabel(stamps, 2), 'now')
+  assert.equal(spanLabel(stamps), '7 minutes ago')
+  assert.equal(agoLabel(stamps, 1), '3 minutes 58 seconds ago')
+  assert.equal(agoLabel(stamps, 2), 'Now')
   assert.equal(spanLabel(['x']), '')
   assert.equal(spanLabel([]), '')
   assert.deepEqual([indexAt(0, 240), indexAt(0.5, 240), indexAt(1.2, 240), indexAt(0.5, 0)], [0, 120, 239, -1])
@@ -99,7 +101,7 @@ test('the live board: thermal groups in Sentinel order, cores and rails by key, 
   assert.equal(metricsMatching(model, /^power_rail_/).length, 8)
   assert.deepEqual(thresholdLines({ warn: 70, critical: 85 }), [{ value: 70, tone: 'warn' }, { value: 85, tone: 'critical' }])
   assert.deepEqual(thresholdLines({ warn: null }), [])
-  assert.deepEqual([axisLabel(100), axisLabel(2.5), axisLabel(1788), axisLabel(null)], ['100', '2.5', '1.8k', ''])
+  assert.deepEqual([axisLabel(100), axisLabel(2.5), axisLabel(1788), axisLabel(null)], ['100', '2.5', '1,788', ''])
 })
 
 // Two saved runs compared with raw=1 on the DevKit, 2026-09-25 (tes3 is the baseline).
@@ -152,4 +154,24 @@ test('the comparison scale is fitted to the runs, so a few percent is visible', 
   assert.deepEqual(tightScale([[8.53, 8.88], [9.03]]), { min: 8.4, max: 9.2 })
   assert.deepEqual(tightScale([[3, 3], [3]]), { min: 2.8, max: 3.2 }, 'equal readings still get a band around them')
   assert.deepEqual(tightScale([[null]]), { min: 0, max: 1 })
+})
+
+test('professional wording: whole-word durations, units as a reader says them', () => {
+  assert.deepEqual([scaleText({ min: 40, max: 90 }, 'C'), scaleText({ min: 0, max: 100 }, '%'), scaleText({ min: 0, max: 1000 }, 'MB')],
+    ['40–90 °C', '0–100%', '0–1,000 MB'])
+  assert.equal(spanLabel(['2026-09-25T00:00:00Z', '2026-09-25T00:00:45Z']), '45 seconds ago')
+  assert.equal(agoLabel(['2026-09-25T00:00:00Z', '2026-09-25T00:01:00Z'], 0), '1 minute ago')
+})
+
+test('per-core bars: load now, the range of each core, the average and the busiest core', () => {
+  const cores = [
+    { key: 'c0', short: 'c0', label: 'CPU core 0 usage', value: 40, status: 'ok' },
+    { key: 'c1', short: 'c1', label: 'CPU core 1 usage', value: 90, status: 'warn' },
+    { key: 'c2', short: 'c2', label: 'CPU core 2 usage', value: null, status: 'unavailable' }
+  ]
+  const summary = coreSummary(cores, { c0: [10, 55, 40], c1: [70, 90], c2: [null] })
+  assert.deepEqual(summary.rows.map((row) => [row.name, row.now, row.low, row.high]), [['c0', 40, 10, 55], ['c1', 90, 70, 90], ['c2', null, null, null]])
+  assert.equal(summary.average, 65, 'a core that did not report is left out of the average')
+  assert.equal(summary.busiest.name, 'c1')
+  assert.deepEqual(coreSummary([], {}), { rows: [], average: null, busiest: null })
 })

@@ -163,10 +163,35 @@ export function formatNumber(value) {
   return String(Number(value.toFixed(digits)))
 }
 
+function plural(count, unit) {
+  return `${count} ${unit}${count === 1 ? '' : 's'}`
+}
+
+/** A duration in words: "45 seconds", "4 minutes 46 seconds", "2 hours 5 minutes", "3 days". */
+export function durationWords(totalSeconds, { precise = false } = {}) {
+  const total = Math.max(0, Math.round(Number(totalSeconds) || 0))
+  if (total < 60) return plural(total, 'second')
+  const minutes = Math.floor(total / 60)
+  if (minutes < 60) return precise && total % 60 ? `${plural(minutes, 'minute')} ${plural(total % 60, 'second')}` : plural(minutes, 'minute')
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return minutes % 60 ? `${plural(hours, 'hour')} ${plural(minutes % 60, 'minute')}` : plural(hours, 'hour')
+  return plural(Math.floor(hours / 24), 'day')
+}
+
+/** How long ago, in words: "less than a minute ago", "20 minutes ago", "1 day ago". */
+export function timeAgo(iso, now = Date.now()) {
+  const at = Date.parse(iso || '')
+  if (!Number.isFinite(at)) return ''
+  const seconds = Math.max(0, (now - at) / 1000)
+  return seconds < 60 ? 'less than a minute ago' : `${durationWords(seconds)} ago`
+}
+
 export function unitSuffix(unit) {
   const text = String(unit || '').trim()
   if (!text) return ''
   if (text === 'C' || text === 'celsius') return '°C'
+  // A load average is a plain number; "6.01 load" reads as a typo.
+  if (text === 'load') return ''
   return text
 }
 
@@ -627,7 +652,7 @@ export function traceBar(trace, { busy = false, now = Date.now() } = {}) {
     return { recording: false, submitLabel: busy ? 'Starting…' : 'Start trace' }
   }
   const startedAt = trace.startedAt || null
-  const started = startedAt ? formatRelativeTime(startedAt, now) : ''
+  const started = startedAt ? timeAgo(startedAt, now) : ''
   return {
     recording: true,
     name: trace.name,
@@ -687,7 +712,7 @@ export function runList(payload) {
 export function runSubtitle(run, now) {
   const parts = []
   if (run.state) parts.push(titleCase(run.state))
-  if (run.startedAt) parts.push(`started ${formatRelativeTime(run.startedAt, now)}`)
+  if (run.startedAt) parts.push(`started ${timeAgo(run.startedAt, now)}`)
   const duration = formatSeconds(run.durationSec)
   if (duration) parts.push(duration)
   if (isNumber(run.energyJoules)) parts.push(formatValue(run.energyJoules, 'J'))

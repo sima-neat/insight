@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Callout } from '../peripherals/ui.jsx'
-import { CoreGrid, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
+import { CoreBars, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
 import {
   DASH_TABS,
   DASH_TAB_KEY,
@@ -16,7 +16,7 @@ import {
   thermalMaxSeries,
   thresholdLines
 } from './dashboard.js'
-import { formatRelativeTime, formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
+import { formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, statusInfo, thresholdText, timeAgo } from './model.js'
 import { FailureCallout, SegmentedTabs } from './ui.jsx'
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
@@ -63,12 +63,12 @@ function MetricChart({ model, metricKey, title, ceiling, headline, height, compa
 }
 
 /** Two or more metrics of one unit on one chart: network in and out, disk reads and writes. */
-function PairChart({ model, keys, title, height }) {
-  const metrics = keys.map((key) => metricByKey(model, key)).filter(Boolean)
+function PairChart({ model, keys, labels = [], title, height }) {
+  const metrics = keys.map((key, index) => ({ metric: metricByKey(model, key), label: labels[index] })).filter((entry) => entry.metric)
   if (!metrics.length) return null
-  const unit = metrics[0].unit
-  const series = metrics.map((metric, index) => ({ key: metric.key, label: metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index] }))
-  const total = metrics.reduce((sum, metric) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
+  const unit = metrics[0].metric.unit
+  const series = metrics.map(({ metric, label }, index) => ({ key: metric.key, label: label || metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index] }))
+  const total = metrics.reduce((sum, { metric }) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
   return (
     <TimeChart
       title={title}
@@ -91,7 +91,7 @@ function ThermalMaxChart({ model, height }) {
   return (
     <TimeChart
       title="Thermal max"
-      headline={`${formatValue(now, 'C')}${worst ? ` · ${worst.short || worst.label}` : ''}`}
+      headline={`${formatValue(now, 'C')}${worst ? ` (${worst.short || worst.label})` : ''}`}
       series={[{ key: 'thermal-max', label: 'Hottest sensor', values, color: 'var(--chart-thermal)' }]}
       scale={scaleFor('C', [values])}
       unit="C"
@@ -177,12 +177,12 @@ function OverviewView({ model }) {
         <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU" />
         <MetricChart model={model} metricKey="linux_mem_used_pct" title="Memory" />
         <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
-        <PairChart model={model} keys={['net_rx_mbps', 'net_tx_mbps']} title="Network" />
+        <PairChart model={model} keys={['net_rx_mbps', 'net_tx_mbps']} labels={['Receive', 'Transmit']} title="Network" />
       </div>
       <details className="dash-card dash-all">
         <summary className="dash-card-title">
           All metrics
-          <span className="dash-card-note">{model.metrics.length} in Sentinel's order</span>
+          <span className="dash-card-note">{model.metrics.length} metrics</span>
         </summary>
         <OpsList metrics={model.metrics} series={model.series} caption="All metrics" />
       </details>
@@ -264,21 +264,21 @@ function SystemView({ model }) {
   const memPct = metricByKey(model, 'linux_mem_used_pct')
   return (
     <div className="dash-grid system">
-      {cores.length > 0 && <CoreGrid cores={cores} series={model.series} timestamps={model.timestamps} />}
+      {cores.length > 0 && <CoreBars cores={cores} series={model.series} timestamps={model.timestamps} />}
       <div className="dash-stack">
         <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" height={56} />
         <MetricChart
           model={model}
           metricKey="cpu_load_1_pct"
-          title="CPU load 1m"
-          headline={load && loadPct ? `${formatValue(load.value, '')} · ${formatValue(loadPct.value, '%')}` : undefined}
+          title="Load average (1 minute)"
+          headline={load && loadPct ? `${formatValue(load.value, '')} (${formatValue(loadPct.value, '%')})` : undefined}
           height={56}
         />
         <MetricChart
           model={model}
           metricKey="linux_mem_used_pct"
           title="Linux memory"
-          headline={memMb && memPct ? `${formatValue(memPct.value, '%')} · ${formatValue(memMb.value, 'MB')}` : undefined}
+          headline={memMb && memPct ? `${formatValue(memPct.value, '%')} (${formatValue(memMb.value, 'MB')})` : undefined}
           height={56}
         />
         <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" height={56} />
@@ -296,8 +296,8 @@ function StorageView({ model }) {
       <div className="dash-grid three">
         <MetricChart model={model} metricKey="disk_emmc_used_pct" title="eMMC used" />
         {nvme && <MetricChart model={model} metricKey={nvme.key} title="NVMe used" />}
-        <PairChart model={model} keys={['net_rx_mbps', 'net_tx_mbps']} title="Network" />
-        <PairChart model={model} keys={['disk_emmc_read_mbps', 'disk_emmc_write_mbps']} title="eMMC I/O" />
+        <PairChart model={model} keys={['net_rx_mbps', 'net_tx_mbps']} labels={['Receive', 'Transmit']} title="Network" />
+        <PairChart model={model} keys={['disk_emmc_read_mbps', 'disk_emmc_write_mbps']} labels={['Read', 'Write']} title="eMMC I/O" />
       </div>
       {storage.length > 0 && (
         <Card title="Storage and network metrics">
@@ -320,7 +320,7 @@ function tabAlert(model, id) {
 
 /**
  * Sentinel on the board, as its own terminal dashboard lays it out: a status line, then
- * Overview, Thermal, Power, System, Storage/Net and Runs. Everything is charted over the
+ * Overview, Thermal, Power, System, Storage & Network and Runs. Everything is charted over the
  * daemon's cached window, so each view opens full rather than filling while you watch.
  */
 export default function SentinelDashboard({ model, startedAt, now, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
@@ -338,7 +338,7 @@ export default function SentinelDashboard({ model, startedAt, now, live, polling
           <span className={`dash-state${polling ? ' on' : ''}`}>{state}</span>
           {startedAt && (
             <span className="dash-session" title={`Sentinel started ${new Date(startedAt).toLocaleString()}`}>
-              session started {formatRelativeTime(startedAt, now)}
+              Session started {timeAgo(startedAt, now)}
             </span>
           )}
           <button type="button" className="btn-tonal dash-pause" onClick={onToggleLive}>

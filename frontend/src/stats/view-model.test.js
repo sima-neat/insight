@@ -248,7 +248,7 @@ test('while a trace records, the same row says what is recording and offers Stop
   assert.equal(bar.recording, true)
   assert.equal(bar.name, 'baseline')
   assert.equal(bar.startedAt, '2026-09-24T12:00:00Z')
-  assert.equal(bar.started, '5 min ago')
+  assert.equal(bar.started, '5 minutes ago')
   assert.deepEqual(bar.tags, ['yolo26'])
   assert.equal(bar.note, 'before NMS')
   assert.equal(bar.stopLabel, 'Stop trace')

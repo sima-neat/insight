@@ -150,8 +150,8 @@ The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sent
 - **Overview**: charts of the hottest temperature sensor, current board power, CPU, memory, MLA memory, and network traffic, with **All metrics** listing every metric in Sentinel's order.
 - **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
 - **Power**: current and session-average power, the session peak against the chart's scale, and the power rails stacked so the top edge is the board total.
-- **System**: a small chart per CPU core on a shared 0-100% scale, marked amber or red when a core passes its limits, beside CPU usage, load, Linux memory, MLA memory, and EV74 CMA use.
-- **Storage/Net**: eMMC use, network and eMMC traffic, and their metrics.
+- **System**: a bar per CPU core showing its load now over a faint band of its range across the window, with the average and the busiest core; a core past its limits turns amber or red. Beside it: CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use.
+- **Storage & Network**: eMMC use, network receive and transmit, eMMC reads and writes, and their metrics.
 - **Runs**: record a trace, and open, compare, or delete saved runs. Comparing overlays one series (total power, thermal maximum, CPU, load, RAM, MLA memory, or EV74 CMA) for every selected run over the time they all cover, on a scale fitted to the runs, with each run's minimum, mean, median, P95, maximum, change against the baseline, and energy; the full per-metric comparison follows it.
 
 Charts use fixed scales (percentages 0-100, temperatures 40-90 °C, anything else up to a round number above its peak), show the warning and critical levels Sentinel defines, and read out every series at a point when you hover. A tab's name is marked when a metric in it is past a threshold. A metric the board cannot measure reads as an em dash, never as zero.

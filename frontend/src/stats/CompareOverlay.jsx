@@ -41,7 +41,7 @@ export default function CompareOverlay({ payload }) {
               <th scope="col" className="stats-ops-num">Median</th>
               <th scope="col" className="stats-ops-num">P95</th>
               <th scope="col" className="stats-ops-num">Max</th>
-              <th scope="col" className="stats-ops-num">Δ base</th>
+              <th scope="col" className="stats-ops-num">vs. baseline</th>
               <th scope="col" className="stats-ops-num">Energy</th>
             </tr>
           </thead>
@@ -59,7 +59,7 @@ export default function CompareOverlay({ payload }) {
                 <td className="stats-ops-num">{formatValue(row.median, unit)}</td>
                 <td className="stats-ops-num">{formatValue(row.p95, unit)}</td>
                 <td className="stats-ops-num">{formatValue(row.maximum, unit)}</td>
-                <td className="stats-ops-num">{row.baseline ? 'base' : formatPercentDelta(row.delta)}</td>
+                <td className="stats-ops-num">{row.baseline ? 'Baseline' : formatPercentDelta(row.delta)}</td>
                 <td className="stats-ops-num">{formatValue(row.energy, 'J')}</td>
               </tr>
             ))}

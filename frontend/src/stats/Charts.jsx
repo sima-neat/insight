@@ -2,13 +2,16 @@ import { useId, useRef, useState } from 'react'
 import {
   agoLabel,
   axisLabel,
+  coreSummary,
   elapsedPath,
   indexAt,
   lastNumber,
   linePath,
+  scaleText,
   spanLabel,
   stackTotals,
   stackedPaths,
+  unitAfter,
   valueNear
 } from './dashboard.js'
 import { formatValue } from './model.js'
@@ -59,9 +62,7 @@ function Frame({ title, headline, scale, unit, timestamps, compact, tone, label,
         <span className="dash-chart-title">{title}</span>
         {headline !== undefined && <span className="dash-chart-value">{headline}</span>}
         {!compact && (
-          <span className="dash-chart-scale">
-            scale {axisLabel(scale.min)}–{axisLabel(scale.max)} {unit}
-          </span>
+          <span className="dash-chart-scale">Scale {scaleText(scale, unit)}</span>
         )}
       </figcaption>
       {legend}
@@ -86,12 +87,14 @@ function Frame({ title, headline, scale, unit, timestamps, compact, tone, label,
       {!compact && (
         <div className="dash-chart-x" aria-hidden="true">
           <span>{spanLabel(timestamps)}</span>
-          <span>now</span>
+          <span>Now</span>
         </div>
       )}
     </figure>
   )
 }
+
+const THRESHOLD_NAMES = { warn: 'Warning', critical: 'Critical' }
 
 /**
  * A time chart on a fixed scale, the way Sentinel's ops view draws one: an area under each line,
@@ -143,7 +146,7 @@ export function TimeChart({ title, headline, series, scale, unit, timestamps, th
         .filter((line) => line.value > scale.min && line.value < scale.max)
         .map((line) => (
           <span key={line.tone} className={`dash-threshold ${line.tone}`} style={{ bottom: `${percentOf(line.value, scale)}%` }} aria-hidden="true">
-            {!compact && <span>{line.tone} {axisLabel(line.value)}</span>}
+            {!compact && <span>{THRESHOLD_NAMES[line.tone] || line.tone} {axisLabel(line.value)}{unitAfter(unit)}</span>}
           </span>
         ))}
       {paths.map((path, index) => path.last && (
@@ -215,42 +218,44 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
   )
 }
 
-const CORE_SCALE = { min: 0, max: 100 }
-const TILE_WIDTH = 200
-const TILE_HEIGHT = 40
-
 /**
- * One small chart per CPU core, on the same 0-100% scale so cores compare at a glance: its load
- * now in large type and its load over the window beneath. A core past its warn or critical level
- * turns amber or red; the rest stay the dashboard's blue.
+ * Per-core CPU as one bar per core: the bar is the load now, the faint band behind it the core's
+ * range over the window, so a spike still shows without a chart per core. A core past its warn or
+ * critical level turns amber or red; the rest stay the dashboard's blue.
  */
-export function CoreGrid({ cores, series, timestamps }) {
+export function CoreBars({ cores, series, timestamps }) {
+  const { rows, average, busiest } = coreSummary(cores, series)
+  const span = spanLabel(timestamps).replace(' ago', '')
   return (
-    <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load over the last ${spanLabel(timestamps).replace(' ago', '') || 'samples'}`}>
+    <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load now, with each core's range over the last ${span || 'samples'}`}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">Per-core CPU</span>
-        <span className="dash-chart-scale">
-          each 0–100 % · {spanLabel(timestamps) || 'recent'} → now
+        <span className="dash-chart-value">{formatValue(average, '%')}</span>
+        <span className="dash-core-meta">
+          average of {rows.length} cores{busiest ? ` · busiest ${busiest.name} at ${formatValue(busiest.now, '%')}` : ''}
         </span>
       </figcaption>
-      <div className="dash-core-grid">
-        {cores.map((core) => {
-          const values = series[core.key] || []
-          const path = linePath(values, CORE_SCALE, TILE_WIDTH, TILE_HEIGHT)
-          const now = typeof core.value === 'number' ? core.value : lastNumber(values)
-          return (
-            <div key={core.key} className={`dash-core tone-${core.status || 'ok'}`} title={`${core.label}: ${formatValue(now, '%')}`}>
-              <span className="dash-core-head">
-                <span className="dash-core-name">{core.short || core.label}</span>
-                <strong className="dash-core-value">{formatValue(now, '%')}</strong>
-              </span>
-              <svg className="dash-core-chart" viewBox={`0 0 ${TILE_WIDTH} ${TILE_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                {path.area && <path d={path.area} fill="currentColor" fillOpacity="0.14" />}
-                <path d={path.line} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-              </svg>
-            </div>
-          )
-        })}
+      <ul className="dash-core-list">
+        {rows.map((row) => (
+          <li
+            key={row.key}
+            className={`dash-core tone-${row.status}`}
+            title={`${row.label}: ${formatValue(row.now, '%')} now${row.low !== null ? `; ${formatValue(row.low, '%')}–${formatValue(row.high, '%')} over the last ${span || 'samples'}` : ''}`}
+          >
+            <span className="dash-core-name">{row.name}</span>
+            <span className="dash-core-track" aria-hidden="true">
+              {row.low !== null && (
+                <span className="dash-core-range" style={{ left: `${row.low}%`, width: `${Math.max(0.5, row.high - row.low)}%` }} />
+              )}
+              <span className="dash-core-fill" style={{ width: `${Math.min(100, Math.max(0, row.now ?? 0))}%` }} />
+            </span>
+            <span className="dash-core-value">{formatValue(row.now, '%')}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="dash-core-legend" aria-hidden="true">
+        <span><span className="dash-core-key now" />Now</span>
+        <span><span className="dash-core-key range" />Range, last {span || 'samples'}</span>
       </div>
     </figure>
   )
@@ -285,7 +290,7 @@ export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }
     <figure className="dash-chart dash-elapsed" aria-label={`${title} for ${lines.length} runs over their common ${window.toFixed(1)} s`}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">{title}</span>
-        <span className="dash-chart-scale">common overlap · elapsed time · scale {axisLabel(scale.min)}–{axisLabel(scale.max)} {unit}, fitted to the runs</span>
+        <span className="dash-chart-scale">Common window · Scale {scaleText(scale, unit)}, fitted to the runs</span>
       </figcaption>
       <ul className="dash-legend">
         {lines.map((line) => (

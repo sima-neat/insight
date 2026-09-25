@@ -3,14 +3,14 @@
  * paths. It mirrors what Sentinel's own terminal `ops` view charts (fixed scales, an eight-
  * minute window of the daemon's 240 cached samples) and holds no React, so it can be tested.
  */
-import { isThermalMetric } from './model.js'
+import { durationWords, isThermalMetric, unitSuffix } from './model.js'
 
 export const DASH_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'thermal', label: 'Thermal' },
   { id: 'power', label: 'Power' },
   { id: 'system', label: 'System' },
-  { id: 'storage', label: 'Storage/Net' },
+  { id: 'storage', label: 'Storage & Network' },
   { id: 'runs', label: 'Runs' }
 ]
 export const DASH_TAB_KEY = 'neat-insight:sentinel-tab'
@@ -163,31 +163,21 @@ function seconds(timestamp) {
   return Number.isFinite(time) ? time / 1000 : null
 }
 
-function duration(total) {
-  const whole = Math.max(0, Math.round(total))
-  if (whole < 60) return `${whole}s`
-  const minutes = Math.floor(whole / 60)
-  const rest = whole % 60
-  return rest && minutes < 10 ? `${minutes}m ${rest}s` : `${minutes}m`
-}
-
-/** How far back the oldest sample is, from the newest one: "7m ago". Board time only, no host clock. */
+/** How far back the oldest sample is, from the newest one: "7 minutes ago". Board time only. */
 export function spanLabel(timestamps) {
   const first = seconds(timestamps?.[0])
   const last = seconds(timestamps?.[timestamps.length - 1])
   if (first === null || last === null || last <= first) return ''
-  const span = last - first
-  // Whole minutes, as the terminal's axis reads: 7m 58s of samples is "7m ago".
-  return span < 60 ? `${Math.round(span)}s ago` : `${Math.floor(span / 60)}m ago`
+  return `${durationWords(last - first)} ago`
 }
 
-/** How long before the newest sample a given one was taken: "1m 20s ago", or "now". */
+/** How long before the newest sample a given one was taken: "4 minutes 46 seconds ago", or "Now". */
 export function agoLabel(timestamps, index) {
   const at = seconds(timestamps?.[index])
   const last = seconds(timestamps?.[timestamps.length - 1])
   if (at === null || last === null) return ''
   const gap = last - at
-  return gap < 1 ? 'now' : `${duration(gap)} ago`
+  return gap < 1 ? 'Now' : `${durationWords(gap, { precise: true })} ago`
 }
 
 /** The sample index under a pointer at `fraction` (0..1) of the plot's width. */
@@ -223,11 +213,47 @@ export function thresholdLines(metric) {
   return lines
 }
 
-/** An axis label: few digits, no unit. */
+/** An axis label: few digits, thousands separated, no unit. */
 export function axisLabel(value) {
   if (!isNumber(value)) return ''
-  if (Math.abs(value) >= 1000) return `${Number((value / 1000).toFixed(1))}k`
+  if (Math.abs(value) >= 1000) return Math.round(value).toLocaleString('en-US')
   return String(Number(value.toFixed(value < 10 ? 1 : 0)))
+}
+
+/** A unit as it follows a number: "°C", "%" with no space before it, else " W". */
+export function unitAfter(unit) {
+  const suffix = unitSuffix(unit)
+  if (!suffix) return ''
+  return suffix === '%' ? '%' : ` ${suffix}`
+}
+
+/** "0–100%", "40–90 °C", "0–1,000 MB": a scale as a reader says it. */
+export function scaleText(scale, unit) {
+  return `${axisLabel(scale.min)}–${axisLabel(scale.max)}${unitAfter(unit)}`
+}
+
+/**
+ * Per-core load now and over the window: the rows of the per-core bars, plus the average and
+ * the busiest core for the header.
+ */
+export function coreSummary(cores, series) {
+  const rows = (cores || []).map((core) => {
+    const values = (series?.[core.key] || []).filter(isNumber)
+    const now = isNumber(core.value) ? core.value : lastNumber(series?.[core.key])
+    return {
+      key: core.key,
+      name: core.short || core.label,
+      label: core.label,
+      status: core.status || 'ok',
+      now,
+      low: values.length ? Math.min(...values) : null,
+      high: values.length ? Math.max(...values) : null
+    }
+  })
+  const reporting = rows.filter((row) => isNumber(row.now))
+  const busiest = reporting.reduce((top, row) => (!top || row.now > top.now ? row : top), null)
+  const average = reporting.length ? reporting.reduce((sum, row) => sum + row.now, 0) / reporting.length : null
+  return { rows, average, busiest }
 }
 
 /**
