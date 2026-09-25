@@ -334,7 +334,25 @@ def stop_media_stream_if(index: int, identity: Optional[int]) -> bool:
 
 
 def webcam_path_name(index: int) -> str:
-    return f"src{index}"
+    """The MediaMTX path a browser WHIP-publishes to and Insight monitors.
+
+    This is the *ingest* path (``cam{index}``), deliberately distinct from the
+    *consumer* path (``src{index}``, built by app._source_url) that the viewer
+    and detection apps read. A browser's WebRTC stream is encoded for a video
+    call — sparse keyframes, and whatever H.264 profile it negotiates — which
+    the board's hardware decoder and rtspsrc cannot consume. So MediaMTX runs a
+    normalizer (runOnReady in webrtc/mediamtx.yml) that transcodes ``cam{index}``
+    to baseline H.264 with a keyframe every second and republishes it on
+    ``src{index}``, exactly the shape a file source's ffmpeg already produces.
+    File sources push straight to ``src{index}`` and never touch the ingest path.
+
+    Everything Insight tracks about the *browser* — readiness, the publishing
+    session's identity, kicking it — is about this ingest path, because that is
+    where the WebRTC session lives; the normalized ``src{index}`` is fed by
+    ffmpeg, not the browser. Consumers are unaffected: they still read
+    ``src{index}``.
+    """
+    return f"cam{index}"
 
 
 # A 404 from MediaMTX is an answer, not a failure: the path or session is not

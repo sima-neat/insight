@@ -510,7 +510,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Register one source slot for a browser webcam",
-        "description": "Marks one one-based source slot as a browser-published webcam and returns the WHIP URL the browser posts its WebRTC offer to. Unlike `/api/mediasrc/assign`, Insight does not start a publisher itself: the browser publishes the camera over WHIP, MediaMTX republishes it as RTSP, and `/api/mediasrc/start` only confirms that the stream arrived. Any file assignment on the slot is cleared, and a playing file source is stopped first. The returned `urls.whip` host and port already account for SDK port remapping, so use it exactly as returned.\n\nOn a slot that is already a webcam this switches cameras, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, so the previous camera stays stoppable. A caller that already closed its own publisher may send `publisher_released: true`.",
+        "description": "Marks one one-based source slot as a browser-published webcam and returns the WHIP URL the browser posts its WebRTC offer to. Unlike `/api/mediasrc/assign`, Insight does not start a publisher itself: the browser publishes the camera over WHIP to an internal ingest path, MediaMTX normalizes it to baseline H.264 with regular keyframes and republishes it on the `urls.rtsp` path (the same shape a file source produces, so detection apps and hardware decoders can consume it directly), and `/api/mediasrc/start` only confirms that the stream arrived. Any file assignment on the slot is cleared, and a playing file source is stopped first. The returned `urls.whip` host and port already account for SDK port remapping, so use it exactly as returned.\n\nOn a slot that is already a webcam this switches cameras, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, so the previous camera stays stoppable. A caller that already closed its own publisher may send `publisher_released: true`.",
         "operationId": "assignWebcamMediaSource",
         "x-codeSamples": [
           {
@@ -545,7 +545,7 @@
                     "allowed_transports": ["rtsp"],
                     "urls": {
                       "rtsp": "rtsp://<INSIGHT_HOST>:8554/src1",
-                      "whip": "https://<INSIGHT_HOST>:8889/src1/whip"
+                      "whip": "https://<INSIGHT_HOST>:8889/cam1/whip"
                     }
                   }
                 }

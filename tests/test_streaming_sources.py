@@ -406,7 +406,9 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(source["state"], "stopped")
         self.assertEqual(source["allowed_transports"], ["rtsp"])
         self.assertEqual(source["urls"]["rtsp"], "rtsp://localhost:8554/src1")
-        self.assertEqual(source["urls"]["whip"], "https://localhost:8889/src1/whip")
+        # The browser publishes to the cam{N} ingest path, which MediaMTX
+        # normalizes onto the src{N} consumer path above (see webcam_path_name).
+        self.assertEqual(source["urls"]["whip"], "https://localhost:8889/cam1/whip")
 
     def test_assign_webcam_requires_an_index(self):
         response = self.client.post("/api/mediasrc/assign-webcam", json={})
@@ -431,7 +433,7 @@ class WebcamSourceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.get_json()["source"]["urls"]["whip"],
-            "https://localhost:18889/src1/whip",
+            "https://localhost:18889/cam1/whip",
         )
 
     def test_webcam_whip_url_falls_back_to_the_default_port(self):
@@ -440,7 +442,7 @@ class WebcamSourceTests(unittest.TestCase):
 
         self.assertEqual(
             response.get_json()["source"]["urls"]["whip"],
-            "https://localhost:8889/src1/whip",
+            "https://localhost:8889/cam1/whip",
         )
 
     def test_persisted_webcam_slot_reloads_without_a_file(self):
@@ -543,7 +545,7 @@ class WebcamSourceTests(unittest.TestCase):
         """48 slots must not mean 48 control-API timeouts when MediaMTX hangs."""
         self._three_playing_webcams()
 
-        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src1", "src2", "src3"}) as ready:
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"cam1", "cam2", "cam3"}) as ready:
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(ready.call_count, 1)
@@ -552,7 +554,7 @@ class WebcamSourceTests(unittest.TestCase):
     def test_a_demotion_is_confirmed_against_a_fresh_copy_before_it_is_written(self):
         self._three_playing_webcams()
 
-        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src2"}) as ready:
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"cam2"}) as ready:
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(ready.call_count, 2, "decide from the snapshot, confirm on the fresh copy")
@@ -583,7 +585,7 @@ class WebcamSourceTests(unittest.TestCase):
 
     def test_a_webcam_that_came_back_between_the_two_checks_is_not_demoted(self):
         self._three_playing_webcams()
-        answers = iter([set(), {"src1", "src2", "src3"}])
+        answers = iter([set(), {"cam1", "cam2", "cam3"}])
 
         with mock.patch.object(app_module, "webcam_ready_paths", side_effect=lambda: next(answers)):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
@@ -614,7 +616,7 @@ class WebcamSourceTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"src1"}):
+        with mock.patch.object(app_module, "webcam_ready_paths", return_value={"cam1"}):
             response = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"})
 
         self.assertEqual(response.get_json()[0]["state"], "playing")
@@ -1266,7 +1268,7 @@ class WebcamSourceTests(unittest.TestCase):
         # path by the time the replacement check runs.
         with mock.patch.object(app_module, "kick_webcam_publisher", return_value="old"):
             with mock.patch.object(app_module, "webcam_publisher_session", return_value=None):
-                with mock.patch.object(app_module, "webcam_publisher_sessions", return_value={"src1": "new"}):
+                with mock.patch.object(app_module, "webcam_publisher_sessions", return_value={"cam1": "new"}):
                     body = self.client.post("/api/mediasrc/stop-all").get_json()
 
         self.assertEqual(body["changed_sources"], [1])
@@ -1517,7 +1519,7 @@ class WebcamSourceTests(unittest.TestCase):
         response = self.client.get("/api/mediasrc", headers={"Host": "[fd00::23]:9900"})
 
         urls = response.get_json()[0]["urls"]
-        self.assertEqual(urls["whip"], "https://[fd00::23]:8889/src1/whip")
+        self.assertEqual(urls["whip"], "https://[fd00::23]:8889/cam1/whip")
         self.assertEqual(urls["rtsp"], "rtsp://[fd00::23]:8554/src1")
 
     def test_a_named_host_is_left_alone(self):
@@ -1526,7 +1528,7 @@ class WebcamSourceTests(unittest.TestCase):
         response = self.client.get("/api/mediasrc", headers={"Host": "insight.local:9900"})
 
         urls = response.get_json()[0]["urls"]
-        self.assertEqual(urls["whip"], "https://insight.local:8889/src1/whip")
+        self.assertEqual(urls["whip"], "https://insight.local:8889/cam1/whip")
         self.assertEqual(urls["rtsp"], "rtsp://insight.local:8554/src1")
 
     def test_assigning_a_file_refuses_when_the_publisher_cannot_be_confirmed(self):
@@ -1591,7 +1593,9 @@ class WebcamPublishStateTests(unittest.TestCase):
             self.assertTrue(mediasrc.webcam_is_publishing(1))
 
         request = urlopen.call_args[0][0]
-        self.assertIn("/v3/paths/get/src1", request.full_url)
+        # The browser publishes to the cam{N} ingest path, so liveness and
+        # session questions are asked about cam{N}, not the src{N} consumer path.
+        self.assertIn("/v3/paths/get/cam1", request.full_url)
         self.assertEqual(request.get_method(), "GET")
 
     def test_reports_not_publishing_when_the_path_is_not_ready(self):
@@ -1777,6 +1781,38 @@ class WebcamPublishStateTests(unittest.TestCase):
         with mock.patch.object(mediasrc.urllib.request, "urlopen", urlopen):
             with self.assertRaises(mediasrc.MediaServerUnreachable):
                 mediasrc.webcam_is_publishing(1)
+
+
+class WebcamNormalizationTests(unittest.TestCase):
+    """A browser webcam is normalized so detection apps can consume it (#120).
+
+    A browser's WebRTC stream has sparse keyframes and a negotiated H.264
+    profile the board's hardware decoder and rtspsrc cannot read. So the browser
+    publishes to a cam{N} ingest path and MediaMTX transcodes it to baseline
+    H.264 with regular keyframes on the src{N} consumer path — the same shape a
+    file source's ffmpeg already produces — leaving src{N} the only path the
+    viewer and apps ever read.
+    """
+
+    def test_webcam_path_name_is_the_ingest_path_not_the_consumer_path(self):
+        self.assertEqual(mediasrc.webcam_path_name(1), "cam1")
+        self.assertEqual(mediasrc.webcam_path_name(12), "cam12")
+
+    def test_mediamtx_config_normalizes_cam_ingest_onto_the_src_consumer_path(self):
+        cfg = Path(__file__).resolve().parent.parent / "webrtc" / "mediamtx.yml"
+        text = cfg.read_text(encoding="utf-8")
+        # A bounded cam{N} ingest path runs a normalizer on ready.
+        self.assertIn('"~^cam(', text)
+        self.assertIn("runOnReady:", text)
+        self.assertIn("runOnReadyRestart: yes", text)
+        # It reads the ingest path and writes the src{N} consumer path.
+        self.assertIn("rtsp://127.0.0.1:8554/$MTX_PATH", text)
+        self.assertIn("rtsp://127.0.0.1:8554/src$G1", text)
+        # Baseline H.264 + a keyframe every second: what the decoder needs and
+        # what a raw browser stream lacks (the two fixes proven on the DevKit).
+        self.assertIn("-profile:v baseline", text)
+        self.assertIn("-g 30", text)
+        self.assertIn("-keyint_min 30", text)
 
 
 if __name__ == "__main__":

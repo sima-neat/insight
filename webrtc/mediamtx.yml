@@ -43,7 +43,36 @@ api: yes
 apiAddress: 127.0.0.1:9997
 
 
+# Webcam ingest + normalization. A browser WHIP-publishes its camera to
+# cam{N} (see neat_insight/mediasrc.py webcam_path_name), NOT to src{N}. A
+# browser's WebRTC stream is encoded for a video call: sparse keyframes and
+# whatever H.264 profile it negotiates, which the board's hardware decoder and
+# GStreamer rtspsrc cannot consume (rtspsrc fails waiting for a keyframe; the
+# decoder rejects a non-baseline profile). runOnReady transcodes cam{N} to
+# baseline H.264 with a keyframe every second and republishes it on src{N} —
+# the same normalized shape a file source's ffmpeg already produces
+# (neat_insight/mediasrc.py _codec_args) — so a webcam is directly consumable
+# by the viewer and by detection apps with no manual ffmpeg hop. MediaMTX owns
+# this process: it starts when the browser publishes, restarts on failure, and
+# is killed when the browser leaves. The pattern is bounded to 1..48 to match
+# the src{N} slots below, so a stray publish cannot restart-loop against an
+# undefined output path. src{N} stays the only path anything reads.
 paths:
+  # This command is the one proven end-to-end on the DevKit (webcam -> board
+  # decode -> detector). It is kept free of shell metacharacters (no quotes,
+  # parens or globs) on purpose: MediaMTX substitutes $MTX_PATH/$G1 and runs the
+  # command without a full shell, so `-g 30 -keyint_min 30` is used to force a
+  # keyframe every second rather than `-force_key_frames "expr:..."`. -profile:v
+  # baseline matches what the browser already emits and what the decoder accepts.
+  "~^cam([1-9]|[1-3][0-9]|4[0-8])$":
+    runOnReady: >
+      ffmpeg -nostdin -hide_banner -loglevel error
+      -rtsp_transport tcp -i rtsp://127.0.0.1:8554/$MTX_PATH -an
+      -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
+      -pix_fmt yuv420p -g 30 -keyint_min 30
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1
+    runOnReadyRestart: yes
+
   src1: {}
 
   src2: {}

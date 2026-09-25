@@ -50,14 +50,14 @@ test("the webcam offer is posted without waiting for candidate gathering", async
 
   const { answerSdp } = await publishWebcamOffer(
     peerConnection,
-    "https://insight.local:8889/src1/whip",
+    "https://insight.local:8889/cam1/whip",
     async (url, options) => {
       request = { url, options };
       return response({ body: "v=0\r\nanswer" });
     },
   );
 
-  assert.equal(request.url, "https://insight.local:8889/src1/whip");
+  assert.equal(request.url, "https://insight.local:8889/cam1/whip");
   assert.equal(request.options.method, "POST");
   assert.equal(request.options.headers["Content-Type"], "application/sdp");
   assert.equal(request.options.body, "v=0\r\n");
@@ -67,7 +67,7 @@ test("the webcam offer is posted without waiting for candidate gathering", async
 
 test("a rejected publish reports the HTTP status", async () => {
   await assert.rejects(
-    publishWebcamOffer(fakePeerConnection(), "https://insight.local:8889/src1/whip", async () =>
+    publishWebcamOffer(fakePeerConnection(), "https://insight.local:8889/cam1/whip", async () =>
       response({ ok: false, status: 400 }),
     ),
     (error) => {
@@ -81,17 +81,17 @@ test("a rejected publish reports the HTTP status", async () => {
 test("the session delete URL is resolved against the publish URL", async () => {
   const { deleteUrl } = await publishWebcamOffer(
     fakePeerConnection(),
-    "https://insight.local:8889/src1/whip",
-    async () => response({ location: "/src1/whip/session/abc123" }),
+    "https://insight.local:8889/cam1/whip",
+    async () => response({ location: "/cam1/whip/session/abc123" }),
   );
 
-  assert.equal(deleteUrl, "https://insight.local:8889/src1/whip/session/abc123");
+  assert.equal(deleteUrl, "https://insight.local:8889/cam1/whip/session/abc123");
 });
 
 test("a missing Location does not fail the publish", async () => {
   const { deleteUrl, answerSdp } = await publishWebcamOffer(
     fakePeerConnection(),
-    "https://insight.local:8889/src1/whip",
+    "https://insight.local:8889/cam1/whip",
     async () => response({ location: null, body: "v=0\r\nanswer" }),
   );
 
@@ -103,12 +103,12 @@ test("an unresolvable Location yields no delete URL rather than throwing", () =>
   // A relative Location resolves against any valid base, so the only way to
   // reach the null path is a base URL that is not itself absolute.
   assert.equal(resolveDeleteUrl("/session/abc", "not-a-valid-base"), null);
-  assert.equal(resolveDeleteUrl("", "https://insight.local:8889/src1/whip"), null);
+  assert.equal(resolveDeleteUrl("", "https://insight.local:8889/cam1/whip"), null);
 });
 
 test("resolveDeleteUrl keeps an absolute Location as given", () => {
   assert.equal(
-    resolveDeleteUrl("https://other.host:8889/x/y", "https://insight.local:8889/src1/whip"),
+    resolveDeleteUrl("https://other.host:8889/x/y", "https://insight.local:8889/cam1/whip"),
     "https://other.host:8889/x/y",
   );
 });
@@ -255,11 +255,11 @@ test("closing a session stops the camera and closes the peer connection", () => 
 
 test("closing a session tells MediaMTX to drop the path", () => {
   const calls = [];
-  const s = fakeSession({ deleteUrl: "https://insight.local:8889/src1/whip/session/a" });
+  const s = fakeSession({ deleteUrl: "https://insight.local:8889/cam1/whip/session/a" });
 
   closeWebcamSession(s, async (url, opts) => { calls.push([url, opts.method]); return {}; });
 
-  assert.deepEqual(calls, [["https://insight.local:8889/src1/whip/session/a", "DELETE"]]);
+  assert.deepEqual(calls, [["https://insight.local:8889/cam1/whip/session/a", "DELETE"]]);
 });
 
 test("a failing DELETE does not break teardown", () => {
@@ -439,22 +439,22 @@ test("the session id comes from the Id header, not the Location", async () => {
   // secret; Id carries the session id the status API reports.
   const { deleteUrl, sessionId } = await publishWebcamOffer(
     fakePeerConnection(),
-    "https://insight.local:8889/src1/whip",
+    "https://insight.local:8889/cam1/whip",
     async () => response({
-      location: "/src1/whip/5fdd8139-d213-48c1-bef7-f95884810d15",
+      location: "/cam1/whip/5fdd8139-d213-48c1-bef7-f95884810d15",
       id: "52304a1c-28cc-41d7-8234-164aa9ebd9bb",
     }),
   );
 
-  assert.equal(deleteUrl, "https://insight.local:8889/src1/whip/5fdd8139-d213-48c1-bef7-f95884810d15");
+  assert.equal(deleteUrl, "https://insight.local:8889/cam1/whip/5fdd8139-d213-48c1-bef7-f95884810d15");
   assert.equal(sessionId, "52304a1c-28cc-41d7-8234-164aa9ebd9bb");
 });
 
 test("no Id header means no session id, so no release claim can be made", async () => {
   const { sessionId } = await publishWebcamOffer(
     fakePeerConnection(),
-    "https://insight.local:8889/src1/whip",
-    async () => response({ location: "/src1/whip/secret" }),
+    "https://insight.local:8889/cam1/whip",
+    async () => response({ location: "/cam1/whip/secret" }),
   );
 
   assert.equal(sessionId, null);
