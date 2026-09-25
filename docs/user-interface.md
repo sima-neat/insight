@@ -92,6 +92,16 @@ Auto Assign, Bulk Start, Stop All and Reset never touch an External stream; the 
 
 External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
 
+### Frame rate
+
+The Source Preview panel shows an FPS control under the file name of the selected source, and the row notes the chosen rate next to the file once it is set. When you assign a video, the control shows the frame rate detected in the file. Use the `−` and `+` buttons to change it in steps of 5, or type a whole number between 1 and 240.
+
+When the value differs from the file's native frame rate, starting the source first creates a *rendition*: a copy of the video re-encoded at the requested constant frame rate with the same encoding rules as the Insight media catalog (H.264 baseline or H.265 main, `yuv420p`, no B-frames, one reference frame, a closed one-second GOP). The row shows **Encoding** with a progress bar in the preview panel, then goes **Live** streaming the rendition. Renditions are stored under `.renditions/` in the media directory and recorded in `renditions.json`, so the next start — including after restarting Insight — reuses them instead of encoding again. Replacing a source file with different content invalidates its old renditions. Deleting a source file removes its renditions. Byte-identical files (for example a copy under another name) share one rendition, which stays until the last of them is deleted or replaced. If encoding fails, the source file is untouched and no partial rendition is kept.
+
+MJPEG sources cannot change frame rate; the control is disabled for them.
+
+**Clear renditions** in the Streaming Sources toolbar deletes every cached rendition (except ones a playing source is using); they are re-created on the next start.
+
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.

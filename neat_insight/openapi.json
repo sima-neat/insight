@@ -365,7 +365,7 @@
       "post": {
         "tags": ["Media library"],
         "summary": "Delete a media file or directory",
-        "description": "Permanently deletes a file or directory beneath the media root. If the deleted path is assigned to a media-source slot, Insight clears that assignment to avoid leaving stale playback state. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
+        "description": "Permanently deletes a file or directory beneath the media root. If a deleted file (or any file inside a deleted directory) is assigned to a media-source slot, Insight stops that slot and clears the assignment, and it discards any cached FPS renditions built from the deleted files. Prefer stopping active sources first, and always obtain the relative path from the media tree rather than sending an absolute host path.",
         "operationId": "deleteMedia",
         "requestBody": {
           "required": true,
@@ -509,7 +509,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign available videos to source slots",
-        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin. Slots held by an external publisher are skipped and listed in `skipped_external`.",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. A slot whose file changes loses its `fps` override, exactly as with a manual assign. Call the bulk-start endpoint afterward when playback should begin. Slots held by an external publisher are skipped and listed in `skipped_external`.",
         "operationId": "autoAssignMediaSources",
         "responses": {
           "200": {
@@ -523,7 +523,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Start one source",
-        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first.",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources. Returns 409 when an external publisher holds the slot and Insight has no stream of its own on it; use `/api/mediasrc/takeover` first. When the slot has an `fps` that differs from the media's native frame rate, the matching rendition is created (synchronously, without progress output) or reused before the stream starts; use `/api/mediasrc/prepare` first to observe progress. Because that preparation can take minutes, the slot is re-read afterwards; if another request stopped, reassigned, reset or unassigned it meanwhile, or an external publisher took the slot, the start is abandoned with 409 and nothing is persisted. A start for a slot that a concurrent start already launched succeeds without changing anything.",
         "operationId": "startMediaSource",
         "x-codeSamples": [
           {
@@ -538,6 +538,95 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
+          "500": {"$ref": "#/components/responses/InternalError"}
+        }
+      }
+    },
+    "/api/mediasrc/prepare": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Prepare the FPS rendition for one source",
+        "description": "Creates or reuses the constant-frame-rate rendition that `/api/mediasrc/start` will stream when the slot's `fps` differs from the media's native frame rate. Streams plain-text progress: `Encoding <file> at <fps> fps (<encoder>)...`, `progress <seconds>/<total>` lines, then one of `Rendition ready: <path>`, `Reusing rendition: <path>`, `Source frame rate matches; no rendition needed.` or `Error: <message>`. Renditions are keyed by source content hash, fps, codec and profile, so replacing a source file never reuses an old rendition, while byte-identical files share one rendition that survives until the last of them is deleted or replaced. `/api/mediasrc/start` performs the same preparation without progress output when it is skipped.",
+        "operationId": "prepareMediaSourceRendition",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -N -H \"Content-Type: application/json\" -d '{\"index\":1}' https://<INSIGHT_HOST>:9900/api/mediasrc/prepare"
+          }
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/ProgressStream"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/api/mediasrc/renditions": {
+      "get": {
+        "tags": ["Media sources"],
+        "summary": "Get cached FPS rendition disk usage",
+        "description": "Returns how many FPS renditions are currently stored under `.renditions/` in the media directory and how many bytes they occupy. Rendition records whose file is missing are pruned before counting.",
+        "operationId": "getMediaSourceRenditions",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k https://<INSIGHT_HOST>:9900/api/mediasrc/renditions"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count and total size of stored renditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {"type": "integer"},
+                    "bytes": {"type": "integer"}
+                  },
+                  "required": ["count", "bytes"]
+                },
+                "example": {"count": 3, "bytes": 15728640}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mediasrc/renditions/clear": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Delete cached FPS renditions",
+        "description": "Deletes every stored FPS rendition file and record, except a rendition that a currently playing source is streaming. Renditions are re-created on the next start that needs them.",
+        "operationId": "clearMediaSourceRenditions",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -X POST https://<INSIGHT_HOST>:9900/api/mediasrc/renditions/clear"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed and kept renditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {"type": "integer"},
+                    "freed_bytes": {"type": "integer"},
+                    "kept": {"type": "array", "items": {"type": "string"}}
+                  },
+                  "required": ["removed", "freed_bytes", "kept"]
+                },
+                "example": {"removed": 2, "freed_bytes": 10485760, "kept": [".renditions/demo_3a9fc20b7e41c9d2_15fps_h264.mp4"]}
+              }
+            }
+          },
           "500": {"$ref": "#/components/responses/InternalError"}
         }
       }
@@ -926,7 +1015,7 @@
       "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Conflict": {"description": "The request conflicts with current runtime state, for example a slot that is not running or is held by an external publisher.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The request conflicts with current runtime state, for example a slot that is not running, is held by an external publisher, or was stopped, reassigned, reset or unassigned while its FPS rendition was being prepared (start it again).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
@@ -1049,7 +1138,13 @@
             "properties": {
               "file": {"type": "string", "description": "Relative media-library path, or an empty string to clear the slot."},
               "transport": {"type": "string", "enum": ["rtsp", "http"], "description": "Requested transport. Insight normalizes this to one supported by the detected codec."},
-              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."}
+              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."},
+              "fps": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "maximum": 240,
+                "description": "Output frame rate for the slot. Omit to keep the current value; send null to stream at the source frame rate. Changing `file` without `fps` resets it to null."
+              }
             }
           }
         ]
@@ -1074,7 +1169,21 @@
             }
           },
           "readers": {"type": "array", "description": "Clients currently reading this slot from mediamtx (Insight's own probe reader is hidden).", "items": {"$ref": "#/components/schemas/StreamReader"}},
-          "external": {"$ref": "#/components/schemas/ExternalStream"}
+          "external": {"$ref": "#/components/schemas/ExternalStream"},
+          "fps": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Requested output frame rate for this slot, or null to stream at the source frame rate."
+          },
+          "native_fps": {
+            "type": ["integer", "null"],
+            "description": "Frame rate detected in the assigned media, rounded to a whole number; null when unassigned or undetectable."
+          },
+          "active_file": {
+            "type": ["string", "null"],
+            "description": "Relative media-library path the running stream reads: the source, or a `.renditions/` file when an FPS rendition is in use. Null when stopped."
+          }
         }
       },
       "StreamReader": {

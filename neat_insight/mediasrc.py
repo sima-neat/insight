@@ -178,6 +178,7 @@ class MediaStream:
     source_codec: Optional[str] = None
     rtsp_url: str = ""
     process: Optional[subprocess.Popen] = None
+    rendition: Optional[str] = None
 
     def start(self) -> Tuple[bool, Optional[str]]:
         if self.process and self.process.poll() is None:
@@ -241,6 +242,7 @@ def start_media_stream(
     transport: str = DEFAULT_TRANSPORT,
     codec: str = DEFAULT_CODEC,
     source_codec: Optional[str] = None,
+    rendition: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     if not file_path:
         return False, "No file assigned"
@@ -264,6 +266,7 @@ def start_media_stream(
             codec=codec,
             source_codec=source_codec,
             rtsp_url=rtsp_url,
+            rendition=rendition,
         )
         ok, err = stream.start()
         if not ok:
@@ -301,3 +304,15 @@ def media_stream_identity(index: int) -> Optional[int]:
     with registry_lock:
         stream = pipeline_registry.get(slot)
         return id(stream) if stream else None
+
+
+def media_stream_file(index: int) -> Optional[str]:
+    """Absolute path of the file the running stream reads (source or rendition), or None."""
+    slot = index - 1
+    with registry_lock:
+        stream = pipeline_registry.get(slot)
+        if not stream:
+            return None
+        if stream.transport != "http" and not (stream.process and stream.process.poll() is None):
+            return None
+        return stream.file_path

@@ -3,6 +3,7 @@ import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
+import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -677,6 +678,70 @@ function UploadProgressCard({ progress, className = '' }) {
   )
 }
 
+function FpsStepper({ value, nativeFps, disabled = false, locked = false, title, onCommit, onInvalidChange }) {
+  const effective = value ?? nativeFps ?? null
+  const [draft, setDraft] = useState(effective == null ? '' : String(effective))
+  const [invalid, setInvalid] = useState(false)
+  const inert = disabled || locked
+  const changed = value != null && nativeFps != null && value !== nativeFps
+
+  useEffect(() => {
+    setDraft(effective == null ? '' : String(effective))
+    setInvalid(false)
+    if (onInvalidChange) onInvalidChange(false)
+  }, [effective])
+
+  function markInvalid(next) {
+    setInvalid(next)
+    if (onInvalidChange) onInvalidChange(next)
+  }
+
+  function commit(next) {
+    markInvalid(false)
+    if (next !== effective) onCommit(next)
+  }
+
+  function commitDraft() {
+    if (draft.trim() === '') {
+      setDraft(effective == null ? '' : String(effective))
+      markInvalid(false)
+      return
+    }
+    const parsed = parseFps(draft)
+    if (parsed == null) {
+      setDraft(effective == null ? '' : String(effective))
+      markInvalid(false)
+      return
+    }
+    commit(parsed)
+  }
+
+  const className = ['fps-stepper', changed ? 'changed' : '', invalid ? 'invalid' : '', locked ? 'locked' : ''].filter(Boolean).join(' ')
+  return (
+    <div className={className} title={title} onClick={(e) => e.stopPropagation()}>
+      <button type="button" aria-label="Decrease FPS by 5" disabled={inert || effective == null} onClick={() => commit(stepFps(effective, -1))}>−</button>
+      <span className="fps-field">
+        <input
+          inputMode="numeric"
+          aria-label="Frames per second"
+          aria-invalid={invalid || undefined}
+          placeholder="—"
+          value={draft}
+          disabled={inert}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            markInvalid(e.target.value.trim() !== '' && parseFps(e.target.value) == null)
+          }}
+          onBlur={commitDraft}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+        />
+        <small>fps</small>
+      </span>
+      <button type="button" aria-label="Increase FPS by 5" disabled={inert || effective == null} onClick={() => commit(stepFps(effective, 1))}>+</button>
+    </div>
+  )
+}
+
 export default function App() {
   const initialRoute = routeStateFromLocation()
   const [tab, setTab] = useState(() => {
@@ -697,6 +762,8 @@ export default function App() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
   const [bulkStartCount, setBulkStartCount] = useState('1')
+  const [renditionUsage, setRenditionUsage] = useState({ count: 0, bytes: 0 })
+  const [clearRenditionsOpen, setClearRenditionsOpen] = useState(false)
   const [selectedSource, setSelectedSource] = useState(1)
   const [previewEnabled, setPreviewEnabled] = useState(() => {
     try {
@@ -709,9 +776,13 @@ export default function App() {
   const [previewToken, setPreviewToken] = useState(() => Date.now())
   const [loadedPreviewSrc, setLoadedPreviewSrc] = useState(null)
   const previewImgRef = useRef(null)
+  const pendingFpsCommits = useRef(new Map()) // slot index -> promise of the in-flight FPS assign
   const [takeoverTarget, setTakeoverTarget] = useState(null)
   const [takeoverBusy, setTakeoverBusy] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [fpsInvalid, setFpsInvalid] = useState({})
+  const [encodeProgress, setEncodeProgress] = useState({})
+  const encodeAbortRef = useRef({})
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -873,6 +944,16 @@ export default function App() {
     if (!isLatest()) return
     const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {}, readers: [] })
     setSources(filled)
+    try {
+      await loadRenditionUsage()
+    } catch {
+      // A failed usage refresh must never break source loading.
+    }
+  }
+
+  async function loadRenditionUsage() {
+    const data = await fetchJson('/api/mediasrc/renditions')
+    setRenditionUsage(data)
   }
 
   async function loadViewerUrl() {
@@ -1554,6 +1635,18 @@ export default function App() {
     }
   }
 
+  // The stepper commits on blur; a Play click in the same motion must wait for that assign and
+  // act on the committed fps, otherwise it skips the prepare step and races /assign on the server.
+  function commitFps(index, fps) {
+    const commit = updateSource(index, { fps })
+      .then(() => ({ ok: true, fps }), () => ({ ok: false })) // updateSource already showed the error
+      .finally(() => { if (pendingFpsCommits.current.get(index) === commit) pendingFpsCommits.current.delete(index) })
+    pendingFpsCommits.current.set(index, commit)
+    return commit
+  }
+
+  // Rejects when the assign is refused, so a caller (commitFps) can tell a committed value from a
+  // rejected one; the list is refreshed either way and the error is shown once, here.
   async function updateSource(index, patch) {
     const src = sources.find((item) => item.index === index) || {}
     const next = {
@@ -1562,19 +1655,127 @@ export default function App() {
       transport: src.transport || 'rtsp',
       ...patch
     }
-    await sourceAction(() => fetchJson('/api/mediasrc/assign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next)
-    }))
+    try {
+      await fetchJson('/api/mediasrc/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next)
+      })
+    } catch (e) {
+      setError(e.message)
+      loadSources().catch(() => {})
+      throw e
+    }
+    await loadSources()
+  }
+
+  function prepareProgressForLine(line, prev) {
+    const progress = /^progress (\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/.exec(line)
+    if (progress) {
+      const seconds = Number(progress[1])
+      const total = progress[2] ? Number(progress[2]) : null
+      const percent = total ? Math.min(99, Math.floor((seconds / total) * 100)) : null
+      return { ...prev, seconds, total, percent }
+    }
+    const encoding = /^Encoding .+ at (\d+) fps \((.+)\)\.\.\.$/.exec(line)
+    if (encoding) return { ...prev, fps: Number(encoding[1]), encoder: encoding[2], label: `Encoding ${encoding[1]} fps rendition…` }
+    return { ...prev, label: line }
+  }
+
+  async function readPrepareProgress(response, index) {
+    const apply = (line) => setEncodeProgress((prev) => ({ ...prev, [index]: prepareProgressForLine(line, prev[index] || {}) }))
+    if (!response.body) {
+      const text = await response.text()
+      text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach(apply)
+      return text
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        lines.map((line) => line.trim()).filter(Boolean).forEach(apply)
+      }
+      if (done) break
+    }
+    if (pending.trim()) apply(pending.trim())
+    return text
+  }
+
+  async function prepareSource(index, fps) {
+    const controller = new AbortController()
+    encodeAbortRef.current[index] = controller
+    setEncodeProgress((prev) => ({ ...prev, [index]: { label: 'Preparing rendition…', percent: null, seconds: 0, total: null } }))
+    try {
+      const response = await fetch('/api/mediasrc/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index }),
+        signal: controller.signal
+      })
+      if (!response.ok) {
+        let message = `Prepare failed (${response.status})`
+        try {
+          const body = await response.json()
+          message = body.error || body.message || message
+        } catch {}
+        throw new Error(message)
+      }
+      const text = await readPrepareProgress(response, index)
+      const errorLine = text.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith('Error:'))
+      if (errorLine) {
+        throw new Error(`Encoding src${index} at ${fps} fps failed. Partial output was removed; the source file is unchanged. ${errorLine.replace(/^Error:\s*/, '')}`)
+      }
+      setEncodeProgress((prev) => ({ ...prev, [index]: { ...(prev[index] || {}), label: 'Starting stream…', percent: 99 } }))
+    } finally {
+      delete encodeAbortRef.current[index]
+    }
+  }
+
+  function cancelPrepare(index) {
+    const controller = encodeAbortRef.current[index]
+    if (controller) controller.abort()
   }
 
   async function startSource(index) {
-    await sourceAction(() => fetchJson('/api/mediasrc/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
-    }))
+    const pending = pendingFpsCommits.current.get(index)
+    const src = withCommittedFps(sources.find((s) => s.index === index), pending ? await pending : undefined)
+    if (!src) return // the fps commit failed and already reported; nothing to start
+    try {
+      if (needsRendition(src)) await prepareSource(index, src.fps)
+      await fetchJson('/api/mediasrc/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        setUploadStatus(`Cancelled encoding for src${index}.`)
+      } else {
+        setError(e.message)
+      }
+    } finally {
+      // Refresh first so the row goes Encoding -> Live without an Idle flash, but always clear the progress.
+      try {
+        await loadSources()
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setEncodeProgress((prev) => {
+          if (!(index in prev)) return prev
+          const next = { ...prev }
+          delete next[index]
+          return next
+        })
+      }
+    }
   }
 
   async function stopSource(index) {
@@ -1602,6 +1803,10 @@ export default function App() {
       return
     }
     try {
+      // Like Play, wait for any in-flight FPS commit so the server starts the committed rates,
+      // and do nothing if one was refused (the commit already showed its error).
+      const commits = await Promise.all([...pendingFpsCommits.current.values()])
+      if (!allCommitsSucceeded(commits)) return
       const data = await fetchJson('/api/mediasrc/start-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1675,6 +1880,18 @@ export default function App() {
     try {
       writePreviewEnabled(window.localStorage, next)
     } catch {}
+  }
+
+  async function clearRenditions() {
+    try {
+      const data = await fetchJson('/api/mediasrc/renditions/clear', { method: 'POST' })
+      setUploadStatus(`Removed ${data.removed} rendition(s), freed ${formatBytes(data.freed_bytes)}.` + (data.kept.length ? ` ${data.kept.length} kept: in use by a playing source.` : ''))
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setClearRenditionsOpen(false)
+    }
   }
 
   async function copyStreamUrl(src) {
@@ -2059,6 +2276,9 @@ export default function App() {
                   <button className="btn-ghost" onClick={resetAllSources}>
                     Reset
                   </button>
+                  <button className="btn-ghost" onClick={() => setClearRenditionsOpen(true)} disabled={!renditionUsage.count} title="Delete cached FPS renditions; they are re-created on the next start">
+                    Clear renditions{renditionUsage.count ? ` (${renditionUsage.count} · ${formatBytes(renditionUsage.bytes)})` : ''}
+                  </button>
                 </div>
               </div>
               <p className="hint">Default RTSP base: <code>{rtspBase}</code></p>
@@ -2083,6 +2303,8 @@ export default function App() {
                             >
                               {codecLabel(src.codec)}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
                             </span>
+                            {/* Holds the FPS column so the actions line up with file-backed rows. */}
+                            <span aria-hidden="true" />
                             <button
                               className="icon-action-btn takeover"
                               onClick={(e) => { e.stopPropagation(); setTakeoverTarget(src) }}
@@ -2115,18 +2337,23 @@ export default function App() {
                       return (
                         <>
                           <span className="src-label">src{src.index}</span>
-                          <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
-                            {src.state === 'playing' ? 'Live' : 'Idle'}
+                          <span className={encodeProgress[src.index] ? 'src-state encoding' : (src.state === 'playing' ? 'src-state playing' : 'src-state stopped')}>
+                            {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
+                          <span className="src-file-cell">
+                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value }).catch(() => {})} disabled={Boolean(encodeProgress[src.index])}>
                             <option value="">Not assigned</option>
                             {videoFiles.map((file) => (
                               <option key={file} value={file}>{file}</option>
                             ))}
                           </select>
+                            {src.fps != null && (
+                              <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
+                            )}
+                          </span>
                           <select
                             value={transportValue}
-                            onChange={(e) => updateSource(src.index, { transport: e.target.value })}
+                            onChange={(e) => updateSource(src.index, { transport: e.target.value }).catch(() => {})}
                             disabled={transportLocked}
                             aria-label={`Transport for src${src.index}`}
                             title={!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`))}
@@ -2139,12 +2366,12 @@ export default function App() {
                           <span className={isAssigned && canStream ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? (canStream ? 'Codec is determined by the selected media format' : 'Codec could not be detected for this media') : 'Assign media before selecting a codec'}>
                             {isAssigned ? codecLabel(src.codec) : '-'}
                           </span>
-                          {src.state === 'playing' ? (
+                          {(src.state === 'playing' || encodeProgress[src.index]) ? (
                             <button
                               className="icon-action-btn stop"
-                              onClick={(e) => { e.stopPropagation(); stopSource(src.index) }}
-                              aria-label={`Stop src${src.index}`}
-                              title={`Stop src${src.index}`}
+                              onClick={(e) => { e.stopPropagation(); if (encodeProgress[src.index]) cancelPrepare(src.index); else stopSource(src.index) }}
+                              aria-label={encodeProgress[src.index] ? `Cancel encoding for src${src.index}` : `Stop src${src.index}`}
+                              title={encodeProgress[src.index] ? `Cancel encoding for src${src.index}` : `Stop src${src.index}`}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -2154,9 +2381,9 @@ export default function App() {
                             <button
                               className="icon-action-btn play"
                               onClick={(e) => { e.stopPropagation(); startSource(src.index) }}
-                              disabled={!canStream}
+                              disabled={!canStream || Boolean(fpsInvalid[src.index])}
                               aria-label={`Start src${src.index}`}
-                              title={canStream ? `Start src${src.index}` : 'Codec must be detected before streaming'}
+                              title={!canStream ? 'Codec must be detected before streaming' : (fpsInvalid[src.index] ? 'FPS must be a whole number between 1 and 240' : `Start src${src.index}`)}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M8 6v12l10-6-10-6z" />
@@ -2186,16 +2413,57 @@ export default function App() {
             <section className="panel">
               {(() => {
                 if (!isExternal(currentSource)) {
+                  const info = currentSource
+                  const progress = encodeProgress[info.index]
+                  const panelTransports = Array.isArray(info.allowed_transports) ? info.allowed_transports : (info.file ? ['rtsp'] : [])
+                  const panelCanStream = Boolean(info.file) && panelTransports.length > 0
+                  const effectiveFps = info.fps ?? info.native_fps ?? null
+                  const customFps = info.fps != null && info.native_fps != null && info.fps !== info.native_fps
+                  const streamingRendition = info.state === 'playing' && info.active_file && info.active_file !== info.file
+                  const fileDetail = info.file ? [info.file, info.native_fps != null ? `${info.native_fps} fps` : null].filter(Boolean).join(' · ') : 'Not assigned'
+                  let outputDetail = `${info.transport ? info.transport.toUpperCase() : '-'} / ${codecLabel(info.codec)}`
+                  if (effectiveFps != null) outputDetail += ` · ${effectiveFps} fps`
                   return (
                     <>
                       <h2>Source Preview: src{currentSource.index}</h2>
-                      <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
-                      <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
+                      <p className="hint">File: {fileDetail}</p>
+                      <div className="fps-field-row">
+                        <span className="hint">Output frame rate</span>
+                        <FpsStepper
+                          value={info.fps ?? null}
+                          nativeFps={info.native_fps ?? null}
+                          disabled={!info.file || !panelCanStream || info.codec === 'mjpeg'}
+                          locked={info.state === 'playing' || Boolean(progress)}
+                          title={!info.file ? 'Assign media before choosing a frame rate' : (info.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (info.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${info.index} (source ${info.native_fps ?? '?'} fps)`))}
+                          onCommit={(fps) => commitFps(info.index, fps)}
+                          onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[info.index] === bad ? prev : { ...prev, [info.index]: bad }))}
+                        />
+                        <span className="hint muted-text">{info.native_fps != null ? `Native ${info.native_fps} fps. A different rate creates a rendition on start.` : 'A rate other than the native one creates a rendition on start.'}</span>
+                      </div>
+                      <p className="hint">
+                        Output: {outputDetail}
+                        {streamingRendition && <span className="ok-text"> · streaming rendition <code>{info.active_file}</code></span>}
+                        {!streamingRendition && customFps && info.state !== 'playing' && !progress && <span className="muted-text"> (rendition will be created on start)</span>}
+                      </p>
                       <div className="preview">
-                        {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                        {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                        {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                        {!currentSource.file && <p>Assign a media file to preview.</p>}
+                        <div className="preview-loading" role="status" aria-live="polite">
+                          {progress && (
+                            <>
+                              <div className="upload-progress-track">
+                                <div
+                                  className={Number.isFinite(progress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
+                                  style={Number.isFinite(progress.percent) ? { width: `${progress.percent}%` } : undefined}
+                                />
+                              </div>
+                              <span>{progress.label}{Number.isFinite(progress.percent) ? ` ${progress.percent}%` : ''}</span>
+                              <span className="muted-text mono">{formatFpsProgress(progress)}{progress.encoder ? ` · ${progress.encoder}` : ''}</span>
+                            </>
+                          )}
+                        </div>
+                        {!progress && info.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(info.file)} alt={info.file} />}
+                        {!progress && info.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${info.file}`} />}
+                        {!progress && info.file && sourcePreviewIsImage && <img src={`/media/${info.file}`} alt={info.file} />}
+                        {!info.file && <p>Assign a media file to preview.</p>}
                       </div>
                     </>
                   )
@@ -2837,6 +3105,7 @@ export default function App() {
           <div className="modal-card">
             <h3>Bulk Start Streams</h3>
             <p>How many streams do you want to start?</p>
+            <p className="hint">Slots with a custom FPS may take longer to start while renditions are created.</p>
             <div className="bulk-slider-row">
               <input
                 className="bulk-slider"
@@ -2866,6 +3135,19 @@ export default function App() {
             <div className="modal-actions">
               <button onClick={() => setTakeoverTarget(null)} disabled={takeoverBusy}>Cancel</button>
               <button className="danger" onClick={takeOverSource} disabled={takeoverBusy}>Disconnect</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clearRenditionsOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Clear cached renditions">
+          <div className="modal-card">
+            <h3>Clear cached renditions</h3>
+            <p>Delete {renditionUsage.count} cached rendition(s) ({formatBytes(renditionUsage.bytes)})? They are re-created on the next start. Renditions in use by a playing source are kept.</p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setClearRenditionsOpen(false)}>Cancel</button>
+              <button className="btn-ghost danger" onClick={clearRenditions}>Clear</button>
             </div>
           </div>
         </div>

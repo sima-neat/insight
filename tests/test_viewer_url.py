@@ -88,6 +88,32 @@ class ViewerUrlTests(unittest.TestCase):
         self.assertEqual(ports[0]["name"], "videoUI")
         self.assertEqual(ports[0]["hostPortStart"], 18081)
 
+    def test_port_discovery_skips_unreadable_candidate(self):
+        # GitHub-hosted runners leave a /home/packer that the runner user cannot
+        # traverse, so a candidate under it fails with EACCES instead of ENOENT.
+        with tempfile.TemporaryDirectory() as directory:
+            locked = Path(directory) / "locked"
+            locked.mkdir()
+            unreadable = locked / ".insight-config" / "neat-port-map.json"
+            valid = Path(directory) / "valid.json"
+            valid.write_text(
+                json.dumps({"videoUI": {"host": 18081, "protocol": "tcp"}}),
+                encoding="utf-8",
+            )
+            locked.chmod(0)
+            try:
+                with mock.patch.object(
+                    app_module,
+                    "_sysinfo_port_map_candidates",
+                    return_value=iter((unreadable, valid)),
+                ):
+                    ports = app_module._read_exposed_ports_from_port_map()
+            finally:
+                locked.chmod(0o700)
+
+        self.assertEqual(ports[0]["name"], "videoUI")
+        self.assertEqual(ports[0]["hostPortStart"], 18081)
+
     def test_missing_channel_capacity_uses_legacy_eighty_channel_behavior(self):
         with mock.patch.object(app_module, "is_sima_board", return_value=False), \
              mock.patch.object(app_module, "_read_neat_port_map", return_value={}):
