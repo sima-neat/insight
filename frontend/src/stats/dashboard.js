@@ -232,27 +232,60 @@ export function scaleText(scale, unit) {
   return `${axisLabel(scale.min)}–${axisLabel(scale.max)}${unitAfter(unit)}`
 }
 
+// Per-core heatmap: 48 columns over the window (10 s each at Sentinel's 2 s cadence), and a
+// one-minute average beside each core, so the view changes slowly rather than every sample.
+export const HEAT_COLUMNS = 48
+export const RECENT_SAMPLES = 30
+
+function mean(values) {
+  const numbers = (values || []).filter(isNumber)
+  return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null
+}
+
+/** A series split into `columns` equal slices of time, each the mean of its samples. */
+export function columnMeans(values, columns = HEAT_COLUMNS) {
+  const list = values || []
+  if (!list.length) return []
+  if (list.length <= columns) return list.map((value) => (isNumber(value) ? value : null))
+  const size = list.length / columns
+  return Array.from({ length: columns }, (_, column) => mean(list.slice(Math.floor(column * size), Math.floor((column + 1) * size))))
+}
+
+/** A 0-100 load as one blue: pale when idle, deep when busy. Missing reads as the empty track. */
+export function loadColor(percent) {
+  if (!isNumber(percent)) return 'var(--surface-soft)'
+  const p = Math.min(100, Math.max(0, percent)) / 100
+  const mix = (from, to) => Math.round(from + (to - from) * p)
+  return `rgb(${mix(236, 12)} ${mix(243, 64)} ${mix(250, 140)})`
+}
+
+function toneOf(value, warn, critical) {
+  if (!isNumber(value)) return 'unavailable'
+  if (isNumber(critical) && value >= critical) return 'critical'
+  if (isNumber(warn) && value >= warn) return 'warn'
+  return 'ok'
+}
+
 /**
- * Per-core load now and over the window: the rows of the per-core bars, plus the average and
- * the busiest core for the header.
+ * The per-core heatmap's rows: each core's column means across the window and its one-minute
+ * average, plus the average and busiest core for the header, both on one-minute averages.
  */
 export function coreSummary(cores, series) {
   const rows = (cores || []).map((core) => {
-    const values = (series?.[core.key] || []).filter(isNumber)
-    const now = isNumber(core.value) ? core.value : lastNumber(series?.[core.key])
+    const values = series?.[core.key] || []
+    const recent = mean(values.slice(-RECENT_SAMPLES))
     return {
       key: core.key,
       name: core.short || core.label,
       label: core.label,
-      status: core.status || 'ok',
-      now,
-      low: values.length ? Math.min(...values) : null,
-      high: values.length ? Math.max(...values) : null
+      cells: columnMeans(values),
+      recent,
+      tone: toneOf(recent, core.warn, core.critical)
     }
   })
-  const reporting = rows.filter((row) => isNumber(row.now))
-  const busiest = reporting.reduce((top, row) => (!top || row.now > top.now ? row : top), null)
-  const average = reporting.length ? reporting.reduce((sum, row) => sum + row.now, 0) / reporting.length : null
+  const reporting = rows.filter((row) => isNumber(row.recent))
+  const busiest = reporting.reduce((top, row) => (!top || row.recent > top.recent ? row : top), null)
+  const average = reporting.length ? reporting.reduce((sum, row) => sum + row.recent, 0) / reporting.length : null
   return { rows, average, busiest }
 }
 

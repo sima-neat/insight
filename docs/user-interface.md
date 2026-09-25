@@ -145,12 +145,12 @@ An install that is refused or fails is reported as an install rather than as a f
 
 ### Live metrics
 
-The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live and when the current Sentinel session started, which is what the session average and peak cover; **Pause updates** stops polling. Below it are six tabs:
+The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live and when the current Sentinel session started, which is what the session average and peak cover. **Export CSV** downloads every metric at each sample Sentinel holds for the session (its last 240, about eight minutes; record a trace under **Runs** for longer), and **Pause updates** stops polling. Below it are six tabs:
 
 - **Overview**: charts of the hottest temperature sensor, current board power, CPU, memory, MLA memory, and network traffic, with **All metrics** listing every metric in Sentinel's order.
 - **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
-- **Power**: current and session-average power, the session peak against the chart's scale, and the power rails stacked so the top edge is the board total.
-- **System**: a bar per CPU core showing its load now over a faint band of its range across the window, with the average and the busiest core; a core past its limits turns amber or red. Beside it: CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use.
+- **Power**: current and session-average power, the session peak with the current draw and the average marked against it, and the power rails stacked so the top edge is the board total.
+- **System**: a heatmap of CPU load, a row per core and a column per 10 seconds of the window in one blue, with each core's one-minute average and the busiest core; an average past a core's limits turns amber or red. Beside it: CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use.
 - **Storage & Network**: eMMC use, network receive and transmit, eMMC reads and writes, and their metrics.
 - **Runs**: record a trace, and open, compare, or delete saved runs. Comparing overlays one series (total power, thermal maximum, CPU, load, RAM, MLA memory, or EV74 CMA) for every selected run over the time they all cover, on a scale fitted to the runs, with each run's minimum, mean, median, P95, maximum, change against the baseline, and energy; the full per-metric comparison follows it.
 

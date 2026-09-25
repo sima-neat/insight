@@ -7,7 +7,10 @@ import {
   agoLabel,
   compareOverlay,
   compareSeriesAvailable,
+  columnMeans,
   coreSummary,
+  HEAT_COLUMNS,
+  loadColor,
   scaleText,
   tightScale,
   elapsedPath,
@@ -163,15 +166,24 @@ test('professional wording: whole-word durations, units as a reader says them', 
   assert.equal(agoLabel(['2026-09-25T00:00:00Z', '2026-09-25T00:01:00Z'], 0), '1 minute ago')
 })
 
-test('per-core bars: load now, the range of each core, the average and the busiest core', () => {
+test('per-core heatmap: column means over the window, a one-minute average per core', () => {
   const cores = [
-    { key: 'c0', short: 'c0', label: 'CPU core 0 usage', value: 40, status: 'ok' },
-    { key: 'c1', short: 'c1', label: 'CPU core 1 usage', value: 90, status: 'warn' },
-    { key: 'c2', short: 'c2', label: 'CPU core 2 usage', value: null, status: 'unavailable' }
+    { key: 'c0', short: 'c0', label: 'CPU core 0 usage', warn: 80, critical: 95 },
+    { key: 'c1', short: 'c1', label: 'CPU core 1 usage', warn: 80, critical: 95 },
+    { key: 'c2', short: 'c2', label: 'CPU core 2 usage', warn: 80, critical: 95 }
   ]
-  const summary = coreSummary(cores, { c0: [10, 55, 40], c1: [70, 90], c2: [null] })
-  assert.deepEqual(summary.rows.map((row) => [row.name, row.now, row.low, row.high]), [['c0', 40, 10, 55], ['c1', 90, 70, 90], ['c2', null, null, null]])
+  const summary = coreSummary(cores, { c0: [10, 30, 50, 70], c1: [90, 90], c2: [null] })
+  assert.deepEqual(summary.rows.map((row) => [row.name, row.recent, row.tone]), [['c0', 40, 'ok'], ['c1', 90, 'warn'], ['c2', null, 'unavailable']])
   assert.equal(summary.average, 65, 'a core that did not report is left out of the average')
   assert.equal(summary.busiest.name, 'c1')
+  // 240 samples make five per column; noise that averages 50 over five reads as a flat 50.
+  const long = Array.from({ length: 240 }, (_, index) => [30, 70, 40, 60, 50][index % 5])
+  const cells = coreSummary([cores[0]], { c0: long }).rows[0].cells
+  assert.equal(cells.length, HEAT_COLUMNS)
+  assert.ok(cells.every((value) => value === 50), 'each column is the mean of its samples, so alternating noise reads flat')
+  assert.deepEqual(columnMeans([1, null, 3], 48), [1, null, 3], 'fewer samples than columns: one column each')
+  assert.equal(loadColor(0), 'rgb(236 243 250)')
+  assert.equal(loadColor(100), 'rgb(12 64 140)')
+  assert.equal(loadColor(null), 'var(--surface-soft)')
   assert.deepEqual(coreSummary([], {}), { rows: [], average: null, busiest: null })
 })

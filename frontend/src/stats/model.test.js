@@ -11,6 +11,8 @@ import {
   POLL_MS,
   compareIncludes,
   compareQuery,
+  sessionCsv,
+  sessionCsvFilename,
   compareReady,
   compareTable,
   createRequestGuard,
@@ -1150,4 +1152,24 @@ test('a comparison that included a deleted run is recognised by its id or name',
   assert.equal(compareIncludes(compare, new Set()), false)
   assert.equal(compareIncludes(null, new Set(['a'])), false)
   assert.equal(compareIncludes({ sentinel: { runs: ['a'] } }, new Set(['a'])), false)
+})
+
+test('the session exports as CSV: a row per sample, a column per metric, empty where the board took no reading', () => {
+  const model = {
+    metrics: [
+      { key: 'power_current_watts', label: 'Current board power', unit: 'W' },
+      { key: 'rtsn_0', label: 'MLA RTSN-0', unit: 'C' },
+      { key: 'cpu_load_1', label: 'CPU load 1m', unit: 'load' }
+    ],
+    timestamps: ['2026-09-25T18:40:00Z', '2026-09-25T18:40:02Z'],
+    series: { power_current_watts: [12.5, 13], rtsn_0: [55.1, null], cpu_load_1: [6.01, 6.2] }
+  }
+  assert.equal(sessionCsv(model), [
+    'timestamp,Current board power (W),MLA RTSN-0 (°C),CPU load 1m',
+    '2026-09-25T18:40:00Z,12.5,55.1,6.01',
+    '2026-09-25T18:40:02Z,13,,6.2',
+    ''
+  ].join('\r\n'))
+  assert.equal(sessionCsv({ metrics: [], timestamps: [] }), '')
+  assert.equal(sessionCsvFilename(new Date(2026, 8, 25, 18, 4, 5)), 'sentinel-session-2026-09-25-180405.csv')
 })

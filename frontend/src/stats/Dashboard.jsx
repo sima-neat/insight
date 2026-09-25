@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Callout } from '../peripherals/ui.jsx'
-import { CoreBars, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
+import { CoreHeatmap, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
 import {
   DASH_TABS,
   DASH_TAB_KEY,
@@ -16,12 +16,24 @@ import {
   thermalMaxSeries,
   thresholdLines
 } from './dashboard.js'
-import { formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, statusInfo, thresholdText, timeAgo } from './model.js'
+import { formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, sessionCsv, sessionCsvFilename, statusInfo, thresholdText, timeAgo } from './model.js'
 import { FailureCallout, SegmentedTabs } from './ui.jsx'
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
 const STORAGE_GROUP = /^(disk|diskio|network|storage|nvme)$/i
 const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_)/
+
+function download(filename, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.hidden = true
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
 
 function readTab() {
   try {
@@ -235,9 +247,10 @@ function PowerView({ model }) {
         {peak && (
           <PeakGauge
             title="Session peak"
-            value={peak.value}
+            peak={peak.value}
+            current={metricByKey(model, 'power_current_watts')?.value ?? null}
+            average={metricByKey(model, 'power_average_watts')?.value ?? null}
             unit="W"
-            scale={{ min: 0, max: ceiling || niceCeil((peak.value || 0) * 1.1) }}
           />
         )}
       </div>
@@ -264,7 +277,7 @@ function SystemView({ model }) {
   const memPct = metricByKey(model, 'linux_mem_used_pct')
   return (
     <div className="dash-grid system">
-      {cores.length > 0 && <CoreBars cores={cores} series={model.series} timestamps={model.timestamps} />}
+      {cores.length > 0 && <CoreHeatmap cores={cores} series={model.series} timestamps={model.timestamps} />}
       <div className="dash-stack">
         <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" height={56} />
         <MetricChart
@@ -341,9 +354,20 @@ export default function SentinelDashboard({ model, startedAt, now, live, polling
               Session started {timeAgo(startedAt, now)}
             </span>
           )}
-          <button type="button" className="btn-tonal dash-pause" onClick={onToggleLive}>
-            {live ? 'Pause updates' : 'Resume updates'}
-          </button>
+          <span className="dash-actions">
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => download(sessionCsvFilename(), sessionCsv(model))}
+              disabled={!model.timestamps.length}
+              title={`Every metric at each of the ${model.timestamps.length} samples Sentinel holds for this session`}
+            >
+              Export CSV
+            </button>
+            <button type="button" className="btn-tonal" onClick={onToggleLive}>
+              {live ? 'Pause updates' : 'Resume updates'}
+            </button>
+          </span>
         </div>
         <p className="sr-only" role="status">
           {polling ? 'Metrics are updating live.' : live ? 'Metric updates are stopped.' : 'Metric updates are paused.'}

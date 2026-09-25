@@ -1139,6 +1139,30 @@ export function compareCsv(table) {
   return lines.map((line) => line.map(csvField).join(',')).join('\r\n') + '\r\n'
 }
 
+/**
+ * The session Sentinel holds, as CSV: one row per sample (board timestamp, ISO 8601), one column
+ * per metric in Sentinel's order, headed with its name and unit. A reading the board did not
+ * take is an empty cell, never 0.
+ */
+export function sessionCsv(model) {
+  const metrics = model?.metrics || []
+  const stamps = model?.timestamps || []
+  if (!metrics.length || !stamps.length) return ''
+  const header = ['timestamp', ...metrics.map((metric) => {
+    const unit = unitSuffix(metric.unit)
+    return unit ? `${metric.label} (${unit})` : metric.label
+  })]
+  const lines = [header, ...stamps.map((stamp, index) => [stamp, ...metrics.map((metric) => model.series?.[metric.key]?.[index] ?? null)])]
+  return lines.map((line) => line.map(csvField).join(',')).join('\r\n') + '\r\n'
+}
+
+/** `sentinel-session-<YYYY-MM-DD>-<HHMMSS>.csv`, in local time, safe on every filesystem. */
+export function sessionCsvFilename(date = new Date()) {
+  const day = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `sentinel-session-${localDay(day)}-${pad(day.getHours())}${pad(day.getMinutes())}${pad(day.getSeconds())}.csv`
+}
+
 function localDay(date) {
   const day = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date()
   const pad = (value) => String(value).padStart(2, '0')

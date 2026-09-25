@@ -4692,7 +4692,9 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-.dash-pause {
+.dash-actions {
+  display: flex;
+  gap: 8px;
   margin-left: auto;
 }
 
@@ -5027,108 +5029,100 @@ button:disabled {
   margin: 0;
 }
 
-/* Per-core CPU: one bar per core, its load now over a faint band of its range across the window. */
+/* Per-core CPU: a heatmap, a row per core and a column per slice of the window, in one blue. */
 .dash-core-meta {
   font-size: 12px;
   color: var(--ink-soft);
 }
 
-.dash-core-list {
-  display: grid;
-  gap: 7px;
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dash-core {
+.dash-heat {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 54px;
+  gap: 10px;
+  min-height: calc(var(--rows) * 20px);
+}
+
+.dash-heat-names,
+.dash-heat-values {
+  display: grid;
+  grid-template-rows: repeat(var(--rows), 1fr);
   align-items: center;
-  gap: 12px;
-  color: var(--chart-1);
-}
-
-.dash-core.tone-warn {
-  color: #b7791f;
-}
-
-.dash-core.tone-critical {
-  color: var(--danger);
-}
-
-.dash-core-name {
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+.dash-heat-names {
   color: var(--ink-soft);
 }
 
-.dash-core-track {
-  position: relative;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--surface-soft);
-  box-shadow: inset 0 0 0 1px var(--line);
-  overflow: hidden;
-}
-
-.dash-core-range {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: color-mix(in srgb, currentColor 18%, transparent);
-}
-
-.dash-core-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  border-radius: 999px;
-  background: currentColor;
-  transition: width 300ms ease;
-}
-
-.dash-core-value {
+.dash-heat-values {
   text-align: right;
-  font-family: var(--font-mono);
-  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
 
-.dash-core-legend {
+.dash-heat-values .tone-warn {
+  color: #b7791f;
+  font-weight: 700;
+}
+
+.dash-heat-values .tone-critical {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.dash-heat-grid {
+  position: relative;
+  min-width: 0;
+  cursor: crosshair;
+}
+
+.dash-heat-grid svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dash-heat-focus {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.dash-heat-foot {
   display: flex;
-  gap: 16px;
-  padding-left: 46px;
+  align-items: center;
+  gap: 24px;
+  padding-left: 44px;
   font-size: 11px;
   color: var(--ink-soft);
 }
 
-.dash-core-legend > span {
+.dash-heat-axis {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  margin-right: 40px;
+}
+
+.dash-heat-scale {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.dash-core-key {
-  width: 14px;
+.dash-heat-ramp {
+  width: 90px;
   height: 8px;
   border-radius: 999px;
-}
-
-.dash-core-key.now {
-  background: var(--chart-1);
-}
-
-.dash-core-key.range {
-  background: color-mix(in srgb, var(--chart-1) 18%, transparent);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-/* Session peak: one number and how much of the scale it reaches. */
+/* Session peak: the number, then a bar from zero to it, filled to the current draw with a tick at the average. */
 .dash-peak {
   align-content: start;
+  gap: 12px;
 }
 
 .dash-peak-value {
@@ -5138,27 +5132,80 @@ button:disabled {
   color: var(--ink);
 }
 
-.dash-peak-bar {
+.dash-peak-track {
+  position: relative;
   height: 10px;
   border-radius: 999px;
-  background: var(--line);
-  overflow: hidden;
+  background: var(--surface-soft);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
-.dash-peak-bar span {
-  display: block;
-  height: 100%;
+.dash-peak-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--chart-2), var(--chart-4));
+  background: var(--chart-1);
 }
 
-.dash-peak-share {
-  font-size: 12px;
+.dash-peak-tick {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+
+.dash-peak-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.dash-peak-stats div {
+  display: grid;
+  gap: 2px;
+}
+
+.dash-peak-stats dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--ink-soft);
 }
 
-.dash-peak .hint {
+.dash-peak-stats dd {
   margin: 0;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.dash-peak-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.dash-peak-key.current {
+  background: var(--chart-1);
+}
+
+.dash-peak-key.average {
+  width: 3px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--ink);
 }
 
 @media (max-width: 1100px) {
@@ -5176,7 +5223,7 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .dash-pause {
+  .dash-actions {
     margin-left: 0;
   }
 
@@ -5186,10 +5233,6 @@ button:disabled {
 @media (prefers-reduced-motion: reduce) {
   .dash-live.on {
     animation: none;
-  }
-
-  .dash-core-fill {
-    transition: none;
   }
 }
 

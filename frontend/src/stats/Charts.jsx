@@ -3,6 +3,7 @@ import {
   agoLabel,
   axisLabel,
   coreSummary,
+  loadColor,
   elapsedPath,
   indexAt,
   lastNumber,
@@ -26,14 +27,17 @@ function percentOf(value, scale) {
   return ((Math.min(scale.max, Math.max(scale.min, value)) - scale.min) / span) * 100
 }
 
+// The pointer's position across the plot is what is remembered, not the sample under it: new
+// samples shift the data every poll, and the readout must follow what is under a still cursor.
 function useHover(length) {
   const plot = useRef(null)
-  const [index, setIndex] = useState(-1)
+  const [fraction, setFraction] = useState(null)
   const onPointerMove = (event) => {
     const rect = plot.current?.getBoundingClientRect()
-    if (rect?.width) setIndex(indexAt((event.clientX - rect.left) / rect.width, length))
+    if (rect?.width) setFraction(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)))
   }
-  return { plot, index, onPointerMove, onPointerLeave: () => setIndex(-1) }
+  const index = fraction === null ? -1 : indexAt(fraction, length)
+  return { plot, index, onPointerMove, onPointerLeave: () => setFraction(null) }
 }
 
 // Legends show the current reading and never follow the pointer: a hovered value would change
@@ -219,62 +223,108 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
 }
 
 /**
- * Per-core CPU as one bar per core: the bar is the load now, the faint band behind it the core's
- * range over the window, so a spike still shows without a chart per core. A core past its warn or
- * critical level turns amber or red; the rest stay the dashboard's blue.
+ * Per-core CPU as a heatmap, the way Grafana and Netdata show many cores: a row per core, a column
+ * per slice of the window, one blue for load. Only the newest column changes as samples arrive, so
+ * the view stays still; the figure beside each core is its one-minute average.
  */
-export function CoreBars({ cores, series, timestamps }) {
+export function CoreHeatmap({ cores, series, timestamps }) {
   const { rows, average, busiest } = coreSummary(cores, series)
-  const span = spanLabel(timestamps).replace(' ago', '')
+  const [pointer, setPointer] = useState(null)
+  const columns = Math.max(0, ...rows.map((row) => row.cells.length))
+  const span = spanLabel(timestamps)
+  const windowText = span.replace(' ago', '')
+  const sampleCount = timestamps?.length || 0
+  const onPointerMove = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (rect.width && rect.height) setPointer({ x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height })
+  }
+  // Worked out on every render from where the pointer is, so it follows new columns as they arrive.
+  const cell = (at) => Math.min(at.count - 1, Math.max(0, Math.floor(at.fraction * at.count)))
+  const hover = pointer && rows.length && columns
+    ? { row: cell({ fraction: pointer.y, count: rows.length }), column: cell({ fraction: pointer.x, count: columns }) }
+    : null
+  const hovered = hover && rows[hover.row]
+  // The newest sample in the hovered column, to say how long ago that slice of the window was.
+  const sampleOf = (column) => Math.min(sampleCount - 1, Math.floor(((column + 1) / Math.max(1, columns)) * sampleCount) - 1)
   return (
-    <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load now, with each core's range over the last ${span || 'samples'}`}>
+    <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load over the last ${windowText || 'samples'}; one-minute average ${formatValue(average, '%')}`}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">Per-core CPU</span>
         <span className="dash-chart-value">{formatValue(average, '%')}</span>
         <span className="dash-core-meta">
-          average of {rows.length} cores{busiest ? ` · busiest ${busiest.name} at ${formatValue(busiest.now, '%')}` : ''}
+          1-minute average of {rows.length} cores{busiest ? ` · busiest ${busiest.name} at ${formatValue(busiest.recent, '%')}` : ''}
         </span>
       </figcaption>
-      <ul className="dash-core-list">
-        {rows.map((row) => (
-          <li
-            key={row.key}
-            className={`dash-core tone-${row.status}`}
-            title={`${row.label}: ${formatValue(row.now, '%')} now${row.low !== null ? `; ${formatValue(row.low, '%')}–${formatValue(row.high, '%')} over the last ${span || 'samples'}` : ''}`}
-          >
-            <span className="dash-core-name">{row.name}</span>
-            <span className="dash-core-track" aria-hidden="true">
-              {row.low !== null && (
-                <span className="dash-core-range" style={{ left: `${row.low}%`, width: `${Math.max(0.5, row.high - row.low)}%` }} />
-              )}
-              <span className="dash-core-fill" style={{ width: `${Math.min(100, Math.max(0, row.now ?? 0))}%` }} />
+      <div className="dash-heat" style={{ '--rows': rows.length }}>
+        <div className="dash-heat-names" aria-hidden="true">
+          {rows.map((row) => <span key={row.key}>{row.name}</span>)}
+        </div>
+        <div className="dash-heat-grid" onPointerMove={onPointerMove} onPointerLeave={() => setPointer(null)}>
+          <svg viewBox={`0 0 ${columns * 10} ${rows.length * 10}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            {rows.map((row, r) => row.cells.map((value, c) => (
+              <rect key={`${row.key}-${c}`} x={c * 10 + 0.6} y={r * 10 + 0.8} width="8.8" height="8.4" rx="1.2" fill={loadColor(value)} />
+            )))}
+            {hover && <rect className="dash-heat-focus" x={hover.column * 10 + 0.2} y={hover.row * 10 + 0.4} width="9.6" height="9.2" rx="1.4" />}
+          </svg>
+          {hovered && (
+            <span className={`dash-tooltip${hover.column > columns / 2 ? ' flip' : ''}`} style={{ left: `${((hover.column + 0.5) / columns) * 100}%`, top: `${(hover.row / rows.length) * 100}%` }} aria-hidden="true">
+              <span className="dash-tooltip-time">{hovered.name} · {agoLabel(timestamps, sampleOf(hover.column))}</span>
+              <span className="dash-tooltip-row">{formatValue(hovered.cells[hover.column], '%')} average</span>
             </span>
-            <span className="dash-core-value">{formatValue(row.now, '%')}</span>
-          </li>
-        ))}
-      </ul>
-      <div className="dash-core-legend" aria-hidden="true">
-        <span><span className="dash-core-key now" />Now</span>
-        <span><span className="dash-core-key range" />Range, last {span || 'samples'}</span>
+          )}
+        </div>
+        <div className="dash-heat-values">
+          {rows.map((row) => (
+            <span key={row.key} className={`tone-${row.tone}`} title={`${row.label}: ${formatValue(row.recent, '%')}, 1-minute average`}>
+              {formatValue(row.recent, '%')}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="dash-heat-foot" aria-hidden="true">
+        <span className="dash-heat-axis">
+          <span>{span}</span>
+          <span>Now</span>
+        </span>
+        <span className="dash-heat-scale">
+          0%
+          <span className="dash-heat-ramp" style={{ background: `linear-gradient(90deg, ${loadColor(0)}, ${loadColor(50)}, ${loadColor(100)})` }} />
+          100%
+        </span>
       </div>
     </figure>
   )
 }
 
-/** A single reading against its scale: the session peak, as the ops view's Power tab shows it. */
-export function PeakGauge({ title, value, unit, scale, caption }) {
-  const share = typeof value === 'number' ? Math.round(percentOf(value, scale)) : null
+/**
+ * The session peak with where the board runs against it: a bar from zero to the peak, filled to
+ * the current draw, with a tick at the session average. A share of the chart's own axis would say
+ * nothing; a share of the peak says how much headroom the workload is using.
+ */
+export function PeakGauge({ title, peak, current, average, unit }) {
+  const share = (value) => (typeof value === 'number' && typeof peak === 'number' && peak > 0 ? Math.min(100, Math.max(0, (value / peak) * 100)) : null)
+  const now = share(current)
+  const mean = share(average)
   return (
-    <figure className="dash-chart dash-peak" aria-label={`${title}: ${formatValue(value, unit)}`}>
+    <figure className="dash-chart dash-peak" aria-label={`${title}: ${formatValue(peak, unit)}; current ${formatValue(current, unit)}, average ${formatValue(average, unit)}`}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">{title}</span>
       </figcaption>
-      <strong className="dash-peak-value">{formatValue(value, unit)}</strong>
-      <span className="dash-peak-bar" aria-hidden="true">
-        <span style={{ width: `${share ?? 0}%` }} />
+      <strong className="dash-peak-value">{formatValue(peak, unit)}</strong>
+      <span className="dash-peak-track" aria-hidden="true">
+        {now !== null && <span className="dash-peak-fill" style={{ width: `${now}%` }} />}
+        {mean !== null && <span className="dash-peak-tick" style={{ left: `${mean}%` }} />}
       </span>
-      <span className="dash-peak-share">{share !== null ? `${share}% of the ${axisLabel(scale.max)} ${unit} scale` : 'Not reported'}</span>
-      {caption && <span className="hint">{caption}</span>}
+      <dl className="dash-peak-stats">
+        <div>
+          <dt><span className="dash-peak-key current" aria-hidden="true" />Current</dt>
+          <dd>{formatValue(current, unit)}</dd>
+        </div>
+        <div>
+          <dt><span className="dash-peak-key average" aria-hidden="true" />Average</dt>
+          <dd>{formatValue(average, unit)}</dd>
+        </div>
+      </dl>
     </figure>
   )
 }
