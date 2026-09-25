@@ -7,8 +7,8 @@ export { formatRelativeTime, normalizeError }
 
 export const POLL_MS = 2000
 export const MAX_POLL_MS = 30000
-// As many samples as Sentinel's own ops view draws per metric.
-export const HISTORY_SAMPLES = 64
+// The whole window Sentinel caches and its ops view charts: 240 samples, about eight minutes.
+export const HISTORY_SAMPLES = 240
 export const NAME_LIMIT = 128
 export const NOTE_LIMIT = 512
 export const MAX_TAGS = 16
@@ -462,17 +462,6 @@ export function statsTabFrom(saved) {
   return STATS_TABS.some((tab) => tab.id === saved) ? saved : STATS_TABS[0].id
 }
 
-/**
- * The board's live metrics, as Sentinel's ops view lists them: every metric in one list,
- * which Power, Thermal and System narrow. Every metric lands in exactly one of those three.
- */
-export const METRIC_SECTIONS = [
-  { id: 'all', label: 'All' },
-  { id: 'power', label: 'Power' },
-  { id: 'thermal', label: 'Thermal' },
-  { id: 'system', label: 'System' }
-]
-
 const TEMPERATURE_UNITS = new Set(['c', '°c', 'degc', 'deg c', 'celsius'])
 const POWER_UNITS = new Set(['w', 'mw', 'kw'])
 const TEMPERATURE_NAME = /temp|rtsn|thermal/i
@@ -505,51 +494,11 @@ export function metricSection(metric, groupName = metric?.group) {
   return 'system'
 }
 
-/**
- * The live groups sorted into the three sections. Each section keeps Sentinel's own group
- * names, in Sentinel's order, as its sub-headings; a group whose metrics went elsewhere is
- * left out of the section rather than shown empty.
- */
-export function metricSections(groups) {
-  const sections = { power: [], thermal: [], system: [] }
-  for (const group of groups || []) {
-    const split = { power: [], thermal: [], system: [] }
-    for (const metric of group.metrics || []) split[metricSection(metric, group.name)].push(metric)
-    for (const id of Object.keys(split)) {
-      if (split[id].length) sections[id].push({ name: group.name, metrics: split[id] })
-    }
-  }
-  return sections
-}
-
 /** How many of these metrics are past a threshold, as the worst tone and its count. */
 export function metricAlert(metrics) {
   const critical = (metrics || []).filter((metric) => metric.status === 'critical').length
   const warn = (metrics || []).filter((metric) => metric.status === 'warn').length
   return critical ? { tone: 'critical', count: critical } : warn ? { tone: 'warn', count: warn } : null
-}
-
-/**
- * The section tabs, with each section's size and anything in it past a threshold, so a hot
- * sensor shows on the Thermal tab while another is open.
- */
-export function metricSectionTabs(sections) {
-  return METRIC_SECTIONS.map((section) => {
-    const metrics = section.id === 'all'
-      ? ['power', 'thermal', 'system'].flatMap((id) => (sections?.[id] || []).flatMap((group) => group.metrics))
-      : (sections?.[section.id] || []).flatMap((group) => group.metrics)
-    return { ...section, count: metrics.length, alert: metricAlert(metrics) }
-  })
-}
-
-/** One section's metrics in Sentinel's order: the rows of the ops list. */
-export function opsRows(metrics, sectionId) {
-  const list = metrics || []
-  return sectionId === 'all' ? list : list.filter((metric) => metricSection(metric) === sectionId)
-}
-
-export function metricSectionFrom(id) {
-  return METRIC_SECTIONS.some((section) => section.id === id) ? id : METRIC_SECTIONS[0].id
 }
 
 /**

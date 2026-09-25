@@ -1581,7 +1581,7 @@
           "order": {"type": "array", "items": {"type": "string"}, "description": "Every metric key in Sentinel's own order, the order its ops view lists them in. A group's sensors are not always adjacent, so this is not the order of `groups`."},
           "history": {
             "type": "object",
-            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested. On the first read of a board, the history is seeded from Sentinel's own sample cache (the newest 64 samples, read once with `simaai-sentinel export`), so it opens full rather than filling from polling.",
+            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested. On the first read of a board, and again after a gap in polling of more than a minute, the history is seeded from Sentinel's own sample cache (its newest 240 samples, read with `simaai-sentinel export`), so it opens full rather than filling from polling.",
             "required": ["timestamps", "series"],
             "properties": {
               "timestamps": {"type": "array", "items": {"type": ["string", "null"]}},

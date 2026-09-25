@@ -4613,3 +4613,534 @@ button:disabled {
     display: none;
   }
 }
+
+/* Sentinel dashboard: a status line and tabs, then charts laid out as Sentinel's own ops view does. */
+.dash {
+  --chart-1: #0e5ab8;
+  --chart-2: #0f9d8f;
+  --chart-3: #7c5cc4;
+  --chart-4: #e08a2e;
+  --chart-5: #2f9e6b;
+  --chart-6: #c2456b;
+  --chart-7: #3a9bd6;
+  --chart-8: #8a7a3b;
+  --chart-thermal: #e0643c;
+  display: grid;
+  gap: 14px;
+}
+
+.dash-bar {
+  display: grid;
+  gap: 12px;
+}
+
+.dash-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.dash-status h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.dash-live {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.dash-live.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 rgba(25, 113, 62, 0.45);
+  animation: dash-pulse 2s ease-out infinite;
+}
+
+@keyframes dash-pulse {
+  70% { box-shadow: 0 0 0 8px rgba(25, 113, 62, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(25, 113, 62, 0); }
+}
+
+.dash-version,
+.dash-state {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dash-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+}
+
+.dash-state {
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  padding: 2px 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.dash-state.on {
+  border-color: rgba(25, 113, 62, 0.3);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.dash-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-pause {
+  margin-left: auto;
+}
+
+.dash-bar .periph-callout {
+  margin: 0;
+}
+
+.dash-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dash-grid {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dash-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dash-grid.sensors {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.dash-grid.system {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.dash-stack {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dash-card,
+.dash-chart {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 12px 14px;
+}
+
+.dash-card {
+  display: grid;
+  gap: 10px;
+}
+
+.dash-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.dash-card-note {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-soft);
+}
+
+.dash-chart {
+  display: grid;
+  gap: 8px;
+}
+
+.dash-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.dash-chart-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.dash-chart-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.dash-chart.tone-warn .dash-chart-value {
+  color: #b7791f;
+}
+
+.dash-chart.tone-critical .dash-chart-value {
+  color: var(--danger);
+}
+
+.dash-chart-scale {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.dash-chart-body {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.dash-chart-y {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.dash-chart-plot {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background-image: linear-gradient(to bottom, #eef2f6 1px, transparent 1px);
+  background-size: 100% 25%;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+
+.dash-chart-svg {
+  display: block;
+  width: 100%;
+}
+
+.dash-chart-x {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 40px;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.dash-threshold {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed;
+  pointer-events: none;
+}
+
+.dash-threshold span {
+  position: absolute;
+  top: -14px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-threshold.warn {
+  border-color: rgba(183, 121, 31, 0.7);
+  color: #b7791f;
+}
+
+/* Warn is labelled on the left and critical on the right, so two close levels never collide. */
+.dash-threshold.warn span {
+  left: 4px;
+}
+
+.dash-threshold.critical span {
+  right: 2px;
+}
+
+.dash-threshold.critical {
+  border-color: rgba(179, 66, 90, 0.7);
+  color: var(--danger);
+}
+
+.dash-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--series);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series) 22%, transparent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.dash-crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(15, 29, 43, 0.35);
+  pointer-events: none;
+}
+
+.dash-tooltip {
+  position: absolute;
+  top: 4px;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  transform: translateX(8px);
+  border-radius: 8px;
+  background: rgba(15, 29, 43, 0.92);
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.dash-tooltip.flip {
+  transform: translateX(calc(-100% - 8px));
+}
+
+.dash-tooltip-time {
+  font-family: var(--font-sans);
+  color: #b8c5d4;
+}
+
+.dash-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.dash-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-legend strong {
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+.dash-legend-grid {
+  gap: 6px 18px;
+}
+
+.dash-share {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--series);
+}
+
+.dash-chart.compact {
+  gap: 4px;
+  padding: 8px 10px;
+  box-shadow: none;
+}
+
+.dash-chart.compact .dash-chart-value {
+  font-size: 14px;
+}
+
+.dash-chart.compact .dash-chart-body {
+  grid-template-columns: 26px minmax(0, 1fr);
+}
+
+.dash-sensors .dash-subtabs {
+  margin: 0;
+}
+
+/* Per-core CPU: a heat strip per core over the window, then its load now. */
+.dash-heat-rows {
+  display: grid;
+  gap: 4px;
+}
+
+.dash-heat-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 90px 46px;
+  align-items: center;
+  gap: 10px;
+}
+
+.dash-heat-label,
+.dash-heat-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.dash-heat-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-heat-strip {
+  display: block;
+  width: 100%;
+  height: 16px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.dash-heat-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.dash-heat-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.dash-heatmap .dash-chart-x {
+  padding-left: 40px;
+  padding-right: 146px;
+}
+
+/* Session peak: one number and how much of the scale it reaches. */
+.dash-peak {
+  align-content: start;
+}
+
+.dash-peak-value {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+.dash-peak-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.dash-peak-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--chart-2), var(--chart-4));
+}
+
+.dash-peak-share {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.dash-peak .hint {
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .dash-grid.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dash-grid.system {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .dash-grid.three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dash-pause {
+    margin-left: 0;
+  }
+
+  .dash-heat-row {
+    grid-template-columns: 30px minmax(0, 1fr) 46px;
+  }
+
+  .dash-heat-bar {
+    display: none;
+  }
+
+  .dash-heatmap .dash-chart-x {
+    padding-right: 56px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-live.on {
+    animation: none;
+  }
+}
+
+.dash-all > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.dash-all > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dash-all > summary::before {
+  content: "▸";
+  margin-right: 6px;
+  color: var(--ink-soft);
+}
+
+.dash-all[open] > summary::before {
+  content: "▾";
+}

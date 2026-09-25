@@ -98,6 +98,8 @@ class BoardCache:
                 return list(self._history)
             if self._interrupted_unlocked(timestamp):
                 self._history.clear()
+                # The daemon kept sampling while nobody polled; read its cache again.
+                self._seeded = False
             self._history.append(sample)
             return list(self._history)
 

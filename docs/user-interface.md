@@ -145,9 +145,18 @@ An install that is refused or fails is reported as an install rather than as a f
 
 ### Live metrics
 
-Live metrics list every metric the way Sentinel's own ops view does: one line each, in Sentinel's order, with its short name, group, current value, a history trace across the row, and its status (normal, warning, or critical against the thresholds Sentinel defines). Hover a name for its full label, description, and thresholds. **Power**, **Thermal**, and **System** narrow the list. A metric the board cannot measure reads as an em dash, never as zero.
+The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows the Sentinel version, whether the cache is live, and how many samples it holds; **Pause updates** stops polling. Below it are six tabs:
 
-The history opens full: on the first read of a board, Insight takes the last 64 samples (about two minutes) from Sentinel's own cache, then adds a sample every two seconds while the tab is open and visible. Use **Pause updates** to stop polling; it also stops on its own when the browser tab is hidden or the view is left. Nothing reads the board while the tab is closed, so a sample taken more than a minute after the last one starts the history again rather than being drawn next to an hours-old value as if the two were neighbours.
+- **Overview**: charts of the hottest temperature sensor, current board power, CPU, memory, MLA memory, and network traffic, with **All metrics** listing every metric in Sentinel's order.
+- **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
+- **Power**: current and session-average power, the session peak against the chart's scale, and the power rails stacked so the top edge is the board total.
+- **System**: a heat strip of each CPU core's load over the window, beside CPU usage, load, Linux memory, MLA memory, and EV74 CMA use.
+- **Storage/Net**: eMMC use, network and eMMC traffic, and their metrics.
+- **Runs**: record a trace, and open, compare, or delete saved runs.
+
+Charts use fixed scales (percentages 0-100, temperatures 40-90 °C, anything else up to a round number above its peak), show the warning and critical levels Sentinel defines, and read out every series at a point when you hover. A tab's name is marked when a metric in it is past a threshold. A metric the board cannot measure reads as an em dash, never as zero.
+
+Charts cover the whole window Sentinel keeps, 240 samples (about eight minutes): on the first read of a board, and again after a pause in polling of more than a minute, Insight takes them from Sentinel's own cache, then adds a sample every two seconds while the tab is open and visible. Polling also stops when the browser tab is hidden or the view is left.
 
 If the board stops answering while you are looking at it, polling stops and the panels stay, holding the last values read and the board's own explanation of what failed, rather than emptying the page. Selecting a different board is not the same thing: that clears everything first, so one board's numbers are never shown under another board's name.
 

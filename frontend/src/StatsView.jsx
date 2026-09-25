@@ -17,7 +17,6 @@ import {
   ALL_GROUPS,
   HOST_POLL_MS,
   MAX_COMPARE_RUNS,
-  METRIC_SECTIONS,
   RUNS_NOTE,
   STATS_TABS,
   STATS_TAB_KEY,
@@ -49,25 +48,18 @@ import {
   healthProblems,
   hostMetricsModel,
   hostNotice,
-  metricSectionFrom,
-  metricSections,
-  metricSectionTabs,
   metricsModel,
   missingSelection,
-  opsRows,
   payloadBoardLabel,
   pollDelay,
   runDetail,
   runList,
   runSubtitle,
-  sparkline,
-  sparklineLabel,
   staleFlags,
   staleNote,
   statsTabFrom,
   statusInfo,
   telemetryVisible,
-  thresholdText,
   toggleSelection,
   traceBar,
   traceExtrasSummary,
@@ -75,6 +67,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
+import SentinelDashboard from './stats/Dashboard.jsx'
 import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, OutputDetails, SegmentedTabs } from './stats/ui.jsx'
 
 // How often the saved-runs list is re-read while the Stats tab is visible.
@@ -207,144 +200,6 @@ function TagPills({ tags }) {
   return <span className="periph-pills">{tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}</span>
 }
 
-const SECTION_EMPTY = {
-  power: 'Sentinel reported no power readings on this board.',
-  thermal: 'Sentinel reported no temperatures on this board.',
-  system: 'Sentinel reported no other metrics on this board.'
-}
-
-/** A metric's history, stretched across its row as Sentinel's ops view draws it. */
-function OpsSpark({ metric, values }) {
-  const spark = sparkline(values, 400, 20)
-  if (!spark) return <span className="stats-ops-spark empty" aria-hidden="true" />
-  return (
-    <svg className="stats-ops-spark" viewBox="0 0 400 20" preserveAspectRatio="none" role="img" aria-label={sparklineLabel(metric, spark)} focusable="false">
-      <polyline points={spark.points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
-}
-
-/**
- * The live metrics as one list in Sentinel's order, one line each: its short name, value,
- * history and status, as the daemon's own ops view shows them. The long name, description and
- * thresholds are on the name's tooltip.
- */
-function OpsList({ metrics, series, caption }) {
-  return (
-    <table className="stats-ops">
-      <caption className="sr-only">{caption}</caption>
-      <thead>
-        <tr>
-          <th scope="col">Metric</th>
-          <th scope="col">Group</th>
-          <th scope="col" className="stats-ops-num">Value</th>
-          <th scope="col" className="stats-ops-history">History</th>
-          <th scope="col">Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {metrics.map((metric) => {
-          const status = statusInfo(metric.status)
-          const tip = [metric.label, metric.description, thresholdText(metric)].filter(Boolean).join(' — ')
-          return (
-            <tr key={metric.key} className={`tone-${metric.status}`}>
-              <th scope="row" title={tip}>{metric.short || metric.label}</th>
-              <td className="stats-ops-group">{metric.group}</td>
-              <td className="stats-ops-num">{formatValue(metric.value, metric.unit)}</td>
-              <td className="stats-ops-history"><OpsSpark metric={metric} values={series[metric.key]} /></td>
-              <td className="stats-ops-status">{status.label}</td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
-
-/**
- * The board's live readings as Sentinel's ops view lists them: every metric, in the daemon's
- * order, with Power, Thermal and System to narrow the list.
- */
-function MetricsPanel({ model, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry }) {
-  const [sectionId, setSectionId] = useState(METRIC_SECTIONS[0].id)
-  const section = metricSectionFrom(sectionId)
-  const sections = useMemo(() => metricSections(model.groups), [model.groups])
-  const tabs = useMemo(() => metricSectionTabs(sections), [sections])
-  const rows = useMemo(() => opsRows(model.metrics, section), [model.metrics, section])
-  return (
-    <section className="panel stats-metrics" aria-labelledby="stats-metrics-title" aria-busy={busy}>
-      <div className="panel-topbar">
-        <div>
-          {/* The pill is the only update state the section shows: Live, Paused, or Not updating. */}
-          <div className="stats-title-row">
-            <h2 id="stats-metrics-title">Live metrics</h2>
-            <Pill tone={polling ? 'ok' : ''}>{polling ? 'Live' : live ? 'Not updating' : 'Paused'}</Pill>
-          </div>
-          <p className="section-note">Sentinel live readings from the board.</p>
-        </div>
-        <div className="periph-actions">
-          {/* Live metrics poll on their own; pausing is the only control they need. */}
-          <button type="button" className="btn-tonal" onClick={onToggleLive}>
-            {live ? 'Pause updates' : 'Resume updates'}
-          </button>
-        </div>
-      </div>
-
-      <p className="sr-only" role="status">
-        {polling ? 'Metrics are updating live.' : live ? 'Metric updates are stopped.' : 'Metric updates are paused.'}
-      </p>
-
-      {stale && (
-        <Callout tone="warn" title="These values are from the previous board">
-          <p>The selected board changed after this sample was read. Refresh to read the board that is selected now.</p>
-          <button type="button" className="btn-tonal" onClick={onRefresh}>Refresh now</button>
-        </Callout>
-      )}
-      <FailureCallout notice={error}>
-        {error?.retryable && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
-      </FailureCallout>
-
-      {model.groups.length > 0 && (
-        <>
-          <SegmentedTabs
-            label="Board metrics"
-            items={tabs}
-            selected={section}
-            onSelect={setSectionId}
-            idPrefix="stats-section-tab"
-            panelPrefix="stats-section"
-            className="stats-sections"
-            noun="metric"
-          />
-          {/* One tab panel whose rows follow the chosen section. */}
-          <div
-            id={`stats-section-${section}`}
-            role="tabpanel"
-            aria-labelledby={`stats-section-tab-${section}`}
-            className="stats-section-panel"
-            tabIndex={0}
-          >
-            {rows.length ? (
-              <OpsList metrics={rows} series={model.series} caption={`${METRIC_SECTIONS.find((item) => item.id === section)?.label || 'All'} metrics`} />
-            ) : (
-              <p className="hint">{SECTION_EMPTY[section] || 'Sentinel reported no metrics on this board.'}</p>
-            )}
-          </div>
-        </>
-      )}
-
-      {!model.groups.length && !error && (
-        <p className="hint">{busy ? 'Reading the first sample…' : 'Sentinel has not reported any metric yet.'}</p>
-      )}
-    </section>
-  )
-}
-
-/**
- * The Runs panel's header row, less its title: the trace form, or what is
- * recording and the control that stops it. The note and tags fields it can unfold, and
- * what a recording trace was started with, are rendered below the header by `TraceDetails`.
- */
 function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
   if (bar.recording) {
     return (
@@ -1540,8 +1395,9 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
             {/* Sentinel not answering now does not unmake what this board already gave. */}
             {telemetryVisible(info, { metrics, traces, runs }) && (
               <>
-                <MetricsPanel
+                <SentinelDashboard
                   model={model}
+                  health={state?.health || null}
                   live={live}
                   polling={polling}
                   stale={stale}
@@ -1557,51 +1413,52 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                     setFailures(0)
                     pollMetrics({ manual: true })
                   }}
-                />
-
-                <RunsPanel
-                  trace={trace}
-                  traceStale={stalePayloads.traces || stalePayloads.traceError}
-                  traceBusy={traceBusy}
-                  traceError={traceError}
-                  form={form}
-                  formError={formError}
-                  onFormChange={setForm}
-                  onStart={onStartTrace}
-                  onStop={onStopTrace}
-                  onRefreshTrace={() => loadTraces()}
-                  runs={runRows}
-                  runsPayload={runs}
-                  definitions={definitions}
-                  stale={stalePayloads.runs || stalePayloads.runsError}
-                  busy={runsBusy}
-                  error={runsError}
-                  selected={selected}
-                  openRef={openRef}
-                  detail={detail}
-                  detailError={detailError}
-                  detailBusy={detailBusy}
-                  detailStale={stalePayloads.detail || stalePayloads.detailError}
-                  compare={compare}
-                  compareError={compareError}
-                  compareBusy={compareBusy}
-                  compareStale={stalePayloads.compare || stalePayloads.compareError}
-                  compareOpen={compareOpen}
-                  deleteBusy={deleteBusy}
-                  deleteResult={deleteResult}
-                  now={now}
-                  onRefresh={() => loadRuns()}
-                  onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
-                  onOpen={openRun}
-                  onCompare={runCompare}
-                  onDelete={deleteSelected}
-                  onClearCompare={() => {
-                    setSelected([])
-                    setCompare(null)
-                    setCompareError(null)
-                  }}
-                  onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
-                  onToggleCompare={() => setCompareOpen((open) => !open)}
+                  runs={(
+                    <RunsPanel
+                      trace={trace}
+                      traceStale={stalePayloads.traces || stalePayloads.traceError}
+                      traceBusy={traceBusy}
+                      traceError={traceError}
+                      form={form}
+                      formError={formError}
+                      onFormChange={setForm}
+                      onStart={onStartTrace}
+                      onStop={onStopTrace}
+                      onRefreshTrace={() => loadTraces()}
+                      runs={runRows}
+                      runsPayload={runs}
+                      definitions={definitions}
+                      stale={stalePayloads.runs || stalePayloads.runsError}
+                      busy={runsBusy}
+                      error={runsError}
+                      selected={selected}
+                      openRef={openRef}
+                      detail={detail}
+                      detailError={detailError}
+                      detailBusy={detailBusy}
+                      detailStale={stalePayloads.detail || stalePayloads.detailError}
+                      compare={compare}
+                      compareError={compareError}
+                      compareBusy={compareBusy}
+                      compareStale={stalePayloads.compare || stalePayloads.compareError}
+                      compareOpen={compareOpen}
+                      deleteBusy={deleteBusy}
+                      deleteResult={deleteResult}
+                      now={now}
+                      onRefresh={() => loadRuns()}
+                      onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
+                      onOpen={openRun}
+                      onCompare={runCompare}
+                      onDelete={deleteSelected}
+                      onClearCompare={() => {
+                        setSelected([])
+                        setCompare(null)
+                        setCompareError(null)
+                      }}
+                      onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
+                      onToggleCompare={() => setCompareOpen((open) => !open)}
+                    />
+                  )}
                 />
               </>
             )}

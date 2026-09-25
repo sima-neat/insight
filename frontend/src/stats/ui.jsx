@@ -1,7 +1,7 @@
 // Small presentational pieces shared by the Stats panels. They reuse the Peripherals
 // callout and pill so both views keep one visual language.
 import { useRef, useState } from 'react'
-import { Callout, Pill } from '../peripherals/ui.jsx'
+import { Callout } from '../peripherals/ui.jsx'
 import { chipKeyTarget } from './model.js'
 
 /**

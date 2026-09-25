@@ -103,7 +103,7 @@ class FakeSentinel:
         # None deletes the run from the /v1/runs answer, as the CLI would; an ExecResult
         # is returned as the CLI's answer and deletes nothing.
         self.delete_result = None
-        self.export_result = ExecResult(0, b"[]", b"")
+        self.export_result = ExecResult(0, json.dumps({"timestamps": [], "keys": [], "rows": []}).encode(), b"")
 
     def answer(self, method, path, status, body):
         self.api[(method, path)] = (status, body)
@@ -928,17 +928,32 @@ class SentinelApiTests(_ApiCase):
 
     def test_the_first_metrics_read_seeds_history_from_the_daemons_cache(self):
         seed = [sample(f"2026-09-22T20:55:{second}Z", rtsn_0=60.0 + i)["sample"] for i, second in enumerate(("41", "43", "45"))]
-        self.transport.export_result = ExecResult(0, json.dumps(seed).encode(), b"")
+        keys = sorted(seed[0]["values"])
+        table = {"timestamps": [s["timestamp"] for s in seed], "keys": keys, "rows": [[s["values"][k] for k in keys] for s in seed]}
+        self.transport.export_result = ExecResult(0, json.dumps(table).encode(), b"")
         body = self.get("/api/sentinel/metrics?history=64").get_json()
         self.assertEqual(body["history"]["timestamps"][-4:], [s["timestamp"] for s in seed] + ["2026-09-22T20:55:47Z"])
         self.assertEqual(body["history"]["series"]["rtsn_0"], [60.0, 61.0, 62.0, 72.0])
-        self.assertEqual(self.transport.exports[0][3:], ["sh", "64"])
+        self.assertEqual(self.transport.exports[0][3:], ["sh", "240"])
         self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
         self.get("/api/sentinel/metrics?history=64")
         self.assertEqual(len(self.transport.exports), 1, "the cache is read once per board, not per poll")
 
+    def test_a_gap_in_polling_reads_the_daemons_cache_again(self):
+        self.get("/api/sentinel/metrics?history=240")
+        self.assertEqual(len(self.transport.exports), 1)
+        # Nobody polled for ten minutes; the daemon kept its own window meanwhile.
+        seed = [sample(f"2026-09-22T21:05:{second}Z")["sample"] for second in ("40", "42", "44")]
+        keys = sorted(seed[0]["values"])
+        table = {"timestamps": [s["timestamp"] for s in seed], "keys": keys, "rows": [[s["values"][k] for k in keys] for s in seed]}
+        self.transport.export_result = ExecResult(0, json.dumps(table).encode(), b"")
+        self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T21:05:46Z"))
+        body = self.get("/api/sentinel/metrics?history=240").get_json()
+        self.assertEqual(len(self.transport.exports), 2)
+        self.assertEqual(body["history"]["timestamps"], [s["timestamp"] for s in seed] + ["2026-09-22T21:05:46Z"])
+
     def test_metrics_still_answer_when_the_cache_cannot_be_read(self):
-        for result in (ExecResult(127, b"", b"python3: not found"), ExecResult(0, b"not json", b""), ExecResult(0, b"{}", b"")):
+        for result in (ExecResult(127, b"", b"python3: not found"), ExecResult(0, b"not json", b""), ExecResult(0, b"{}", b""), ExecResult(0, b"[]", b"")):
             with self.subTest(result=result):
                 api.cache = state.BoardCache()
                 self.transport.export_result = result
@@ -1262,10 +1277,11 @@ class SeedScriptTests(unittest.TestCase):
             (Path(root) / "export.json").write_text(json.dumps(export))
             env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}")
             out = subprocess.run(["sh", "-c", cache_history.SEED_SCRIPT, "sh", "64"], capture_output=True, env=env, check=True)
-        samples = json.loads(out.stdout)
-        self.assertEqual(len(samples), 64)
-        self.assertEqual((samples[0]["timestamp"], samples[-1]["timestamp"]), ("2026-09-25T00:00:06Z", "2026-09-25T00:00:69Z"))
-        self.assertEqual(samples[0]["values"], {"rtsn_0": 66.1235, "n": None})
+        table = json.loads(out.stdout)
+        self.assertEqual(table["keys"], ["n", "rtsn_0"], "each key once")
+        self.assertEqual(len(table["rows"]), 64)
+        self.assertEqual((table["timestamps"][0], table["timestamps"][-1]), ("2026-09-25T00:00:06Z", "2026-09-25T00:00:69Z"))
+        self.assertEqual(table["rows"][0], [None, 66.1235])
 
     def test_read_takes_only_well_formed_samples(self):
         class Board:
@@ -1278,8 +1294,13 @@ class SeedScriptTests(unittest.TestCase):
                     raise self.result
                 return self.result
 
-        good = {"timestamp": "2026-09-25T00:00:00Z", "values": {"rtsn_0": 60.0}}
-        body = json.dumps([good, {"timestamp": 5, "values": {}}, "x", {"timestamp": "t"}]).encode()
-        self.assertEqual(cache_history.read(Board(ExecResult(0, body, b""))), [good])
+        table = {"timestamps": ["2026-09-25T00:00:00Z", 5, "2026-09-25T00:00:04Z"], "keys": ["rtsn_0", "cpu"],
+                 "rows": [[60.0, 12.5], [61.0, 13.0], [62.0]]}
+        body = json.dumps(table).encode()
+        self.assertEqual(cache_history.read(Board(ExecResult(0, body, b""))),
+                         [{"timestamp": "2026-09-25T00:00:00Z", "values": {"rtsn_0": 60.0, "cpu": 12.5}}],
+                         "a row with a bad timestamp or the wrong width is dropped")
+        mismatched = json.dumps(dict(table, rows=table["rows"][:2])).encode()
+        self.assertEqual(cache_history.read(Board(ExecResult(0, mismatched, b""))), [])
         self.assertEqual(cache_history.read(Board(BoardError("unreachable", "gone"))), [])
         self.assertEqual(cache_history.read(Board(ExecResult(1, b"[]", b"boom"))), [])

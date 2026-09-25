@@ -198,9 +198,10 @@ def get_metrics():
     limit = _history_limit(request.args.get("history"))
     context = _Context()
     latest = context.client.latest()
-    if cache.needs_seed(context.key):
-        cache.seed(context.key, cache_history.read(context.session))
     history = cache.add_sample(context.key, latest.get("sample"))
+    # First read of this board, or the first after a gap in polling: take the daemon's own window.
+    if cache.needs_seed(context.key):
+        history = cache.seed(context.key, cache_history.read(context.session))
     return context.payload(**metric_view.build(context.definitions(), latest, history, limit))
 
 
