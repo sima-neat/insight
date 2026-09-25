@@ -1917,6 +1917,15 @@ export default function App() {
   }
 
   async function stopWebcamSource(index) {
+    // Hold the row busy for the whole stop, the way start/assign do. Without it,
+    // a second Stop click while the first request is in flight finds no local
+    // session — teardownWebcamSession() below already cleared it — and sends an
+    // *unbound* stop, which the backend implements by kicking whichever publisher
+    // holds the slot now. If another tab assigned and started a replacement
+    // camera in that window, the duplicate click would disconnect it. Setting
+    // webcamBusy disables this row's Stop button (rowBusy), so only the
+    // session-bound first request is emitted.
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
     const session = webcamSessionsRef.current.get(index)
     teardownWebcamSession(index)
     try {
@@ -1926,6 +1935,12 @@ export default function App() {
       // The slot may have moved on (409) or be unverifiable (502); show what
       // the backend now holds rather than what this tab assumed.
       await loadSources().catch(() => {})
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
     }
   }
 
