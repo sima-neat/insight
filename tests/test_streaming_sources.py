@@ -1836,9 +1836,12 @@ class WebcamNormalizationTests(unittest.TestCase):
         # It reads the ingest path and writes the src{N} consumer path.
         self.assertIn("rtsp://127.0.0.1:8554/$MTX_PATH", text)
         self.assertIn("rtsp://127.0.0.1:8554/src$G1", text)
-        # Baseline H.264 + a keyframe every second: what the decoder needs and
-        # what a raw browser stream lacks (the two fixes proven on the DevKit).
+        # Baseline H.264, a defined 30fps, and a keyframe every second: what the
+        # decoder needs and what a raw WebRTC stream lacks. -r 30 in particular is
+        # load-bearing — without a fixed framerate libx264 emits H.264 level 6.2,
+        # which the hardware decoder rejects (proven on the DevKit).
         self.assertIn("-profile:v baseline", text)
+        self.assertIn("-r 30", text)
         self.assertIn("-g 30", text)
         self.assertIn("-keyint_min 30", text)
 
