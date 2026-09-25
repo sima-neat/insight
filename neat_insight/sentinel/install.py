@@ -4,6 +4,8 @@
 needs sudo. The installer always restarts the daemon, which would break a trace in
 flight, so a healthy install is never reinstalled.
 """
+from datetime import datetime, timedelta, timezone
+
 from neat_insight.sentinel.errors import SentinelError
 from neat_insight.sentinel.socket_client import SOCKET_PATH
 
@@ -24,6 +26,11 @@ echo @@
 systemctl cat {service}.service >/dev/null 2>&1 && echo yes || echo no
 echo @@
 command -v sima-cli 2>/dev/null || {{ [ -x "{fallback}" ] && printf '%s\\n' "{fallback}"; }} || true
+echo @@
+# Seconds the service has been running, from two monotonic clocks: the board's wall clock can be
+# wrong right after a boot, before time sync, so a start timestamp read from it could be too.
+since=$(systemctl show {service} -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+[ "${{since:-0}}" -gt 0 ] 2>/dev/null && awk -v since="$since" '{{ printf "%d\\n", $1 - since / 1000000 }}' /proc/uptime || true
 """.format(
     service=SERVICE, socket=SOCKET_PATH, fallback=FALLBACK_CLI
 )
@@ -53,9 +60,13 @@ def _tail(*chunks) -> str:
 def status(session) -> dict:
     """Report whether Sentinel is installed, running and reachable on the board."""
     result = session.transport.exec(["sh", "-c", _STATUS_SCRIPT], timeout=STATUS_TIMEOUT_SEC)
-    parts = (result.stdout.decode("utf-8", errors="replace").split("@@") + [""] * 4)[:4]
-    service, socket_present, unit_present, sima_cli = (part.strip() for part in parts)
+    parts = (result.stdout.decode("utf-8", errors="replace").split("@@") + [""] * 5)[:5]
+    service, socket_present, unit_present, sima_cli, running = (part.strip() for part in parts)
     installed = unit_present == "yes" or socket_present == "yes"
+    started_at = None
+    if service == "active" and running.isdigit():
+        # On Insight's clock: the page shows it relative to the viewer's own time.
+        started_at = (datetime.now(timezone.utc) - timedelta(seconds=int(running))).isoformat(timespec="seconds")
     return {
         "installed": installed,
         "healthy": service == "active" and socket_present == "yes",
@@ -63,6 +74,7 @@ def status(session) -> dict:
         "socket": socket_present == "yes",
         "socket_path": SOCKET_PATH,
         "sima_cli": sima_cli.splitlines()[0].strip() if sima_cli else None,
+        "started_at": started_at,
     }
 
 

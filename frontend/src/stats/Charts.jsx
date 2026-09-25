@@ -33,11 +33,13 @@ function useHover(length) {
   return { plot, index, onPointerMove, onPointerLeave: () => setIndex(-1) }
 }
 
-function Legend({ series, unit, index }) {
+// Legends show the current reading and never follow the pointer: a hovered value would change
+// their width on every move and reflow the card. The tooltip carries the hovered moment.
+function Legend({ series, unit }) {
   return (
     <ul className="dash-legend">
       {series.map((item) => {
-        const value = index >= 0 ? item.values[index] : lastNumber(item.values)
+        const value = lastNumber(item.values)
         return (
           <li key={item.key} style={{ '--series': item.color }}>
             <span className="dash-swatch" aria-hidden="true" />
@@ -113,7 +115,7 @@ export function TimeChart({ title, headline, series, scale, unit, timestamps, th
       tone={tone}
       label={label}
       hover={hover}
-      legend={series.length > 1 ? <Legend series={series} unit={unit} index={hover.index} /> : null}
+      legend={series.length > 1 ? <Legend series={series} unit={unit} /> : null}
       tooltip={series.map((item) => (
         <span key={item.key} className="dash-tooltip-row" style={{ '--series': item.color }}>
           {series.length > 1 && <span className="dash-swatch" />}
@@ -164,7 +166,7 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
   const hover = useHover(length)
   const areas = stackedPaths(lists, scale, WIDTH, HEIGHT)
   const totals = stackTotals(lists)
-  const at = hover.index >= 0 ? hover.index : length - 1
+  const at = length - 1
   const total = totals[at] ?? null
   return (
     <Frame
@@ -191,7 +193,18 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
           })}
         </ul>
       )}
-      tooltip={<span className="dash-tooltip-row">Total {formatValue(totals[hover.index] ?? null, unit)}</span>}
+      tooltip={(
+        <>
+          <span className="dash-tooltip-row dash-tooltip-total">Total {formatValue(totals[hover.index] ?? null, unit)}</span>
+          {series.map((item) => (
+            <span key={item.key} className="dash-tooltip-row" style={{ '--series': item.color }}>
+              <span className="dash-swatch" />
+              <span className="dash-tooltip-label">{item.label}</span>
+              {formatValue(item.values[hover.index] ?? null, unit)}
+            </span>
+          ))}
+        </>
+      )}
     >
       <svg className="dash-chart-svg" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" style={{ height }} aria-hidden="true" focusable="false">
         {areas.map((d, index) => (
@@ -275,17 +288,13 @@ export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }
         <span className="dash-chart-scale">common overlap · elapsed time · scale {axisLabel(scale.min)}–{axisLabel(scale.max)} {unit}, fitted to the runs</span>
       </figcaption>
       <ul className="dash-legend">
-        {lines.map((line) => {
-          const near = at === null ? null : valueNear(line.points, at)
-          return (
-            <li key={line.id} style={{ '--series': line.color }}>
-              <span className="dash-swatch" aria-hidden="true" />
-              {line.baseline && <span className="dash-baseline">B</span>}
-              <span>{line.name}</span>
-              {near && <strong>{formatValue(near.v, unit)}</strong>}
-            </li>
-          )
-        })}
+        {lines.map((line) => (
+          <li key={line.id} style={{ '--series': line.color }}>
+            <span className="dash-swatch" aria-hidden="true" />
+            {line.baseline && <span className="dash-baseline">B</span>}
+            <span>{line.name}</span>
+          </li>
+        ))}
       </ul>
       <div className="dash-chart-body">
         <div className="dash-chart-y" aria-hidden="true">

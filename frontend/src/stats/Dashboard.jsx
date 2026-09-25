@@ -16,7 +16,7 @@ import {
   thermalMaxSeries,
   thresholdLines
 } from './dashboard.js'
-import { formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
+import { formatRelativeTime, formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
 import { FailureCallout, SegmentedTabs } from './ui.jsx'
 
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
@@ -323,7 +323,7 @@ function tabAlert(model, id) {
  * Overview, Thermal, Power, System, Storage/Net and Runs. Everything is charted over the
  * daemon's cached window, so each view opens full rather than filling while you watch.
  */
-export default function SentinelDashboard({ model, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
+export default function SentinelDashboard({ model, startedAt, now, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
   const [tab, setTab] = useState(readTab)
   useEffect(() => saveTab(tab), [tab])
   const items = useMemo(() => DASH_TABS.map((item) => ({ ...item, alert: item.id === 'runs' ? null : tabAlert(model, item.id) })), [model])
@@ -336,6 +336,11 @@ export default function SentinelDashboard({ model, live, polling, stale, error, 
           <span className={`dash-live${polling ? ' on' : ''}`} aria-hidden="true" />
           <h2 id="dash-title">Sentinel</h2>
           <span className={`dash-state${polling ? ' on' : ''}`}>{state}</span>
+          {startedAt && (
+            <span className="dash-session" title={`Sentinel started ${new Date(startedAt).toLocaleString()}`}>
+              session started {formatRelativeTime(startedAt, now)}
+            </span>
+          )}
           <button type="button" className="btn-tonal dash-pause" onClick={onToggleLive}>
             {live ? 'Pause updates' : 'Resume updates'}
           </button>

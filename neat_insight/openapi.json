@@ -1517,7 +1517,8 @@
           "service": {"type": "string", "description": "`systemctl is-active simaai-sentinel`.", "example": "active"},
           "socket": {"type": "boolean"},
           "socket_path": {"type": "string", "example": "/run/simaai-sentinel/api.sock"},
-          "sima_cli": {"type": ["string", "null"], "description": "Path to sima-cli on the board, used to install Sentinel."}
+          "sima_cli": {"type": ["string", "null"], "description": "Path to sima-cli on the board, used to install Sentinel."},
+          "started_at": {"type": ["string", "null"], "format": "date-time", "description": "When the running daemon started, on Insight's clock: measured on the board as how long the service has been active, so a board clock that is wrong after a boot does not skew it. Null when the daemon is not running."}
         }
       },
       "SentinelState": {

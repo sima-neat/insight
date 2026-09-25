@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from types import SimpleNamespace
@@ -475,9 +476,12 @@ class InstallTests(unittest.TestCase):
                 "socket": True,
                 "socket_path": socket_client.SOCKET_PATH,
                 "sima_cli": "/usr/bin/sima-cli",
+                # The fake board reports no running time, so no session start is claimed.
+                "started_at": None,
             },
         )
         self.assertIn("systemctl is-active simaai-sentinel", self.transport.scripts[0])
+        self.assertIn("ActiveEnterTimestampMonotonic", self.transport.scripts[0])
         self.assertIn(socket_client.SOCKET_PATH, self.transport.scripts[0])
         self.assertIn(".sima-cli/.venv/bin/sima-cli", self.transport.scripts[0])
 
@@ -583,6 +587,29 @@ if [ -n "$FAKE_INSTALL_WAIT" ]; then
 fi
 exit "${FAKE_INSTALL_EXIT:-0}"
 """
+
+
+class DaemonStatusTests(unittest.TestCase):
+    def status(self, *fields):
+        class Board:
+            def __init__(self, text):
+                self.transport = self
+                self.text = text
+
+            def exec(self, argv, *, timeout, stdin=None):
+                return ExecResult(0, self.text.encode(), b"")
+
+        return install.status(Board("@@".join(fields)))
+
+    def test_the_session_start_comes_from_how_long_the_daemon_has_run(self):
+        before = datetime.now(timezone.utc)
+        started = datetime.fromisoformat(self.status("active", "yes", "yes", "/usr/bin/sima-cli", "895\n")["started_at"])
+        self.assertAlmostEqual((before - started).total_seconds(), 895, delta=2)
+
+    def test_no_session_start_when_the_daemon_is_not_running_or_says_nothing(self):
+        self.assertIsNone(self.status("inactive", "no", "yes", "", "")["started_at"])
+        self.assertIsNone(self.status("active", "yes", "yes", "")["started_at"], "an older status script has four fields")
+        self.assertIsNone(self.status("active", "yes", "yes", "", "soon")["started_at"])
 
 
 class InstallScriptTests(unittest.TestCase):

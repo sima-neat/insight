@@ -4687,6 +4687,11 @@ button:disabled {
   color: var(--ok);
 }
 
+.dash-session {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
 .dash-pause {
   margin-left: auto;
 }
@@ -4953,11 +4958,33 @@ button:disabled {
 
 .dash-legend strong {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
 
+/* Fixed columns: name, then value and share at set widths, so changing numbers never reflow it. */
 .dash-legend-grid {
-  gap: 6px 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 4px 20px;
+}
+
+.dash-legend-grid li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 7ch 4ch;
+  gap: 8px;
+}
+
+.dash-legend-grid li > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-legend-grid strong,
+.dash-legend-grid .dash-share {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .dash-share {
@@ -5169,4 +5196,14 @@ button:disabled {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.dash-tooltip-total {
+  font-weight: 700;
+}
+
+.dash-tooltip-label {
+  min-width: 15ch;
+  font-family: var(--font-sans);
+  color: #d8e0ea;
 }

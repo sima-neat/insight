@@ -145,7 +145,7 @@ An install that is refused or fails is reported as an install rather than as a f
 
 ### Live metrics
 
-The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live; **Pause updates** stops polling. Below it are six tabs:
+The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live and when the current Sentinel session started, which is what the session average and peak cover; **Pause updates** stops polling. Below it are six tabs:
 
 - **Overview**: charts of the hottest temperature sensor, current board power, CPU, memory, MLA memory, and network traffic, with **All metrics** listing every metric in Sentinel's order.
 - **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.

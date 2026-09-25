@@ -1399,6 +1399,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
               <>
                 <SentinelDashboard
                   model={model}
+                  startedAt={state?.daemon?.started_at || null}
+                  now={now}
                   live={live}
                   polling={polling}
                   stale={stale}
