@@ -54,6 +54,7 @@ class BoardCache:
         self._key = None
         self._values = {}
         self._history = deque(maxlen=history_limit)
+        self._seeded = False
         self._identity = {}
 
     def identity(self, session, ttl: float = IDENTITY_TTL_SEC) -> dict:
@@ -100,6 +101,32 @@ class BoardCache:
             self._history.append(sample)
             return list(self._history)
 
+    def needs_seed(self, key) -> bool:
+        with self._lock:
+            return key != self._key or not self._seeded
+
+    def seed(self, key, samples: list) -> list:
+        """Put the daemon's own recent samples before the ones Insight polled, once per board.
+
+        Only samples older than the oldest polled one are taken, and only when the newest of
+        them is close enough to it to be one trend; otherwise the seed is dropped.
+        """
+        with self._lock:
+            self._reset_unlocked(key)
+            self._seeded = True
+            oldest = moment(self._history[0]["timestamp"]) if self._history else None
+            earlier = []
+            for sample in samples:
+                at = moment(sample.get("timestamp"))
+                if at is not None and (oldest is None or at < oldest):
+                    earlier.append((at, sample))
+            earlier.sort(key=lambda pair: pair[0])
+            if earlier and oldest is not None and (oldest - earlier[-1][0]).total_seconds() > self.history_gap_sec:
+                earlier = []
+            merged = [sample for _, sample in earlier] + list(self._history)
+            self._history = deque(merged[-self.history_limit:], maxlen=self.history_limit)
+            return list(self._history)
+
     def _interrupted_unlocked(self, timestamp: str) -> bool:
         """Whether this sample and the last one are too far apart to be one trend."""
         if not self._history:
@@ -119,3 +146,4 @@ class BoardCache:
             self._key = key
             self._values = {}
             self._history = deque(maxlen=self.history_limit)
+            self._seeded = False

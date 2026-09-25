@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult
-from neat_insight.sentinel import api, install, metrics, runs, socket_client, state
+from neat_insight.sentinel import api, cache_history, install, metrics, runs, socket_client, state
 from neat_insight.sentinel.api import sentinel_bp
 from neat_insight.sentinel.client import SentinelClient
 from neat_insight.sentinel.errors import SentinelError
@@ -103,6 +103,7 @@ class FakeSentinel:
         # None deletes the run from the /v1/runs answer, as the CLI would; an ExecResult
         # is returned as the CLI's answer and deletes nothing.
         self.delete_result = None
+        self.export_result = ExecResult(0, b"[]", b"")
 
     def answer(self, method, path, status, body):
         self.api[(method, path)] = (status, body)
@@ -116,6 +117,8 @@ class FakeSentinel:
         script = argv[2]
         if "runs delete" in script:
             return self._delete(argv[4])
+        if '"$cli" export' in script:
+            return self.export_result
         if "neat install sentinel" in script:
             return self.install_result
         return ExecResult(0, "@@".join(self.status_fields).encode(), b"")
@@ -146,6 +149,10 @@ class FakeSentinel:
     @property
     def api_paths(self):
         return [(argv[2], argv[3]) for argv, _, _ in self.calls if argv[0] == "python3"]
+
+    @property
+    def exports(self):
+        return [argv for argv, _, _ in self.calls if argv[0] == "sh" and '"$cli" export' in argv[2]]
 
     @property
     def scripts(self):
@@ -695,6 +702,9 @@ class MetricViewTests(unittest.TestCase):
         self.assertEqual(built["sampled_at"], SAMPLE["sample"]["timestamp"])
         self.assertEqual(built["counts"], {"total": 4, "unavailable": 1, "warn": 1, "critical": 1})
 
+    def test_order_is_sentinels_own_not_the_grouping(self):
+        self.assertEqual(self.build()["order"], ["rtsn_0", "power_current_watts", "linux_mem_used_pct", "cvu_clock_mhz"])
+
     def test_an_unavailable_metric_stays_null_and_is_never_zero(self):
         power = [m for g in self.build()["groups"] for m in g["metrics"] if m["key"] == "power_current_watts"][0]
         self.assertIsNone(power["value"])
@@ -731,6 +741,36 @@ class BoardCacheTests(unittest.TestCase):
             {"timestamp": "t2", "values": {}}
         ])
         self.assertIsNone(self.cache.get(first, "definitions"))
+
+    def test_the_daemons_samples_go_before_the_polled_ones_once_per_board(self):
+        cache = state.BoardCache(history_limit=5)
+        key = (1, "fp-1")
+        cache.add_sample(key, {"timestamp": "2026-09-22T20:55:50Z", "values": {}})
+        self.assertTrue(cache.needs_seed(key))
+        seeded = cache.seed(key, [
+            {"timestamp": "2026-09-22T20:55:44Z", "values": {}},
+            {"timestamp": "2026-09-22T20:55:46Z", "values": {}},
+            {"timestamp": "2026-09-22T20:55:48Z", "values": {}},
+            {"timestamp": "2026-09-22T20:55:50Z", "values": {}},  # already polled: not taken twice
+            {"timestamp": "not a time", "values": {}},
+        ])
+        self.assertEqual([s["timestamp"][-3:] for s in seeded], ["44Z", "46Z", "48Z", "50Z"])
+        self.assertFalse(cache.needs_seed(key))
+        self.assertTrue(cache.needs_seed((2, "fp-1")), "another board is seeded again")
+
+    def test_a_seed_that_does_not_join_the_polled_history_is_dropped(self):
+        cache = state.BoardCache(history_limit=5, history_gap_sec=60)
+        key = (1, "fp-1")
+        cache.add_sample(key, {"timestamp": "2026-09-22T21:00:00Z", "values": {}})
+        seeded = cache.seed(key, [{"timestamp": "2026-09-22T20:50:00Z", "values": {}}])
+        self.assertEqual([s["timestamp"] for s in seeded], ["2026-09-22T21:00:00Z"])
+        self.assertFalse(cache.needs_seed(key), "a failed or unusable seed is not retried on every poll")
+
+    def test_a_seed_is_bounded_like_the_history(self):
+        cache = state.BoardCache(history_limit=3)
+        key = (1, "fp-1")
+        samples = [{"timestamp": f"2026-09-22T20:55:{second:02d}Z", "values": {}} for second in range(0, 20, 2)]
+        self.assertEqual([s["timestamp"][-3:] for s in cache.seed(key, samples)], ["14Z", "16Z", "18Z"])
 
     def test_history_is_bounded_and_ignores_a_repeated_sample(self):
         key = (1, "fp-1")
@@ -885,6 +925,26 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 1)
         self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:47Z", "2026-09-22T20:55:49Z"])
         self.assertEqual(body["history"]["series"]["rtsn_0"], [72.0, 72.0])
+
+    def test_the_first_metrics_read_seeds_history_from_the_daemons_cache(self):
+        seed = [sample(f"2026-09-22T20:55:{second}Z", rtsn_0=60.0 + i)["sample"] for i, second in enumerate(("41", "43", "45"))]
+        self.transport.export_result = ExecResult(0, json.dumps(seed).encode(), b"")
+        body = self.get("/api/sentinel/metrics?history=64").get_json()
+        self.assertEqual(body["history"]["timestamps"][-4:], [s["timestamp"] for s in seed] + ["2026-09-22T20:55:47Z"])
+        self.assertEqual(body["history"]["series"]["rtsn_0"], [60.0, 61.0, 62.0, 72.0])
+        self.assertEqual(self.transport.exports[0][3:], ["sh", "64"])
+        self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
+        self.get("/api/sentinel/metrics?history=64")
+        self.assertEqual(len(self.transport.exports), 1, "the cache is read once per board, not per poll")
+
+    def test_metrics_still_answer_when_the_cache_cannot_be_read(self):
+        for result in (ExecResult(127, b"", b"python3: not found"), ExecResult(0, b"not json", b""), ExecResult(0, b"{}", b"")):
+            with self.subTest(result=result):
+                api.cache = state.BoardCache()
+                self.transport.export_result = result
+                response = self.get("/api/sentinel/metrics?history=64")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["history"]["timestamps"], ["2026-09-22T20:55:47Z"])
 
     def test_history_never_mixes_two_boards(self):
         self.get("/api/sentinel/metrics")
@@ -1185,3 +1245,41 @@ def quote_path(value):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeedScriptTests(unittest.TestCase):
+    """The cache-trimming script, run for real by sh with a fake simaai-sentinel that prints an export."""
+
+    def test_the_newest_samples_come_back_oldest_first_and_rounded(self):
+        with tempfile.TemporaryDirectory() as root:
+            export = {"schema": 1, "metrics": [], "samples": [
+                {"timestamp": f"2026-09-25T00:00:{second:02d}Z", "values": {"rtsn_0": 60.123456789 + second, "n": None}}
+                for second in range(70)
+            ]}
+            cli = Path(root) / "simaai-sentinel"
+            cli.write_text("#!/bin/sh\n[ \"$1\" = export ] && cat " + shlex.quote(str(Path(root) / "export.json")) + "\n")
+            cli.chmod(0o755)
+            (Path(root) / "export.json").write_text(json.dumps(export))
+            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}")
+            out = subprocess.run(["sh", "-c", cache_history.SEED_SCRIPT, "sh", "64"], capture_output=True, env=env, check=True)
+        samples = json.loads(out.stdout)
+        self.assertEqual(len(samples), 64)
+        self.assertEqual((samples[0]["timestamp"], samples[-1]["timestamp"]), ("2026-09-25T00:00:06Z", "2026-09-25T00:00:69Z"))
+        self.assertEqual(samples[0]["values"], {"rtsn_0": 66.1235, "n": None})
+
+    def test_read_takes_only_well_formed_samples(self):
+        class Board:
+            def __init__(self, result):
+                self.transport = self
+                self.result = result
+
+            def exec(self, argv, *, timeout, stdin=None):
+                if isinstance(self.result, Exception):
+                    raise self.result
+                return self.result
+
+        good = {"timestamp": "2026-09-25T00:00:00Z", "values": {"rtsn_0": 60.0}}
+        body = json.dumps([good, {"timestamp": 5, "values": {}}, "x", {"timestamp": "t"}]).encode()
+        self.assertEqual(cache_history.read(Board(ExecResult(0, body, b""))), [good])
+        self.assertEqual(cache_history.read(Board(BoardError("unreachable", "gone"))), [])
+        self.assertEqual(cache_history.read(Board(ExecResult(1, b"[]", b"boom"))), [])

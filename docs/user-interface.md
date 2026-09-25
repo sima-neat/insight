@@ -145,7 +145,9 @@ An install that is refused or fails is reported as an install rather than as a f
 
 ### Live metrics
 
-While the tab is open and visible, Insight polls Sentinel's latest sample every two seconds and shows each value with the label, unit, group, and thresholds Sentinel defines for it, ranked as normal, warning, or critical. A metric the board cannot measure reads as an em dash, never as zero. Recent samples are drawn as a sparkline beside each value. Use **Pause updates** to stop polling; it also stops on its own when the browser tab is hidden or the view is left. Recent samples mean one stretch of polling: nothing reads the board while the tab is closed, so a sample taken more than a minute after the last one starts the sparklines again rather than being drawn next to an hours-old value as if the two were neighbours.
+Live metrics list every metric the way Sentinel's own ops view does: one line each, in Sentinel's order, with its short name, group, current value, a history trace across the row, and its status (normal, warning, or critical against the thresholds Sentinel defines). Hover a name for its full label, description, and thresholds. **Power**, **Thermal**, and **System** narrow the list. A metric the board cannot measure reads as an em dash, never as zero.
+
+The history opens full: on the first read of a board, Insight takes the last 64 samples (about two minutes) from Sentinel's own cache, then adds a sample every two seconds while the tab is open and visible. Use **Pause updates** to stop polling; it also stops on its own when the browser tab is hidden or the view is left. Nothing reads the board while the tab is closed, so a sample taken more than a minute after the last one starts the history again rather than being drawn next to an hours-old value as if the two were neighbours.
 
 If the board stops answering while you are looking at it, polling stops and the panels stay, holding the last values read and the board's own explanation of what failed, rather than emptying the page. Selecting a different board is not the same thing: that clears everything first, so one board's numbers are never shown under another board's name.
 

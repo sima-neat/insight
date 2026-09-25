@@ -17,6 +17,10 @@ import {
   ALL_GROUPS,
   HOST_POLL_MS,
   MAX_COMPARE_RUNS,
+  METRIC_SECTIONS,
+  RUNS_NOTE,
+  STATS_TABS,
+  STATS_TAB_KEY,
   compareCsv,
   compareCsvFilename,
   compareGroups,
@@ -45,27 +49,25 @@ import {
   healthProblems,
   hostMetricsModel,
   hostNotice,
-  METRIC_SECTIONS,
-  metricAlert,
   metricSectionFrom,
-  metricSectionTabs,
   metricSections,
+  metricSectionTabs,
   metricsModel,
   missingSelection,
+  opsRows,
   payloadBoardLabel,
   pollDelay,
-  RUNS_NOTE,
   runDetail,
   runList,
   runSubtitle,
+  sparkline,
+  sparklineLabel,
   staleFlags,
   staleNote,
-  STATS_TAB_KEY,
-  STATS_TABS,
   statsTabFrom,
   statusInfo,
   telemetryVisible,
-  thermalSummary,
+  thresholdText,
   toggleSelection,
   traceBar,
   traceExtrasSummary,
@@ -73,7 +75,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
-import { AlertBadge, ChipTabs, CountBadge, DeltaReason, Facts, FailureCallout, KeyValueTable, MetricCard, OutputDetails, SegmentedTabs, Sparkline } from './stats/ui.jsx'
+import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, OutputDetails, SegmentedTabs } from './stats/ui.jsx'
 
 // How often the saved-runs list is re-read while the Stats tab is visible.
 const RUNS_POLL_MS = 30000
@@ -211,82 +213,64 @@ const SECTION_EMPTY = {
   system: 'Sentinel reported no other metrics on this board.'
 }
 
-/** One Sentinel group of live metrics: its name as a sub-heading, then a row per metric. */
-function MetricGroupTable({ group, headingId, series }) {
-  const alert = metricAlert(group.metrics)
+/** A metric's history, stretched across its row as Sentinel's ops view draws it. */
+function OpsSpark({ metric, values }) {
+  const spark = sparkline(values, 400, 20)
+  if (!spark) return <span className="stats-ops-spark empty" aria-hidden="true" />
   return (
-    <section className="stats-group-block" aria-labelledby={headingId}>
-      <h3 id={headingId} className="stats-group-head">
-        <span>{group.name}</span>
-        <CountBadge className="stats-segment-count" count={group.metrics.length} noun="metric" />
-        <AlertBadge alert={alert} />
-      </h3>
-      <table className="sysinfo-table stats-table">
-        <caption className="sr-only">{group.name} metrics</caption>
-        <thead>
-          <tr>
-            <th scope="col">Metric</th>
-            <th scope="col">Value</th>
-            <th scope="col">Status</th>
-            <th scope="col" className="stats-col-spark">Recent</th>
-          </tr>
-        </thead>
-        <tbody>
-          {group.metrics.map((metric) => {
-            const status = statusInfo(metric.status)
-            return (
-              <tr key={metric.key}>
-                <th scope="row">
-                  {metric.label}
-                  {metric.description && <span className="hint">{metric.description}</span>}
-                </th>
-                <td className="stats-cell-value">{formatValue(metric.value, metric.unit)}</td>
-                <td><Pill tone={status.tone}>{status.label}</Pill></td>
-                <td className={`stats-cell-spark tone-${metric.status}`}>
-                  <Sparkline metric={metric} values={series[metric.key]} />
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </section>
-  )
-}
-
-/** The line above the thermal tables: how many sensors, the hottest, and the limits they share. */
-function ThermalSummary({ summary }) {
-  if (!summary.count) return null
-  return (
-    <p className="stats-thermal-summary">
-      <span>
-        {summary.count} sensor{summary.count === 1 ? '' : 's'}
-        {summary.reporting < summary.count && `, ${summary.reporting} reporting`}
-      </span>
-      {summary.hottest ? (
-        <span>
-          Hottest <strong>{summary.hottest.label}</strong>{' '}
-          <span className="stats-cell-value">{formatValue(summary.hottest.value, summary.hottest.unit)}</span>
-        </span>
-      ) : (
-        <span>None reported a value</span>
-      )}
-      {summary.limits && <span className="hint">{summary.limits}</span>}
-    </p>
+    <svg className="stats-ops-spark" viewBox="0 0 400 20" preserveAspectRatio="none" role="img" aria-label={sparklineLabel(metric, spark)} focusable="false">
+      <polyline points={spark.points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
   )
 }
 
 /**
- * The board's live readings. Overview (Sentinel's highlights) opens first; Power, Thermal and
- * System are peer tabs beside it, each showing all of its metrics under Sentinel's group names,
- * so any metric is one click from the default view and only one section is on screen at once.
+ * The live metrics as one list in Sentinel's order, one line each: its short name, value,
+ * history and status, as the daemon's own ops view shows them. The long name, description and
+ * thresholds are on the name's tooltip.
+ */
+function OpsList({ metrics, series, caption }) {
+  return (
+    <table className="stats-ops">
+      <caption className="sr-only">{caption}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          <th scope="col">Group</th>
+          <th scope="col" className="stats-ops-num">Value</th>
+          <th scope="col" className="stats-ops-history">History</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {metrics.map((metric) => {
+          const status = statusInfo(metric.status)
+          const tip = [metric.label, metric.description, thresholdText(metric)].filter(Boolean).join(' — ')
+          return (
+            <tr key={metric.key} className={`tone-${metric.status}`}>
+              <th scope="row" title={tip}>{metric.short || metric.label}</th>
+              <td className="stats-ops-group">{metric.group}</td>
+              <td className="stats-ops-num">{formatValue(metric.value, metric.unit)}</td>
+              <td className="stats-ops-history"><OpsSpark metric={metric} values={series[metric.key]} /></td>
+              <td className="stats-ops-status">{status.label}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+/**
+ * The board's live readings as Sentinel's ops view lists them: every metric, in the daemon's
+ * order, with Power, Thermal and System to narrow the list.
  */
 function MetricsPanel({ model, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry }) {
   const [sectionId, setSectionId] = useState(METRIC_SECTIONS[0].id)
   const section = metricSectionFrom(sectionId)
   const sections = useMemo(() => metricSections(model.groups), [model.groups])
   const tabs = useMemo(() => metricSectionTabs(sections), [sections])
-  const thermal = useMemo(() => thermalSummary(sections.thermal), [sections])
+  const rows = useMemo(() => opsRows(model.metrics, section), [model.metrics, section])
   return (
     <section className="panel stats-metrics" aria-labelledby="stats-metrics-title" aria-busy={busy}>
       <div className="panel-topbar">
@@ -332,46 +316,20 @@ function MetricsPanel({ model, live, polling, stale, error, busy, onToggleLive, 
             className="stats-sections"
             noun="metric"
           />
-          {/* Only the open section is drawn: the others are empty until chosen, so a poll
-              re-renders one section's rows, not all 59. */}
-          {METRIC_SECTIONS.map(({ id, label }) => (
-            <div
-              key={id}
-              id={`stats-section-${id}`}
-              role="tabpanel"
-              aria-labelledby={`stats-section-tab-${id}`}
-              className="stats-section-panel"
-              tabIndex={0}
-              hidden={id !== section}
-            >
-              {id === section && id === 'overview' && (
-                <div className="stats-metric-grid">
-                  {model.highlights.map((metric) => (
-                    <MetricCard key={metric.key} metric={metric} values={model.series[metric.key]} />
-                  ))}
-                </div>
-              )}
-              {id === section && id !== 'overview' && (
-                <>
-                  {id === 'thermal' && <ThermalSummary summary={thermal} />}
-                  {sections[id].length ? (
-                    <div className="stats-group-blocks">
-                      {sections[id].map((group, index) => (
-                        <MetricGroupTable
-                          key={group.name}
-                          group={group}
-                          headingId={`stats-${id}-group-${index}`}
-                          series={model.series}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="hint">{SECTION_EMPTY[id] || `No ${label.toLowerCase()} metrics.`}</p>
-                  )}
-                </>
-              )}
-            </div>
-          ))}
+          {/* One tab panel whose rows follow the chosen section. */}
+          <div
+            id={`stats-section-${section}`}
+            role="tabpanel"
+            aria-labelledby={`stats-section-tab-${section}`}
+            className="stats-section-panel"
+            tabIndex={0}
+          >
+            {rows.length ? (
+              <OpsList metrics={rows} series={model.series} caption={`${METRIC_SECTIONS.find((item) => item.id === section)?.label || 'All'} metrics`} />
+            ) : (
+              <p className="hint">{SECTION_EMPTY[section] || 'Sentinel reported no metrics on this board.'}</p>
+            )}
+          </div>
         </>
       )}
 

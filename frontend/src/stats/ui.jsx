@@ -2,7 +2,7 @@
 // callout and pill so both views keep one visual language.
 import { useRef, useState } from 'react'
 import { Callout, Pill } from '../peripherals/ui.jsx'
-import { chipKeyTarget, formatValue, sparkline, sparklineLabel, statusInfo, thresholdText } from './model.js'
+import { chipKeyTarget } from './model.js'
 
 /**
  * The em dash of a comparison cell that has no change, and why. The reason used to sit in a
@@ -123,39 +123,6 @@ export function FailureCallout({ notice, detailLabel = 'Output from the board', 
   )
 }
 
-export function Sparkline({ metric, values }) {
-  const spark = sparkline(values, 132, 30)
-  if (!spark) return <span className="stats-spark-empty" aria-hidden="true" />
-  return (
-    <svg className="stats-spark" viewBox="0 0 132 30" role="img" aria-label={sparklineLabel(metric, spark)} focusable="false">
-      <polyline points={spark.points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-export function MetricCard({ metric, values }) {
-  const status = statusInfo(metric.status)
-  const thresholds = thresholdText(metric)
-  return (
-    <div className={`stats-metric-card tone-${metric.status}`}>
-      <div className="stats-metric-head">
-        <span className="stats-metric-label" title={metric.description || undefined}>{metric.label}</span>
-        {metric.status !== 'ok' && <Pill tone={status.tone}>{status.label}</Pill>}
-      </div>
-      <span className="stats-metric-value">{formatValue(metric.value, metric.unit)}</span>
-      <Sparkline metric={metric} values={values} />
-      {thresholds && <span className="hint">{thresholds}</span>}
-    </div>
-  )
-}
-
-/**
- * A single-select row of chips with tab semantics. The chips wrap onto further lines rather
- * than scroll or shrink. Focus is roving: Tab enters and leaves the row, the arrow keys, Home
- * and End move within it. With `automatic` the focused chip is selected as focus moves;
- * otherwise Enter or Space selects it. With `collapsible`, selecting the selected chip again
- * selects nothing, which closes its panel.
- */
 export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, noun = '', automatic = false, collapsible = false }) {
   const refs = useRef([])
   const [focused, setFocused] = useState(null)

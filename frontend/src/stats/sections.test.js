@@ -1,4 +1,4 @@
-// The DevKit / Host split and the Overview / Power / Thermal / System sections of the live
+// The DevKit / Host split and the All / Power / Thermal / System sections of the live
 // metrics, checked against the 59-metric payload the Sentinel daemon returned on a Modalix
 // DevKit (GET /api/sentinel/metrics, captured from the sandbox on 2026-09-24).
 import assert from 'node:assert/strict'
@@ -15,8 +15,8 @@ import {
   metricSectionTabs,
   metricSections,
   metricsModel,
-  statsTabFrom,
-  thermalSummary
+  opsRows,
+  statsTabFrom
 } from './model.js'
 
 const LIVE = JSON.parse(readFileSync(new URL('./fixtures/metrics-live.json', import.meta.url), 'utf8'))
@@ -31,11 +31,27 @@ test('the page opens on the DevKit, and a saved sub-tab is trusted only when it 
   assert.equal(statsTabFrom(''), 'devkit')
 })
 
-test('the live metrics open on Overview and name the three sections a reader looks for', () => {
-  assert.deepEqual(METRIC_SECTIONS.map((section) => section.label), ['Overview', 'Power', 'Thermal', 'System'])
-  assert.equal(metricSectionFrom(undefined), 'overview')
+test('the live metrics open on every metric, as Sentinel lists them, and narrow to three sections', () => {
+  assert.deepEqual(METRIC_SECTIONS.map((section) => section.label), ['All', 'Power', 'Thermal', 'System'])
+  assert.equal(metricSectionFrom(undefined), 'all')
   assert.equal(metricSectionFrom('thermal'), 'thermal')
-  assert.equal(metricSectionFrom('Board'), 'overview')
+  assert.equal(metricSectionFrom('overview'), 'all', 'a saved Overview from an older build opens on All')
+})
+
+test('the ops list follows the order Sentinel reports, whatever Insight groups them under', () => {
+  const order = keysOf(metricsModel(LIVE).groups).reverse()
+  const model = metricsModel({ ...LIVE, order })
+  assert.deepEqual(opsRows(model.metrics, 'all').map((metric) => metric.key), order)
+  const thermal = opsRows(model.metrics, 'thermal')
+  assert.equal(thermal.length, 17)
+  assert.ok(thermal.every((metric) => metricSection(metric) === 'thermal'))
+  assert.deepEqual(thermal.map((metric) => metric.key), order.filter((key) => thermal.some((metric) => metric.key === key)))
+  // A key Sentinel lists without a definition is skipped, and a metric the order leaves out still shows, last.
+  const partial = metricsModel({ ...LIVE, order: ['no_such_metric', order[1]] })
+  assert.equal(partial.metrics[0].key, order[1])
+  assert.equal(partial.metrics.length, 59)
+  assert.equal(metricsModel({ ...LIVE }).metrics.length, 59, 'an older backend without an order still lists every metric')
+  assert.deepEqual(opsRows(null, 'all'), [])
 })
 
 test('every live metric lands in exactly one of Power, Thermal and System', () => {
@@ -118,28 +134,13 @@ test('the section tabs carry their size and anything past a threshold', () => {
     })
   }))
   const tabs = metricSectionTabs(metricSections(groups))
-  assert.deepEqual(tabs.map((tab) => [tab.id, tab.count]), [['overview', undefined], ['power', 11], ['thermal', 17], ['system', 31]])
-  // A critical outranks a warning on the same tab, so a hot sensor shows from Overview.
+  assert.deepEqual(tabs.map((tab) => [tab.id, tab.count]), [['all', 59], ['power', 11], ['thermal', 17], ['system', 31]])
+  // A critical outranks a warning on the same tab, so a hot sensor shows from any other tab.
+  assert.deepEqual(tabs[0].alert, { tone: 'critical', count: 1 })
   assert.deepEqual(tabs[2].alert, { tone: 'critical', count: 1 })
   assert.deepEqual(tabs[3].alert, { tone: 'warn', count: 1 })
   assert.equal(tabs[1].alert, null)
   assert.equal(metricAlert([]), null)
-  assert.deepEqual(metricSectionTabs(null).map((tab) => tab.count), [undefined, 0, 0, 0])
+  assert.deepEqual(metricSectionTabs(null).map((tab) => tab.count), [0, 0, 0, 0])
 })
 
-test('the thermal line names the hottest sensor and the limits every sensor shares', () => {
-  const sections = metricSections(metricsModel(LIVE).groups)
-  const summary = thermalSummary(sections.thermal)
-  assert.equal(summary.count, 17)
-  assert.equal(summary.reporting, 17)
-  assert.equal(summary.hottest.key, 'lm96163_temp2')
-  assert.equal(summary.limits, 'warn at 70 °C, critical at 85 °C')
-  // A sensor that did not report is counted but never the hottest, and limits that differ are not claimed.
-  const partial = thermalSummary([
-    { name: 'MLA', metrics: [{ key: 'a', unit: 'C', value: null, warn: 70, critical: 85 }, { key: 'b', unit: 'C', value: 40, warn: 60, critical: 85 }] }
-  ])
-  assert.deepEqual([partial.count, partial.reporting, partial.hottest.key], [2, 1, 'b'])
-  assert.equal(partial.limits, 'critical at 85 °C')
-  const none = thermalSummary([])
-  assert.deepEqual([none.count, none.hottest, none.limits], [0, null, ''])
-})

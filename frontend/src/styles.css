@@ -3910,8 +3910,7 @@ button:disabled {
 }
 
 .stats-view .stats-version,
-.stats-view .stats-cell-value,
-.stats-view .stats-metric-value {
+.stats-view .stats-cell-value {
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
@@ -3939,81 +3938,6 @@ button:disabled {
 
 .stats-detail {
   margin-top: 10px;
-}
-
-.stats-metric-grid {
-  margin: 12px 0;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
-.stats-metric-card {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  padding: 8px 12px;
-}
-
-.stats-metric-card.tone-ok {
-  border-left-color: var(--ok);
-}
-
-.stats-metric-card.tone-warn {
-  border-left-color: #c98a11;
-}
-
-.stats-metric-card.tone-critical {
-  border-left-color: var(--danger);
-}
-
-.stats-metric-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.stats-metric-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: #274155;
-}
-
-.stats-metric-value {
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--ink);
-}
-
-.stats-metric-card .hint {
-  margin: 0;
-}
-
-.stats-spark {
-  width: 100%;
-  height: 24px;
-  color: var(--accent);
-}
-
-.stats-spark-empty {
-  display: block;
-  height: 24px;
-}
-
-.stats-metric-card.tone-warn .stats-spark,
-.stats-cell-spark.tone-warn {
-  color: #a8720d;
-}
-
-.stats-metric-card.tone-critical .stats-spark,
-.stats-cell-spark.tone-critical {
-  color: var(--danger);
 }
 
 /* The folded parts of this view are toggled with `hidden`. Several of them carry a class
@@ -4087,11 +4011,6 @@ button:disabled {
 
 .stats-table .stats-cell-value {
   white-space: nowrap;
-}
-
-.stats-cell-spark {
-  width: 150px;
-  color: var(--accent);
 }
 
 /* A run is named by whoever recorded it, and Sentinel keeps names of up to 128 characters
@@ -4267,9 +4186,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .stats-cell-spark {
-    display: none;
-  }
 }
 
 /* The Insight host panel: the machine Insight runs on. It is quieter than the board
@@ -4603,75 +4519,97 @@ button:disabled {
   border-radius: var(--radius-sm);
 }
 
-.stats-section-panel > .stats-metric-grid {
-  margin: 0;
+@media (max-width: 700px) {
+  .stats-sections .stats-segment {
+    padding-inline: 7px;
+  }
 }
 
-/* A section's Sentinel groups flow into two columns when the panel is wide enough, so a long
-   group (CPU's nineteen rows) sits beside the short ones instead of above them. */
-.stats-group-blocks {
-  columns: 2 460px;
-  column-gap: 16px;
-}
-
-.stats-group-block {
-  display: inline-block;
+/* Live metrics as Sentinel's ops view lists them: one line per metric, its history across the row. */
+.stats-ops {
   width: 100%;
-  margin: 0 0 12px;
-  break-inside: avoid;
-}
-
-.stats-group-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0 0 6px;
+  border-collapse: collapse;
   font-size: 13px;
+}
+
+.stats-ops thead th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 11px;
   font-weight: 700;
-  color: #274155;
-}
-
-.stats-thermal-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 16px;
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: var(--ink);
-}
-
-.stats-thermal-summary .hint {
-  margin: 0;
-}
-
-.stats-thermal-summary .stats-cell-value {
-  font-family: var(--font-mono);
-  font-weight: 700;
-}
-
-/* The metric's name and description take the room a column leaves, so a description reads in
-   two lines rather than six beside a status column wider than its pill. */
-.stats-group-block .stats-table tbody th {
-  width: 50%;
-}
-
-.stats-group-block .sysinfo-pill {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
   white-space: nowrap;
 }
 
-/* On a phone the sparkline column is dropped (see above), and its heading goes with it. */
-@media (max-width: 700px) {
-  .stats-group-block .stats-table tbody th {
-    width: auto;
-  }
+.stats-ops tbody th,
+.stats-ops td {
+  padding: 3px 10px;
+  border-bottom: 1px solid #eef2f6;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 
-  .stats-col-spark {
+.stats-ops tbody tr:hover {
+  background: var(--surface-soft);
+}
+
+.stats-ops tbody th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+  cursor: help;
+}
+
+.stats-ops-group {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.stats-ops .stats-ops-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-ops .stats-ops-history {
+  width: 100%;
+}
+
+.stats-ops-spark {
+  display: block;
+  width: 100%;
+  min-width: 120px;
+  height: 20px;
+  color: var(--accent-alt);
+}
+
+.stats-ops-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ok);
+}
+
+.stats-ops tr.tone-warn .stats-ops-status,
+.stats-ops tr.tone-warn .stats-ops-spark {
+  color: #b7791f;
+}
+
+.stats-ops tr.tone-critical .stats-ops-status,
+.stats-ops tr.tone-critical .stats-ops-spark {
+  color: var(--danger);
+}
+
+.stats-ops tr.tone-unavailable .stats-ops-status,
+.stats-ops tr.tone-unavailable .stats-ops-num {
+  color: var(--ink-soft);
+}
+
+@media (max-width: 640px) {
+  .stats-ops .stats-ops-group {
     display: none;
-  }
-
-  .stats-sections .stats-segment {
-    padding-inline: 7px;
   }
 }

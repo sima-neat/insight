@@ -103,5 +103,7 @@ def build(definitions: dict, latest: dict, history: List[dict], history_limit: i
         },
         "highlights": highlights,
         "groups": [{"name": name, "metrics": groups[name]} for name in sorted(groups)],
+        # Sentinel's own order, which its ops view lists in: sensors of one group are not adjacent.
+        "order": [metric["key"] for metric in metrics],
         "history": series(history, [metric["key"] for metric in metrics], history_limit),
     }

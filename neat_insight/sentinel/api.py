@@ -2,7 +2,7 @@
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.sentinel import install, metrics as metric_view, runs as saved_runs
+from neat_insight.sentinel import cache_history, install, metrics as metric_view, runs as saved_runs
 from neat_insight.sentinel.client import SCHEMA, SentinelClient
 from neat_insight.sentinel.errors import SentinelError
 from neat_insight.sentinel.state import DEFINITIONS_TTL_SEC, HISTORY_LIMIT, STATUS_TTL_SEC, BoardCache
@@ -198,6 +198,8 @@ def get_metrics():
     limit = _history_limit(request.args.get("history"))
     context = _Context()
     latest = context.client.latest()
+    if cache.needs_seed(context.key):
+        cache.seed(context.key, cache_history.read(context.session))
     history = cache.add_sample(context.key, latest.get("sample"))
     return context.payload(**metric_view.build(context.definitions(), latest, history, limit))
 

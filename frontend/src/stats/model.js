@@ -7,7 +7,8 @@ export { formatRelativeTime, normalizeError }
 
 export const POLL_MS = 2000
 export const MAX_POLL_MS = 30000
-export const HISTORY_SAMPLES = 60
+// As many samples as Sentinel's own ops view draws per metric.
+export const HISTORY_SAMPLES = 64
 export const NAME_LIMIT = 128
 export const NOTE_LIMIT = 512
 export const MAX_TAGS = 16
@@ -430,9 +431,20 @@ export function metricsModel(payload) {
     counts,
     sampledAt: payload?.sampled_at || null,
     version: payload?.version || null,
+    // Every metric in Sentinel's own order, which its ops view lists in; groups are Insight's.
+    metrics: orderedMetrics(payload?.order, groups),
     series: payload?.history?.series || {},
     timestamps: payload?.history?.timestamps || []
   }
+}
+
+function orderedMetrics(order, groups) {
+  const all = groups.flatMap((group) => group.metrics)
+  if (!Array.isArray(order) || !order.length) return all
+  const byKey = new Map(all.map((metric) => [metric.key, metric]))
+  const listed = order.map((key) => byKey.get(key)).filter(Boolean)
+  const seen = new Set(listed.map((metric) => metric.key))
+  return [...listed, ...all.filter((metric) => !seen.has(metric.key))]
 }
 
 /**
@@ -451,12 +463,11 @@ export function statsTabFrom(saved) {
 }
 
 /**
- * The board's live metrics as the reader asks about them: an overview, then power, thermal
- * and system. Overview is Sentinel's own highlights; every metric lands in exactly one of
- * the other three.
+ * The board's live metrics, as Sentinel's ops view lists them: every metric in one list,
+ * which Power, Thermal and System narrow. Every metric lands in exactly one of those three.
  */
 export const METRIC_SECTIONS = [
-  { id: 'overview', label: 'Overview' },
+  { id: 'all', label: 'All' },
   { id: 'power', label: 'Power' },
   { id: 'thermal', label: 'Thermal' },
   { id: 'system', label: 'System' }
@@ -520,43 +531,25 @@ export function metricAlert(metrics) {
 
 /**
  * The section tabs, with each section's size and anything in it past a threshold, so a hot
- * sensor shows on the Thermal tab while Overview is open. Overview counts nothing: it is a
- * choice of metrics from the other three.
+ * sensor shows on the Thermal tab while another is open.
  */
 export function metricSectionTabs(sections) {
   return METRIC_SECTIONS.map((section) => {
-    if (section.id === 'overview') return { ...section }
-    const metrics = (sections?.[section.id] || []).flatMap((group) => group.metrics)
+    const metrics = section.id === 'all'
+      ? ['power', 'thermal', 'system'].flatMap((id) => (sections?.[id] || []).flatMap((group) => group.metrics))
+      : (sections?.[section.id] || []).flatMap((group) => group.metrics)
     return { ...section, count: metrics.length, alert: metricAlert(metrics) }
   })
 }
 
-export function metricSectionFrom(id) {
-  return METRIC_SECTIONS.some((section) => section.id === id) ? id : METRIC_SECTIONS[0].id
+/** One section's metrics in Sentinel's order: the rows of the ops list. */
+export function opsRows(metrics, sectionId) {
+  const list = metrics || []
+  return sectionId === 'all' ? list : list.filter((metric) => metricSection(metric) === sectionId)
 }
 
-/**
- * One line above the thermal tables: how many sensors, the hottest one, and the limits they
- * share. Sensors that did not report are counted but never chosen as the hottest.
- */
-export function thermalSummary(groups) {
-  const metrics = (groups || []).flatMap((group) => group.metrics)
-  let hottest = null
-  for (const metric of metrics) {
-    if (isNumber(metric.value) && (!hottest || metric.value > hottest.value)) hottest = metric
-  }
-  const shared = (field) => {
-    const values = new Set(metrics.map((metric) => (isNumber(metric[field]) ? metric[field] : null)))
-    const [only] = values
-    return values.size === 1 && only !== null ? only : null
-  }
-  const unit = metrics[0]?.unit ?? 'C'
-  return {
-    count: metrics.length,
-    reporting: metrics.filter((metric) => isNumber(metric.value)).length,
-    hottest,
-    limits: thresholdText({ warn: shared('warn'), critical: shared('critical'), unit })
-  }
+export function metricSectionFrom(id) {
+  return METRIC_SECTIONS.some((section) => section.id === id) ? id : METRIC_SECTIONS[0].id
 }
 
 /**
