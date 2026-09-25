@@ -25,13 +25,13 @@ function loadSettingsApi(stored = {}) {
   return window.viewerSettingsApi;
 }
 
-test("viewer synchronization settings default to a 350 ms video buffer and unlimited retention", () => {
+test("viewer synchronization settings default to a 300 ms video buffer and unlimited retention", () => {
   const api = loadSettingsApi();
 
   assert.deepEqual(
     { ...api.defaults.general },
     {
-      videoSyncBufferMs: 350,
+      videoSyncBufferMs: 300,
       metadataRetentionMs: 0,
       showRoi: true,
       applyRoiFiltering: true,
@@ -51,6 +51,18 @@ test("viewer synchronization settings preserve configured values", () => {
   assert.equal(settings.general.metadataRetentionMs, 2500);
 });
 
+test("the previous 350 ms default migrates to the measured 300 ms floor", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 8,
+      general: { videoSyncBufferMs: 350 },
+    }),
+  });
+
+  assert.equal(api.resolveTypeSettings(0).general.videoSyncBufferMs, 300);
+  assert.equal(api.readScopeSettings("global").general.videoSyncBufferMs, 300);
+});
+
 test("version two settings migrate without retaining overlay delay", () => {
   const api = loadSettingsApi({
     viewerSettings_global: JSON.stringify({
@@ -61,8 +73,8 @@ test("version two settings migrate without retaining overlay delay", () => {
   });
 
   const settings = api.readScopeSettings("global");
-  assert.equal(settings.version, 8);
-  assert.equal(settings.general.videoSyncBufferMs, 350);
+  assert.equal(settings.version, 9);
+  assert.equal(settings.general.videoSyncBufferMs, 300);
   assert.equal(settings.general.metadataRetentionMs, 0);
   assert.equal(settings.general.showRoi, false);
   assert.equal(settings.types["object-detection"].confidenceThreshold, 0.5);
@@ -101,7 +113,7 @@ test("legacy animation and stabilization settings are discarded", () => {
   });
   const pose3D = settings.auxiliary["blazepose-3d"];
 
-  assert.equal(settings.version, 8);
+  assert.equal(settings.version, 9);
   assert.equal(pose3D.yawDegrees, 35);
   assert.equal("autoRotate" in pose3D, false);
   assert.equal("rotationSpeed" in pose3D, false);

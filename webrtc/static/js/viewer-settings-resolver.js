@@ -1,6 +1,7 @@
 (() => {
-  const SETTINGS_VERSION = 8;
-  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, 7, SETTINGS_VERSION]);
+  const SETTINGS_VERSION = 9;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, 7, 8, SETTINGS_VERSION]);
+  const PREVIOUS_VIDEO_SYNC_DEFAULT_MS = 350;
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -38,7 +39,7 @@
     classification: { visible: true }
   };
   const GENERAL_DEFAULTS = {
-    videoSyncBufferMs: 350,
+    videoSyncBufferMs: 300,
     metadataRetentionMs: 0,
     showRoi: true,
     applyRoiFiltering: true
@@ -102,12 +103,16 @@
     return Array.from(byLabel.values());
   }
 
-  function normalizeGeneral(rawGeneral = {}, fillDefaults = true) {
+  function normalizeGeneral(rawGeneral = {}, fillDefaults = true, sourceVersion = SETTINGS_VERSION) {
     const general = fillDefaults ? clone(GENERAL_DEFAULTS) : {};
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "videoSyncBufferMs")) {
-      general.videoSyncBufferMs = Math.round(
+      const configuredBufferMs = Math.round(
         clampNumber(rawGeneral.videoSyncBufferMs, 0, 4000, GENERAL_DEFAULTS.videoSyncBufferMs)
       );
+      general.videoSyncBufferMs = sourceVersion < SETTINGS_VERSION
+        && configuredBufferMs === PREVIOUS_VIDEO_SYNC_DEFAULT_MS
+        ? GENERAL_DEFAULTS.videoSyncBufferMs
+        : configuredBufferMs;
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "metadataRetentionMs")) {
       general.metadataRetentionMs = Math.round(
@@ -251,7 +256,7 @@
     if (!rawSettings || typeof rawSettings !== "object") return settings;
 
     if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
-      settings.general = normalizeGeneral(rawSettings.general);
+      settings.general = normalizeGeneral(rawSettings.general, true, rawSettings.version);
       METADATA_TYPES.forEach((type) => {
         settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value]);
       });
@@ -284,7 +289,7 @@
     if (!rawSettings || typeof rawSettings !== "object") return overrides;
 
     if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
-      overrides.general = normalizeGeneral(rawSettings.general, false);
+      overrides.general = normalizeGeneral(rawSettings.general, false, rawSettings.version);
       METADATA_TYPES.forEach((type) => {
         const rawType = rawSettings.types?.[type.value];
         if (rawType && typeof rawType === "object") {
