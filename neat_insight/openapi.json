@@ -714,6 +714,26 @@
         }
       }
     },
+    "/api/mediasrc/pull": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Pull an existing RTSP stream into a slot",
+        "description": "Points the slot's mediamtx path at a stream that already exists on the network (an IP camera, another server) so applications read it at `rtsp://…/srcN`. The packets are forwarded unchanged. Only `rtsp://` and `rtsps://` URLs are accepted; credentials go in `username`/`password` or in the URL and never appear in any response. Insight checks the camera once before configuring the pull: rejected credentials answer 400 with `reason: \"auth_failed\"` and nothing is configured; an unreachable camera still configures the pull (status `unreachable`) and the slot recovers by itself. The pull is session-only and needs the loopback mediamtx control API.",
+        "operationId": "pullMediaSource",
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PullRequest"}}}
+        },
+        "responses": {
+          "200": {"description": "The slot, now `pulled`.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MediaSource"}}}},
+          "400": {"description": "Invalid index or URL, or the camera rejected the credentials (`reason: \"auth_failed\"`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"description": "The slot is streaming, held by an external publisher, or already pulling.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "502": {"description": "mediamtx refused the path configuration.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "503": {"description": "The mediamtx control API was disabled at launch (port 9997 in use), so pulling is unavailable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+        }
+      }
+    },
     "/stream/http/src{index}.mjpg": {
       "get": {
         "tags": ["Media sources"],
@@ -1158,9 +1178,9 @@
         "properties": {
           "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
           "file": {"type": "string", "description": "Assigned relative media-library path, or an empty string for an unassigned slot."},
-          "state": {"type": "string", "enum": ["playing", "stopped", "external"], "description": "Persisted playback state, or `external` when a publisher other than Insight currently holds the slot's RTSP path. `external` is derived at request time and never persisted."},
+          "state": {"type": "string", "enum": ["playing", "stopped", "external", "pulled"], "description": "Persisted playback state, or `external` when a publisher other than Insight currently holds the slot's RTSP path, or `pulled` when Insight pulls a network stream into the slot (session-only, never persisted). `external` is derived at request time and never persisted."},
           "transport": {"type": "string", "enum": ["rtsp", "http", ""], "description": "Selected output transport, or empty when the slot is unassigned."},
-          "codec": {"type": "string", "description": "Codec detected from the assigned media, or the codec on the wire while the slot is external (any mediamtx track name lower-cased, e.g. `vp8`)."},
+          "codec": {"type": "string", "description": "Codec detected from the assigned media, or the codec on the wire while the slot is external (any mediamtx track name lower-cased, e.g. `vp8`), or the codec on the wire while the slot is pulled (`none` until the stream is live)."},
           "allowed_transports": {"type": "array", "description": "Transports compatible with the detected codec and current backend capabilities.", "items": {"type": "string", "enum": ["rtsp", "http"]}},
           "urls": {
             "type": "object",
@@ -1172,6 +1192,7 @@
           },
           "readers": {"type": "array", "description": "Clients currently reading this slot from mediamtx (Insight's own probe reader is hidden).", "items": {"$ref": "#/components/schemas/StreamReader"}},
           "external": {"$ref": "#/components/schemas/ExternalStream"},
+          "pull": {"$ref": "#/components/schemas/PullStream"},
           "fps": {
             "type": ["integer", "null"],
             "minimum": 1,
@@ -1186,6 +1207,34 @@
             "type": ["string", "null"],
             "description": "Relative media-library path the running stream reads: the source, or a `.renditions/` file when an FPS rendition is in use. Null when stopped."
           }
+        }
+      },
+      "PullRequest": {
+        "type": "object",
+        "required": ["index", "url"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
+          "url": {"type": "string", "description": "`rtsp://` or `rtsps://` URL of the stream to pull. Credentials typed as `user:pass@` are accepted."},
+          "username": {"type": "string", "description": "Optional; wins over credentials in the URL."},
+          "password": {"type": "string", "description": "Optional; wins over credentials in the URL."}
+        }
+      },
+      "PullStream": {
+        "type": "object",
+        "description": "Details of a stream Insight pulls into the slot. Present only when `state` is `pulled`. Never contains credentials.",
+        "required": ["status", "scheme", "host", "path", "error", "since", "codec_supported", "width", "height", "fps", "bitrate_bps"],
+        "properties": {
+          "status": {"type": "string", "enum": ["connecting", "live", "unreachable", "auth_failed"], "description": "`live` while mediamtx receives the stream; `unreachable` retries by itself; `auth_failed` stays until the slot is stopped and pulled again with other credentials."},
+          "scheme": {"type": "string", "enum": ["rtsp", "rtsps"]},
+          "host": {"type": "string", "description": "`host:port` of the source."},
+          "path": {"type": "string", "description": "Path and query of the source URL."},
+          "error": {"type": ["string", "null"], "description": "Short explanation for `unreachable` and `auth_failed`."},
+          "since": {"type": ["string", "null"], "description": "RFC 3339 time the path became ready; null until live."},
+          "codec_supported": {"type": "boolean"},
+          "width": {"type": ["integer", "null"]},
+          "height": {"type": ["integer", "null"]},
+          "fps": {"type": ["number", "null"]},
+          "bitrate_bps": {"type": ["integer", "null"]}
         }
       },
       "StreamReader": {
