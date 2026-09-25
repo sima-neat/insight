@@ -376,7 +376,7 @@ Codec and transport are derived from the assigned media:
 | `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. |
 | `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
 | `POST` | `/api/mediasrc/takeover` | JSON `{"index": 2}` | Disconnect the external publisher holding a slot (409 when the slot is not external, 502 when the mediamtx API is unreachable). |
-| `POST` | `/api/mediasrc/pull` | JSON `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Pull an existing RTSP/RTSPS stream into the slot (mediamtx forwards it unchanged). 400 with `reason: "auth_failed"` when the camera rejects the credentials, 409 when the slot is streaming, external or pulled, 503 when the mediamtx control API is unavailable. `stop` releases it. |
+| `POST` | `/api/mediasrc/pull` | JSON `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Pull an existing RTSP/RTSPS stream into the slot (mediamtx forwards it unchanged). 400 with `reason: "auth_failed"` when the camera rejects the credentials, 409 when the slot is streaming, external or pulled, 502 when mediamtx refuses or cannot be reached while configuring the slot, 503 only when the mediamtx control API was disabled at launch. `stop` releases it. |
 | `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments, including for an externally held slot; the external stream keeps running and its slot is listed in `skipped_external`. |
 | `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
 | `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
@@ -435,5 +435,6 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
 - `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 - `503` from `/api/mediasrc/pull` when the mediamtx control API was disabled at launch.
+- `502` from `/api/mediasrc/pull` when mediamtx refuses or cannot be reached while configuring the slot.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.
