@@ -1683,13 +1683,11 @@ export default function App() {
       return next
     })
     // Same reasoning as a lost connection: record each stop rather than reload,
-    // naming the session so a slot that has moved on is left alone.
+    // naming the session so a slot that has moved on is left alone. Route through
+    // the shared helper so each row is held busy for its stop — closing the same
+    // click-during-teardown race as the manual and onLost paths.
     for (const [index, session] of lostSessions) {
-      try {
-        await stopSource(index, releaseClaimFor(session))
-      } catch (e) {
-        setError(e.message)
-      }
+      await stopWebcamSessionBound(index, session)
     }
     if (lostSessions.length) await loadSources().catch(() => {})
   }
@@ -1831,15 +1829,12 @@ export default function App() {
           // tab no longer holds is not ours to stop at all.
           const lost = webcamSessionsRef.current.get(index)
           if (!lost) return
-          teardownWebcamSession(index)
-          // Record the stop explicitly rather than reloading: MediaMTX may
-          // still report the path ready while the teardown is in flight, and
-          // a reload that sees that would leave the row Live with no session.
-          stopSource(index, releaseClaimFor(lost))
-            .catch(async (e) => {
-              setError(e.message)
-              await loadSources().catch(() => {})
-            })
+          // Same session-bound, busy-guarded stop as a manual click. The row
+          // still shows Live until this lands, so a Stop clicked in that window
+          // must not fire a second, unbound stop; holding the row busy prevents
+          // it. The helper records the stop rather than reloading (MediaMTX may
+          // still report the path ready mid-teardown) and never rejects.
+          stopWebcamSessionBound(index, lost)
         },
       })
       pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
@@ -1916,17 +1911,18 @@ export default function App() {
     return sessionId ? { publisherReleased: true, publisherSession: sessionId } : {}
   }
 
-  async function stopWebcamSource(index) {
-    // Hold the row busy for the whole stop, the way start/assign do. Without it,
-    // a second Stop click while the first request is in flight finds no local
-    // session — teardownWebcamSession() below already cleared it — and sends an
-    // *unbound* stop, which the backend implements by kicking whichever publisher
-    // holds the slot now. If another tab assigned and started a replacement
-    // camera in that window, the duplicate click would disconnect it. Setting
-    // webcamBusy disables this row's Stop button (rowBusy), so only the
-    // session-bound first request is emitted.
+  // The one safe way to stop a webcam this tab owns, shared by the manual Stop,
+  // the automatic connection-loss teardown, and the device-removal sweep. It
+  // holds the row busy for the whole request so a second stop cannot fire after
+  // teardownWebcamSession() has cleared the local session: that second call would
+  // find no session and send an *unbound* stop, which the backend implements by
+  // kicking whichever publisher holds the slot then — disconnecting a replacement
+  // another tab may have started in the gap. `session` is captured by the caller
+  // before teardown so the stop names the session it is about; a null session
+  // releases nothing (releaseClaimFor). Never rejects, so fire-and-forget callers
+  // (onLost) need no catch.
+  async function stopWebcamSessionBound(index, session) {
     setWebcamBusy((prev) => ({ ...prev, [index]: true }))
-    const session = webcamSessionsRef.current.get(index)
     teardownWebcamSession(index)
     try {
       await stopSource(index, releaseClaimFor(session))
@@ -1942,6 +1938,10 @@ export default function App() {
         return next
       })
     }
+  }
+
+  async function stopWebcamSource(index) {
+    await stopWebcamSessionBound(index, webcamSessionsRef.current.get(index))
   }
 
   async function autoAssignAllSources() {
