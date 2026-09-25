@@ -57,6 +57,8 @@ curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9
 
 Insight 이외의 주체가 게시하는 슬롯은 `state: "external"`과 `external` 객체(프로토콜, 주소, 게시 시작 시각, 코덱 지원 여부, 해상도, 비트레이트)를 보고하며, 모든 슬롯은 현재 `readers`도 나열합니다. 이러한 슬롯에 대해 `start`와 `assign`은 `409`를 반환하며, 슬롯에 Insight 자체 스트림이 더 이상 남아 있지 않으면 `stop`도 마찬가지입니다. `POST /api/mediasrc/takeover`는 게시자의 연결을 끊습니다. 일괄 작업은 외부 스트림을 계속 실행 상태로 두고 해당 슬롯을 `skipped_external`에 나열합니다. `reset`은 여전히 모든 슬롯의 저장된 기록을 지웁니다. `GET /stream/preview/src<N>.mjpg`는 라이브 상태인 모든 슬롯의 MJPEG 미리보기를 소스 프레임 속도로 렌더링합니다.
 
+`{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}`를 사용한 `POST /api/mediasrc/pull`은 기존 RTSP/RTSPS 스트림을 슬롯으로 끌어옵니다. 그러면 슬롯은 `state: "pulled"`와 `pull` 객체(`connecting`, `live`, `unreachable` 또는 `auth_failed` 중 하나인 `status`와 호스트, 경로, 오류, 시작 시각, 코덱 지원 여부, 해상도, 비트레이트. 자격 증명은 절대 포함되지 않음)를 보고합니다. 자격 증명이 거부되면 `"reason": "auth_failed"`와 함께 `400`을 반환하고, 스트리밍 중이거나 외부이거나 이미 끌어온 슬롯은 `409`를 반환하며, `503`은 mediamtx 제어 API를 사용할 수 없다는 뜻입니다. `stop`은 끌어오기를 해제합니다. 끌어온 슬롯에 대해 `assign`, `start`, `prepare`, `takeover`는 `409`를 반환하며, 일괄 작업은 이 슬롯을 건너뛰고 `skipped_pulled`에 나열합니다. 끌어오기는 현재 세션에서만 유지됩니다.
+
 ## 응답 및 스트리밍 규칙
 
 - 대부분의 엔드포인트는 JSON 형식으로 응답합니다. 오류 발생 시에는 일반적으로 HTTP 오류 상태와 함께 `{"error": "message"}`를 사용합니다.
