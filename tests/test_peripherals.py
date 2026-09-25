@@ -346,6 +346,32 @@ class ProbeCollectTests(unittest.TestCase):
         (board.root / "sys/class/video4linux/video3/index").write_text("0\n")
         self.assertEqual([c["node"] for c in board.collect()["usb"]], ["/dev/video2"])
 
+    def test_usb_nodes_are_not_guessed_without_v4l2_ctl(self):
+        board = camera_board(self.tmp.name)
+        (board.root / "sys/class/video4linux/video3/index").write_text("0\n")
+        board.tools["v4l2-ctl"] = None
+        output = board.collect()
+        self.assertEqual(output["usb"], [])
+        issue = next(i for i in snapshot_of(output)["issues"] if i["code"] == "tool_missing" and "USB" in i["message"])
+        self.assertIn("cannot be identified", issue["message"])
+
+    def test_usb_node_is_not_guessed_when_capabilities_cannot_be_read(self):
+        board = camera_board(self.tmp.name)
+        board.command(
+            "v4l2-ctl",
+            "-d",
+            "/dev/video2",
+            "--info",
+            code=1,
+            err="Cannot open device /dev/video2: Permission denied",
+        )
+        output = board.collect()
+        self.assertEqual(output["usb"], [])
+        failure = next(f for f in output["failures"] if f["tool"] == "v4l2-ctl")
+        self.assertIn("Permission denied", failure["detail"])
+        issue = next(i for i in snapshot_of(output)["issues"] if i["code"] == "permission_denied")
+        self.assertEqual(issue["hint"], cameras.PERMISSION_HINT)
+
     def test_mipi_camera_is_enumerated_with_media_graph_placement(self):
         output = camera_board(self.tmp.name).collect()
         (camera,) = output["mipi"]

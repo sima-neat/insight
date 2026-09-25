@@ -548,7 +548,10 @@ def _usb_identity(usb_dir):
     }
 
 
-def collect_usb(tools, check_users):
+def collect_usb(tools, check_users, failures):
+    v4l2 = tools.get("v4l2-ctl")
+    if not v4l2:
+        return []
     by_id = _by_id_links()
     class_root = os.path.join(SYSFS_ROOT, "class", "video4linux")
     cameras = []
@@ -558,6 +561,12 @@ def collect_usb(tools, check_users):
         if usb_dir is None or _read(os.path.join(class_dir, "index")) != "0":
             continue
         node = "/dev/" + name
+        code, out, err = run([v4l2, "-d", node, "--info"])
+        if code != 0:
+            failures.append(_failure("v4l2-ctl", code, err or out))
+            continue
+        if not any(cap.startswith("Video Capture") for cap in parse_device_caps(out)):
+            continue
         camera = {
             "node": node,
             "by_id": by_id.get(node),
@@ -566,16 +575,11 @@ def collect_usb(tools, check_users):
             "formats": None,
             "detail": None,
         }
-        v4l2 = tools.get("v4l2-ctl")
-        if v4l2:
-            code, out, _ = run([v4l2, "-d", node, "--info"])
-            if code == 0 and not any(cap.startswith("Video Capture") for cap in parse_device_caps(out)):
-                continue
-            code, out, err = run([v4l2, "-d", node, "--list-formats-ext"])
-            if code == 0:
-                camera["formats"] = parse_v4l2_formats(out)
-            else:
-                camera["detail"] = _tail(err) or "v4l2-ctl --list-formats-ext failed"
+        code, out, err = run([v4l2, "-d", node, "--list-formats-ext"])
+        if code == 0:
+            camera["formats"] = parse_v4l2_formats(out)
+        else:
+            camera["detail"] = _tail(err) or "v4l2-ctl --list-formats-ext failed"
         camera["users"] = check_users([node])
         cameras.append(camera)
     return cameras
@@ -638,7 +642,7 @@ def collect():
         "mipi": mipi,
         # Only needed to gate libcamera's modes, so skipped when no camera reported any.
         "isp": read_isp_sizes(tools) if any(camera["formats"] for camera in mipi) else None,
-        "usb": collect_usb(tools, check_users),
+        "usb": collect_usb(tools, check_users, failures),
         "failures": failures,
     }
 

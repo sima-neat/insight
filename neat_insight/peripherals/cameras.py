@@ -66,7 +66,7 @@ TOOL_ISSUES = {
         "Install v4l-utils (media-ctl) on the board, then Refresh.",
     ),
     "v4l2-ctl": (
-        "`v4l2-ctl` was not found, so USB camera modes and the ISP's output sizes cannot be listed.",
+        "`v4l2-ctl` was not found, so USB cameras cannot be identified and the ISP's output sizes cannot be listed.",
         "Install v4l-utils (v4l2-ctl) on the board, then Refresh.",
     ),
     "gst-inspect-1.0": (
