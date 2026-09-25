@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
-  previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
+  previewSrc, protocolLabel, pullSourceText, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
@@ -1811,13 +1811,15 @@ export default function App() {
 
   // Rejects with the server's message so the dialog can show it inline and stay open.
   async function pullSource(index, payload) {
-    await fetchJson('/api/mediasrc/pull', {
+    const data = await fetchJson('/api/mediasrc/pull', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index, ...payload })
     })
     await loadSources()
-    setUploadStatus(`src${index} is pulling from ${payload.url.replace(/\/\/[^@]*@/, '//')}.`)
+    // Built from the server's credential-free pull record, never from the typed URL, which may
+    // still carry a password after the first '@' in a userinfo containing a literal '@'.
+    setUploadStatus(`src${index} is pulling from ${pullSourceText(data.pull)}.`)
   }
 
   async function autoAssignAllSources() {

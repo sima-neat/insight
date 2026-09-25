@@ -57,7 +57,7 @@ export default function AssignMediaDialog({ sourceIndex, currentFile, tree, onAs
   const canPull = STREAM_URL_PATTERN.test(url.trim()) && !busy
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Assign media to src${sourceIndex}`}>
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Source for src${sourceIndex}`}>
       <div className="modal-card assign-dialog-card" data-testid="assign-dialog">
         <h3>Source for src{sourceIndex}</h3>
         <div className="assign-tabs" role="tablist" aria-label="Source kind">
