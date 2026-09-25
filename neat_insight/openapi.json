@@ -190,7 +190,7 @@
       "get": {
         "tags": ["Media library"],
         "summary": "List media files as a folder tree",
-        "description": "Returns the complete visible media-library hierarchy using relative paths that can be passed directly to inspection, assignment, preview, and deletion APIs. Hidden entries and macOS archive metadata are omitted so the result matches what users see in Insight.",
+        "description": "Returns the complete visible media-library hierarchy using relative paths that can be passed directly to inspection, assignment, preview, and deletion APIs. Hidden entries and macOS archive metadata are omitted so the result matches what users see in Insight. File nodes carry `streamable`, folder nodes carry `streamable_count`, so clients hide unsupported files with the server's rule.",
         "operationId": "listMediaFiles",
         "responses": {
           "200": {
@@ -1065,6 +1065,8 @@
           "name": {"type": "string", "description": "Final filename or directory name displayed to the user."},
           "path": {"type": "string", "description": "Relative media-library path accepted by other media endpoints."},
           "type": {"type": "string", "enum": ["file", "folder"], "description": "Whether the node contains media bytes or nested nodes."},
+          "streamable": {"type": "boolean", "description": "Present on files: whether the media-source streamer accepts this file by its extension. Files with `false` are hidden from Insight's media selectors."},
+          "streamable_count": {"type": "integer", "minimum": 0, "description": "Present on folders: number of streamable files anywhere beneath the folder, used for the folder badge in the media selector."},
           "children": {"type": "array", "description": "Recursive children for a folder; omitted for files.", "items": {"$ref": "#/components/schemas/MediaTreeNode"}}
         }
       },

@@ -4,6 +4,9 @@ import {
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import FolderBrowser from './media/FolderBrowser.jsx'
+import AssignMediaDialog from './media/AssignMediaDialog.jsx'
+import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -108,14 +111,6 @@ const ONBOARDING_STEPS = [
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
   }
 ]
-
-function flattenFiles(tree, acc = []) {
-  for (const node of tree || []) {
-    if (node.type === 'file') acc.push(node.path)
-    if (node.type === 'folder') flattenFiles(node.children || [], acc)
-  }
-  return acc
-}
 
 function prettyKey(key) {
   if (key === 'duration_ms') return 'Duration'
@@ -755,12 +750,15 @@ export default function App() {
   const [routeWorkspacePath, setRouteWorkspacePath] = useState(() => initialRoute.workspacePath)
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
+  const [mediaFolder, setMediaFolder] = useState('')
+  const mediaFolderRef = useRef('') // so async reloads read the current folder, not a stale closure
   const [sources, setSources] = useState([])
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
+  const [assignTarget, setAssignTarget] = useState(null) // slot index while the assign dialog is open
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [renditionUsage, setRenditionUsage] = useState({ count: 0, bytes: 0 })
   const [clearRenditionsOpen, setClearRenditionsOpen] = useState(false)
@@ -835,13 +833,10 @@ export default function App() {
   const sourcePollBusy = useRef(false)
   sourcesRef.current = sources
 
-  const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
-  const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
-  const filteredFiles = useMemo(() => {
-    const q = mediaFilter.trim().toLowerCase()
-    if (!q) return allFiles
-    return allFiles.filter((f) => f.toLowerCase().includes(q))
-  }, [allFiles, mediaFilter])
+  // Streamable files drive assignment and Bulk Start; the library also lists the rest greyed (issue #113).
+  const allFiles = useMemo(() => streamableFiles(mediaTree), [mediaTree])
+  const allMediaPaths = useMemo(() => allFilePaths(mediaTree), [mediaTree])
+  const videoFiles = allFiles // streamable files only; Bulk Start needs at least one
   const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
   const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
   const catalogSourcesById = useMemo(() => {
@@ -926,14 +921,36 @@ export default function App() {
   async function loadMedia(forceSelectFirst = false) {
     const data = await fetchJson('/api/media-files')
     setMediaTree(data)
-    const flat = flattenFiles(data)
+    // A folder can vanish between loads (its last file deleted); fall back to the nearest ancestor.
+    const current = mediaFolderRef.current
+    const folder = nearestExistingFolder(data, current)
+    if (folder !== current) {
+      setMediaFolder(folder)
+      setMediaFilter('')
+    }
     if (forceSelectFirst) {
-      setSelectedFile(flat[0] || '')
+      // Prefer something the user can see: the first streamable file in the folder they are in.
+      const here = listFolder(data, folder).files.find((f) => f.streamable)
+      setSelectedFile(here ? here.path : '')
       return
     }
-    if (!selectedFile && flat.length > 0) {
-      setSelectedFile(flat[0])
+    if (!selectedFile) {
+      const flat = streamableFiles(data)
+      if (flat.length > 0) setSelectedFile(flat[0])
     }
+  }
+
+  function navigateMediaFolder(path) {
+    setMediaFolder(path)
+    setMediaFilter('') // a scoped search never silently carries over to another folder
+  }
+
+  // Show the folder that holds `path` and select it (imports and uploads land outside the
+  // folder the user is browsing).
+  function revealMediaFile(path) {
+    setMediaFolder(parentPath(path))
+    setMediaFilter('')
+    setSelectedFile(path)
   }
 
   async function loadSources() {
@@ -1028,6 +1045,10 @@ export default function App() {
   }
 
   useEffect(() => {
+    mediaFolderRef.current = mediaFolder
+  }, [mediaFolder])
+
+  useEffect(() => {
     Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
   }, [])
 
@@ -1075,12 +1096,12 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedMediaPaths.length) return
-    const available = new Set(allFiles)
+    const available = new Set(allMediaPaths)
     const next = selectedMediaPaths.filter((path) => available.has(path))
     if (next.length !== selectedMediaPaths.length) {
       setSelectedMediaPaths(next)
     }
-  }, [allFiles, selectedMediaPaths])
+  }, [allMediaPaths, selectedMediaPaths])
 
   useEffect(() => {
     if (!selectedCatalogSource) {
@@ -1354,7 +1375,7 @@ export default function App() {
       const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved YouTube media to '))
       const savedPath = savedLine ? savedLine.replace(/^Saved YouTube media to\s+/, '').trim() : ''
       await loadMedia()
-      if (savedPath) setSelectedFile(savedPath)
+      if (savedPath) revealMediaFile(savedPath)
       setUploadProgress(null)
       setUploadStatus('Imported YouTube video.')
       setImportDialogOpen(false)
@@ -1425,7 +1446,7 @@ export default function App() {
         if (savedPath) lastSavedPath = savedPath
       }
       await loadMedia()
-      if (lastSavedPath) setSelectedFile(lastSavedPath)
+      if (lastSavedPath) revealMediaFile(lastSavedPath)
       setUploadProgress(null)
       setUploadStatus(`Imported ${assetsToImport.length} catalog asset(s).`)
       setImportDialogOpen(false)
@@ -1513,6 +1534,8 @@ export default function App() {
       }
 
       await loadMedia()
+      // Uploads always land at the top of the library, so show it if we are browsing elsewhere.
+      if (mediaFolderRef.current) navigateMediaFolder('')
       if (!failed.length) {
         setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
@@ -2183,37 +2206,26 @@ export default function App() {
                   <span className="sr-only">Import Media</span>
                 </button>
               </div>
-              <p className="meta-count">{filteredFiles.length} files</p>
-
-              <div className="media-toolbar">
-                <input className="search-input" placeholder="Filter files..." value={mediaFilter} onChange={(e) => setMediaFilter(e.target.value)} />
-              </div>
-
-              <div className="media-list">
-                {filteredFiles.map((path) => {
-                  const checked = selectedMediaPaths.includes(path)
-                  const className = [
-                    'media-row',
-                    path === selectedFile ? 'active' : '',
-                    checked ? 'selected' : ''
-                  ].filter(Boolean).join(' ')
-                  return (
-                    <div key={path} className={className}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelectedMediaPath(path)}
-                        aria-label={`Select ${path} for deletion`}
-                      />
-                      <button type="button" className="media-row-preview" onClick={() => setSelectedFile(path)}>
-                        <span className="media-name">{path}</span>
-                        <span className="media-ext">{path.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                      </button>
-                    </div>
-                  )
-                })}
-                {filteredFiles.length === 0 && <p className="empty">No files match the filter.</p>}
-              </div>
+              <FolderBrowser
+                tree={mediaTree}
+                folder={mediaFolder}
+                onNavigate={navigateMediaFolder}
+                filter={mediaFilter}
+                onFilterChange={setMediaFilter}
+                selectedPath={selectedFile}
+                onSelect={setSelectedFile}
+                showUnsupported
+                fileRowClass={(path) => (selectedMediaPaths.includes(path) ? 'selected' : '')}
+                renderFileLead={(path) => (
+                  <input
+                    type="checkbox"
+                    checked={selectedMediaPaths.includes(path)}
+                    onChange={() => toggleSelectedMediaPath(path)}
+                    aria-label={`Select ${path} for deletion`}
+                  />
+                )}
+                idPrefix="library"
+              />
             </section>
 
             <section className="panel">
@@ -2341,12 +2353,17 @@ export default function App() {
                             {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
                           <span className="src-file-cell">
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value }).catch(() => {})} disabled={Boolean(encodeProgress[src.index])}>
-                            <option value="">Not assigned</option>
-                            {videoFiles.map((file) => (
-                              <option key={file} value={file}>{file}</option>
-                            ))}
-                          </select>
+                            <button
+                              type="button"
+                              className={src.file ? 'source-file-btn' : 'source-file-btn unassigned'}
+                              onClick={(e) => { e.stopPropagation(); selectSource(src.index); setAssignTarget(src.index) }}
+                              disabled={Boolean(encodeProgress[src.index])}
+                              aria-label={`Assign media to src${src.index}`}
+                              title={src.file || 'Not assigned'}
+                              data-testid={`source-file-${src.index}`}
+                            >
+                              {src.file || 'Not assigned'}
+                            </button>
                             {src.fps != null && (
                               <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
                             )}
@@ -3098,6 +3115,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {assignTarget != null && (
+        <AssignMediaDialog
+          sourceIndex={assignTarget}
+          currentFile={(sources.find((s) => s.index === assignTarget) || {}).file || ''}
+          tree={mediaTree}
+          onAssign={(file) => updateSource(assignTarget, { file })}
+          onClose={() => setAssignTarget(null)}
+        />
       )}
 
       {bulkStartOpen && (

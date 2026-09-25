@@ -292,7 +292,9 @@ select:focus-visible,
   position: fixed;
   top: 18px;
   right: 18px;
-  z-index: 50;
+  /* above .modal-backdrop (60) and the workspace JSON modal (70): an error raised by a
+     dialog action must stay visible */
+  z-index: 80;
   max-width: min(480px, calc(100vw - 36px));
   display: grid;
   gap: 8px;
@@ -1015,7 +1017,7 @@ button:hover:not(:disabled) {
 .icon-action-btn:disabled,
 button:disabled {
   opacity: 0.52;
-  cursor: not-allowed;
+  cursor: default; /* not-allowed renders as no cursor on some desktop themes */
   transform: none;
 }
 
@@ -3515,4 +3517,155 @@ button:disabled {
   .youtube-form-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Media folder browser (issue #113) */
+.folder-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.crumb-sep {
+  color: #8aa0b2;
+  padding: 0 2px;
+}
+
+.crumb-link {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  border-radius: 4px;
+}
+
+.crumb-link:hover {
+  text-decoration: underline;
+}
+
+.crumb-current {
+  font-weight: 600;
+  padding: 2px 4px;
+}
+
+.folder-nav-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.folder-nav-actions .btn-ghost {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.media-row.folder-row {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.media-row.folder-row:hover {
+  border-color: var(--line-strong);
+}
+
+.folder-icon {
+  width: 16px;
+  height: 16px;
+  fill: #5b7188;
+}
+
+.folder-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #486176;
+  background: rgba(15, 122, 116, 0.08);
+  border-radius: 999px;
+  padding: 1px 7px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.media-row-lead {
+  width: 16px;
+  height: 16px;
+}
+
+.hidden-note {
+  margin: 2px 0 0;
+}
+
+.assign-dialog-card {
+  width: min(560px, 100%);
+}
+
+.assign-dialog-card .media-list {
+  max-height: 360px;
+}
+
+.assign-target {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.source-file-btn {
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.source-file-btn.unassigned {
+  color: #6b7f92;
+}
+
+.source-file-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.src-file-cell .source-file-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.media-row.unsupported .media-name {
+  color: #7d8da0;
+}
+
+.unsupported-tag {
+  color: #8b5a00;
+  background: #fff4e0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
 }
