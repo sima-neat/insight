@@ -8,6 +8,7 @@ import hashlib
 import secrets
 import socket
 import ssl
+import threading
 import urllib.parse
 from dataclasses import dataclass
 from typing import Optional
@@ -188,3 +189,70 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
         return ProbeResult("unreachable", "The camera closed the connection")
     finally:
         sock.close()
+
+
+PROBE_INTERVAL_SECONDS = 10.0
+
+
+def status_from_probe(result: ProbeResult) -> str:
+    return "connecting" if result.status == "ok" else result.status
+
+
+@dataclass
+class PullRecord:
+    index: int
+    url: str            # full URL with credentials; never leaves the process
+    scheme: str
+    host: str
+    path: str
+    started_at: float
+    status: str = "connecting"      # "connecting" | "unreachable" | "auth_failed"; "live" is derived from mediamtx
+    error: Optional[str] = None
+    probed_at: float = 0.0
+    probing: bool = False
+
+
+class PullRegistry:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._records: dict[int, PullRecord] = {}
+
+    def get(self, index: int) -> Optional[PullRecord]:
+        with self._lock:
+            return self._records.get(index)
+
+    def put(self, record: PullRecord) -> None:
+        with self._lock:
+            self._records[record.index] = record
+
+    def remove(self, index: int) -> Optional[PullRecord]:
+        with self._lock:
+            return self._records.pop(index, None)
+
+    def all(self) -> list:
+        with self._lock:
+            return list(self._records.values())
+
+    def indexes(self) -> list:
+        with self._lock:
+            return sorted(self._records)
+
+    def due_for_probe(self, now: float, interval: float = PROBE_INTERVAL_SECONDS) -> list:
+        due = []
+        with self._lock:
+            for record in self._records.values():
+                if record.probing or record.status == "auth_failed" or now - record.probed_at < interval:
+                    continue
+                record.probing = True
+                due.append(record)
+        return due
+
+    def apply_probe(self, record: PullRecord, result: ProbeResult, now: float) -> bool:
+        with self._lock:
+            if self._records.get(record.index) is not record:
+                return False
+            record.status = status_from_probe(result)
+            record.error = result.error
+            record.probed_at = now
+            record.probing = False
+            return True

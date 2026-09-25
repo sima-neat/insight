@@ -254,5 +254,56 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(closed, [True])
 
+class RegistryTests(unittest.TestCase):
+    def _record(self, index=3, **kwargs):
+        base = dict(index=index, url="rtsp://u:p@10.0.0.5:554/x", scheme="rtsp", host="10.0.0.5:554", path="/x", started_at=100.0)
+        base.update(kwargs)
+        return pull_sources.PullRecord(**base)
+
+    def test_put_get_remove(self):
+        registry = pull_sources.PullRegistry()
+        record = self._record()
+        registry.put(record)
+        self.assertIs(registry.get(3), record)
+        self.assertEqual(registry.indexes(), [3])
+        self.assertIs(registry.remove(3), record)
+        self.assertIsNone(registry.get(3))
+        self.assertIsNone(registry.remove(3))
+
+    def test_due_for_probe_marks_records_and_skips_auth_failed_and_in_flight(self):
+        registry = pull_sources.PullRegistry()
+        due = self._record(index=1, probed_at=0.0)
+        recent = self._record(index=2, probed_at=95.0)
+        failed = self._record(index=4, status="auth_failed", probed_at=0.0)
+        for record in (due, recent, failed):
+            registry.put(record)
+        self.assertEqual(registry.due_for_probe(now=100.0, interval=10.0), [due])
+        self.assertTrue(due.probing)
+        self.assertEqual(registry.due_for_probe(now=100.0, interval=10.0), [])  # in flight now
+
+    def test_apply_probe_writes_status_and_clears_in_flight(self):
+        registry = pull_sources.PullRegistry()
+        record = self._record(probing=True)
+        registry.put(record)
+        ok = registry.apply_probe(record, pull_sources.ProbeResult("unreachable", "Connection refused"), now=120.0)
+        self.assertTrue(ok)
+        self.assertEqual((record.status, record.error, record.probed_at, record.probing), ("unreachable", "Connection refused", 120.0, False))
+        registry.apply_probe(record, pull_sources.ProbeResult("ok"), now=130.0)
+        self.assertEqual((record.status, record.error), ("connecting", None))
+
+    def test_apply_probe_ignores_a_replaced_record(self):
+        registry = pull_sources.PullRegistry()
+        old = self._record(probing=True)
+        registry.put(old)
+        new = self._record(host="10.0.0.9:554")
+        registry.put(new)
+        self.assertFalse(registry.apply_probe(old, pull_sources.ProbeResult("auth_failed", "x"), now=1.0))
+        self.assertEqual(new.status, "connecting")
+
+    def test_status_from_probe(self):
+        self.assertEqual(pull_sources.status_from_probe(pull_sources.ProbeResult("ok")), "connecting")
+        self.assertEqual(pull_sources.status_from_probe(pull_sources.ProbeResult("auth_failed", "x")), "auth_failed")
+
+
 if __name__ == "__main__":
     unittest.main()
