@@ -31,13 +31,15 @@ function recordingContext() {
     lineDash: [],
     globalAlpha: 1,
     strokes: [],
+    strokeAlphas: [],
     fills: [],
     boxes: [],
+    texts: [],
     save() { stack.push({ lineDash: [...this.lineDash], globalAlpha: this.globalAlpha }); },
     restore() { Object.assign(this, stack.pop()); },
     setLineDash(value) { this.lineDash = [...value]; },
     strokeRect(...box) { this.strokes.push([...this.lineDash]); this.boxes.push(box); },
-    stroke() { this.strokes.push([...this.lineDash]); },
+    stroke() { this.strokes.push([...this.lineDash]); this.strokeAlphas.push(this.globalAlpha); },
     beginPath() {},
     closePath() {},
     moveTo() {},
@@ -46,7 +48,7 @@ function recordingContext() {
     fill() { this.fills.push(this.fillStyle); },
     fillRect() {},
     measureText(text) { return { width: text.length * 7 }; },
-    fillText() {},
+    fillText(text) { this.texts.push(text); },
   };
 }
 
@@ -94,6 +96,51 @@ test("drawing restores canvas state even when a strategy throws", (t) => {
   assert.equal(warn.mock.callCount(), 1);
   assert.deepEqual(ctx.lineDash, []);
   assert.equal(ctx.globalAlpha, 1);
+});
+
+test("pose landmark names are opt-in while joint markers remain configurable", (t) => {
+  loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const pose = {
+    type: "pose-estimation",
+    data: { poses: [{ keypoints: [{ name: "nose", x: 20, y: 20, confidence: 1 }] }] },
+  };
+
+  const clean = recordingContext();
+  drawMetadata(clean, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: true, showKeypointLabels: false } },
+  });
+  assert.equal(clean.fills.length, 1);
+  assert.deepEqual(clean.texts, []);
+
+  const labeled = recordingContext();
+  drawMetadata(labeled, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: false, showKeypointLabels: true } },
+  });
+  assert.equal(labeled.fills.length, 0);
+  assert.deepEqual(labeled.texts, ["nose"]);
+});
+
+test("low-confidence pose links fade instead of disappearing at the draw threshold", (t) => {
+  loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const ctx = recordingContext();
+  const pose = {
+    type: "pose-estimation",
+    data: { poses: [{ keypoints: [
+      { name: "left_shoulder", x: 20, y: 20, confidence: 0 },
+      { name: "left_elbow", x: 30, y: 30, confidence: 0 },
+    ] }] },
+  };
+
+  drawMetadata(ctx, canvas, pose, video, 0, {
+    settings: { general: {}, type: { showKeypoints: true } },
+  });
+
+  assert.equal(ctx.strokes.length, 1);
+  assert.ok(ctx.strokeAlphas[0] > 0 && ctx.strokeAlphas[0] < 1);
 });
 
 test("a malformed pose does not stop tracking or later frames", (t) => {

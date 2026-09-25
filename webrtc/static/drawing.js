@@ -30,6 +30,11 @@ const COCO_SKELETON = [
   ['right_hip', 'right_knee'], ['right_knee', 'right_ankle']
 ];
 
+function poseConfidenceAlpha(confidence) {
+  const value = Number.isFinite(Number(confidence)) ? Number(confidence) : 1;
+  return 0.18 + 0.82 * Math.min(1, Math.max(0, value));
+}
+
 
 function computeScaleAndOffset(video, canvas) {
   const containerWidth = canvas.clientWidth;
@@ -95,7 +100,7 @@ function resolveViewerDrawSettings(index, metadataType) {
     return window.resolveTypeSettings(index, metadataType);
   }
   return {
-    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    general: { videoSyncBufferMs: 300, metadataRetentionMs: 0, showRoi: true },
     type: {}
   };
 }
@@ -376,6 +381,8 @@ window.drawStrategies = {
     const strokeColor = settings.type.poseStrokeColor || 'aqua';
     const fillColor = settings.type.poseFillColor || 'aqua';
     const font = settings.type.poseFont || FONT;
+    const showKeypoints = settings.type.showKeypoints !== false;
+    const showKeypointLabels = settings.type.showKeypointLabels === true;
 
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
@@ -389,22 +396,30 @@ window.drawStrategies = {
 
       COCO_SKELETON.forEach(([a, b]) => {
         const kpA = kpMap[a], kpB = kpMap[b];
-        if (kpA && kpB && kpA.confidence > 0.3 && kpB.confidence > 0.3) {
+        const confidence = Math.min(kpA?.confidence ?? 1, kpB?.confidence ?? 1);
+        if (kpA && kpB) {
           ctx.beginPath();
           ctx.moveTo(kpA.x * scaleX + offsetX, kpA.y * scaleY + offsetY);
           ctx.lineTo(kpB.x * scaleX + offsetX, kpB.y * scaleY + offsetY);
+          ctx.globalAlpha = poseConfidenceAlpha(confidence);
           ctx.stroke();
         }
       });
 
       pose.keypoints.forEach(kp => {
-        if (kp.confidence > 0.3) {
-          ctx.beginPath();
-          ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
+        if (kp) {
+          ctx.globalAlpha = poseConfidenceAlpha(kp.confidence);
+          if (showKeypoints) {
+            ctx.beginPath();
+            ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          if (showKeypointLabels) {
+            ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
+          }
         }
       });
+      ctx.globalAlpha = 1;
     });
   },
 

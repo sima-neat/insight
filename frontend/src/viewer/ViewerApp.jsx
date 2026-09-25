@@ -7,6 +7,9 @@ import {
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import AuxiliaryPanel from "./AuxiliaryPanel.jsx";
+import "./blazePose3DRenderer.js";
+import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import { drawMetadata } from "./metadataDrawing.js";
@@ -28,13 +31,24 @@ const RECONNECT_DELAY_MS = 2000;
 // more expensive response.
 const DECODER_STALL_MS = 5000;
 const STREAM_STALE_MS = 1800;
+const auxiliaryWarnings = new Set();
+
+function warnIgnoredAuxiliary(channelIndex, ignored) {
+  for (const item of ignored) {
+    const id = item.message?.data?.id ?? "<unknown>";
+    const key = `${channelIndex}:${id}:${item.reason}`;
+    if (auxiliaryWarnings.has(key) || auxiliaryWarnings.size >= 128) continue;
+    auxiliaryWarnings.add(key);
+    console.warn(`auxiliary: channel ${channelIndex} ignored ${id}: ${item.reason}`);
+  }
+}
 
 function getResolvedViewerSettings(channelIndex, metadataType = "object-detection") {
   if (typeof window.resolveTypeSettings === "function") {
     return window.resolveTypeSettings(channelIndex, metadataType);
   }
   return {
-    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    general: { videoSyncBufferMs: 300, metadataRetentionMs: 0, showRoi: true },
     type: {},
   };
 }
@@ -43,22 +57,19 @@ function getSynchronizationSettings(channelIndex) {
   const settings = getResolvedViewerSettings(channelIndex);
   return {
     videoSyncBufferMs:
-      typeof settings.general.videoSyncBufferMs === "number" ? settings.general.videoSyncBufferMs : 350,
+      typeof settings.general.videoSyncBufferMs === "number" ? settings.general.videoSyncBufferMs : 300,
     metadataRetentionMs:
       typeof settings.general.metadataRetentionMs === "number" ? settings.general.metadataRetentionMs : 0,
   };
 }
 
-function getObjectConfidenceThreshold(channelIndex) {
-  const settings = getResolvedViewerSettings(channelIndex, "object-detection");
-  return settings.type.confidenceThreshold ?? 0;
-}
-
 function hasDrawableMetadata(message, channelIndex) {
   const data = message?.data;
+  const settings = getResolvedViewerSettings(channelIndex, message?.type);
+  if (settings.type.visible === false) return false;
   switch (message?.type) {
     case "object-detection": {
-      const threshold = getObjectConfidenceThreshold(channelIndex);
+      const threshold = settings.type.confidenceThreshold ?? 0;
       return Array.isArray(data?.objects) && data.objects.some((obj) => (obj?.confidence ?? 1) >= threshold);
     }
     case "classification":
@@ -94,6 +105,7 @@ function applyLayout(count) {
 function ChannelTile({ index, onActiveChange, debug }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const auxiliaryPanelRef = useRef(null);
   const metadataQueueRef = useRef(createMetadataQueue());
   const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
@@ -198,6 +210,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
+      auxiliaryPanelRef.current?.reset();
       trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
@@ -302,19 +315,26 @@ function ChannelTile({ index, onActiveChange, debug }) {
             canvas.height = canvas.clientHeight;
           }
 
+          const candidates = takeMetadataForFrame(
+            metadataQueueRef.current,
+            frameMetadata?.rtpTimestamp,
+            synchronizationSettingsRef.current.metadataRetentionMs,
+            now,
+          );
+          const { overlays, auxiliaryViews, ignoredAuxiliary } = partitionFrameMetadata(
+            candidates,
+            frameMetadata?.rtpTimestamp,
+          );
+          auxiliaryPanelRef.current?.showFrame(auxiliaryViews);
+          warnIgnoredAuxiliary(index, ignoredAuxiliary);
+
           if (ctx) {
             // Always clear overlay to avoid stale masks/opaque leftovers.
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const candidates = takeMetadataForFrame(
-              metadataQueueRef.current,
-              frameMetadata?.rtpTimestamp,
-              synchronizationSettingsRef.current.metadataRetentionMs,
-              now,
-            );
             // Every type for this frame draws onto the same overlay, already
             // cleared above.
             const frameState = {};
-            for (const candidate of candidates) {
+            for (const candidate of overlays) {
               const metadataType = candidate.data?.type;
               if (typeof metadataType !== "string" || !hasDrawableMetadata(candidate.data, index)) continue;
               const resolvedSettings = getResolvedViewerSettings(index, metadataType);
@@ -330,6 +350,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           trackHistoryRef.current.clear();
+          auxiliaryPanelRef.current?.clearFrame();
         }
       };
 
@@ -394,6 +415,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               const canvas = canvasRef.current;
               canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
               trackHistoryRef.current.clear();
+              auxiliaryPanelRef.current?.clearFrame();
             }
             setBanner(
               formatChannelStatus({
@@ -545,6 +567,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         metadataChannel.close();
       }
       if (pc) pc.close();
+      auxiliaryPanelRef.current?.reset();
       setTileActive(false);
     };
   }, [index, onActiveChange]);
@@ -559,6 +582,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
     <div className="video-tile" style={{ position: "relative" }} data-active={active ? "1" : "0"}>
       <video ref={videoRef} autoPlay playsInline muted />
       <canvas ref={canvasRef} />
+      <AuxiliaryPanel ref={auxiliaryPanelRef} channelIndex={index} />
       {!active && <div className="tile-no-video">No active video received</div>}
       <div className="tile-banner-wrapper">
         <div className="tile-banner-text">{banner}</div>

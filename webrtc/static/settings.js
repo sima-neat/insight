@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const viewerSettingsClose = document.getElementById("viewerSettingsClose");
   const saveViewerSettings = document.getElementById("saveViewerSettings");
   const metadataTypeSelector = document.getElementById("metadataTypeSelector");
+  const metadataVisibilityToggle = document.getElementById("toggleMetadataVisibility");
   const confidenceSlider = document.getElementById("confidenceSlider");
   const trackingConfidenceSlider = document.getElementById("trackingConfidenceSlider");
   const trackTrailLengthSlider = document.getElementById("trackTrailLengthSlider");
@@ -34,12 +35,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const objectDetectionSettings = document.getElementById("objectDetectionSettings");
   const segmentationSettings = document.getElementById("segmentationSettings");
   const trackingSettings = document.getElementById("trackingSettings");
+  const poseEstimationSettings = document.getElementById("poseEstimationSettings");
   const metadataNoSettings = document.getElementById("metadataNoSettings");
+  const poseKeypointsToggle = document.getElementById("togglePoseKeypoints");
+  const poseKeypointLabelsToggle = document.getElementById("togglePoseKeypointLabels");
   const roiToggle = document.getElementById("toggleRoiVisibility");
   const roiFilteringToggle = document.getElementById("toggleRoiFiltering");
   const trackHistoryToggle = document.getElementById("toggleTrackHistory");
   const trackHistoryDependentRows = document.querySelectorAll(".track-history-dependent");
+  const blazePose3DPanelToggle = document.getElementById("toggleBlazePose3DPanel");
+  const blazePose3DPanelMode = document.getElementById("blazePose3DPanelMode");
+  const blazePose3DTransparencySlider = document.getElementById("blazePose3DTransparencySlider");
+  const blazePose3DTransparencyDisplay = document.getElementById("blazePose3DTransparencyDisplay");
+  const blazePose3DYawSlider = document.getElementById("blazePose3DYawSlider");
+  const blazePose3DYawDisplay = document.getElementById("blazePose3DYawDisplay");
+  const blazePose3DPitchSlider = document.getElementById("blazePose3DPitchSlider");
+  const blazePose3DPitchDisplay = document.getElementById("blazePose3DPitchDisplay");
+  const blazePose3DReferenceBoxToggle = document.getElementById("toggleBlazePose3DReferenceBox");
+  const blazePose3DDependentRows = document.querySelectorAll(".blazepose-3d-dependent");
+  const blazePose3DScopeNote = document.getElementById("blazePose3DScopeNote");
+  const resetBlazePose3DView = document.getElementById("resetBlazePose3DView");
+  const useGlobalBlazePose3DView = document.getElementById("useGlobalBlazePose3DView");
   const settingsApi = window.viewerSettingsApi;
+  let metadataVisibilityDraft = {};
 
   if (!settingsApi) {
     console.error("viewerSettingsApi is not available");
@@ -59,6 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   viewerSettingsClose.addEventListener("click", () => {
     viewerSettingsOverlay.classList.add("hidden");
+    restoreSavedBlazePose3DSettings();
   });
 
   tabButtons.forEach((btn) => {
@@ -102,6 +121,43 @@ document.addEventListener("DOMContentLoaded", () => {
     updateTrackHistoryControls();
   });
 
+  blazePose3DPanelToggle.addEventListener("change", () => {
+    updateBlazePose3DControls();
+    previewBlazePose3DSettings();
+  });
+
+  blazePose3DPanelMode.addEventListener("change", previewBlazePose3DSettings);
+
+  blazePose3DYawSlider.addEventListener("input", () => {
+    updateBlazePose3DDisplays();
+    previewBlazePose3DSettings();
+  });
+
+  blazePose3DPitchSlider.addEventListener("input", () => {
+    updateBlazePose3DDisplays();
+    previewBlazePose3DSettings();
+  });
+
+  blazePose3DTransparencySlider.addEventListener("input", () => {
+    updateBlazePose3DDisplays();
+    previewBlazePose3DSettings();
+  });
+
+  blazePose3DReferenceBoxToggle.addEventListener("change", previewBlazePose3DSettings);
+
+  resetBlazePose3DView.addEventListener("click", () => {
+    const defaults = settingsApi.defaults.auxiliary["blazepose-3d"];
+    blazePose3DPanelToggle.checked = defaults.enabled;
+    blazePose3DPanelMode.value = defaults.panelMode;
+    blazePose3DTransparencySlider.value = Math.round((defaults.backgroundTransparency ?? 0) * 100);
+    blazePose3DYawSlider.value = defaults.yawDegrees;
+    blazePose3DPitchSlider.value = defaults.pitchDegrees;
+    blazePose3DReferenceBoxToggle.checked = defaults.showReferenceBox;
+    updateBlazePose3DDisplays();
+    updateBlazePose3DControls();
+    previewBlazePose3DSettings();
+  });
+
   videoSyncBufferSlider.addEventListener("input", () => {
     videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
   });
@@ -113,6 +169,20 @@ document.addEventListener("DOMContentLoaded", () => {
   metadataTypeSelector.addEventListener("change", () => {
     localStorage.setItem("lastViewerMetadataType", metadataTypeSelector.value);
     updateMetadataTypeSection();
+  });
+
+  metadataVisibilityToggle.addEventListener("change", () => {
+    metadataVisibilityDraft[metadataTypeSelector.value] = metadataVisibilityToggle.checked;
+  });
+
+  useGlobalBlazePose3DView.addEventListener("click", () => {
+    if (scope === "global") return;
+    settingsApi.clearScopeAuxiliarySettings(scope, "blazepose-3d");
+    loadSettings();
+    window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
+      detail: { scope, auxiliaryRenderer: "blazepose-3d" },
+    }));
+    viewerSettingsOverlay.classList.add("hidden");
   });
 
   saveViewerSettings.addEventListener("click", () => {
@@ -132,14 +202,22 @@ document.addEventListener("DOMContentLoaded", () => {
       trailLength: parseInt(trackTrailLengthSlider.value, 10),
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
+    settings.types["pose-estimation"].showKeypoints = poseKeypointsToggle.checked;
+    settings.types["pose-estimation"].showKeypointLabels = poseKeypointLabelsToggle.checked;
+    settingsApi.metadataTypes.forEach(({ value }) => {
+      settings.types[value].visible = metadataVisibilityDraft[value] !== false;
+    });
+    settings.auxiliary["blazepose-3d"] = blazePose3DDraftSettings();
 
     settingsApi.writeScopeSettings(scope, settings);
+    if (scope === "global") settingsApi.clearAllChannelSettings();
     viewerSettingsOverlay.classList.add("hidden");
     window.dispatchEvent(
       new CustomEvent("viewer-settings-changed", {
         detail: {
           scope,
-          metadataType: metadataTypeSelector.value
+          metadataType: metadataTypeSelector.value,
+          auxiliaryRenderer: "blazepose-3d"
         }
       })
     );
@@ -159,6 +237,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const index = scopeToIndex(scope);
     connectToStream(index.toString());
     updateViewerTitle(scope);
+    updateBlazePose3DScopeNote(scope, index);
     loadSettings();
     viewerSettingsOverlay.classList.remove("hidden");
     loadPolygons(index);
@@ -172,11 +251,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateMetadataTypeSection() {
     const selectedType = metadataTypeSelector.value;
+    metadataVisibilityToggle.checked = metadataVisibilityDraft[selectedType] !== false;
     objectDetectionSettings.style.display = selectedType === "object-detection" ? "flex" : "none";
     segmentationSettings.style.display = selectedType === "segmentation" ? "flex" : "none";
     trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
+    poseEstimationSettings.style.display = selectedType === "pose-estimation" ? "flex" : "none";
     metadataNoSettings.style.display =
-      selectedType !== "object-detection" && selectedType !== "segmentation" && selectedType !== "tracking" ? "flex" : "none";
+      selectedType !== "object-detection" && selectedType !== "segmentation" &&
+      selectedType !== "tracking" && selectedType !== "pose-estimation" ? "flex" : "none";
   }
 
   function updateTrackTrailLengthDisplay() {
@@ -198,6 +280,73 @@ document.addEventListener("DOMContentLoaded", () => {
         control.disabled = !enabled;
       });
     });
+  }
+
+  function updateBlazePose3DDisplays() {
+    blazePose3DTransparencyDisplay.textContent = `${blazePose3DTransparencySlider.value}%`;
+    blazePose3DYawDisplay.textContent = `${blazePose3DYawSlider.value}\u00b0`;
+    blazePose3DPitchDisplay.textContent = `${blazePose3DPitchSlider.value}\u00b0`;
+  }
+
+  function updateBlazePose3DControls() {
+    const enabled = blazePose3DPanelToggle.checked;
+    blazePose3DDependentRows.forEach((row) => {
+      row.classList.toggle("is-disabled", !enabled);
+      row.querySelectorAll("input, select, button").forEach((control) => {
+        control.disabled = !enabled;
+      });
+    });
+  }
+
+  function blazePose3DDraftSettings() {
+    return {
+      enabled: blazePose3DPanelToggle.checked,
+      panelMode: blazePose3DPanelMode.value,
+      backgroundTransparency: parseInt(blazePose3DTransparencySlider.value, 10) / 100,
+      yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
+      pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
+      showReferenceBox: blazePose3DReferenceBoxToggle.checked
+    };
+  }
+
+  function previewBlazePose3DSettings() {
+    window.dispatchEvent(new CustomEvent("viewer-settings-preview", {
+      detail: {
+        scope,
+        auxiliaryRenderer: "blazepose-3d",
+        auxiliarySettings: blazePose3DDraftSettings()
+      }
+    }));
+  }
+
+  function restoreSavedBlazePose3DSettings() {
+    window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
+      detail: { scope, auxiliaryRenderer: "blazepose-3d" }
+    }));
+  }
+
+  function updateBlazePose3DScopeNote(value, index) {
+    const isGlobal = value === "global";
+    const hasOverride = !isGlobal && settingsApi.hasScopeAuxiliarySettings(value, "blazepose-3d");
+    blazePose3DScopeNote.textContent = isGlobal
+      ? "Saving applies these settings to every channel and clears channel-specific overrides."
+      : hasOverride
+        ? `Channel ${index} is using channel-specific 3D Pose settings.`
+        : `Channel ${index} is inheriting the global 3D Pose settings.`;
+    useGlobalBlazePose3DView.style.display = isGlobal || !hasOverride ? "none" : "inline-flex";
+  }
+
+  function settingsForEditor() {
+    if (scope === "global") return settingsApi.readScopeSettings(scope);
+    const index = scopeToIndex(scope);
+    const settings = settingsApi.readScopeSettings(scope);
+    settingsApi.metadataTypes.forEach(({ value }) => {
+      const resolved = settingsApi.resolveTypeSettings(index, value);
+      settings.general = resolved.general;
+      settings.types[value] = resolved.type;
+    });
+    settings.auxiliary["blazepose-3d"] = settingsApi.resolveAuxiliarySettings(index, "blazepose-3d");
+    return settings;
   }
 
   function createObjectEntry(label, color, lineStyle, lineWidth) {
@@ -321,11 +470,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function loadSettings() {
-    const settings = settingsApi.readScopeSettings(scope);
+    const settings = settingsForEditor();
     const objectDetectionTypeSettings = settings.types["object-detection"];
     const segmentationTypeSettings = settings.types.segmentation;
     const trackingTypeSettings = settings.types.tracking;
+    const poseTypeSettings = settings.types["pose-estimation"];
     const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
+    const blazePose3DSettings = settings.auxiliary["blazepose-3d"]
+      || settingsApi.defaults.auxiliary["blazepose-3d"];
 
     confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
     confidenceDisplay.textContent = confidenceSlider.value;
@@ -337,16 +489,29 @@ document.addEventListener("DOMContentLoaded", () => {
     trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
     trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
     lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
-    videoSyncBufferSlider.value = settings.general.videoSyncBufferMs ?? 350;
+    videoSyncBufferSlider.value = settings.general.videoSyncBufferMs ?? 300;
     videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
     metadataRetentionSlider.value = settings.general.metadataRetentionMs ?? 0;
     metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
+    poseKeypointsToggle.checked = poseTypeSettings.showKeypoints !== false;
+    poseKeypointLabelsToggle.checked = poseTypeSettings.showKeypointLabels === true;
+    blazePose3DPanelToggle.checked = blazePose3DSettings.enabled !== false;
+    blazePose3DPanelMode.value = blazePose3DSettings.panelMode || "compact";
+    blazePose3DTransparencySlider.value = Math.round((blazePose3DSettings.backgroundTransparency ?? 0) * 100);
+    blazePose3DYawSlider.value = blazePose3DSettings.yawDegrees ?? -45;
+    blazePose3DPitchSlider.value = blazePose3DSettings.pitchDegrees ?? 20;
+    blazePose3DReferenceBoxToggle.checked = blazePose3DSettings.showReferenceBox !== false;
+    metadataVisibilityDraft = Object.fromEntries(
+      settingsApi.metadataTypes.map(({ value }) => [value, settings.types[value]?.visible !== false])
+    );
     updateTrackTrailLengthDisplay();
     updateLostTrackTtlDisplay();
     updateTrackHistoryControls();
+    updateBlazePose3DDisplays();
+    updateBlazePose3DControls();
     loadObjectEntries(objectDetectionTypeSettings.objects || settingsApi.defaults.types["object-detection"].objects);
     loadSegmentationEntries(segmentationTypeSettings.objects || settingsApi.defaults.types.segmentation.objects);
 
@@ -354,6 +519,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const supportedType = settingsApi.metadataTypes.some((metadataType) => metadataType.value === lastMetadataType);
     metadataTypeSelector.value = supportedType ? lastMetadataType : "object-detection";
     updateMetadataTypeSection();
+    updateBlazePose3DScopeNote(scope, scopeToIndex(scope));
   }
 
   addViewerObjectBtn?.addEventListener("click", () => {
@@ -382,6 +548,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById(initialTab).style.display = "flex";
   }
 
+  updateBlazePose3DScopeNote(scope, scopeToIndex(scope));
   loadSettings();
   window.openSettingsForScope = openSettingsForScope;
   window.loadPolygons = loadPolygons;

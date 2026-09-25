@@ -88,6 +88,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 - Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
 - Hard-reload the viewer after installing a new Insight before trusting a rendering result. A browser can serve a stale `drawing.js` for days.
+- Global Viewer Configuration saves are authoritative: they clear stored channel settings so the change takes effect everywhere. Settings opened from a tile create a later channel override; **Use Global Settings** discards it. Metadata types also have a **Show Overlay** switch; use it instead of treating style rows as visibility controls.
+- **Panel Transparency** in the 3D Pose tab adds transparency to auxiliary-panel surfaces without fading the visualization or controls. A global save applies the value to every channel.
 - Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
@@ -160,7 +162,41 @@ A frame may be described by several metadata types at once. Send one message per
 type, all carrying the source frame's `timestamp` in integer milliseconds; the
 correlator matches each against the retained frame mapping, and the viewer draws
 every type it holds for that frame.
-A second message of the same type for the same frame replaces the first; retained
+A separate panel accepts `type: "auxiliary-visualization"` for data that should
+not cover the video. Its `data` object requires `schema_version: 1`, a stable
+`id`, a registered `renderer`, and an object `payload`. The envelope is generic:
+the payload stays opaque to the transport and panel, and the registered renderer
+owns its schema, validation, drawing, and optional Viewer Configuration adapters.
+Unlike ordinary overlays,
+auxiliary views require the exact correlated RTP timestamp. The panel holds the
+last exactly correlated view for at most 160 ms across a brief delivery gap,
+then clears; late or expired messages are not selected. Multiple IDs for one
+frame become tabs; keep their channel and source PTS identical to the
+corresponding video and overlay messages. The
+built-in `blazepose-3d` renderer expects `payload.poses[].keypoints[]` with named
+finite `x`, `y`, and `z` world coordinates. Unknown versions/renderers are
+ignored and warned once in the browser console.
+Viewer Configuration has a **3D Pose** tab. Open it globally to set defaults or
+from a tile menu to control that channel's panel visibility, panel size, camera
+yaw/pitch, and 3D reference cube independently. Cube and camera changes from the
+panel controls stay synchronized with the corresponding channel configuration.
+Expanded mode is intentionally translucent so the source video remains visible
+behind the larger 3D visualization.
+The BlazePose panel can show a labeled reference cube around the world landmarks.
+Its skeleton uses an anatomical palette with a compact legend: amber head,
+violet torso, coral subject-left, and blue subject-right.
+Its panel-local controls toggle the cube and reset the camera; dragging the
+canvas selects a fixed manual inspection angle. The renderer uses each correlated
+frame's world landmarks directly, without temporal smoothing or automatic camera
+motion, so its pose timing remains aligned with the 2D overlay. It uses a fixed
+metric camera frame by default instead of refitting to changing pose bounds;
+`payload.view.center` and `payload.view.half_extent` can override that fixed frame.
+These preferences are browser-local and isolated by channel and auxiliary-view ID.
+The **Pose Estimation** metadata settings independently control overlay
+visibility, joint markers, and landmark names. Landmark names default off to
+avoid covering the subject in full-body demos.
+A second ordinary message of the same type for the same frame replaces the first;
+auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses
 the single-message arrival fallback, since types cannot safely be grouped without
 a shared frame identity.

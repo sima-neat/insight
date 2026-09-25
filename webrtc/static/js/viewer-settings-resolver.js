@@ -1,5 +1,7 @@
 (() => {
-  const SETTINGS_VERSION = 3;
+  const SETTINGS_VERSION = 9;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, 6, 7, 8, SETTINGS_VERSION]);
+  const PREVIOUS_VIDEO_SYNC_DEFAULT_MS = 350;
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -10,10 +12,12 @@
   ];
   const TYPE_DEFAULTS = {
     "object-detection": {
+      visible: true,
       confidenceThreshold: 0,
       objects: DEFAULT_OBJECTS
     },
     tracking: {
+      visible: true,
       confidenceThreshold: 0,
       history: {
         enabled: true,
@@ -21,20 +25,36 @@
         lostTrackTtlMs: 2000
       }
     },
-    "pose-estimation": {},
+    "pose-estimation": {
+      visible: true,
+      showKeypoints: true,
+      showKeypointLabels: false
+    },
     segmentation: {
+      visible: true,
       confidenceThreshold: 0,
       maskOpacity: 0.4,
       objects: DEFAULT_OBJECTS
     },
-    classification: {}
+    classification: { visible: true }
   };
   const GENERAL_DEFAULTS = {
-    videoSyncBufferMs: 350,
+    videoSyncBufferMs: 300,
     metadataRetentionMs: 0,
     showRoi: true,
     applyRoiFiltering: true
   };
+  const AUXILIARY_DEFAULTS = {
+    "blazepose-3d": {
+      enabled: true,
+      panelMode: "compact",
+      backgroundTransparency: 0,
+      yawDegrees: -45,
+      pitchDegrees: 20,
+      showReferenceBox: true
+    }
+  };
+  const PANEL_MODES = new Set(["compact", "collapsed", "expanded"]);
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -83,12 +103,16 @@
     return Array.from(byLabel.values());
   }
 
-  function normalizeGeneral(rawGeneral = {}, fillDefaults = true) {
+  function normalizeGeneral(rawGeneral = {}, fillDefaults = true, sourceVersion = SETTINGS_VERSION) {
     const general = fillDefaults ? clone(GENERAL_DEFAULTS) : {};
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "videoSyncBufferMs")) {
-      general.videoSyncBufferMs = Math.round(
+      const configuredBufferMs = Math.round(
         clampNumber(rawGeneral.videoSyncBufferMs, 0, 4000, GENERAL_DEFAULTS.videoSyncBufferMs)
       );
+      general.videoSyncBufferMs = sourceVersion < SETTINGS_VERSION
+        && configuredBufferMs === PREVIOUS_VIDEO_SYNC_DEFAULT_MS
+        ? GENERAL_DEFAULTS.videoSyncBufferMs
+        : configuredBufferMs;
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "metadataRetentionMs")) {
       general.metadataRetentionMs = Math.round(
@@ -123,6 +147,9 @@
 
   function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
+    if (Object.prototype.hasOwnProperty.call(rawType, "visible")) {
+      type.visible = rawType.visible !== false;
+    }
     if (metadataType === "object-detection" || metadataType === "segmentation") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
         type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
@@ -150,10 +177,60 @@
       if (fillDefaults || Object.keys(history).length > 0) {
         type.history = history;
       }
+    } else if (metadataType === "pose-estimation") {
+      if (Object.prototype.hasOwnProperty.call(rawType, "showKeypoints")) {
+        type.showKeypoints = rawType.showKeypoints !== false;
+      }
+      if (Object.prototype.hasOwnProperty.call(rawType, "showKeypointLabels")) {
+        type.showKeypointLabels = rawType.showKeypointLabels === true;
+      }
     } else if (rawType && typeof rawType === "object") {
       Object.assign(type, rawType);
     }
     return type;
+  }
+
+  function normalizeAuxiliarySettings(renderer, rawSettings = {}, fillDefaults = true) {
+    const defaults = AUXILIARY_DEFAULTS[renderer] || {
+      enabled: true,
+      panelMode: "compact"
+    };
+    const settings = fillDefaults ? clone(defaults) : {};
+    if (!rawSettings || typeof rawSettings !== "object") return settings;
+
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "enabled")) {
+      settings.enabled = rawSettings.enabled !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "panelMode")) {
+      settings.panelMode = PANEL_MODES.has(rawSettings.panelMode) ? rawSettings.panelMode : defaults.panelMode;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawSettings, "backgroundTransparency")) {
+      settings.backgroundTransparency = clampNumber(rawSettings.backgroundTransparency, 0, 1, 0);
+    }
+    if (renderer === "blazepose-3d") {
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "yawDegrees")) {
+        settings.yawDegrees = Math.round(clampNumber(rawSettings.yawDegrees, -180, 180, defaults.yawDegrees));
+      }
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "pitchDegrees")) {
+        settings.pitchDegrees = Math.round(clampNumber(rawSettings.pitchDegrees, -60, 60, defaults.pitchDegrees));
+      }
+      if (Object.prototype.hasOwnProperty.call(rawSettings, "showReferenceBox")) {
+        settings.showReferenceBox = rawSettings.showReferenceBox !== false;
+      }
+    }
+    return settings;
+  }
+
+  function normalizeAuxiliaryMap(rawAuxiliary = {}, fillDefaults = true) {
+    const auxiliary = {};
+    const renderers = new Set([
+      ...(fillDefaults ? Object.keys(AUXILIARY_DEFAULTS) : []),
+      ...Object.keys(rawAuxiliary && typeof rawAuxiliary === "object" ? rawAuxiliary : {})
+    ]);
+    renderers.forEach((renderer) => {
+      auxiliary[renderer] = normalizeAuxiliarySettings(renderer, rawAuxiliary?.[renderer], fillDefaults);
+    });
+    return auxiliary;
   }
 
   function readRawSettings(scope) {
@@ -169,7 +246,8 @@
     const settings = {
       version: SETTINGS_VERSION,
       general: clone(GENERAL_DEFAULTS),
-      types: {}
+      types: {},
+      auxiliary: normalizeAuxiliaryMap()
     };
     METADATA_TYPES.forEach((type) => {
       settings.types[type.value] = clone(TYPE_DEFAULTS[type.value] || {});
@@ -177,11 +255,12 @@
 
     if (!rawSettings || typeof rawSettings !== "object") return settings;
 
-    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
-      settings.general = normalizeGeneral(rawSettings.general);
+    if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
+      settings.general = normalizeGeneral(rawSettings.general, true, rawSettings.version);
       METADATA_TYPES.forEach((type) => {
         settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value]);
       });
+      settings.auxiliary = normalizeAuxiliaryMap(rawSettings.auxiliary);
       return settings;
     }
 
@@ -206,17 +285,18 @@
   }
 
   function settingsOverrides(rawSettings) {
-    const overrides = { general: {}, types: {} };
+    const overrides = { general: {}, types: {}, auxiliary: {} };
     if (!rawSettings || typeof rawSettings !== "object") return overrides;
 
-    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
-      overrides.general = normalizeGeneral(rawSettings.general, false);
+    if (SUPPORTED_SETTINGS_VERSIONS.has(rawSettings.version)) {
+      overrides.general = normalizeGeneral(rawSettings.general, false, rawSettings.version);
       METADATA_TYPES.forEach((type) => {
         const rawType = rawSettings.types?.[type.value];
         if (rawType && typeof rawType === "object") {
           overrides.types[type.value] = normalizeTypeSettings(type.value, rawType, false);
         }
       });
+      overrides.auxiliary = normalizeAuxiliaryMap(rawSettings.auxiliary, false);
       return overrides;
     }
 
@@ -275,6 +355,7 @@
     let typeSettings;
     if (type === "object-detection" || type === "segmentation") {
       typeSettings = {
+        visible: channelType.visible ?? globalType.visible ?? TYPE_DEFAULTS[type].visible,
         confidenceThreshold:
           channelType.confidenceThreshold ?? globalType.confidenceThreshold ?? TYPE_DEFAULTS[type].confidenceThreshold,
         objects: mergeObjectStyles(TYPE_DEFAULTS[type].objects, globalType.objects || [], channelType.objects || [])
@@ -288,6 +369,7 @@
       const globalHistory = globalType.history || {};
       const channelHistory = channelType.history || {};
       typeSettings = {
+        visible: channelType.visible ?? globalType.visible ?? TYPE_DEFAULTS[type].visible,
         confidenceThreshold:
           channelType.confidenceThreshold ?? globalType.confidenceThreshold ?? TYPE_DEFAULTS[type].confidenceThreshold,
         history: {
@@ -311,6 +393,17 @@
     };
   }
 
+  function resolveAuxiliarySettings(channelIndex, renderer) {
+    const defaults = normalizeAuxiliarySettings(renderer);
+    const globalOverrides = settingsOverrides(readRawSettings("global"));
+    const channelOverrides = settingsOverrides(readRawSettings(`channel_${channelIndex}`));
+    return {
+      ...defaults,
+      ...(globalOverrides.auxiliary[renderer] || {}),
+      ...(channelOverrides.auxiliary[renderer] || {})
+    };
+  }
+
   function readScopeSettings(scope) {
     return normalizeSettings(readRawSettings(scope));
   }
@@ -321,17 +414,72 @@
     return normalized;
   }
 
+  function writeScopeAuxiliarySettings(scope, renderer, auxiliarySettings) {
+    const raw = readRawSettings(scope);
+    let next;
+    if (!raw || typeof raw !== "object") {
+      next = { version: SETTINGS_VERSION, auxiliary: {} };
+    } else if (SUPPORTED_SETTINGS_VERSIONS.has(raw.version)) {
+      next = clone(raw);
+      next.version = SETTINGS_VERSION;
+      next.auxiliary = raw.auxiliary && typeof raw.auxiliary === "object" ? clone(raw.auxiliary) : {};
+    } else {
+      next = normalizeSettings(raw);
+    }
+    const existing = next.auxiliary[renderer] && typeof next.auxiliary[renderer] === "object"
+      ? next.auxiliary[renderer]
+      : {};
+    next.auxiliary[renderer] = normalizeAuxiliarySettings(
+      renderer,
+      { ...existing, ...auxiliarySettings },
+    );
+    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(next));
+    return clone(next.auxiliary[renderer]);
+  }
+
+  function hasScopeAuxiliarySettings(scope, renderer) {
+    const raw = readRawSettings(scope);
+    return Boolean(raw?.auxiliary?.[renderer] && typeof raw.auxiliary[renderer] === "object");
+  }
+
+  function clearScopeAuxiliarySettings(scope, renderer) {
+    const raw = readRawSettings(scope);
+    if (!raw || typeof raw !== "object") return;
+    const next = SUPPORTED_SETTINGS_VERSIONS.has(raw.version) ? clone(raw) : normalizeSettings(raw);
+    if (!next.auxiliary || typeof next.auxiliary !== "object") return;
+    delete next.auxiliary[renderer];
+    next.version = SETTINGS_VERSION;
+    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(next));
+  }
+
+  function clearAllChannelSettings() {
+    const keys = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (/^viewerSettings_channel_\d+$/.test(key || "")) keys.push(key);
+    }
+    keys.forEach((key) => window.localStorage.removeItem(key));
+    return keys.length;
+  }
+
   window.viewerSettingsApi = {
     version: SETTINGS_VERSION,
     metadataTypes: METADATA_TYPES,
     defaults: {
       general: GENERAL_DEFAULTS,
-      types: TYPE_DEFAULTS
+      types: TYPE_DEFAULTS,
+      auxiliary: AUXILIARY_DEFAULTS
     },
     readScopeSettings,
     writeScopeSettings,
+    writeScopeAuxiliarySettings,
+    hasScopeAuxiliarySettings,
+    clearScopeAuxiliarySettings,
+    clearAllChannelSettings,
     normalizeSettings,
-    resolveTypeSettings
+    resolveTypeSettings,
+    resolveAuxiliarySettings
   };
   window.resolveTypeSettings = resolveTypeSettings;
+  window.resolveAuxiliarySettings = resolveAuxiliarySettings;
 })();

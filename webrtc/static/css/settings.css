@@ -255,6 +255,29 @@
   width: 160px;
 }
 
+.filter-table select {
+  min-width: 160px;
+  padding: 6px 8px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font-family: var(--viewer-font-sans);
+}
+
+.settings-scope-note {
+  margin: 0 auto 12px;
+  color: #999;
+  font-family: var(--viewer-font-sans);
+  text-align: center;
+}
+
+.settings-inline-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
 .metadata-type-row {
   display: flex;
   align-items: center;
