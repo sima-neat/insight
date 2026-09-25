@@ -64,6 +64,16 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 
 When the application runs outside the SDK container, resolve the RTSP, video UDP, and metadata UDP host ports from `neat --json` before launching the test.
 
+## Stream from an external tool or webcam
+
+1. Open Streaming Sources and pick a slot that shows Idle.
+2. Publish to it from the host, e.g. `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`.
+3. The slot turns External. Select it and turn the preview on to check the picture; the first frame appears at the publisher's next keyframe, so keep the keyframe interval short (`-g 30` above).
+4. Run the application against the slot's RTSP URL as with any other source.
+5. To reuse the slot for a file, stop the external tool or press Take over.
+
+`sima-ai/tool-mediasources` (`mediasrc.sh`) starts its own MediaMTX on the same RTSP port and numbers streams from `src0`; run it on a different port or use Insight's slots instead of running both.
+
 ## Configure application endpoints from the SDK port map
 
 Use this workflow when the application runs on a DevKit and Insight runs inside the SDK:

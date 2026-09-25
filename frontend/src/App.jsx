@@ -1,4 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
+  previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
+} from './externalSource.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
@@ -694,6 +698,20 @@ export default function App() {
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [selectedSource, setSelectedSource] = useState(1)
+  const [previewEnabled, setPreviewEnabled] = useState(() => {
+    try {
+      return readPreviewEnabled(window.localStorage)
+    } catch {
+      return false
+    }
+  })
+  const [previewError, setPreviewError] = useState(false)
+  const [previewToken, setPreviewToken] = useState(() => Date.now())
+  const [loadedPreviewSrc, setLoadedPreviewSrc] = useState(null)
+  const previewImgRef = useRef(null)
+  const [takeoverTarget, setTakeoverTarget] = useState(null)
+  const [takeoverBusy, setTakeoverBusy] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -740,6 +758,11 @@ export default function App() {
   const [error, setError] = useState('')
   const metricEs = useRef(null)
   const youtubeImportAbortRef = useRef(null)
+  const sourcesRef = useRef(sources)
+  const beginSourcesLoad = useRef(null)
+  if (!beginSourcesLoad.current) beginSourcesLoad.current = latestOnly()
+  const sourcePollBusy = useRef(false)
+  sourcesRef.current = sources
 
   const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
   const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
@@ -815,6 +838,12 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewEnabled, previewToken, currentSource.external?.since) : null
+  // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
+  // load must be keyed on the tab as well, not on the URL alone.
+  const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
+  const previewLoading = Boolean(activePreviewSrc) && !previewError && loadedPreviewSrc !== activePreviewSrc
+  const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
@@ -837,8 +866,12 @@ export default function App() {
   }
 
   async function loadSources() {
+    // A poll answered after a newer request (such as the reload that follows a user
+    // action) holds older data and must not overwrite it.
+    const isLatest = beginSourcesLoad.current()
     const data = await fetchJson('/api/mediasrc')
-    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {} })
+    if (!isLatest()) return
+    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {}, readers: [] })
     setSources(filled)
   }
 
@@ -996,6 +1029,64 @@ export default function App() {
       setCatalogSelectedAssetPaths(next)
     }
   }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
+
+  // A preview that failed (e.g. its publisher dropped) gets a fresh start whenever its URL
+  // changes: a replacement publisher yields a new URL, and the image only mounts while
+  // there is no error.
+  useEffect(() => {
+    setPreviewError(false)
+  }, [activePreviewSrc])
+
+  useEffect(() => {
+    if (!activePreviewSrc) return undefined
+    const img = previewImgRef.current
+    return () => {
+      // A browser keeps an mjpeg <img> load running after the element is dropped, so an
+      // unmounted preview would decode forever; clearing src aborts it. The <img> is keyed
+      // on its URL, so every URL change detaches the element captured above (the ref
+      // already points at the replacement, or at null, when this cleanup runs).
+      if (img && !img.isConnected) img.src = ''
+      // Coming back to the tab mounts a new <img> on the same URL; forgetting the loaded
+      // URL brings the connecting indicator back without a second, aborted request.
+      setLoadedPreviewSrc(null)
+    }
+  }, [activePreviewSrc])
+
+  useEffect(() => {
+    if (!activePreviewSrc || previewError) return undefined
+    // A multipart mjpeg <img> fires load unreliably (Chrome only once the stream ends), so
+    // the first decoded frame is detected by the element gaining dimensions. The <img> is
+    // keyed on its URL, so a switch starts from a fresh element with naturalWidth 0.
+    const timer = setInterval(() => {
+      const img = previewImgRef.current
+      if (img && img.naturalWidth > 0) {
+        setLoadedPreviewSrc(activePreviewSrc)
+        clearInterval(timer)
+      }
+    }, 100)
+    return () => clearInterval(timer)
+  }, [activePreviewSrc, previewError])
+
+  useEffect(() => {
+    if (tab !== 'rtsp') return undefined
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      if (sourcesRef.current.some(isExternal)) setNow(Date.now())
+      // One poll at a time: a slow server would otherwise have every response superseded.
+      if (sourcePollBusy.current) return
+      sourcePollBusy.current = true
+      loadSources()
+        .catch((e) => console.warn('Source poll failed:', e.message))
+        .finally(() => { sourcePollBusy.current = false })
+    }
+    tick()
+    const timer = setInterval(tick, 2000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [tab])
 
   useEffect(() => {
     if (tab !== 'visualizer') return
@@ -1451,6 +1542,18 @@ export default function App() {
     }
   }
 
+  // A per-source action can be refused, e.g. with 409 when an external publisher took the
+  // slot since the last poll: show the reason and resync the list.
+  async function sourceAction(run) {
+    try {
+      await run()
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+      loadSources().catch(() => {})
+    }
+  }
+
   async function updateSource(index, patch) {
     const src = sources.find((item) => item.index === index) || {}
     const next = {
@@ -1459,30 +1562,27 @@ export default function App() {
       transport: src.transport || 'rtsp',
       ...patch
     }
-    await fetchJson('/api/mediasrc/assign', {
+    await sourceAction(() => fetchJson('/api/mediasrc/assign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(next)
-    })
-    await loadSources()
+    }))
   }
 
   async function startSource(index) {
-    await fetchJson('/api/mediasrc/start', {
+    await sourceAction(() => fetchJson('/api/mediasrc/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index })
-    })
-    await loadSources()
+    }))
   }
 
   async function stopSource(index) {
-    await fetchJson('/api/mediasrc/stop', {
+    await sourceAction(() => fetchJson('/api/mediasrc/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index })
-    })
-    await loadSources()
+    }))
   }
 
   async function autoAssignAllSources() {
@@ -1532,11 +1632,49 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
       await loadSources()
-      setSelectedSource(1)
+      selectSource(1)
       setUploadStatus(data.message || 'Reset all assignments.')
     } catch (e) {
       setError(e.message)
     }
+  }
+
+  async function takeOverSource() {
+    const index = takeoverTarget?.index
+    if (!index) return
+    setTakeoverBusy(true)
+    try {
+      await fetchJson('/api/mediasrc/takeover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+      setTakeoverTarget(null)
+      await loadSources()
+      setUploadStatus(`Disconnected the external stream on src${index}.`)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setTakeoverBusy(false)
+    }
+  }
+
+  // Selecting a slot and refreshing the preview token in one render keeps a source switch
+  // to a single preview request instead of one aborted and one kept.
+  function selectSource(index) {
+    setSelectedSource(index)
+    setPreviewError(false)
+    setPreviewToken(Date.now())
+  }
+
+  function togglePreview() {
+    const next = !previewEnabled
+    setPreviewEnabled(next)
+    setPreviewError(false)
+    setPreviewToken(Date.now())
+    try {
+      writePreviewEnabled(window.localStorage, next)
+    } catch {}
   }
 
   async function copyStreamUrl(src) {
@@ -1927,8 +2065,48 @@ export default function App() {
 
               <div className="sources">
                 {sources.map((src) => (
-                  <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
+                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : ''].filter(Boolean).join(' ')} onClick={() => selectSource(src.index)}>
                     {(() => {
+                      if (isExternal(src)) {
+                        const ext = src.external || {}
+                        const warning = codecWarningText(ext, codecLabel(src.codec))
+                        const chip = externalChipText(ext)
+                        return (
+                          <>
+                            <span className="src-label">src{src.index}</span>
+                            <span className="src-state external">External</span>
+                            <span className="external-chip" title={chip}>{chip}</span>
+                            <span className="codec-lock" title="External streams are read over RTSP">RTSP</span>
+                            <span
+                              className={warning ? 'codec-lock warn' : 'codec-lock'}
+                              title={warning || 'Codec of the external stream'}
+                            >
+                              {codecLabel(src.codec)}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
+                            </span>
+                            <button
+                              className="icon-action-btn takeover"
+                              onClick={(e) => { e.stopPropagation(); setTakeoverTarget(src) }}
+                              aria-label={`Take over: disconnect the external publisher on src${src.index}`}
+                              title={`Take over: disconnect the external publisher on src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                              </svg>
+                            </button>
+                            <button
+                              className="icon-action-btn copy"
+                              onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
+                              aria-label={`Copy stream URL for src${src.index}`}
+                              title={`Copy stream URL for src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9 9h10v12H9z" />
+                                <path d="M5 3h10v2H7v10H5z" />
+                              </svg>
+                            </button>
+                          </>
+                        )
+                      }
                       const isAssigned = Boolean(src.file)
                       const allowedTransports = Array.isArray(src.allowed_transports) ? src.allowed_transports : (isAssigned ? ['rtsp'] : [])
                       const transportLocked = !isAssigned || allowedTransports.length <= 1
@@ -2006,16 +2184,81 @@ export default function App() {
             </section>
 
             <section className="panel">
-              <h2>Source Preview: src{currentSource.index}</h2>
-              <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
-              <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
-
-              <div className="preview">
-                {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                {!currentSource.file && <p>Assign a media file to preview.</p>}
-              </div>
+              {(() => {
+                if (!isExternal(currentSource)) {
+                  return (
+                    <>
+                      <h2>Source Preview: src{currentSource.index}</h2>
+                      <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
+                      <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
+                      <div className="preview">
+                        {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
+                        {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
+                        {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
+                        {!currentSource.file && <p>Assign a media file to preview.</p>}
+                      </div>
+                    </>
+                  )
+                }
+                const ext = currentSource.external || {}
+                const warning = codecWarningText(ext, codecLabel(currentSource.codec))
+                const src = previewImgSrc
+                return (
+                  <>
+                    <div className="panel-topbar">
+                      <div>
+                        <h2>Source Preview: src{currentSource.index} <span className="src-state external preview-badge">External</span></h2>
+                        <p className="hint"><code>{currentSource.urls?.rtsp || `${rtspBase}/src${currentSource.index}`}</code></p>
+                      </div>
+                      <button
+                        type="button"
+                        className={previewEnabled ? 'btn-tonal preview-toggle' : 'btn-ghost preview-toggle'}
+                        aria-pressed={previewEnabled}
+                        onClick={togglePreview}
+                      >
+                        {previewEnabled ? 'Preview on' : 'Preview off'}
+                      </button>
+                    </div>
+                    <div className="preview">
+                      <div className="preview-loading" role="status" aria-live="polite">
+                        {previewLoading && (
+                          <>
+                            <div className="upload-progress-track"><div className="upload-progress-bar indeterminate" /></div>
+                            <span>Connecting to src{currentSource.index}...</span>
+                          </>
+                        )}
+                      </div>
+                      {!src && <p>Preview is off. Nothing is decoded. Turn it on to watch this stream.</p>}
+                      {src && previewError && (
+                        <p>
+                          Preview unavailable.{' '}
+                          <button type="button" className="btn-ghost" onClick={() => { setPreviewError(false); setPreviewToken(Date.now()) }}>Retry</button>
+                        </p>
+                      )}
+                      {src && !previewError && (
+                        <img
+                          key={src}
+                          ref={previewImgRef}
+                          src={src}
+                          className={previewLoading ? 'loading' : undefined}
+                          alt={`Live preview of src${currentSource.index}`}
+                          onLoad={() => setLoadedPreviewSrc(src)}
+                          onError={() => setPreviewError(true)}
+                        />
+                      )}
+                    </div>
+                    <table className="kv-table">
+                      <tbody>
+                        <tr><th>Publisher</th><td>{protocolLabel(ext.protocol)} · {ext.address || '-'}</td></tr>
+                        <tr><th>Video</th><td>{codecLabel(currentSource.codec)}{dimensionsText(ext) ? ` · ${dimensionsText(ext)}` : ''}{warning && <span className="warn-text"> ⚠ {warning}</span>}</td></tr>
+                        <tr><th>Live for</th><td>{liveFor(ext.since, now)}</td></tr>
+                        <tr><th>Bitrate</th><td>{formatBitrate(ext.bitrate_bps)}</td></tr>
+                        <tr><th>Readers</th><td>{readersText(currentSource.readers)}</td></tr>
+                      </tbody>
+                    </table>
+                  </>
+                )
+              })()}
             </section>
           </div>
         )}
@@ -2608,6 +2851,21 @@ export default function App() {
             <div className="modal-actions">
               <button onClick={() => setBulkStartOpen(false)}>Cancel</button>
               <button className="btn-tonal" onClick={startSourcesBulk}>Start</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {takeoverSource && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Disconnect external stream">
+          <div className="modal-card">
+            <h3>Disconnect external stream on src{takeoverSource.index}?</h3>
+            <p><code>{externalChipText(takeoverSource.external || {})}</code></p>
+            <p>Readers: {readersText(takeoverSource.readers)}</p>
+            <p>The publisher and all readers will be disconnected. src{takeoverSource.index} becomes Idle and you can assign a file to it.</p>
+            <div className="modal-actions">
+              <button onClick={() => setTakeoverTarget(null)} disabled={takeoverBusy}>Cancel</button>
+              <button className="danger" onClick={takeOverSource} disabled={takeoverBusy}>Disconnect</button>
             </div>
           </div>
         </div>

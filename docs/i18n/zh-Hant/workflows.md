@@ -6,8 +6,6 @@ sidebar_position: 4
 
 # 常見工作流程
 
-<a id="import-standard-test-videos"></a>
-
 ## 匯入標準測試影片
 
 當您需要用於範例、煙霧測試或多串流驗證的可重複媒體時，請使用標準影片素材：
@@ -65,6 +63,16 @@ curl -k -F "file=@${tmpdir}/video01.mp4" \
 6. 使用檢視器診斷功能來檢查串流瓶頸。在本次版本中，「統計資料」檢視僅為佔位符，我們計畫在下一個版本中新增執行階段瓶頸診斷功能。
 
 當應用程式在 SDK 容器外部執行時，請在啟動測試之前，從 `neat --json` 中解析 RTSP、視訊 UDP 和中繼資料 UDP 的主機連接埠。
+
+## 從外部工具或網路攝影機串流
+
+1. 開啟「串流來源」，並選擇一個顯示為閒置的插槽。
+2. 從主機發布到該插槽，例如 `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`。
+3. 插槽會變為外部。選取該插槽並開啟預覽以檢查畫面；第一個畫面會在發布端的下一個關鍵幀出現，因此請保持較短的關鍵幀間隔（上方的 `-g 30`）。
+4. 如同其他來源，針對插槽的 RTSP URL 執行應用程式。
+5. 若要將插槽改用於檔案，請停止外部工具或按下「接管」。
+
+`sima-ai/tool-mediasources`（`mediasrc.sh`）會在相同的 RTSP 連接埠上啟動自己的 MediaMTX，並從 `src0` 開始為串流編號；請在不同的連接埠上執行它，或改用 Insight 的插槽，而不要同時執行兩者。
 
 ## 從 SDK 埠對應表中設定應用程式端點。
 

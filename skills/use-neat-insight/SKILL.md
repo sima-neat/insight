@@ -91,6 +91,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
+- A source with `state: "external"` is held by a publisher Insight did not start. Do not call start/assign/stop on it (409); call `/api/mediasrc/takeover` only when the user explicitly wants that stream disconnected. Bulk endpoints leave the external stream alone and report such slots in `skipped_external`; `reset` still clears the stored assignment of every slot.
 
 ## Health And Metrics
 
@@ -334,7 +335,7 @@ For multi-stream testing, import multiple files, then use `/api/mediasrc/auto-as
 
 ## Media Sources
 
-Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state`, selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`.
+Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state` (`playing`, `stopped` or `external`), selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`. Each source also carries `readers` (current mediamtx readers) and, while external, an `external` object with protocol, address, since, codec_supported, width, height, fps and bitrate_bps.
 
 Codec and transport are derived from the assigned media:
 
@@ -346,15 +347,17 @@ Codec and transport are derived from the assigned media:
 | --- | --- | --- | --- |
 | `GET` | `/api/mediasrc/videos` | None | Return sorted relative media paths accepted by the media-source streamer. |
 | `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. |
-| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp"}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. |
+| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp"}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. Returns 409 for an external slot. |
 | `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. |
-| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. |
+| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot. |
 | `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
-| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. |
+| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. |
 | `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
-| `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments. |
+| `POST` | `/api/mediasrc/takeover` | JSON `{"index": 2}` | Disconnect the external publisher holding a slot (409 when the slot is not external, 502 when the mediamtx API is unreachable). |
+| `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments, including for an externally held slot; the external stream keeps running and its slot is listed in `skipped_external`. |
 | `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
 | `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
+| `GET` | `/stream/preview/src<int:index>.mjpg` | None | Multipart MJPEG preview of any live slot at the source frame rate. Max 4 concurrent (429). |
 
 Common workflow:
 
