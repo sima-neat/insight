@@ -4036,11 +4036,27 @@ button:disabled {
   background: var(--accent-soft);
 }
 
-.stats-compare-bar {
-  margin-top: 10px;
+/* Appears above the runs once any is ticked: how many, and what can be done with them. */
+.stats-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  border: 1px solid rgba(14, 90, 184, 0.18);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  padding: 6px 10px;
 }
 
-/* "Delete selected" becomes this in place: the question, then Delete and Cancel. */
+.stats-selection-count {
+  margin-right: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+/* "Delete" becomes this in place: the question, then Delete and Cancel. */
 .stats-delete-confirm {
   display: inline-flex;
   flex-wrap: wrap;

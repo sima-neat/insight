@@ -362,7 +362,7 @@ export function RunsPanel({
   // A refused note or tag list is shown where it can be fixed, not behind the fold.
   const extrasShown = extrasOpen || Boolean(formError && extras)
 
-  // Deleting is irreversible, so "Delete selected" first turns into an inline confirmation.
+  // Deleting is irreversible, so Delete first turns into an inline confirmation.
   const [confirming, setConfirming] = useState(false)
   // Where focus goes once the confirmation or the delete has rendered: the control that
   // replaced the one that had it, never the page body.
@@ -453,6 +453,49 @@ export function RunsPanel({
 
       {runs.length > 0 && (
         <>
+          {selected.length > 0 && (
+            <div className="stats-selection-bar" role="toolbar" aria-label="Selected runs">
+              <span className="stats-selection-count">{selected.length} selected</span>
+              <button
+                type="button"
+                className="btn-tonal"
+                onClick={onCompare}
+                disabled={!compareReady(selected) || compareBusy || deleteBusy}
+                title={compareReady(selected) || selected.length > 1 ? undefined : 'Select at least two runs to compare them'}
+              >
+                {compareBusy ? 'Comparing…' : 'Compare'}
+              </button>
+              {confirming ? (
+                <span
+                  className="stats-delete-confirm"
+                  role="group"
+                  aria-labelledby="stats-delete-prompt"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      cancelDelete()
+                    }
+                  }}
+                >
+                  <span id="stats-delete-prompt" className="stats-delete-prompt">
+                    {deletePrompt(selected.length)}
+                    <span className="sr-only"> This removes {selected.length === 1 ? 'it' : 'them'} from the board and cannot be undone.</span>
+                  </span>
+                  <button type="button" className="btn-ghost danger" onClick={confirmDelete}>Delete</button>
+                  <button type="button" className="btn-ghost" ref={cancelRef} onClick={cancelDelete}>Cancel</button>
+                </span>
+              ) : (
+                <>
+                  <button type="button" className="btn-ghost danger" ref={deleteRef} onClick={askDelete} disabled={deleteDisabled}>
+                    {deleteBusy ? 'Deleting…' : 'Delete'}
+                  </button>
+                  <button type="button" className="btn-ghost" onClick={onClearCompare} disabled={deleteBusy}>Clear</button>
+                </>
+              )}
+              <span className="sr-only" role="status">{deleteBusy ? `Deleting ${selected.length} run${selected.length === 1 ? '' : 's'}…` : ''}</span>
+            </div>
+          )}
+
           <table className="sysinfo-table stats-table stats-run-table">
             <thead>
               <tr>
@@ -496,45 +539,6 @@ export function RunsPanel({
               ))}
             </tbody>
           </table>
-
-          <div className="periph-actions stats-compare-bar">
-            <button
-              type="button"
-              className="btn-tonal"
-              onClick={onCompare}
-              disabled={!compareReady(selected) || compareBusy || deleteBusy}
-            >
-              {compareBusy ? 'Comparing…' : 'Compare selected'}
-            </button>
-            {confirming ? (
-              <span
-                className="stats-delete-confirm"
-                role="group"
-                aria-labelledby="stats-delete-prompt"
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault()
-                    cancelDelete()
-                  }
-                }}
-              >
-                <span id="stats-delete-prompt" className="stats-delete-prompt">
-                  {deletePrompt(selected.length)}
-                  <span className="sr-only"> This removes {selected.length === 1 ? 'it' : 'them'} from the board and cannot be undone.</span>
-                </span>
-                <button type="button" className="btn-ghost danger" onClick={confirmDelete}>Delete</button>
-                <button type="button" className="btn-ghost" ref={cancelRef} onClick={cancelDelete}>Cancel</button>
-              </span>
-            ) : (
-              <button type="button" className="btn-ghost danger" ref={deleteRef} onClick={askDelete} disabled={deleteDisabled}>
-                {deleteBusy ? 'Deleting…' : 'Delete selected'}
-              </button>
-            )}
-            {selected.length > 0 && !confirming && (
-              <button type="button" className="btn-ghost" onClick={onClearCompare} disabled={deleteBusy}>Clear selection</button>
-            )}
-            <span className="sr-only" role="status">{deleteBusy ? `Deleting ${selected.length} run${selected.length === 1 ? '' : 's'}…` : ''}</span>
-          </div>
 
           {uncomparable.length > 0 && (
             <Callout tone="warn" title="Some selected runs cannot be compared by name">
