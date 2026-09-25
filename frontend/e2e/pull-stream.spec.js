@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 
 import { openTab, sourceByIndex } from './insightApi.js'
 
-// A test publisher fills src48 so src47 can pull it back through the Stream URL tab (issue #127).
+// A test publisher fills src45 so src46 can pull it back through the Stream URL tab (issue #127).
 const PUBLISH_BASE = process.env.INSIGHT_RTSP_PUBLISH_BASE || 'rtsp://127.0.0.1:8554'
 const PULL_BASE = process.env.INSIGHT_RTSP_PULL_BASE || 'rtsp://127.0.0.1:8554'
 // The folder-navigation suite uses INSIGHT_TEST_SLOT (default 48); stay clear of it.
@@ -52,7 +52,7 @@ test('pull a stream into a slot through the dialog, watch it go live, then stop 
   await expect(page.getByTestId(`source-file-${SLOT}`)).toBeVisible()
 })
 
-test('a wrong URL scheme and a rejected camera keep the dialog open with the message', async ({ page }) => {
+test('an unreachable camera still configures the pull and the row says Unreachable until stopped', async ({ page }) => {
   await openTab(page, '/streaming')
   await page.getByTestId(`source-file-${SLOT}`).click()
   const dialog = page.getByTestId('assign-dialog')
