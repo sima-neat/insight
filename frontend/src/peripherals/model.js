@@ -276,7 +276,8 @@ export function formatOptions(camera) {
     const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
     return {
       value: f.format,
-      label: `${f.label || f.format} — ${selectable ? tierInfo(f.support?.tier).short : 'not usable'}`,
+      label: f.label || f.format,
+      tier: selectable ? f.support?.tier || '' : 'unsupported',
       disabled: !selectable,
       reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
       range: f.range || null
@@ -289,7 +290,8 @@ export function sizeOptions(camera, format) {
     value: sizeKey(s.width, s.height),
     width: s.width,
     height: s.height,
-    label: `${sizeLabel(s.width, s.height)} — ${tierInfo(sizeTier(s)).short}`
+    label: sizeLabel(s.width, s.height),
+    tier: sizeTier(s)
   }))
 }
 
@@ -297,8 +299,34 @@ export function fpsOptions(camera, format, width, height) {
   const size = findSize(findFormat(camera, format), width, height)
   return (size?.fps || []).map((f) => ({
     value: String(f.value),
-    label: `${fpsLabel(f.value)} fps — ${tierInfo(f.tier).short}`
+    label: `${fpsLabel(f.value)} fps`,
+    tier: f.tier
   }))
+}
+
+// A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
+// pill beside the menu for the chosen entry, and the entries are grouped under their tier.
+const TIER_PILLS = {
+  verified: { label: 'Verified', tone: 'ok' },
+  advertised: { label: 'Advertised', tone: 'warn' },
+  unsupported: { label: 'Not usable', tone: 'periph-danger' }
+}
+const TIER_GROUPS = [
+  { id: 'verified', label: 'Verified with Core' },
+  { id: 'advertised', label: 'Advertised by libcamera' },
+  { id: 'unsupported', label: 'Not usable' },
+  { id: '', label: 'Support unknown' }
+]
+
+export function optionTier(options, value) {
+  const option = (options || []).find((o) => o.value === String(value))
+  return option ? TIER_PILLS[option.tier] || null : null
+}
+
+export function groupOptions(options) {
+  return TIER_GROUPS
+    .map((group) => ({ ...group, options: (options || []).filter((o) => (o.tier || '') === group.id) }))
+    .filter((group) => group.options.length)
 }
 
 // One visible explanation line per camera state, chosen by priority, so the

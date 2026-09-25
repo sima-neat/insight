@@ -20,11 +20,13 @@ import {
   formatRangeLabel,
   formatRelativeTime,
   fpsOptions,
+  groupOptions,
   groupCameras,
   initialBoardForm,
   isSnapshotStale,
   modeLabel,
   normalizeError,
+  optionTier,
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
@@ -156,16 +158,18 @@ test('cameras are grouped MIPI first, then USB, and other kinds are ignored', ()
 test('format options disable non-exportable formats and keep their reason', () => {
   const [nv12, rgb] = formatOptions(imx568)
   assert.equal(nv12.disabled, false)
-  assert.equal(nv12.label, 'NV12 (YUV 4:2:0) — advertised')
+  assert.equal(nv12.label, 'NV12 (YUV 4:2:0)')
+  assert.equal(nv12.tier, 'advertised')
   assert.deepEqual(nv12.range.max_width, 2432)
   assert.equal(rgb.disabled, true)
-  assert.equal(rgb.label, 'RGB888 — not usable')
+  assert.equal(rgb.label, 'RGB888')
+  assert.equal(rgb.tier, 'unsupported')
   assert.equal(rgb.reason, 'Core CameraInput outputs NV12 only.')
 })
 
-test('size and fps options are labelled with their best support tier', () => {
-  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => o.label), ['1920×1080 — verified', '1280×720 — advertised'])
-  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => o.label), ['30 fps — verified', '60 fps — advertised'])
+test('size and fps options carry their best support tier, for the pill beside the menu', () => {
+  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier]), [['1920×1080', 'verified'], ['1280×720', 'advertised']])
+  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.label, o.tier]), [['30 fps', 'verified'], ['60 fps', 'advertised']])
   assert.deepEqual(fpsOptions(imx568, 'NV12', 1920, 1080).map((o) => o.value), ['30', '59.94'])
   assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
 })
@@ -565,4 +569,17 @@ test('renders without a collapse leave focus where it is', () => {
   // The effect runs after every render, e.g. each keystroke in the board form.
   assert.equal(focusReturn.flush(), null)
   assert.equal(change.focused, 1)
+})
+
+test('a mode menu groups its entries by tier, and the pill names the chosen one', () => {
+  const sizes = sizeOptions(imx477, 'NV12')
+  assert.deepEqual(groupOptions(sizes).map((g) => [g.label, g.options.map((o) => o.label)]),
+    [['Verified with Core', ['1920×1080']], ['Advertised by libcamera', ['1280×720']]])
+  assert.deepEqual(optionTier(sizes, sizes[1].value), { label: 'Advertised', tone: 'warn' })
+  assert.equal(optionTier(sizes, 'no-such-size'), null)
+  const formats = formatOptions(imx568)
+  assert.deepEqual(groupOptions(formats).map((g) => g.label), ['Advertised by libcamera', 'Not usable'])
+  assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
+  assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
+  assert.deepEqual(groupOptions([]), [])
 })

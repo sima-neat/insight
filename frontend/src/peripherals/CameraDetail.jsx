@@ -6,6 +6,8 @@ import {
   deviceRows,
   formatOptions,
   fpsOptions,
+  groupOptions,
+  optionTier,
   sizeKey,
   sizeOptions,
   tierInfo
@@ -32,6 +34,22 @@ function BlockedFormats({ options }) {
   )
 }
 
+function FieldHead({ title, tier }) {
+  return (
+    <span className="periph-field-head">
+      {title}
+      {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
+    </span>
+  )
+}
+
+function ModeOptions({ options }) {
+  const groups = groupOptions(options)
+  const entry = (o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
+  if (groups.length < 2) return options.map(entry)
+  return groups.map((group) => <optgroup key={group.id} label={group.label}>{group.options.map(entry)}</optgroup>)
+}
+
 function ModePicker({ camera, selection, notice, onChange }) {
   const formats = formatOptions(camera)
   const sizes = selection ? sizeOptions(camera, selection.format) : []
@@ -55,13 +73,13 @@ function ModePicker({ camera, selection, notice, onChange }) {
       <legend>Input mode</legend>
       <div className="periph-mode-fields">
         <label>
-          Pixel format
+          <FieldHead title="Pixel format" tier={optionTier(formats, selection.format)} />
           <select value={selection.format} onChange={(e) => onChange({ ...selection, format: e.target.value })}>
-            {formats.map((f) => <option key={f.value} value={f.value} disabled={f.disabled}>{f.label}</option>)}
+            <ModeOptions options={formats} />
           </select>
         </label>
         <label>
-          Resolution
+          <FieldHead title="Resolution" tier={optionTier(sizes, sizeKey(selection.width, selection.height))} />
           <select
             value={sizeKey(selection.width, selection.height)}
             onChange={(e) => {
@@ -69,13 +87,13 @@ function ModePicker({ camera, selection, notice, onChange }) {
               onChange({ format: selection.format, width: size.width, height: size.height, fps: selection.fps })
             }}
           >
-            {sizes.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            <ModeOptions options={sizes} />
           </select>
         </label>
         <label>
-          Frame rate
+          <FieldHead title="Frame rate" tier={optionTier(rates, selection.fps)} />
           <select value={String(selection.fps)} onChange={(e) => onChange({ ...selection, fps: Number(e.target.value) })}>
-            {rates.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            <ModeOptions options={rates} />
           </select>
         </label>
       </div>

@@ -3519,6 +3519,15 @@ button:disabled {
   color: #2f4c61;
 }
 
+/* A menu's title with the chosen entry's tier as a pill, so no entry needs a suffix. */
+.periph-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+
 .periph-refresh[aria-disabled='true'] {
   /* Dim the surface, never the label: fading both drops "Scanning… N s" below AA contrast,
      and that state is on screen for the whole scan. */
