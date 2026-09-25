@@ -21,6 +21,7 @@ class FakeMediamtx:
         self.pull_sources = {}
         self.cleared = []
         self.fail_patch = False
+        self.fail_after_apply = False
 
     def snapshot(self):
         return dict(self.paths) if self.available else None
@@ -44,6 +45,8 @@ class FakeMediamtx:
             raise mediamtx.MediamtxError("connection refused")
         self.pull_sources[name] = url
         self.paths[name] = pulled_path(int(name[3:]), ready=False)
+        if self.fail_after_apply:
+            raise mediamtx.MediamtxError("timed out")  # mediamtx applied the PATCH but answered too late
 
     def clear_pull_source(self, name):
         if self.fail_patch:
@@ -873,6 +876,27 @@ class PullSourceTests(_SourceFixture):
         response = self._pull()
         self.assertEqual(response.status_code, 502)
         self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_patch_failure_after_mediamtx_applied_it_clears_the_source(self):
+        self.mtx.fail_after_apply = True
+        response = self._pull()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertEqual(self.mtx.pull_sources, {})
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_background_probe_that_raises_releases_the_record(self):
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        record.probing = True
+
+        def boom(url, timeout=2.0):
+            raise RuntimeError("unexpected")
+
+        with mock.patch.object(app_module, "probe_rtsp", boom):
+            with self.assertRaises(RuntimeError):
+                app_module._run_pull_probe(record)
+        self.assertFalse(record.probing)
 
     def test_pull_bumps_generation_so_an_in_flight_start_abandons(self):
         self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")

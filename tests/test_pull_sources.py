@@ -63,8 +63,8 @@ class NormalizeUrlTests(unittest.TestCase):
 class FakeRtspServer:
     """Answers one DESCRIBE per connection the way a camera would. `mode` selects the behaviour."""
 
-    def __init__(self, mode="ok", user="cam", password="pw", qop=None):
-        self.mode, self.user, self.password, self.qop = mode, user, password, qop
+    def __init__(self, mode="ok", user="cam", password="pw", qop=None, algorithm=None):
+        self.mode, self.user, self.password, self.qop, self.algorithm = mode, user, password, qop, algorithm
         self.requests = []
         self.sock = socket.socket()
         self.sock.bind(("127.0.0.1", 0))
@@ -108,14 +108,18 @@ class FakeRtspServer:
                 if self.mode == "ok" or self._authorized(data.decode()):
                     conn.sendall(b"RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Type: application/sdp\r\nContent-Length: 0\r\n\r\n")
                     return
-                challenge = self._challenge()
-                conn.sendall(f"RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\nWWW-Authenticate: {challenge}\r\n\r\n".encode())
+                challenges = "".join(f"WWW-Authenticate: {c}\r\n" for c in self._challenges())
+                conn.sendall(f"RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\n{challenges}\r\n".encode())
 
-    def _challenge(self):
+    def _challenges(self):
         if self.mode == "basic":
-            return 'Basic realm="ipcam"'
+            return ['Basic realm="ipcam"']
         qop = f', qop="{self.qop}"' if self.qop else ""
-        return f'Digest realm="ipcam", nonce="abc123"{qop}'
+        algorithm = f", algorithm={self.algorithm}" if self.algorithm else ""
+        digest = f'Digest realm="ipcam", nonce="abc123"{qop}{algorithm}'
+        if self.mode == "digest+basic":  # e.g. Hikvision: Digest first, Basic last
+            return [digest, 'Basic realm="ipcam"']
+        return [digest]
 
     def _authorized(self, request):
         line = next((l for l in request.split("\r\n") if l.lower().startswith("authorization:")), None)
@@ -125,6 +129,8 @@ class FakeRtspServer:
         if self.mode == "basic":
             import base64
             return value == "Basic " + base64.b64encode(f"{self.user}:{self.password}".encode()).decode()
+        if not value.startswith("Digest ") or self.algorithm or self.qop not in (None, "auth"):
+            return False  # this fake only verifies plain MD5 Digest, with or without qop=auth
         params = dict(p.strip().split("=", 1) for p in value[len("Digest "):].split(","))
         params = {k: v.strip('"') for k, v in params.items()}
         ha1 = hashlib.md5(f"{self.user}:ipcam:{self.password}".encode()).hexdigest()
@@ -168,6 +174,32 @@ class ProbeTests(unittest.TestCase):
         server = self._server(mode="digest", user="us er", password="p@ss:w/rd#1")
         url = pull_sources.normalize_pull_url(f"rtsp://127.0.0.1:{server.port}/live", "us er", "p@ss:w/rd#1").url
         self.assertEqual(pull_sources.probe_rtsp(url, timeout=2).status, "ok")
+
+    def test_digest_is_preferred_over_a_basic_challenge_sent_last(self):
+        server = self._server(mode="digest+basic")
+        result = pull_sources.probe_rtsp(f"rtsp://cam:pw@127.0.0.1:{server.port}/live", timeout=2)
+        self.assertEqual(result.status, "ok")
+        self.assertIn("Authorization: Digest ", server.requests[1])
+
+    def test_sha256_only_digest_is_left_to_mediamtx(self):
+        # The probe cannot answer SHA-256; mediamtx can, so the probe must not veto the pull.
+        server = self._server(mode="digest", algorithm="SHA-256")
+        result = pull_sources.probe_rtsp(f"rtsp://cam:pw@127.0.0.1:{server.port}/live", timeout=2)
+        self.assertEqual((result.status, result.error), ("ok", None))
+        self.assertEqual(len(server.requests), 1)
+
+    def test_auth_int_only_digest_is_left_to_mediamtx(self):
+        server = self._server(mode="digest", qop="auth-int")
+        result = pull_sources.probe_rtsp(f"rtsp://cam:pw@127.0.0.1:{server.port}/live", timeout=2)
+        self.assertEqual((result.status, result.error), ("ok", None))
+        self.assertEqual(len(server.requests), 1)
+
+    def test_md5_digest_is_answered_when_offered_next_to_sha256(self):
+        server = self._server(mode="digest")
+        server._challenges = lambda: ['Digest realm="ipcam", nonce="abc123", algorithm=SHA-256',
+                                      'Digest realm="ipcam", nonce="abc123", algorithm=MD5']
+        result = pull_sources.probe_rtsp(f"rtsp://cam:pw@127.0.0.1:{server.port}/live", timeout=2)
+        self.assertEqual(result.status, "ok")
 
     def test_wrong_credentials_are_auth_failed(self):
         server = self._server(mode="digest")
@@ -214,6 +246,12 @@ class ProbeTests(unittest.TestCase):
         result = pull_sources.probe_rtsp("rtsp://no-such-host.invalid/x", timeout=1)
         self.assertEqual(result.status, "unreachable")
         self.assertIn("resolve", result.error)
+
+    def test_invalid_hostname_is_unreachable(self):
+        host = "a" * 70 + ".example"
+        result = pull_sources.probe_rtsp(f"rtsp://{host}/x", timeout=1)
+        self.assertEqual(result.status, "unreachable")
+        self.assertEqual(result.error, "Invalid host name in the stream URL")
 
     def test_rtsps_untrusted_certificate_is_unreachable(self):
         # A plain TCP fake behind rtsps:// fails the TLS handshake; the message names the certificate/TLS.

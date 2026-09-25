@@ -2204,16 +2204,19 @@ def _pull_payload(record, path) -> dict:
 
 
 def _run_pull_probe(record) -> None:
-    result = probe_rtsp(record.url)
-    if not pull_registry.apply_probe(record, result, time.monotonic()):
-        return
-    if result.status == "auth_failed":
-        # Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
-        logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
-        try:
-            mediamtx_client.clear_pull_source(f"src{record.index}")
-        except MediamtxError as exc:
-            logging.warning("src%s: could not pause the pull: %s", record.index, exc)
+    try:
+        result = probe_rtsp(record.url)
+        if not pull_registry.apply_probe(record, result, time.monotonic()):
+            return
+        if result.status == "auth_failed":
+            # Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
+            logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
+            try:
+                mediamtx_client.clear_pull_source(f"src{record.index}")
+            except MediamtxError as exc:
+                logging.warning("src%s: could not pause the pull: %s", record.index, exc)
+    finally:
+        record.probing = False  # never leave the record marked in flight, even if the probe raised
 
 
 def _schedule_pull_probes(snapshot) -> None:
@@ -2971,6 +2974,10 @@ def pull_source():
         try:
             mediamtx_client.set_pull_source(f"src{index}", target.url)
         except MediamtxError as exc:
+            try:  # a slow reply may arrive after mediamtx already applied the PATCH
+                mediamtx_client.clear_pull_source(f"src{index}")
+            except MediamtxError:
+                pass
             return _json_error(f"Could not configure src{index}: {exc}", 502)
         _bump_slot(index)
         pull_registry.put(record)

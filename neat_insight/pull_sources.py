@@ -5,6 +5,7 @@ disk: a pull is session-only and its credentials live only in memory.
 """
 import base64
 import hashlib
+import re
 import secrets
 import socket
 import ssl
@@ -75,6 +76,7 @@ class ProbeResult:
 
 
 def _read_response(sock) -> tuple[int, str, dict]:
+    """Return (status, reason, headers); header names are lower-case and every value is kept in a list."""
     data = b""
     while b"\r\n\r\n" not in data:
         chunk = sock.recv(4096)
@@ -88,45 +90,67 @@ def _read_response(sock) -> tuple[int, str, dict]:
     parts = lines[0].split(" ", 2)
     if len(parts) < 2 or not parts[0].startswith("RTSP/"):
         raise ConnectionError("closed")
-    headers = {}
+    headers: dict = {}
     for line in lines[1:]:
         name, sep, value = line.partition(":")
         if sep:
-            headers[name.strip().lower()] = value.strip()
+            headers.setdefault(name.strip().lower(), []).append(value.strip())
     return int(parts[1]), (parts[2] if len(parts) > 2 else ""), headers
+
+
+_CHALLENGE_PARAM = re.compile(r'([A-Za-z0-9_-]+)\s*=\s*("(?:[^"\\]|\\.)*"|[^,\s]*)')
 
 
 def _parse_challenge(value: str) -> tuple[str, dict]:
     scheme, _, rest = value.strip().partition(" ")
     params = {}
-    for item in rest.split(","):
-        key, sep, val = item.strip().partition("=")
-        if sep:
-            params[key.strip().lower()] = val.strip().strip('"')
+    for key, val in _CHALLENGE_PARAM.findall(rest):
+        if val.startswith('"'):
+            val = val[1:-1]
+        params[key.lower()] = val
     return scheme.lower(), params
 
 
-def _authorization(scheme: str, params: dict, username: str, password: str, uri: str) -> Optional[str]:
-    if scheme == "basic":
-        token = base64.b64encode(f"{username}:{password}".encode()).decode()
-        return f"Basic {token}"
-    if scheme != "digest":
-        return None
+def _qops(params: dict) -> list:
+    return [q.strip().lower() for q in params.get("qop", "").split(",") if q.strip()]
+
+
+def _digest_is_answerable(params: dict) -> bool:
+    """MD5 Digest (the default algorithm), either without qop or offering qop=auth."""
+    qops = _qops(params)
+    return params.get("algorithm", "md5").lower() == "md5" and (not qops or "auth" in qops)
+
+
+def _digest_authorization(params: dict, username: str, password: str, uri: str) -> str:
     realm, nonce = params.get("realm", ""), params.get("nonce", "")
     ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode()).hexdigest()
     ha2 = hashlib.md5(f"DESCRIBE:{uri}".encode()).hexdigest()
     fields = [f'username="{username}"', f'realm="{realm}"', f'nonce="{nonce}"', f'uri="{uri}"']
-    qop = params.get("qop", "")
-    if "auth" in [q.strip() for q in qop.split(",")]:
+    if "auth" in _qops(params):
         cnonce, nc = secrets.token_hex(8), "00000001"
         response = hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}".encode()).hexdigest()
         fields += ['qop=auth', f"nc={nc}", f'cnonce="{cnonce}"']
     else:
         response = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
     fields.append(f'response="{response}"')
+    if "algorithm" in params:
+        fields.append("algorithm=MD5")
     if params.get("opaque"):
         fields.append(f'opaque="{params["opaque"]}"')
     return "Digest " + ", ".join(fields)
+
+
+def _authorization(challenges: list, username: str, password: str, uri: str) -> Optional[str]:
+    """Answer the best challenge this probe can compute: MD5 Digest first, then Basic; None if none fits."""
+    parsed = [_parse_challenge(value) for value in challenges]
+    for scheme, params in parsed:
+        if scheme == "digest" and _digest_is_answerable(params):
+            return _digest_authorization(params, username, password, uri)
+    for scheme, _params in parsed:
+        if scheme == "basic":
+            token = base64.b64encode(f"{username}:{password}".encode()).decode()
+            return f"Basic {token}"
+    return None
 
 
 def _describe(sock, uri: str, cseq: int, authorization: Optional[str]) -> tuple[int, str, dict]:
@@ -158,6 +182,8 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
         return ProbeResult("unreachable", f"Timed out after {timeout:g} s")
     except OSError as exc:
         return ProbeResult("unreachable", exc.strerror or str(exc))
+    except ValueError:  # UnicodeError from an overlong or non-encodable host name
+        return ProbeResult("unreachable", "Invalid host name in the stream URL")
     try:
         sock.settimeout(timeout)
         if parsed.scheme == "rtsps":
@@ -173,10 +199,11 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
         if status == 401 and "www-authenticate" in headers:
             if not username:
                 return ProbeResult("auth_failed", AUTH_REQUIRED_MESSAGE)
-            scheme, params = _parse_challenge(headers["www-authenticate"])
-            authorization = _authorization(scheme, params, username, password, uri)
+            authorization = _authorization(headers["www-authenticate"], username, password, uri)
             if authorization is None:
-                return ProbeResult("unreachable", f"Unsupported authentication scheme {scheme}")
+                # A challenge this probe cannot compute (SHA-256, auth-int, another scheme):
+                # mediamtx may still answer it, so let the pull go ahead and mediamtx decide.
+                return ProbeResult("ok")
             status, reason, headers = _describe(sock, uri, 2, authorization)
         if 200 <= status < 300:
             return ProbeResult("ok")
