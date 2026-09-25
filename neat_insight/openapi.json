@@ -1569,7 +1569,7 @@
       },
       "SentinelMetrics": {
         "type": "object",
-        "required": ["board", "generation", "sampled_at", "version", "counts", "highlights", "groups", "history"],
+        "required": ["board", "generation", "sampled_at", "version", "counts", "highlights", "groups", "order", "history"],
         "properties": {
           "board": {"$ref": "#/components/schemas/SentinelBoard"},
           "generation": {"type": "integer"},
@@ -1578,9 +1578,10 @@
           "counts": {"type": "object", "properties": {"total": {"type": "integer"}, "unavailable": {"type": "integer"}, "warn": {"type": "integer"}, "critical": {"type": "integer"}}},
           "highlights": {"type": "array", "items": {"type": "string"}, "description": "Keys the Stats page leads with: board power, CPU, Linux memory, MLA allocated memory, EV74 CMA memory, and the hottest temperature sensor the board reports."},
           "groups": {"type": "array", "items": {"type": "object", "required": ["name", "metrics"], "properties": {"name": {"type": "string"}, "metrics": {"type": "array", "items": {"$ref": "#/components/schemas/SentinelMetric"}}}}},
+          "order": {"type": "array", "items": {"type": "string"}, "description": "Every metric key in Sentinel's own order, the order its ops view lists them in. A group's sensors are not always adjacent, so this is not the order of `groups`."},
           "history": {
             "type": "object",
-            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested.",
+            "description": "The last `history` samples of this board, aligned; empty unless `history` was requested. On the first read of a board, the history is seeded from Sentinel's own sample cache (the newest 64 samples, read once with `simaai-sentinel export`), so it opens full rather than filling from polling.",
             "required": ["timestamps", "series"],
             "properties": {
               "timestamps": {"type": "array", "items": {"type": ["string", "null"]}},
