@@ -57,7 +57,7 @@ curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9
 
 由 Insight 以外的程式發布的插槽會回報 `state: "external"` 以及 `external` 物件（通訊協定、位址、開始發布時間、編解碼器支援情況、畫面尺寸、位元率）；每個插槽也會列出其目前的 `readers`。對於這類插槽，`start` 和 `assign` 會回傳 `409`；當插槽上已沒有 Insight 自己的串流時，`stop` 也會如此。`POST /api/mediasrc/takeover` 會中斷發布端的連線。批次作業會讓外部串流繼續執行，並在 `skipped_external` 中列出這些插槽；`reset` 仍會清除每個插槽的已儲存記錄。`GET /stream/preview/src<N>.mjpg` 會以來源幀率呈現任何即時插槽的 MJPEG 預覽。
 
-使用 `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` 呼叫 `POST /api/mediasrc/pull`，會將現有的 RTSP/RTSPS 串流拉取到插槽中；之後插槽會回報 `state: "pulled"` 以及 `pull` 物件（`status` 為 `connecting`、`live`、`unreachable` 或 `auth_failed`，另含主機、路徑、錯誤、開始時間、編解碼器支援情況、畫面尺寸和位元率；絕不包含認證資訊）。認證資訊遭拒時會回傳 `400` 並附上 `"reason": "auth_failed"`；正在串流、屬於外部或已拉取的插槽會回傳 `409`；`503` 表示無法使用 mediamtx 控制 API。`stop` 會解除拉取。對於已拉取的插槽，`assign`、`start`、`prepare` 和 `takeover` 會回傳 `409`，批次作業則會略過它並在 `skipped_pulled` 中列出。拉取僅在目前工作階段中有效。
+使用 `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` 呼叫 `POST /api/mediasrc/pull`，會將現有的 RTSP/RTSPS 串流拉取到插槽中；之後插槽會回報 `state: "pulled"` 以及 `pull` 物件（`status` 為 `connecting`、`live`、`unreachable` 或 `auth_failed`，另含協定、主機、路徑、錯誤、開始時間、編解碼器支援情況、畫面尺寸、幀率和位元率；絕不包含認證資訊）。認證資訊遭拒時會回傳 `400` 並附上 `"reason": "auth_failed"`；正在串流、屬於外部或已拉取的插槽會回傳 `409`；`503` 表示 mediamtx 控制 API 在啟動時已停用，`502` 表示 mediamtx 拒絕了設定或無法連線到 mediamtx。`stop` 會解除拉取。對於已拉取的插槽，`assign`、`start`、`prepare` 和 `takeover` 會回傳 `409`，批次作業則會略過它並在 `skipped_pulled` 中列出。拉取僅在目前工作階段中有效。
 
 ## 回應和串流協定
 
