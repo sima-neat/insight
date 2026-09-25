@@ -896,6 +896,12 @@ button:hover:not(:disabled) {
   background: var(--pull-soft);
 }
 
+.source-row.pulled.warn.active,
+.source-row.pulled.failed.active {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
 .pull-chip {
   min-height: 36px;
   border: 1px solid #a9d3d6;

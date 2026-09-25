@@ -905,7 +905,7 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
-  const previewInfo = isExternal(currentSource) ? currentSource.external : (isPulled(currentSource) ? currentSource.pull : null)
+  const previewInfo = isExternal(currentSource) ? (currentSource.external || {}) : (isPulled(currentSource) ? currentSource.pull : null)
   const previewImgSrc = previewInfo && (!isPulled(currentSource) || previewInfo.status === 'live')
     ? previewSrc(currentSource.index, previewEnabled, previewToken, previewInfo.since)
     : null
