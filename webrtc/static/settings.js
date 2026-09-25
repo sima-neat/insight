@@ -77,6 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   viewerSettingsClose.addEventListener("click", () => {
     viewerSettingsOverlay.classList.add("hidden");
+    restoreSavedBlazePose3DSettings();
   });
 
   tabButtons.forEach((btn) => {
@@ -122,19 +123,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   blazePose3DPanelToggle.addEventListener("change", () => {
     updateBlazePose3DControls();
+    previewBlazePose3DSettings();
   });
+
+  blazePose3DPanelMode.addEventListener("change", previewBlazePose3DSettings);
 
   blazePose3DYawSlider.addEventListener("input", () => {
     updateBlazePose3DDisplays();
+    previewBlazePose3DSettings();
   });
 
   blazePose3DPitchSlider.addEventListener("input", () => {
     updateBlazePose3DDisplays();
+    previewBlazePose3DSettings();
   });
 
   blazePose3DTransparencySlider.addEventListener("input", () => {
     updateBlazePose3DDisplays();
+    previewBlazePose3DSettings();
   });
+
+  blazePose3DReferenceBoxToggle.addEventListener("change", previewBlazePose3DSettings);
 
   resetBlazePose3DView.addEventListener("click", () => {
     const defaults = settingsApi.defaults.auxiliary["blazepose-3d"];
@@ -146,6 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
     blazePose3DReferenceBoxToggle.checked = defaults.showReferenceBox;
     updateBlazePose3DDisplays();
     updateBlazePose3DControls();
+    previewBlazePose3DSettings();
   });
 
   videoSyncBufferSlider.addEventListener("input", () => {
@@ -197,14 +207,7 @@ document.addEventListener("DOMContentLoaded", () => {
     settingsApi.metadataTypes.forEach(({ value }) => {
       settings.types[value].visible = metadataVisibilityDraft[value] !== false;
     });
-    settings.auxiliary["blazepose-3d"] = {
-      enabled: blazePose3DPanelToggle.checked,
-      panelMode: blazePose3DPanelMode.value,
-      backgroundTransparency: parseInt(blazePose3DTransparencySlider.value, 10) / 100,
-      yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
-      pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
-      showReferenceBox: blazePose3DReferenceBoxToggle.checked
-    };
+    settings.auxiliary["blazepose-3d"] = blazePose3DDraftSettings();
 
     settingsApi.writeScopeSettings(scope, settings);
     if (scope === "global") settingsApi.clearAllChannelSettings();
@@ -293,6 +296,33 @@ document.addEventListener("DOMContentLoaded", () => {
         control.disabled = !enabled;
       });
     });
+  }
+
+  function blazePose3DDraftSettings() {
+    return {
+      enabled: blazePose3DPanelToggle.checked,
+      panelMode: blazePose3DPanelMode.value,
+      backgroundTransparency: parseInt(blazePose3DTransparencySlider.value, 10) / 100,
+      yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
+      pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
+      showReferenceBox: blazePose3DReferenceBoxToggle.checked
+    };
+  }
+
+  function previewBlazePose3DSettings() {
+    window.dispatchEvent(new CustomEvent("viewer-settings-preview", {
+      detail: {
+        scope,
+        auxiliaryRenderer: "blazepose-3d",
+        auxiliarySettings: blazePose3DDraftSettings()
+      }
+    }));
+  }
+
+  function restoreSavedBlazePose3DSettings() {
+    window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
+      detail: { scope, auxiliaryRenderer: "blazepose-3d" }
+    }));
   }
 
   function updateBlazePose3DScopeNote(value, index) {

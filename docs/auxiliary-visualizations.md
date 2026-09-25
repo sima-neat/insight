@@ -113,6 +113,10 @@ pose, title, and controls remain fully visible. Set it in global Viewer
 Configuration to update every channel. A later channel-specific edit can still
 override it for that channel.
 
+The 3D Pose controls preview immediately while the dialog is open. **Save**
+persists the preview for the selected scope; closing the dialog restores the
+last saved settings.
+
 The BlazePose view renders the current frame's world landmarks directly. It does
 not smooth pose coordinates or animate the camera independently, so its motion
 stays aligned with the frame-correlated 2D pose overlay. Camera fitting uses a

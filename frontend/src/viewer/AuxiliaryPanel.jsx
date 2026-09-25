@@ -227,9 +227,17 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   const knownViewsRef = useRef([]);
   const selectedIdRef = useRef(selectedId);
   const sessionsRef = useRef(new Map());
+  const previewSettingsRef = useRef(null);
   const controlsSignatureRef = useRef("");
   const drawFrameRef = useRef(null);
   const scheduleDrawRef = useRef(() => {});
+
+  const effectiveRendererSettings = useCallback((renderer) => {
+    const resolved = resolveRendererSettings(channelIndex, renderer);
+    const preview = previewSettingsRef.current;
+    if (!preview || preview.renderer !== renderer) return resolved;
+    return { ...resolved, ...preview.settings };
+  }, [channelIndex]);
 
   const updateControls = useCallback((session) => {
     const controls = session?.getControls?.() ?? [];
@@ -307,7 +315,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         frameId: current.frameId,
         rtpTimestamp: current.rtpTimestamp,
         animationTimeMs,
-        settings: resolveRendererSettings(channelIndex, current.renderer),
+        settings: effectiveRendererSettings(current.renderer),
       });
     } catch (error) {
       const warningKey = `${channelIndex}:${current.renderer}`;
@@ -320,7 +328,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       ctx.restore();
     }
     return shouldAnimateAuxiliaryView(mode, true, session);
-  }, [channelIndex, getRendererSession, mode, updateControls]);
+  }, [channelIndex, effectiveRendererSettings, getRendererSession, mode, updateControls]);
 
   const scheduleDraw = useCallback(() => {
     if (modeRef.current === "collapsed" || modeRef.current === "hidden") return;
@@ -358,12 +366,12 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         if (!selectedIdRef.current || !byId.has(selectedIdRef.current)) {
           selectedIdRef.current = views[0].id;
           setSelectedId(views[0].id);
-          const nextMode = displayMode(resolveRendererSettings(channelIndex, views[0].renderer));
+          const nextMode = displayMode(effectiveRendererSettings(views[0].renderer));
           modeRef.current = nextMode;
           setMode(nextMode);
         }
         const renderer = rendererForSelection(selectedIdRef.current, payloadsRef.current, nextKnown);
-        setSurfaceOpacity(panelSurfaceOpacity(resolveRendererSettings(channelIndex, renderer)));
+        setSurfaceOpacity(panelSurfaceOpacity(effectiveRendererSettings(renderer)));
       }
       scheduleDraw();
     },
@@ -380,7 +388,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       destroySessions();
       scheduleDraw();
     },
-  }), [destroySessions, scheduleDraw]);
+  }), [destroySessions, effectiveRendererSettings, scheduleDraw]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -400,7 +408,16 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       const changedRenderer = event?.detail?.auxiliaryRenderer;
       if (changedRenderer && changedRenderer !== renderer) return;
 
-      const resolved = resolveRendererSettings(channelIndex, renderer);
+      const isPreview = event?.type === "viewer-settings-preview";
+      if (isPreview) {
+        previewSettingsRef.current = {
+          renderer,
+          settings: event?.detail?.auxiliarySettings || {},
+        };
+      } else {
+        previewSettingsRef.current = null;
+      }
+      const resolved = effectiveRendererSettings(renderer);
       const nextMode = displayMode(resolved);
       modeRef.current = nextMode;
       setMode(nextMode);
@@ -412,8 +429,12 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       scheduleDraw();
     };
     window.addEventListener("viewer-settings-changed", refreshSettings);
-    return () => window.removeEventListener("viewer-settings-changed", refreshSettings);
-  }, [channelIndex, scheduleDraw, updateControls]);
+    window.addEventListener("viewer-settings-preview", refreshSettings);
+    return () => {
+      window.removeEventListener("viewer-settings-changed", refreshSettings);
+      window.removeEventListener("viewer-settings-preview", refreshSettings);
+    };
+  }, [channelIndex, effectiveRendererSettings, scheduleDraw, updateControls]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -469,7 +490,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     setRendererControls([]);
     setSelectedId(viewId);
     const renderer = knownViewsRef.current.find((view) => view.id === viewId)?.renderer;
-    setSurfaceOpacity(panelSurfaceOpacity(resolveRendererSettings(channelIndex, renderer)));
+    setSurfaceOpacity(panelSurfaceOpacity(effectiveRendererSettings(renderer)));
     scheduleDraw();
   };
   const setPanelMode = (nextMode) => {
