@@ -103,7 +103,7 @@ Peripherals lists the cameras connected to a board and shows the modes each came
 
 ### Selected board
 
-Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
 
 The board is chosen in this order:
 
@@ -139,7 +139,7 @@ Stats works on the selected board, chosen in the same **Board** panel the Periph
 
 ### Sentinel daemon
 
-The page first reports whether Sentinel is installed and running on that board, and its version. When it is missing, select **Install Sentinel**: Insight runs `sima-cli neat install sentinel` on the board itself, which needs `sima-cli` there and passwordless `sudo`. When either is missing, the page names the command to run in a shell on the board instead. An installed and running daemon is never reinstalled from here, because the installer restarts it and would end a trace in flight.
+When Sentinel is missing, stopped or cannot be reached on that board, the page says so before anything else. When it is missing, select **Install Sentinel**: Insight runs `sima-cli neat install sentinel` on the board itself, which needs `sima-cli` there and passwordless `sudo`. When either is missing, the page names the command to run in a shell on the board instead. An installed and running daemon is never reinstalled from here, because the installer restarts it and would end a trace in flight.
 
 An install that is refused or fails is reported as an install rather than as a failed read: the page says the install did not happen, gives the board's own sentence for why — no `sima-cli`, no passwordless `sudo`, an installer that exited non-zero, or one that finished with the service still down — and keeps the installer's output behind **Installer output**.
 
@@ -185,11 +185,11 @@ Reading a board takes an SSH round trip, so an answer can arrive after you have 
 
 ### Insight host
 
-Below the runs, a compact panel reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the board telemetry above it, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so. When the endpoint answers with no reading at all, the panel says that rather than listing its labels against em dashes.
+Stats has two views, **DevKit** and **Host**; everything above is the DevKit view. The Host view reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the DevKit view, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so. When the endpoint answers with no reading at all, the panel says that rather than listing its labels against em dashes.
 
 ### NEAT profiling timeline
 
-Last on the tab, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
+Below the Insight host panel on the Host view, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
 
 ## System Information
 
