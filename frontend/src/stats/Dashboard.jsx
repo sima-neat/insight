@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Callout } from '../peripherals/ui.jsx'
-import { CoreHeatmap, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
+import { CoreGrid, PeakGauge, StackedChart, TimeChart } from './Charts.jsx'
 import {
   DASH_TABS,
   DASH_TAB_KEY,
@@ -11,7 +11,6 @@ import {
   niceCeil,
   scaleFor,
   seriesOf,
-  spanLabel,
   stackTotals,
   thermalGroups,
   thermalMaxSeries,
@@ -239,7 +238,6 @@ function PowerView({ model }) {
             value={peak.value}
             unit="W"
             scale={{ min: 0, max: ceiling || niceCeil((peak.value || 0) * 1.1) }}
-            caption="Highest valid total since the daemon started"
           />
         )}
       </div>
@@ -266,7 +264,7 @@ function SystemView({ model }) {
   const memPct = metricByKey(model, 'linux_mem_used_pct')
   return (
     <div className="dash-grid system">
-      {cores.length > 0 && <CoreHeatmap cores={cores} series={model.series} timestamps={model.timestamps} />}
+      {cores.length > 0 && <CoreGrid cores={cores} series={model.series} timestamps={model.timestamps} />}
       <div className="dash-stack">
         <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" height={56} />
         <MetricChart
@@ -325,12 +323,10 @@ function tabAlert(model, id) {
  * Overview, Thermal, Power, System, Storage/Net and Runs. Everything is charted over the
  * daemon's cached window, so each view opens full rather than filling while you watch.
  */
-export default function SentinelDashboard({ model, health, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
+export default function SentinelDashboard({ model, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
   const [tab, setTab] = useState(readTab)
   useEffect(() => saveTab(tab), [tab])
   const items = useMemo(() => DASH_TABS.map((item) => ({ ...item, alert: item.id === 'runs' ? null : tabAlert(model, item.id) })), [model])
-  const samples = health?.cached_samples ?? model.timestamps.length
-  const span = spanLabel(model.timestamps).replace(' ago', '')
   const state = polling ? 'LIVE' : live ? 'NOT UPDATING' : 'PAUSED'
   const hasMetrics = model.metrics.length > 0
   return (
@@ -339,11 +335,7 @@ export default function SentinelDashboard({ model, health, live, polling, stale,
         <div className="dash-status">
           <span className={`dash-live${polling ? ' on' : ''}`} aria-hidden="true" />
           <h2 id="dash-title">Sentinel</h2>
-          {model.version && <span className="dash-version">{model.version}</span>}
-          <span className="dash-divider" aria-hidden="true" />
-          <span className={`dash-state${polling ? ' on' : ''}`}>cache {state}</span>
-          {samples > 0 && <span className="dash-meta">{samples} samples</span>}
-          {span && <span className="dash-meta">{span} window</span>}
+          <span className={`dash-state${polling ? ' on' : ''}`}>{state}</span>
           <button type="button" className="btn-tonal dash-pause" onClick={onToggleLive}>
             {live ? 'Pause updates' : 'Resume updates'}
           </button>

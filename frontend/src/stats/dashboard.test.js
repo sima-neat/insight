@@ -11,8 +11,6 @@ import {
   elapsedPath,
   axisLabel,
   dashTabFrom,
-  downsample,
-  heatColor,
   indexAt,
   lastNumber,
   linePath,
@@ -91,14 +89,6 @@ test('time labels use board timestamps only', () => {
   assert.equal(spanLabel(['x']), '')
   assert.equal(spanLabel([]), '')
   assert.deepEqual([indexAt(0, 240), indexAt(0.5, 240), indexAt(1.2, 240), indexAt(0.5, 0)], [0, 120, 239, -1])
-})
-
-test('heatmap cells: buckets keep their peak, colours run from teal to red', () => {
-  assert.deepEqual(downsample([1, 5, 2, 8, null, null], 3), [5, 8, null])
-  assert.deepEqual(downsample([1, 2], 5), [1, 2])
-  assert.equal(heatColor(0), 'hsl(175 70% 88%)')
-  assert.equal(heatColor(100), 'hsl(5 70% 48%)')
-  assert.equal(heatColor(null), 'var(--line)')
 })
 
 test('the live board: thermal groups in Sentinel order, cores and rails by key, threshold lines', () => {

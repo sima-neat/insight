@@ -1399,7 +1399,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
               <>
                 <SentinelDashboard
                   model={model}
-                  health={state?.health || null}
                   live={live}
                   polling={polling}
                   stale={stale}

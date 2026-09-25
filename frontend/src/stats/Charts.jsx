@@ -2,9 +2,7 @@ import { useId, useRef, useState } from 'react'
 import {
   agoLabel,
   axisLabel,
-  downsample,
   elapsedPath,
-  heatColor,
   indexAt,
   lastNumber,
   linePath,
@@ -204,40 +202,42 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
   )
 }
 
-const HEAT_CELLS = 60
+const CORE_SCALE = { min: 0, max: 100 }
+const TILE_WIDTH = 200
+const TILE_HEIGHT = 40
 
-/** One row per CPU core: its load over the window as a heat strip, then its load now. */
-export function CoreHeatmap({ cores, series, timestamps }) {
+/**
+ * One small chart per CPU core, on the same 0-100% scale so cores compare at a glance: its load
+ * now in large type and its load over the window beneath. A core past its warn or critical level
+ * turns amber or red; the rest stay the dashboard's blue.
+ */
+export function CoreGrid({ cores, series, timestamps }) {
   return (
-    <figure className="dash-chart dash-heatmap" aria-label={`Per-core CPU load over the last ${spanLabel(timestamps).replace(' ago', '') || 'samples'}`}>
+    <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load over the last ${spanLabel(timestamps).replace(' ago', '') || 'samples'}`}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">Per-core CPU</span>
-        <span className="dash-chart-scale">load over time · 0–100 %</span>
+        <span className="dash-chart-scale">
+          each 0–100 % · {spanLabel(timestamps) || 'recent'} → now
+        </span>
       </figcaption>
-      <div className="dash-heat-rows">
+      <div className="dash-core-grid">
         {cores.map((core) => {
           const values = series[core.key] || []
-          const cells = downsample(values, HEAT_CELLS)
-          const now = lastNumber(values)
+          const path = linePath(values, CORE_SCALE, TILE_WIDTH, TILE_HEIGHT)
+          const now = typeof core.value === 'number' ? core.value : lastNumber(values)
           return (
-            <div key={core.key} className="dash-heat-row" title={`${core.label}: ${formatValue(now, '%')}`}>
-              <span className="dash-heat-label">{core.short || core.label}</span>
-              <svg className="dash-heat-strip" viewBox={`0 0 ${cells.length || 1} 1`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                {cells.map((value, index) => (
-                  <rect key={index} x={index} y="0" width="1.02" height="1" fill={heatColor(value)} />
-                ))}
-              </svg>
-              <span className="dash-heat-bar" aria-hidden="true">
-                <span style={{ width: `${Math.min(100, Math.max(0, now ?? 0))}%`, background: heatColor(now) }} />
+            <div key={core.key} className={`dash-core tone-${core.status || 'ok'}`} title={`${core.label}: ${formatValue(now, '%')}`}>
+              <span className="dash-core-head">
+                <span className="dash-core-name">{core.short || core.label}</span>
+                <strong className="dash-core-value">{formatValue(now, '%')}</strong>
               </span>
-              <span className="dash-heat-value">{formatValue(now, '%')}</span>
+              <svg className="dash-core-chart" viewBox={`0 0 ${TILE_WIDTH} ${TILE_HEIGHT}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                {path.area && <path d={path.area} fill="currentColor" fillOpacity="0.14" />}
+                <path d={path.line} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              </svg>
             </div>
           )
         })}
-      </div>
-      <div className="dash-chart-x" aria-hidden="true">
-        <span>{spanLabel(timestamps)}</span>
-        <span>now</span>
       </div>
     </figure>
   )

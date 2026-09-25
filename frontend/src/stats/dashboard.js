@@ -196,26 +196,6 @@ export function indexAt(fraction, length) {
   return Math.min(length - 1, Math.max(0, Math.round(fraction * (length - 1))))
 }
 
-/** Keep every `n`th bucket's maximum, so a long series fits a fixed number of cells. */
-export function downsample(values, cells) {
-  const list = values || []
-  if (list.length <= cells) return list.slice()
-  const size = list.length / cells
-  return Array.from({ length: cells }, (_, cell) => {
-    const bucket = list.slice(Math.floor(cell * size), Math.floor((cell + 1) * size)).filter(isNumber)
-    return bucket.length ? Math.max(...bucket) : null
-  })
-}
-
-/** A heatmap colour for a 0-100 load: cool teal when idle, through amber, to red at full load. */
-export function heatColor(percent) {
-  if (!isNumber(percent)) return 'var(--line)'
-  const p = Math.min(100, Math.max(0, percent)) / 100
-  const hue = 175 - p * 170
-  const lightness = 88 - p * 40
-  return `hsl(${Math.round(hue)} 70% ${Math.round(lightness)}%)`
-}
-
 /** The board's temperature sensors under Sentinel's own group names, in Sentinel's order. */
 export function thermalGroups(model) {
   const groups = []

@@ -145,12 +145,12 @@ An install that is refused or fails is reported as an install rather than as a f
 
 ### Live metrics
 
-The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows the Sentinel version, whether the cache is live, and how many samples it holds; **Pause updates** stops polling. Below it are six tabs:
+The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live; **Pause updates** stops polling. Below it are six tabs:
 
 - **Overview**: charts of the hottest temperature sensor, current board power, CPU, memory, MLA memory, and network traffic, with **All metrics** listing every metric in Sentinel's order.
 - **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
 - **Power**: current and session-average power, the session peak against the chart's scale, and the power rails stacked so the top edge is the board total.
-- **System**: a heat strip of each CPU core's load over the window, beside CPU usage, load, Linux memory, MLA memory, and EV74 CMA use.
+- **System**: a small chart per CPU core on a shared 0-100% scale, marked amber or red when a core passes its limits, beside CPU usage, load, Linux memory, MLA memory, and EV74 CMA use.
 - **Storage/Net**: eMMC use, network and eMMC traffic, and their metrics.
 - **Runs**: record a trace, and open, compare, or delete saved runs. Comparing overlays one series (total power, thermal maximum, CPU, load, RAM, MLA memory, or EV74 CMA) for every selected run over the time they all cover, on a scale fitted to the runs, with each run's minimum, mean, median, P95, maximum, change against the baseline, and energy; the full per-metric comparison follows it.
 
