@@ -4,19 +4,55 @@
 const CANVAS_FONT_FAMILY = '"Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif';
 const FONT = `14px ${CANVAS_FONT_FAMILY}`;
 const FONT_LARGE = `16px ${CANVAS_FONT_FAMILY}`;
-const TRACK_COLORS = [
-  "#2563eb",
-  "#dc2626",
-  "#16a34a",
-  "#ca8a04",
-  "#9333ea",
-  "#0891b2",
-  "#ea580c",
-  "#4f46e5",
-  "#be123c",
-  "#0f766e"
-];
-const TRACK_FALLBACK_COLOR = "#f8fafc";
+// Colors come from metadata-colors.js, loaded before this file. The fallback allocator
+// serves callers that pass no drawContext.colorAllocator, such as tests. It is created
+// lazily so this file still loads on its own (rleMask.test.js does that).
+let fallbackColorAllocator = null;
+
+function colorAllocatorFrom(drawContext) {
+  if (drawContext.colorAllocator) return drawContext.colorAllocator;
+  const api = window.metadataColors;
+  if (!api) return null;
+  if (!fallbackColorAllocator) fallbackColorAllocator = api.createColorAllocator();
+  return fallbackColorAllocator;
+}
+
+// Style entries come from the settings object lists; keyed by label, `default` covers
+// every unlisted label. Object.create(null) keeps a label like "__proto__" from touching
+// the prototype; Object.keys/`in` behave the same as on a plain object either way.
+function styleLookup(entries) {
+  const byLabel = Object.create(null);
+  (entries || []).forEach((entry) => {
+    if (entry && typeof entry.label === "string") byLabel[entry.label] = entry;
+  });
+  return byLabel;
+}
+
+function overridesFrom(styles) {
+  const overrides = Object.create(null);
+  Object.keys(styles).forEach((label) => {
+    if (typeof styles[label].color === "string") overrides[label] = styles[label].color;
+  });
+  return overrides;
+}
+
+function applyLineStyle(ctx, style) {
+  ctx.lineWidth = style?.width || 2;
+  ctx.setLineDash(style?.style === "dashed" ? [6, 4] : style?.style === "dotted" ? [2, 2] : []);
+}
+
+function identityColor(drawContext, index, namespace, identity, overrides) {
+  const api = window.metadataColors;
+  if (!api) return "#f8fafc";
+  return api.resolveColor({
+    allocator: colorAllocatorFrom(drawContext),
+    channelIndex: index,
+    namespace,
+    identity,
+    overrides,
+    now: drawContext.now ?? performance.now()
+  });
+}
 
 const COCO_SKELETON = [
   ['nose', 'left_eye'], ['nose', 'right_eye'],
@@ -62,17 +98,6 @@ function computeScaleAndOffset(video, canvas) {
   const scaleY = drawHeight / videoHeight;
 
   return { scaleX, scaleY, offsetX, offsetY };
-}
-
-function colorForTrackId(id) {
-  if (id === null || id === undefined || id === "") return TRACK_FALLBACK_COLOR;
-
-  const text = String(id);
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-  return TRACK_COLORS[hash % TRACK_COLORS.length];
 }
 
 function drawTrackLabel(ctx, text, x, y, color) {
@@ -311,12 +336,8 @@ window.drawStrategies = {
     if (!data?.objects) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "object-detection");
-    const objectStyles = {};
-    (settings.type.objects || []).forEach(entry => {
-      objectStyles[entry.label] = entry;
-    });
-
-    const defaultStyle = objectStyles["default"];
+    const objectStyles = styleLookup(settings.type.objects);
+    const overrides = overridesFrom(objectStyles);
     const threshold = settings.type.confidenceThreshold ?? 0;
     const showRoi = settings.general.showRoi !== false;
     const applyRoiFiltering = settings.general.applyRoiFiltering !== false;
@@ -334,14 +355,13 @@ window.drawStrategies = {
       const [x, y, w, h] = obj.bbox;
       if (!passesRoiFilter([x, y, w, h], roiPolygons, video, scale, applyRoiFiltering)) return;
 
-      const style = objectStyles[obj.label] || defaultStyle;
+      const style = objectStyles[obj.label] || objectStyles.default;
+      const color = identityColor(drawContext, index, "class", obj.label, overrides);
 
-      ctx.strokeStyle = style?.color || 'lime';
-      ctx.lineWidth = style?.width || 2;
-      ctx.setLineDash(style?.style === "dashed" ? [6, 4] :
-        style?.style === "dotted" ? [2, 2] : []);
+      ctx.strokeStyle = color;
+      applyLineStyle(ctx, style);
       ctx.font = "14px sans-serif";
-      ctx.fillStyle = style?.color || 'lime';
+      ctx.fillStyle = color;
 
       ctx.strokeRect(x * scaleX + offsetX, y * scaleY + offsetY, w * scaleX, h * scaleY);
       const label = `${obj.label} (${Math.round(obj.confidence * 100)}%)`;
@@ -353,16 +373,12 @@ window.drawStrategies = {
   "classification": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.top_classes) return;
 
-    const settings = drawContext.settings || resolveViewerDrawSettings(index, "classification");
-    const labelColor = settings.type.classificationColor || 'yellow';
-    const font = settings.type.classificationFont || FONT_LARGE;
-
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
 
-    ctx.font = font;
-    ctx.fillStyle = labelColor;
+    ctx.font = FONT_LARGE;
 
     data.top_classes.slice(0, 3).forEach((cls, i) => {
+      ctx.fillStyle = identityColor(drawContext, index, "class", cls.label);
       ctx.fillText(`${cls.label} (${Math.round(cls.confidence * 100)}%)`, 10 * scaleX + offsetX, (20 + i * 20) * scaleY + offsetY);
     });
   },
@@ -370,24 +386,26 @@ window.drawStrategies = {
   "pose-estimation": (ctx, canvas, data, video, index, drawContext = {}) => {
     if (!data?.poses) return;
 
-    const settings = drawContext.settings || resolveViewerDrawSettings(index, "pose-estimation");
-    const strokeColor = settings.type.poseStrokeColor || 'aqua';
-    const fillColor = settings.type.poseFillColor || 'aqua';
-    const font = settings.type.poseFont || FONT;
-
     const { scaleX, scaleY, offsetX, offsetY } = computeScaleAndOffset(video, canvas);
+    const KEYPOINT_MIN_CONFIDENCE = 0.3;
+    const BOX_PADDING = 8;
 
-    ctx.strokeStyle = strokeColor;
-    ctx.fillStyle = fillColor;
     ctx.lineWidth = 2;
-    ctx.font = font;
+    ctx.setLineDash([]);
+    ctx.font = FONT;
 
     data.poses.forEach(pose => {
+      if (!Array.isArray(pose?.keypoints)) return;
+      const color = identityColor(drawContext, index, "pose", pose.id);
       const kpMap = Object.fromEntries(pose.keypoints.map(kp => [kp.name, kp]));
+      const confident = pose.keypoints.filter(kp => kp.confidence > KEYPOINT_MIN_CONFIDENCE);
+
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
 
       COCO_SKELETON.forEach(([a, b]) => {
         const kpA = kpMap[a], kpB = kpMap[b];
-        if (kpA && kpB && kpA.confidence > 0.3 && kpB.confidence > 0.3) {
+        if (kpA && kpB && kpA.confidence > KEYPOINT_MIN_CONFIDENCE && kpB.confidence > KEYPOINT_MIN_CONFIDENCE) {
           ctx.beginPath();
           ctx.moveTo(kpA.x * scaleX + offsetX, kpA.y * scaleY + offsetY);
           ctx.lineTo(kpB.x * scaleX + offsetX, kpB.y * scaleY + offsetY);
@@ -395,14 +413,26 @@ window.drawStrategies = {
         }
       });
 
-      pose.keypoints.forEach(kp => {
-        if (kp.confidence > 0.3) {
-          ctx.beginPath();
-          ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
-        }
+      confident.forEach(kp => {
+        ctx.beginPath();
+        ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.fillText(kp.name, (kp.x + 4) * scaleX + offsetX, (kp.y - 4) * scaleY + offsetY);
       });
+
+      if (confident.length < 2) return;
+      const xs = confident.map(kp => kp.x);
+      const ys = confident.map(kp => kp.y);
+      const left = Math.min(...xs) - BOX_PADDING;
+      const top = Math.min(...ys) - BOX_PADDING;
+      const width = Math.max(...xs) - Math.min(...xs) + BOX_PADDING * 2;
+      const height = Math.max(...ys) - Math.min(...ys) + BOX_PADDING * 2;
+      const boxLeft = left * scaleX + offsetX;
+      const boxTop = top * scaleY + offsetY;
+      ctx.strokeRect(boxLeft, boxTop, width * scaleX, height * scaleY);
+
+      const idText = pose.id === null || pose.id === undefined || pose.id === "" ? "" : ` #${pose.id}`;
+      drawTrackLabel(ctx, `${pose.label || "pose"}${idText}`, boxLeft, boxTop - 6, color);
     });
   },
 
@@ -410,12 +440,8 @@ window.drawStrategies = {
     if (!Array.isArray(data?.segments)) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "segmentation");
-    const objectStyles = {};
-    (settings.type.objects || []).forEach(entry => {
-      objectStyles[entry.label] = entry;
-    });
-
-    const defaultStyle = objectStyles["default"];
+    const objectStyles = styleLookup(settings.type.objects);
+    const overrides = overridesFrom(objectStyles);
     const threshold = settings.type.confidenceThreshold ?? 0;
     const opacity = settings.type.maskOpacity ?? 0.4;
     const showRoi = settings.general.showRoi !== false;
@@ -444,13 +470,11 @@ window.drawStrategies = {
       }
       if (!passesRoiFilter(bbox, roiPolygons, video, scale, applyRoiFiltering)) return;
 
-      const style = objectStyles[seg.label] || defaultStyle;
-      const color = style?.color || 'lime';
+      const style = objectStyles[seg.label] || objectStyles.default;
+      const color = identityColor(drawContext, index, "class", seg.label, overrides);
 
       ctx.strokeStyle = color;
-      ctx.lineWidth = style?.width || 2;
-      ctx.setLineDash(style?.style === "dashed" ? [6, 4] :
-        style?.style === "dotted" ? [2, 2] : []);
+      applyLineStyle(ctx, style);
       ctx.font = "14px sans-serif";
       ctx.fillStyle = color;
 
@@ -553,17 +577,27 @@ window.drawStrategies = {
         .map(track => `${index}:${track.id}`)
     );
 
+    // Resolve each id once per frame, so a track's trail and box always agree even
+    // when the allocator has to share slots above the palette size.
+    const frameColors = new Map();
+    const trackColor = (trackId) => {
+      if (trackId === null || trackId === undefined) return identityColor(drawContext, index, "track", trackId);
+      const key = String(trackId);
+      if (!frameColors.has(key)) frameColors.set(key, identityColor(drawContext, index, "track", trackId));
+      return frameColors.get(key);
+    };
+
     if (showTrackHistory && trackHistory) {
       trackHistory.forEach((entry, key) => {
         if (Number(key.split(":")[0]) !== index) return;
         const trackId = key.substring(key.indexOf(":") + 1);
-        drawTrackHistoryPath(ctx, entry.points, scale, colorForTrackId(trackId), activeKeys.has(key) ? 0.72 : 0.35);
+        drawTrackHistoryPath(ctx, entry.points, scale, trackColor(trackId), activeKeys.has(key) ? 0.72 : 0.35);
       });
     }
 
     visibleTracks.forEach((track) => {
       const [x, y, w, h] = track.bbox;
-      const color = colorForTrackId(track.id);
+      const color = trackColor(track.id);
       const left = x * scaleX + offsetX;
       const top = y * scaleY + offsetY;
       const width = w * scaleX;
@@ -576,7 +610,7 @@ window.drawStrategies = {
 
       const confidence =
         typeof track.confidence === "number" ? ` (${Math.round(track.confidence * 100)}%)` : "";
-      const idText = track.id === null || track.id === undefined ? "" : ` #${track.id}`;
+      const idText = track.id === null || track.id === undefined || track.id === "" ? "" : ` #${track.id}`;
       const label = `${track.label || "track"}${idText}${confidence}`;
       drawTrackLabel(ctx, label, left, top - 6, color);
     });

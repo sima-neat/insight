@@ -41,6 +41,7 @@
               <div class="object-list-header">
                 <button id="addViewerObject" class="add-btn" title="Add Object">+</button>
               </div>
+              <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="viewerObjectList">
                 <table class="viewer-object-table">
                   <tbody id="viewerObjectTableBody">
@@ -69,6 +70,7 @@
               <div class="object-list-header">
                 <button id="addSegmentationObject" class="add-btn" title="Add Object">+</button>
               </div>
+              <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="segmentationObjectList">
                 <table class="viewer-object-table">
                   <tbody id="segmentationObjectTableBody">
@@ -176,6 +178,7 @@
   </button>
 
   <script src="/static/js/viewer-settings-resolver.js"></script>
+  <script src="/static/js/metadata-colors.js"></script>
   <script src="/static/drawing.js"></script>
   <script src="/static/viewer-react.js"></script>
   <link rel="stylesheet" href="/static/css/settings.css">
