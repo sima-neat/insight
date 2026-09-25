@@ -478,7 +478,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign or clear one source slot",
-        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.",
+        "description": "Assigns a media-library path to one one-based source slot. Send an empty `file` value to clear the slot. Insight probes the media, normalizes the requested transport to one supported by the detected codec, persists the assignment, and automatically restarts the source when it was already playing. Obtain valid paths from `/api/mediasrc/videos`.\n\nAssigning a file to a webcam slot converts it back to a file source, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, because converting it would erase the only record that a camera may still be publishing. A caller that already closed its own publisher may send `publisher_released: true`.",
         "operationId": "assignMediaSource",
         "x-codeSamples": [
           {
@@ -500,7 +500,63 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
+          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
+        }
+      }
+    },
+    "/api/mediasrc/assign-webcam": {
+      "post": {
+        "tags": ["Media sources"],
+        "summary": "Register one source slot for a browser webcam",
+        "description": "Marks one one-based source slot as a browser-published webcam and returns the WHIP URL the browser posts its WebRTC offer to. Unlike `/api/mediasrc/assign`, Insight does not start a publisher itself: the browser publishes the camera over WHIP to an internal ingest path, MediaMTX normalizes it to baseline H.264 with regular keyframes and republishes it on the `urls.rtsp` path (the same shape a file source produces, so detection apps and hardware decoders can consume it directly), and `/api/mediasrc/start` only confirms that the stream arrived. Any file assignment on the slot is cleared, and a playing file source is stopped first. The returned `urls.whip` host and port already account for SDK port remapping, so use it exactly as returned.\n\nOn a slot that is already a webcam this switches cameras, so Insight first asks MediaMTX to close the browser publishing to it. If MediaMTX cannot be reached the call answers `502` and leaves the slot unchanged, so the previous camera stays stoppable. A caller that already closed its own publisher may send `publisher_released: true`.",
+        "operationId": "assignWebcamMediaSource",
+        "x-codeSamples": [
+          {
+            "lang": "Shell",
+            "label": "curl",
+            "source": "curl -k -H \"Content-Type: application/json\" -d '{\"index\":1}' https://<INSIGHT_HOST>:9900/api/mediasrc/assign-webcam"
+          }
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/WebcamStop"},
+        "responses": {
+          "200": {
+            "description": "The slot is registered as a webcam source.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["success", "source"],
+                  "properties": {
+                    "success": {"type": "boolean"},
+                    "source": {"$ref": "#/components/schemas/MediaSource"}
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "source": {
+                    "index": 1,
+                    "file": "",
+                    "state": "stopped",
+                    "transport": "rtsp",
+                    "codec": "h264",
+                    "type": "webcam",
+                    "allowed_transports": ["rtsp"],
+                    "urls": {
+                      "rtsp": "rtsp://<INSIGHT_HOST>:8554/src1",
+                      "whip": "https://<INSIGHT_HOST>:8889/cam1/whip"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
       }
     },
@@ -508,8 +564,9 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Assign available videos to source slots",
-        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.",
+        "description": "Convenience operation for test setup. Insight stops every active source, walks the sorted assignable-video list, assigns unique files to source slots in index order, persists the result, and leaves all slots stopped. Call the bulk-start endpoint afterward when playback should begin.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions before rewriting the slot. A slot whose publisher could not be confirmed closed keeps its webcam marking and playing state, is left unassigned, and is listed in `unconfirmed_webcams`; the remaining slots are assigned as usual. A slot another caller reassigned while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that already closed its own publishers may list them in `released_webcams`.",
         "operationId": "autoAssignMediaSources",
+        "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Assignment counts and success message.",
@@ -522,7 +579,7 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Start one source",
-        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.",
+        "description": "Starts streaming the file assigned to one one-based source slot and persists its state as `playing`. The slot must exist and have a valid assignment. Repeated calls are safe for normal control flows, but callers should inspect `/api/mediasrc` when they need to distinguish newly started from already-running sources.\n\nA webcam slot is published by the browser rather than by Insight, so for those slots this endpoint only confirms the stream: it returns `409` until MediaMTX reports the WHIP stream as publishing.",
         "operationId": "startMediaSource",
         "x-codeSamples": [
           {
@@ -536,7 +593,10 @@
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "500": {"$ref": "#/components/responses/InternalError"}
+          "409": {"$ref": "#/components/responses/WebcamNotPublishing"},
+          "410": {"$ref": "#/components/responses/SourceChangedWhileStarting"},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
       }
     },
@@ -568,13 +628,15 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop one source",
-        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.",
+        "description": "Stops the process backing one source slot and persists its state as `stopped` without clearing the assigned file. The same slot can subsequently be started again without reassignment.\n\nA webcam slot is published by a browser rather than by Insight, so stopping one asks MediaMTX to close that session. If MediaMTX cannot be reached the call answers `502` rather than reporting a stop it cannot verify. A caller that has already closed its own publisher may send `publisher_released: true` to skip that check.",
         "operationId": "stopMediaSource",
-        "requestBody": {"$ref": "#/components/requestBodies/SourceIndex"},
+        "requestBody": {"$ref": "#/components/requestBodies/WebcamStop"},
         "responses": {
           "200": {"$ref": "#/components/responses/Success"},
           "400": {"$ref": "#/components/responses/BadRequest"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
+          "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
       }
     },
@@ -582,12 +644,13 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Stop every source",
-        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.",
+        "description": "Stops all running source processes while preserving their file assignments and transport choices. Use this before deleting media, changing a group of assignments, or shutting down a test; the response reports how many sources were previously playing.\n\nWebcam slots are published by a browser rather than by Insight, so stopping one asks MediaMTX to close the session. Any slot whose publisher could not be confirmed closed is listed in `unconfirmed_webcams`; the other sources still stop. A slot reassigned by another caller while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that has already closed its own publishers may list those indexes in `released_webcams`, and they are not reported as unconfirmed.",
         "operationId": "stopAllMediaSources",
+        "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Number of sources that were previously playing.",
-            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "message": "Stopped 4 source(s)."}}}
+            "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}, "example": {"success": true, "stopped_count": 4, "unconfirmed_webcams": [], "changed_sources": [], "message": "Stopped 4 source(s)."}}}
           }
         }
       }
@@ -596,8 +659,9 @@
       "post": {
         "tags": ["Media sources"],
         "summary": "Reset all source assignments",
-        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained.",
+        "description": "Returns source management to its initial state by stopping every source and rewriting the persisted slot configuration with empty assignments. This is destructive configuration cleanup; use `stop-all` instead when assignments should be retained.\n\nWebcam slots are published by a browser, so Insight asks MediaMTX to close those sessions. A slot whose publisher could not be confirmed closed keeps its webcam marking and is listed in `unconfirmed_webcams`, so a later stop can still identify it and retry — clearing it would lose the only record that a camera may still be live. A slot another caller reassigned while this request was releasing publishers is left as it now is and listed in `changed_sources`. A caller that already closed its own publishers may list them in `released_webcams`.",
         "operationId": "resetMediaSources",
+        "requestBody": {"$ref": "#/components/requestBodies/ReleasedWebcams"},
         "responses": {
           "200": {
             "description": "Every source was stopped and default empty assignments were written.",
@@ -875,6 +939,24 @@
             "example": {"index": 1}
           }
         }
+      },
+      "WebcamStop": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {"$ref": "#/components/schemas/WebcamStopRequest"},
+            "example": {"index": 1, "publisher_released": true, "publisher_session": "52304a1c-28cc-41d7-8234-164aa9ebd9bb"}
+          }
+        }
+      },
+      "ReleasedWebcams": {
+        "required": false,
+        "content": {
+          "application/json": {
+            "schema": {"$ref": "#/components/schemas/ReleasedWebcamsRequest"},
+            "example": {"released_webcams": [{"index": 1, "session": "b5840975-9d5b-4948-bcab-070af869bb50"}]}
+          }
+        }
       }
     },
     "responses": {
@@ -890,6 +972,10 @@
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "SourceChangedWhileStarting": {"description": "The slot was reassigned while Insight was confirming a webcam publisher or starting a file, so the start was not recorded (a file stream started this way is stopped again). Unlike 409, not worth retrying: reload the source list.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "WebcamStopSuperseded": {"description": "Nothing was changed, for one of two reasons: the released session no longer publishes to this slot and a different session does; or the slot changed kind (file to webcam or back) while this request was waiting on MediaMTX. Reload the source list and retry.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "WebcamNotConfirmedStopped": {"description": "Insight could not reach MediaMTX to verify the slot's publisher, so nothing was changed. If the camera has in fact stopped, the slot updates on its own once MediaMTX is reachable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
@@ -1002,6 +1088,26 @@
         "required": ["index"],
         "properties": {"index": {"type": "integer", "minimum": 1, "description": "One-based source slot index. This differs from the viewer's zero-based channel indexes."}}
       },
+      "WebcamStopRequest": {
+        "description": "Selects one slot to stop or reassign, with the hints a browser that published a webcam to it uses to say it has already closed that publisher.",
+        "allOf": [
+          {"$ref": "#/components/schemas/SourceIndexRequest"},
+          {
+            "type": "object",
+            "properties": {
+              "publisher_released": {"type": "boolean", "default": false, "description": "True when the caller has already closed its own WebRTC peer connection for this slot. Requires `publisher_session`; a claim that names no session is rejected with `400`. Insight then verifies that session is still the one on the slot (or that the slot is idle) rather than asking MediaMTX to close anything: a different session answers `409`, and an unreachable MediaMTX answers `502`, in both cases changing nothing."},
+              "publisher_session": {"type": "string", "description": "The WHIP session id the caller released: the value of the `Id` response header from the WHIP POST, which MediaMTX also reports in `/v3/webrtcsessions` and as the path's `source.id`. Note this is not the last segment of `Location`, which is a separate resource secret. Required with `publisher_released`."}
+            }
+          }
+        ]
+      },
+      "ReleasedWebcamsRequest": {
+        "type": "object",
+        "description": "Bulk-operation hint from a browser that has already closed its own webcam publishers.",
+        "properties": {
+          "released_webcams": {"type": "array", "description": "Sessions the caller closed itself, one per slot. Each is honoured only if that session is still the one on its slot (or the slot is idle); a stale entry falls back to an ordinary confirmed stop of whatever is there. A bare index is not a claim and is ignored.", "items": {"type": "object", "required": ["index", "session"], "properties": {"index": {"type": "integer", "minimum": 1, "description": "One-based slot index."}, "session": {"type": "string", "description": "The WHIP session id that was closed — the `Id` response header from the WHIP POST, not the `Location` segment."}}}}
+        }
+      },
       "MediaSourceAssignment": {
         "description": "Desired file and transport configuration for one media-source slot.",
         "allOf": [
@@ -1012,7 +1118,9 @@
             "properties": {
               "file": {"type": "string", "description": "Relative media-library path, or an empty string to clear the slot."},
               "transport": {"type": "string", "enum": ["rtsp", "http"], "description": "Requested transport. Insight normalizes this to one supported by the detected codec."},
-              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."}
+              "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg"], "description": "Compatibility hint; the detected source codec takes precedence."},
+          "publisher_released": {"type": "boolean", "default": false, "description": "When assigning a file over a webcam slot: true if the caller has already closed its own publisher. Requires `publisher_session` and is verified the same way as for `/api/mediasrc/stop`."},
+          "publisher_session": {"type": "string", "description": "The WHIP session id the caller closed — the `Id` response header from the WHIP POST. Required with `publisher_released`."}
             }
           }
         ]
@@ -1020,20 +1128,22 @@
       "MediaSource": {
         "type": "object",
         "description": "Persisted configuration and current runtime state for one streaming source slot.",
-        "required": ["index", "file", "state", "transport", "codec", "allowed_transports", "urls"],
+        "required": ["index", "file", "state", "transport", "codec", "type", "allowed_transports", "urls"],
         "properties": {
           "index": {"type": "integer", "minimum": 1, "description": "One-based source slot index."},
           "file": {"type": "string", "description": "Assigned relative media-library path, or an empty string for an unassigned slot."},
           "state": {"type": "string", "enum": ["playing", "stopped"], "description": "Persisted playback state; `playing` indicates a source process should be active."},
           "transport": {"type": "string", "enum": ["rtsp", "http", ""], "description": "Selected output transport, or empty when the slot is unassigned."},
           "codec": {"type": "string", "enum": ["h264", "h265", "mjpeg", "unknown"], "description": "Codec detected from the assigned media."},
+          "type": {"type": "string", "enum": ["file", "webcam"], "description": "Source kind. A `file` slot streams an assigned media-library path; a `webcam` slot is published into MediaMTX by a browser over WHIP and has no file."},
           "allowed_transports": {"type": "array", "description": "Transports compatible with the detected codec and current backend capabilities.", "items": {"type": "string", "enum": ["rtsp", "http"]}},
           "urls": {
             "type": "object",
             "description": "Client URLs for the selected source and transports.",
             "properties": {
               "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
-              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."}
+              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."},
+              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots."}
             }
           }
         }

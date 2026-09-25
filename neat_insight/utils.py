@@ -38,6 +38,8 @@ import psutil
 import ipaddress
 import socket
 
+from neat_insight.mediasrc import MEDIAMTX_API_PORT, WEBCAM_WHIP_ICE_PORT, WEBCAM_WHIP_PORT
+
 CERT_FILE = "cert.pem"
 KEY_FILE = "key.pem"
 CERT_HOST_ENV = "NFS_SERVER_HOST_IP"
@@ -267,12 +269,17 @@ def _terminate_conflicting_port_specs(port_specs):
         time.sleep(0.2)
 
 
-def _terminate_conflicting_ports():
-    # mediamtx uses 8554/tcp and a default UDP helper port 8000.
+def _terminate_conflicting_ports(webcam_ice_port=None):
+    # mediamtx uses 8554/tcp, a default UDP helper port 8000, 8889/tcp for
+    # webcam WHIP signalling, its ICE media port for the video itself, and
+    # 9997/tcp (loopback) for its status API.
     # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
     port_specs = [
         (8554, "TCP"),
         (8000, "UDP"),
+        (WEBCAM_WHIP_PORT, "TCP"),
+        (webcam_ice_port or WEBCAM_WHIP_ICE_PORT, "UDP"),
+        (MEDIAMTX_API_PORT, "TCP"),
         (8081, "TCP"),
         *[(port, "UDP") for port in range(9000, 9080)],
         *[(port, "UDP") for port in range(9100, 9180)],
@@ -284,8 +291,8 @@ def _terminate_conflicting_ports():
     _terminate_conflicting_port_specs(port_specs)
 
 
-def start_processes(ssl_context):
-    _terminate_conflicting_ports()
+def start_processes(ssl_context, webcam_ice_port=None):
+    _terminate_conflicting_ports(webcam_ice_port)
     bin_dir = os.path.join(os.path.dirname(__file__), "bin")
     is_windows = os.name == "nt"
     vf = os.path.join(bin_dir, "vf.exe" if is_windows else "vf")
@@ -318,10 +325,43 @@ def start_processes(ssl_context):
     )
     processes.append(vf_proc)
 
+    # MediaMTX reads any config key as an MTX_<UPPERCASE_KEY> env override, so
+    # the webcam WHIP listener can reuse the same cert/key already resolved
+    # for `vf` and the Flask app (mkcert-generated or SDK-provided) instead of
+    # needing its own baked into mediamtx.yml.
+    mtx_env = dict(os.environ)
+    mtx_env["MTX_WEBRTCENCRYPTION"] = "yes"
+    mtx_env["MTX_WEBRTCSERVERCERT"] = cert_file
+    mtx_env["MTX_WEBRTCSERVERKEY"] = key_file
+
+    # The ICE port ends up inside MediaMTX's SDP answer, and Docker forwards a
+    # mapped port without rewriting what is written there. The SDK publishes it
+    # identity-mapped and reports it in the port map; binding that same number
+    # keeps the advertised port and the open host port in agreement.
+    if webcam_ice_port:
+        mtx_env["MTX_WEBRTCLOCALUDPADDRESS"] = f":{webcam_ice_port}"
+
+    # Inside an SDK container, MediaMTX's own network view only has the
+    # container-internal address to offer as an ICE host candidate, which the
+    # browser (outside the container) can't reach. handleOffer() in
+    # webrtc/viewer.go solves the same problem for vf's playback path via
+    # CONTAINER_HOST_IP + SetNAT1To1IPs; webrtcAdditionalHosts is MediaMTX's
+    # equivalent knob for its own WHIP listener.
+    host_ip = os.getenv("CONTAINER_HOST_IP", "")
+    try:
+        parsed_host_ip = ipaddress.ip_address(host_ip) if host_ip else None
+    except ValueError:
+        parsed_host_ip = None
+    if parsed_host_ip and not parsed_host_ip.is_loopback and not parsed_host_ip.is_unspecified:
+        mtx_env["MTX_WEBRTCADDITIONALHOSTS"] = host_ip
+    elif host_ip:
+        print(f"⚠️ Ignoring invalid or internal CONTAINER_HOST_IP for MediaMTX: {host_ip!r}")
+
     mtx_proc = subprocess.Popen(
         [mtx, mtx_config],
         stdout=mtx_log,
-        stderr=subprocess.STDOUT
+        stderr=subprocess.STDOUT,
+        env=mtx_env,
     )
     processes.append(mtx_proc)
 

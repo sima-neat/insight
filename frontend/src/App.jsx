@@ -1,8 +1,25 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
+import {
+  closeAllWebcamSessions,
+  closeWebcamSession,
+  recordWebcamStopsOnExit,
+  createDisconnectWatcher,
+  pinH264,
+  confirmWebcamPublishing,
+  describeWebcamError,
+  publishWebcamOffer,
+  selectH264Codecs,
+} from './streaming/webcamPublishing.js'
+
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 
 const SOURCE_COUNT = 48
+const WEBCAM_OPTION_PREFIX = '__webcam__:'
+// Thrown to abandon a start whose slot was reassigned or stopped while it was
+// in flight. Raised rather than returned so the catch releases the camera and
+// peer connection it had already created.
+const WEBCAM_START_SUPERSEDED = { superseded: true }
 const STREAMING_TRANSPORTS = [
   { value: 'rtsp', label: 'RTSP' },
   { value: 'http', label: 'HTTP' }
@@ -492,7 +509,11 @@ async function fetchJson(url, init) {
   const isJson = contentType.toLowerCase().includes('application/json')
   const body = isJson ? await res.json().catch(() => ({})) : {}
 
-  if (!res.ok) throw new Error(body.error || body.message || `Request failed: ${res.status}`)
+  if (!res.ok) {
+    const error = new Error(body.error || body.message || `Request failed: ${res.status}`)
+    error.status = res.status
+    throw error
+  }
   if (!isJson) {
     throw new Error(`Expected JSON from ${url}, received ${contentType || 'an empty content type'}.`)
   }
@@ -687,6 +708,27 @@ export default function App() {
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
   const [sources, setSources] = useState([])
+  const [webcamDevices, setWebcamDevices] = useState([])
+  // Explicit camera opt-in lives on the Media Sources tab (a camera is a kind
+  // of media source). Requesting access from a real button click is also the
+  // user gesture Chrome needs to expose Continuity Camera (an iPhone).
+  const [cameraProbing, setCameraProbing] = useState(false)
+  const [cameraError, setCameraError] = useState(null)
+  const [webcamAssignments, setWebcamAssignments] = useState({})
+  const [webcamBusy, setWebcamBusy] = useState({})
+  const [webcamPreviewStream, setWebcamPreviewStream] = useState(null)
+  const webcamSessionsRef = useRef(new Map())
+  // The devicechange listener below is registered once and would otherwise
+  // close over the first render's assignments forever.
+  const webcamAssignmentsRef = useRef({})
+  // Starting a webcam spans several awaits; by the time its stream is ready
+  // the user may have selected another row, and the closure's selectedSource
+  // would be stale. The preview must follow the selection as it is now.
+  const selectedSourceRef = useRef(1)
+  // Starting a webcam spans getUserMedia and the WHIP exchange. Anything that
+  // reassigns or stops the slot in between bumps this, and the in-flight start
+  // abandons itself rather than publishing a camera the user already replaced.
+  const webcamGenerationRef = useRef({})
   const [selectedFile, setSelectedFile] = useState('')
   const [selectedMediaPaths, setSelectedMediaPaths] = useState([])
   const [mediaInfo, setMediaInfo] = useState(null)
@@ -815,6 +857,12 @@ export default function App() {
   )
   const selectedCatalogPreview = selectedCatalogAssets.find((asset) => asset.preview && asset.codec === 'h264') || selectedCatalogAssets.find((asset) => asset.preview) || null
   const currentSource = sources.find((s) => s.index === selectedSource) || { index: selectedSource, file: '', state: 'stopped' }
+  // A camera selection or publish still in flight has a server request that a
+  // bulk action cannot cancel; the two could complete out of order and the
+  // earlier one re-register a webcam slot the bulk action just cleared. Hold
+  // the bulk controls until every slot has settled.
+  const anyWebcamBusy = Object.keys(webcamBusy).length > 0
+  const bulkHoldTitle = anyWebcamBusy ? 'Waiting for a webcam selection to finish' : undefined
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
@@ -838,7 +886,7 @@ export default function App() {
 
   async function loadSources() {
     const data = await fetchJson('/api/mediasrc')
-    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', allowed_transports: ['rtsp'], urls: {} })
+    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {} })
     setSources(filled)
   }
 
@@ -954,6 +1002,48 @@ export default function App() {
     const t = setTimeout(() => setError(''), 4600)
     return () => clearTimeout(t)
   }, [error])
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) return
+    // Lists devices already permitted; labels stay blank until access is
+    // granted, which the Streaming-tab effect below prompts for.
+    refreshWebcamDevices()
+    navigator.mediaDevices.addEventListener('devicechange', refreshWebcamDevices)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', refreshWebcamDevices)
+  }, [])
+
+  useEffect(() => {
+    return () => closeAllWebcamSessions(webcamSessionsRef.current)
+  }, [])
+
+  useEffect(() => {
+    // A full page reload or close does not run the unmount cleanup above, so
+    // record a stop for each owned webcam here instead — otherwise the
+    // reloaded page can show a Live row for a session that no longer exists
+    // until the user next touches a source. pagehide (not beforeunload) also
+    // fires when entering the bfcache; skip that case, since the page — and its
+    // live sessions — may be restored.
+    const onPageHide = (event) => {
+      if (event.persisted) return
+      recordWebcamStopsOnExit(webcamSessionsRef.current)
+      closeAllWebcamSessions(webcamSessionsRef.current)
+    }
+    window.addEventListener('pagehide', onPageHide)
+    return () => window.removeEventListener('pagehide', onPageHide)
+  }, [])
+
+  useEffect(() => {
+    webcamAssignmentsRef.current = webcamAssignments
+  }, [webcamAssignments])
+
+  useEffect(() => {
+    selectedSourceRef.current = selectedSource
+  }, [selectedSource])
+
+  useEffect(() => {
+    const session = webcamSessionsRef.current.get(selectedSource)
+    setWebcamPreviewStream(session ? session.stream : null)
+  }, [selectedSource])
 
   useEffect(() => {
     loadMediaInfo(selectedFile)
@@ -1476,18 +1566,395 @@ export default function App() {
     await loadSources()
   }
 
-  async function stopSource(index) {
+  // The per-row Start/Stop buttons for file sources call the two helpers above
+  // directly; a rejected request there — the slot changed under another tab
+  // (409/410), or a codec problem — must reach the user and refresh the row,
+  // not vanish as an unhandled rejection.
+  async function reportSourceError(e) {
+    setError(e.message)
+    await loadSources().catch(() => {})
+  }
+
+  async function stopSource(index, { publisherReleased = false, publisherSession = null } = {}) {
     await fetchJson('/api/mediasrc/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
+      // Closing our own peer connection released the camera regardless of what
+      // MediaMTX reports, so this slot needs no confirmation from it. The
+      // session id lets the backend refuse this stop if the slot has since been
+      // taken over by another browser.
+      body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
     })
     await loadSources()
   }
 
+  // How this tab and Insight agree about a webcam it publishes:
+  //  - Insight never owns the publisher; only this tab can end it. So every
+  //    path that ends a session here also records the stop with the backend,
+  //    naming the WHIP session it ended.
+  //  - A "released" claim is only ever made for a session this tab held and
+  //    can name. The backend honours it only for that session, so a stale
+  //    claim can never mark another browser's camera stopped.
+  //  - A start spans several awaits; a per-slot generation lets anything that
+  //    changes the slot in the meantime abandon it.
+  function invalidateWebcamStart(index) {
+    const next = (webcamGenerationRef.current[index] || 0) + 1
+    webcamGenerationRef.current[index] = next
+    return next
+  }
+
+  function teardownWebcamSession(index) {
+    invalidateWebcamStart(index)
+    const session = webcamSessionsRef.current.get(index)
+    if (!session) return
+    webcamSessionsRef.current.delete(index)
+    session.watcher?.cancel()
+    closeWebcamSession(session)
+    setWebcamPreviewStream((prev) => (prev === session.stream ? null : prev))
+  }
+
+  // Insight can stop a file source by killing its ffmpeg process, but a webcam
+  // is published by this browser — only we can end it. Any bulk action that
+  // stops or clears sources has to close these too, or the camera keeps
+  // publishing to MediaMTX while the UI reports everything stopped.
+  function teardownAllWebcamSessions({ clearAssignments = false } = {}) {
+    // A start that has not finished yet owns no session, so closing the
+    // registry alone would let it complete after the bulk action and publish a
+    // camera the user just stopped. Invalidate every slot that has ever started
+    // one; a stale generation is harmless, a missed one is not.
+    for (const index of Object.keys(webcamGenerationRef.current)) {
+      invalidateWebcamStart(Number(index))
+    }
+    closeAllWebcamSessions(webcamSessionsRef.current)
+    setWebcamPreviewStream(null)
+    if (clearAssignments) setWebcamAssignments({})
+  }
+
+  // Media Sources opt-in: an explicit click asks the browser for camera access
+  // and lists what it found. Being a real user gesture is what makes Chrome
+  // reveal Continuity Camera (an iPhone), which a background probe does not.
+  // Doubles as a re-scan when a camera is plugged in later.
+  async function enableCameraAccess() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('This browser cannot access cameras.')
+      return
+    }
+    setCameraError(null)
+    setCameraProbing(true)
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true })
+      probe.getTracks().forEach((track) => track.stop())
+      await refreshWebcamDevices()
+    } catch (e) {
+      setCameraError(describeWebcamError(e))
+    } finally {
+      setCameraProbing(false)
+    }
+  }
+
+  async function refreshWebcamDevices() {
+    let devices
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices()
+    } catch {
+      return
+    }
+    const cameras = devices
+      .filter((device) => device.kind === 'videoinput' && device.deviceId)
+      .map((device, i) => ({ deviceId: device.deviceId, label: device.label || `Camera ${i + 1}` }))
+    setWebcamDevices(cameras)
+
+    const validIds = new Set(cameras.map((c) => c.deviceId))
+    const dropped = Object.entries(webcamAssignmentsRef.current)
+      .filter(([, assignment]) => !validIds.has(assignment.deviceId))
+      .map(([indexStr]) => Number(indexStr))
+
+    if (!dropped.length) return
+
+    // A dropped assignment this tab never published is only a local choice;
+    // there is nothing to stop and the slot may well be another browser's.
+    const lostSessions = dropped
+      .map((index) => [index, webcamSessionsRef.current.get(index)])
+      .filter(([, session]) => session)
+    for (const index of dropped) teardownWebcamSession(index)
+    setWebcamAssignments((prev) => {
+      const next = { ...prev }
+      for (const index of dropped) delete next[index]
+      return next
+    })
+    // Same reasoning as a lost connection: record each stop rather than reload,
+    // naming the session so a slot that has moved on is left alone. Route through
+    // the shared helper so each row is held busy for its stop — closing the same
+    // click-during-teardown race as the manual and onLost paths.
+    for (const [index, session] of lostSessions) {
+      await stopWebcamSessionBound(index, session)
+    }
+    if (lostSessions.length) await loadSources().catch(() => {})
+  }
+
+
+  async function assignWebcamToSource(index, deviceId, label, { publisherReleased = false, publisherSession = null } = {}) {
+    // The caller has just invalidated the slot (teardown), so this generation
+    // is the one this selection belongs to. Busy disables the select and Start
+    // while the request is in flight, so two selections cannot race; the
+    // generation check covers anything else — a stop or bulk action — that
+    // changes the slot before the answer lands.
+    const generation = webcamGenerationRef.current[index] || 0
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    try {
+      await fetchJson('/api/mediasrc/assign-webcam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index, publisher_released: publisherReleased, publisher_session: publisherSession })
+      })
+      if ((webcamGenerationRef.current[index] || 0) !== generation) return
+      setWebcamAssignments((prev) => ({ ...prev, [index]: { deviceId, label } }))
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+      // This tab could not establish the intended assignment — the slot
+      // changed under another tab (409), or MediaMTX could not confirm the
+      // previous publisher (502). We already tore down our own session before
+      // this call, so drop the stale label rather than leave the row showing a
+      // camera we never confirmed; the dropdown falls back to "Webcam
+      // (reselect)" and the reload below shows the backend's actual state.
+      // Guarded by generation so a newer selection's assignment is not cleared.
+      if ((webcamGenerationRef.current[index] || 0) === generation) {
+        setWebcamAssignments((prev) => {
+          const next = { ...prev }
+          delete next[index]
+          return next
+        })
+      }
+      await loadSources().catch(() => {})
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+  }
+
+  function handleSourceSelectChange(index, value) {
+    if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
+      const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
+      const device = webcamDevices.find((d) => d.deviceId === deviceId)
+      // Switching cameras on a publishing slot: end the current session first.
+      // Otherwise the old track keeps publishing to the same MediaMTX path and
+      // the replacement is rejected because the path already has a publisher.
+      const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
+      teardownWebcamSession(index)
+      assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
+      return
+    }
+    const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
+    if (webcamAssignments[index]) {
+      teardownWebcamSession(index)
+      setWebcamAssignments((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+    // Closing our own publisher above released the camera, so the backend does
+    // not need MediaMTX to confirm it before converting the slot to a file —
+    // provided we can name the session, so a stale claim cannot hit another's.
+    assignFileToSource(index, value, claim)
+  }
+
+  // A file selection is a server write like a camera selection, and just as
+  // able to complete out of order if a second one is launched while the first
+  // is in flight — converting away from a webcam is slow, since the backend
+  // verifies the released publisher first. Hold the slot busy until it lands,
+  // exactly as assignWebcamToSource() does, so the select cannot fire twice.
+  async function assignFileToSource(index, file, claim = {}) {
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    try {
+      await updateSource(index, {
+        file,
+        publisher_released: Boolean(claim.publisherReleased),
+        publisher_session: claim.publisherSession ?? null,
+      })
+    } catch (e) {
+      setError(e.message)
+      await loadSources().catch(() => {})
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+  }
+
+  async function startWebcamSource(index) {
+    const assignment = webcamAssignments[index]
+    if (!assignment) {
+      setError('Select a webcam for this source before starting it.')
+      return
+    }
+    const src = sources.find((item) => item.index === index)
+    const whipUrl = src?.urls?.whip
+    if (!whipUrl) {
+      setError('No publish URL for this source; reassign the webcam and try again.')
+      return
+    }
+
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    const generation = invalidateWebcamStart(index)
+    const superseded = () => webcamGenerationRef.current[index] !== generation
+    let stream = null
+    let pc = null
+    let watcher = null
+    try {
+      // Video-only for now, per the ticket's initial scope.
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: assignment.deviceId } }
+      })
+      if (superseded()) throw WEBCAM_START_SUPERSEDED
+      pc = new RTCPeerConnection()
+      const videoTrack = stream.getVideoTracks()[0]
+      const sender = pc.addTrack(videoTrack, stream)
+      // Refuse rather than silently publishing VP8 while the slot advertises H.264.
+      pinH264(
+        pc.getTransceivers().find((t) => t.sender === sender),
+        RTCRtpSender.getCapabilities?.('video'),
+      )
+      watcher = createDisconnectWatcher({
+        onLost: () => {
+          // Capture our identity before teardown: this stop can arrive after
+          // another browser has taken the slot, and must name the session it
+          // is about so the backend can refuse to act on theirs. A slot this
+          // tab no longer holds is not ours to stop at all.
+          const lost = webcamSessionsRef.current.get(index)
+          if (!lost) return
+          // Same session-bound, busy-guarded stop as a manual click. The row
+          // still shows Live until this lands, so a Stop clicked in that window
+          // must not fire a second, unbound stop; holding the row busy prevents
+          // it. The helper records the stop rather than reloading (MediaMTX may
+          // still report the path ready mid-teardown) and never rejects.
+          stopWebcamSessionBound(index, lost)
+        },
+      })
+      pc.addEventListener('connectionstatechange', () => watcher.update(pc.connectionState))
+
+      const { answerSdp, deleteUrl, sessionId } = await publishWebcamOffer(pc, whipUrl)
+      // MediaMTX holds a session for this path from the POST onward, so the
+      // session is registered the moment the POST returns — before the
+      // supersession check and before the answer is applied. Either failure
+      // then reaches teardown with the delete URL in hand and releases the
+      // path, instead of leaving the resource occupying it until MediaMTX
+      // times it out.
+      webcamSessionsRef.current.set(index, { pc, stream, deleteUrl, sessionId, watcher })
+      if (superseded()) throw WEBCAM_START_SUPERSEDED
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+
+      // Compare against the selection as it is now, not as it was when the
+      // start began; installing this stream under another row's preview
+      // would show the wrong camera until the next selection change.
+      if (index === selectedSourceRef.current) setWebcamPreviewStream(stream)
+
+      // Insight only records the slot as playing once MediaMTX sees the path,
+      // which lags the WHIP exchange by the ICE handshake. The slot can still be
+      // reassigned during that wait, so check on every attempt — starting a slot
+      // that is now a file source would leave that file unexpectedly playing.
+      await confirmWebcamPublishing(
+        () => {
+          if (superseded()) throw WEBCAM_START_SUPERSEDED
+          return startSource(index)
+        },
+        // Stop retrying on outcomes that will not change within the window:
+        //  - 410: another tab made the slot a file source; it can never become
+        //    ours, so this tab's generation never moved and a retry is pointless.
+        //  - 502: MediaMTX's control API is unreachable; every /start retry
+        //    blocks ~1s on the dead API, so a dozen retries just hammer a server
+        //    already known to be down. Surface it and tear down instead.
+        { isTerminal: (e) => Boolean(e?.superseded) || e?.status === 410 || e?.status === 502 },
+      )
+    } catch (e) {
+      if (webcamSessionsRef.current.has(index)) {
+        teardownWebcamSession(index)
+      } else {
+        // Failed before the session was registered — getUserMedia succeeded but
+        // the publish was rejected, say. Nothing is tracking pc or stream yet,
+        // so release them here rather than leaking a camera and an open peer
+        // connection.
+        watcher?.cancel()
+        closeWebcamSession({ pc, stream, deleteUrl: null })
+      }
+      // A superseded start is the user changing their mind, not a failure.
+      if (!e?.superseded) setError(describeWebcamError(e))
+      await loadSources()
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+  }
+
+  // The bulk actions each end every session this tab holds and tell the
+  // backend which ones, by id, so a slot another browser has since taken is
+  // confirmed with MediaMTX instead of trusted. Read before teardown clears
+  // the registry.
+  function releasedWebcamClaims() {
+    return Array.from(webcamSessionsRef.current.entries())
+      .filter(([, session]) => session?.sessionId)
+      .map(([index, session]) => ({ index, session: session.sessionId }))
+  }
+
+  // Only a session this tab held, and can name, supports a released claim.
+  function releaseClaimFor(session) {
+    const sessionId = session?.sessionId ?? null
+    return sessionId ? { publisherReleased: true, publisherSession: sessionId } : {}
+  }
+
+  // The one safe way to stop a webcam this tab owns, shared by the manual Stop,
+  // the automatic connection-loss teardown, and the device-removal sweep. It
+  // holds the row busy for the whole request so a second stop cannot fire after
+  // teardownWebcamSession() has cleared the local session: that second call would
+  // find no session and send an *unbound* stop, which the backend implements by
+  // kicking whichever publisher holds the slot then — disconnecting a replacement
+  // another tab may have started in the gap. `session` is captured by the caller
+  // before teardown so the stop names the session it is about; a null session
+  // releases nothing (releaseClaimFor). Never rejects, so fire-and-forget callers
+  // (onLost) need no catch.
+  async function stopWebcamSessionBound(index, session) {
+    setWebcamBusy((prev) => ({ ...prev, [index]: true }))
+    teardownWebcamSession(index)
+    try {
+      await stopSource(index, releaseClaimFor(session))
+    } catch (e) {
+      setError(e.message)
+      // The slot may have moved on (409) or be unverifiable (502); show what
+      // the backend now holds rather than what this tab assumed.
+      await loadSources().catch(() => {})
+    } finally {
+      setWebcamBusy((prev) => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+    }
+  }
+
+  async function stopWebcamSource(index) {
+    await stopWebcamSessionBound(index, webcamSessionsRef.current.get(index))
+  }
+
   async function autoAssignAllSources() {
     try {
-      const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
+      // The backend rewrites every slot to a file source; the browser has to
+      // release the cameras those slots were using.
+      const released = releasedWebcamClaims()
+      teardownAllWebcamSessions({ clearAssignments: true })
+      const data = await fetchJson('/api/mediasrc/auto-assign-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_webcams: released })
+      })
       await loadSources()
       setUploadStatus(data.message || `Assigned ${data.assigned_count || 0} source(s).`)
     } catch (e) {
@@ -1496,6 +1963,12 @@ export default function App() {
   }
 
   async function startSourcesBulk() {
+    // The dialog can have been open since before a webcam selection began;
+    // start-bulk rewrites every slot, so it must wait like the other bulk actions.
+    if (anyWebcamBusy) {
+      setError('Waiting for a webcam selection to finish before starting sources.')
+      return
+    }
     const count = Number.parseInt(bulkStartCount, 10)
     if (!Number.isFinite(count) || count < 1) {
       setError('Enter a valid stream count (>= 1).')
@@ -1520,7 +1993,15 @@ export default function App() {
 
   async function stopAllSources() {
     try {
-      const data = await fetchJson('/api/mediasrc/stop-all', { method: 'POST' })
+      // Stop leaves the slot assigned, so the camera choice is kept and only
+      // the publishing session ends.
+      const released = releasedWebcamClaims()
+      teardownAllWebcamSessions()
+      const data = await fetchJson('/api/mediasrc/stop-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_webcams: released })
+      })
       await loadSources()
       setUploadStatus(data.message || 'Stopped all sources.')
     } catch (e) {
@@ -1530,7 +2011,15 @@ export default function App() {
 
   async function resetAllSources() {
     try {
-      const data = await fetchJson('/api/mediasrc/reset', { method: 'POST' })
+      // Reset returns every slot to an unassigned file source, so the camera
+      // choices go with it.
+      const released = releasedWebcamClaims()
+      teardownAllWebcamSessions({ clearAssignments: true })
+      const data = await fetchJson('/api/mediasrc/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_webcams: released })
+      })
       await loadSources()
       setSelectedSource(1)
       setUploadStatus(data.message || 'Reset all assignments.')
@@ -1830,6 +2319,34 @@ export default function App() {
               </div>
               <p className="meta-count">{filteredFiles.length} files</p>
 
+              <div className="camera-optin">
+                <div className="camera-optin-head">
+                  <span className="camera-optin-title">Local cameras</span>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={enableCameraAccess}
+                    disabled={cameraProbing}
+                    title="Ask this browser for camera access, then use a camera as a live source in Streaming"
+                  >
+                    {cameraProbing ? 'Requesting…' : (webcamDevices.length ? 'Refresh cameras' : 'Enable camera access')}
+                  </button>
+                </div>
+                <p className="section-note">
+                  A webcam or connected phone can be a live streaming source. Enable access here, then pick it in a Streaming slot.
+                </p>
+                {cameraError && <p className="camera-optin-error">{cameraError}</p>}
+                {webcamDevices.length > 0 ? (
+                  <ul className="camera-list">
+                    {webcamDevices.map((device) => (
+                      <li key={device.deviceId}>{device.label}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  !cameraError && <p className="hint">No cameras enabled yet.</p>
+                )}
+              </div>
+
               <div className="media-toolbar">
                 <input className="search-input" placeholder="Filter files..." value={mediaFilter} onChange={(e) => setMediaFilter(e.target.value)} />
               </div>
@@ -1909,49 +2426,93 @@ export default function App() {
                   <p className="section-note">Assign media, choose an available transport, and control source playback.</p>
                 </div>
                 <div className="rtsp-actions">
-                  <button className="btn-ghost" onClick={autoAssignAllSources} title="Auto assign unique media files to all sources">
+                  <button className="btn-ghost" onClick={autoAssignAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle || 'Auto assign unique media files to all sources'}>
                     Auto Assign
                   </button>
-                  <button className="btn-tonal" onClick={() => setBulkStartOpen(true)} disabled={!videoFiles.length}>
+                  <button className="btn-tonal" onClick={() => setBulkStartOpen(true)} disabled={!videoFiles.length || anyWebcamBusy} title={bulkHoldTitle}>
                     Bulk Start
                   </button>
-                  <button className="btn-tonal" onClick={stopAllSources}>
+                  <button className="btn-tonal" onClick={stopAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>
                     Stop All
                   </button>
-                  <button className="btn-ghost" onClick={resetAllSources}>
+                  <button className="btn-ghost" onClick={resetAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>
                     Reset
                   </button>
                 </div>
               </div>
               <p className="hint">Default RTSP base: <code>{rtspBase}</code></p>
+              {webcamDevices.length === 0 && (
+                <p className="hint">
+                  To use a webcam, enable camera access under <strong>Media Sources</strong> first.
+                </p>
+              )}
 
               <div className="sources">
                 {sources.map((src) => (
                   <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
                     {(() => {
-                      const isAssigned = Boolean(src.file)
+                      const isWebcam = src.type === 'webcam'
+                      const webcamAssignment = webcamAssignments[src.index]
+                      const isAssigned = isWebcam || Boolean(src.file)
                       const allowedTransports = Array.isArray(src.allowed_transports) ? src.allowed_transports : (isAssigned ? ['rtsp'] : [])
                       const transportLocked = !isAssigned || allowedTransports.length <= 1
                       const transportValue = isAssigned && allowedTransports.includes(src.transport) ? src.transport : ''
                       const canStream = isAssigned && allowedTransports.length > 0
+                      // While an assign/publish for this slot is in flight, `src`
+                      // is the pre-request render: a transport change or start
+                      // fired now would post that stale file/type and race the
+                      // pending write (e.g. an /assign with the old filename
+                      // converting a just-assigned webcam back to a file). Hold
+                      // every mutating control on the row, not just the select.
+                      const rowBusy = Boolean(webcamBusy[src.index])
+                      const selectValue = isWebcam
+                        ? (webcamAssignment ? `${WEBCAM_OPTION_PREFIX}${webcamAssignment.deviceId}` : '')
+                        : (src.file || '')
                       return (
                         <>
-                          <span className="src-label">src{src.index}</span>
+                          <span className="src-label">
+                            <span className="src-id">src{src.index}</span>
+                            {(isWebcam || src.file) && (
+                              <span className={`src-type ${isWebcam ? 'cam' : 'vid'}`}>
+                                {isWebcam ? '[CAM]' : '[VID]'}
+                              </span>
+                            )}
+                          </span>
                           <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
                             {src.state === 'playing' ? 'Live' : 'Idle'}
                           </span>
-                          <select value={src.file || ''} onChange={(e) => updateSource(src.index, { file: e.target.value })}>
+                          <select
+                            value={selectValue}
+                            disabled={rowBusy}
+                            onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
+                          >
                             <option value="">Not assigned</option>
-                            {videoFiles.map((file) => (
-                              <option key={file} value={file}>{file}</option>
-                            ))}
+                            {/* Grouped so a camera reads differently from a file
+                                at a glance; the selected type shows as a
+                                [CAM]/[VID] badge on the row (per review feedback). */}
+                            {webcamDevices.length > 0 && (
+                              <optgroup label="Cameras">
+                                {webcamDevices.map((device) => (
+                                  <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
+                                    {device.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {videoFiles.length > 0 && (
+                              <optgroup label="Video files">
+                                {videoFiles.map((file) => (
+                                  <option key={file} value={file}>{file}</option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                           <select
                             value={transportValue}
                             onChange={(e) => updateSource(src.index, { transport: e.target.value })}
-                            disabled={transportLocked}
+                            disabled={transportLocked || rowBusy}
                             aria-label={`Transport for src${src.index}`}
-                            title={!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`))}
+                            title={rowBusy ? 'Waiting for the current change to finish' : (!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`)))}
                           >
                             {(!isAssigned || !canStream) && <option value="">-</option>}
                             {STREAMING_TRANSPORTS.filter((transport) => allowedTransports.includes(transport.value)).map((transport) => (
@@ -1964,9 +2525,10 @@ export default function App() {
                           {src.state === 'playing' ? (
                             <button
                               className="icon-action-btn stop"
-                              onClick={(e) => { e.stopPropagation(); stopSource(src.index) }}
+                              onClick={(e) => { e.stopPropagation(); isWebcam ? stopWebcamSource(src.index) : stopSource(src.index).catch(reportSourceError) }}
+                              disabled={rowBusy}
                               aria-label={`Stop src${src.index}`}
-                              title={`Stop src${src.index}`}
+                              title={rowBusy ? 'Waiting for the current change to finish' : `Stop src${src.index}`}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -1975,10 +2537,14 @@ export default function App() {
                           ) : (
                             <button
                               className="icon-action-btn play"
-                              onClick={(e) => { e.stopPropagation(); startSource(src.index) }}
-                              disabled={!canStream}
+                              onClick={(e) => { e.stopPropagation(); isWebcam ? startWebcamSource(src.index) : startSource(src.index).catch(reportSourceError) }}
+                              disabled={rowBusy || !canStream || (isWebcam && !webcamAssignment)}
                               aria-label={`Start src${src.index}`}
-                              title={canStream ? `Start src${src.index}` : 'Codec must be detected before streaming'}
+                              title={
+                                isWebcam
+                                  ? (webcamAssignment ? `Start publishing ${webcamAssignment.label}` : 'Select a webcam first')
+                                  : (canStream ? `Start src${src.index}` : 'Codec must be detected before streaming')
+                              }
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <path d="M8 6v12l10-6-10-6z" />
@@ -2007,14 +2573,35 @@ export default function App() {
 
             <section className="panel">
               <h2>Source Preview: src{currentSource.index}</h2>
-              <p className="hint">File: {currentSource.file || 'Not assigned'}</p>
+              <p className="hint">
+                {currentSource.type === 'webcam'
+                  ? `Webcam: ${webcamAssignments[currentSource.index]?.label || 'Not selected'}`
+                  : `File: ${currentSource.file || 'Not assigned'}`}
+              </p>
               <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
 
               <div className="preview">
-                {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                {!currentSource.file && <p>Assign a media file to preview.</p>}
+                {currentSource.type === 'webcam' ? (
+                  webcamPreviewStream ? (
+                    <video
+                      autoPlay
+                      muted
+                      playsInline
+                      ref={(el) => {
+                        if (el && el.srcObject !== webcamPreviewStream) el.srcObject = webcamPreviewStream
+                      }}
+                    />
+                  ) : (
+                    <p>Start this source to preview the live webcam.</p>
+                  )
+                ) : (
+                  <>
+                    {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
+                    {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
+                    {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
+                    {!currentSource.file && <p>Assign a media file to preview.</p>}
+                  </>
+                )}
               </div>
             </section>
           </div>

@@ -1,0 +1,285 @@
+// WHIP publishing helpers for browser webcam sources (see issue #120).
+//
+// Kept out of App.jsx so the negotiation can be tested without a DOM, a real
+// RTCPeerConnection, or a camera — the same split the viewer uses for
+// webrtc/static/js/webrtcSignaling.js.
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Turn a getUserMedia or publish failure into something a user can act on.
+// Anything unrecognized falls through to the underlying message rather than a
+// generic string, because the publish errors below already read well.
+export function describeWebcamError(error) {
+  if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
+    return 'Camera permission was denied. Allow camera access for this site and try again.'
+  }
+  if (error?.name === 'NotFoundError' || error?.name === 'OverconstrainedError') {
+    return 'That camera is no longer available. Detect webcams again and reselect one.'
+  }
+  if (error?.name === 'NotReadableError') {
+    return 'The camera could not be started (it may be in use by another application).'
+  }
+  return error?.message || 'Webcam publishing failed.'
+}
+
+// MediaMTX returns the session resource in Location; DELETE on it releases the
+// path immediately instead of waiting for the peer connection to time out. A
+// malformed or absent value is not worth failing the publish over — closing the
+// RTCPeerConnection already ends the media flow.
+// The session id is NOT the last segment of Location. MediaMTX names the WHIP
+// resource with a separate secret, so that knowing a session id does not let
+// anyone delete it; the session id itself — the one its status API reports as
+// the path's source, and the one a stop must name — comes back in the `Id`
+// response header, which MediaMTX exposes to cross-origin callers. Verified
+// against v1.12.1 on a DevKit: Location carried 5fdd8139-…, Id and the API
+// both carried 52304a1c-….
+export function sessionIdFromResponse(headers) {
+  const id = headers?.get?.('Id')
+  return typeof id === 'string' && id.trim() ? id.trim() : null
+}
+
+export function resolveDeleteUrl(location, whipUrl) {
+  if (!location) return null
+  try {
+    return new URL(location, whipUrl).toString()
+  } catch {
+    return null
+  }
+}
+
+// Chrome's default offer prefers VP8. The rest of Insight (codec badges, what a
+// Core application expects on the RTSP side) assumes h264/h265/mjpeg, and #120
+// calls for H.264, so the transceiver is pinned rather than left to negotiate.
+export function selectH264Codecs(capabilities) {
+  return (capabilities?.codecs || []).filter((codec) => /^video\/H264$/i.test(codec.mimeType))
+}
+
+// The offer is posted before ICE gathering completes, deliberately, for the
+// reason webrtcSignaling.js documents on the viewer side: gathering cannot
+// report complete until every configured STUN server has answered or exhausted
+// its RFC 5389 retransmission schedule, which measured 120 ms when the server
+// answered and 3.9-25 s when its packets were dropped. Waiting would put that in
+// front of a connection between a browser and MediaMTX on the same host or LAN,
+// which needs none of those candidates: the browser reaches MediaMTX on the host
+// candidates in the answer, and MediaMTX accepts the browser's source address as
+// peer-reflexive.
+export async function publishWebcamOffer(peerConnection, whipUrl, fetchRequest = globalThis.fetch) {
+  const offer = await peerConnection.createOffer()
+  await peerConnection.setLocalDescription(offer)
+
+  const response = await fetchRequest(whipUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: peerConnection.localDescription.sdp,
+  })
+
+  if (!response.ok) {
+    const error = new Error(`Webcam publish was rejected (HTTP ${response.status}).`)
+    error.status = response.status
+    throw error
+  }
+
+  return {
+    answerSdp: await response.text(),
+    deleteUrl: resolveDeleteUrl(response.headers?.get('Location'), whipUrl),
+    sessionId: sessionIdFromResponse(response.headers),
+  }
+}
+
+// Insight reports a webcam slot as playing only once MediaMTX says the path is
+// ready, which lags the WHIP exchange by the ICE handshake. Poll to a deadline
+// rather than sleeping a fixed amount: a fixed delay is either longer than a
+// local handshake needs or too short for a slow one, and this reports the real
+// failure when the stream genuinely never arrives.
+export async function confirmWebcamPublishing(attempt, options = {}) {
+  const {
+    // Longer than MediaMTX's webrtcTrackGatherTimeout (10s) plus the ICE
+    // handshake, AND the extra hop before the slot reports ready: start now
+    // confirms the normalized output path (src{N}), which only appears once the
+    // browser is publishing to the ingest path AND MediaMTX's runOnReady ffmpeg
+    // has spun up and produced its first frames (~1-3s on the DevKit). A
+    // slow-starting camera or normalizer is still within this window, and giving
+    // up first would tear down a publish that was about to succeed.
+    timeoutMs = 20000,
+    intervalMs = 250,
+    sleep = defaultSleep,
+    now = () => Date.now(),
+    // Not every failure is worth retrying. A slot reassigned out from under the
+    // start will never become the thing we are waiting for, so retrying until
+    // the deadline would both waste the wait and risk acting on the new slot.
+    isTerminal = () => false,
+  } = options
+
+  const deadline = now() + timeoutMs
+  let lastError = null
+
+  for (;;) {
+    try {
+      return await attempt()
+    } catch (error) {
+      lastError = error
+      if (isTerminal(error)) throw error
+    }
+    if (now() >= deadline) {
+      throw lastError || new Error('Webcam did not start publishing in time.')
+    }
+    await sleep(intervalMs)
+  }
+}
+
+// Releasing a webcam session means three things, and the DELETE is the only
+// optional one: stop the camera tracks so the OS releases the device, close
+// the peer connection so MediaMTX sees the publisher go away, and best-effort
+// tell MediaMTX to drop the path now rather than waiting for the WebRTC
+// timeout. Kept here, out of the component, so the bulk paths that have to do
+// this for every session can be tested without React.
+export function closeWebcamSession(session, fetchRequest = globalThis.fetch) {
+  if (!session) return false
+
+  try {
+    session.stream?.getTracks?.().forEach((track) => track.stop())
+  } catch {
+    // A track already ended is not worth failing the teardown over.
+  }
+  try {
+    session.pc?.close?.()
+  } catch {
+    // Same for an already-closed peer connection.
+  }
+
+  if (session.deleteUrl && fetchRequest) {
+    try {
+      fetchRequest(session.deleteUrl, { method: 'DELETE' })?.catch?.(() => {})
+    } catch {
+      // Closing the peer connection above already ended the media flow.
+    }
+  }
+  return true
+}
+
+// Stop All, Reset and Auto Assign each invalidate every live webcam slot at
+// once. Insight can kill a file source's ffmpeg process itself, but only this
+// browser can end a webcam publish, so a bulk action that skips this leaves
+// cameras publishing while the UI reports everything stopped.
+export function closeAllWebcamSessions(sessions, fetchRequest = globalThis.fetch) {
+  const closed = []
+  if (!sessions) return closed
+  for (const index of Array.from(sessions.keys())) {
+    closeWebcamSession(sessions.get(index), fetchRequest)
+    sessions.delete(index)
+    closed.push(index)
+  }
+  return closed
+}
+
+// When the page is unloading (reload or close), closing the peer connection
+// only makes MediaMTX drop the path ~15-20s later, and the reloaded page can
+// query sources before that and keep the slot marked Live with no session
+// behind it, with no periodic refresh to correct it. So record a session-bound
+// stop for each owned webcam over a keepalive POST — a plain fetch is cancelled
+// when the page dies, keepalive lets it complete. Same-origin (Insight's own
+// API), so no CORS concern. Returns the indexes a stop was sent for.
+export function recordWebcamStopsOnExit(sessions, fetchRequest = globalThis.fetch) {
+  const stopped = []
+  if (!sessions) return stopped
+  for (const [index, session] of sessions) {
+    // Only a session this tab can name can be stopped without a kick; a
+    // session with no id has nothing to record and is just closed.
+    if (!session?.sessionId) continue
+    try {
+      fetchRequest('/api/mediasrc/stop', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          index,
+          publisher_released: true,
+          publisher_session: session.sessionId,
+        }),
+      })?.catch?.(() => {})
+    } catch {
+      // The page is unloading; there is nothing more we can do.
+    }
+    stopped.push(index)
+  }
+  return stopped
+}
+
+// `disconnected` is not the same as gone. ICE reports it for a transient
+// interruption — a Wi-Fi blip, a roam between APs — and recovers to
+// `connected` on its own without renegotiation. Tearing down on sight turns a
+// momentary disturbance into a source the user has to set up again, so only
+// `failed` and `closed` are acted on immediately; `disconnected` gets a grace
+// period to come back.
+export function createDisconnectWatcher({
+  onLost,
+  graceMs = 10000,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+} = {}) {
+  let timer = null
+  // Two different things end the wait. Recovery — `connected` after a
+  // `disconnected` — only clears the pending grace timer; the watcher stays
+  // armed for the next loss. Cancellation is permanent and is reserved for
+  // intentional teardown: closing the peer connection on purpose emits a
+  // `closed` state change like any other, and a watcher that still reacted to
+  // it would report the teardown as a lost connection and send a second stop
+  // for a session that is already gone.
+  let active = true
+
+  function clearGrace() {
+    if (timer !== null) {
+      clearTimer(timer)
+      timer = null
+    }
+  }
+
+  function cancel() {
+    active = false
+    clearGrace()
+  }
+
+  return {
+    cancel,
+    update(state) {
+      if (!active) return
+      if (state === 'failed' || state === 'closed') {
+        cancel()
+        onLost?.(state)
+        return
+      }
+      if (state === 'disconnected') {
+        if (timer === null) {
+          timer = setTimer(() => {
+            timer = null
+            onLost?.('disconnected')
+          }, graceMs)
+        }
+        return
+      }
+      // connecting / connected / new: whatever interruption there was is over,
+      // but the connection can still be lost later — stay armed.
+      clearGrace()
+    },
+  }
+}
+
+// Insight advertises every webcam source as H.264 — the codec badge, the RTSP
+// output, and what a Core application is configured to decode. If the browser
+// cannot actually offer H.264, MediaMTX will happily accept VP8 and the source
+// then lies about its codec, failing downstream instead of here. Fail here.
+export function pinH264(transceiver, capabilities) {
+  const codecs = selectH264Codecs(capabilities)
+  if (!codecs.length) {
+    throw new Error(
+      'This browser cannot publish H.264 video, which webcam sources require. Try Chrome, Edge or Safari.',
+    )
+  }
+  if (!transceiver || typeof transceiver.setCodecPreferences !== 'function') {
+    throw new Error(
+      'This browser cannot choose a video codec, so H.264 publishing cannot be guaranteed. Try Chrome, Edge or Safari.',
+    )
+  }
+  transceiver.setCodecPreferences(codecs)
+  return codecs
+}
