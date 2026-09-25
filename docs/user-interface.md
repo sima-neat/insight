@@ -152,7 +152,7 @@ The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sent
 - **Power**: current and session-average power, the session peak against the chart's scale, and the power rails stacked so the top edge is the board total.
 - **System**: a heat strip of each CPU core's load over the window, beside CPU usage, load, Linux memory, MLA memory, and EV74 CMA use.
 - **Storage/Net**: eMMC use, network and eMMC traffic, and their metrics.
-- **Runs**: record a trace, and open, compare, or delete saved runs.
+- **Runs**: record a trace, and open, compare, or delete saved runs. Comparing overlays one series (total power, thermal maximum, CPU, load, RAM, MLA memory, or EV74 CMA) for every selected run over the time they all cover, on a scale fitted to the runs, with each run's minimum, mean, median, P95, maximum, change against the baseline, and energy; the full per-metric comparison follows it.
 
 Charts use fixed scales (percentages 0-100, temperatures 40-90 °C, anything else up to a round number above its peak), show the warning and critical levels Sentinel defines, and read out every series at a point when you hover. A tab's name is marked when a metric in it is past a threshold. A metric the board cannot measure reads as an em dash, never as zero.
 

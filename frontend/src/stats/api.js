@@ -56,5 +56,5 @@ export function deleteRun(ref, generation = null) {
 }
 
 export function compareRuns(refs) {
-  return requestJson(compareQuery(refs))
+  return requestJson(compareQuery(refs, { raw: true }))
 }

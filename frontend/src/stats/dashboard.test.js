@@ -5,6 +5,10 @@ import test from 'node:test'
 import {
   DASH_TABS,
   agoLabel,
+  compareOverlay,
+  compareSeriesAvailable,
+  tightScale,
+  elapsedPath,
   axisLabel,
   dashTabFrom,
   downsample,
@@ -21,9 +25,10 @@ import {
   sumSeries,
   thermalGroups,
   thermalMaxSeries,
-  thresholdLines
+  thresholdLines,
+  valueNear
 } from './dashboard.js'
-import { metricsModel } from './model.js'
+import { compareTable, metricsModel } from './model.js'
 
 const LIVE = JSON.parse(readFileSync(new URL('./fixtures/metrics-live.json', import.meta.url), 'utf8'))
 
@@ -105,4 +110,56 @@ test('the live board: thermal groups in Sentinel order, cores and rails by key, 
   assert.deepEqual(thresholdLines({ warn: 70, critical: 85 }), [{ value: 70, tone: 'warn' }, { value: 85, tone: 'critical' }])
   assert.deepEqual(thresholdLines({ warn: null }), [])
   assert.deepEqual([axisLabel(100), axisLabel(2.5), axisLabel(1788), axisLabel(null)], ['100', '2.5', '1.8k', ''])
+})
+
+// Two saved runs compared with raw=1 on the DevKit, 2026-09-25 (tes3 is the baseline).
+const RAW = JSON.parse(readFileSync(new URL('./fixtures/compare-raw.json', import.meta.url), 'utf8'))
+
+test('compare runs overlays one series per run over elapsed time, baseline first', () => {
+  const overlay = compareOverlay(RAW, 'power')
+  assert.equal(overlay.spec.label, 'Total power')
+  assert.equal(overlay.unit, 'W')
+  assert.deepEqual(overlay.lines.map((line) => [line.name, line.baseline]), [['tes3', true], ['insight-hw-1790177227', false]])
+  assert.deepEqual(overlay.lines[0].points.map((point) => Math.round(point.t)), [0, 2, 4, 6], 'about two seconds apart, as recorded')
+  assert.deepEqual(overlay.lines[1].points.map((point) => point.v), [8.53125, 8.53125, 8.53125, 8.875])
+  assert.equal(Math.round(overlay.overlap), 6)
+  // Sentinel's own summary and baseline delta, and each run's energy.
+  const [base, other] = overlay.rows
+  assert.deepEqual([base.samples, base.mean, base.energy], [4, 9.03125, 54.1891436875])
+  assert.deepEqual([other.minimum, other.p95, other.maximum], [8.53125, 8.875, 8.875])
+  assert.equal(Number(other.delta.toFixed(3)), -4.585)
+})
+
+test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {
+  assert.deepEqual(compareSeriesAvailable(RAW).map((entry) => entry.label),
+    ['Total power', 'Thermal maximum', 'CPU utilization', 'CPU load', 'RAM used', 'MLA memory', 'EV74 CMA'])
+  const thermal = compareOverlay(RAW, 'thermal')
+  assert.equal(thermal.unit, 'C')
+  const firstSample = RAW.sentinel.runs.find((run) => run.metadata.name === 'tes3').samples[0].values
+  const hottest = Math.max(...Object.entries(firstSample).filter(([key]) => /^(rtsn_|lm96163_|eth_mdio_temp)/.test(key)).map(([, value]) => value))
+  assert.equal(thermal.lines[0].points[0].v, hottest)
+  assert.equal(thermal.rows[0].delta, 0, 'the baseline against itself')
+  assert.equal(compareOverlay(RAW, 'nonsense').spec.id, 'power', 'an unknown series falls back to the first')
+  assert.equal(compareOverlay({ sentinel: { runs: [] } }, 'power'), null)
+})
+
+test('the overlay path stays inside the common window and breaks on missing samples', () => {
+  const points = [{ t: 0, v: 1 }, { t: 1, v: null }, { t: 2, v: 3 }, { t: 9, v: 5 }]
+  assert.equal(elapsedPath(points, 4, { min: 0, max: 4 }, 100, 4), 'M0 3 M50 1 L225 0', 'the first point past the window carries the line to the edge')
+  assert.equal(elapsedPath([{ t: 0, v: 1 }, { t: 9, v: 2 }, { t: 12, v: 3 }], 4, { min: 0, max: 4 }, 100, 4), 'M0 3 L225 2', 'and only the first')
+  assert.deepEqual(valueNear(points, 1.2), { t: 2, v: 3 })
+  assert.equal(valueNear([], 1), null)
+})
+
+test('the comparison table reads raw runs too, whose details sit under metadata', () => {
+  const table = compareTable(RAW)
+  assert.deepEqual(table.columns.map((column) => [column.label, column.baseline]), [['tes3', true], ['insight-hw-1790177227', false]])
+  const power = table.rows.find((row) => row.key === 'power_current_watts')
+  assert.deepEqual(power.cells.map((cell) => cell.value), [9.03125, 8.6171875])
+})
+
+test('the comparison scale is fitted to the runs, so a few percent is visible', () => {
+  assert.deepEqual(tightScale([[8.53, 8.88], [9.03]]), { min: 8.4, max: 9.2 })
+  assert.deepEqual(tightScale([[3, 3], [3]]), { min: 2.8, max: 3.2 }, 'equal readings still get a band around them')
+  assert.deepEqual(tightScale([[null]]), { min: 0, max: 1 })
 })

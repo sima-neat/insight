@@ -5144,3 +5144,35 @@ button:disabled {
 .dash-all[open] > summary::before {
   content: "▾";
 }
+
+/* Compare Runs: the overlay and its per-run summary. */
+.dash-compare {
+  margin: 0 0 14px;
+}
+
+.dash-baseline {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 4px;
+  background: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.dash-compare-summary th[scope="row"] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.dash-compare-summary .stats-ops-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

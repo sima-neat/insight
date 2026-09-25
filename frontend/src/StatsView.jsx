@@ -67,6 +67,7 @@ import {
   uncomparableRefs,
   validateTrace
 } from './stats/model.js'
+import CompareOverlay from './stats/CompareOverlay.jsx'
 import SentinelDashboard from './stats/Dashboard.jsx'
 import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, OutputDetails, SegmentedTabs } from './stats/ui.jsx'
 
@@ -730,6 +731,7 @@ export function RunsPanel({
           )}
           {compareStale && <StaleBanner what="This comparison" payload={compare} onRefresh={onCompare} refreshLabel="Compare again" />}
           <div id="stats-compare-body" hidden={!compareOpen}>
+            <CompareOverlay payload={compare} />
             {table ? (
               <>
                 {/* Each “—” shows its reason on hover, focus or tap, so the table needs no paragraph explaining them. */}

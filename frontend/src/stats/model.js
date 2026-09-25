@@ -746,8 +746,9 @@ export function missingSelection(selected, runs) {
   return list.filter((ref) => !refs.has(String(ref)))
 }
 
-export function compareQuery(refs) {
-  return `/api/sentinel/compare?runs=${encodeURIComponent((refs || []).join(','))}`
+export function compareQuery(refs, { raw = false } = {}) {
+  // raw=1 adds every run's timestamped samples, which the overlay chart draws.
+  return `/api/sentinel/compare?runs=${encodeURIComponent((refs || []).join(','))}${raw ? '&raw=1' : ''}`
 }
 
 /**
@@ -888,7 +889,9 @@ export function deltaAbsenceText(code) {
 }
 
 function compareColumns(runs, baselineId, summaries) {
-  return runs.map((run, index) => {
+  return runs.map((entry, index) => {
+    // With raw=1 each run is { metadata, metrics, samples }; without it, the metadata itself.
+    const run = entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : entry
     const id = String(run?.id ?? index)
     return {
       key: id,

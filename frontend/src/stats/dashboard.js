@@ -249,3 +249,150 @@ export function axisLabel(value) {
   if (Math.abs(value) >= 1000) return `${Number((value / 1000).toFixed(1))}k`
   return String(Number(value.toFixed(value < 10 ? 1 : 0)))
 }
+
+/**
+ * The series Compare Runs can overlay, as Sentinel's own Compare Runs tab offers them. Thermal
+ * maximum is derived per sample from every temperature sensor the runs recorded.
+ */
+export const COMPARE_SERIES = [
+  { id: 'power', label: 'Total power', key: 'power_current_watts' },
+  { id: 'thermal', label: 'Thermal maximum', thermal: true },
+  { id: 'cpu', label: 'CPU utilization', key: 'cpu_usage_pct' },
+  { id: 'load', label: 'CPU load', key: 'cpu_load_1' },
+  { id: 'ram', label: 'RAM used', key: 'linux_mem_used_mb' },
+  { id: 'mla', label: 'MLA memory', key: 'mla_mem_allocated_mb' },
+  { id: 'cma', label: 'EV74 CMA', key: 'ev74_cma_used_mb' }
+]
+
+function percentile(sorted, p) {
+  if (!sorted.length) return null
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))]
+}
+
+function stats(values) {
+  const sorted = values.filter(isNumber).sort((a, b) => a - b)
+  if (!sorted.length) return { count: 0, minimum: null, mean: null, median: null, p95: null, maximum: null }
+  const middle = Math.floor(sorted.length / 2)
+  return {
+    count: sorted.length,
+    minimum: sorted[0],
+    mean: sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
+    median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
+    p95: percentile(sorted, 95),
+    maximum: sorted[sorted.length - 1]
+  }
+}
+
+/** The series in COMPARE_SERIES that these runs actually recorded. */
+export function compareSeriesAvailable(payload) {
+  const runs = (payload?.sentinel || payload || {}).runs || []
+  const defs = runs[0]?.metrics || []
+  const keys = new Set(defs.map((definition) => definition.key))
+  return COMPARE_SERIES.filter((spec) => (spec.thermal ? defs.some(isThermalMetric) : keys.has(spec.key)))
+}
+
+/**
+ * Every compared run's samples of one series against elapsed time, as Sentinel's Compare Runs
+ * overlays them, with a summary row per run. The baseline comes first. `overlap` is the time all
+ * runs cover; the chart draws that window, where the runs can be compared side by side.
+ */
+export function compareOverlay(payload, seriesId) {
+  const body = payload?.sentinel || payload || {}
+  const available = compareSeriesAvailable(payload)
+  const spec = available.find((entry) => entry.id === seriesId) || available[0]
+  const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples) && run.samples.length)
+  if (!spec || !runs.length) return null
+  const defs = runs[0].metrics || []
+  const thermalKeys = defs.filter(isThermalMetric).map((definition) => definition.key)
+  const definition = spec.thermal ? null : defs.find((entry) => entry.key === spec.key)
+  const unit = spec.thermal ? 'C' : definition?.unit ?? ''
+  const baselineId = body.baseline_id
+
+  const lines = runs.map((run) => {
+    const start = seconds(run.samples[0].timestamp)
+    const points = run.samples.map((sample) => {
+      const values = sample?.values || {}
+      const value = spec.thermal
+        ? thermalKeys.map((key) => values[key]).filter(isNumber).reduce((max, next) => (max === null || next > max ? next : max), null)
+        : values[spec.key]
+      const at = seconds(sample?.timestamp)
+      return { t: start === null || at === null ? null : at - start, v: isNumber(value) ? value : null }
+    }).filter((point) => isNumber(point.t) && point.t >= 0)
+    return { id: run.metadata.id, name: String(run.metadata.name || run.metadata.id), baseline: run.metadata.id === baselineId, points }
+  }).sort((a, b) => Number(b.baseline) - Number(a.baseline))
+
+  const ends = lines.map((line) => (line.points.length ? line.points[line.points.length - 1].t : 0))
+  const overlap = Math.min(...ends)
+  const baselineStats = stats(lines.find((line) => line.baseline)?.points.map((point) => point.v) || [])
+  const rows = lines.map((line) => {
+    const summary = spec.thermal ? null : body.summaries?.[line.id]?.metrics?.[spec.key]
+    const figures = summary && isNumber(summary.count) ? summary : stats(line.points.map((point) => point.v))
+    let delta = spec.thermal ? null : body.baseline_deltas_pct?.[line.id]?.[spec.key]
+    if (spec.thermal && isNumber(figures.mean) && isNumber(baselineStats.mean) && baselineStats.mean !== 0) {
+      delta = ((figures.mean - baselineStats.mean) / baselineStats.mean) * 100
+    }
+    return {
+      id: line.id,
+      name: line.name,
+      baseline: line.baseline,
+      samples: figures.count ?? line.points.length,
+      minimum: figures.minimum ?? null,
+      mean: figures.mean ?? null,
+      median: figures.median ?? null,
+      p95: figures.p95 ?? null,
+      maximum: figures.maximum ?? null,
+      delta: isNumber(delta) ? delta : null,
+      energy: isNumber(body.summaries?.[line.id]?.energy_joules) ? body.summaries[line.id].energy_joules : null
+    }
+  })
+  return { spec, available, unit, lines, overlap: overlap > 0 ? overlap : Math.max(0, ...ends), rows }
+}
+
+/**
+ * A scale fitted to the readings, for comparing runs: differences of a few percent are the
+ * point of a comparison, and a scale from zero would draw them as one flat line. Padded by a
+ * sixth of the spread (or 5% of the value when all runs read the same) and rounded outwards.
+ */
+export function tightScale(valueLists) {
+  const values = valueLists.flat().filter(isNumber)
+  if (!values.length) return { min: 0, max: 1 }
+  const low = Math.min(...values)
+  const high = Math.max(...values)
+  const pad = (high - low) / 6 || Math.abs(high) * 0.05 || 1
+  // Round to a tenth of the padded spread's order of magnitude: 8.44-9.11 W becomes 8.4-9.2.
+  const step = 10 ** Math.floor(Math.log10(high - low + 2 * pad))
+  const clean = (value) => Number(value.toPrecision(12))
+  return { min: clean(Math.floor((low - pad) / step) * step), max: clean(Math.ceil((high + pad) / step) * step) }
+}
+
+/**
+ * One run's points in the window, as an SVG line on a fixed scale. The first point past the
+ * window is kept too, so the line runs to the edge (the plot clips it) instead of stopping short.
+ */
+export function elapsedPath(points, window, scale, width, height) {
+  const list = points || []
+  const past = list.findIndex((point) => point.t > window + 1e-9)
+  const inside = past < 0 ? list : list.slice(0, past + 1)
+  const segments = []
+  let current = []
+  for (const point of inside) {
+    if (!isNumber(point.v)) {
+      if (current.length) segments.push(current)
+      current = []
+      continue
+    }
+    current.push([round(window > 0 ? (point.t / window) * width : 0), round(yOf(point.v, scale, height))])
+  }
+  if (current.length) segments.push(current)
+  return segments.map((segment) => segment.map(([x, y], index) => `${index ? 'L' : 'M'}${x} ${y}`).join(' ')).join(' ')
+}
+
+/** The reading nearest to elapsed time `t`, for the hover readout. */
+export function valueNear(points, t) {
+  let best = null
+  for (const point of points || []) {
+    if (!isNumber(point.v)) continue
+    if (!best || Math.abs(point.t - t) < Math.abs(best.t - t)) best = point
+  }
+  return best
+}

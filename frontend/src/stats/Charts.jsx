@@ -3,13 +3,15 @@ import {
   agoLabel,
   axisLabel,
   downsample,
+  elapsedPath,
   heatColor,
   indexAt,
   lastNumber,
   linePath,
   spanLabel,
   stackTotals,
-  stackedPaths
+  stackedPaths,
+  valueNear
 } from './dashboard.js'
 import { formatValue } from './model.js'
 
@@ -255,6 +257,78 @@ export function PeakGauge({ title, value, unit, scale, caption }) {
       </span>
       <span className="dash-peak-share">{share !== null ? `${share}% of the ${axisLabel(scale.max)} ${unit} scale` : 'Not reported'}</span>
       {caption && <span className="hint">{caption}</span>}
+    </figure>
+  )
+}
+
+/**
+ * Compared runs of one series over elapsed time, as Sentinel's Compare Runs overlays them: the
+ * window every run covers, the baseline drawn heavier, and a readout of each run on hover.
+ */
+export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }) {
+  const hover = useHover(101)
+  const at = hover.index >= 0 ? (hover.index / 100) * window : null
+  return (
+    <figure className="dash-chart dash-elapsed" aria-label={`${title} for ${lines.length} runs over their common ${window.toFixed(1)} s`}>
+      <figcaption className="dash-chart-head">
+        <span className="dash-chart-title">{title}</span>
+        <span className="dash-chart-scale">common overlap · elapsed time · scale {axisLabel(scale.min)}–{axisLabel(scale.max)} {unit}, fitted to the runs</span>
+      </figcaption>
+      <ul className="dash-legend">
+        {lines.map((line) => {
+          const near = at === null ? null : valueNear(line.points, at)
+          return (
+            <li key={line.id} style={{ '--series': line.color }}>
+              <span className="dash-swatch" aria-hidden="true" />
+              {line.baseline && <span className="dash-baseline">B</span>}
+              <span>{line.name}</span>
+              {near && <strong>{formatValue(near.v, unit)}</strong>}
+            </li>
+          )
+        })}
+      </ul>
+      <div className="dash-chart-body">
+        <div className="dash-chart-y" aria-hidden="true">
+          <span>{axisLabel(scale.max)}</span>
+          <span>{axisLabel(scale.min)}</span>
+        </div>
+        <div className="dash-chart-plot" ref={hover.plot} onPointerMove={hover.onPointerMove} onPointerLeave={hover.onPointerLeave}>
+          <svg className="dash-chart-svg" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" style={{ height }} aria-hidden="true" focusable="false">
+            {lines.map((line) => (
+              <path
+                key={line.id}
+                d={elapsedPath(line.points, window, scale, WIDTH, HEIGHT)}
+                fill="none"
+                stroke={line.color}
+                strokeWidth={line.baseline ? 2.6 : 1.6}
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </svg>
+          {hover.index >= 0 && (
+            <>
+              <span className="dash-crosshair" style={{ left: `${hover.index}%` }} aria-hidden="true" />
+              <span className={`dash-tooltip${hover.index > 50 ? ' flip' : ''}`} style={{ left: `${hover.index}%` }} aria-hidden="true">
+                <span className="dash-tooltip-time">{at.toFixed(1)} s</span>
+                {lines.map((line) => {
+                  const near = valueNear(line.points, at)
+                  return (
+                    <span key={line.id} className="dash-tooltip-row" style={{ '--series': line.color }}>
+                      <span className="dash-swatch" />
+                      {near ? formatValue(near.v, unit) : '—'}
+                    </span>
+                  )
+                })}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="dash-chart-x" aria-hidden="true">
+        <span>0 s</span>
+        <span>{window.toFixed(1)} s</span>
+      </div>
     </figure>
   )
 }
