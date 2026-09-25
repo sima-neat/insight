@@ -1809,6 +1809,17 @@ export default function App() {
     }))
   }
 
+  // Rejects with the server's message so the dialog can show it inline and stay open.
+  async function pullSource(index, payload) {
+    await fetchJson('/api/mediasrc/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index, ...payload })
+    })
+    await loadSources()
+    setUploadStatus(`src${index} is pulling from ${payload.url.replace(/\/\/[^@]*@/, '//')}.`)
+  }
+
   async function autoAssignAllSources() {
     try {
       const data = await fetchJson('/api/mediasrc/auto-assign-all', { method: 'POST' })
@@ -3123,6 +3134,7 @@ export default function App() {
           currentFile={(sources.find((s) => s.index === assignTarget) || {}).file || ''}
           tree={mediaTree}
           onAssign={(file) => updateSource(assignTarget, { file })}
+          onPull={(payload) => pullSource(assignTarget, payload)}
           onClose={() => setAssignTarget(null)}
         />
       )}

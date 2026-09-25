@@ -3628,6 +3628,63 @@ button:disabled {
   font-size: 12px;
 }
 
+.assign-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.assign-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.assign-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.pull-form {
+  display: grid;
+  gap: 8px;
+}
+
+.pull-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.pull-field input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.pull-credentials {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pull-error {
+  margin: 0;
+  color: #a12626;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .source-file-btn {
   min-width: 0;
   text-align: left;
