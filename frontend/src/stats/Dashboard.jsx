@@ -19,6 +19,12 @@ import {
 import { formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, sessionCsv, sessionCsvFilename, statusInfo, thresholdText, timeAgo } from './model.js'
 import { FailureCallout, SegmentedTabs } from './ui.jsx'
 
+// Colour says how a reading stands, never what it measures: blue until a threshold is passed.
+const TONE_COLORS = { warn: 'var(--chart-warn)', critical: 'var(--chart-critical)' }
+function toneColor(status) {
+  return TONE_COLORS[status] || COLORS[0]
+}
+
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
 const STORAGE_GROUP = /^(disk|diskio|network|storage|nvme)$/i
 const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_)/
@@ -56,8 +62,7 @@ function MetricChart({ model, metricKey, title, ceiling, headline, height, compa
   const metric = metricByKey(model, metricKey)
   if (!metric) return null
   const values = seriesOf(model, metricKey)
-  // Temperatures share the thermal colour, as the Thermal max chart does.
-  const color = isThermalMetric(metric) ? 'var(--chart-thermal)' : COLORS[0]
+  const color = toneColor(metric.status)
   return (
     <TimeChart
       title={title || metric.label}
@@ -104,7 +109,7 @@ function ThermalMaxChart({ model, height }) {
     <TimeChart
       title="Thermal max"
       headline={`${formatValue(now, 'C')}${worst ? ` (${worst.short || worst.label})` : ''}`}
-      series={[{ key: 'thermal-max', label: 'Hottest sensor', values, color: 'var(--chart-thermal)' }]}
+      series={[{ key: 'thermal-max', label: 'Hottest sensor', values, color: toneColor(worst?.status) }]}
       scale={scaleFor('C', [values])}
       unit="C"
       timestamps={model.timestamps}
@@ -185,9 +190,9 @@ function OverviewView({ model }) {
     <>
       <div className="dash-grid three">
         <ThermalMaxChart model={model} />
-        <MetricChart model={model} metricKey="power_current_watts" title="Current power" ceiling={powerCeiling(model)} />
-        <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU" />
-        <MetricChart model={model} metricKey="linux_mem_used_pct" title="Memory" />
+        <MetricChart model={model} metricKey="power_current_watts" title="Board power" ceiling={powerCeiling(model)} />
+        <MetricChart model={model} metricKey="cpu_usage_pct" title="CPU usage" />
+        <MetricChart model={model} metricKey="linux_mem_used_pct" title="Linux memory" />
         <MetricChart model={model} metricKey="mla_mem_allocated_mb" title="MLA memory" />
         <PairChart model={model} keys={['net_rx_mbps', 'net_tx_mbps']} labels={['Receive', 'Transmit']} title="Network" />
       </div>
@@ -211,23 +216,21 @@ function ThermalView({ model }) {
   return (
     <>
       <ThermalMaxChart model={model} height={150} />
-      <Card className="dash-sensors">
-        <SegmentedTabs
-          label="Thermal sensor groups"
-          items={items}
-          selected={group.name}
-          onSelect={setChosen}
-          idPrefix="dash-thermal-tab"
-          panelPrefix="dash-thermal"
-          className="dash-subtabs"
-          noun="sensor"
-        />
-        <div id={`dash-thermal-${group.name}`} role="tabpanel" aria-labelledby={`dash-thermal-tab-${group.name}`} className="dash-grid sensors">
-          {group.metrics.map((metric) => (
-            <MetricChart key={metric.key} model={model} metricKey={metric.key} title={metric.short || metric.label} height={54} compact />
-          ))}
-        </div>
-      </Card>
+      <SegmentedTabs
+        label="Thermal sensor groups"
+        items={items}
+        selected={group.name}
+        onSelect={setChosen}
+        idPrefix="dash-thermal-tab"
+        panelPrefix="dash-thermal"
+        className="dash-subtabs"
+        noun="sensor"
+      />
+      <div id={`dash-thermal-${group.name}`} role="tabpanel" aria-labelledby={`dash-thermal-tab-${group.name}`} className="dash-grid sensors">
+        {group.metrics.map((metric) => (
+          <MetricChart key={metric.key} model={model} metricKey={metric.key} title={metric.short || metric.label} height={54} compact />
+        ))}
+      </div>
     </>
   )
 }

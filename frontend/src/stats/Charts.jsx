@@ -60,15 +60,12 @@ function Legend({ series, unit }) {
   )
 }
 
-function Frame({ title, headline, scale, unit, timestamps, compact, tone, label, children, legend, hover, tooltip }) {
+function Frame({ title, headline, scale, timestamps, compact, tone, label, children, legend, hover, tooltip }) {
   return (
     <figure className={`dash-chart tone-${tone || 'ok'}${compact ? ' compact' : ''}`} aria-label={label}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">{title}</span>
         {headline !== undefined && headline !== null && headline !== '' && <span className="dash-chart-value">{headline}</span>}
-        {!compact && (
-          <span className="dash-chart-scale">Scale {scaleText(scale, unit)}</span>
-        )}
       </figcaption>
       {legend}
       <div className="dash-chart-body">
@@ -149,11 +146,14 @@ export function TimeChart({ title, headline, series, scale, unit, timestamps, th
       </svg>
       {thresholds
         .filter((line) => line.value > scale.min && line.value < scale.max)
-        .map((line) => (
-          <span key={line.label || line.tone} className={`dash-threshold ${line.tone}`} style={{ bottom: `${percentOf(line.value, scale)}%` }} aria-hidden="true">
-            {!compact && <span>{line.label || THRESHOLD_NAMES[line.tone] || line.tone} {axisLabel(line.value)}{unitAfter(unit)}</span>}
-          </span>
-        ))}
+        .map((line) => {
+          const at = percentOf(line.value, scale)
+          return (
+            <span key={line.label || line.tone} className={`dash-threshold ${line.tone}${at > 86 ? ' below' : ''}`} style={{ bottom: `${at}%` }} aria-hidden="true">
+              {!compact && <span>{line.label || THRESHOLD_NAMES[line.tone] || line.tone} {axisLabel(line.value)}{unitAfter(unit)}</span>}
+            </span>
+          )
+        })}
       {paths.map((path, index) => path.last && (
         <span
           key={series[index].key}

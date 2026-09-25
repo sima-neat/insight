@@ -42,6 +42,7 @@ import {
   failureNotice,
   formatPercentDelta,
   formatRelativeTime,
+  formatTimeRange,
   formatTimestamp,
   formatValue,
   healthFacts,
@@ -605,30 +606,14 @@ export function RunsPanel({
           {detailBusy && <p className="hint" role="status">Reading the run from the board…</p>}
           {detail && !detailError && run && (
             <>
-              <p className="hint">
-                {run.sampleCount} sample{run.sampleCount === 1 ? '' : 's'} of {run.metricCount} metric
-                {run.metricCount === 1 ? '' : 's'}
-                {run.single && run.sampledAt && (
-                  <>
-                    {' '}taken <time dateTime={run.sampledAt}>{formatTimestamp(run.sampledAt)}</time>
-                  </>
-                )}
-                {!run.single && run.firstSampleAt && run.lastSampleAt && (
-                  <>
-                    {' '}from <time dateTime={run.firstSampleAt}>{formatTimestamp(run.firstSampleAt)}</time> to{' '}
-                    <time dateTime={run.lastSampleAt}>{formatTimestamp(run.lastSampleAt)}</time>
-                  </>
-                )}
-                {run.crossed > 0 && `, ${run.crossed} of them crossing a threshold`}.
+              <p className="hint stats-run-facts">
+                {run.sampleCount} sample{run.sampleCount === 1 ? '' : 's'} · {run.metricCount} metric{run.metricCount === 1 ? '' : 's'}
+                {run.single && run.sampledAt && <> · <time dateTime={run.sampledAt}>{formatTimestamp(run.sampledAt)}</time></>}
+                {!run.single && run.firstSampleAt && run.lastSampleAt && ` · ${formatTimeRange(run.firstSampleAt, run.lastSampleAt)}`}
+                {run.crossed > 0 && ` · ${run.crossed} past a threshold`}
               </p>
               {run.metrics.length > 0 && (
                 <>
-                  <p className="hint">
-                    {run.single
-                      ? "This run holds one sample, so each metric's mean, minimum and maximum are that one value."
-                      : "The smallest, largest and mean value of each metric over this run's samples."}{' '}
-                    The labels, units and thresholds are the ones the run itself recorded.
-                  </p>
                   <div className="stats-table-scroll" role="region" aria-label={`Metrics of run ${openRef}`} tabIndex={0}>
                     <table className="sysinfo-table stats-table stats-run-metrics">
                       <thead>
@@ -645,10 +630,7 @@ export function RunsPanel({
                           const peak = statusInfo(metric.status)
                           return (
                             <tr key={metric.key}>
-                              <th scope="row">
-                                {metric.label}
-                                {metric.description && <span className="hint">{metric.description}</span>}
-                              </th>
+                              <th scope="row" title={metric.description || undefined}>{metric.label}</th>
                               <td>{metric.group}</td>
                               <td className="stats-cell-value">{formatValue(metric.mean, metric.unit)}</td>
                               <td className="stats-cell-value">{formatValue(metric.minimum, metric.unit)}</td>
@@ -744,6 +726,12 @@ export function RunsPanel({
                     </p>
                   </Callout>
                 )}
+                {/* The overlay and its summary answer which run is better; the 62 rows are the deep dive, folded. */}
+                <details className="dash-card dash-all stats-compare-metrics">
+                  <summary className="dash-card-title">
+                    Per-metric comparison
+                    <span className="dash-card-note">{table.rows.length} rows</span>
+                  </summary>
                 <div className="stats-compare-filters">
                   <ChipTabs
                     label="Filter the comparison by metric group"
@@ -807,6 +795,7 @@ export function RunsPanel({
                     </table>
                   </div>
                 </div>
+                </details>
               </>
             ) : (
               <>

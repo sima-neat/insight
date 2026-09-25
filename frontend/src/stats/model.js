@@ -224,6 +224,21 @@ export function formatSeconds(seconds) {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`
 }
 
+/** "Sep 24, 2026, 17:52:33–17:52:39", or both dates in full when a run spans days. */
+export function formatTimeRange(fromIso, toIso, locale = undefined) {
+  const from = Date.parse(fromIso || '')
+  const to = Date.parse(toIso || '')
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return ''
+  const a = new Date(from)
+  const b = new Date(to)
+  const day = (date) => date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+  // hourCycle, not hour12: false, which some ICU builds render as 24:00:10 at midnight.
+  const clock = (date) => date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+  return a.toDateString() === b.toDateString()
+    ? `${day(a)}, ${clock(a)}–${clock(b)}`
+    : `${day(a)}, ${clock(a)} – ${day(b)}, ${clock(b)}`
+}
+
 export function formatTimestamp(iso) {
   const time = Date.parse(iso || '')
   if (!Number.isFinite(time)) return ''

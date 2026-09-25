@@ -11,6 +11,7 @@ import {
   POLL_MS,
   compareIncludes,
   compareQuery,
+  formatTimeRange,
   sessionCsv,
   sessionCsvFilename,
   compareReady,
@@ -1172,4 +1173,10 @@ test('the session exports as CSV: a row per sample, a column per metric, empty w
   ].join('\r\n'))
   assert.equal(sessionCsv({ metrics: [], timestamps: [] }), '')
   assert.equal(sessionCsvFilename(new Date(2026, 8, 25, 18, 4, 5)), 'sentinel-session-2026-09-25-180405.csv')
+})
+
+test('a run is dated once, with its start and end clock times', () => {
+  assert.equal(formatTimeRange('2026-09-24T17:52:33Z', '2026-09-24T17:52:39Z', 'en-US'), 'Sep 24, 2026, 17:52:33–17:52:39')
+  assert.equal(formatTimeRange('2026-09-24T23:59:50Z', '2026-09-25T00:00:10Z', 'en-US'), 'Sep 24, 2026, 23:59:50 – Sep 25, 2026, 00:00:10')
+  assert.equal(formatTimeRange('x', '2026-09-24T17:52:39Z'), '')
 })

@@ -4624,7 +4624,8 @@ button:disabled {
   --chart-6: #c2456b;
   --chart-7: #3a9bd6;
   --chart-8: #8a7a3b;
-  --chart-thermal: #e0643c;
+  --chart-warn: #b7791f;
+  --chart-critical: #b3425a;
   display: grid;
   gap: 14px;
 }
@@ -4716,6 +4717,63 @@ button:disabled {
 
 .dash-grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Headline figures are narrow, so they stay in one row where charts would already wrap. */
+.dash-grid.three.dash-stats {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+/* The dashboard's tabs, underlined beneath the status line. */
+.dash-tabs {
+  gap: 4px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dash-tabs .stats-segment {
+  margin-bottom: -1px;
+  border-bottom: 3px solid transparent;
+  padding: 8px 12px 7px;
+  font-size: 15px;
+}
+
+.dash-tabs .stats-segment:hover {
+  color: var(--accent-strong);
+  border-bottom-color: var(--line-strong);
+}
+
+.dash-tabs .stats-segment.active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
+}
+
+/* Views within one tab (System, Thermal): a small pill switch, a level below the tabs. */
+.dash-subtabs {
+  justify-self: start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.dash-subtabs .stats-segment {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.dash-subtabs .stats-segment:hover {
+  background: var(--accent-soft);
+}
+
+.dash-subtabs .stats-segment.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.dash-subtabs .stats-segment.active .stats-segment-count {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .dash-grid.sensors {
@@ -4875,6 +4933,10 @@ button:disabled {
   right: 2px;
 }
 
+.dash-threshold.below span {
+  top: 2px;
+}
+
 .dash-threshold.critical {
   border-color: rgba(179, 66, 90, 0.7);
   color: var(--danger);
@@ -5005,10 +5067,6 @@ button:disabled {
 
 .dash-chart.compact .dash-chart-body {
   grid-template-columns: 26px minmax(0, 1fr);
-}
-
-.dash-sensors .dash-subtabs {
-  margin: 0;
 }
 
 /* Per-core CPU: a heatmap, a row per core and a column per slice of the window, in one blue. */
@@ -5173,6 +5231,14 @@ button:disabled {
 
 .dash-all[open] > summary::before {
   content: "▾";
+}
+
+.stats-compare-metrics {
+  margin-top: 14px;
+}
+
+.stats-compare-metrics[open] > summary {
+  margin-bottom: 10px;
 }
 
 /* Compare Runs: the overlay and its per-run summary. */
