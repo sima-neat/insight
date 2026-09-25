@@ -39,7 +39,7 @@ After importing media, you can filter the file list, preview a selected file, in
 
 The library is shown as folders. Folder rows open the folder and list its subfolders and videos; each folder row shows how many streamable files it holds. Use **Back** to return to the parent folder, **Media Root** to jump to the top of the library, and the breadcrumb to see where you are or jump to any level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
 
-![Insight Media Sources view three folders deep, with the breadcrumb, Back and Media Root buttons, a folder row with its count badge, a selected video preview, and a greyed file Insight cannot stream.](images/insight-media-library.png)
+![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
 Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
 
