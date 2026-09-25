@@ -55,18 +55,18 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 
 ## Validate an app against a live webcam
 
-Use this workflow to test an application against a real camera instead of a recorded file. The webcam is attached to the computer running your browser, not to the board.
+Use this workflow to test an application against a real camera instead of a recorded file. The webcam is attached to the computer running your browser, not to the board: the browser publishes it to Insight, which serves it as an ordinary RTSP source your application consumes exactly like a file.
 
 1. Open Insight over HTTPS and confirm the browser trusts its certificate.
-2. Go to Streaming Sources and select **Detect webcam**. Allow camera access when the browser asks.
-3. Select your camera in the `src1` dropdown; it is listed as `<webcam>`.
+2. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. Allow access when the browser asks; your cameras then appear in the list.
+3. Go to Streaming Sources and pick your camera from the `src1` dropdown, under the **Cameras** group. The row shows a `[CAM]` marker once the camera is selected.
 4. Start `src1` and confirm the slot reports `Live` and the preview shows the camera.
-5. Run your application against the same RTSP URL a file source would use:
+5. Run your application against the same RTSP URL a file source would use. Insight normalizes the webcam to the same baseline H.264 with regular keyframes a file source produces, so the board's hardware decoder and GStreamer `rtspsrc` consume it with no extra step — no manual `ffmpeg` and no separate path:
    - Inside the SDK container: `rtsp://127.0.0.1:8554/src1`
    - On a DevKit or external machine: `rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1`
 6. Open Video Viewer and watch channel `0`.
 
-Keep the browser tab open for as long as the webcam is publishing; the tab is what sends video to Insight. Closing it, unplugging the camera, or selecting **Stop** ends the stream.
+Keep the browser tab visible and in the foreground while the webcam is publishing: the tab is what sends video to Insight, and browsers throttle a hidden or backgrounded tab, which interrupts the stream. Closing the tab, unplugging the camera, or selecting **Stop** ends the stream.
 
 When Insight runs inside the SDK, the browser also needs to reach the `webrtcWhip` host port from `neat --json`, in addition to the RTSP port your application uses. See [Ports and Network Behavior](ports-network.md).
 
