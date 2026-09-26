@@ -321,16 +321,28 @@ test('run summaries survive the field names the daemon happens to use', () => {
   }
   const runs = runList(payload)
   assert.deepEqual(runs.map((run) => run.label), ['baseline', 'optimized', 'r3'])
-  assert.equal(runs[0].ref, 'baseline')
+  assert.equal(runs[0].ref, 'r1')
   assert.equal(runs[0].durationSec, 120)
   assert.deepEqual(runs[0].tags, ['v1'])
-  assert.equal(runs[1].ref, 'optimized')
+  assert.equal(runs[1].ref, 'r2')
   assert.equal(runs[1].durationSec, 4.5)
   assert.equal(runs[2].ref, 'r3')
   assert.deepEqual(runList({ sentinel: { runs: [] } }), [])
   assert.deepEqual(runList(null), [])
   assert.match(runSubtitle(runs[0], Date.parse('2026-09-22T20:03:00Z')), /^Complete · started .* · 2 min 0 s · 60 samples$/)
   assert.equal(runSubtitle({ label: 'x' }, Date.now()), '')
+})
+
+test('run actions prefer ids when another runs name collides with one', () => {
+  const runs = runList({ sentinel: { runs: [
+    { id: 'run-a', name: 'baseline' },
+    { id: 'run-b', name: 'run-a' }
+  ] } })
+  assert.deepEqual(runs.map((run) => [run.label, run.ref]), [
+    ['baseline', 'run-a'],
+    ['run-a', 'run-b']
+  ])
+  assert.equal(deleteRunQuery(runs[1].ref), '/api/sentinel/runs/run-b')
 })
 
 test('a run carries the energy Sentinel measured for it, not only its duration', () => {
@@ -779,8 +791,8 @@ test('a host reading the endpoint does not give stays absent instead of reading 
 
 test('a selected run that has left the board is named, not left stuck in the selection', () => {
   // The board's two saved runs, then one of them deleted on the board and the list
-  // refreshed. `insight-hw-1790177178` keeps its place in the selection with no row and
-  // no checkbox to clear it, and every Compare fails on it.
+  // refreshed. The deleted run's stable id keeps its place in the selection with no row
+  // and no checkbox to clear it, and every Compare fails on it.
   const runs = runList({
     sentinel: {
       runs: [
@@ -793,10 +805,10 @@ test('a selected run that has left the board is named, not left stuck in the sel
   assert.deepEqual(missingSelection(selected, runs), [])
 
   const left = runs.slice(0, 1)
-  assert.deepEqual(missingSelection(selected, left), ['insight-hw-1790177178'])
+  assert.deepEqual(missingSelection(selected, left), ['20260923T152624.613Z-insight-hw-1790177178'])
   // What the daemon answers for that selection, captured from the DevKit.
   const refused = failureNotice({
-    error: "unknown run 'insight-hw-1790177178'",
+    error: "unknown run '20260923T152624.613Z-insight-hw-1790177178'",
     code: 'not_found',
     hint: 'List runs and use a name or id Sentinel reports.'
   })
@@ -1068,11 +1080,11 @@ test('a run name long enough to break the tables is carried intact and wrapped',
   const name = 'a'.repeat(NAME_LIMIT)
   const runs = runList({ sentinel: { runs: [{ id: 'id-1', name }, { id: 'id-2', name: 'short' }] } })
   assert.equal(runs[0].label, name)
-  assert.equal(runs[0].ref, name, 'the name is the reference, so it must not be shortened')
+  assert.equal(runs[0].ref, 'id-1', 'the stable id is used for actions while the full name remains the label')
   assert.equal(validateTrace({ name }).body.name, name)
   assert.match(validateTrace({ name: `${name}a` }).error, /at most 128 characters/)
 
-  // It survives the compare query and the selection whole.
+  // The full name still survives when an older caller explicitly selects by name.
   assert.equal(compareQuery([name, 'short']), `/api/sentinel/compare?runs=${encodeURIComponent(`${name},short`)}`)
   assert.deepEqual(missingSelection([name], runs), [])
   assert.deepEqual(uncomparableRefs([name]), [])

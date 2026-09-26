@@ -707,8 +707,9 @@ export function runList(payload) {
       const tags = pick(source, RUN_FIELDS.tags)
       return {
         key,
-        // Sentinel accepts either a unique name or a stable id on /runs/<id>.
-        ref: String(name || id || key),
+        // Prefer the stable id: an unrelated run's name is allowed to equal this id, and
+        // Sentinel deliberately resolves ids before names on every run action.
+        ref: String(id || name || key),
         id: id ? String(id) : '',
         name: name ? String(name) : '',
         label: String(name || id || `Run ${index + 1}`),
