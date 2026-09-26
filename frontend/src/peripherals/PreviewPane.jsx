@@ -92,7 +92,12 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
           {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
               describes a state the reader cannot walk away from. */}
           <div className="periph-actions">
-            <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={onStop}
+              disabled={!session?.id || state?.status === 'stopping'}
+            >
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
             </button>
           </div>
