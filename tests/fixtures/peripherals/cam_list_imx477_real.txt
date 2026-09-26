@@ -1,0 +1,12 @@
+[1:00:35.012521990] [5300]  INFO Camera camera_manager.cpp:340 libcamera v0.0.0+2085-00bb435a-dirty (2026-08-19T19:22:58UTC)
+[1:00:35.070506123] [5303]  INFO Modalix modalix.cpp:815 Acquired Active Media Device: /dev/media0
+[1:00:35.071422761] [5303]  WARN CameraSensor camera_sensor_legacy.cpp:355 'imx477 5-001a': Recommended V4L2 control 0x009a0922 not supported
+[1:00:35.071467283] [5303]  WARN CameraSensor camera_sensor_legacy.cpp:427 'imx477 5-001a': The sensor kernel driver needs to be fixed
+[1:00:35.071484644] [5303]  WARN CameraSensor camera_sensor_legacy.cpp:429 'imx477 5-001a': See Documentation/sensor_driver_requirements.rst in the libcamera sources for more information
+[1:00:35.072449044] [5303]  WARN CameraSensor camera_sensor_legacy.cpp:595 'imx477 5-001a': Failed to retrieve the camera location
+[1:00:35.072477605] [5303]  WARN CameraSensor camera_sensor_legacy.cpp:617 'imx477 5-001a': Rotation control not available, default to 0 degrees
+[1:00:35.072770537] [5303]  INFO Modalix modalix.cpp:462 mode rate limit: 66.1857 fps max (15109 us/frame); faster caps negotiate and snap to it
+[1:00:35.072875102] [5303]  INFO Camera camera_manager.cpp:223 Adding camera 'imx477 5-001a' for pipeline handler modalix
+[1:00:35.072897743] [5303]  INFO Modalix modalix.cpp:837 Registered Camera: imx477 5-001a
+Available cameras:
+1: (imx477 5-001a)

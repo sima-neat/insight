@@ -1,0 +1,59 @@
+Media controller API version 6.18.3
+
+Media device information
+------------------------
+driver          simaai-v4l2-vid
+model           SiMa.ai Capture Media Device
+serial
+bus info        platform:csi2video@1
+hw revision     0x0
+driver version  6.18.3
+
+Device topology
+- entity 1: raw-capture.1.0 (1 pad, 1 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video0
+	pad0: SINK
+		<- "vdma.1":4 [ENABLED,IMMUTABLE]
+
+- entity 5: vdma.1 (8 pads, 5 links, 0 routes)
+            type V4L2 subdev subtype Unknown flags 0
+	pad0: SINK
+		<- "csidev-40c3000.csi":1 [ENABLED,IMMUTABLE]
+	pad1: SINK
+		<- "csidev-40c3000.csi":3 [ENABLED,IMMUTABLE]
+	pad2: SINK
+		<- "csidev-40c3000.csi":5 [ENABLED,IMMUTABLE]
+	pad3: SINK
+		<- "csidev-40c3000.csi":7 [ENABLED,IMMUTABLE]
+	pad4: SOURCE
+		-> "raw-capture.1.0":0 [ENABLED,IMMUTABLE]
+	pad5: SOURCE
+	pad6: SOURCE
+	pad7: SOURCE
+
+- entity 16: csidev-40c3000.csi (8 pads, 5 links, 0 routes)
+             type V4L2 subdev subtype Unknown flags 0
+	pad0: SINK
+		<- "imx477 5-001a":0 [ENABLED,IMMUTABLE]
+	pad1: SOURCE
+		-> "vdma.1":0 [ENABLED,IMMUTABLE]
+	pad2: SINK
+	pad3: SOURCE
+		-> "vdma.1":1 [ENABLED,IMMUTABLE]
+	pad4: SINK
+	pad5: SOURCE
+		-> "vdma.1":2 [ENABLED,IMMUTABLE]
+	pad6: SINK
+	pad7: SOURCE
+		-> "vdma.1":3 [ENABLED,IMMUTABLE]
+
+- entity 25: imx477 5-001a (1 pad, 1 link, 0 routes)
+             type V4L2 subdev subtype Sensor flags 0
+             device node name /dev/v4l-subdev0
+	pad0: SOURCE
+		[stream:0 fmt:SRGGB12_1X12/4056x3040 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range
+		 crop.bounds:(8,16)/4056x3040
+		 crop:(8,16)/4056x3040]
+		-> "csidev-40c3000.csi":0 [ENABLED,IMMUTABLE]
+

@@ -1,0 +1,12 @@
+ioctl: VIDIOC_ENUM_FMT
+	Type: Video Capture
+
+	[0]: 'YUYV' (YUYV 4:2:2)
+		Size: Stepwise 16x16 - 1920x1080 with step 16/16
+	[1]: 'NV12' (Y/UV 4:2:0)
+		Size: Continuous 32x32 - 1280x720
+	[2]: 'MJPG' (Motion-JPEG, compressed)
+		Size: Discrete 1280x720
+			Interval: Continuous 0.017s - 1.000s (1.000-60.000 fps)
+		Size: Discrete 640x480
+			Interval: Stepwise 0.033s - 0.200s with step 0.033s (5.000-30.000 fps)

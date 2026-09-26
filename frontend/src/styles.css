@@ -144,13 +144,19 @@ select:focus-visible,
 
 .masthead-actions {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  /* Every control in this row is the same height and centred on one line, so the board box sits on
+     the same axis as the round info button and the tour button rather than hanging above them. */
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.devkit-trigger,
+.masthead-actions > button {
+  height: 38px;
+}
+
+.board-trigger,
 .tour-trigger,
 .sysinfo-trigger {
   background: var(--surface-soft);
@@ -159,10 +165,35 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.devkit-trigger {
-  border-color: rgba(14, 90, 184, 0.28);
-  background: var(--accent-soft);
-  color: #184b86;
+.board-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  cursor: pointer;
+}
+
+.board-trigger-label {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-trigger:hover {
+  border-color: var(--line-strong);
+}
+
+/* A connected board tints its own box, so the masthead answers "is the board there?" at a glance
+   without reading the pill. */
+.board-trigger.ok {
+  border-color: rgba(18, 122, 84, 0.34);
+  background: #edfaf3;
+  color: #14543c;
+}
+
+.board-trigger.ok:hover {
+  border-color: rgba(18, 122, 84, 0.55);
 }
 
 .sysinfo-trigger {
@@ -3296,5 +3327,651 @@ button:disabled {
 
   .youtube-form-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.periph-view {
+  display: grid;
+  gap: 12px;
+}
+
+.periph-view a {
+  color: var(--accent-alt);
+  font-weight: 700;
+}
+
+.periph-view code,
+.periph-camera-id,
+.periph-facts dd,
+.periph-detail-head .hint {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.periph-actions,
+.periph-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.periph-board-summary {
+  display: flex;
+  flex-wrap: wrap;
+  /* The 16px label and the 12px pills share a baseline instead of being centred against each other. */
+  align-items: baseline;
+  gap: 8px;
+}
+
+.periph-board-summary .hint,
+.periph-issues p,
+.periph-form .hint,
+.periph-form .periph-callout {
+  margin: 0;
+}
+
+.periph-board-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-facts {
+  /* A grid, not wrapped flex: hostname, build and machine line their values up in one column
+     instead of each pair starting wherever the previous one ended. */
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 16px;
+  font-size: 12px;
+}
+
+.periph-facts > div {
+  display: contents;
+}
+
+.periph-facts dt {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.periph-facts dd {
+  margin: 0;
+}
+
+.periph-pill {
+  min-width: 0;
+  white-space: normal;
+}
+
+.sysinfo-pill.periph-danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+  color: #8f2f45;
+}
+
+.sysinfo-pill.periph-info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.periph-callout {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-callout.warn {
+  border-color: #eed39a;
+  background: #fff8e7;
+}
+
+.periph-callout.danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+}
+
+.periph-callout.info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+}
+
+.periph-callout p,
+.periph-callout ol,
+.periph-callout ul {
+  margin: 0 0 4px;
+}
+
+.periph-callout > :last-child {
+  margin-bottom: 0;
+}
+
+.periph-callout ol {
+  padding-left: 16px;
+}
+
+.periph-callout-title {
+  font-weight: 700;
+}
+
+.periph-code {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #d9e5ee;
+  border-radius: 10px;
+  background: #f4f8fb;
+  color: #20384f;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: normal;
+}
+
+.periph-command {
+  margin-top: 4px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.periph-command .periph-code {
+  justify-self: stretch;
+  background: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.periph-confirm,
+.periph-form {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form-fields {
+  display: grid;
+  /* host, then the short port, then user */
+  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.periph-mode-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form label,
+.periph-modes label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+/* A menu's title with the chosen entry's tier as a pill, so no entry needs a suffix. */
+.periph-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.periph-refresh[aria-disabled='true'] {
+  /* Dim the surface, never the label: fading both drops "Scanning… N s" below AA contrast,
+     and that state is on screen for the whole scan. */
+  background: #eef3fb;
+  border-color: rgba(23, 79, 76, 0.25);
+  cursor: progress;
+  transform: none;
+}
+
+.periph-meta {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.periph-issues {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.periph-issues li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-notes,
+.periph-blocked {
+  margin: 8px 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.periph-grid {
+  margin-top: 12px;
+  display: grid;
+  /* The camera list takes only what its rows need (capped at 280px, long names wrap);
+     the detail column gets the rest. */
+  grid-template-columns: fit-content(280px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.periph-list,
+.periph-group {
+  display: grid;
+  gap: 6px;
+}
+
+.periph-list {
+  min-width: 200px;
+}
+
+.periph-group-title,
+.periph-identity summary,
+.periph-modes legend {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-camera-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.periph-camera-row:hover {
+  border-color: var(--line-strong);
+}
+
+.periph-camera-row.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+}
+
+.periph-camera-row:focus-visible,
+.periph-code:focus-visible,
+.periph-identity summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+.periph-camera-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-camera-id {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.periph-camera-row .periph-pills {
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.periph-detail {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  padding: 12px;
+}
+
+.periph-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-detail h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.periph-detail-head .hint {
+  margin: 2px 0 8px;
+}
+
+.periph-identity {
+  margin: 8px 0;
+}
+
+.periph-identity summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.periph-identity table {
+  margin-top: 8px;
+}
+
+.periph-detail .sysinfo-table.key-value tbody th {
+  width: 140px;
+}
+
+.periph-modes {
+  min-width: 0;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px 12px;
+}
+
+.periph-modes legend {
+  padding: 0 4px;
+}
+
+.periph-mode-fields {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+}
+
+.periph-modes .hint {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 980px) {
+  .periph-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .periph-form-fields,
+  .periph-mode-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Board settings panel (masthead indicator opens this) */
+.board-panel-card {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 24px));
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.board-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-panel-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+
+/* The actions close the card, after what they act on, instead of floating beside the heading. */
+.periph-board-actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.board-panel-body {
+  padding: 12px 16px 16px;
+}
+
+/* One rhythm down the panel: every block the card renders is spaced the same. */
+.board-panel-body .periph-board > * + * {
+  margin-top: 12px;
+}
+
+.board-panel-body .periph-board {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+
+/* The card only takes focus as a last resort, when a collapse removed every nearer control. */
+.periph-board:focus {
+  outline: none;
+}
+
+/* Peripherals: device-kind icon rail. 56px wide: 46px buttons + 4px padding + 1px border. */
+.periph-kind-layout {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.periph-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 56px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.periph-kind {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.periph-kind:hover:not([aria-disabled='true']) {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+/* No lift on hover (the global button rule): a transform would also re-anchor the phone-width tip. */
+.periph-kinds .periph-kind:hover {
+  transform: none;
+}
+
+.periph-kind.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+  color: var(--accent-alt);
+}
+
+.periph-kind:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+/* Greyed: not supported, or nothing detected. #7a8a99 keeps 3.39:1 on the rail and 3.55:1 on white. */
+.periph-kind[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: #7a8a99;
+}
+
+.periph-kind.active[aria-disabled='true'] {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.periph-kind-icon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.periph-kind-svg {
+  display: block;
+}
+
+/* White on --accent-alt is 5.18:1; the greyed bubble (--ink-soft on #e8edf2) is 5.49:1. */
+.periph-kind-badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--surface-soft);
+  border-radius: 999px;
+  background: var(--accent-alt);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.periph-kind[aria-disabled='true'] .periph-kind-badge {
+  background: #e8edf2;
+  color: var(--ink-soft);
+}
+
+.periph-kind-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: none;
+}
+
+.periph-kind:hover .periph-kind-tip,
+.periph-kind:focus-visible .periph-kind-tip {
+  display: block;
+}
+
+.periph-kind-panel {
+  min-width: 0;
+}
+
+.periph-kind-panel .periph-grid {
+  margin-top: 0;
+}
+
+/* Detail pane: one explanation line, progressive disclosure */
+.periph-summary-line {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.periph-summary-line .periph-links {
+  color: inherit;
+}
+
+.periph-blocked-disclosure {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.periph-blocked-disclosure > summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #40596d;
+  font-weight: 700;
+}
+
+.periph-blocked-disclosure > summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.periph-blocked-disclosure .periph-blocked {
+  margin-top: 4px;
+}
+
+/* Phones: the rail becomes a row of icons above the panel (RAIL_ROW_QUERY in PeripheralsView.jsx).
+   The tip anchors to the whole row, so it spans the row's width and never runs off-screen. */
+@media (max-width: 640px) {
+  .periph-kind-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .periph-kinds {
+    position: relative;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+  }
+
+  .periph-kind {
+    position: static;
+  }
+
+  .periph-kind-tip {
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    transform: none;
+    width: auto;
+    max-width: none;
   }
 }

@@ -1,0 +1,234 @@
+sima@modalix:/workspace$ cam -c 1 -I
+[7:12:37.762591720] [25624]  INFO Camera camera_manager.cpp:340 libcamera v0.0.0+2085-00bb435a-dirty (2026-08-19T19:22:58UTC)
+[7:12:37.823298721] [25627]  INFO Modalix modalix.cpp:815 Acquired Active Media Device: /dev/media0
+[7:12:37.824337682] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:355 'econ-imx568-fpga 5-0042': Recommended V4L2 control 0x009a0922 not supported
+[7:12:37.824394804] [25627] ERROR V4L2 v4l2_subdevice.cpp:1192 'econ-imx568-fpga 5-0042': Unable to get rectangle 2 on pad 0/0: Inappropriate ioctl for device
+[7:12:37.824436006] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:402 'econ-imx568-fpga 5-0042': The PixelArraySize property has been defaulted to 2432x2048
+[7:12:37.824462327] [25627] ERROR V4L2 v4l2_subdevice.cpp:1192 'econ-imx568-fpga 5-0042': Unable to get rectangle 1 on pad 0/0: Inappropriate ioctl for device
+[7:12:37.824486408] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:413 'econ-imx568-fpga 5-0042': The PixelArrayActiveAreas property has been defaulted to (0, 0)/2432x2048
+[7:12:37.824521049] [25627] ERROR V4L2 v4l2_subdevice.cpp:1192 'econ-imx568-fpga 5-0042': Unable to get rectangle 0 on pad 0/0: Inappropriate ioctl for device
+[7:12:37.824544650] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:421 'econ-imx568-fpga 5-0042': Failed to retrieve the sensor crop rectangle
+[7:12:37.824565531] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:427 'econ-imx568-fpga 5-0042': The sensor kernel driver needs to be fixed
+[7:12:37.824586732] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:429 'econ-imx568-fpga 5-0042': See Documentation/sensor_driver_requirements.rst in the libcamera sources for more information
+[7:12:37.825703376] [25627]  WARN CameraSensorProperties camera_sensor_properties.cpp:538 No static properties available for 'econ-imx568-fpga'
+[7:12:37.825736217] [25627]  WARN CameraSensorProperties camera_sensor_properties.cpp:540 Please consider updating the camera sensor properties database
+[7:12:37.825760578] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:595 'econ-imx568-fpga 5-0042': Failed to retrieve the camera location
+[7:12:37.825783939] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:617 'econ-imx568-fpga 5-0042': Rotation control not available, default to 0 degrees
+[7:12:37.826174995] [25627] ERROR V4L2 v4l2_subdevice.cpp:1192 'econ-imx568-fpga 5-0042': Unable to get rectangle 0 on pad 0/0: Inappropriate ioctl for device
+[7:12:37.826213156] [25627]  WARN CameraSensor camera_sensor_legacy.cpp:881 'econ-imx568-fpga 5-0042': The analogue crop rectangle has been defaulted to the active area size
+[7:12:37.826279719] [25627]  INFO Modalix modalix.cpp:462 mode rate limit: 29.9742 fps max (33362 us/frame); faster caps negotiate and snap to it
+[7:12:37.826385123] [25627]  INFO Camera camera_manager.cpp:223 Adding camera 'econ-imx568-fpga 5-0042' for pipeline handler modalix
+[7:12:37.826477846] [25627]  INFO Modalix modalix.cpp:837 Registered Camera: econ-imx568-fpga 5-0042
+Using camera econ-imx568-fpga 5-0042 as cam0
+0: 2432x2048-NV12/Unset
+ * Pixelformat: SRGGB10 (640x480)-(2432x2048)/(+1,+1)
+  - 640x480
+  - 720x480
+  - 768x480
+  - 854x480
+  - 720x576
+  - 800x600
+  - 960x540
+  - 1024x576
+  - 960x640
+  - 1024x600
+  - 1024x768
+  - 1280x720
+  - 1152x864
+  - 1280x800
+  - 1360x768
+  - 1366x768
+  - 1440x900
+  - 1280x1024
+  - 1536x864
+  - 1280x1080
+  - 1600x900
+  - 1400x1050
+  - 1680x1050
+  - 1600x1200
+  - 1920x1080
+  - 2048x1080
+  - 1920x1200
+  - 2160x1080
+  - 2048x1152
+  - 2048x1536
+ * Pixelformat: SRGGB12 (640x480)-(2432x2048)/(+1,+1)
+  - 640x480
+  - 720x480
+  - 768x480
+  - 854x480
+  - 720x576
+  - 800x600
+  - 960x540
+  - 1024x576
+  - 960x640
+  - 1024x600
+  - 1024x768
+  - 1280x720
+  - 1152x864
+  - 1280x800
+  - 1360x768
+  - 1366x768
+  - 1440x900
+  - 1280x1024
+  - 1536x864
+  - 1280x1080
+  - 1600x900
+  - 1400x1050
+  - 1680x1050
+  - 1600x1200
+  - 1920x1080
+  - 2048x1080
+  - 1920x1200
+  - 2160x1080
+  - 2048x1152
+  - 2048x1536
+ * Pixelformat: NV12 (48x32)-(2432x2048)/(+2,+2)
+  - 160x120
+  - 240x160
+  - 320x240
+  - 400x240
+  - 480x320
+  - 640x360
+  - 640x480
+  - 720x480
+  - 768x480
+  - 854x480
+  - 720x576
+  - 800x600
+  - 960x540
+  - 1024x576
+  - 960x640
+  - 1024x600
+  - 1024x768
+  - 1280x720
+  - 1152x864
+  - 1280x800
+  - 1360x768
+  - 1366x768
+  - 1440x900
+  - 1280x1024
+  - 1536x864
+  - 1280x1080
+  - 1600x900
+  - 1400x1050
+  - 1680x1050
+  - 1600x1200
+  - 1920x1080
+  - 2048x1080
+  - 1920x1200
+  - 2160x1080
+  - 2048x1152
+  - 2048x1536
+ * Pixelformat: BGR888 (48x32)-(2432x2048)/(+2,+2)
+  - 160x120
+  - 240x160
+  - 320x240
+  - 400x240
+  - 480x320
+  - 640x360
+  - 640x480
+  - 720x480
+  - 768x480
+  - 854x480
+  - 720x576
+  - 800x600
+  - 960x540
+  - 1024x576
+  - 960x640
+  - 1024x600
+  - 1024x768
+  - 1280x720
+  - 1152x864
+  - 1280x800
+  - 1360x768
+  - 1366x768
+  - 1440x900
+  - 1280x1024
+  - 1536x864
+  - 1280x1080
+  - 1600x900
+  - 1400x1050
+  - 1680x1050
+  - 1600x1200
+  - 1920x1080
+  - 2048x1080
+  - 1920x1200
+  - 2160x1080
+  - 2048x1152
+  - 2048x1536
+ * Pixelformat: RGB888 (48x32)-(2432x2048)/(+2,+2)
+  - 160x120
+  - 240x160
+  - 320x240
+  - 400x240
+  - 480x320
+  - 640x360
+  - 640x480
+  - 720x480
+  - 768x480
+  - 854x480
+  - 720x576
+  - 800x600
+  - 960x540
+  - 1024x576
+  - 960x640
+  - 1024x600
+  - 1024x768
+  - 1280x720
+  - 1152x864
+  - 1280x800
+  - 1360x768
+  - 1366x768
+  - 1440x900
+  - 1280x1024
+  - 1536x864
+  - 1280x1080
+  - 1600x900
+  - 1400x1050
+  - 1680x1050
+  - 1600x1200
+  - 1920x1080
+  - 2048x1080
+  - 1920x1200
+  - 2160x1080
+  - 2048x1152
+  - 2048x1536
+ * Pixelformat: YUYV (48x32)-(2432x2048)/(+2,+2)
+  - 160x120
+  - 240x160
+  - 320x240
+  - 400x240
+  - 480x320
+  - 640x360
+  - 640x480
+  - 720x480
+  - 768x480
+  - 854x480
+  - 720x576
+  - 800x600
+  - 960x540
+  - 1024x576
+  - 960x640
+  - 1024x600
+  - 1024x768
+  - 1280x720
+  - 1152x864
+  - 1280x800
+  - 1360x768
+  - 1366x768
+  - 1440x900
+  - 1280x1024
+  - 1536x864
+  - 1280x1080
+  - 1600x900
+  - 1400x1050
+  - 1680x1050
+  - 1600x1200
+  - 1920x1080
+  - 2048x1080
+  - 1920x1200
+  - 2160x1080
+  - 2048x1152
+  - 2048x1536
+
