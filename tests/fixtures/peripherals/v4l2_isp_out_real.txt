@@ -1,0 +1,94 @@
+Driver Info:
+	Driver name      : arm-camera-isp
+	Card type        : arm-isp-out
+	Bus info         : platform: isp-v4l2-0-0-1
+	Driver version   : 6.18.3
+	Capabilities     : 0x85201000
+		Video Capture Multiplanar
+		Read/Write
+		Streaming
+		Extended Pix Format
+		Device Capabilities
+	Device Caps      : 0x05201000
+		Video Capture Multiplanar
+		Read/Write
+		Streaming
+		Extended Pix Format
+ioctl: VIDIOC_ENUM_FMT
+	Type: Video Capture Multiplanar
+
+	[0]: 'AR24' (32-bit BGRA 8-8-8-8)
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+	[1]: 'RGB3' (24-bit RGB 8-8-8)
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+	[2]: 'NV12' (Y/UV 4:2:0)
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 1920x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2048x1080
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048
+		Size: Discrete 2432x2048

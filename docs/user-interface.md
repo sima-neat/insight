@@ -97,6 +97,48 @@ Use the Video Viewer to confirm:
 
 The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
 
+## Peripherals
+
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. Discovery reads device information only: it does not publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes. **Preview** is the one exception, and it only runs when you start it. The camera export API works from the cached scan without touching the board.
+
+### Selected board
+
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
+
+The board is chosen in this order:
+
+- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
+- **Insight installed on the board**: Insight inspects the board it runs on.
+- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
+
+Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
+
+### Cameras and modes
+
+Select **Refresh** to scan the board. Insight finds MIPI cameras through libcamera and the media graph, and USB cameras through V4L2. For each camera it shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+
+| Level | Meaning |
+| --- | --- |
+| Verified | The mode has been validated with Core `CameraInput`. |
+| Advertised | The camera reports the mode, but it has not been validated with Core. It can still fail when capture starts. |
+| Not supported | Core `CameraInput` cannot use it. This includes USB cameras, raw sensor formats, and formats other than NV12. |
+
+To read a MIPI camera's modes, Refresh briefly opens the camera through libcamera without streaming. Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Preview a camera
+
+Select **Start preview** to see what a camera sees. The board captures video, encodes it in hardware, and sends it to Insight's viewer; the preview appears in the page and reserves one viewer channel.
+
+A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. It also stops by itself shortly after Insight stops watching, so a lost browser or a restarted Insight cannot leave the camera busy.
+
+Preview is available for MIPI cameras on modes Insight lists as usable. USB cameras are discovered and can be exported, but preview is not available for them yet.
+
+### Camera configuration API
+
+The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
+
 ## Stats
 
 The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.

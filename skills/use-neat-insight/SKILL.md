@@ -79,7 +79,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
-- Do not configure DevKit IP through neat-insight UI or API. Remote devkit configuration is environment-driven.
+- Preview is the only Peripherals operation that touches the sensor, and only while it runs: the board captures, encodes H.264 in hardware, and sends RTP to a reserved vf channel, which the existing viewer serves. Discovery and export never capture. Read vf's own counters at `https://127.0.0.1:8081/ingest/stats` — `/api/ingest/stats` is Insight's proxy of it, and vf answers unknown paths with the viewer page rather than a 404.
+- Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
@@ -390,6 +391,24 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
 Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
+
+## Board And Peripherals
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/board` | Selected board target, its `source` (`manual`, `on-board`, `sdk-env`), defaults, `generation`, and last status. Never connects. |
+| `POST` | `/api/board/select` | JSON `{"host", "port", "user"}` saves a manual target; `{"reset": true}` restores the default. |
+| `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
+| `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
+| `GET` | `/api/peripherals` | Last camera scan for the selected board, or an empty snapshot with `scanned_at: null`. |
+| `POST` | `/api/peripherals/refresh` | Scan the board for MIPI (libcamera, media graph) and USB (V4L2) cameras. |
+| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`; return Python, C++, and JSON input configurations, plus Apps `config.yaml` when the board's `libcamerasrc` supports `buffer-count`. |
+| `GET` | `/api/peripherals/preview` | The running preview session, or `null`. |
+| `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional `{"format", "width", "height", "fps"}`; start capture on the board and return the session with its reserved `channel` and `viewer_url`. Refuses a busy camera (`409 camera_in_use`) and never stops the process holding it. |
+| `POST` | `/api/peripherals/cameras/preview/<session_id>/heartbeat` | Extend the session. Without heartbeats the board stops capturing after 45 s; a `404` means the preview is gone. A `409 channel_taken` means another stream arrived on the preview's channel (its RTP `ssrc` in `/ingest/stats` is not the session's `ssrc`) and Insight stopped the preview. |
+| `POST` | `/api/peripherals/cameras/preview/<session_id>/stop` | Stop capture and release the camera and the channel. |
+
+Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` separates `verified` Core `CameraInput` modes from `advertised` ones that the camera reports but Core has not validated; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838). An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first.
 
 ## Error Handling
 

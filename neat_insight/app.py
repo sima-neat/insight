@@ -2,7 +2,6 @@ import argparse
 import atexit
 import base64
 import hashlib
-import ipaddress
 import json
 import logging
 import os
@@ -46,7 +45,10 @@ from neat_insight.mediasrc import (
     start_media_stream,
     stop_media_stream,
 )
+from neat_insight import board
 from neat_insight.api_docs import api_docs_bp
+from neat_insight.peripherals import peripherals_bp, previews
+from neat_insight import port_map
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_metrics,
@@ -148,6 +150,9 @@ DEFAULT_VIDEO_UI_PORT = 8081
 app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
 app.register_blueprint(workspace_bp)
+board_manager = board.init_app(app, env["NEAT_INSIGHT_DATA"], on_board=is_sima_board())
+board_manager.set_before_session_close(previews.stop_for_board_change)
+app.register_blueprint(peripherals_bp)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
@@ -172,45 +177,51 @@ def _json_urlopen(url: str, timeout: float = 20.0) -> dict[str, Any]:
 
 
 def _request_host_name() -> str:
-    host = request.host.strip()
-    if host.startswith("["):
-        end = host.find("]")
-        if end > 0:
-            return host[1:end]
-    elif host.count(":") == 1:
-        name, maybe_port = host.rsplit(":", 1)
-        if maybe_port.isdigit():
-            host = name
-    return host or "127.0.0.1"
+    return port_map.request_host_name(request.host)
 
 
 def _format_browser_https_url(host, port, path="", query=""):
-    if not host or not port:
-        return None
-    try:
-        if ipaddress.ip_address(host).version == 6:
-            host = f"[{host}]"
-    except ValueError:
-        logging.debug("Host '%s' is not an IP literal; using host value as-is", host)
+    return port_map.format_browser_https_url(host, port, path, query)
 
-    url = f"https://{host}:{port}{path}"
-    return f"{url}?{query}" if query else url
+
+def _shell_target():
+    """The board the shell should open on: the one Insight is using, not a separate env var.
+
+    Falls back to DEVKIT_SYNC_DEVKIT_IP so a board that was never selected still has a shell.
+    """
+    try:
+        target = board.get_board_manager().target()
+    except Exception:  # noqa: BLE001 - the shell must not depend on board resolution succeeding
+        target = None
+    if target is not None and target.mode == "ssh" and target.host:
+        # The bundled password is only a promise the SDK makes for its paired default DevKit.
+        # Manual targets and SDK targets with an overridden account use the service account's
+        # SSH key and may have unrelated passwords, so never send the DevKit credential to them.
+        ssh_user = target.user or DEFAULT_DEVKIT_SSH_USERNAME
+        return (
+            target.host,
+            target.port or 22,
+            ssh_user,
+            target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
+        )
+    devkit_ip = get_devkit_sync_devkit_ip()
+    return devkit_ip or None, 22, DEFAULT_DEVKIT_SSH_USERNAME, bool(devkit_ip)
 
 
 def _build_devkit_shell_payload():
-    devkit_ip = get_devkit_sync_devkit_ip()
+    devkit_ip, ssh_port, ssh_user, credentials_prefilled = _shell_target()
     configured = bool(devkit_ip)
     webssh_port = get_webssh_port()
     webssh_host_port = _resolve_webssh_host_port()
     launch_url = None
 
-    if configured:
+    if configured and credentials_prefilled:
         password_b64 = base64.b64encode(DEFAULT_DEVKIT_SSH_PASSWORD.encode("utf-8")).decode("ascii")
         params = urllib.parse.urlencode(
             {
                 "hostname": devkit_ip,
-                "port": 22,
-                "username": DEFAULT_DEVKIT_SSH_USERNAME,
+                "port": ssh_port,
+                "username": ssh_user,
                 "password": password_b64,
                 "title": f"DevKit {devkit_ip}",
             }
@@ -226,7 +237,8 @@ def _build_devkit_shell_payload():
         "webssh_port": webssh_port,
         "webssh_host_port": webssh_host_port,
         "default_username": DEFAULT_DEVKIT_SSH_USERNAME,
-        "credentials_prefilled": True,
+        "credentials_prefilled": credentials_prefilled,
+        "launch_supported": configured and credentials_prefilled,
         "launch_url": launch_url,
     }
 
@@ -572,117 +584,31 @@ def _fake_sysinfo_payload():
 
 
 def _coerce_port_value(value):
-    if value is None or value == "":
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return value
+    return port_map.coerce_port_value(value)
 
 
 def _port_protocol(name_parts, value):
-    protocol = value.get("protocol")
-    if protocol:
-        return str(protocol)
-    if name_parts and str(name_parts[-1]).lower() in {"tcp", "udp"}:
-        return str(name_parts[-1]).lower()
-    return ""
+    return port_map.port_protocol(name_parts, value)
 
 
 def _collect_port_map_rows(name_parts, value, rows):
-    if not isinstance(value, dict):
-        return
-
-    name = ".".join(name_parts)
-    protocol = _port_protocol(name_parts, value)
-    if "host" in value:
-        rows.append(
-            {
-                "hostPortEnd": None,
-                "hostPortStart": _coerce_port_value(value.get("host")),
-                "name": name,
-                "protocol": protocol,
-            }
-        )
-        return
-
-    if "hostStart" in value or "hostEnd" in value:
-        rows.append(
-            {
-                "hostPortEnd": _coerce_port_value(value.get("hostEnd")),
-                "hostPortStart": _coerce_port_value(value.get("hostStart")),
-                "name": name,
-                "protocol": protocol,
-            }
-        )
-        return
-
-    for key, child in value.items():
-        _collect_port_map_rows([*name_parts, str(key)], child, rows)
+    return port_map.collect_port_map_rows(name_parts, value, rows)
 
 
 def _sysinfo_port_map_candidates():
-    paths = []
-    configured = os.getenv("NEAT_PORT_MAP_FILE", "").strip()
-    if configured:
-        paths.append(Path(configured))
-
-    paths.extend(
-        [
-            Path.home() / ".insight-config" / "neat-port-map.json",
-            Path("/workspace/.insight-config/neat-port-map.json"),
-            Path("/workspace/insight-config/neat-port-map.json"),
-            Path("/insight-config/neat-port-map.json"),
-        ]
-    )
-
-    for parent in (Path("/home"), Path("/Users")):
-        try:
-            paths.extend(user_dir / ".insight-config" / "neat-port-map.json" for user_dir in parent.iterdir() if user_dir.is_dir())
-        except OSError as exc:
-            logging.debug("Skipping port map search under %s: %s", parent, exc)
-
-    seen = set()
-    for path in paths:
-        key = str(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        yield path
+    yield from port_map.port_map_candidates()
 
 
 def _iter_neat_port_maps():
-    for path in _sysinfo_port_map_candidates():
-        if not path.is_file():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logging.debug("Failed to read neat port map %s: %s", path, exc)
-            continue
-
-        if isinstance(data, dict):
-            if data:
-                yield data
-            continue
-        logging.warning("Ignoring neat port map %s because its root is not an object", path)
+    yield from port_map.iter_neat_port_maps(_sysinfo_port_map_candidates())
 
 
 def _read_neat_port_map():
-    for data in _iter_neat_port_maps():
-        if "insightVideoChannels" in data:
-            return data
-    return {}
+    return port_map.read_neat_port_map(_iter_neat_port_maps())
 
 
 def _read_exposed_ports_from_port_map():
-    for data in _iter_neat_port_maps():
-        rows = []
-        for key, value in data.items():
-            _collect_port_map_rows([str(key)], value, rows)
-        if rows:
-            return rows
-    return []
+    return port_map.read_exposed_ports(_iter_neat_port_maps())
 
 
 def _resolve_video_channel_capacity():
@@ -727,37 +653,11 @@ def _sanitize_viewer_sources(value, max_channels):
 
 
 def _valid_port(value):
-    try:
-        port = int(value)
-    except (TypeError, ValueError):
-        return None
-    if 1 <= port <= 65535:
-        return port
-    return None
+    return port_map.valid_port(value)
 
 
 def _find_exposed_port(ports, name, protocol=None):
-    if not isinstance(ports, list):
-        return None
-
-    for port in ports:
-        if not isinstance(port, dict):
-            continue
-
-        row_name = str(port.get("name") or "")
-        if row_name != name and not row_name.startswith(f"{name}."):
-            continue
-
-        if protocol:
-            row_protocol = str(port.get("protocol") or "").lower()
-            if row_protocol and row_protocol != protocol.lower():
-                continue
-
-        resolved = _valid_port(port.get("hostPortStart"))
-        if resolved:
-            return resolved
-
-    return None
+    return port_map.find_exposed_port(ports, name, protocol)
 
 
 def _resolve_video_ui_port():
@@ -2450,6 +2350,8 @@ def start_devkit_shell():
 
     if not payload["configured"]:
         return _json_error("DEVKIT_SYNC_DEVKIT_IP is not configured.", 404)
+    if not payload["launch_supported"]:
+        return _json_error("The browser shell is available only for the SDK-paired DevKit.", 409)
     if server_ssl_context is None:
         return _json_error("Insight TLS context is not initialized.", 500)
 
