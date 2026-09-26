@@ -126,9 +126,14 @@ def _compare_runs(raw) -> list:
     return runs
 
 
-def _expected_generation(raw, read: str = "the run list"):
+def _expected_generation(raw, read: str = "the run list", *, required: bool = False):
     """The board generation the caller judged its request against, or None when it names none."""
     if raw in (None, ""):
+        if required:
+            raise _invalid(
+                "`generation` is required for this operation.",
+                "Send the `generation` of the payload {} came from.".format(read),
+            )
         return None
     try:
         return int(raw)
@@ -185,7 +190,14 @@ def get_sentinel():
 @sentinel_bp.post("/api/sentinel/install")
 def install_sentinel():
     """Run `sima-cli neat install sentinel` on the board; refuses when Sentinel is already healthy."""
+    expected = _expected_generation(request.args.get("generation"), read="the Sentinel status", required=True)
     context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since its Sentinel status was read, so nothing was installed.",
+        "Read the Sentinel status of the board selected now, then install again.",
+    )
     result = install.install(context.session)
     cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
     return context.payload(daemon=result["status"], log=result["log"])
@@ -218,7 +230,14 @@ def get_traces():
 def start_trace():
     """Start recording a named trace; 409 when another trace is active or the name is taken."""
     wanted = _trace_request(request.get_json(silent=True))
+    expected = _expected_generation(request.args.get("generation"), read="the active trace", required=True)
     context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since its active trace was read, so no trace was started.",
+        "Read the active trace of the board selected now, then start it again.",
+    )
     started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
     return context.payload(sentinel=_passthrough(started))
 

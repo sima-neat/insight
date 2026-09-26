@@ -1011,7 +1011,7 @@ class SentinelApiTests(_ApiCase):
 
     def test_starting_a_trace_forwards_the_name_note_and_tags(self):
         self.transport.answer("POST", "/v1/traces", 200, {"schema": 1, "trace": {"name": "baseline"}})
-        response = self.post("/api/sentinel/traces", json={"name": " baseline ", "note": "n", "tags": ["t"]})
+        response = self.post("/api/sentinel/traces?generation=1", json={"name": " baseline ", "note": "n", "tags": ["t"]})
         self.assertEqual(response.status_code, 200)
         argv = self.transport.calls[-1][0]
         self.assertEqual(json.loads(argv[4]), {"name": "baseline", "note": "n", "tags": ["t"]})
@@ -1039,7 +1039,7 @@ class SentinelApiTests(_ApiCase):
 
     def test_a_conflicting_trace_keeps_the_daemons_conflict(self):
         self.transport.answer("POST", "/v1/traces", 409, {"error": "a trace is already active"})
-        response = self.post("/api/sentinel/traces", json={"name": "baseline"})
+        response = self.post("/api/sentinel/traces?generation=1", json={"name": "baseline"})
         self.assertEqual(response.status_code, 409)
         body = response.get_json()
         self.assertEqual((body["code"], body["error"]), ("trace_conflict", "a trace is already active"))
@@ -1050,6 +1050,14 @@ class SentinelApiTests(_ApiCase):
         body = self.post("/api/sentinel/traces/stop").get_json()
         self.assertEqual(body["sentinel"], {"run": {"id": "r1"}})
         self.assertEqual(self.transport.api_paths[-1], ("POST", "/v1/traces/stop"))
+
+    def test_starting_a_trace_requires_the_board_generation_and_refuses_a_stale_one(self):
+        missing = self.post("/api/sentinel/traces", json={"name": "baseline"})
+        self.assertEqual((missing.status_code, missing.get_json()["code"]), (400, "invalid_request"))
+        stale = self.post("/api/sentinel/traces?generation=7", json={"name": "baseline"})
+        self.assertEqual((stale.status_code, stale.get_json()["code"]), (409, "stale_snapshot"))
+        self.assertIn("no trace was started", stale.get_json()["error"])
+        self.assertEqual(self.transport.api_paths, [])
 
     def test_stopping_a_trace_read_from_another_board_is_refused_before_anything_runs(self):
         # The page showed board A's trace; the selected board is now generation 1, not 7.
@@ -1093,7 +1101,7 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(self.transport.api_paths[-1], ("GET", "/v1/compare?runs=baseline,optimized"))
 
     def test_install_refuses_to_restart_a_healthy_daemon(self):
-        response = self.post("/api/sentinel/install")
+        response = self.post("/api/sentinel/install?generation=1")
         self.assertEqual(response.status_code, 409)
         body = response.get_json()
         self.assertEqual(body["code"], "already_installed")
@@ -1109,10 +1117,19 @@ class SentinelApiTests(_ApiCase):
             return result
 
         self.transport.exec = exec_once
-        body = self.post("/api/sentinel/install").get_json()
+        body = self.post("/api/sentinel/install?generation=1").get_json()
         self.assertEqual(body["daemon"]["healthy"], True)
         self.assertEqual(body["log"], "Sentinel installed")
         self.assertTrue(self.get("/api/sentinel").get_json()["available"])
+
+    def test_install_requires_the_board_generation_and_refuses_a_stale_one(self):
+        self.transport.status_fields = ["inactive", "no", "no", "/usr/bin/sima-cli"]
+        missing = self.post("/api/sentinel/install")
+        self.assertEqual((missing.status_code, missing.get_json()["code"]), (400, "invalid_request"))
+        stale = self.post("/api/sentinel/install?generation=7")
+        self.assertEqual((stale.status_code, stale.get_json()["code"]), (409, "stale_snapshot"))
+        self.assertIn("nothing was installed", stale.get_json()["error"])
+        self.assertEqual(self.transport.calls, [])
 
 
 RUN_A = {"id": "20260924T175231.958Z-baseline", "name": "baseline", "samples": 4}

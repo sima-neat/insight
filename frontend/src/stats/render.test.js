@@ -145,3 +145,13 @@ test('a trace read from a board no longer selected cannot be stopped from here',
   const stale = stopOf(runsPanel(RunsPanel, { trace: traceModel(RECORDING), traceStale: true, compare: null }))
   assert.match(stale, /disabled/)
 })
+
+test('a trace cannot start before its board-bound state has loaded', () => {
+  const startOf = (html) => html.match(/<button[^>]*>Start trace<\/button>/)?.[0] || ''
+  const loading = startOf(runsPanel(RunsPanel))
+  assert.match(loading, /disabled/)
+  const ready = startOf(runsPanel(RunsPanel, {
+    trace: traceModel({ generation: 3, sentinel: { trace: null } })
+  }))
+  assert.doesNotMatch(ready, /disabled/)
+})

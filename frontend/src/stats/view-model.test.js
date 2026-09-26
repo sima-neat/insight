@@ -229,9 +229,12 @@ test('the CSV is named after the baseline and the day, safely', () => {
 })
 
 test('the Runs header row is the trace form until a trace records', () => {
-  assert.deepEqual(traceBar(traceModel(null)), { recording: false, submitLabel: 'Start trace' })
-  assert.deepEqual(traceBar(traceModel({ sentinel: { trace: null, summary: null } }), { busy: true }), {
+  assert.deepEqual(traceBar(traceModel(null)), { recording: false, disabled: true, submitLabel: 'Start trace' })
+  const ready = traceModel({ generation: 3, sentinel: { trace: null, summary: null } })
+  assert.deepEqual(traceBar(ready), { recording: false, disabled: false, submitLabel: 'Start trace' })
+  assert.deepEqual(traceBar(ready, { busy: true }), {
     recording: false,
+    disabled: true,
     submitLabel: 'Starting…'
   })
 })

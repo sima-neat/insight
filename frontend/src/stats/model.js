@@ -664,7 +664,11 @@ export const RUNS_NOTE = 'A trace records a workload and is saved on the board a
  */
 export function traceBar(trace, { busy = false, now = Date.now() } = {}) {
   if (!trace?.active) {
-    return { recording: false, submitLabel: busy ? 'Starting…' : 'Start trace' }
+    return {
+      recording: false,
+      disabled: busy || !trace?.payload,
+      submitLabel: busy ? 'Starting…' : 'Start trace'
+    }
   }
   const startedAt = trace.startedAt || null
   const started = startedAt ? timeAgo(startedAt, now) : ''
@@ -675,6 +679,7 @@ export function traceBar(trace, { busy = false, now = Date.now() } = {}) {
     started,
     tags: trace.tags || [],
     note: trace.note || '',
+    disabled: busy,
     stopLabel: busy ? 'Stopping…' : 'Stop trace'
   }
 }
@@ -809,18 +814,18 @@ export function compareReady(refs) {
   return uncomparableRefs(list).length === 0
 }
 
-function withGeneration(path, generation) {
+export function generationQuery(path, generation) {
   return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
 }
 
 /** The request that deletes one run, bound to the board generation its run list came from. */
 export function deleteRunQuery(ref, generation = null) {
-  return withGeneration(`/api/sentinel/runs/${encodeURIComponent(String(ref))}`, generation)
+  return generationQuery(`/api/sentinel/runs/${encodeURIComponent(String(ref))}`, generation)
 }
 
 /** The request that stops the active trace, bound to the board generation it was read under. */
 export function stopTraceQuery(generation = null) {
-  return withGeneration('/api/sentinel/traces/stop', generation)
+  return generationQuery('/api/sentinel/traces/stop', generation)
 }
 
 export function deletePrompt(count) {

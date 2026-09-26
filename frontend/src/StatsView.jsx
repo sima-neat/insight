@@ -202,7 +202,7 @@ function TagPills({ tags }) {
   return <span className="periph-pills">{tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}</span>
 }
 
-function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
+function TraceBar({ bar, stale = false, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
   if (bar.recording) {
     return (
       <div className="stats-trace-bar">
@@ -215,7 +215,7 @@ function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggl
         )}
         <TagPills tags={bar.tags} />
         {/* A trace read from a board no longer selected is not this board's to stop. */}
-        <button type="button" className="btn-tonal" onClick={onStop} disabled={busy || stale}>{bar.stopLabel}</button>
+        <button type="button" className="btn-tonal" onClick={onStop} disabled={bar.disabled || stale}>{bar.stopLabel}</button>
       </div>
     )
   }
@@ -234,7 +234,7 @@ function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggl
           required
         />
       </label>
-      <button type="submit" className="btn-tonal" disabled={busy}>{bar.submitLabel}</button>
+      <button type="submit" className="btn-tonal" disabled={bar.disabled}>{bar.submitLabel}</button>
       <button
         type="button"
         className="btn-ghost"
@@ -421,7 +421,6 @@ export function RunsPanel({
         <h2 id="stats-runs-title" ref={headingRef} tabIndex={-1}>Runs</h2>
         <TraceBar
           bar={bar}
-          busy={traceBusy}
           stale={traceStale}
           form={form}
           extras={extras}
@@ -1118,7 +1117,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         setInstallError(null)
         setInstallResult(null)
       },
-      call: installSentinel,
+      call: () => installSentinel(state?.generation),
       done: async (data, ticket) => {
         setInstallResult(data)
         onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
@@ -1145,7 +1144,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     await send('trace-action', {
       busy: setTraceBusy,
       start: () => setTraceError(null),
-      call: () => startTrace(result.body),
+      call: () => startTrace(result.body, traces?.generation),
       done: (data) => {
         setTraces(data)
         setForm({ name: '', note: '', tags: '' })

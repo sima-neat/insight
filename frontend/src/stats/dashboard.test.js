@@ -108,7 +108,8 @@ test('the live board: thermal groups in Sentinel order, cores and rails by key, 
   assert.deepEqual([axisLabel(100), axisLabel(2.5), axisLabel(1788), axisLabel(null)], ['100', '2.5', '1,788', ''])
 })
 
-// Two saved runs compared with raw=1 on the DevKit, 2026-09-25 (tes3 is the baseline).
+// Two saved runs compared with raw=1 on the DevKit, 2026-09-25 (tes3 is the baseline),
+// trimmed to the seven dashboard series plus a second thermal sensor for max derivation.
 const RAW = JSON.parse(readFileSync(new URL('./fixtures/compare-raw.json', import.meta.url), 'utf8'))
 
 test('compare runs overlays one series per run over elapsed time, baseline first', () => {
