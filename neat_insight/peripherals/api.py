@@ -64,6 +64,17 @@ def _run_probe(session) -> dict:
     return probe
 
 
+def _export_generation(body: dict) -> int:
+    generation = body.get("generation")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
+        raise BoardError(
+            "invalid_request",
+            "`generation` must be the whole-number board generation from the camera scan.",
+            hint="Send the `generation` returned by GET /api/peripherals with the selected mode.",
+        )
+    return generation
+
+
 # API: return the last camera scan of the selected board.
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
@@ -100,8 +111,17 @@ def refresh_peripherals():
 def export_camera():
     """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
     try:
-        selection = export.parse_request(request.get_json(silent=True))
+        body = request.get_json(silent=True)
+        selection = export.parse_request(body)
+        expected_generation = _export_generation(body)
         session = get_board_manager().session()
+        if expected_generation != session.generation:
+            raise BoardError(
+                "stale_snapshot",
+                "The selected board changed since this camera scan was read, so no configuration was exported.",
+                hint="Refresh the selected board, then export again.",
+                expected_generation=expected_generation,
+            )
         snapshot = scans.snapshot(session.generation)
         if snapshot is None:
             raise BoardError(

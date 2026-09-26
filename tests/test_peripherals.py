@@ -923,7 +923,15 @@ class PeripheralsApiTests(unittest.TestCase):
         return self.client.post("/api/peripherals/refresh")
 
     def export(self, **body):
-        body = {"id": "mipi:" + IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30, **body}
+        body = {
+            "id": "mipi:" + IMX477,
+            "format": "NV12",
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            "generation": self.manager.current.generation,
+            **body,
+        }
         return self.client.post("/api/peripherals/cameras/export", json=body)
 
     def test_scan_responses_are_not_cached(self):
@@ -1160,6 +1168,11 @@ class PeripheralsApiTests(unittest.TestCase):
                 self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
         self.assertIn("NV12 only", self.export(format="RGB888").get_json()["error"])
 
+        for generation in (None, "1", True, -1):
+            with self.subTest(generation=generation):
+                response = self.export(generation=generation)
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
     def test_export_is_stale_after_the_board_changes(self):
         self.use()
         self.assertEqual(self.export().status_code, 409)
@@ -1169,6 +1182,16 @@ class PeripheralsApiTests(unittest.TestCase):
         response = self.export()
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertEqual(self.client.get("/api/peripherals").get_json()["scanned_at"], None)
+
+    def test_export_is_bound_to_the_generation_of_its_source_scan(self):
+        self.use(self.board("a"), generation=1, fingerprint="fp-1")
+        self.refresh()
+        self.use(self.board("b"), generation=2, fingerprint="fp-2")
+        self.refresh()
+
+        response = self.export(generation=1)
+        body = response.get_json()
+        self.assertEqual((response.status_code, body["code"], body["expected_generation"]), (409, "stale_snapshot", 1))
 
     def test_board_errors_pass_through(self):
         self.use(BoardError("unreachable", "Cannot reach sima@192.168.2.2.", hint="Check the cable."))

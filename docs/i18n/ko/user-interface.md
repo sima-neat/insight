@@ -127,7 +127,7 @@ MIPI 카메라의 모드를 읽기 위해 새로 고침은 스트리밍 없이 l
 
 ### 카메라 구성 API
 
-페이지에서는 형식, 해상도 및 프레임 속도를 검사할 수 있습니다. 현재 복사 또는 다운로드 작업은 제공하지 않습니다. API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. Apps `config.yaml`의 `camera:` 블록은 설치된 `libcamerasrc`가 필요한 캡처 버퍼 옵션을 지원할 때만 포함됩니다. 내보내기에는 항상 카메라 이름이 명시됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
+페이지에서는 형식, 해상도 및 프레임 속도를 검사할 수 있습니다. 현재 복사 또는 다운로드 작업은 제공하지 않습니다. API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. 요청에는 동일한 `/api/peripherals` 스냅샷의 `generation`이 포함되어야 하며, 선택한 보드가 변경되면 Insight는 `409 stale_snapshot`을 반환합니다. Apps `config.yaml`의 `camera:` 블록은 설치된 `libcamerasrc`가 필요한 캡처 버퍼 옵션을 지원할 때만 포함됩니다. 내보내기에는 항상 카메라 이름이 명시됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
 
 Modalix DevKit에서 측정된 두 가지 동작이 내보내기에 반영됩니다. 엄격한 제로 카피로 시작되지 않았기 때문에 CPU 폴백(`allow_cpu_fallback = True`)을 허용합니다. 또한 카메라는 요청한 속도가 아니라 libcamera가 선택한 센서 모드의 프레임 속도로 전달합니다. 1920×1080의 IMX477은 15 또는 30 fps를 요청했을 때 약 66 fps를 전달했습니다. 더 적은 프레임이 필요하면 애플리케이션에서 프레임을 삭제하십시오.
 
