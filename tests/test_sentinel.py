@@ -137,7 +137,9 @@ class FakeSentinel:
         if self.delete_result is not None:
             return self.delete_result
         status, body = self.api[("GET", "/v1/runs")]
-        kept = [run for run in body["runs"] if target not in (run.get("id"), run.get("name"))]
+        id_match = any(run.get("id") == target for run in body["runs"])
+        field = "id" if id_match else "name"
+        kept = [run for run in body["runs"] if run.get(field) != target]
         if len(kept) == len(body["runs"]):
             return ExecResult(0, b"", "Error: unknown completed run '{}'\n".format(target).encode())
         self.api[("GET", "/v1/runs")] = (status, dict(body, runs=kept))
@@ -1164,6 +1166,13 @@ class DeleteRunTests(_ApiCase):
         body = self.delete("/api/sentinel/runs/" + RUN_B["id"]).get_json()
         self.assertEqual(body["deleted"], {"id": RUN_B["id"], "name": "optimized"})
         self.assertEqual(self.transport.deletes[0][4], RUN_B["id"])
+
+    def test_another_runs_name_may_equal_the_deleted_id(self):
+        collision = {"id": "another-id", "name": RUN_A["id"], "samples": 2}
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [RUN_A, collision]})
+        response = self.delete("/api/sentinel/runs/" + RUN_A["id"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["sentinel"]["runs"], [collision])
 
     def test_the_script_finds_the_cli_off_a_non_login_path(self):
         script = runs.DELETE_SCRIPT
