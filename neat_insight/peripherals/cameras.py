@@ -274,7 +274,9 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         errors.append(_mipi_modes_error(camera, probe))
         previous = modes.get(item_id)
         if previous:
-            modes_source, formats, default = "previous-scan", previous["formats"], previous["default_selection"]
+            modes_source = "previous-scan"
+            formats = _reclassify_mipi_formats(previous["formats"], model, libcamerasrc)
+            default = previous["default_selection"]
             scanned_at = previous["scanned_at"]
             notes.append(f"Modes are from the scan at {scanned_at}; they could not be read during this refresh.")
         else:
@@ -338,6 +340,17 @@ def _fps_tier(model: str, fmt: str, size: dict, fps: int, libcamerasrc: Optional
     return "advertised"
 
 
+def _mipi_format_support(name: str, sizes: list, libcamerasrc: Optional[bool]) -> dict:
+    raw = bool(_RAW_BAYER_RE.match(name))
+    if name != "NV12":
+        return _support("unsupported", RAW_REASON if raw else NV12_ONLY_REASON, [])
+    if libcamerasrc is False:
+        return _support("unsupported", NO_LIBCAMERASRC_REASON, [])
+    if any(choice["tier"] == "verified" for size in sizes for choice in size["fps"]):
+        return _support("verified", VERIFIED_REASON, [CORE_883])
+    return _support("advertised", ADVERTISED_REASON, [CORE_883])
+
+
 def _mipi_format(fmt: dict, model: str, max_fps: Optional[float], libcamerasrc: Optional[bool]) -> dict:
     name = fmt["format"]
     raw = bool(_RAW_BAYER_RE.match(name))
@@ -351,22 +364,31 @@ def _mipi_format(fmt: dict, model: str, max_fps: Optional[float], libcamerasrc: 
         }
         for size in fmt["sizes"]
     ]
-    if name != "NV12":
-        support = _support("unsupported", RAW_REASON if raw else NV12_ONLY_REASON, [])
-    elif libcamerasrc is False:
-        support = _support("unsupported", NO_LIBCAMERASRC_REASON, [])
-    elif any(choice["tier"] == "verified" for size in sizes for choice in size["fps"]):
-        support = _support("verified", VERIFIED_REASON, [CORE_883])
-    else:
-        support = _support("advertised", ADVERTISED_REASON, [CORE_883])
     return {
         "format": name,
         "label": FORMAT_LABELS.get(name) or (f"{name} (raw Bayer)" if raw else name),
         "exportable": name == "NV12",
-        "support": support,
+        "support": _mipi_format_support(name, sizes, libcamerasrc),
         "range": fmt.get("range"),
         "sizes": sizes,
     }
+
+
+def _reclassify_mipi_formats(formats: list, model: str, libcamerasrc: Optional[bool]) -> list:
+    rebuilt = []
+    for fmt in formats:
+        sizes = [
+            {
+                **size,
+                "fps": [
+                    {**choice, "tier": _fps_tier(model, fmt["format"], size, choice["value"], libcamerasrc)}
+                    for choice in size["fps"]
+                ],
+            }
+            for size in fmt["sizes"]
+        ]
+        rebuilt.append({**fmt, "support": _mipi_format_support(fmt["format"], sizes, libcamerasrc), "sizes": sizes})
+    return rebuilt
 
 
 def _mipi_default(formats: list) -> Optional[dict]:
@@ -443,7 +465,15 @@ def _usb_item(camera: dict, platform: dict) -> dict:
             errors.append(_error("tool_missing", message, TOOL_ISSUES["v4l2-ctl"][1]))
 
     return {
-        "id": f"usb:{usb.get('vendor_id')}:{usb.get('product_id')}:{usb.get('serial') or usb.get('bus_path')}",
+        "id": "usb:"
+        + ":".join(
+            (
+                usb.get("vendor_id") or "unknown",
+                usb.get("product_id") or "unknown",
+                usb.get("serial") or "no-serial",
+                usb.get("bus_path") or "unknown-path",
+            )
+        ),
         "kind": "camera",
         "connection": "usb",
         "name": usb.get("product") or camera.get("name") or camera["node"],

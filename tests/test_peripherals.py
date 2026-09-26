@@ -17,6 +17,7 @@ from neat_insight.peripherals.api import peripherals_bp
 
 FIXTURES = Path(__file__).parent / "fixtures" / "peripherals"
 IMX477 = "imx477 5-001a"
+USB_ID = "usb:046d:082d:A1B2C3D4:1-1.2"
 ISP_QUERY = ("v4l2-ctl", "-d", "/dev/video0out", "--info", "--list-formats-ext")
 
 
@@ -372,6 +373,26 @@ class ProbeCollectTests(unittest.TestCase):
         issue = next(i for i in snapshot_of(output)["issues"] if i["code"] == "permission_denied")
         self.assertEqual(issue["hint"], cameras.PERMISSION_HINT)
 
+    def test_usb_ids_include_topology_when_serials_are_cloned(self):
+        board = camera_board(self.tmp.name)
+        interface = board.usb_device(
+            "1-1.3",
+            idVendor="046d",
+            idProduct="082d",
+            manufacturer="Logitech",
+            product="HD Pro Webcam C920",
+            serial="A1B2C3D4",
+            speed="480",
+        )
+        board.video_node("video4", interface, 0, "HD Pro Webcam C920")
+        board.command("v4l2-ctl", "-d", "/dev/video4", "--info", out=fixture("v4l2_info_c920_synthetic.txt"))
+        board.command(
+            "v4l2-ctl", "-d", "/dev/video4", "--list-formats-ext", out=fixture("v4l2_formats_c920_synthetic.txt")
+        )
+        ids = [entry["id"] for entry in snapshot_of(board.collect())["items"] if entry["connection"] == "usb"]
+        self.assertEqual(ids, [USB_ID, "usb:046d:082d:A1B2C3D4:1-1.3"])
+        self.assertEqual(len(ids), len(set(ids)))
+
     def test_mipi_camera_is_enumerated_with_media_graph_placement(self):
         output = camera_board(self.tmp.name).collect()
         (camera,) = output["mipi"]
@@ -416,7 +437,7 @@ class ProbeCollectTests(unittest.TestCase):
         output = board.collect()
         self.assertEqual(output["availability_method"], "proc-user")
         snapshot = snapshot_of(output)
-        usb = item(snapshot, "usb:046d:082d:A1B2C3D4")["availability"]
+        usb = item(snapshot, USB_ID)["availability"]
         self.assertEqual((usb["state"], usb["reason"]), ("unknown", cameras.UNKNOWN_USERS_REASON))
         # cam -I still acquired the MIPI camera, which proves nobody holds it.
         self.assertEqual(item(snapshot, "mipi:" + IMX477)["availability"]["state"], "available")
@@ -813,7 +834,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn(("error", "tool_missing"), [(i["severity"], i["code"]) for i in snapshot["issues"]])
 
     def test_usb_camera_is_unsupported_with_format_notes(self):
-        camera = item(snapshot_of(camera_board(self.tmp.name).collect()), "usb:046d:082d:A1B2C3D4")
+        camera = item(snapshot_of(camera_board(self.tmp.name).collect()), USB_ID)
         self.assertEqual((camera["connection"], camera["name"]), ("usb", "HD Pro Webcam C920"))
         self.assertEqual(camera["support"]["tier"], "unsupported")
         self.assertEqual(camera["support"]["links"], [cameras.CORE_838])
@@ -831,7 +852,7 @@ class SnapshotTests(unittest.TestCase):
         for link in (board.root / "dev/v4l/by-id").iterdir():
             link.unlink()
         camera = snapshot_of(board.collect())["items"][1]
-        self.assertEqual(camera["id"], "usb:046d:082d:1-1.2")
+        self.assertEqual(camera["id"], "usb:046d:082d:no-serial:1-1.2")
         self.assertNotIn("by_id", camera["device"])
         self.assertIn("/dev/videoN numbering", camera["notes"][0])
 
@@ -927,7 +948,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(stdin, Path(probe.__file__).read_bytes())
         snapshot = response.get_json()
         self.assertEqual(snapshot["board"]["fingerprint"], "fp-1")
-        self.assertEqual([i["id"] for i in snapshot["items"]], ["mipi:" + IMX477, "usb:046d:082d:A1B2C3D4"])
+        self.assertEqual([i["id"] for i in snapshot["items"]], ["mipi:" + IMX477, USB_ID])
         self.assertIsNone(snapshot["changes"])
         self.assertEqual(self.client.get("/api/peripherals").get_json(), snapshot)
 
@@ -953,6 +974,27 @@ class PeripheralsApiTests(unittest.TestCase):
         warnings = self.export().get_json()["warnings"]
         self.assertTrue(any("earlier scan" in w for w in warnings))
         self.assertIn("The camera is in use by another process; CameraInput cannot acquire it until it is released.", warnings)
+
+    def test_cached_modes_follow_current_libcamerasrc_support(self):
+        first = self.board("a", usb=False)
+        missing = self.board("b", usb=False, cam_info="cam_info_busy_synthetic.txt")
+        missing["libcamerasrc"] = {"present": False, "external_buffer_mode": False, "buffer_count": False}
+        unchecked = self.board("c", usb=False, cam_info="cam_info_busy_synthetic.txt")
+        unchecked["libcamerasrc"] = None
+        self.use(first, missing, unchecked)
+        self.refresh()
+
+        unsupported = self.refresh().get_json()["items"][0]
+        unsupported_nv12 = fmt_of(unsupported, "NV12")
+        self.assertEqual((unsupported["support"]["tier"], unsupported_nv12["support"]["tier"]), ("unsupported", "unsupported"))
+        self.assertEqual({choice["tier"] for size in unsupported_nv12["sizes"] for choice in size["fps"]}, {"unsupported"})
+        self.assertEqual(self.export().get_json()["support"]["tier"], "unsupported")
+
+        advertised = self.refresh().get_json()["items"][0]
+        advertised_nv12 = fmt_of(advertised, "NV12")
+        self.assertEqual((advertised["support"]["tier"], advertised_nv12["support"]["tier"]), ("advertised", "advertised"))
+        self.assertEqual({choice["tier"] for size in advertised_nv12["sizes"] for choice in size["fps"]}, {"advertised"})
+        self.assertEqual(self.export().get_json()["support"]["tier"], "advertised")
 
     def test_in_use_warning_names_the_holding_processes(self):
         self.use(self.board("a", usb=False))
@@ -1064,7 +1106,7 @@ class PeripheralsApiTests(unittest.TestCase):
     def test_export_usb_emits_descriptors_only(self):
         self.use(self.board("a"))
         self.refresh()
-        response = self.export(id="usb:046d:082d:A1B2C3D4", format="MJPG", width=1280, height=720, fps=7.5)
+        response = self.export(id=USB_ID, format="MJPG", width=1280, height=720, fps=7.5)
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertEqual([e["id"] for e in body["exports"]], ["yaml", "json"])
@@ -1082,7 +1124,7 @@ class PeripheralsApiTests(unittest.TestCase):
         output["usb"][0]["by_id"] = None
         self.use(output)
         self.refresh()
-        body = self.export(id="usb:046d:082d:A1B2C3D4", format="YUYV", width=640, height=480, fps=30).get_json()
+        body = self.export(id=USB_ID, format="YUYV", width=640, height=480, fps=30).get_json()
         self.assertEqual(json.loads(body["exports"][1]["content"])["device"], "/dev/video2")
         self.assertTrue(any("not stable" in w for w in body["warnings"]))
 
