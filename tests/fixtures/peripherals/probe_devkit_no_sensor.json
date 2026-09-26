@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "python": "3.11.2",
+  "euid": 1000,
+  "tools": {
+    "cam": true,
+    "media-ctl": true,
+    "v4l2-ctl": true,
+    "gst-inspect-1.0": true,
+    "fuser": true,
+    "sudo": true
+  },
+  "libcamerasrc": {
+    "present": true,
+    "external_buffer_mode": true,
+    "buffer_count": true
+  },
+  "availability_method": "sudo-fuser",
+  "media_devices": [
+    {
+      "path": "/dev/media0",
+      "driver": "simaai-v4l2-vid",
+      "model": "SiMa.ai Capture Media Device",
+      "bus_info": "platform:csi2video@1",
+      "csi": "csidev-40c3000.csi",
+      "sensors": [],
+      "nodes": [
+        "/dev/media0",
+        "/dev/video0"
+      ]
+    }
+  ],
+  "libcamera": {
+    "cameras": [],
+    "no_sensor": [
+      "/dev/media0"
+    ],
+    "rates": {},
+    "listed": true
+  },
+  "mipi": [],
+  "usb": [],
+  "failures": []
+}

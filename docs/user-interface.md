@@ -97,11 +97,99 @@ Use the Video Viewer to confirm:
 
 The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
 
+## Peripherals
+
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. Discovery reads device information only: it does not publish a stream, so cameras stay available to your applications, apart from the moment a scan reads a MIPI camera's own modes. The camera export API also works from the cached scan without touching the board.
+
+### Selected board
+
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
+
+The board is chosen in this order:
+
+- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
+- **Insight installed on the board**: Insight inspects the board it runs on.
+- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
+
+Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
+
+### Cameras and modes
+
+Select **Refresh** to scan the board. Insight finds MIPI cameras through libcamera and the media graph, and USB cameras through V4L2. For each camera it shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+
+| Level | Meaning |
+| --- | --- |
+| Verified | The mode has been validated with Core `CameraInput`. |
+| Advertised | The camera reports the mode, but it has not been validated with Core. It can still fail when capture starts. |
+| Not supported | Core `CameraInput` cannot use it. This includes USB cameras, raw sensor formats, and formats other than NV12. |
+
+To read a MIPI camera's modes, Refresh briefly opens the camera through libcamera without streaming. Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Camera configuration API
+
+The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. The request must include `generation` from the same `/api/peripherals` snapshot; Insight returns `409 stale_snapshot` if the selected board has changed. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
+
 ## Stats
 
-The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.
+Stats reads the board's own telemetry from Sentinel, the `simaai-sentinel` daemon, so you can separate application behavior from device behavior. A dropped frame may come from the stream path, but it may also correlate with board power, on-die temperature, CPU load, or memory pressure.
 
-This feature is intended to be completed in the next release. Once complete, use Stats when you need to separate application behavior from system behavior. For example, a dropped frame problem may come from the application stream path, but it may also correlate with CPU load, memory pressure, or device runtime state.
+Stats works on the selected board, chosen in the same **Board** panel the Peripherals page uses.
+
+### Sentinel daemon
+
+When Sentinel is missing, stopped or cannot be reached on that board, the page says so before anything else. When it is missing, select **Install Sentinel**: Insight runs `sima-cli neat install sentinel` on the board itself, which needs `sima-cli` there and passwordless `sudo`. When either is missing, the page names the command to run in a shell on the board instead. An installed and running daemon is never reinstalled from here, because the installer restarts it and would end a trace in flight.
+
+An install that is refused or fails is reported as an install rather than as a failed read: the page says the install did not happen, gives the board's own sentence for why — no `sima-cli`, no passwordless `sudo`, an installer that exited non-zero, or one that finished with the service still down — and keeps the installer's output behind **Installer output**.
+
+### Live metrics
+
+The DevKit view is laid out like Sentinel's own terminal dashboard (`simaai-sentinel ops`). A status line shows whether the readings are live and when the current Sentinel session started, which is what the session average and peak cover. **Export CSV** downloads every metric at each sample Sentinel holds for the session (its last 240, about eight minutes; record a trace under **Runs** for longer), and **Pause updates** stops polling. Below it are six tabs:
+
+- **Overview**: charts of the hottest temperature sensor, board power, CPU usage, Linux memory, MLA memory, and network traffic, with **All metrics** folded beneath them, every metric in Sentinel's order.
+- **Thermal**: the hottest sensor over time, then each sensor group (MLA, APU, CVU, TOP, Board) as small charts.
+- **Power**: current, session-average, and session-peak power as figures, board power over the window with the session average marked, and the power rails stacked so the top edge is the board total.
+- **System**: **CPU & memory** charts CPU usage, load average, Linux memory, MLA memory, and EV74 CMA use. **Per-core CPU** is a heatmap of load, a row per core and a column per 10 seconds of the window in one blue, with each core's one-minute average and the busiest core; an average past a core's limits turns amber or red.
+- **Storage & Network**: eMMC use, network receive and transmit, eMMC reads and writes, and their metrics.
+- **Runs**: record a trace, and open, compare, or delete saved runs. Comparing overlays one series (total power, thermal maximum, CPU, load, RAM, MLA memory, or EV74 CMA) for every selected run over the time they all cover, on a scale fitted to the runs, with each run's minimum, mean, median, P95, maximum, change against the baseline, and energy; the per-metric comparison is folded beneath it.
+
+Charts use fixed scales (percentages 0-100, temperatures 40-90 °C, anything else up to a round number above its peak), show the warning and critical levels Sentinel defines, and read out every series at a point when you hover. Colour means status: a chart is blue until its reading passes a warning or critical level, then amber or red. A tab's name is marked when a metric in it is past a threshold. A metric the board cannot measure reads as an em dash, never as zero.
+
+Charts cover the whole window Sentinel keeps, 240 samples (about eight minutes): on the first read of a board, and again after a pause in polling of more than a minute, Insight takes them from Sentinel's own cache, then adds a sample every two seconds while the tab is open and visible. Polling also stops when the browser tab is hidden or the view is left.
+
+If the board stops answering while you are looking at it, polling stops and the panels stay, holding the last values read and the board's own explanation of what failed, rather than emptying the page. Selecting a different board is not the same thing: that clears everything first, so one board's numbers are never shown under another board's name.
+
+### Traces and runs
+
+A trace records every sample around a workload. Name it, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it as a run on the board. Sentinel records one trace at a time and refuses a name a saved run already uses. Saved runs are listed with their state, start time, duration, the energy Sentinel measured over the run, and sample count, and survive a daemon restart. Open a run to see it summarised: every metric it recorded, with the label, unit, group and thresholds that were in force at the time, and the smallest, largest and mean value over that run's samples. A metric that crossed its warning or critical threshold at any point in the run is marked. A run that caught only one sample is reported as the moment it was taken rather than as a range from that moment to itself, and its mean, minimum and maximum are named as the single value they all are. The run's metadata — its name, note, sample interval, Sentinel version, and the board it ran on — sits below that.
+
+Ticking a run shows a toolbar with how many are selected and what can be done with them. Select two to eight and **Compare** to put the metrics in rows and the runs in columns. Sentinel measures the comparison against one baseline run, which is marked in the header along with each run's note; every other cell shows that metric's mean over the run with its percentage change against the baseline beside it. A change too small to print shows as “<0.01%” rather than as no change at all.
+
+Where a cell shows “—” in place of a change, Sentinel withheld one, and the table says which of its reasons applies rather than leaving one em dash to stand for all of them. Hover, tab to or tap a “—” to see its reason beside it; a screen reader reads the reason with the dash. The reasons are:
+
+- **Sentinel publishes no change for it.** Run totals — duration, energy and sample count — are reported per run without a percentage.
+- **The baseline measured 0, and there is no percentage change from 0.** The baseline did measure the metric; there is simply no percentage from zero. This is common for per-core CPU usage on an idle baseline, and it is where the change is often largest: a core that averaged 0% in the baseline and 5.9% in the other run shows “—” here, so read the two values rather than the change.
+- **The baseline run has no value for that metric.** The only case in which the baseline never measured it.
+- **This run has no value for that metric.** Where a run was listed but Sentinel summarised nothing for it, the whole column reads this way and is called out above the table.
+
+Run totals are shown in the units the rest of the view uses: a duration Sentinel reports in milliseconds reads in seconds, and energy in joules.
+
+If a run is deleted on the board while it is selected, its row leaves the list and there is no longer a checkbox to clear it with, so every comparison fails on it. Insight names any selected run Sentinel no longer lists and offers to drop it from the selection.
+
+A comparison asks for its runs as one comma-separated list of names, so a trace name cannot contain a comma: the request would be read as two runs the board does not have, and fail naming a run nobody selected. Insight refuses such a name when you start a trace, and names any already-saved run that carries one rather than letting Compare fail on it.
+
+### Values from a board you have left
+
+Reading a board takes an SSH round trip, so an answer can arrive after you have selected another board. Selecting it cancels everything still on its way from the previous board: the new board is checked at once, and a late answer from the old one is dropped rather than shown as the new board's. **Stop trace** names the board its trace was read from, and is refused rather than stopping a trace on another board. When the selected board changes somewhere else — another browser tab, or an API client — the values already on the page are labelled with the board they came from, with a way to read them again.
+
+### Insight host
+
+Stats has two views, **DevKit** and **Host**; everything above is the DevKit view. The Host view reports the machine Insight itself runs on — the SDK container, or the board Insight is installed on — from `/api/metrics`: CPU load, memory, disk, and a temperature where the platform exposes one. It answers a different question from the DevKit view, such as whether the container is running out of disk, and it is read every 15 seconds rather than every two. When the legacy `REMOTE_DEVKIT` configuration is set, this panel reports that connection instead, and says so. When the endpoint answers with no reading at all, the panel says that rather than listing its labels against em dashes.
+
+### NEAT profiling timeline
+
+Below the Insight host panel on the Host view, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
 
 ## System Information
 

@@ -1,0 +1,107 @@
+Media controller API version 6.18.3
+
+Media device information
+------------------------
+driver          simaai-v4l2-vid
+model           SiMa.ai Capture Media Device
+serial          
+bus info        platform:csi2video@1
+hw revision     0x0
+driver version  6.18.3
+
+Device topology
+- entity 1: raw-capture.1.0 (1 pad, 1 link)
+            type Node subtype V4L flags 0
+            device node name /dev/video0
+	pad0: SINK
+		<- "vdma.1":4 [ENABLED,IMMUTABLE]
+
+- entity 5: vdma.1 (8 pads, 5 links, 4 routes)
+            type V4L2 subdev subtype Unknown flags 0
+            device node name /dev/v4l-subdev0
+	routes:
+		0/0 -> 4/0 [ACTIVE]
+		1/1 -> 5/1 [ACTIVE]
+		2/2 -> 6/2 [ACTIVE]
+		3/3 -> 7/3 [ACTIVE]
+	pad0: SINK
+		[stream:0 fmt:unknown/0x0]
+		<- "csidev-40c3000.csi":1 [ENABLED,IMMUTABLE]
+	pad1: SINK
+		[stream:1 fmt:unknown/0x0]
+		<- "csidev-40c3000.csi":3 [ENABLED,IMMUTABLE]
+	pad2: SINK
+		[stream:2 fmt:unknown/0x0]
+		<- "csidev-40c3000.csi":5 [ENABLED,IMMUTABLE]
+	pad3: SINK
+		[stream:3 fmt:unknown/0x0]
+		<- "csidev-40c3000.csi":7 [ENABLED,IMMUTABLE]
+	pad4: SOURCE
+		[stream:0 fmt:unknown/0x0]
+		-> "raw-capture.1.0":0 [ENABLED,IMMUTABLE]
+	pad5: SOURCE
+		[stream:1 fmt:unknown/0x0]
+	pad6: SOURCE
+		[stream:2 fmt:unknown/0x0]
+	pad7: SOURCE
+		[stream:3 fmt:unknown/0x0]
+
+- entity 16: csidev-40c3000.csi (8 pads, 5 links, 4 routes)
+             type V4L2 subdev subtype Unknown flags 0
+             device node name /dev/v4l-subdev1
+	routes:
+		0/0 -> 1/0 [ACTIVE]
+		2/0 -> 3/1 [ACTIVE]
+		4/0 -> 5/2 [ACTIVE]
+		6/0 -> 7/3 [ACTIVE]
+	pad0: SINK
+		[stream:0 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+		<- "imx477 5-001a":0 [ENABLED]
+	pad1: SOURCE
+		[stream:0 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+		[dv.detect:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		[dv.current:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		-> "vdma.1":0 [ENABLED,IMMUTABLE]
+	pad2: SINK
+		[stream:0 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+	pad3: SOURCE
+		[stream:1 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+		[dv.detect:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		[dv.current:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		-> "vdma.1":1 [ENABLED,IMMUTABLE]
+	pad4: SINK
+		[stream:0 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+	pad5: SOURCE
+		[stream:2 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+		[dv.detect:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		[dv.current:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		-> "vdma.1":2 [ENABLED,IMMUTABLE]
+	pad6: SINK
+		[stream:0 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+	pad7: SOURCE
+		[stream:3 fmt:UYVY8_1X16/1920x1080 field:none colorspace:smpte170m xfer:709 ycbcr:601 quantization:lim-range]
+		[dv.caps:BT.656/1120 min:320x240@40000000 max:4096x3280@1250000000 stds: caps:interlaced,progressive,custom]
+		[dv.detect:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		[dv.current:BT.656/1120 1920x1080p0 (2152x1099) stds: flags:]
+		-> "vdma.1":3 [ENABLED,IMMUTABLE]
+
+- entity 33: imx477 5-001a (2 pads, 1 link, 0 routes)
+             type V4L2 subdev subtype Sensor flags 0
+             device node name /dev/v4l-subdev2
+	pad0: SOURCE
+		[stream:0 fmt:SRGGB12_1X12/1920x1080 field:none colorspace:raw xfer:none ycbcr:601 quantization:full-range
+		 crop.bounds:(8,16)/4056x3040
+		 crop:(8,456)/4056x2160]
+		-> "csidev-40c3000.csi":0 [ENABLED]
+	pad1: SOURCE
+		[stream:0 fmt:unknown/16384x1 field:none
+		 crop.bounds:(8,16)/4056x3040
+		 crop:(8,456)/4056x2160]
+

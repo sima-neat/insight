@@ -1,0 +1,7 @@
+[0:00:41.102734520] [1873]  INFO Camera camera_manager.cpp:340 libcamera v0.0.0+2085-00bb435a-dirty (2026-08-19T19:22:58UTC)
+[0:00:41.158310244] [1876]  INFO Modalix modalix.cpp:815 Acquired Active Media Device: /dev/media0
+[0:00:41.160945611] [1876]  INFO Modalix modalix.cpp:462 mode rate limit: 30.0000 fps max (33333 us/frame); faster caps negotiate and snap to it
+[0:00:41.161047315] [1876]  INFO Camera camera_manager.cpp:223 Adding camera 'imx477 5-001a' for pipeline handler modalix
+[0:00:41.161129858] [1876]  INFO Modalix modalix.cpp:837 Registered Camera: imx477 5-001a
+Available cameras:
+1: 'imx477' (imx477 5-001a)

@@ -66,5 +66,8 @@ The OpenAPI document groups operations by purpose:
 - **Viewer** — browser-reachable viewer URL and configured channel capacity.
 - **Workspace** — browse, search, inspect, and preview workspace files and MPK archive members.
 - **DevKit shell** — discover and start the hosted shell bridge when configured.
+- **Board** — select the board that board-facing features use, test the SSH connection, and trust a reflashed board's host key.
+- **Peripherals** — discover MIPI and USB cameras on the selected board and render camera input configurations through the API.
+- **Sentinel** — check and install the Sentinel daemon on the selected board, read its live metrics and recent history, and start, stop, list, compare and delete traces.
 
 The raw OpenAPI file is also maintained in the Insight repository at `neat_insight/openapi.json`. Tests compare its operations with Flask's registered `/api` routes so new endpoints cannot be added silently without updating the reference.

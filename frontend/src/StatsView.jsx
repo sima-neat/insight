@@ -1,0 +1,1484 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Callout, Pill } from './peripherals/ui.jsx'
+import {
+  compareRuns,
+  deleteRun,
+  fetchActiveTrace,
+  fetchHostMetrics,
+  fetchMetrics,
+  fetchRun,
+  fetchRuns,
+  fetchSentinel,
+  installSentinel,
+  startTrace,
+  stopTrace
+} from './stats/api.js'
+import {
+  ALL_GROUPS,
+  HOST_POLL_MS,
+  MAX_COMPARE_RUNS,
+  RUNS_NOTE,
+  STATS_TABS,
+  STATS_TAB_KEY,
+  compareCsv,
+  compareCsvFilename,
+  compareGroups,
+  compareIncludes,
+  compareReady,
+  compareTable,
+  compareView,
+  compareViewText,
+  createRequestGuard,
+  daemonBusy,
+  daemonFacts,
+  daemonInfo,
+  daemonNoticeNeeded,
+  definitionsByKey,
+  deletePrompt,
+  deleteStops,
+  deleteSummary,
+  deltaAbsenceText,
+  factRows,
+  failureNotice,
+  formatPercentDelta,
+  formatRelativeTime,
+  formatTimeRange,
+  formatTimestamp,
+  formatValue,
+  healthFacts,
+  healthProblems,
+  hostMetricsModel,
+  hostNotice,
+  metricsModel,
+  missingSelection,
+  payloadBoardLabel,
+  pollDelay,
+  runDetail,
+  runList,
+  runSubtitle,
+  staleFlags,
+  staleNote,
+  statsTabFrom,
+  statusInfo,
+  telemetryVisible,
+  toggleSelection,
+  traceBar,
+  traceExtrasSummary,
+  traceModel,
+  uncomparableRefs,
+  validateTrace
+} from './stats/model.js'
+import CompareOverlay from './stats/CompareOverlay.jsx'
+import SentinelDashboard from './stats/Dashboard.jsx'
+import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, OutputDetails, SegmentedTabs } from './stats/ui.jsx'
+
+// How often the saved-runs list is re-read while the Stats tab is visible.
+const RUNS_POLL_MS = 30000
+
+/** Hands the browser a file to save. The object URL is released once the click has used it. */
+function downloadText(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.hidden = true
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+/** Calls `run` now and every `ms` after, only while the browser tab is visible; returns the cleanup. */
+function pollWhileVisible(run, ms) {
+  let timer = null
+  const start = () => {
+    if (timer !== null) return
+    run()
+    timer = setInterval(run, ms)
+  }
+  const stop = () => {
+    if (timer === null) return
+    clearInterval(timer)
+    timer = null
+  }
+  const onVisibility = () => (document.visibilityState === 'hidden' ? stop() : start())
+  onVisibility()
+  document.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    stop()
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
+}
+
+/**
+ * Values that were read from a board that is no longer the selected one. They are kept
+ * and labelled rather than hidden: a request in flight during a board switch resolves
+ * afterwards, and nobody should read the previous board's numbers as the current ones.
+ */
+export function StaleBanner({ what, payload, onRefresh, refreshLabel = 'Refresh' }) {
+  return (
+    <Callout tone="warn" title="From the previous board" role="status">
+      <p>{staleNote(what, payloadBoardLabel(payload))}</p>
+      {onRefresh && <button type="button" className="btn-tonal" onClick={onRefresh}>{refreshLabel}</button>}
+    </Callout>
+  )
+}
+
+function DaemonPanel({ info, health, busy, installing, install, installStale, error, blocked, onInstall, onRetry }) {
+  return (
+    <section className="panel stats-daemon" aria-labelledby="stats-daemon-title" aria-busy={busy}>
+      <div className="panel-topbar">
+        <div>
+          <h2 id="stats-daemon-title">Sentinel daemon</h2>
+          <p className="section-note">
+            Sentinel samples power, temperature, CPU, memory and storage on the board and records them into runs.
+          </p>
+        </div>
+        <div className="periph-actions">
+          <button type="button" className="btn-ghost" onClick={onRetry} disabled={busy}>Re-check</button>
+          {info.state !== 'ready' && (
+            <button
+              type="button"
+              className="btn-tonal"
+              onClick={onInstall}
+              disabled={busy || !info.canInstall}
+              title={info.canInstall ? undefined : info.installBlocked || undefined}
+            >
+              {installing ? 'Installing…' : 'Install Sentinel'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="periph-board-summary">
+        <Pill tone={info.tone}>{info.label}</Pill>
+        {info.version && <span className="stats-version">{info.version}</span>}
+        {info.state === 'unknown' && (
+          <span className="hint">
+            {blocked
+              ? 'Sentinel cannot be checked until the board answers; the board control in the top right says why.'
+              : 'Sentinel has not been checked on this board yet.'}
+          </span>
+        )}
+      </div>
+      {info.state !== 'unknown' && <Facts rows={[...daemonFacts(info), ...healthFacts(health)]} />}
+
+      {installing && (
+        <p className="hint" role="status">
+          Running <code>sima-cli neat install sentinel</code> on the board. This downloads and unpacks an artifact and can take
+          several minutes.
+        </p>
+      )}
+      {/* Only an install attaches installer output; a failed read attaches the board's own. */}
+      <FailureCallout
+        notice={error}
+        detailLabel={error?.action === 'install' ? 'Installer output' : 'Output from the board'}
+      />
+      {!error && info.error && (
+        <Callout tone={info.state === 'error' ? 'danger' : 'warn'} title={info.error.message}>
+          {info.error.hint && <p>{info.error.hint}</p>}
+          {!info.canInstall && info.installBlocked && info.state !== 'ready' && <p className="hint">{info.installBlocked}</p>}
+        </Callout>
+      )}
+      {healthProblems(health).length > 0 && (
+        <Callout tone="warn" title="Sentinel reported collector errors">
+          <ul className="periph-notes">
+            {healthProblems(health).map((problem) => <li key={problem}>{problem}</li>)}
+          </ul>
+        </Callout>
+      )}
+      {install?.log && (
+        <>
+          {installStale && <StaleBanner what="This installer output" payload={install} />}
+          <OutputDetails label="Installer output" text={install.log} />
+        </>
+      )}
+    </section>
+  )
+}
+
+function TagPills({ tags }) {
+  if (!tags.length) return null
+  return <span className="periph-pills">{tags.map((tag) => <Pill key={tag} tone="periph-info">{tag}</Pill>)}</span>
+}
+
+function TraceBar({ bar, stale = false, form, extras, extrasShown, onToggleExtras, onFormChange, onStart, onStop }) {
+  if (bar.recording) {
+    return (
+      <div className="stats-trace-bar">
+        <Pill tone="ok">Recording</Pill>
+        <span className="stats-trace-running">{bar.name}</span>
+        {bar.started && (
+          <span className="hint">
+            started <time dateTime={bar.startedAt} title={formatTimestamp(bar.startedAt)}>{bar.started}</time>
+          </span>
+        )}
+        <TagPills tags={bar.tags} />
+        {/* A trace read from a board no longer selected is not this board's to stop. */}
+        <button type="button" className="btn-tonal" onClick={onStop} disabled={bar.disabled || stale}>{bar.stopLabel}</button>
+      </div>
+    )
+  }
+  return (
+    <form id="stats-trace-form" className="stats-trace-bar" onSubmit={onStart} aria-label="Start a trace">
+      <label className="stats-trace-name">
+        {/* One label, inside the box: a visible "Trace name" beside a "baseline" example said it twice.
+            Screen readers still get the name from the hidden text, not from the placeholder. */}
+        <span className="sr-only">Trace name</span>
+        <input
+          value={form.name}
+          onChange={(event) => onFormChange({ ...form, name: event.target.value })}
+          placeholder="Trace name (e.g. baseline)"
+          autoComplete="off"
+          spellCheck={false}
+          required
+        />
+      </label>
+      <button type="submit" className="btn-tonal" disabled={bar.disabled}>{bar.submitLabel}</button>
+      <button
+        type="button"
+        className="btn-ghost"
+        aria-expanded={extrasShown}
+        aria-controls="stats-trace-extras"
+        onClick={onToggleExtras}
+      >
+        Add note and tags
+      </button>
+      {!extrasShown && extras && <span className="hint">{extras}</span>}
+    </form>
+  )
+}
+
+/** What sits under the header row: the unfolded note and tags, or a recording trace's note and summary. */
+function TraceDetails({ bar, trace, form, formError, extrasShown, onFormChange }) {
+  if (bar.recording) {
+    return (
+      <>
+        {bar.note && <p className="hint stats-trace-note">{bar.note}</p>}
+        <KeyValueTable rows={trace.facts} caption="Running trace summary" />
+      </>
+    )
+  }
+  return (
+    <>
+      {/* Outside the form element so the header row stays one row; `form` keeps them in it. */}
+      <div id="stats-trace-extras" className="periph-form stats-trace-extras" hidden={!extrasShown}>
+        <label>
+          Note (optional)
+          <input
+            form="stats-trace-form"
+            value={form.note}
+            onChange={(event) => onFormChange({ ...form, note: event.target.value })}
+            placeholder="before the NMS change"
+            autoComplete="off"
+          />
+        </label>
+        <label>
+          Tags (optional, comma separated)
+          <input
+            form="stats-trace-form"
+            value={form.tags}
+            onChange={(event) => onFormChange({ ...form, tags: event.target.value })}
+            placeholder="compiler-v2, yolo26"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+      </div>
+      {formError && (
+        <>
+          <p className="sr-only" role="alert">{formError}</p>
+          <Callout tone="danger" title={formError} />
+        </>
+      )}
+    </>
+  )
+}
+
+export function RunsPanel({
+  trace,
+  traceStale,
+  traceBusy,
+  traceError,
+  form,
+  formError,
+  onFormChange,
+  onStart,
+  onStop,
+  onRefreshTrace,
+  runs,
+  runsPayload,
+  definitions,
+  stale,
+  busy,
+  error,
+  selected,
+  openRef,
+  detail,
+  detailError,
+  detailBusy,
+  detailStale,
+  compare,
+  compareError,
+  compareBusy,
+  compareStale,
+  compareOpen,
+  deleteBusy,
+  deleteResult,
+  now,
+  onRefresh,
+  onToggle,
+  onOpen,
+  onCompare,
+  onDelete,
+  onClearCompare,
+  onDropMissing,
+  onToggleCompare
+}) {
+  const table = useMemo(() => (compare ? compareTable(compare, definitions) : null), [compare, definitions])
+  const [compareGroup, setCompareGroup] = useState(ALL_GROUPS)
+  const [changesOnly, setChangesOnly] = useState(false)
+  const groups = useMemo(() => compareGroups(table), [table])
+  const view = useMemo(() => compareView(table, { group: compareGroup, changesOnly }), [table, compareGroup, changesOnly])
+
+  // Everything the table holds, not what the filter shows: a filter is how it is being read.
+  function exportCsv() {
+    downloadText(compareCsvFilename(table), compareCsv(table), 'text/csv;charset=utf-8')
+  }
+  // Runs that were selected and are no longer on the board: their checkbox is gone.
+  // Until a list has been read there is nothing to judge the selection against.
+  const missing = useMemo(() => missingSelection(selected, runsPayload ? runs : null), [selected, runs, runsPayload])
+  // Runs whose own name breaks the comma-separated compare query.
+  const uncomparable = useMemo(() => uncomparableRefs(selected), [selected])
+  const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
+  const run = useMemo(() => runDetail(detail), [detail])
+  // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
+  const detailRows = useMemo(() => (detail && !run ? factRows(detail.sentinel, ['samples']) : []), [detail, run])
+
+  const bar = traceBar(trace, { busy: traceBusy, now })
+  const [extrasOpen, setExtrasOpen] = useState(false)
+  // Text left in the folded note and tags fields is still sent, so it is still said.
+  const extras = traceExtrasSummary(form)
+  // A refused note or tag list is shown where it can be fixed, not behind the fold.
+  const extrasShown = extrasOpen || Boolean(formError && extras)
+
+  // Deleting is irreversible, so Delete first turns into an inline confirmation.
+  const [confirming, setConfirming] = useState(false)
+  // Where focus goes once the confirmation or the delete has rendered: the control that
+  // replaced the one that had it, never the page body.
+  const focusNext = useRef('')
+  const headingRef = useRef(null)
+  const deleteRef = useRef(null)
+  const cancelRef = useRef(null)
+  const deleteFailureRef = useRef(null)
+  const deleteDisabled = selected.length === 0 || deleteBusy || compareBusy || stale
+  useEffect(() => {
+    const target = focusNext.current
+    if (!target) return
+    focusNext.current = ''
+    const element = {
+      cancel: cancelRef.current,
+      delete: deleteRef.current,
+      heading: headingRef.current,
+      failure: deleteFailureRef.current
+    }[target]
+    element?.focus()
+  })
+  // Nothing selected (or a board switch) leaves nothing to confirm.
+  useEffect(() => {
+    if (confirming && deleteDisabled) setConfirming(false)
+  }, [confirming, deleteDisabled])
+
+  function askDelete() {
+    focusNext.current = 'cancel'
+    setConfirming(true)
+  }
+
+  function cancelDelete() {
+    focusNext.current = 'delete'
+    setConfirming(false)
+  }
+
+  async function confirmDelete() {
+    setConfirming(false)
+    focusNext.current = 'heading'
+    const summary = await onDelete()
+    // The heading keeps focus while the list is rewritten; a failure takes it to its report.
+    if (summary?.title) {
+      // The report may already be on the page, or arrive with the next render.
+      if (deleteFailureRef.current) {
+        focusNext.current = ''
+        deleteFailureRef.current.focus()
+      } else {
+        focusNext.current = 'failure'
+      }
+    }
+  }
+
+  return (
+    <section className="panel stats-runs" aria-labelledby="stats-runs-title" aria-busy={busy || traceBusy}>
+      <div className="stats-runs-head">
+        <h2 id="stats-runs-title" ref={headingRef} tabIndex={-1}>Runs</h2>
+        <TraceBar
+          bar={bar}
+          stale={traceStale}
+          form={form}
+          extras={extras}
+          extrasShown={extrasShown}
+          onToggleExtras={() => setExtrasOpen(!extrasShown)}
+          onFormChange={onFormChange}
+          onStart={onStart}
+          onStop={onStop}
+        />
+      </div>
+      <TraceDetails
+        bar={bar}
+        trace={trace}
+        form={form}
+        formError={formError}
+        extrasShown={extrasShown}
+        onFormChange={onFormChange}
+      />
+      <p className="section-note stats-runs-note">{RUNS_NOTE}</p>
+
+      <FailureCallout notice={traceError} />
+      {traceStale && <StaleBanner what="This trace" payload={trace.payload} onRefresh={onRefreshTrace} />}
+      <FailureCallout notice={error} />
+      {stale && <StaleBanner what="These runs" payload={runsPayload} onRefresh={onRefresh} />}
+
+      {runs.length === 0 && !error && (
+        <p className="hint">{busy ? 'Reading runs from the board…' : 'No runs yet. Start a trace to record one.'}</p>
+      )}
+
+      {runs.length > 0 && (
+        <>
+          {selected.length > 0 && (
+            <div className="stats-selection-bar" role="toolbar" aria-label="Selected runs">
+              <span className="stats-selection-count">{selected.length} selected</span>
+              <button
+                type="button"
+                className="btn-tonal"
+                onClick={onCompare}
+                disabled={!compareReady(selected) || compareBusy || deleteBusy}
+                title={compareReady(selected) || selected.length > 1 ? undefined : 'Select at least two runs to compare them'}
+              >
+                {compareBusy ? 'Comparing…' : 'Compare'}
+              </button>
+              {confirming ? (
+                <span
+                  className="stats-delete-confirm"
+                  role="group"
+                  aria-labelledby="stats-delete-prompt"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      cancelDelete()
+                    }
+                  }}
+                >
+                  <span id="stats-delete-prompt" className="stats-delete-prompt">
+                    {deletePrompt(selected.length)}
+                    <span className="sr-only"> This removes {selected.length === 1 ? 'it' : 'them'} from the board and cannot be undone.</span>
+                  </span>
+                  <button type="button" className="btn-ghost danger" onClick={confirmDelete}>Delete</button>
+                  <button type="button" className="btn-ghost" ref={cancelRef} onClick={cancelDelete}>Cancel</button>
+                </span>
+              ) : (
+                <>
+                  <button type="button" className="btn-ghost danger" ref={deleteRef} onClick={askDelete} disabled={deleteDisabled}>
+                    {deleteBusy ? 'Deleting…' : 'Delete'}
+                  </button>
+                  <button type="button" className="btn-ghost" onClick={onClearCompare} disabled={deleteBusy}>Clear</button>
+                </>
+              )}
+              <span className="sr-only" role="status">{deleteBusy ? `Deleting ${selected.length} run${selected.length === 1 ? '' : 's'}…` : ''}</span>
+            </div>
+          )}
+
+          <table className="sysinfo-table stats-table stats-run-table">
+            <thead>
+              <tr>
+                <th scope="col"><span className="sr-only">Compare</span></th>
+                <th scope="col">Run</th>
+                <th scope="col">Recorded</th>
+                <th scope="col"><span className="sr-only">Open</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr key={run.key} className={run.ref === openRef ? 'active' : undefined}>
+                  <td>
+                    <label className="stats-check">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(run.ref)}
+                        onChange={() => onToggle(run.ref)}
+                        disabled={deleteBusy || (!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS)}
+                      />
+                      <span className="sr-only">Select {run.label}</span>
+                    </label>
+                  </td>
+                  <th scope="row">
+                    {run.label}
+                    {run.note && <span className="hint">{run.note}</span>}
+                    <TagPills tags={run.tags} />
+                  </th>
+                  <td>{runSubtitle(run, now) || '—'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      aria-expanded={run.ref === openRef}
+                      onClick={() => onOpen(run.ref === openRef ? '' : run.ref)}
+                    >
+                      {run.ref === openRef ? 'Hide' : 'Open'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {uncomparable.length > 0 && (
+            <Callout tone="warn" title="Some selected runs cannot be compared by name">
+              <p>
+                Sentinel compares runs from one comma-separated list of names, so a name that contains a comma is read
+                as two runs the board does not have. {uncomparable.join(' · ')}{' '}
+                {uncomparable.length === 1 ? 'carries one' : 'carry one'}, so comparing would fail on a run nobody
+                selected. Clear {uncomparable.length === 1 ? 'it' : 'them'}, or read{' '}
+                {uncomparable.length === 1 ? 'that run' : 'those runs'} one at a time with Open.
+              </p>
+              <button type="button" className="btn-tonal" onClick={() => onDropMissing(uncomparable)}>
+                {uncomparable.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
+              </button>
+            </Callout>
+          )}
+        </>
+      )}
+
+      {/* Outside the table: when every selected run has gone there is no table, and this
+          is then the only place the selection can be seen and cleared. */}
+      {missing.length > 0 && (
+        <Callout tone="warn" title="Some selected runs are no longer on the board">
+          <p>
+            {missing.join(', ')} {missing.length === 1 ? 'is' : 'are'} not in the list Sentinel reports now, so there is
+            no longer a checkbox to clear {missing.length === 1 ? 'it' : 'them'} with, and comparing will fail on{' '}
+            {missing.length === 1 ? 'it' : 'them'}.
+          </p>
+          <button type="button" className="btn-tonal" onClick={() => onDropMissing(missing)}>
+            {missing.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
+          </button>
+        </Callout>
+      )}
+
+      {deleteResult?.title && (
+        <div className="stats-delete-failure" ref={deleteFailureRef} tabIndex={-1}>
+          <p className="sr-only" role="alert">{deleteResult.title}.</p>
+          <Callout tone="danger" title={deleteResult.title}>
+            <ul className="stats-delete-failures">
+              {deleteResult.failed.map(({ ref, notice }) => (
+                <li key={ref}>
+                  <strong>{ref}</strong>: {notice.title}. {notice.message}
+                  {notice.hint && <span className="hint"> {notice.hint}</span>}
+                  {notice.detail && <OutputDetails label="Output from the board" text={notice.detail} />}
+                </li>
+              ))}
+              {deleteResult.skipped.length > 0 && (
+                <li>
+                  <strong>{deleteResult.skipped.join(', ')}</strong>: not tried, because the failure above would stop{' '}
+                  {deleteResult.skipped.length === 1 ? 'it' : 'them'} too. {deleteResult.skipped.length === 1 ? 'It is' : 'They are'} still
+                  selected.
+                </li>
+              )}
+            </ul>
+            {deleteResult.deleted.length > 0 && (
+              <p className="hint">
+                {deleteResult.deleted.join(', ')} {deleteResult.deleted.length === 1 ? 'was' : 'were'} deleted and{' '}
+                {deleteResult.deleted.length === 1 ? 'stays' : 'stay'} deleted.
+              </p>
+            )}
+          </Callout>
+        </div>
+      )}
+
+      {openRef && (
+        <section className="stats-run-detail" aria-label={`Run ${openRef}`} aria-busy={detailBusy}>
+          <h3>{openRef}</h3>
+          <FailureCallout notice={detailError} />
+          {detailStale && <StaleBanner what="This run" payload={detail} onRefresh={() => onOpen(openRef)} refreshLabel="Read it again" />}
+          {detailBusy && <p className="hint" role="status">Reading the run from the board…</p>}
+          {detail && !detailError && run && (
+            <>
+              <p className="hint stats-run-facts">
+                {run.sampleCount} sample{run.sampleCount === 1 ? '' : 's'} · {run.metricCount} metric{run.metricCount === 1 ? '' : 's'}
+                {run.single && run.sampledAt && <> · <time dateTime={run.sampledAt}>{formatTimestamp(run.sampledAt)}</time></>}
+                {!run.single && run.firstSampleAt && run.lastSampleAt && ` · ${formatTimeRange(run.firstSampleAt, run.lastSampleAt)}`}
+                {run.crossed > 0 && ` · ${run.crossed} past a threshold`}
+              </p>
+              {run.metrics.length > 0 && (
+                <>
+                  <div className="stats-table-scroll" role="region" aria-label={`Metrics of run ${openRef}`} tabIndex={0}>
+                    <table className="sysinfo-table stats-table stats-run-metrics">
+                      <thead>
+                        <tr>
+                          <th scope="col">Metric</th>
+                          <th scope="col">Group</th>
+                          <th scope="col">Mean</th>
+                          <th scope="col">Minimum</th>
+                          <th scope="col">Maximum</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {run.metrics.map((metric) => {
+                          const peak = statusInfo(metric.status)
+                          return (
+                            <tr key={metric.key}>
+                              <th scope="row" title={metric.description || undefined}>{metric.label}</th>
+                              <td>{metric.group}</td>
+                              <td className="stats-cell-value">{formatValue(metric.mean, metric.unit)}</td>
+                              <td className="stats-cell-value">{formatValue(metric.minimum, metric.unit)}</td>
+                              <td className="stats-cell-value">
+                                {formatValue(metric.maximum, metric.unit)}
+                                {metric.status !== 'ok' && <Pill tone={peak.tone}>{peak.label}</Pill>}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+              {run.undefinedKeys.length > 0 && (
+                <p className="hint">
+                  This run also recorded {run.undefinedKeys.length} value
+                  {run.undefinedKeys.length === 1 ? '' : 's'} it carries no definition for:{' '}
+                  {run.undefinedKeys.join(', ')}.
+                </p>
+              )}
+              {run.facts.length > 0 && (
+                <details className="stats-detail">
+                  <summary>Run metadata</summary>
+                  <KeyValueTable rows={run.facts} caption={`Run ${openRef}`} />
+                </details>
+              )}
+              {run.facts.length === 0 && <p className="hint">Sentinel recorded no metadata for this run.</p>}
+              {run.extras.length > 0 && (
+                <details className="stats-detail">
+                  <summary>Other fields Sentinel returned</summary>
+                  <KeyValueTable rows={run.extras} />
+                </details>
+              )}
+            </>
+          )}
+          {detail && !detailError && !run && (
+            detailRows.length > 0 ? (
+              <>
+                <p className="hint">
+                  This Sentinel build answered with a run body Insight does not know; its values are listed as they came
+                  from the board.
+                </p>
+                <KeyValueTable rows={detailRows} caption={`Run ${openRef}`} />
+              </>
+            ) : (
+              <p className="hint">Sentinel returned no detail for this run.</p>
+            )
+          )}
+        </section>
+      )}
+
+      <FailureCallout notice={compareError} />
+      {compare && !compareError && (
+        <section className="stats-compare" aria-labelledby="stats-compare-title">
+          <div className="stats-compare-head">
+            <h3 id="stats-compare-title">Comparison</h3>
+            <div className="periph-actions">
+              {table && (
+                <button type="button" className="btn-ghost" onClick={exportCsv} aria-describedby="stats-compare-export-note">
+                  Export CSV
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-ghost"
+                aria-expanded={compareOpen}
+                aria-controls="stats-compare-body"
+                onClick={onToggleCompare}
+              >
+                {compareOpen ? 'Collapse' : 'Expand'}
+              </button>
+            </div>
+          </div>
+          {table && (
+            <p id="stats-compare-export-note" className="sr-only">
+              Exports all {table.rows.length} rows of the comparison, whichever group or changes filter is on screen.
+            </p>
+          )}
+          {compareStale && <StaleBanner what="This comparison" payload={compare} onRefresh={onCompare} refreshLabel="Compare again" />}
+          <div id="stats-compare-body" hidden={!compareOpen}>
+            <CompareOverlay payload={compare} />
+            {table ? (
+              <>
+                {/* Each “—” shows its reason on hover, focus or tap, so the table needs no paragraph explaining them. */}
+                {table.columns.some((column) => !column.summarised) && (
+                  <Callout tone="warn" title="Sentinel summarised only some of these runs">
+                    <p>
+                      {table.columns.filter((column) => !column.summarised).map((column) => column.label).join(', ')} came back
+                      with no summary, so every value in that column is “—”. Re-record the run, or compare the runs Sentinel did
+                      summarise.
+                    </p>
+                  </Callout>
+                )}
+                {/* The overlay and its summary answer which run is better; the 62 rows are the deep dive, folded. */}
+                <details className="dash-card dash-all stats-compare-metrics">
+                  <summary className="dash-card-title">
+                    Per-metric comparison
+                    <span className="dash-card-note">{table.rows.length} rows</span>
+                  </summary>
+                <div className="stats-compare-filters">
+                  <ChipTabs
+                    label="Filter the comparison by metric group"
+                    items={groups}
+                    selected={view.group}
+                    onSelect={(id) => setCompareGroup(id || ALL_GROUPS)}
+                    idPrefix="stats-compare-tab"
+                    panelId="stats-compare-panel"
+                    noun="row"
+                    automatic
+                  />
+                  <label className="stats-toggle">
+                    <input type="checkbox" checked={changesOnly} onChange={(event) => setChangesOnly(event.target.checked)} />
+                    Changes only
+                  </label>
+                </div>
+                <p className="hint" role="status">
+                  {compareViewText(view)}
+                  {view.rows.length < view.total && ` Export CSV still writes all ${view.total}.`}
+                </p>
+                <div
+                  id="stats-compare-panel"
+                  role="tabpanel"
+                  aria-labelledby={`stats-compare-tab-${groups.findIndex((item) => item.id === view.group)}`}
+                >
+                  <div className="stats-table-scroll" role="region" aria-label="Comparison table" tabIndex={0}>
+                    <table className="sysinfo-table stats-table stats-compare-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Metric</th>
+                          {table.columns.map((column) => (
+                            <th key={column.key} scope="col">
+                              {column.label}
+                              {column.baseline && <span className="hint">baseline</span>}
+                              {column.note && <span className="hint">{column.note}</span>}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {view.rows.map((row) => (
+                          <tr key={row.key}>
+                            <th scope="row">{row.label}</th>
+                            {row.cells.map((cell) => (
+                              <td key={`${row.key}-${cell.column}`} className="stats-cell-value">
+                                {formatValue(cell.value, row.unit)}
+                                {!cell.baseline && (
+                                  <span className={cell.deltaPct === null ? 'hint' : 'hint stats-delta'}>
+                                    {cell.deltaAbsence ? (
+                                      <DeltaReason reason={deltaAbsenceText(cell.deltaAbsence)} />
+                                    ) : (
+                                      formatPercentDelta(cell.deltaPct)
+                                    )}
+                                  </span>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                </details>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  This Sentinel build returned a comparison Insight cannot lay out as a table. Its values are listed as they came
+                  from the board.
+                </p>
+                <KeyValueTable rows={fallbackRows} caption="Comparison values" />
+              </>
+            )}
+          </div>
+        </section>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The machine Insight runs on, from /api/metrics. It lives on its own Host sub-tab: it
+ * answers "is my SDK container out of disk", which is a different question from what the
+ * board is doing, and the two must not be read as one set of numbers.
+ */
+function HostPanel({ model, error, updatedAt, busy, now }) {
+  // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
+  const notice = hostNotice(model, updatedAt > 0)
+  return (
+    <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
+      <div className="stats-host-head">
+        <h2 id="stats-host-title">Insight host</h2>
+        {/* One run of text: the flex gap between two spans left a hole mid-sentence. */}
+        <span className="hint">
+          {model.sourceLabel}, not the board.
+          {updatedAt > 0 && (
+            <>
+              {' '}Read <time dateTime={new Date(updatedAt).toISOString()}>{formatRelativeTime(new Date(updatedAt).toISOString(), now)}</time>.
+            </>
+          )}
+        </span>
+      </div>
+
+      <FailureCallout notice={error} />
+      {notice ? (
+        <p className="hint stats-host-notice">{notice}</p>
+      ) : (
+        <ul className="stats-host-rows" aria-label="Insight host readings">
+          {model.rows.map((row) => (
+            <li key={row.key}>
+              <span className="stats-host-label">{row.label}</span>
+              <span className="stats-host-value">{formatValue(row.value, row.unit)}</span>
+              {row.percent !== null && (
+                <span className="stats-host-bar" aria-hidden="true">
+                  <span style={{ width: `${row.percent}%` }} />
+                </span>
+              )}
+              {row.detail && <span className="hint">{row.detail}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+export default function StatsView({ board = null, boardError = null, onOpenBoardPanel, onReloadBoard, onError, onStatus, hostExtra = null }) {
+  const [state, setState] = useState(null)
+  const [stateError, setStateError] = useState(null)
+  const [stateBusy, setStateBusy] = useState(true)
+  const [installBusy, setInstallBusy] = useState(false)
+  const [installError, setInstallError] = useState(null)
+  const [installResult, setInstallResult] = useState(null)
+  const [metrics, setMetrics] = useState(null)
+  const [metricsError, setMetricsError] = useState(null)
+  const [metricsBusy, setMetricsBusy] = useState(false)
+  const [failures, setFailures] = useState(0)
+  const [live, setLive] = useState(true)
+  const [halted, setHalted] = useState(false)
+  const [traces, setTraces] = useState(null)
+  const [traceError, setTraceError] = useState(null)
+  const [traceBusy, setTraceBusy] = useState(false)
+  const [form, setForm] = useState({ name: '', note: '', tags: '' })
+  const [formError, setFormError] = useState('')
+  const [runs, setRuns] = useState(null)
+  const [runsError, setRunsError] = useState(null)
+  const [runsBusy, setRunsBusy] = useState(false)
+  const [openRef, setOpenRef] = useState('')
+  const [detail, setDetail] = useState(null)
+  const [detailError, setDetailError] = useState(null)
+  const [detailBusy, setDetailBusy] = useState(false)
+  const [selected, setSelected] = useState([])
+  const [compare, setCompare] = useState(null)
+  const [compareError, setCompareError] = useState(null)
+  const [compareBusy, setCompareBusy] = useState(false)
+  // Collapsing keeps the comparison; only Compare reads the board again.
+  const [compareOpen, setCompareOpen] = useState(true)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteResult, setDeleteResult] = useState(null)
+  const [host, setHost] = useState(null)
+  const [hostError, setHostError] = useState(null)
+  const [hostBusy, setHostBusy] = useState(false)
+  const [hostReadAt, setHostReadAt] = useState(0)
+  const [now, setNow] = useState(() => Date.now())
+  // DevKit or Host. Remembered across reloads; storage that throws (a private window, blocked
+  // site data) only costs the memory, never the page.
+  const [statsTab, setStatsTab] = useState(() => {
+    try {
+      return statsTabFrom(window.localStorage.getItem(STATS_TAB_KEY))
+    } catch {
+      return statsTabFrom(null)
+    }
+  })
+  const hostShown = statsTab === 'host'
+
+  const mounted = useRef(false)
+  // One in-flight request per endpoint: a second click must not run a second command
+  // on the board while the first is still out. Every request carries a ticket for the
+  // board it was asked of, and its answer is applied only while that ticket is current:
+  // a board switch cancels them all, so nothing the previous board says lands on this one.
+  const guard = useRef(createRequestGuard())
+  // The Insight host is not the board, so its reads never follow a board switch.
+  const hostGuard = useRef(createRequestGuard())
+  const tick = useRef(() => {})
+  // The open run and comparison as they are now, not as they were when a delete started.
+  const openRefNow = useRef(openRef)
+  openRefNow.current = openRef
+  const compareNow = useRef(compare)
+  compareNow.current = compare
+
+  const info = useMemo(() => daemonInfo(state), [state])
+  const model = useMemo(() => metricsModel(metrics), [metrics])
+  const trace = useMemo(() => traceModel(traces), [traces])
+  const runRows = useMemo(() => runList(runs), [runs])
+  const hostModel = useMemo(() => hostMetricsModel(host), [host])
+  // The board's own metric definitions, used to label saved runs and comparisons, which
+  // carry metric keys but no labels or units of their own.
+  const definitions = useMemo(() => definitionsByKey(metrics), [metrics])
+  // Everything the board answered is judged against the board selected now, including
+  // the failures: an SSH round trip can outlive a board switch.
+  const stalePayloads = staleFlags(board, {
+    state,
+    metrics,
+    metricsError,
+    traces,
+    traceError,
+    runs,
+    runsError,
+    detail,
+    detailError,
+    compare,
+    compareError,
+    install: installResult,
+    installError
+  })
+  const stale = stalePayloads.metrics || stalePayloads.state
+  const polling = info.available && live && !halted && !stale
+  const delay = pollDelay(failures)
+  const generation = board?.generation ?? null
+
+  // An answer is applied only while the view is mounted and its request still belongs to
+  // the selected board and has not been superseded.
+  function fresh(ticket) {
+    return mounted.current && guard.current.current(ticket)
+  }
+
+  // One guarded request: nothing is sent while `name` is already out, `busy` is flagged
+  // while it is, and its answer or failure is applied only while it is still fresh.
+  async function send(name, { busy, start, call, done, fail, supersede = false, action }) {
+    const ticket = guard.current.begin(name, { supersede })
+    if (!ticket) return
+    busy(true)
+    start?.()
+    try {
+      const data = await call()
+      // A follow-up read that `done` returns keeps the request busy until it lands.
+      const after = fresh(ticket) ? done(data, ticket) : null
+      if (after) await after
+    } catch (err) {
+      if (fresh(ticket)) fail(failureNotice(err, ticket.generation, { action }))
+    } finally {
+      guard.current.end(ticket)
+      if (fresh(ticket)) busy(false)
+    }
+  }
+
+  function reset() {
+    // Requests to the previous board were cancelled by the switch and will not clear
+    // their own busy flags.
+    setStateBusy(false)
+    setInstallBusy(false)
+    setMetricsBusy(false)
+    setTraceBusy(false)
+    setRunsBusy(false)
+    setDetailBusy(false)
+    setCompareBusy(false)
+    setDeleteBusy(false)
+    setMetrics(null)
+    setMetricsError(null)
+    setTraces(null)
+    setTraceError(null)
+    setRuns(null)
+    setRunsError(null)
+    setOpenRef('')
+    setDetail(null)
+    setDetailError(null)
+    setSelected([])
+    setCompare(null)
+    setCompareError(null)
+    setDeleteResult(null)
+    setInstallResult(null)
+    setInstallError(null)
+    setFailures(0)
+    setHalted(false)
+  }
+
+  function loadBoard() {
+    return onReloadBoard ? onReloadBoard() : null
+  }
+
+  function loadState({ quiet = false } = {}) {
+    return send('state', {
+      busy: quiet ? () => {} : setStateBusy,
+      call: fetchSentinel,
+      done: (data) => {
+        setState(data)
+        setStateError(null)
+        if (data.available) {
+          setHalted(false)
+          loadTraces({ quiet: true })
+          loadRuns()
+        }
+      },
+      fail: (notice) => {
+        setState(null)
+        setStateError(notice)
+      }
+    })
+  }
+
+  function loadTraces({ quiet = false } = {}) {
+    return send('traces', {
+      busy: quiet ? () => {} : setTraceBusy,
+      call: fetchActiveTrace,
+      done: (data) => {
+        setTraces(data)
+        setTraceError(null)
+      },
+      fail: setTraceError
+    })
+  }
+
+  function loadRuns() {
+    return send('runs', {
+      busy: setRunsBusy,
+      call: fetchRuns,
+      done: (data) => {
+        setRuns(data)
+        setRunsError(null)
+      },
+      fail: setRunsError
+    })
+  }
+
+  async function loadHost() {
+    const ticket = hostGuard.current.begin('host')
+    if (!ticket) return
+    setHostBusy(true)
+    try {
+      const data = await fetchHostMetrics()
+      if (!mounted.current) return
+      setHost(data)
+      setHostError(null)
+      setHostReadAt(Date.now())
+    } catch (err) {
+      // The host snapshot belongs to Insight itself, so a board generation means nothing here.
+      if (mounted.current) setHostError(failureNotice(err))
+    } finally {
+      hostGuard.current.end(ticket)
+      if (mounted.current) setHostBusy(false)
+    }
+  }
+
+  async function pollMetrics({ manual = false } = {}) {
+    if (manual) setMetricsBusy(true)
+    // A refresh asked for while a poll is already out is that poll: it clears the busy
+    // flag when it lands, so the button reports the wait instead of doing nothing.
+    const ticket = guard.current.begin('metrics')
+    if (!ticket) return
+    try {
+      const data = await fetchMetrics()
+      if (!fresh(ticket)) return
+      setMetrics(data)
+      setMetricsError(null)
+      setFailures(0)
+      setHalted(false)
+      if (trace.active) loadTraces({ quiet: true })
+    } catch (err) {
+      if (!fresh(ticket)) return
+      const notice = failureNotice(err, ticket.generation)
+      setMetricsError(notice)
+      setFailures((count) => count + 1)
+      // A missing board or a stopped daemon will not answer the next tick either:
+      // stop polling it and re-read the daemon state so the page says why.
+      if (notice.board || notice.daemon) {
+        setHalted(true)
+        loadState({ quiet: true })
+      }
+    } finally {
+      guard.current.end(ticket)
+      if (fresh(ticket)) setMetricsBusy(false)
+    }
+  }
+
+  function install() {
+    return send('install', {
+      busy: setInstallBusy,
+      start: () => {
+        setInstallError(null)
+        setInstallResult(null)
+      },
+      call: () => installSentinel(state?.generation),
+      done: async (data, ticket) => {
+        setInstallResult(data)
+        onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
+        await loadState({ quiet: true })
+        if (fresh(ticket)) pollMetrics({ manual: true })
+      },
+      fail: (notice) => {
+        setInstallError(notice)
+        onError?.(notice.message)
+        loadState({ quiet: true })
+      },
+      action: 'install'
+    })
+  }
+
+  async function onStartTrace(event) {
+    event.preventDefault()
+    const result = validateTrace(form)
+    if (result.error) {
+      setFormError(result.error)
+      return
+    }
+    setFormError('')
+    await send('trace-action', {
+      busy: setTraceBusy,
+      start: () => setTraceError(null),
+      call: () => startTrace(result.body, traces?.generation),
+      done: (data) => {
+        setTraces(data)
+        setForm({ name: '', note: '', tags: '' })
+        onStatus?.(`Recording trace “${result.body.name}”.`)
+        loadRuns()
+      },
+      fail: setTraceError
+    })
+  }
+
+  async function onStopTrace() {
+    // Stop the board the shown trace was read from: a board switched since is refused
+    // with 409 stale_snapshot instead of ending a trace on the board selected now.
+    const traceGeneration = Number.isInteger(traces?.generation) ? traces.generation : generation
+    await send('trace-action', {
+      busy: setTraceBusy,
+      start: () => setTraceError(null),
+      call: () => stopTrace(traceGeneration),
+      done: async () => {
+        onStatus?.('Trace stopped and saved as a run.')
+        await loadTraces({ quiet: true })
+        loadRuns()
+      },
+      fail: setTraceError
+    })
+  }
+
+  // Opening a run replaces the read of the run opened before it, whose answer would
+  // otherwise be drawn under this run's heading; closing it cancels the read.
+  async function openRun(ref) {
+    setOpenRef(ref)
+    setDetail(null)
+    setDetailError(null)
+    if (!ref) {
+      guard.current.cancel('run')
+      setDetailBusy(false)
+      return
+    }
+    await send('run', {
+      busy: setDetailBusy,
+      call: () => fetchRun(ref),
+      done: (data) => setDetail(data),
+      fail: setDetailError,
+      supersede: true
+    })
+  }
+
+  function runCompare() {
+    return send('compare', {
+      busy: setCompareBusy,
+      start: () => setCompareError(null),
+      call: () => compareRuns(selected),
+      done: (data) => {
+        setCompare(data)
+        setCompareOpen(true)
+      },
+      fail: (notice) => {
+        setCompare(null)
+        setCompareError(notice)
+      }
+    })
+  }
+
+  /**
+   * Deletes the selected runs one at a time, each bound to the generation the run list was
+   * read under. A run that fails is named with its reason and stays selected; runs that
+   * were deleted stay deleted. A failure that would stop the rest too (the board, the
+   * daemon, a board switch) ends the batch, and the runs not tried are named as such.
+   */
+  async function deleteSelected() {
+    const refs = [...selected]
+    const ticket = refs.length ? guard.current.begin('delete') : null
+    if (!ticket) return null
+    setDeleteBusy(true)
+    setDeleteResult(null)
+    const listGeneration = Number.isInteger(runs?.generation) ? runs.generation : generation
+    const results = []
+    let latest = null
+    try {
+      for (const ref of refs) {
+        if (results.some((result) => result.stop)) {
+          results.push({ ref, skipped: true })
+          continue
+        }
+        try {
+          const data = await deleteRun(ref, listGeneration)
+          latest = data
+          results.push({ ref, deleted: data?.deleted || { id: null, name: null } })
+        } catch (err) {
+          const notice = failureNotice(err, ticket.generation, { action: 'delete' })
+          results.push({ ref, notice, stop: deleteStops(notice) })
+        }
+        // A board switch ends the batch: the rest were chosen from the previous board's list.
+        if (!fresh(ticket)) return null
+      }
+    } finally {
+      guard.current.end(ticket)
+      if (fresh(ticket)) setDeleteBusy(false)
+    }
+    const summary = deleteSummary(results)
+    const { gone } = summary
+    if (gone.size) {
+      setSelected((current) => current.filter((ref) => !gone.has(String(ref))))
+      if (openRefNow.current && gone.has(openRefNow.current)) openRun('')
+      if (compareIncludes(compareNow.current, gone)) {
+        setCompare(null)
+        setCompareError(null)
+      }
+    }
+    // The last successful delete answered with the list as the board holds it afterwards;
+    // a read that was already out answers from before the delete and must not bring the
+    // deleted runs back.
+    if (latest) {
+      guard.current.cancel('runs')
+      setRuns(latest)
+      setRunsError(null)
+    }
+    setDeleteResult(summary.title ? summary : null)
+    if (summary.status) onStatus?.(summary.status)
+    loadRuns()
+    return summary
+  }
+
+  // The masthead changes the board; this page follows it. Another board means another daemon,
+  // other runs and another history, so nothing read from the previous one is kept, and
+  // nothing still on its way from it is let in: the switch cancels every request out to it,
+  // so the new board is checked at once instead of waiting for the old one to answer.
+  useEffect(() => {
+    if (!guard.current.switchTo(generation)) return
+    setState(null)
+    reset()
+    loadState()
+  }, [generation])
+
+  useEffect(() => {
+    mounted.current = true
+    loadBoard()
+    loadState()
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+
+  // The tick is read through a ref so a state change never restarts the interval.
+  tick.current = () => pollMetrics()
+
+  useEffect(() => {
+    if (!polling) return undefined
+    // A hidden tab must not keep running commands on the board.
+    return pollWhileVisible(() => tick.current(), delay)
+  }, [polling, delay])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STATS_TAB_KEY, statsTab)
+    } catch {}
+  }, [statsTab])
+
+  // The host moves slowly and costs a psutil read, so it is polled far less often than
+  // the board, and only while its sub-tab is the one on screen; like the board poll it
+  // stops with the view and with a hidden browser tab. Opening it reads it at once.
+  useEffect(() => {
+    if (!hostShown) return undefined
+    return pollWhileVisible(() => loadHost(), HOST_POLL_MS)
+  }, [hostShown])
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // The run list keeps itself current, so the panel needs no Refresh button. Insight's own traces
+  // already re-read it when they start and stop; this catches runs recorded or deleted elsewhere
+  // (another Insight, the Sentinel CLI). Paused while the tab is hidden: each read runs on the board.
+  const sentinelAvailable = Boolean(state?.available)
+  useEffect(() => {
+    if (!sentinelAvailable) return undefined
+    const timer = setInterval(() => {
+      if (!document.hidden) loadRuns()
+    }, RUNS_POLL_MS)
+    return () => clearInterval(timer)
+  }, [sentinelAvailable, generation])
+
+
+  const boardProblem = boardError || (stateError?.board ? stateError : null)
+  const sentinelProblem = stateError && !stateError.board ? stateError : null
+
+  return (
+    <div className="periph-view stats-view">
+      <SegmentedTabs
+        label="Stats source"
+        items={STATS_TABS}
+        selected={statsTab}
+        onSelect={setStatsTab}
+        idPrefix="stats-tab"
+        panelPrefix="stats-tabpanel"
+        className="stats-subtabs"
+      />
+
+      {/* Everything read from the board. It stays mounted while Host is open, so an open run,
+          a comparison and its filters are still there on the way back, and the board keeps
+          being polled as it was before the page had sub-tabs. */}
+      <div
+        id="stats-tabpanel-devkit"
+        role="tabpanel"
+        aria-labelledby="stats-tab-devkit"
+        className="stats-tabpanel"
+        hidden={statsTab !== 'devkit'}
+      >
+        {boardProblem && boardProblem.code !== 'no_target' && (
+          <Callout tone="danger" title={boardProblem.message || 'The board could not be reached'}>
+            {boardProblem.hint && <p>{boardProblem.hint}</p>}
+            <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
+          </Callout>
+        )}
+
+        {stateBusy && !state && <p className="hint" role="status">Checking Sentinel on the board…</p>}
+
+        {stateError?.code === 'no_target' ? (
+          <Callout tone="info" title="Select a board to see its telemetry">
+            <p>{stateError.message} {stateError.hint}</p>
+            <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Choose a board</button>
+          </Callout>
+        ) : (
+          <>
+            {/* Nothing to say about a daemon that is working: the telemetry below is the proof. */}
+            {daemonNoticeNeeded(info, { error: installError || sentinelProblem, health: state?.health || null, install: installResult }) && (
+            <DaemonPanel
+              info={info}
+              health={state?.health || null}
+              busy={daemonBusy({ installBusy, stateBusy })}
+              installing={installBusy}
+              install={installResult}
+              installStale={stalePayloads.install}
+              error={installError || sentinelProblem}
+              blocked={Boolean(boardProblem)}
+              onInstall={install}
+              onRetry={() => loadState()}
+            />
+            )}
+
+            {/* Sentinel not answering now does not unmake what this board already gave. */}
+            {telemetryVisible(info, { metrics, traces, runs }) && (
+              <>
+                <SentinelDashboard
+                  model={model}
+                  startedAt={state?.daemon?.started_at || null}
+                  now={now}
+                  live={live}
+                  polling={polling}
+                  stale={stale}
+                  error={metricsError}
+                  busy={metricsBusy}
+                  onToggleLive={() => setLive((value) => !value)}
+                  onRefresh={() => {
+                    loadBoard()
+                    pollMetrics({ manual: true })
+                  }}
+                  onRetry={() => {
+                    setHalted(false)
+                    setFailures(0)
+                    pollMetrics({ manual: true })
+                  }}
+                  runs={(
+                    <RunsPanel
+                      trace={trace}
+                      traceStale={stalePayloads.traces || stalePayloads.traceError}
+                      traceBusy={traceBusy}
+                      traceError={traceError}
+                      form={form}
+                      formError={formError}
+                      onFormChange={setForm}
+                      onStart={onStartTrace}
+                      onStop={onStopTrace}
+                      onRefreshTrace={() => loadTraces()}
+                      runs={runRows}
+                      runsPayload={runs}
+                      definitions={definitions}
+                      stale={stalePayloads.runs || stalePayloads.runsError}
+                      busy={runsBusy}
+                      error={runsError}
+                      selected={selected}
+                      openRef={openRef}
+                      detail={detail}
+                      detailError={detailError}
+                      detailBusy={detailBusy}
+                      detailStale={stalePayloads.detail || stalePayloads.detailError}
+                      compare={compare}
+                      compareError={compareError}
+                      compareBusy={compareBusy}
+                      compareStale={stalePayloads.compare || stalePayloads.compareError}
+                      compareOpen={compareOpen}
+                      deleteBusy={deleteBusy}
+                      deleteResult={deleteResult}
+                      now={now}
+                      onRefresh={() => loadRuns()}
+                      onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
+                      onOpen={openRun}
+                      onCompare={runCompare}
+                      onDelete={deleteSelected}
+                      onClearCompare={() => {
+                        setSelected([])
+                        setCompare(null)
+                        setCompareError(null)
+                      }}
+                      onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
+                      onToggleCompare={() => setCompareOpen((open) => !open)}
+                    />
+                  )}
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      <div
+        id="stats-tabpanel-host"
+        role="tabpanel"
+        aria-labelledby="stats-tab-host"
+        className="stats-tabpanel"
+        hidden={!hostShown}
+      >
+        <HostPanel
+          model={hostModel}
+          error={hostError}
+          updatedAt={hostReadAt}
+          busy={hostBusy}
+          now={now}
+        />
+        {/* The profiling timeline charts what arrives on Insight's metrics port, which today is
+            Insight's own host readings (topic "sys"), so it belongs with the host, not the board. */}
+        {hostExtra}
+      </div>
+    </div>
+  )
+}

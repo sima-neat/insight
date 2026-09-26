@@ -1,0 +1,484 @@
+{
+  "sentinel": {
+    "baseline_deltas_pct": {
+      "20260923T152712.952Z-insight-hw-1790177227": {
+        "cpu_load_1": -67.09401709401709,
+        "cpu_usage_pct": -47.31167668574097,
+        "ev74_cma_used_mb": -3.825942656955841,
+        "linux_mem_used_mb": -17.088110991653206,
+        "mla_mem_allocated_mb": 0,
+        "power_current_watts": -4.58477508650519,
+        "rtsn_0": -26.29091625757568,
+        "rtsn_1": -27.278142260640248
+      },
+      "20260924T175231.958Z-tes3": {
+        "cpu_load_1": 0,
+        "cpu_usage_pct": 0,
+        "ev74_cma_used_mb": 0,
+        "linux_mem_used_mb": 0,
+        "mla_mem_allocated_mb": 0,
+        "power_current_watts": 0,
+        "rtsn_0": 0,
+        "rtsn_1": 0
+      }
+    },
+    "baseline_id": "20260924T175231.958Z-tes3",
+    "generated_at": "2026-09-25T00:33:12.457679752Z",
+    "runs": [
+      {
+        "metadata": {
+          "ended_at": "2026-09-24T17:52:40.088551848Z",
+          "id": "20260924T175231.958Z-tes3",
+          "name": "tes3",
+          "note": null,
+          "sample_interval_ms": 2000,
+          "sentinel_version": "main:80ab7de4da31",
+          "started_at": "2026-09-24T17:52:31.958615236Z",
+          "system": {
+            "architecture": "aarch64",
+            "device_tree_model": "SiMa.ai Modalix SoM 16Gig Board",
+            "hostname": "modalix",
+            "os_release": "PRETTY_NAME=\"eLxr 12 (aria)\"\nNAME=\"eLxr\"\nVARIANT=\"Edge Edition\"\nVARIANT_ID=edge\nVERSION_ID=\"12\"\nVERSION=\"12 (aria)\"\nVERSION_CODENAME=aria\nID=elxr\nID_LIKE=debian\nHOME_URL=\"https://elxr.org\"\nSUPPORT_URL=\"https://elxr.org\"\nBUG_REPORT_URL=\"https://gitlab.com/groups/elxr/-/issues\""
+          },
+          "tags": []
+        },
+        "metrics": [
+          {
+            "critical": 85,
+            "description": "On-die RTSN at the MLA Q0 site; feeds DTS Hub Alert channel 0.",
+            "group": "MLA",
+            "key": "rtsn_0",
+            "label": "MLA RTSN-0",
+            "short": "MLA-0",
+            "unit": "C",
+            "warn": 70
+          },
+          {
+            "critical": 85,
+            "description": "On-die RTSN at the MLA Q1 site; feeds DTS Hub Alert channel 1.",
+            "group": "MLA",
+            "key": "rtsn_1",
+            "label": "MLA RTSN-1",
+            "short": "MLA-1",
+            "unit": "C",
+            "warn": 70
+          },
+          {
+            "critical": 95,
+            "description": "Aggregate Linux CPU utilization.",
+            "group": "CPU",
+            "key": "cpu_usage_pct",
+            "label": "CPU usage",
+            "short": "CPU%",
+            "unit": "%",
+            "warn": 80
+          },
+          {
+            "critical": null,
+            "description": "Linux 1-minute load average.",
+            "group": "CPU",
+            "key": "cpu_load_1",
+            "label": "CPU load 1m",
+            "short": "Load1",
+            "unit": "load",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "Linux memory in active use.",
+            "group": "Memory",
+            "key": "linux_mem_used_mb",
+            "label": "Linux memory used MB",
+            "short": "MemMB",
+            "unit": "MB",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "MLA allocator total allocated size parsed from /dev/simaai-mem.",
+            "group": "MLA",
+            "key": "mla_mem_allocated_mb",
+            "label": "MLA memory allocated",
+            "short": "MLAMB",
+            "unit": "MB",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "CmaTotal minus CmaFree; a proxy for EV74 memory consumption when EV74 owns the CMA pool.",
+            "group": "EV74",
+            "key": "ev74_cma_used_mb",
+            "label": "EV74 CMA used",
+            "short": "CMAUsed",
+            "unit": "MB",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "Latest valid total PMBus POUT reading across configured board rails.",
+            "group": "Power",
+            "key": "power_current_watts",
+            "label": "Current board power",
+            "short": "Current",
+            "unit": "W",
+            "warn": null
+          }
+        ],
+        "samples": [
+          {
+            "timestamp": "2026-09-24T17:52:33.859427146Z",
+            "values": {
+              "cpu_load_1": 0.61,
+              "cpu_usage_pct": 1.906845889340414,
+              "ev74_cma_used_mb": 74.5703125,
+              "linux_mem_used_mb": 621.91796875,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 9.03125,
+              "rtsn_0": 51.77583007812501,
+              "rtsn_1": 52.117089843749966
+            }
+          },
+          {
+            "timestamp": "2026-09-24T17:52:35.848995119Z",
+            "values": {
+              "cpu_load_1": 0.61,
+              "cpu_usage_pct": 1.6255079712410136,
+              "ev74_cma_used_mb": 74.27734375,
+              "linux_mem_used_mb": 616.30078125,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 9.03125,
+              "rtsn_0": 52.79960937499999,
+              "rtsn_1": 51.94645996093749
+            }
+          },
+          {
+            "timestamp": "2026-09-24T17:52:37.849109943Z",
+            "values": {
+              "cpu_load_1": 0.56,
+              "cpu_usage_pct": 1.560549313358306,
+              "ev74_cma_used_mb": 73.98828125,
+              "linux_mem_used_mb": 619.625,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 9.03125,
+              "rtsn_0": 52.79960937499999,
+              "rtsn_1": 51.94645996093749
+            }
+          },
+          {
+            "timestamp": "2026-09-24T17:52:39.859611809Z",
+            "values": {
+              "cpu_load_1": 0.56,
+              "cpu_usage_pct": 1.3137316233969298,
+              "ev74_cma_used_mb": 73.76171875,
+              "linux_mem_used_mb": 616.44140625,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 9.03125,
+              "rtsn_0": 51.60520019531248,
+              "rtsn_1": 52.2877197265625
+            }
+          }
+        ],
+        "schema": 1
+      },
+      {
+        "metadata": {
+          "ended_at": "2026-09-23T15:27:19.620064802Z",
+          "id": "20260923T152712.952Z-insight-hw-1790177227",
+          "name": "insight-hw-1790177227",
+          "note": "Insight hardware validation",
+          "sample_interval_ms": 1989,
+          "sentinel_version": "main:80ab7de4da31",
+          "started_at": "2026-09-23T15:27:12.952702307Z",
+          "system": {
+            "architecture": "aarch64",
+            "device_tree_model": "SiMa.ai Modalix SoM 16Gig Board",
+            "hostname": "modalix",
+            "os_release": "PRETTY_NAME=\"eLxr 12 (aria)\"\nNAME=\"eLxr\"\nVARIANT=\"Edge Edition\"\nVARIANT_ID=edge\nVERSION_ID=\"12\"\nVERSION=\"12 (aria)\"\nVERSION_CODENAME=aria\nID=elxr\nID_LIKE=debian\nHOME_URL=\"https://elxr.org\"\nSUPPORT_URL=\"https://elxr.org\"\nBUG_REPORT_URL=\"https://gitlab.com/groups/elxr/-/issues\""
+          },
+          "tags": []
+        },
+        "metrics": [
+          {
+            "critical": 85,
+            "description": "On-die RTSN at the MLA Q0 site; feeds DTS Hub Alert channel 0.",
+            "group": "MLA",
+            "key": "rtsn_0",
+            "label": "MLA RTSN-0",
+            "short": "MLA-0",
+            "unit": "C",
+            "warn": 70
+          },
+          {
+            "critical": 85,
+            "description": "On-die RTSN at the MLA Q1 site; feeds DTS Hub Alert channel 1.",
+            "group": "MLA",
+            "key": "rtsn_1",
+            "label": "MLA RTSN-1",
+            "short": "MLA-1",
+            "unit": "C",
+            "warn": 70
+          },
+          {
+            "critical": 95,
+            "description": "Aggregate Linux CPU utilization.",
+            "group": "CPU",
+            "key": "cpu_usage_pct",
+            "label": "CPU usage",
+            "short": "CPU%",
+            "unit": "%",
+            "warn": 80
+          },
+          {
+            "critical": null,
+            "description": "Linux 1-minute load average.",
+            "group": "CPU",
+            "key": "cpu_load_1",
+            "label": "CPU load 1m",
+            "short": "Load1",
+            "unit": "load",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "Linux memory in active use.",
+            "group": "Memory",
+            "key": "linux_mem_used_mb",
+            "label": "Linux memory used MB",
+            "short": "MemMB",
+            "unit": "MB",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "MLA allocator total allocated size parsed from /dev/simaai-mem.",
+            "group": "MLA",
+            "key": "mla_mem_allocated_mb",
+            "label": "MLA memory allocated",
+            "short": "MLAMB",
+            "unit": "MB",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "CmaTotal minus CmaFree; a proxy for EV74 memory consumption when EV74 owns the CMA pool.",
+            "group": "EV74",
+            "key": "ev74_cma_used_mb",
+            "label": "EV74 CMA used",
+            "short": "CMAUsed",
+            "unit": "MB",
+            "warn": null
+          },
+          {
+            "critical": null,
+            "description": "Latest valid total PMBus POUT reading across configured board rails.",
+            "group": "Power",
+            "key": "power_current_watts",
+            "label": "Current board power",
+            "short": "Current",
+            "unit": "W",
+            "warn": null
+          }
+        ],
+        "samples": [
+          {
+            "timestamp": "2026-09-23T15:27:13.270295197Z",
+            "values": {
+              "cpu_load_1": 0.2,
+              "cpu_usage_pct": 1.9699812382739212,
+              "ev74_cma_used_mb": 71.3125,
+              "linux_mem_used_mb": 519.79296875,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 8.53125,
+              "rtsn_0": 38.29606933593749,
+              "rtsn_1": 37.95480957031248
+            }
+          },
+          {
+            "timestamp": "2026-09-23T15:27:15.280692862Z",
+            "values": {
+              "cpu_load_1": 0.19,
+              "cpu_usage_pct": 0.4376367614879695,
+              "ev74_cma_used_mb": 71.3125,
+              "linux_mem_used_mb": 517.55078125,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 8.53125,
+              "rtsn_0": 38.466699218749966,
+              "rtsn_1": 37.7841796875
+            }
+          },
+          {
+            "timestamp": "2026-09-23T15:27:17.270418435Z",
+            "values": {
+              "cpu_load_1": 0.19,
+              "cpu_usage_pct": 0.09375000000000357,
+              "ev74_cma_used_mb": 71.3125,
+              "linux_mem_used_mb": 504.1484375,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 8.53125,
+              "rtsn_0": 38.466699218749966,
+              "rtsn_1": 37.7841796875
+            }
+          },
+          {
+            "timestamp": "2026-09-23T15:27:19.270569777Z",
+            "values": {
+              "cpu_load_1": 0.19,
+              "cpu_usage_pct": 0.8741804558226707,
+              "ev74_cma_used_mb": 71.3125,
+              "linux_mem_used_mb": 509.984375,
+              "mla_mem_allocated_mb": 3.0039710998535156,
+              "power_current_watts": 8.875,
+              "rtsn_0": 38.80795898437498,
+              "rtsn_1": 37.95480957031248
+            }
+          }
+        ],
+        "schema": 1
+      }
+    ],
+    "summaries": {
+      "20260923T152712.952Z-insight-hw-1790177227": {
+        "duration_ms": 6667,
+        "energy_joules": 51.533604984375,
+        "metrics": {
+          "cpu_load_1": {
+            "count": 4,
+            "maximum": 0.2,
+            "mean": 0.1925,
+            "median": 0.19,
+            "minimum": 0.19,
+            "p95": 0.2
+          },
+          "cpu_usage_pct": {
+            "count": 4,
+            "maximum": 1.9699812382739212,
+            "mean": 0.8438871138961412,
+            "median": 0.8741804558226707,
+            "minimum": 0.09375000000000357,
+            "p95": 1.9699812382739212
+          },
+          "ev74_cma_used_mb": {
+            "count": 4,
+            "maximum": 71.3125,
+            "mean": 71.3125,
+            "median": 71.3125,
+            "minimum": 71.3125,
+            "p95": 71.3125
+          },
+          "linux_mem_used_mb": {
+            "count": 4,
+            "maximum": 519.79296875,
+            "mean": 512.869140625,
+            "median": 517.55078125,
+            "minimum": 504.1484375,
+            "p95": 519.79296875
+          },
+          "mla_mem_allocated_mb": {
+            "count": 4,
+            "maximum": 3.0039710998535156,
+            "mean": 3.0039710998535156,
+            "median": 3.0039710998535156,
+            "minimum": 3.0039710998535156,
+            "p95": 3.0039710998535156
+          },
+          "power_current_watts": {
+            "count": 4,
+            "maximum": 8.875,
+            "mean": 8.6171875,
+            "median": 8.53125,
+            "minimum": 8.53125,
+            "p95": 8.875
+          },
+          "rtsn_0": {
+            "count": 4,
+            "maximum": 38.80795898437498,
+            "mean": 38.5093566894531,
+            "median": 38.466699218749966,
+            "minimum": 38.29606933593749,
+            "p95": 38.80795898437498
+          },
+          "rtsn_1": {
+            "count": 4,
+            "maximum": 37.95480957031248,
+            "mean": 37.86949462890624,
+            "median": 37.95480957031248,
+            "minimum": 37.7841796875,
+            "p95": 37.95480957031248
+          }
+        },
+        "samples": 4
+      },
+      "20260924T175231.958Z-tes3": {
+        "duration_ms": 8129,
+        "energy_joules": 54.1891436875,
+        "metrics": {
+          "cpu_load_1": {
+            "count": 4,
+            "maximum": 0.61,
+            "mean": 0.585,
+            "median": 0.61,
+            "minimum": 0.56,
+            "p95": 0.61
+          },
+          "cpu_usage_pct": {
+            "count": 4,
+            "maximum": 1.906845889340414,
+            "mean": 1.601658699334166,
+            "median": 1.6255079712410136,
+            "minimum": 1.3137316233969298,
+            "p95": 1.906845889340414
+          },
+          "ev74_cma_used_mb": {
+            "count": 4,
+            "maximum": 74.5703125,
+            "mean": 74.1494140625,
+            "median": 74.27734375,
+            "minimum": 73.76171875,
+            "p95": 74.5703125
+          },
+          "linux_mem_used_mb": {
+            "count": 4,
+            "maximum": 621.91796875,
+            "mean": 618.5712890625,
+            "median": 619.625,
+            "minimum": 616.30078125,
+            "p95": 621.91796875
+          },
+          "mla_mem_allocated_mb": {
+            "count": 4,
+            "maximum": 3.0039710998535156,
+            "mean": 3.0039710998535156,
+            "median": 3.0039710998535156,
+            "minimum": 3.0039710998535156,
+            "p95": 3.0039710998535156
+          },
+          "power_current_watts": {
+            "count": 4,
+            "maximum": 9.03125,
+            "mean": 9.03125,
+            "median": 9.03125,
+            "minimum": 9.03125,
+            "p95": 9.03125
+          },
+          "rtsn_0": {
+            "count": 4,
+            "maximum": 52.79960937499999,
+            "mean": 52.24506225585937,
+            "median": 52.79960937499999,
+            "minimum": 51.60520019531248,
+            "p95": 52.79960937499999
+          },
+          "rtsn_1": {
+            "count": 4,
+            "maximum": 52.2877197265625,
+            "mean": 52.07443237304686,
+            "median": 52.117089843749966,
+            "minimum": 51.94645996093749,
+            "p95": 52.2877197265625
+          }
+        },
+        "samples": 4
+      }
+    }
+  }
+}
