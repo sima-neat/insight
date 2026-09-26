@@ -20,6 +20,7 @@ import urllib.request
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Optional
 
 from neat_insight.board import BoardError
@@ -95,14 +96,20 @@ def _port_map_entry(name: str):
     return port_map.find_exposed_entry(port_map.read_exposed_ports(), name)
 
 
-def _neat_port_entry(name: str):
-    """The SDK publishes its port map through `neat --json` when no port-map file is present."""
+@lru_cache(maxsize=1)
+def _neat_exposed_ports():
+    """Read the SDK fallback once; its published ports are fixed for this Insight process."""
     try:
         result = subprocess.run(["neat", "--json"], capture_output=True, timeout=20, check=False)
         data = json.loads(result.stdout.decode("utf-8", errors="replace"))
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    for entry in data.get("exposedPorts", []):
+        return ()
+    return tuple(entry for entry in data.get("exposedPorts", []) if isinstance(entry, dict))
+
+
+def _neat_port_entry(name: str):
+    """The SDK publishes its port map through `neat --json` when no port-map file is present."""
+    for entry in _neat_exposed_ports():
         if isinstance(entry, dict) and entry.get("name") == name:
             return entry
     return None

@@ -839,6 +839,22 @@ class ActiveChannelTests(unittest.TestCase):
 
 
 class PortMapAndViewerUrlTests(unittest.TestCase):
+    def tearDown(self):
+        preview._neat_exposed_ports.cache_clear()
+
+    def test_neat_json_fallback_is_reused_across_port_lookups(self):
+        data = {"exposedPorts": [
+            {"name": "videoUDP", "hostPortStart": 19000, "hostPortEnd": 19003},
+            {"name": "videoUI", "hostPortStart": 18081},
+        ]}
+        result = mock.Mock(stdout=json.dumps(data).encode())
+        with mock.patch.object(preview.port_map, "read_exposed_ports", return_value=[]), \
+                mock.patch.object(preview.subprocess, "run", return_value=result) as run:
+            self.assertEqual(preview.port_map_video_range(), (19000, 4))
+            self.assertEqual(preview.video_ui_port(), 18081)
+            self.assertEqual(preview.video_ui_port(), 18081)
+        run.assert_called_once_with(["neat", "--json"], capture_output=True, timeout=20, check=False)
+
     def test_canonical_nested_map_and_string_ports_are_shared_with_preview(self):
         data = {
             "schema": "sima.neat.port-map.v1",

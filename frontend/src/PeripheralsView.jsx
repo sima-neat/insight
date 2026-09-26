@@ -399,6 +399,7 @@ export default function PeripheralsView({
     // heartbeat, so pausing here would kill a preview the user only briefly switched away from.
     if (!beating) return
     let cancelled = false
+    let timer
     async function beat() {
       try {
         const data = await requestJson(previewUrl(beatSessionId, 'heartbeat'), { method: 'POST' })
@@ -407,13 +408,16 @@ export default function PeripheralsView({
         if (cancelled) return
         const event = heartbeatFailureEvent(normalizeError(err), beatSessionId)
         if (event) dispatchPreview(event)
+      } finally {
+        // Wait for this request to settle before scheduling another one. A slow board must not
+        // accumulate overlapping heartbeats in the browser or worker threads in Insight.
+        if (!cancelled) timer = setTimeout(beat, beatMs)
       }
     }
     beat()
-    const timer = setInterval(beat, beatMs)
     return () => {
       cancelled = true
-      clearInterval(timer)
+      clearTimeout(timer)
     }
   }, [beating, beatSessionId, beatMs])
 
