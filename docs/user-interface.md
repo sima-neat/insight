@@ -127,7 +127,7 @@ Cameras that another application is using are skipped and keep the modes from th
 
 ### Camera configuration API
 
-API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. The request must include `generation` from the same `/api/peripherals` snapshot; Insight returns `409 stale_snapshot` if the selected board has changed. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
 
 The camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
 

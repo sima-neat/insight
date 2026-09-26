@@ -127,7 +127,7 @@ Insight는 실행 계정의 키로 SSH에 연결합니다. 비밀번호를 요�
 
 ### 카메라 구성 API
 
-API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. Apps `config.yaml`의 `camera:` 블록은 설치된 `libcamerasrc`가 필요한 캡처 버퍼 옵션을 지원할 때만 포함됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
+API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. 요청에는 동일한 `/api/peripherals` 스냅샷의 `generation`이 포함되어야 하며, 선택한 보드가 변경되면 Insight는 `409 stale_snapshot`을 반환합니다. Apps `config.yaml`의 `camera:` 블록은 설치된 `libcamerasrc`가 필요한 캡처 버퍼 옵션을 지원할 때만 포함됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
 
 카메라는 요청한 속도가 아니라 libcamera가 선택한 센서 모드의 프레임 속도로 전달합니다. 1920×1080의 IMX477은 15 또는 30 fps를 요청했을 때 약 66 fps를 전달했습니다. 더 적은 프레임이 필요하면 애플리케이션에서 프레임을 삭제하십시오.
 
