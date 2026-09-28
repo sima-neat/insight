@@ -178,6 +178,16 @@ class PreviewTests(unittest.TestCase):
         self.assertIsNone(self.manager.current())
         self.assertTrue(self.kills())
 
+    def test_a_start_that_read_the_board_before_a_board_change_never_reaches_the_old_board(self):
+        def change_board(*args):
+            self.manager.stop_for_board_change(self.session)
+            return camera(), PYTHON
+
+        with mock.patch.object(api, "_camera_or_404", side_effect=change_board):
+            response = self.client().post(PREVIEW, json={"id": "x"})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+        self.assertEqual(self.session.transport.calls, [])
+
     def test_another_sender_on_the_channel_stops_the_preview_at_start_and_on_a_heartbeat(self):
         foreign = mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 777})
         live = mock.patch.object(preview, "_channel_rtp", side_effect=[None, {"active": True, "ssrc": 1234}])

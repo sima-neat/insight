@@ -152,6 +152,7 @@ class PreviewManager:
         self._starting: Optional[str] = None
         self._heartbeats = 0
         self._scan_active = False
+        self._retired = set()
 
     def current(self, generation: Optional[int] = None) -> Optional[dict]:
         with self._lock:
@@ -163,6 +164,12 @@ class PreviewManager:
     def start(self, session_ctx, item: dict, mode: dict, python: Optional[str]) -> dict:
         self.stop_stale()
         with self._lock:
+            if session_ctx.generation in self._retired:
+                raise BoardError(
+                    "stale_snapshot",
+                    "The selected board changed; the preview was not started.",
+                    hint="Refresh the selected board, then start the preview.",
+                )
             if self._scan_active:
                 raise BoardError(
                     "preview_active",
@@ -317,7 +324,8 @@ class PreviewManager:
     def stop_for_board_change(self, session_ctx) -> None:
         # An expired session is the board worker's to release; the old board may be unreachable.
         with self.scan_guard(session_ctx, discard_expired=True):
-            pass
+            with self._lock:
+                self._retired.add(session_ctx.generation)
 
     def stop_stale(self) -> None:
         with self._lock:
