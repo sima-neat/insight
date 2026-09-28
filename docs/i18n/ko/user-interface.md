@@ -125,6 +125,8 @@ Insight는 실행 계정의 키로 SSH에 연결합니다. 비밀번호를 요�
 
 다른 애플리케이션이 사용하는 카메라는 건너뛰고 이전 스캔의 모드를 유지합니다. 사용 가능 여부에는 카메라를 점유한 프로세스가 표시됩니다. Insight는 root로 실행되거나 보드가 비밀번호 없는 `sudo`를 허용할 때만 다른 사용자의 프로세스를 볼 수 있으며, 그렇지 않으면 **알 수 없음**으로 보고합니다.
 
+스캔은 보드의 Neat도 확인합니다. PyNeat가 없으면 경고에 설치 명령이 표시되고, 더 새로운 Neat 릴리스가 있으면 `neat update`를 권하는 알림이 표시됩니다.
+
 ### 카메라 구성 API
 
 API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. 요청에는 동일한 `/api/peripherals` 스냅샷의 `generation`이 포함되어야 하며, 선택한 보드가 변경되면 Insight는 `409 stale_snapshot`을 반환합니다. Apps `config.yaml`의 `camera:` 블록은 설치된 `libcamerasrc`가 필요한 캡처 버퍼 옵션을 지원할 때만 포함됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.

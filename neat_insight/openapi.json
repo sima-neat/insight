@@ -1303,7 +1303,7 @@
           "generation": {"type": "integer", "description": "Board generation of the scan."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
-          "platform": {"type": ["object", "null"], "description": "Board tools and libcamerasrc properties."},
+          "platform": {"type": ["object", "null"], "description": "Board tools and libcamerasrc properties.", "properties": {"neat": {"type": ["object", "null"], "description": "PyNeat on the board; null when it could not be checked.", "properties": {"version": {"type": ["string", "null"], "description": "PyNeat version; null when PyNeat is missing."}, "python": {"type": ["string", "null"], "description": "Python of the per-user PyNeat venv (`PYNEAT_VENV_DIR`, default `~/pyneat`)."}, "update_available": {"type": ["boolean", "null"]}, "latest_version": {"type": ["string", "null"]}}}}},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
           "changes": {"type": ["object", "null"], "description": "Cameras added and removed since the previous scan."}

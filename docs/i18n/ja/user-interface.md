@@ -125,6 +125,8 @@ Insight は、実行アカウントのキーを使用して SSH 接続します�
 
 別のアプリケーションが使用中のカメラはスキップされ、前回のスキャンのモードを保持します。使用可能状態にはカメラを保持しているプロセスが表示されます。Insight が他のユーザーのプロセスを確認できるのは、root として実行されている場合、またはボードでパスワードなしの `sudo` が許可されている場合のみで、それ以外は **不明** と報告されます。
 
+スキャンではボード上の Neat も確認します。PyNeat がない場合は警告にインストールコマンドが表示され、新しい Neat リリースがある場合は `neat update` を勧めるメモが表示されます。
+
 ### カメラ設定 API
 
 API クライアントは選択したモードを `/api/peripherals/cameras/export` に POST し、Python（`pyneat.CameraInputOptions`）、C++、および JSON 表現を受け取れます。リクエストには同じ `/api/peripherals` スナップショットの `generation` を含める必要があり、選択したボードが変更されていれば Insight は `409 stale_snapshot` を返します。Apps の `config.yaml` の `camera:` ブロックは、インストール済みの `libcamerasrc` が必要なキャプチャバッファーオプションをサポートする場合にのみ含まれます。USB カメラの場合、API は `CameraInput` 設定ではなくデバイス記述子を返します。

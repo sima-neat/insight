@@ -105,6 +105,10 @@ ISP_SIZE_CAUSES = {
     "unparseable": "`{show}` listed no discrete sizes",
     "failed": "`{show}` failed: {detail}",
 }
+NEAT_INSTALL_HINT = (
+    "On the board, run `sima-cli neat install core` (run `sima-cli login` first if it asks); it installs PyNeat "
+    "in ~/pyneat. Then Refresh."
+)
 PERMISSION_HINT = (
     "Add the account Insight connects as to the board's `video` group (`sudo usermod -aG video <user>`, then "
     "reconnect), or connect as root; then Refresh."
@@ -191,6 +195,7 @@ def _platform(probe: dict) -> dict:
         if libcamerasrc is None
         else {key: bool(libcamerasrc.get(key)) for key in ("present", "external_buffer_mode", "buffer_count")},
         "availability_method": probe.get("availability_method") or "none",
+        "neat": probe.get("neat"),
     }
 
 
@@ -537,6 +542,12 @@ def _issues(probe: dict, platform: dict, media: dict, isp_unread: bool) -> list:
     if _libcamerasrc_state(probe) is False:
         hint = "Install the libcamera GStreamer plugin (libcamerasrc) on the board, then Refresh."
         issues.append(_issue("error", "tool_missing", NO_LIBCAMERASRC_REASON, hint))
+    neat = platform["neat"]
+    if neat and not neat.get("version"):
+        issues.append(_issue("warning", "neat_missing", "Neat is not installed on this board.", NEAT_INSTALL_HINT))
+    elif neat and neat.get("update_available") and neat.get("latest_version"):
+        message = f"Neat {neat['version']} is installed; {neat['latest_version']} is available."
+        issues.append(_issue("info", "neat_update", message, "On the board, run `neat update`, then Refresh."))
     if platform["availability_method"] in AVAILABILITY_ISSUES:
         severity, message, hint = AVAILABILITY_ISSUES[platform["availability_method"]]
         issues.append(_issue(severity, "availability_limited", message, hint))

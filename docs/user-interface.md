@@ -125,6 +125,8 @@ Select **Refresh** to scan the board. For each camera Insight shows the identity
 
 Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
+The scan also checks Neat on the board. If PyNeat is missing, a warning gives the install command; if a newer Neat release is available, a note suggests `neat update`.
+
 ### Camera configuration API
 
 API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. The request must include `generation` from the same `/api/peripherals` snapshot; Insight returns `409 stale_snapshot` if the selected board has changed. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.

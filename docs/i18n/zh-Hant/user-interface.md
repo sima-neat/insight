@@ -125,6 +125,8 @@ Insight 使用執行帳戶的金鑰透過 SSH 連線。它絕不會要求或儲�
 
 其他應用程式正在使用的相機會被略過，並保留先前掃描的模式。可用性會指出占用相機的程序；Insight 只有在以 root 身分執行或開發板允許無密碼 `sudo` 時，才能看到其他使用者的程序，否則會回報 **未知**。
 
+掃描也會檢查開發板上的 Neat。若缺少 PyNeat，警告會提供安裝指令；若有較新的 Neat 版本，提示會建議執行 `neat update`。
+
 ### 相機設定 API
 
 API 用戶端可將選取的模式 POST 至 `/api/peripherals/cameras/export`，並接收 Python（`pyneat.CameraInputOptions`）、C++ 和 JSON 表示法。請求必須包含同一份 `/api/peripherals` 快照中的 `generation`；若選取的開發板已變更，Insight 會回傳 `409 stale_snapshot`。只有在已安裝的 `libcamerasrc` 支援所需的擷取緩衝區選項時，才會包含 Apps `config.yaml` 的 `camera:` 區塊。對於 USB 相機，API 會傳回裝置描述元，而不是 `CameraInput` 設定。

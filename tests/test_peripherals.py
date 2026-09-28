@@ -204,6 +204,28 @@ class ProbeTests(unittest.TestCase):
         request = {"id": "mipi:" + path_id, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
         self.assertEqual(export.render(snapshot, request)["support"]["tier"], "verified")
 
+    def test_neat_version_is_read_from_the_venv_insight_will_run(self):
+        venv = Path(self.tmp.name) / "venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").touch(mode=0o755)
+        python = str(venv / "bin" / "python")
+        status = {"components": {"pyneat": {"version": "0.4.0"}, "core": {"updateAvailable": True, "latestVersion": "0.5.0"}}}
+        found = {"python": python, "update_available": True, "latest_version": "0.5.0"}
+        cases = [
+            # `neat --json` reports ~/pyneat, not the overriding venv.
+            (str(venv), (0, "0.3.0\n", ""), dict(found, version="0.3.0")),
+            (str(venv / "missing"), None, dict(found, version=None, python=None)),
+            # A timed-out import is unknown, not "not installed".
+            (str(venv), (None, "", "timed out"), None),
+        ]
+        for venv_dir, imported, expected in cases:
+            with self.subTest(venv_dir=venv_dir, imported=imported):
+                def run(argv, timeout=0):
+                    return (0, json.dumps(status), "") if argv[1:] == ["--json"] else imported
+
+                with mock.patch.object(probe, "run", run), mock.patch.dict(os.environ, {"PYNEAT_VENV_DIR": venv_dir}):
+                    self.assertEqual(probe.probe_neat({"neat": "/usr/bin/neat"}), expected)
+
 
 class FakeSession:
     def __init__(self, generation: int, transport, fingerprint: str = "fp-1"):
