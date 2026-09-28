@@ -127,7 +127,9 @@ Insight는 실행 계정의 키로 SSH에 연결합니다. 비밀번호를 요�
 
 스캔은 보드의 PyNeat도 확인합니다. PyNeat가 없으면 최신 Neat를 설치하는 명령이 경고에 표시됩니다.
 
-### 카메라 구성 API
+### 카메라 구성
+
+모드 메뉴 아래에서 형식을 고르고 **구성 복사**를 선택하면 선택한 모드가 해당 형식으로 클립보드에 복사됩니다. 선택할 수 있는 형식은 아래의 내보내기 API가 해당 카메라에 대해 반환하는 형식입니다.
 
 API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. 요청에는 동일한 `/api/peripherals` 스냅샷의 `generation`이 포함되어야 하며, 선택한 보드가 변경되면 Insight는 `409 stale_snapshot`을 반환합니다. Apps `config.yaml`의 `camera:` 블록은 설치된 `libcamerasrc`가 필요한 캡처 버퍼 옵션을 지원할 때만 포함됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
 

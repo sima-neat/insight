@@ -25,9 +25,28 @@ export async function requestJson(url, { method = 'GET', body } = {}) {
 }
 
 export async function copyText(text) {
-  const failure = 'Could not copy: the browser only allows clipboard access over HTTPS or localhost. Select the text and copy it instead.'
-  if (!navigator.clipboard?.writeText) throw new Error(failure)
-  await navigator.clipboard.writeText(text).catch(() => {
-    throw new Error(failure)
-  })
+  try {
+    await navigator.clipboard.writeText(text)
+    return
+  } catch {
+    // navigator.clipboard is missing over plain HTTP to a board; fall back to a hidden textarea.
+  }
+  const focused = document.activeElement
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } catch {
+    // Reported below.
+  } finally {
+    area.remove()
+    focused?.focus?.({ preventScroll: true })
+  }
+  if (!copied) throw new Error('Could not copy: the browser blocked clipboard access.')
 }

@@ -127,7 +127,9 @@ Cameras that another application is using are skipped and keep the modes from th
 
 The scan also checks for PyNeat on the board; if it is missing, a warning gives the command that installs the latest Neat.
 
-### Camera configuration API
+### Camera configuration
+
+Under the mode menus, pick a format and select **Copy configuration** to copy the selected mode to the clipboard in that format. The formats are the ones the export API below returns for the camera.
 
 API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. The request must include `generation` from the same `/api/peripherals` snapshot; Insight returns `409 stale_snapshot` if the selected board has changed. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
 

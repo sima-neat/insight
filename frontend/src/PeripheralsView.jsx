@@ -302,6 +302,8 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
             selection={selection}
             selectionNotice={selectionNotice}
             onSelectionChange={changeSelection}
+            generation={snapshot.generation}
+            appsYaml={Boolean(snapshot.platform?.libcamerasrc?.buffer_count)}
           />
         ) : (
           <div className="periph-detail">

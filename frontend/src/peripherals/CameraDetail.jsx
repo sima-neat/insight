@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+import { copyText, requestJson } from './api.js'
 import {
   availabilityInfo,
   blockedFormatSummary,
@@ -7,6 +9,8 @@ import {
   formatOptions,
   fpsOptions,
   groupOptions,
+  modeLabel,
+  normalizeError,
   optionTier,
   sizeKey,
   sizeOptions,
@@ -48,7 +52,84 @@ function ModeOptions({ options }) {
   return groups.map((group) => <optgroup key={group.id} label={group.label}>{group.options.map(entry)}</optgroup>)
 }
 
-function ModePicker({ camera, selection, notice, onChange }) {
+const MIPI_EXPORTS = [
+  ['python', 'Python (PyNeat)'],
+  ['cpp', 'C++'],
+  ['yaml', 'Apps config.yaml'],
+  ['json', 'JSON']
+]
+const USB_EXPORTS = [
+  ['yaml', 'YAML descriptor'],
+  ['json', 'JSON descriptor']
+]
+
+function CopyConfig({ camera, selection, generation, appsYaml }) {
+  const choices = camera.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS.filter(([id]) => id !== 'yaml' || appsYaml)
+  const [wanted, setWanted] = useState('')
+  const [state, setState] = useState({ status: 'idle' })
+  const seq = useRef(0)
+  const [id, label] = choices.find(([value]) => value === wanted) || choices[0]
+  const rate = fpsOptions(camera, selection.format, selection.width, selection.height).find((o) => o.value === String(selection.fps))
+  const blocked = camera.connection !== 'usb' && rate?.tier === 'unsupported'
+    ? camera.formats.find((f) => f.format === selection.format)?.support?.reason || 'This mode cannot be used.'
+    : ''
+  const busy = state.status === 'busy'
+  const modeKey = `${camera.id}|${modeLabel(selection)}|${generation}`
+
+  useEffect(() => {
+    seq.current += 1
+    setState({ status: 'idle' })
+  }, [modeKey])
+
+  useEffect(() => {
+    if (state.status !== 'copied') return undefined
+    const timer = setTimeout(() => setState({ status: 'idle' }), 2000)
+    return () => clearTimeout(timer)
+  }, [state])
+
+  async function copy() {
+    const run = ++seq.current
+    setState({ status: 'busy' })
+    try {
+      const { format, width, height, fps } = selection
+      const data = await requestJson('/api/peripherals/cameras/export', {
+        method: 'POST',
+        body: { id: camera.id, format, width, height, fps, generation }
+      })
+      if (run !== seq.current) return
+      const item = (data.exports || []).find((entry) => entry.id === id)
+      if (!item) throw new Error(`${label} is not available for this mode.`)
+      await copyText(item.content)
+      if (run === seq.current) setState({ status: 'copied' })
+    } catch (err) {
+      if (run === seq.current) setState({ status: 'error', error: normalizeError(err) })
+    }
+  }
+
+  return (
+    <>
+      <div className="periph-actions periph-copy">
+        <select aria-label="Configuration format" value={id} onChange={(e) => setWanted(e.target.value)}>
+          {choices.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+        </select>
+        <button
+          type="button"
+          className="btn-tonal"
+          onClick={() => !busy && copy()}
+          disabled={Boolean(blocked)}
+          aria-disabled={busy ? 'true' : undefined}
+          title={blocked || undefined}
+        >
+          {state.status === 'copied' ? 'Copied' : 'Copy configuration'}
+        </button>
+        <span className="sr-only" role="status">{state.status === 'copied' ? `Copied the ${label} configuration.` : ''}</span>
+      </div>
+      {state.status === 'error' && <ErrorNotice error={state.error} />}
+    </>
+  )
+}
+
+function ModePicker({ camera, selection, notice, onChange, children }) {
   const formats = formatOptions(camera)
   const sizes = selection ? sizeOptions(camera, selection.format) : []
   const rates = selection ? fpsOptions(camera, selection.format, selection.width, selection.height) : []
@@ -96,11 +177,12 @@ function ModePicker({ camera, selection, notice, onChange }) {
         </label>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
+      {children}
     </fieldset>
   )
 }
 
-export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
+export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange, generation, appsYaml }) {
   const availability = availabilityInfo(camera.availability)
   const tier = tierInfo(camera.support?.tier)
   const summary = cameraSummaryLine(camera)
@@ -147,7 +229,9 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
         )}
       </details>
 
-      <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange} />
+      <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange}>
+        {selection && <CopyConfig camera={camera} selection={selection} generation={generation} appsYaml={appsYaml} />}
+      </ModePicker>
     </section>
   )
 }

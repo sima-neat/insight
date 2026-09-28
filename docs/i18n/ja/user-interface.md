@@ -127,7 +127,9 @@ Insight は、実行アカウントのキーを使用して SSH 接続します�
 
 スキャンではボード上の PyNeat も確認します。PyNeat がない場合は、最新の Neat をインストールするコマンドが警告に表示されます。
 
-### カメラ設定 API
+### カメラ設定
+
+モードメニューの下で形式を選び、**設定をコピー**を選択すると、選択したモードがその形式でクリップボードにコピーされます。選べる形式は、以下のエクスポート API がそのカメラに返す形式です。
 
 API クライアントは選択したモードを `/api/peripherals/cameras/export` に POST し、Python（`pyneat.CameraInputOptions`）、C++、および JSON 表現を受け取れます。リクエストには同じ `/api/peripherals` スナップショットの `generation` を含める必要があり、選択したボードが変更されていれば Insight は `409 stale_snapshot` を返します。Apps の `config.yaml` の `camera:` ブロックは、インストール済みの `libcamerasrc` が必要なキャプチャバッファーオプションをサポートする場合にのみ含まれます。USB カメラの場合、API は `CameraInput` 設定ではなくデバイス記述子を返します。
 

@@ -127,7 +127,9 @@ Insight 使用執行帳戶的金鑰透過 SSH 連線。它絕不會要求或儲�
 
 掃描也會檢查開發板上的 PyNeat；若缺少 PyNeat，警告會提供安裝最新 Neat 的指令。
 
-### 相機設定 API
+### 相機設定
+
+在模式選單下方選擇格式，然後選取 **複製設定**，即可將選取的模式以該格式複製到剪貼簿。可選的格式即為下方匯出 API 針對該相機傳回的格式。
 
 API 用戶端可將選取的模式 POST 至 `/api/peripherals/cameras/export`，並接收 Python（`pyneat.CameraInputOptions`）、C++ 和 JSON 表示法。請求必須包含同一份 `/api/peripherals` 快照中的 `generation`；若選取的開發板已變更，Insight 會回傳 `409 stale_snapshot`。只有在已安裝的 `libcamerasrc` 支援所需的擷取緩衝區選項時，才會包含 Apps `config.yaml` 的 `camera:` 區塊。對於 USB 相機，API 會傳回裝置描述元，而不是 `CameraInput` 設定。
 
