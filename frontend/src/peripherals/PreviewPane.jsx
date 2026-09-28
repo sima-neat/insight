@@ -45,6 +45,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
   const session = state?.session || null
   const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
   const frameUrl = state?.status === 'live' ? safeHref(session?.viewer_url) : null
+  const otherCamera = session?.camera_id && camera && session.camera_id !== camera.id ? session.camera_id : ''
 
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
@@ -90,7 +91,9 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
             </button>
           </div>
-          {frameUrl ? (
+          {otherCamera ? (
+            <p className="hint">The preview of <span className="periph-inline-code">{otherCamera}</span> is still running.</p>
+          ) : frameUrl ? (
             <iframe
               className="periph-preview-frame"
               title={`Live preview of ${camera?.name || 'the camera'}`}
