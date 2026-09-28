@@ -8,7 +8,7 @@ import {
   resetLatenessWindow,
   takeMetadataForFrame,
 } from "./metadataSync.js";
-import { lateNoticeDetails, nextWarningActive } from "./metadataLateness.js";
+import { bufferSettleMs, lateNoticeDetails, nextWarningActive } from "./metadataLateness.js";
 import MetadataLateNotice from "./MetadataLateNotice.jsx";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
@@ -120,6 +120,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const playbackRef = useRef({ lastFrameAt: 0 });
   const activeRef = useRef(false);
   const lateWarningActiveRef = useRef(false);
+  const lateSettleUntilRef = useRef(0);
+  const settingsButtonRef = useRef(null);
   const [lateNotice, setLateNotice] = useState(null);
   const [banner, setBanner] = useState(`Channel ${index}`);
   const [active, setActive] = useState(false);
@@ -160,7 +162,16 @@ function ChannelTile({ index, onActiveChange, debug }) {
     const onViewerSettingsChanged = (event) => {
       const changedScope = event.detail?.scope;
       if (changedScope && changedScope !== "global" && changedScope !== `channel_${index}`) return;
+      const previousBufferMs = synchronizationSettingsRef.current.videoSyncBufferMs;
       applySynchronizationSettings();
+      const nextBufferMs = synchronizationSettingsRef.current.videoSyncBufferMs;
+      if (nextBufferMs !== previousBufferMs) {
+        // What was measured belongs to the old buffer; the chip must reflect the new one only.
+        resetLatenessWindow(metadataQueueRef.current);
+        lateWarningActiveRef.current = false;
+        setLateNotice(null);
+        lateSettleUntilRef.current = performance.now() + bufferSettleMs(previousBufferMs, nextBufferMs);
+      }
       if (event.detail?.metadataType === "tracking") {
         trackHistoryRef.current.clear();
       }
@@ -208,6 +219,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
       lateWarningActiveRef.current = false;
+      lateSettleUntilRef.current = 0;
       setLateNotice(null);
       trackHistoryRef.current.clear();
       colorAllocatorRef.current?.clear();
@@ -435,19 +447,25 @@ function ChannelTile({ index, onActiveChange, debug }) {
             });
 
             const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
-            lateWarningActiveRef.current = nextWarningActive(
-              lateWarningActiveRef.current,
-              metadataSync.recentLateShare,
-            );
-            setLateNotice(
-              lateWarningActiveRef.current
-                ? lateNoticeDetails(
-                    metadataSync,
-                    synchronizationSettingsRef.current.videoSyncBufferMs,
-                    videoSyncStatusRef.current.supported,
-                  )
-                : null,
-            );
+            if (performance.now() < lateSettleUntilRef.current) {
+              resetLatenessWindow(metadataQueueRef.current);
+              lateWarningActiveRef.current = false;
+              setLateNotice(null);
+            } else {
+              lateWarningActiveRef.current = nextWarningActive(
+                lateWarningActiveRef.current,
+                metadataSync.recentLateShare,
+              );
+              setLateNotice(
+                lateWarningActiveRef.current
+                  ? lateNoticeDetails(
+                      metadataSync,
+                      synchronizationSettingsRef.current.videoSyncBufferMs,
+                      videoSyncStatusRef.current.supported,
+                    )
+                  : null,
+              );
+            }
 
             if (metadataChannel?.readyState === "open") {
               const video = videoRef.current;
@@ -591,10 +609,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
     const scope = `channel_${index}`;
     const stored = window.viewerSettingsApi?.writeScopeGeneralOverride?.(scope, "videoSyncBufferMs", targetMs);
     if (!stored) return false;
-    // What was measured belongs to the old buffer; the chip must reflect the new one only.
-    resetLatenessWindow(metadataQueueRef.current);
-    lateWarningActiveRef.current = false;
-    setLateNotice(null);
+    // The chip and its panel are about to disappear; leave focus on the tile.
+    settingsButtonRef.current?.focus();
     window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope } }));
     return true;
   };
@@ -606,8 +622,14 @@ function ChannelTile({ index, onActiveChange, debug }) {
       {!active && <div className="tile-no-video">No active video received</div>}
       <div className="tile-banner-wrapper">
         <div className="tile-banner-text">{banner}</div>
-        <MetadataLateNotice details={lateNotice} onRaise={raiseVideoSyncBuffer} />
-        <button className="channel-menu-button" title="Settings" onClick={openScopeSettings} type="button">
+        <MetadataLateNotice details={active ? lateNotice : null} onRaise={raiseVideoSyncBuffer} />
+        <button
+          ref={settingsButtonRef}
+          className="channel-menu-button"
+          title="Settings"
+          onClick={openScopeSettings}
+          type="button"
+        >
           <img src="/static/icons/menu.png" alt="Settings" className="channel-menu-icon" />
         </button>
       </div>

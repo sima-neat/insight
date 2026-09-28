@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { lateNoticeDetails, nextWarningActive, suggestedBufferMs } from "./metadataLateness.js";
+import { bufferSettleMs, lateNoticeDetails, nextWarningActive, suggestedBufferMs } from "./metadataLateness.js";
 
 test("the warning turns on when half of the messages are late", () => {
   assert.equal(nextWarningActive(false, 0.5), true);
@@ -87,4 +87,19 @@ test("notice details survive a window without lateness samples", () => {
     suggestedBufferMs: null,
     blockedBy: "maximum",
   });
+});
+
+test("a raised buffer needs time to settle, in proportion to the raise", () => {
+  assert.equal(bufferSettleMs(350, 600), 3500);
+  assert.equal(bufferSettleMs(0, 4000), 41000);
+});
+
+test("a lowered or unchanged buffer settles after the base time", () => {
+  assert.equal(bufferSettleMs(600, 350), 1000);
+  assert.equal(bufferSettleMs(350, 350), 1000);
+});
+
+test("the settle time survives values that are not numbers", () => {
+  assert.equal(bufferSettleMs(undefined, 600), 1000);
+  assert.equal(bufferSettleMs(350, Number.NaN), 1000);
 });
