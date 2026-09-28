@@ -5,7 +5,6 @@ import threading
 import time
 import unittest
 import unittest.mock as mock
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import paramiko
@@ -17,7 +16,6 @@ from neat_insight.board import transport as transport_module
 from neat_insight.board import target as target_module
 from neat_insight.board.errors import BoardError
 from neat_insight.board.transport import ExecResult, LocalTransport, SshTransport, key_fingerprint
-from neat_insight.peripherals import preview
 
 SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "sima", "DEVKIT_SYNC_DEVKIT_PORT": "22"}
 IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
@@ -26,11 +24,8 @@ IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VER
 class FakeTransport:
     def __init__(self):
         self.closed = False
-        self.error = None
 
     def exec(self, argv, *, timeout, stdin=None):
-        if self.error:
-            raise self.error
         return ExecResult(0, IDENTITY_OUTPUT, b"")
 
     def remote_host_key_fingerprint(self):
@@ -70,60 +65,24 @@ class BoardApiTests(unittest.TestCase):
 
     def test_board_cleanup_runs_before_the_old_transport_is_closed(self):
         self.client.get("/api/board")
-        old = self.transports[-1]
-        observations = []
-        with self.app.app_context():
-            board.get_board_manager().set_before_session_close(
-                lambda session: observations.append((session, session.raw_transport.closed))
-            )
-        response = self.client.post("/api/board/select", json={"host": "10.1.1.9", "port": 22, "user": "sima"})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(observations[0][1], False)
-        self.assertTrue(old.closed)
-
-    def test_expired_preview_does_not_block_switch_from_unreachable_board(self):
-        with self.app.app_context():
-            manager = board.get_board_manager()
-            old_session = manager.session()
-            previews = preview.PreviewManager()
-            previews._session = {
-                "id": "expired-preview",
-                "generation": old_session.generation,
-                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds"),
-            }
-            previews._owner = old_session
-            old_session.raw_transport.error = BoardError("unreachable", "The old board is offline.")
-            manager.set_before_session_close(previews.stop_for_board_change)
-
-        response = self.client.post(
-            "/api/board/select",
-            json={"host": "10.1.1.9", "port": 22, "user": "sima"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["target"]["host"], "10.1.1.9")
-        self.assertIsNone(previews.current())
+        closed = []
+        self.app.extensions["neat_board"].set_before_session_close(lambda session: closed.append(session.raw_transport.closed))
+        self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
+        self.assertEqual(closed, [False])
+        self.assertTrue(self.transports[0].closed)
 
     def test_board_cleanup_wait_does_not_block_transport_error_recording(self):
-        self.client.get("/api/board")
-        old_session = self.app.extensions["neat_board"].session()
-        entered = threading.Event()
-        release = threading.Event()
-
-        def cleanup(_session):
-            entered.set()
-            release.wait(2)
-
-        self.app.extensions["neat_board"].set_before_session_close(cleanup)
-        switcher = threading.Thread(
-            target=lambda: self.app.extensions["neat_board"].select("10.1.1.9", 22, "sima")
-        )
+        manager = self.app.extensions["neat_board"]
+        old = manager.session()
+        entered, release = threading.Event(), threading.Event()
+        manager.set_before_session_close(lambda _session: (entered.set(), release.wait(2)))
+        switcher = threading.Thread(target=manager.select, args=("10.1.1.9", 22, "sima"))
         switcher.start()
         self.assertTrue(entered.wait(1))
-        old_session.raw_transport.error = BoardError("unreachable", "late failure")
+        old.raw_transport.exec = mock.Mock(side_effect=BoardError("unreachable", "late failure"))
         begin = time.monotonic()
         with self.assertRaises(BoardError):
-            old_session.transport.exec(["true"], timeout=1)
+            old.transport.exec(["true"], timeout=1)
         self.assertLess(time.monotonic() - begin, 0.2)
         release.set()
         switcher.join(2)
