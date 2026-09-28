@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { copyText, requestJson } from './api.js'
+import PreviewPane from './PreviewPane.jsx'
 import {
   availabilityInfo,
   blockedFormatSummary,
@@ -183,7 +184,20 @@ function ModePicker({ camera, selection, notice, onChange, children }) {
   )
 }
 
-export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange, generation, appsYaml }) {
+export default function CameraDetail({
+  camera,
+  stale,
+  target,
+  selection,
+  selectionNotice,
+  onSelectionChange,
+  preview,
+  onStartPreview,
+  onStopPreview,
+  onOpenBoardPanel,
+  generation,
+  appsYaml
+}) {
   const availability = availabilityInfo(camera.availability)
   const tier = tierInfo(camera.support?.tier)
   const summary = cameraSummaryLine(camera)
@@ -233,6 +247,17 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
       <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange}>
         {selection && <CopyConfig camera={camera} selection={selection} generation={generation} appsYaml={appsYaml} />}
       </ModePicker>
+
+      <PreviewPane
+        camera={camera}
+        selection={selection}
+        stale={stale}
+        target={target}
+        state={preview}
+        onStart={onStartPreview}
+        onStop={onStopPreview}
+        onOpenBoardPanel={onOpenBoardPanel}
+      />
     </section>
   )
 }

@@ -3891,13 +3891,76 @@ button:disabled {
   font-weight: 700;
 }
 
-.periph-blocked-disclosure > summary:focus-visible {
+.periph-blocked-disclosure > summary:focus-visible,
+.periph-preview-frame:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
 }
 
 .periph-blocked-disclosure .periph-blocked {
   margin-top: 4px;
+}
+
+/* Camera preview */
+.periph-preview {
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-preview-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-preview .hint,
+.periph-preview .periph-callout {
+  margin: 0;
+}
+
+.periph-preview-reason {
+  color: #8f2f45;
+}
+
+.periph-preview-frame {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #0e1923;
+}
+
+.periph-preview-placeholder {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.periph-inline-code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 /* Keep in sync with RAIL_ROW_QUERY in PeripheralsView.jsx. */
@@ -3925,4 +3988,28 @@ button:disabled {
     width: auto;
     max-width: none;
   }
+}
+
+/* Preview mode: format, size and rate as one segmented tag group. */
+.periph-mode-badges {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+  white-space: nowrap;
+}
+
+.periph-mode-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+}
+
+.periph-mode-badges > span + span {
+  border-left: 1px solid var(--line);
 }

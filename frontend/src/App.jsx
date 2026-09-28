@@ -102,7 +102,7 @@ const ONBOARDING_STEPS = [
     title: 'See what is attached to the board',
     summary: 'Peripherals detects devices on the selected board and shows what each one reports.',
     details:
-      'Confirm a camera is connected and read the modes it reports. Cameras work today; other kinds appear as Insight learns to read them.'
+      'Confirm a camera works before you build around it, then read the modes it reports. Cameras work today; other kinds appear as Insight learns to read them.'
   },
   {
     id: 'visualizer',
