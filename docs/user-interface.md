@@ -135,7 +135,7 @@ The viewer can render metadata overlays for common vision outputs, including obj
 
 Viewer settings exist in two scopes. The settings button of the viewer page opens the global settings. The button at the right end of a tile's status bar opens the settings of that channel; the dialog's title names the channel.
 
-A channel follows the global settings until a value is changed for it. A value that a channel sets itself takes precedence over the global value. On the **General** tab, the channel dialog marks each setting as **own value** or **global**, and the global dialog lists the channels that set their own value. **Use global value** removes a channel's own value.
+A channel follows the global settings until a value is changed for it. A value that a channel sets itself takes precedence over the global value. On the **General** tab, the channel dialog marks each setting as **own value** or **global**, and the global dialog lists the channels that set their own value. **Use global value** removes a channel's own value at once, without **Save**.
 
 Settings are stored in the browser. They are not shared between browsers or machines.
 
@@ -175,8 +175,9 @@ The panel offers two ways to raise the buffer to a value that covers the measure
 |---|---|
 | **Raise for this channel to N ms** | Sets the video sync buffer of this channel only. Other channels keep their setting. |
 | **Raise globally to N ms** | Sets the global video sync buffer. It applies to every channel that has no value of its own. If this channel had its own value, that value is removed. |
+| **Use global value (V ms)** | Shown instead of **Raise globally to N ms** when the global video sync buffer already covers the measured lateness. Removes this channel's own value; the global value is not changed. |
 
-The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
+The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself, and the panel never lowers the global buffer. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
 
 The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner.
 
