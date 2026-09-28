@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 )
@@ -11,6 +12,45 @@ const rtpTimestampTolerance = uint32(videoRTPClockRate / 1000)
 // Bounds what a producer can echo into the stats response; payloads arrive over
 // UDP from outside the process.
 const maxReportedFrameIDBytes = 64
+
+// Enough for ten seconds at 25 messages per second, so the summary describes
+// the stream as it is now rather than its whole history.
+const videoFirstLagSampleLimit = 256
+
+// lagSamples keeps the most recent lags in a ring.
+type lagSamples struct {
+	values []time.Duration
+	next   int
+}
+
+func (l *lagSamples) add(lag time.Duration) {
+	// The frame's and the message's arrival times are separate clock reads.
+	if lag < 0 {
+		lag = 0
+	}
+	if len(l.values) < videoFirstLagSampleLimit {
+		l.values = append(l.values, lag)
+		return
+	}
+	l.values[l.next] = lag
+	l.next = (l.next + 1) % videoFirstLagSampleLimit
+}
+
+func (l *lagSamples) reset() {
+	l.values = l.values[:0]
+	l.next = 0
+}
+
+func (l *lagSamples) summary() (median, max *float64, count uint64) {
+	if len(l.values) == 0 {
+		return nil, nil, 0
+	}
+	sorted := slices.Clone(l.values)
+	slices.Sort(sorted)
+	medianMS := roundFloat(float64(sorted[(len(sorted)-1)/2])/float64(time.Millisecond), 1)
+	maxMS := roundFloat(float64(sorted[len(sorted)-1])/float64(time.Millisecond), 1)
+	return &medianMS, &maxMS, uint64(len(sorted))
+}
 
 type arrival interface {
 	arrivedAt() time.Time
@@ -129,6 +169,7 @@ type metadataTimestampCorrelator struct {
 
 	matchedVideoFirst    uint64
 	matchedMetadataFirst uint64
+	videoFirstLag        lagSamples
 	lastFrameID          json.RawMessage
 }
 
@@ -158,6 +199,7 @@ func (c *metadataTimestampCorrelator) addVideoFrame(
 		// restart would let a repeated source timestamp match the wrong frame.
 		c.frames.reset()
 		c.pending.reset()
+		c.videoFirstLag.reset()
 	}
 	c.ssrc = ssrc
 	c.haveSSRC = true
@@ -168,7 +210,7 @@ func (c *metadataTimestampCorrelator) addVideoFrame(
 		if !ok {
 			return correlatedMetadata{}, false
 		}
-		return correlatedMetadata{payload: metadata.payload, outgoing: matched, correlated: true}, true
+		return correlatedMetadata{payload: metadata.payload, outgoing: matched.outgoing, correlated: true}, true
 	})
 	c.matchedMetadataFirst += uint64(len(ready))
 	return ready
@@ -189,7 +231,7 @@ func (c *metadataTimestampCorrelator) addMetadata(payload []byte, now time.Time)
 	c.frames.prune(now)
 	c.pending.prune(now)
 	source := uint32(uint64(*envelope.Timestamp) * 90)
-	outgoing, ok := c.findOutgoingTimestamp(source)
+	frame, ok := c.findOutgoingTimestamp(source)
 	if !ok {
 		c.pending.add(pendingMetadata{
 			payload:  append([]byte(nil), payload...),
@@ -199,8 +241,9 @@ func (c *metadataTimestampCorrelator) addMetadata(payload []byte, now time.Time)
 		return nil
 	}
 	c.matchedVideoFirst++
+	c.videoFirstLag.add(now.Sub(frame.recorded))
 	return []correlatedMetadata{{
-		payload: append([]byte(nil), payload...), outgoing: outgoing, correlated: true,
+		payload: append([]byte(nil), payload...), outgoing: frame.outgoing, correlated: true,
 	}}
 }
 
@@ -212,16 +255,20 @@ func (c *metadataTimestampCorrelator) pruneAndSnapshot(now time.Time) MetadataCo
 	defer c.mu.Unlock()
 	c.frames.prune(now)
 	c.pending.prune(now)
+	lagMedian, lagMax, lagSamples := c.videoFirstLag.summary()
 	return MetadataCorrelationSnapshot{
-		MatchedVideoFirst:    c.matchedVideoFirst,
-		MatchedMetadataFirst: c.matchedMetadataFirst,
-		PendingVideo:         c.frames.depth(),
-		PendingMetadata:      c.pending.depth(),
-		ExpiredVideo:         c.frames.expired,
-		ExpiredMetadata:      c.pending.expired,
-		EvictedVideo:         c.frames.evicted,
-		EvictedMetadata:      c.pending.evicted,
-		FrameID:              append(json.RawMessage(nil), c.lastFrameID...),
+		MatchedVideoFirst:           c.matchedVideoFirst,
+		MatchedMetadataFirst:        c.matchedMetadataFirst,
+		PendingVideo:                c.frames.depth(),
+		PendingMetadata:             c.pending.depth(),
+		ExpiredVideo:                c.frames.expired,
+		ExpiredMetadata:             c.pending.expired,
+		EvictedVideo:                c.frames.evicted,
+		EvictedMetadata:             c.pending.evicted,
+		VideoFirstLagRecentMedianMS: lagMedian,
+		VideoFirstLagRecentMaxMS:    lagMax,
+		VideoFirstLagSamples:        lagSamples,
+		FrameID:                     append(json.RawMessage(nil), c.lastFrameID...),
 	}
 }
 
@@ -234,21 +281,21 @@ func (c *metadataTimestampCorrelator) recordFrameID(frameID json.RawMessage) {
 	c.lastFrameID = append(c.lastFrameID[:0], frameID...)
 }
 
-func (c *metadataTimestampCorrelator) findOutgoingTimestamp(source uint32) (uint32, bool) {
+func (c *metadataTimestampCorrelator) findOutgoingTimestamp(source uint32) (rtpTimestampMapping, bool) {
 	var (
 		bestDistance = rtpTimestampTolerance + 1
-		outgoing     uint32
+		best         rtpTimestampMapping
 		found        bool
 	)
 	for i := len(c.frames.items) - 1; i >= 0; i-- {
 		distance := rtpTimestampDistance(c.frames.items[i].source, source)
 		if distance <= rtpTimestampTolerance && distance < bestDistance {
 			bestDistance = distance
-			outgoing = c.frames.items[i].outgoing
+			best = c.frames.items[i]
 			found = true
 		}
 	}
-	return outgoing, found
+	return best, found
 }
 
 func rtpTimestampDistance(a, b uint32) uint32 {
