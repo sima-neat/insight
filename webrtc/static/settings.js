@@ -71,6 +71,25 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
+  // A browser can pair this script with an older cached settings resolver. Without
+  // the scope functions the dialog works as before: no scope line, tags or notes,
+  // each scope loaded and saved as a whole. Decided once, so no path calls them.
+  const SCOPE_API_FUNCTIONS = [
+    "readScopeOverrides",
+    "clearScopeGeneralOverride",
+    "listChannelGeneralOverrides",
+    "followedGeneralValue",
+    "generalKeysToStore"
+  ];
+  const missingScopeFunctions = SCOPE_API_FUNCTIONS.filter((name) => typeof settingsApi[name] !== "function");
+  const scopeApiAvailable = missingScopeFunctions.length === 0;
+  if (!scopeApiAvailable) {
+    console.warn(
+      `viewerSettingsApi lacks ${missingScopeFunctions.join(", ")} (an older viewer-settings-resolver.js); ` +
+        "the settings dialog does not show which values a channel sets itself. Reload the page to update it."
+    );
+  }
+
   settingsApi.metadataTypes.forEach((metadataType) => {
     const option = document.createElement("option");
     option.value = metadataType.value;
@@ -158,7 +177,7 @@ document.addEventListener("DOMContentLoaded", () => {
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
 
-    if (isChannelScope(scope)) {
+    if (scopeApiAvailable && isChannelScope(scope)) {
       settingsApi.writeScopeSettings(scope, settings, { generalKeys: generalKeysToStore() });
     } else {
       settingsApi.writeScopeSettings(scope, settings);
@@ -182,14 +201,10 @@ document.addEventListener("DOMContentLoaded", () => {
     return value !== "global";
   }
 
-  function formatMs(value) {
+  // A general value as the notes show it; a metadata retention of 0 means no expiry.
+  function formatGeneralValue(key, value) {
+    if (key === "metadataRetentionMs" && value === 0) return "no expiry";
     return `${value} ms`;
-  }
-
-  // What a channel follows for a general key when it has no value of its own.
-  function followedGeneralValue(key) {
-    const globalOwn = settingsApi.readScopeOverrides("global").general;
-    return Object.prototype.hasOwnProperty.call(globalOwn, key) ? globalOwn[key] : settingsApi.defaults.general[key];
   }
 
   function readGeneralControls() {
@@ -204,9 +219,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // A channel keeps a general key as its own if it had one at load, or if the
   // control now holds something else than the dialog put there.
   function generalKeysToStore() {
-    const current = readGeneralControls();
-    return GENERAL_KEYS.filter(
-      (key) => loadedGeneral.ownKeys.has(key) || current[key] !== loadedGeneral.values[key]
+    return settingsApi.generalKeysToStore(
+      Array.from(loadedGeneral.ownKeys),
+      loadedGeneral.values,
+      readGeneralControls()
     );
   }
 
@@ -245,7 +261,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isOwn) {
       setting.note.appendChild(
         createNoteLine(
-          `Global value: ${formatMs(followedGeneralValue(setting.key))}.`,
+          `Global value: ${formatGeneralValue(setting.key, settingsApi.followedGeneralValue(setting.key))}.`,
           createUseGlobalButton(() => useGlobalValueInChannelDialog(setting))
         )
       );
@@ -266,7 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
     overrides.forEach(({ channel, value }) => {
       box.appendChild(
         createNoteLine(
-          `Channel ${channel} uses its own value: ${formatMs(value)}.`,
+          `Channel ${channel} uses its own value: ${formatGeneralValue(setting.key, value)}.`,
           createUseGlobalButton(() => useGlobalValueForChannel(channel, setting.key))
         )
       );
@@ -278,7 +294,20 @@ document.addEventListener("DOMContentLoaded", () => {
     setting.noteRow.hidden = false;
   }
 
+  // The fallback without the scope functions: tags and notes stay hidden.
+  function hideGeneralScopeNotes() {
+    SCOPED_GENERAL_SETTINGS.forEach((setting) => {
+      setting.tag.hidden = true;
+      setting.note.replaceChildren();
+      setting.noteRow.hidden = true;
+    });
+  }
+
   function renderGeneralScopeNotes() {
+    if (!scopeApiAvailable) {
+      hideGeneralScopeNotes();
+      return;
+    }
     if (isChannelScope(scope)) {
       const ownGeneral = settingsApi.readScopeOverrides(scope).general;
       SCOPED_GENERAL_SETTINGS.forEach((setting) => renderChannelSettingScope(setting, ownGeneral));
@@ -291,7 +320,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function useGlobalValueInChannelDialog(setting) {
     if (!settingsApi.clearScopeGeneralOverride(scope, setting.key)) return;
     dispatchSettingsChanged(scope);
-    setSliderValue(setting, followedGeneralValue(setting.key));
+    setSliderValue(setting, settingsApi.followedGeneralValue(setting.key));
     loadedGeneral.ownKeys.delete(setting.key);
     loadedGeneral.values[setting.key] = parseInt(setting.slider.value, 10);
     renderGeneralScopeNotes();
@@ -306,11 +335,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Fills the General tab: a channel dialog shows what the channel resolves to
-  // (own, else global, else default), the global dialog the global values.
+  // (own, else global, else default), the global dialog the global values. Without
+  // the scope functions every dialog shows its scope's values, as before.
   function loadGeneralSettings() {
     let general;
     let ownGeneral = {};
-    if (isChannelScope(scope)) {
+    if (scopeApiAvailable && isChannelScope(scope)) {
       general = settingsApi.resolveTypeSettings(scopeToIndex(scope), metadataTypeSelector.value).general;
       ownGeneral = settingsApi.readScopeOverrides(scope).general;
     } else {
@@ -328,7 +358,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateScopeLine(value) {
-    if (isChannelScope(value)) {
+    if (scopeApiAvailable && isChannelScope(value)) {
       viewerSettingsScopeLine.textContent =
         `These settings apply to channel ${scopeToIndex(value)} only. ` +
         "Values you have not changed follow the global settings.";
