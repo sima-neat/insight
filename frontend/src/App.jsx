@@ -739,11 +739,8 @@ export default function App() {
   const [boardError, setBoardError] = useState(null)
   const [boardLoading, setBoardLoading] = useState(true)
   const [boardPanelOpen, setBoardPanelOpen] = useState(false)
-  // Stable, because the board panel's focus handling keys off it: a new function each render
-  // would re-run that effect and pull focus out of whatever the user is typing in.
+  // Stable: BoardPanel's focus effect depends on it.
   const closeBoardPanel = useCallback(() => setBoardPanelOpen(false), [])
-  // Reads and board changes can answer out of order; the sync keeps an older read from undoing
-  // a newer change. It only calls state setters, which React keeps stable, so one is enough.
   const boardSyncRef = useRef(null)
   if (!boardSyncRef.current) {
     boardSyncRef.current = createBoardSync({
@@ -1614,7 +1611,6 @@ export default function App() {
     loadSysInfo()
   }
 
-  // One board target, shared by Peripherals and (later) Stats.
   function loadBoard() {
     return boardSyncRef.current.load()
   }
@@ -1734,8 +1730,6 @@ export default function App() {
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
         <div className="masthead-actions">
-          {/* One box for the board: which one, whether it answers, and the way in to everything
-              else about it — a shell on it, or a different board. */}
           <button
             type="button"
             className={['board-trigger', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}

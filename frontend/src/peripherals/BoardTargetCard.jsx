@@ -57,8 +57,6 @@ export default function BoardTargetCard({
   const focusReturn = useRef(null)
   if (!focusReturn.current) focusReturn.current = createFocusReturn()
 
-  // Cancel, Save and Trust remove the button that has focus; give it back to the opener (or the
-  // nearest control still shown) so the next Tab continues from there, not from the panel's top.
   useEffect(() => {
     focusReturn.current.flush()
   })
@@ -128,7 +126,6 @@ export default function BoardTargetCard({
     setEditing(false)
     setForm(null)
     setConfirmTrust(false)
-    // With no board left to use, the form stays open: continue in it.
     returnFocus(changeRef, hostRef)
     onStatus?.(message)
   }
@@ -166,7 +163,6 @@ export default function BoardTargetCard({
             <Pill tone={state.tone}>{state.label}</Pill>
           </div>
           <p className="section-note">{description}</p>
-          {/* Identity and the last check read as one list rather than a line of prose and a grid. */}
           <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
           <div className="periph-actions periph-board-actions">
             {onOpenShell && shell?.launch_supported && (
@@ -180,7 +176,6 @@ export default function BoardTargetCard({
                 {shellBusy ? 'Opening shell…' : 'Open shell'}
               </button>
             )}
-            {/* A board that just answered needs no test; the button is for when it did not. */}
             {state.tone !== 'ok' && (
               <button type="button" className="btn-tonal" ref={testRef} onClick={testConnection} disabled={Boolean(busy)}>
                 {busy === 'test' ? 'Testing…' : 'Test connection'}

@@ -202,18 +202,12 @@ def _format_browser_https_url(host, port, path="", query=""):
 
 
 def _shell_target():
-    """The board the shell should open on: the one Insight is using, not a separate env var.
-
-    Falls back to DEVKIT_SYNC_DEVKIT_IP so a board that was never selected still has a shell.
-    """
     try:
         target = board.get_board_manager().target()
-    except Exception:  # noqa: BLE001 - the shell must not depend on board resolution succeeding
+    except Exception:
         target = None
     if target is not None and target.mode == "ssh" and target.host:
-        # The bundled password is only a promise the SDK makes for its paired default DevKit.
-        # Manual targets and SDK targets with an overridden account use the service account's
-        # SSH key and may have unrelated passwords, so never send the DevKit credential to them.
+        # The bundled password is valid only for the SDK-paired DevKit's default account.
         ssh_user = target.user or DEFAULT_DEVKIT_SSH_USERNAME
         return (
             target.host,

@@ -51,8 +51,6 @@ def _output_too_large(argv: List[str]) -> BoardError:
 
 
 class LocalTransport:
-    """Runs commands on the machine Insight runs on (Insight installed on the board)."""
-
     def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
         deadline = time.monotonic() + timeout
         try:
@@ -81,7 +79,7 @@ class LocalTransport:
 
     @staticmethod
     def _collect(proc, argv, stdin, deadline, timeout):
-        # Read as the output arrives, so the SSH transport's output limit holds here too.
+        # Read as output arrives so MAX_OUTPUT_BYTES holds as it does over SSH.
         chunks = {proc.stdout: [], proc.stderr: []}
         pending = memoryview(stdin or b"")
         size = 0
@@ -125,12 +123,6 @@ class LocalTransport:
 
 
 class SshTransport:
-    """One persistent SSH connection to a board, authenticated with the service account's SSH keys.
-
-    Host keys live in Insight's own known_hosts: the first key a board presents is trusted
-    and saved, and a different key later is refused until the user trusts it explicitly.
-    """
-
     def __init__(self, host: str, port: int, user: str, known_hosts: Path, connect_timeout: float = 8.0):
         self.host = host
         self.port = port
@@ -181,9 +173,7 @@ class SshTransport:
         self.presented_host_key = None
 
     def close(self) -> None:
-        # Not under the lock: a connect to an unreachable board may hold it for the full timeout.
-        # Set the flag before dropping the client; _open_channel stores its client before checking
-        # the flag, so one of the two always sees the other and the connection is never kept.
+        # Lock-free (a connect may hold the lock); pairs with the store-then-check in _open_channel.
         self._closed = True
         self._drop()
 
@@ -202,7 +192,6 @@ class SshTransport:
                 progressed = True
             if size > MAX_OUTPUT_BYTES:
                 raise _output_too_large(argv)
-            # Exit status is sent after all output, so both buffers are complete once it arrives.
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 return ExecResult(channel.recv_exit_status(), b"".join(stdout), b"".join(stderr))
             if time.monotonic() >= deadline:
@@ -219,8 +208,6 @@ class SshTransport:
             if transport is None or not transport.is_active():
                 self._drop()
                 client = self._connect()
-                # Store first, then check: a close() that ran before the store saw no client to
-                # close, so this check has to catch it (see close()).
                 self._client = client
                 if self._closed:
                     self._drop()
@@ -238,8 +225,7 @@ class SshTransport:
         self.known_hosts.touch(exist_ok=True)
         client = paramiko.SSHClient()
         client.load_host_keys(str(self.known_hosts))
-        # With Insight's own known_hosts loaded, AutoAddPolicy only applies to unknown hosts
-        # (accept-new); a changed key still raises BadHostKeyException.
+        # Only unknown hosts are auto-added; a changed key still raises BadHostKeyException.
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         timeout = self.connect_timeout
         try:

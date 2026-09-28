@@ -1,4 +1,3 @@
-"""Turn probe output into the Peripherals camera snapshot."""
 import re
 import threading
 import time
@@ -9,7 +8,6 @@ from neat_insight.peripherals import compat
 from neat_insight.peripherals.probe import OUT_OF_TIME
 
 STANDARD_FPS = (60, 30, 25, 20, 15, 10, 5)
-# libcamera snaps a faster request to the mode's rate limit, so a 29.97 fps mode still serves 30.
 FPS_SNAP_TOLERANCE = 0.5
 PLATFORM_TOOLS = ("cam", "v4l2-ctl", "media-ctl", "gst-inspect-1.0", "fuser")
 _RAW_BAYER_RE = re.compile(r"^S(RGGB|BGGR|GRBG|GBRG)")
@@ -163,7 +161,6 @@ def empty_snapshot(board: dict, generation: int) -> dict:
 
 
 def build_snapshot(probe: dict, board: dict, generation: int, previous: Optional[dict], scan_ms: int):
-    """Return (snapshot, modes); modes keeps each camera's last live formats for carry-forward."""
     scanned_at = now_iso()
     platform = _platform(probe)
     modes = dict(previous["modes"]) if previous else {}
@@ -209,7 +206,6 @@ def _isp_sizes(probe: dict) -> Optional[set]:
 
 
 def _libcamerasrc_state(probe: dict) -> Optional[bool]:
-    """True/False when gst-inspect answered, None when it could not run."""
     libcamerasrc = probe.get("libcamerasrc")
     return None if libcamerasrc is None else bool(libcamerasrc.get("present"))
 
@@ -221,7 +217,6 @@ def _availability(users: Optional[list], method: str, acquire: Optional[str] = N
     if acquire == "busy":
         state, reason = "in_use", "libcamera could not acquire the camera; another process holds it."
     elif unmatched:
-        # A libcamera acquire does not see processes using the V4L2 nodes directly.
         state, reason = "unknown", UNMATCHED_REASON
     elif acquire == "ok" or (users is not None and method in ("proc-root", "sudo-fuser")):
         state, reason = "available", None
@@ -249,8 +244,7 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
     formats, hidden = [], 0
     for fmt in camera.get("formats") or []:
         sizes = fmt["sizes"]
-        # libcamera advertises any size the sensor can be scaled to, but the ISP only outputs its preset
-        # sizes; for any other the ISP keeps its current size and libcamera aborts the stream (core#883).
+        # The ISP only outputs its preset sizes; libcamera aborts any other (core#883).
         if isp_sizes is not None and not _RAW_BAYER_RE.match(fmt["format"]):
             sizes = [size for size in sizes if (size["width"], size["height"]) in isp_sizes]
             hidden += len(fmt["sizes"]) - len(sizes)
@@ -327,7 +321,6 @@ def _mipi_support(model: str, libcamerasrc: Optional[bool]) -> dict:
     if libcamerasrc is None:
         return _support("advertised", UNCHECKED_LIBCAMERASRC_REASON, [CORE_883])
     if compat.has_model(model):
-        # No model prefix: this sits directly under the camera's own heading.
         return _support("verified", VERIFIED_REASON, [CORE_883])
     return _support("advertised", ADVERTISED_REASON, [CORE_883])
 
@@ -571,7 +564,6 @@ def _issues(probe: dict, platform: dict, media: dict, isp_unread: bool) -> list:
         bus_info = (media.get(path) or {}).get("bus_info")
         where = f"{path} ({bus_info})" if bus_info else path
         issues.append(_issue("info", "no_sensor", f"No MIPI sensor detected on {where}.", NO_SENSOR_HINT))
-    # Without a media graph every camera is unmatched; the media-ctl issue above already says why.
     graph_read = tools.get("media-ctl") and not any(f.get("tool") == "media-ctl" for f in probe.get("failures") or [])
     if graph_read:
         issues += [_unmatched_issue(camera) for camera in probe.get("mipi") or [] if _unmatched(camera)]
@@ -603,8 +595,6 @@ def _changes(before_items: list, after_items: list) -> dict:
 
 
 class ScanCache:
-    """The latest scan, keyed by board generation; a different board fingerprint starts a fresh history."""
-
     def __init__(self):
         self._lock = threading.Lock()
         self._entry: Optional[dict] = None
@@ -620,7 +610,6 @@ class ScanCache:
         return entry["snapshot"] if entry and entry["generation"] == generation else None
 
     def completed_since(self, generation: int, since: float) -> Optional[dict]:
-        """The snapshot of a refresh that finished after `since` (monotonic), i.e. one that was in flight."""
         with self._lock:
             entry = self._entry
         if entry and entry["generation"] == generation and entry["completed"] >= since:

@@ -23,8 +23,6 @@ def get_board_manager() -> "BoardManager":
 
 
 class _ReportingTransport:
-    """Records connection-level failures in the manager's status before re-raising them."""
-
     def __init__(self, manager: "BoardManager", generation: int, transport):
         self._manager = manager
         self._generation = generation
@@ -80,8 +78,6 @@ class BoardSession:
 
 
 class BoardManager:
-    """Owns the single selected board that every board-facing Insight feature uses."""
-
     def __init__(self, data_dir: Path, on_board: bool):
         self.data_dir = Path(data_dir)
         self.on_board = on_board
@@ -133,7 +129,7 @@ class BoardManager:
                     hint="Test the connection again and confirm the fingerprint it reports.",
                 )
             transport.replace_host_key(key)
-            # The trusted key may belong to a different board: start a new generation so its scans stay separate.
+            # A new key may mean a different board: start a new generation.
             transport.close()
             self._session = None
             self._replace_session(self.target())

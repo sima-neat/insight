@@ -1,5 +1,3 @@
-// Device-kind icons for the Peripherals rail. Inline so they inherit
-// `currentColor`: the greyed state is a colour change in CSS, not a second file.
 const PATHS = {
   camera: (
     <>

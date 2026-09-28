@@ -17,8 +17,6 @@ _HTTP_STATUS = {
 
 
 class BoardError(Exception):
-    """A board-access failure with a stable code and a recovery hint for the UI."""
-
     def __init__(self, code: str, message: str, hint: Optional[str] = None, **extra):
         super().__init__(message)
         self.code = code

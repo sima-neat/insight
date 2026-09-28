@@ -1,4 +1,3 @@
-"""Render camera input configurations for one mode of the cached scan."""
 import json
 from fractions import Fraction
 from typing import Optional
@@ -85,7 +84,7 @@ def _export(export_id: str, label: str, filename: str, language: str, content: s
 
 
 def _yaml_block(rows, comment: Optional[str] = None) -> str:
-    # JSON scalars are valid YAML flow scalars, which keeps device-reported strings quoted and escaped.
+    # JSON scalars are valid YAML flow scalars, so device strings stay quoted and escaped.
     header = f"# {comment}\n" if comment else ""
     return header + "camera:\n" + "".join(f"  {key}: {json.dumps(value)}\n" for key, value in rows)
 
@@ -105,7 +104,7 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
         "queue_depth": QUEUE_DEPTH,
         "allow_cpu_fallback": True,
     }
-    # Core rejects capture_buffer_count > 0 when libcamerasrc lacks buffer-count.
+    # Without buffer-count, Core rejects capture_buffer_count > 0 and Apps rejects any capture_buffers.
     capture_buffers = CAPTURE_BUFFERS if libcamerasrc and libcamerasrc["buffer_count"] else 0
     descriptor = {
         "kind": "neat.camera-input",
@@ -132,9 +131,6 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
         _export("python", "Python (pyneat)", "camera_input.py", "python", _python(options, capture_buffers)),
         _export("cpp", "C++ (Neat)", "camera_input.cpp", "cpp", _cpp(options, capture_buffers)),
     ]
-    # Apps treats capture_buffers as a positive capture-buffer request; unlike the Core APIs it
-    # has no value that means "do not set buffer-count".  Do not offer a configuration that the
-    # installed libcamerasrc is known to reject.
     if capture_buffers:
         exports.append(_export("yaml", "Apps config.yaml camera block", "config.yaml", "yaml", _yaml_block(yaml_rows)))
     exports.append(_export("json", "JSON", "camera_input.json", "json", json.dumps(descriptor, indent=2) + "\n"))
@@ -164,8 +160,6 @@ def _mode_support(item: dict, choice: dict, mode: Optional[dict]) -> dict:
 
 def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc: Optional[dict]) -> list:
     warnings = []
-    # An advertised mode says so on its own menu entry and on the tier pill; a paragraph repeating it
-    # above the code belongs to neither.
     if mode and mode.get("delivered_fps") and mode["delivered_fps"] != choice["value"]:
         warnings.append(
             f"Measured on a DevKit, this mode delivered about {mode['delivered_fps']} fps regardless of the "
@@ -186,8 +180,6 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc:
     if not libcamerasrc or not libcamerasrc["present"]:
         warnings.append(item["support"]["reason"])
         return warnings
-    # Nothing is said when the board can do zero-copy: the exported code sets allow_cpu_fallback
-    # where anyone reading it will see it. Only its absence needs explaining.
     if not libcamerasrc["external_buffer_mode"]:
         warnings.append(
             "The export allows CPU fallback: libcamerasrc on this board has no external-buffer-mode property, "
@@ -213,7 +205,7 @@ def _cpp_value(value) -> str:
     escaped = []
     for byte in value.encode("utf-8"):
         char = chr(byte)
-        # Octal escapes stop after three digits, unlike \x, so a following character cannot be absorbed.
+        # Octal, not \x: an octal escape stops after three digits.
         escaped.append(char if 0x20 <= byte < 0x7F and char not in '"\\?' else f"\\{byte:03o}")
     return '"' + "".join(escaped) + '"'
 

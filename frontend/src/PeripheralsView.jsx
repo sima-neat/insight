@@ -42,7 +42,7 @@ function IssueList({ issues }) {
   )
 }
 
-// Must match the breakpoint in styles.css where the rail turns into a row.
+// Keep in sync with the rail breakpoint in styles.css.
 const RAIL_ROW_QUERY = '(max-width: 640px)'
 
 function useMediaQuery(query) {
@@ -61,8 +61,6 @@ function useMediaQuery(query) {
 
 function DeviceKindNav({ tabs, activeId, onSelect }) {
   const refs = useRef(new Map())
-  // Greyed kinds stay focusable (aria-disabled, not disabled) so a keyboard or
-  // screen-reader user can read why they are not selectable.
   const [focused, setFocused] = useState(null)
   const horizontal = useMediaQuery(RAIL_ROW_QUERY)
   const order = tabs.map((tab) => tab.id)
@@ -118,8 +116,6 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
             <KindIcon icon={tab.icon} />
             {tab.badge && <span className="periph-kind-badge" aria-hidden="true">{tab.badge}</span>}
           </span>
-          {/* The tip is for sighted users (hover and keyboard focus); assistive tech gets the
-              same words from aria-label and the description below. */}
           <span className="periph-kind-tip" aria-hidden="true">{tab.tooltip}</span>
           {tab.note && <span id={`periph-kind-note-${tab.id}`} className="sr-only">{tab.note}</span>}
         </button>
@@ -162,8 +158,6 @@ function CameraList({ groups, selectedId, onSelect }) {
                 onClick={() => onSelect(camera.id)}
               >
                 <span className="periph-camera-name">{camera.name}</span>
-                {/* An empty subtitle must not render: the row is a grid, and a blank span would
-                    leave this row taller than its neighbours. */}
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
                 <span className="periph-pills">
                   <Pill tone={availability.tone}>{availability.label}</Pill>
@@ -277,7 +271,6 @@ export default function PeripheralsView({
   }, [])
 
   useEffect(() => {
-    // Only the "Scanning… N s" counter needs a clock now that nothing on the page shows a relative time.
     if (!scanning) return undefined
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)

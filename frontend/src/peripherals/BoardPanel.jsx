@@ -19,8 +19,6 @@ export default function BoardPanel({
   const closeRef = useRef(null)
 
   useEffect(() => {
-    // aria-modal tells assistive technology the page behind is inert, so keyboard focus has to
-    // behave that way too: keep Tab inside the panel and give focus back where it came from.
     const opener = document.activeElement
     closeRef.current?.focus()
 

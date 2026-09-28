@@ -1,9 +1,4 @@
-"""Camera discovery probe, executed on the board as ``python3 -``.
-
-Stdlib only and Python 3.8 compatible. It reads sysfs, /proc and the output of
-libcamera and V4L2 tools, never captures or changes controls, and prints one
-JSON document that ``cameras.py`` turns into the Peripherals snapshot.
-"""
+# Runs on the board as `python3 -`: stdlib only, Python 3.8, never captures or changes controls.
 import json
 import os
 import platform
@@ -17,9 +12,7 @@ SYSFS_ROOT = "/sys"
 PROC_ROOT = "/proc"
 DEV_ROOT = "/dev"
 COMMAND_TIMEOUT = 10
-# cam -I opens the sensor and gst-inspect may rebuild the plugin registry.
 SLOW_COMMAND_TIMEOUT = 15
-# The backend waits BUDGET_SEC + a margin; commands past the budget are skipped, not waited for.
 BUDGET_SEC = 70
 TOOLS = ("cam", "media-ctl", "v4l2-ctl", "gst-inspect-1.0", "fuser", "sudo")
 _deadline = None
@@ -51,10 +44,8 @@ _V4L2_RANGE_SIZE_RE = re.compile(
 _V4L2_DISCRETE_INTERVAL_RE = re.compile(r"^\s*Interval:\s*Discrete\s.*\(([\d.]+)\s*fps\)")
 _V4L2_RANGE_INTERVAL_RE = re.compile(r"^\s*Interval:\s*(?:Stepwise|Continuous)\s.*\(([\d.]+)-([\d.]+)\s*fps\)")
 _V4L2_CARD_RE = re.compile(r"^\s*Card type\s*:\s*(.*?)\s*$", re.MULTILINE)
-# The Modalix ISP's output nodes: sysfs name and V4L2 card.
 ISP_OUTPUT_NAME = "isp_v4l2-vid-cap-out"
 ISP_OUTPUT_CARD = "arm-isp-out"
-# libcamera's UVC pipeline ids end in "<vid>:<pid>"; those cameras are reported through V4L2.
 _USB_CAMERA_ID_RE = re.compile(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$")
 # v4l2_i2c_subdev_set_name() names an I2C sensor entity "<driver> <bus>-<4-hex-digit address>".
 _I2C_CLIENT_RE = re.compile(r"\s(\d+-[0-9a-fA-F]{4})$")
@@ -65,7 +56,6 @@ def which(name):
 
 
 def run(argv, timeout=COMMAND_TIMEOUT):
-    """Run argv without a shell; return (exit code, stdout, stderr), exit code None on timeout."""
     if _deadline is not None:
         timeout = min(timeout, _deadline - time.monotonic())
         if timeout <= 0:
@@ -141,7 +131,6 @@ def _split_camera_label(label):
 
 
 def parse_rate_limits(text):
-    """Map camera id -> max fps from the Modalix handler's log, which precedes each camera's registration."""
     rates, pending = {}, None
     for line in text.splitlines():
         match = _RATE_RE.search(line)
@@ -173,7 +162,6 @@ def parse_cam_list(text):
 
 
 def parse_cam_info(text):
-    """Formats of the first stream from `cam -c <id> -I`."""
     formats, current = [], None
     for line in text.splitlines():
         match = _STREAM_RE.match(line)
@@ -219,7 +207,7 @@ def parse_gst_properties(text):
 
 
 def parse_device_caps(text):
-    """The node's own capabilities from `v4l2-ctl --info`; the driver-wide Capabilities list covers every node."""
+    # Device Caps, not Capabilities: the latter covers every node of the driver.
     caps, in_caps = [], False
     for line in text.splitlines():
         key, sep, _ = line.partition(":")
@@ -284,7 +272,6 @@ def availability_method(tools):
 
 
 def scan_proc():
-    """Map each /dev path held open to the pids holding it, for every process we may inspect."""
     held = {}
     own = os.getpid()
     for pid in _names(PROC_ROOT, r"\d+"):
@@ -306,7 +293,6 @@ def scan_proc():
 
 
 def user_checker(method, tools):
-    """Return nodes -> list of users, or None when the check could not run."""
     if method in ("proc-root", "proc-user"):
         held = scan_proc()
         return lambda nodes: _users({pid for node in nodes for pid in held.get(node, ())})
@@ -323,23 +309,14 @@ def user_checker(method, tools):
 
 
 def sensor_model(name):
-    """The sensor model read from a libcamera id or entity name, lowercased.
-
-    Device-tree path ids end in the sensor node, "<model>@<address>"; entity names are
-    "<model> <bus>-<address>".
-    """
+    # Ids are "<model> <bus>-<addr>" entity names or device-tree paths ending in "<model>@<addr>".
     leaf = (name or "").strip().rstrip("/").rsplit("/", 1)[-1]
     parts = leaf.split()
     return parts[0].split("@", 1)[0].lower() if parts else ""
 
 
 def firmware_id(sensor):
-    """The sensor's firmware node as libcamera names the camera when it has one, else None.
-
-    libcamera (sysfs::firmwareNodePath) resolves the subdevice's device/of_node and strips
-    /sys/firmware/devicetree, giving "/base/...", or reads firmware_node/path on ACPI systems.
-    The device is found through the entity's subdevice node, else its I2C client "<bus>-<addr>".
-    """
+    # Mirrors libcamera's sysfs::firmwareNodePath: the of_node below /sys/firmware/devicetree, else ACPI's path.
     devices = []
     if sensor.get("node"):
         devices.append(os.path.join(SYSFS_ROOT, "class", "video4linux", os.path.basename(sensor["node"]), "device"))
@@ -421,11 +398,7 @@ def probe_libcamerasrc(tools, failures):
 
 
 def _match_sensors(media, listing):
-    """Pair each libcamera camera with its media-graph sensor entity; one entry per physical sensor.
-
-    libcamera names a camera by its sensor entity ("imx477 5-001a") or by the sensor's firmware
-    node ("/base/.../imx477@1a"); both are matched exactly, never on the model or address alone.
-    """
+    # Match exactly on the entity name or firmware node, never on the model or address alone.
     sensors = [dict(sensor, device=device) for device in media for sensor in device["sensors"]]
     by_id = {}
     for sensor in sensors:
@@ -446,8 +419,7 @@ def _match_sensors(media, listing):
     for sensor in sensors:
         if id(sensor) in claimed:
             continue
-        # A sensor libcamera may already list under a name that could not be matched is not listed
-        # twice; the unmatched camera names it instead.
+        # Possibly an unmatched libcamera camera: named on that camera instead of listed twice.
         model = sensor_model(sensor["name"])
         suspects = [e for e in unmatched if sensor_model(e.get("model") or e["id"]) in ("", model)]
         for entry in suspects:
@@ -489,7 +461,6 @@ def collect_mipi(tools, media, listing, check_users):
 
 
 def _read_modes(tools, camera):
-    # cam -I acquires the camera exclusively but never starts streaming.
     code, out, err = run([tools["cam"], "-c", camera["id"], "-I"], SLOW_COMMAND_TIMEOUT)
     text = err + "\n" + out
     if code is None:
@@ -586,7 +557,6 @@ def collect_usb(tools, check_users, failures):
 
 
 def read_isp_sizes(tools):
-    """Discrete sizes every ISP output node lists, or the reason they could not be read."""
     result = {"nodes": [], "sizes": None, "differs": False, "reason": None, "node": None, "detail": None}
     if not tools.get("v4l2-ctl"):
         result["reason"] = "tool_missing"
@@ -640,7 +610,6 @@ def collect():
         "media_devices": media,
         "libcamera": listing,
         "mipi": mipi,
-        # Only needed to gate libcamera's modes, so skipped when no camera reported any.
         "isp": read_isp_sizes(tools) if any(camera["formats"] for camera in mipi) else None,
         "usb": collect_usb(tools, check_users, failures),
         "failures": failures,

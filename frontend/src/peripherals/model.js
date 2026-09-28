@@ -13,10 +13,6 @@ const CONNECTIONS = [
 
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
 
-// Device kinds Insight knows a name and an icon for. Only "camera" has a view;
-// the rest are listed so the shape of the page does not change when the backend
-// starts reporting them (contract: build nothing for other kinds yet). A kind
-// the backend invents gets the generic "device" icon.
 const DEVICE_KINDS = [
   { id: 'camera', label: 'Cameras', icon: 'camera' },
   { id: 'microphone', label: 'Microphones', icon: 'microphone' },
@@ -83,8 +79,6 @@ export function boardIndicator(board) {
     }
   }
   const state = connectionStateInfo(board.status)
-  // One control names the board and its state. "sima@host" is the connection string, which belongs
-  // in the panel; the masthead says which machine, in the words the rest of the SDK uses for it.
   const label = target.mode === 'local'
     ? 'This board'
     : `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`
@@ -126,11 +120,6 @@ function kindCountBadge(count) {
   return count > 99 ? '99+' : String(count)
 }
 
-// One entry per device kind for the icon rail. A kind is selectable only when
-// Insight has a view for it AND the last scan found at least one; everything
-// else is greyed, and `note` says why (it becomes the tooltip and the
-// accessible description, so a greyed icon never leaves the user guessing).
-// `scanned: false` means there is no scan yet, so no count is claimed.
 export function deviceTabs(items, { scanned = true } = {}) {
   const counts = new Map()
   for (const item of items || []) {
@@ -175,8 +164,6 @@ export function resolveDeviceKind(tabs, wanted) {
   const list = tabs || []
   const usable = list.filter((tab) => !tab.disabled)
   if (wanted && usable.some((tab) => tab.id === wanted)) return wanted
-  // With nothing selectable (no scan yet, or no camera attached) the panel still
-  // shows the first kind Insight has a view for: that view explains what to do next.
   return usable[0]?.id || list.find((tab) => tab.supported)?.id || null
 }
 
@@ -187,7 +174,6 @@ export function cameraDeviceId(camera) {
 
 export function cameraSubtitle(camera) {
   const deviceId = cameraDeviceId(camera)
-  // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
 }
@@ -304,8 +290,6 @@ export function fpsOptions(camera, format, width, height) {
   }))
 }
 
-// A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
-// pill beside the menu for the chosen entry, and the entries are grouped under their tier.
 const TIER_PILLS = {
   verified: { label: 'Verified', tone: 'ok' },
   advertised: { label: 'Advertised', tone: 'warn' },
@@ -329,8 +313,6 @@ export function groupOptions(options) {
     .filter((group) => group.options.length)
 }
 
-// One visible explanation line per camera state, chosen by priority, so the
-// detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
   const availability = availabilityInfo(camera?.availability)
   const tier = camera?.support?.tier
@@ -339,8 +321,6 @@ export function cameraSummaryLine(camera) {
   }
   if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
-  // A working camera gets no sentence at all. Every mode menu already labels each entry
-  // "verified" or "advertised", so a paragraph repeating that distinction only adds text.
   return ''
 }
 
@@ -453,10 +433,7 @@ export function validateBoardForm(values) {
   return { body: { host, port, user } }
 }
 
-// The board state has several writers: reads (on load, Retry, after a scan) and the POSTs that
-// change the board and answer with the new state. Their answers can arrive out of order, so a
-// read only applies while nothing newer has been sent or applied; a superseded read resolves to
-// whatever state won instead of its own out-of-date answer.
+// A read applies only if nothing newer was sent or applied; a superseded read resolves to the newer state.
 export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
   let latest = 0
   let newest = Promise.resolve(null)
@@ -499,11 +476,7 @@ export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
   return { load, apply }
 }
 
-// When a disclosure collapses, the control that had focus is removed, and focus would fall to the
-// page body. request() is called when it collapses; flush() runs after the next render, so the
-// candidates (usually refs) are read once the opener is back on the page. The first candidate
-// still rendered and enabled gets focus. flush() does nothing without a pending request: it runs
-// after every render, including each keystroke in a form.
+// flush() runs after every render and focuses the first connected, enabled candidate of a pending request.
 export function createFocusReturn() {
   let pending = null
   return {
