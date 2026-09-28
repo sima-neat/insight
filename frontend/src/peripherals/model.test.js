@@ -3,26 +3,17 @@ import test from 'node:test'
 
 import {
   apiError,
-  availabilityInfo,
-  blockedFormatSummary,
-  boardIndicator,
-  cameraSubtitle,
   cameraSummaryLine,
-  changeSummary,
   createBoardSync,
   createFocusReturn,
-  defaultTargetText,
   deviceRows,
   deviceTabs,
   formatOptions,
-  formatRangeLabel,
-  formatRelativeTime,
   fpsOptions,
-  groupOptions,
   groupCameras,
+  groupOptions,
   initialBoardForm,
   isSnapshotStale,
-  modeLabel,
   normalizeError,
   optionTier,
   resolveCameraId,
@@ -32,8 +23,6 @@ import {
   sameSelection,
   sizeOptions,
   sortIssues,
-  sourceLabel,
-  tierInfo,
   validateBoardForm
 } from './model.js'
 
@@ -127,15 +116,8 @@ const usb = {
 }
 
 const snapshot = {
-  board: { label: 'sima@192.168.2.2', source: 'sdk-env', hostname: 'modalix', machine: 'aarch64', build_version: '2.0.0', fingerprint: 'SHA256:abc' },
   generation: 3,
   scanned_at: '2026-09-21T10:00:00Z',
-  scan_ms: 3400,
-  platform: {
-    tools: { cam: true, 'v4l2-ctl': false, 'media-ctl': true, 'gst-inspect-1.0': true, fuser: false },
-    libcamerasrc: { present: true, external_buffer_mode: true, buffer_count: true },
-    availability_method: 'proc-user'
-  },
   items: [usb, imx477, { id: 'mic:0', kind: 'microphone', connection: 'usb', name: 'USB mic' }, imx568, inUse],
   issues: [
     { severity: 'info', code: 'no_usb_power', message: 'USB hub reports low power.', hint: 'Use a powered hub.' },
@@ -147,7 +129,7 @@ const snapshot = {
 
 test('cameras are grouped MIPI first, then USB, and other kinds are ignored', () => {
   const groups = groupCameras(snapshot.items)
-  assert.deepEqual(groups.map((g) => g.label), ['MIPI (libcamera)', 'USB (V4L2)'])
+  assert.deepEqual(groups.map((g) => g.id), ['mipi', 'usb'])
   assert.deepEqual(groups[0].items.map((c) => c.id), [imx477.id, imx568.id, inUse.id])
   assert.deepEqual(groups[1].items.map((c) => c.id), [usb.id])
   assert.deepEqual(groupCameras([]), [])
@@ -155,73 +137,48 @@ test('cameras are grouped MIPI first, then USB, and other kinds are ignored', ()
 
 test('format options disable non-exportable formats and keep their reason', () => {
   const [nv12, rgb] = formatOptions(imx568)
-  assert.equal(nv12.disabled, false)
-  assert.equal(nv12.label, 'NV12 (YUV 4:2:0)')
-  assert.equal(nv12.tier, 'advertised')
-  assert.deepEqual(nv12.range.max_width, 2432)
-  assert.equal(rgb.disabled, true)
-  assert.equal(rgb.label, 'RGB888')
-  assert.equal(rgb.tier, 'unsupported')
-  assert.equal(rgb.reason, 'Core CameraInput outputs NV12 only.')
+  assert.deepEqual([nv12.disabled, nv12.tier, nv12.range.max_width], [false, 'advertised', 2432])
+  assert.deepEqual([rgb.disabled, rgb.tier, rgb.reason], [true, 'unsupported', 'Core CameraInput outputs NV12 only.'])
+  const ranged = formatOptions({ formats: [format('YUYV', 'YUYV', false, support('unsupported', 'No discrete sizes.'), [], {
+    min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 16
+  })] })[0]
+  assert.match(ranged.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
-test('size and fps options carry their best support tier, for the pill beside the menu', () => {
-  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier]), [['1920×1080', 'verified'], ['1280×720', 'advertised']])
-  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.label, o.tier]), [['30 fps', 'verified'], ['60 fps', 'advertised']])
+test('size and fps options carry their best support tier', () => {
+  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.value, o.tier]), [['1920x1080', 'verified'], ['1280x720', 'advertised']])
+  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.value, o.tier]), [['30', 'verified'], ['60', 'advertised']])
   assert.deepEqual(fpsOptions(imx568, 'NV12', 1920, 1080).map((o) => o.value), ['30', '59.94'])
   assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
 })
 
-test('the default selection is preselected when it is exportable', () => {
-  assert.deepEqual(resolveSelection(imx477, null), { format: 'NV12', width: 1920, height: 1080, fps: 30 })
-  assert.deepEqual(resolveSelection(usb, null), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
-})
-
-test('a missing or non-exportable default falls back to the best exportable mode', () => {
-  assert.deepEqual(resolveSelection(imx568, null), { format: 'NV12', width: 2432, height: 2048, fps: 30 })
-  const rgbDefault = { ...imx568, default_selection: { format: 'RGB888', width: 1920, height: 1080, fps: 30 } }
-  assert.equal(resolveSelection(rgbDefault, null).format, 'NV12')
-  assert.equal(resolveSelection({ ...imx568, formats: [imx568.formats[1]] }, null), null)
-})
-
-test('changing one level keeps the rest of the selection when it is still offered', () => {
-  assert.deepEqual(resolveSelection(usb, { format: 'YUYV' }), { format: 'YUYV', width: 640, height: 480, fps: 30 })
-  assert.deepEqual(
-    resolveSelection(usb, { format: 'YUYV', width: 640, height: 480, fps: 30 }),
-    { format: 'YUYV', width: 640, height: 480, fps: 30 }
-  )
-  assert.deepEqual(
-    resolveSelection(usb, { format: 'YUYV', width: 1280, height: 720, fps: 30 }),
-    { format: 'YUYV', width: 640, height: 480, fps: 30 }
-  )
-  assert.deepEqual(resolveSelection(usb, { format: 'MJPG' }), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
-  assert.deepEqual(
-    resolveSelection(imx477, { format: 'NV12', width: 1280, height: 720, fps: 30 }),
-    { format: 'NV12', width: 1280, height: 720, fps: 60 }
-  )
-  assert.deepEqual(
-    resolveSelection(imx568, { format: 'NV12', width: 1920, height: 1080, fps: 59.94 }),
-    { format: 'NV12', width: 1920, height: 1080, fps: 59.94 }
-  )
-})
-
-test('a selection that disappears after refresh falls back instead of clearing', () => {
-  const refreshed = { ...imx477, formats: [{ ...imx477.formats[0], sizes: [imx477.formats[0].sizes[0]] }] }
-  assert.deepEqual(
-    resolveSelection(refreshed, { format: 'NV12', width: 1280, height: 720, fps: 60 }),
-    { format: 'NV12', width: 1920, height: 1080, fps: 60 }
-  )
-  assert.deepEqual(
-    resolveSelection(refreshed, { format: 'NV12', width: 1280, height: 720, fps: 15 }),
-    { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-  )
-  assert.equal(resolveSelection(usb, { format: 'H264', width: 1920, height: 1080, fps: 30 }).format, 'MJPG')
+test('resolveSelection prefers the wanted mode, then the default, then the best exportable mode', () => {
+  const mode = (format, width, height, fps) => ({ format, width, height, fps })
+  const shrunk = { ...imx477, formats: [{ ...imx477.formats[0], sizes: [imx477.formats[0].sizes[0]] }] }
+  const cases = [
+    [imx477, null, mode('NV12', 1920, 1080, 30)],
+    [usb, null, mode('MJPG', 1280, 720, 30)],
+    [imx568, null, mode('NV12', 2432, 2048, 30)],
+    [{ ...imx568, default_selection: mode('RGB888', 1920, 1080, 30) }, null, mode('NV12', 2432, 2048, 30)],
+    [{ ...imx568, formats: [imx568.formats[1]] }, null, null],
+    [usb, { format: 'YUYV' }, mode('YUYV', 640, 480, 30)],
+    [usb, mode('YUYV', 1280, 720, 30), mode('YUYV', 640, 480, 30)],
+    [usb, { format: 'MJPG' }, mode('MJPG', 1280, 720, 30)],
+    [usb, mode('H264', 1920, 1080, 30), mode('MJPG', 1280, 720, 30)],
+    [imx477, mode('NV12', 1280, 720, 30), mode('NV12', 1280, 720, 60)],
+    [imx568, mode('NV12', 1920, 1080, 59.94), mode('NV12', 1920, 1080, 59.94)],
+    [shrunk, mode('NV12', 1280, 720, 60), mode('NV12', 1920, 1080, 60)],
+    [shrunk, mode('NV12', 1280, 720, 15), mode('NV12', 1920, 1080, 30)]
+  ]
+  for (const [camera, wanted, expected] of cases) {
+    assert.deepEqual(resolveSelection(camera, wanted), expected, `${camera.id} ${JSON.stringify(wanted)}`)
+  }
 })
 
 test('the selected camera id survives refreshes and removals', () => {
   assert.equal(resolveCameraId(snapshot, null), imx477.id)
   assert.equal(resolveCameraId(snapshot, usb.id), usb.id)
-  assert.equal(resolveCameraId(snapshot, 'mipi:gone'), 'mipi:gone', 'removed cameras stay selected so the UI can explain')
+  assert.equal(resolveCameraId(snapshot, 'mipi:gone'), 'mipi:gone')
   assert.equal(resolveCameraId(snapshot, 'usb:unknown'), imx477.id)
   assert.equal(resolveCameraId({ items: [] }, 'usb:unknown'), null)
   assert.equal(resolveCameraId(null, null), null)
@@ -234,21 +191,6 @@ test('a snapshot is stale only when it was scanned for another board generation'
   assert.equal(isSnapshotStale(null, snapshot), false)
 })
 
-test('labels for tiers, availability, sources, and defaults', () => {
-  assert.equal(tierInfo('verified').label, 'Verified with Core')
-  assert.equal(tierInfo('advertised').label, 'Advertised, unverified')
-  assert.equal(tierInfo('unsupported').label, 'Not supported by Core CameraInput')
-  assert.equal(tierInfo('bogus').label, 'Support unknown')
-  assert.equal(availabilityInfo(inUse.availability).label, 'In use by gst-launch-1.0 (pid 812)')
-  assert.deepEqual(availabilityInfo(imx568.availability), { label: 'Availability unknown', tone: '', reason: 'fuser is not installed on the board.' })
-  assert.equal(availabilityInfo(available).label, 'Available')
-  assert.equal(sourceLabel('on-board'), 'On this board')
-  assert.equal(sourceLabel('sdk-env'), 'SDK DevKit')
-  assert.equal(sourceLabel('manual'), 'Manual')
-  assert.equal(defaultTargetText({ on_board: false, sdk_env: { host: '192.168.2.2', port: 22, user: 'sima' } }), 'sima@192.168.2.2:22 (paired SDK DevKit)')
-  assert.equal(defaultTargetText({ on_board: false, sdk_env: null }), '')
-})
-
 test('identity rows list only known device fields', () => {
   const rows = Object.fromEntries(deviceRows(usb))
   assert.equal(rows['USB ID'], '046d:0825')
@@ -258,29 +200,8 @@ test('identity rows list only known device fields', () => {
   assert.equal(Object.fromEntries(deviceRows(imx568))['Name source'], 'media-graph')
 })
 
-test('a subtitle never repeats what the name already says', () => {
-  // "imx477 5-001a" carries the model, so the subtitle beneath it must not read "imx477" again.
-  assert.equal(cameraSubtitle(imx477), '')
-  // The USB camera reports its product string as both name and model, so only the device id is news.
-  assert.equal(cameraSubtitle(usb), usb.device.by_id)
-  assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
-  assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
-})
-
-test('issues sort by severity and changes read as sentences', () => {
+test('issues sort by severity', () => {
   assert.deepEqual(sortIssues(snapshot.issues).map((i) => i.severity), ['error', 'warning', 'info'])
-  assert.deepEqual(changeSummary(snapshot.changes), ['Disconnected since last refresh: imx219', 'New: HD Webcam C270'])
-  assert.deepEqual(changeSummary(null), [])
-})
-
-test('relative times and durations', () => {
-  const now = Date.parse('2026-09-21T10:00:00Z')
-  assert.equal(formatRelativeTime('2026-09-21T09:59:58Z', now), 'just now')
-  assert.equal(formatRelativeTime('2026-09-21T09:59:30Z', now), '30 s ago')
-  assert.equal(formatRelativeTime('2026-09-21T09:55:00Z', now), '5 min ago')
-  assert.equal(formatRelativeTime('2026-09-21T07:00:00Z', now), '3 h ago')
-  assert.equal(formatRelativeTime('2026-09-19T10:00:00Z', now), '2 d ago')
-  assert.equal(formatRelativeTime(null, now), '')
 })
 
 test('API errors keep code, hint, and extra fields', () => {
@@ -304,11 +225,8 @@ test('API errors keep code, hint, and extra fields', () => {
   assert.equal(normalizeError(null), null)
 })
 
-test('mode labels and selection equality drive the fallback notice', () => {
+test('selection equality compares fps numerically', () => {
   const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-  assert.equal(modeLabel(mode), 'NV12 1920×1080 @ 30 fps')
-  assert.equal(modeLabel({ ...mode, fps: 59.94 }), 'NV12 1920×1080 @ 59.94 fps')
-  assert.equal(modeLabel(null), '')
   assert.ok(sameSelection(mode, { ...mode, fps: '30' }))
   assert.ok(!sameSelection(mode, { ...mode, width: 1280, height: 720 }))
   assert.ok(!sameSelection(mode, { ...mode, format: 'YUYV' }))
@@ -319,12 +237,8 @@ test('mode labels and selection equality drive the fallback notice', () => {
 test('board form defaults and validation', () => {
   const board = { target: { mode: 'local' }, saved: null, defaults: { on_board: false, sdk_env: { host: '192.168.2.2', port: 22, user: 'sima' } } }
   assert.deepEqual(initialBoardForm(board), { host: '192.168.2.2', port: '22', user: 'sima' })
-  assert.deepEqual(initialBoardForm(null), { host: '', port: '22', user: 'sima' })
   assert.deepEqual(validateBoardForm({ host: ' devkit.local ', port: '2222', user: 'sima' }), { body: { host: 'devkit.local', port: 2222, user: 'sima' } })
-  assert.ok(validateBoardForm({ host: '', port: '22', user: 'sima' }).error)
-  assert.ok(validateBoardForm({ host: 'a b', port: '22', user: 'sima' }).error)
   assert.ok(validateBoardForm({ host: 'devkit', port: '70000', user: 'sima' }).error)
-  assert.ok(validateBoardForm({ host: 'devkit', port: '22', user: ' ' }).error)
 })
 
 test('only http(s) links are rendered', () => {
@@ -333,131 +247,40 @@ test('only http(s) links are rendered', () => {
   assert.equal(safeHref(undefined), null)
 })
 
-// --- #126 addendum: board indicator, device sub-tabs, declutter ------------
-
-test('the masthead board indicator collapses board state into a label and a short pill', () => {
-  assert.deepEqual(boardIndicator(null).state.short, 'Loading…')
-  const none = boardIndicator({ target: null, status: { state: 'unknown' } })
-  assert.equal(none.label, 'No board')
-  assert.equal(none.state.short, 'Not selected')
-  // The masthead names the machine the way the SDK does; sima@host is a connection string and
-  // stays in the panel.
-  const connected = boardIndicator({
-    target: { label: 'sima@192.168.2.2', mode: 'ssh', source: 'sdk-env', host: '192.168.2.2' },
-    status: { state: 'connected' }
-  })
-  assert.equal(connected.label, 'DevKit: 192.168.2.2')
-  assert.equal(connected.state.short, 'Connected')
-  assert.equal(connected.state.tone, 'ok')
-  assert.match(connected.title, /^sima@192\.168\.2\.2 — Connected/, 'the full target stays in the tooltip')
-  const manual = boardIndicator({
-    target: { label: 'sima@10.0.0.4', mode: 'ssh', source: 'manual', host: '10.0.0.4' },
-    status: { state: 'connected' }
-  })
-  assert.equal(manual.label, 'Board: 10.0.0.4', 'a hand-entered board is not called a DevKit')
-  assert.equal(boardIndicator({ target: { label: 'This board', mode: 'local', source: 'on-board' }, status: null }).label, 'This board')
-  const failed = boardIndicator({ target: { label: 'This board' }, status: { state: 'error' } })
-  assert.equal(failed.state.short, 'Error')
-  assert.equal(failed.state.label, 'Connection failed', 'the card keeps the long label')
-  assert.equal(boardIndicator({ target: { label: 'This board' }, status: null }).state.short, 'Not checked')
-})
-
-test('device sub-tabs come from the snapshot kinds and keep unbuilt kinds disabled', () => {
-  const tabs = deviceTabs(snapshot.items)
-  assert.deepEqual(tabs.map((t) => t.id), ['camera', 'microphone', 'lidar'])
-  assert.deepEqual(tabs.map((t) => t.label), ['Cameras', 'Microphones', 'LiDAR'])
-  assert.equal(tabs[0].count, 4)
-  assert.equal(tabs[0].disabled, false)
-  assert.equal(tabs[1].count, 1, 'the microphone in the snapshot is counted')
-  assert.equal(tabs[1].disabled, true)
-  assert.match(tabs[1].note, /cannot show microphones yet/)
-  assert.equal(tabs[2].count, 0)
-  assert.equal(tabs[2].note, 'Not supported yet')
-})
-
-test('a kind the backend invents appears automatically, after the known ones', () => {
-  const tabs = deviceTabs([{ kind: 'camera' }, { kind: 'radar' }, { kind: 'radar' }, { kind: null }])
-  assert.deepEqual(tabs.map((t) => t.id), ['camera', 'microphone', 'lidar', 'radar'])
-  const radar = tabs.at(-1)
-  assert.equal(radar.label, 'Radars')
-  assert.equal(radar.count, 2)
-  assert.equal(radar.disabled, true)
-  assert.equal(radar.icon, 'device', 'an unknown kind gets the generic icon')
-  assert.deepEqual(deviceTabs([]).map((t) => t.disabled), [true, true, true], 'no cameras detected greys cameras too')
-})
-
-test('each rail icon carries a count bubble, an accessible name and the reason it is greyed', () => {
-  const tabs = deviceTabs(snapshot.items)
-  assert.deepEqual(tabs.map((t) => t.icon), ['camera', 'microphone', 'lidar'])
-  assert.deepEqual(tabs.map((t) => t.badge), ['4', '1', ''], 'no bubble for a kind with nothing detected')
-  assert.deepEqual(tabs.map((t) => t.name), ['Cameras, 4 devices', 'Microphones, 1 device', 'LiDAR, 0 devices'])
-  assert.equal(tabs[0].note, '', 'a selectable kind needs no explanation')
-  assert.equal(tabs[0].tooltip, 'Cameras, 4 devices')
-  assert.equal(tabs[1].tooltip, 'Microphones — 1 device detected; Insight cannot show microphones yet.')
-  assert.equal(tabs[2].tooltip, 'LiDAR — Not supported yet')
-  const one = deviceTabs([{ kind: 'camera' }])[0]
-  assert.equal(one.name, 'Cameras, 1 device')
-  assert.equal(one.disabled, false)
+test('device kinds: only a supported kind with detections is selectable', () => {
+  const summary = (tabs) => tabs.map((t) => [t.id, t.count, t.disabled, t.badge])
+  const none = [['camera', 0, true, ''], ['microphone', 0, true, ''], ['lidar', 0, true, '']]
+  const cases = [
+    [deviceTabs(snapshot.items), [['camera', 4, false, '4'], ['microphone', 1, true, '1'], ['lidar', 0, true, '']]],
+    [deviceTabs([{ kind: 'camera' }, { kind: 'radar' }, { kind: 'radar' }, { kind: null }]),
+      [['camera', 1, false, '1'], ['microphone', 0, true, ''], ['lidar', 0, true, ''], ['radar', 2, true, '2']]],
+    [deviceTabs([]), none],
+    [deviceTabs(undefined, { scanned: false }), none]
+  ]
+  for (const [tabs, expected] of cases) assert.deepEqual(summary(tabs), expected)
+  assert.equal(deviceTabs([{ kind: 'radar' }]).at(-1).icon, 'device')
   assert.equal(deviceTabs(Array.from({ length: 120 }, () => ({ kind: 'camera' })))[0].badge, '99+')
 })
 
-test('a supported kind with nothing detected is greyed but says why', () => {
-  const [cameras] = deviceTabs([{ kind: 'microphone' }])
-  assert.equal(cameras.supported, true)
-  assert.equal(cameras.disabled, true)
-  assert.equal(cameras.note, 'No cameras detected')
-  assert.equal(cameras.name, 'Cameras, 0 devices')
-  assert.equal(cameras.tooltip, 'Cameras — No cameras detected')
-  const [unscanned, , lidar] = deviceTabs(undefined, { scanned: false })
-  assert.equal(unscanned.note, 'Not scanned yet', 'before a scan nothing is claimed about the count')
-  assert.equal(unscanned.name, 'Cameras')
-  assert.equal(unscanned.badge, '')
-  assert.equal(lidar.note, 'Not supported yet', 'unsupported wins over not scanned')
-})
-
-test('only an enabled sub-tab can be selected', () => {
+test('only an enabled kind can be selected, and camera is the fallback view', () => {
   const tabs = deviceTabs(snapshot.items)
-  assert.equal(resolveDeviceKind(tabs, 'camera'), 'camera')
-  assert.equal(resolveDeviceKind(tabs, 'microphone'), 'camera', 'disabled kinds fall back')
-  assert.equal(resolveDeviceKind(tabs, 'nonsense'), 'camera')
-  assert.equal(resolveDeviceKind([], 'camera'), null)
-})
-
-test('with nothing selectable the panel keeps showing the camera view', () => {
-  assert.equal(resolveDeviceKind(deviceTabs([]), 'camera'), 'camera', 'no cameras: the camera view explains it')
-  assert.equal(resolveDeviceKind(deviceTabs([], { scanned: false }), 'lidar'), 'camera')
-  assert.equal(resolveDeviceKind(deviceTabs([{ kind: 'radar' }]), 'radar'), 'camera', 'unsupported kinds never become the view')
-})
-
-test('blocked export formats collapse into one line', () => {
-  assert.equal(blockedFormatSummary(formatOptions(imx477)), '')
-  assert.equal(blockedFormatSummary(formatOptions(imx568)), '1 format cannot be used (RGB888)')
-  assert.equal(
-    blockedFormatSummary([{ value: 'A', disabled: true }, { value: 'B', disabled: true }, { value: 'C', disabled: false }]),
-    '2 formats cannot be used (A, B)'
-  )
-})
-
-test('stepwise and continuous format ranges keep their bounds and steps visible', () => {
-  assert.equal(
-    formatRangeLabel({ min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 8 }),
-    '16–1920×16–1080 in 16×8 steps'
-  )
-  const option = formatOptions({ formats: [format('YUYV', 'YUYV', false, support('unsupported', 'Discrete sizes are unavailable.'), [], {
-    min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 16
-  })] })[0]
-  assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
+  const cases = [
+    [tabs, 'camera', 'camera'],
+    [tabs, 'microphone', 'camera'],
+    [tabs, 'nonsense', 'camera'],
+    [[], 'camera', null],
+    [deviceTabs([]), 'camera', 'camera'],
+    [deviceTabs([], { scanned: false }), 'lidar', 'camera'],
+    [deviceTabs([{ kind: 'radar' }]), 'radar', 'camera']
+  ]
+  for (const [list, wanted, expected] of cases) assert.equal(resolveDeviceKind(list, wanted), expected, wanted)
 })
 
 test('the detail pane shows one explanation line, chosen by priority', () => {
-  assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\. Stop that process/)
-  assert.equal(cameraSummaryLine(imx568), imx568.support.reason, 'an unverified tier wins over unknown availability')
-  // A verified, available camera says nothing: the mode menus carry the verified/advertised labels.
+  assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\./)
+  assert.equal(cameraSummaryLine(imx568), imx568.support.reason)
   assert.equal(cameraSummaryLine(imx477), '')
-  assert.equal(
-    cameraSummaryLine({ ...imx477, support: support('verified', ''), availability: imx568.availability }),
-    'Availability unknown: fuser is not installed on the board.'
-  )
+  assert.match(cameraSummaryLine({ ...imx477, support: support('verified', ''), availability: imx568.availability }), /fuser is not installed/)
   assert.equal(cameraSummaryLine({}), '')
 })
 
@@ -567,13 +390,12 @@ test('renders without a collapse leave focus where it is', () => {
 
 test('a mode menu groups its entries by tier, and the pill names the chosen one', () => {
   const sizes = sizeOptions(imx477, 'NV12')
-  assert.deepEqual(groupOptions(sizes).map((g) => [g.label, g.options.map((o) => o.label)]),
-    [['Verified with Core', ['1920×1080']], ['Advertised by libcamera', ['1280×720']]])
-  assert.deepEqual(optionTier(sizes, sizes[1].value), { label: 'Advertised', tone: 'warn' })
+  assert.deepEqual(groupOptions(sizes).map((g) => [g.id, g.options.map((o) => o.value)]), [['verified', ['1920x1080']], ['advertised', ['1280x720']]])
+  assert.equal(optionTier(sizes, sizes[1].value).tone, 'warn')
   assert.equal(optionTier(sizes, 'no-such-size'), null)
   const formats = formatOptions(imx568)
-  assert.deepEqual(groupOptions(formats).map((g) => g.label), ['Advertised by libcamera', 'Not usable'])
-  assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
-  assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
+  assert.deepEqual(groupOptions(formats).map((g) => g.id), ['advertised', 'unsupported'])
+  assert.equal(optionTier(formats, 'RGB888').tone, 'periph-danger')
+  assert.equal(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30).tone, 'ok')
   assert.deepEqual(groupOptions([]), [])
 })

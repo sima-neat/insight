@@ -179,37 +179,21 @@ class ViewerUrlTests(unittest.TestCase):
         self.assertTrue(payload["launch_url"].startswith("https://10.0.0.23:26228/?"))
         self.assertIn("hostname=10.42.0.175", payload["launch_url"])
 
-    def test_the_shell_opens_on_the_selected_board_not_the_sdk_env(self):
-        """One control owns the board, so its shell must follow the board that control selected."""
-        target = SimpleNamespace(mode="ssh", source="manual", host="10.0.0.9", port=2222, user="dev")
-        manager = SimpleNamespace(target=lambda: target)
-        with app_module.app.test_request_context(headers={"Host": "10.0.0.23:9900"}), \
-             mock.patch.object(app_module.board, "get_board_manager", return_value=manager), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
-            self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev", False))
-            payload = app_module._build_devkit_shell_payload()
-            self.assertFalse(payload["credentials_prefilled"])
-            self.assertFalse(payload["launch_supported"])
-            self.assertIsNone(payload["launch_url"])
-
-        # Insight running on the board itself has no shell of its own to open; the SDK's DevKit stands in.
-        local = SimpleNamespace(mode="local", source="on-board", host=None, port=None, user=None)
-        with mock.patch.object(app_module.board, "get_board_manager", return_value=SimpleNamespace(target=lambda: local)), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
-            self.assertEqual(app_module._shell_target(), ("10.42.0.175", 22, "sima", True))
-
-    def test_sdk_shell_does_not_prefill_default_password_for_custom_user(self):
-        target = SimpleNamespace(mode="ssh", source="sdk-env", host="10.0.0.9", port=2222, user="dev")
-        manager = SimpleNamespace(target=lambda: target)
-
-        with app_module.app.test_request_context(headers={"Host": "10.0.0.23:9900"}), \
-             mock.patch.object(app_module.board, "get_board_manager", return_value=manager):
-            self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev", False))
-            payload = app_module._build_devkit_shell_payload()
-
-        self.assertFalse(payload["credentials_prefilled"])
-        self.assertFalse(payload["launch_supported"])
-        self.assertIsNone(payload["launch_url"])
+    def test_the_shell_follows_the_selected_board_and_prefills_only_the_sdk_default_account(self):
+        cases = (
+            (SimpleNamespace(mode="ssh", source="manual", host="10.0.0.9", port=2222, user="dev"), ("10.0.0.9", 2222, "dev", False)),
+            (SimpleNamespace(mode="ssh", source="sdk-env", host="10.0.0.9", port=2222, user="dev"), ("10.0.0.9", 2222, "dev", False)),
+            (SimpleNamespace(mode="local", source="on-board", host=None, port=None, user=None), ("10.42.0.175", 22, "sima", True)),
+        )
+        for target, expected in cases:
+            with self.subTest(source=target.source), \
+                 app_module.app.test_request_context(headers={"Host": "10.0.0.23:9900"}), \
+                 mock.patch.object(app_module.board, "get_board_manager", return_value=SimpleNamespace(target=lambda t=target: t)), \
+                 mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
+                self.assertEqual(app_module._shell_target(), expected)
+                if not expected[3]:
+                    payload = app_module._build_devkit_shell_payload()
+                    self.assertEqual((payload["credentials_prefilled"], payload["launch_supported"], payload["launch_url"]), (False, False, None))
 
     def test_start_devkit_shell_rejects_target_without_safe_prefill(self):
         payload = {

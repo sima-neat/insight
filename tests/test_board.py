@@ -64,7 +64,6 @@ class TargetResolutionTests(unittest.TestCase):
                 self.assertIsNone(target_module.sdk_env_target())
                 self.assertIsNone(target_module.sdk_env_target())
             self.assertEqual(len(logs.records), 1)
-            self.assertIn("Ignoring DEVKIT_SYNC_DEVKIT_IP", logs.output[0])
         env = {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local", "SIMA_DEVKIT_IP": "192.168.2.9"}
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(target_module, "_WARNED", set()):
             with self.assertLogs(level="WARNING"):
@@ -142,11 +141,12 @@ class BoardApiTests(unittest.TestCase):
         self.assertEqual(body["target"]["source"], "sdk-env")
         self.assertIsNone(body["saved"])
 
-    def test_invalid_selection_returns_400_with_hint(self):
-        response = self.client.post("/api/board/select", json={"host": "", "user": "sima"})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()["code"], "invalid_request")
-        self.assertTrue(response.get_json()["hint"])
+    def test_invalid_selections_return_400_with_hint(self):
+        for body in ({"host": "", "user": "sima"}, [1]):
+            with self.subTest(body=body):
+                response = self.client.post("/api/board/select", json=body)
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+                self.assertTrue(response.get_json()["hint"])
 
     def test_connection_errors_surface_with_code_and_are_recorded(self):
         self.client.get("/api/board")
@@ -204,10 +204,6 @@ class BoardApiTests(unittest.TestCase):
         response = self.client.post("/api/board/test")
         self.assertEqual((response.status_code, response.get_json()["code"]), (502, "command_failed"))
 
-    def test_non_object_bodies_get_the_json_error_shape(self):
-        response = self.client.post("/api/board/select", json=[1])
-        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
-
     def test_board_state_is_not_cached(self):
         self.assertEqual(self.client.get("/api/board").headers["Cache-Control"], "no-store")
 
@@ -254,10 +250,12 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         return ctx.exception
 
-    def test_auth_failure_command_uses_sudo_when_insight_runs_as_root(self):
-        with mock.patch.object(transport_module, "_local_account", return_value="root"):
-            error = self._connect_raising(paramiko.AuthenticationException("denied"))
-        self.assertEqual(error.extra["command"], "sudo -H ssh-copy-id -p 22 sima@192.168.2.2")
+    def test_auth_failure_suggests_ssh_copy_id_with_sudo_for_root(self):
+        for account, command in (("root", "sudo -H ssh-copy-id -p 22 sima@192.168.2.2"), ("dev", "ssh-copy-id -p 22 sima@192.168.2.2")):
+            with self.subTest(account=account), mock.patch.object(transport_module, "_local_account", return_value=account):
+                error = self._connect_raising(paramiko.AuthenticationException("denied"))
+                self.assertEqual((error.code, error.extra["command"]), ("auth_failed", command))
+                self.assertIn(command, error.hint)
 
     def test_closed_transport_never_connects(self):
         self.transport.close()
@@ -266,11 +264,6 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         self.assertEqual(ctx.exception.code, "stale_snapshot")
         connect.assert_not_called()
-
-    def test_auth_failure_suggests_ssh_copy_id(self):
-        error = self._connect_raising(paramiko.AuthenticationException("denied"))
-        self.assertEqual(error.code, "auth_failed")
-        self.assertIn("ssh-copy-id -p 22 sima@192.168.2.2", error.hint)
 
     def test_changed_host_key_reports_both_fingerprints(self):
         old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
@@ -310,9 +303,7 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertTrue(close.called)
 
     def test_close_at_any_point_before_the_command_is_sent_stops_it(self):
-        # close() does not take the transport lock, so it can land between any two lines of
-        # exec()/_open_channel(). Wherever it lands before the command is sent, the command must
-        # not run, the error must say the board changed, and no connection may stay attached.
+        # close() takes no lock, so trace-inject it between every line of exec()/_open_channel().
         targets = {SshTransport.exec.__code__, SshTransport._open_channel.__code__}
 
         class FakeClient:

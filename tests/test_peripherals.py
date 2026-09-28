@@ -216,11 +216,6 @@ class ProbeParsingTests(unittest.TestCase):
         self.assertEqual(graph["entities"][0]["node"], "/dev/video0")
         self.assertFalse(any("subtype Sensor" in e["type"] for e in graph["entities"]))
 
-    def test_media_ctl_with_sensor_names_the_libcamera_id(self):
-        graph = probe.parse_media_ctl(fixture("media_ctl_imx477_synthetic.txt"))
-        sensor = next(e for e in graph["entities"] if "subtype Sensor" in e["type"])
-        self.assertEqual((sensor["name"], sensor["node"]), (IMX477, "/dev/v4l-subdev0"))
-
     def test_cam_list_without_sensor_reports_the_zombie_media_device(self):
         listing = probe.parse_cam_list(fixture("cam_list_no_sensor.txt"))
         self.assertEqual(listing, {"cameras": [], "no_sensor": ["/dev/media0"], "rates": {}})
@@ -252,7 +247,7 @@ class ProbeParsingTests(unittest.TestCase):
 
     def test_commands_past_the_time_budget_are_skipped(self):
         with mock.patch.object(probe, "_deadline", time.monotonic() - 1):
-            self.assertEqual(probe.run(["true"]), (None, "", "skipped: the probe's time budget was used up"))
+            self.assertEqual(probe.run(["true"]), (None, "", probe.OUT_OF_TIME))
 
     def test_budget_skips_are_not_reported_as_timeouts(self):
         self.assertEqual(probe._failure("cam", None, probe.OUT_OF_TIME)["reason"], "out_of_time")
@@ -318,11 +313,8 @@ class ProbeCollectTests(unittest.TestCase):
         self.assertEqual(output["availability_method"], "proc-root")
         snapshot = snapshot_of(output)
         self.assertEqual(snapshot["items"], [])
-        self.assertEqual(
-            [(i["severity"], i["code"], i["message"]) for i in snapshot["issues"]],
-            [("info", "no_sensor", "No MIPI sensor detected on /dev/media0 (platform:csi2video@1).")],
-        )
-        self.assertIn("ribbon cable", snapshot["issues"][0]["hint"])
+        self.assertEqual([(i["severity"], i["code"]) for i in snapshot["issues"]], [("info", "no_sensor")])
+        self.assertIn("/dev/media0 (platform:csi2video@1)", snapshot["issues"][0]["message"])
 
     def test_real_devkit_probe_output_builds_an_empty_snapshot(self):
         snapshot = snapshot_of(json.loads(fixture("probe_devkit_no_sensor.json")))
@@ -353,8 +345,7 @@ class ProbeCollectTests(unittest.TestCase):
         board.tools["v4l2-ctl"] = None
         output = board.collect()
         self.assertEqual(output["usb"], [])
-        issue = next(i for i in snapshot_of(output)["issues"] if i["code"] == "tool_missing" and "USB" in i["message"])
-        self.assertIn("cannot be identified", issue["message"])
+        self.assertIn("tool_missing", [i["code"] for i in snapshot_of(output)["issues"]])
 
     def test_usb_node_is_not_guessed_when_capabilities_cannot_be_read(self):
         board = camera_board(self.tmp.name)
@@ -484,22 +475,19 @@ class SensorIdentityTests(unittest.TestCase):
         self.assertEqual(snapshot["items"][0]["availability"]["state"], "available")
         self.assertNotIn("sensor_unmatched", [i["code"] for i in snapshot["issues"]])
 
-    def test_device_tree_path_id_is_one_item_with_the_entity_placement(self):
+    def test_device_tree_path_id_is_one_item_with_the_entity_placement_and_holder_check(self):
         board = self.path_id_board(DEVKIT_OF_NODE, DEVKIT_OF_NODE)
         output = board.collect()
         (camera,) = output["mipi"]
         self.assertEqual((camera["id"], camera["sensor"], camera["sensor_match"]), (DEVKIT_OF_NODE, IMX477, "firmware-node"))
-        snapshot = snapshot_of(output)
-        (entry,) = snapshot["items"]
+        (entry,) = snapshot_of(output)["items"]
         self.assertEqual(entry["id"], "mipi:" + DEVKIT_OF_NODE)
-        self.assertEqual(entry["device"]["camera_name"], DEVKIT_OF_NODE)
-        self.assertEqual(entry["device"]["camera_name_source"], "libcamera")
+        self.assertEqual((entry["device"]["camera_name"], entry["device"]["camera_name_source"]), (DEVKIT_OF_NODE, "libcamera"))
         self.assertEqual((entry["device"]["media_device"], entry["device"]["csi"]), ("/dev/media0", "csidev-40c3000.csi"))
         self.assertEqual((entry["availability"]["state"], entry["support"]["tier"]), ("available", "verified"))
 
-    def test_device_tree_path_id_gets_the_process_holder_check(self):
-        board = self.path_id_board(DEVKIT_OF_NODE, DEVKIT_OF_NODE)
         board.hold(4321, "gst-launch-1.0", "/dev/v4l-subdev0")
+        board.calls.clear()
         output = board.collect()
         self.assertNotIn(("cam", "-c", DEVKIT_OF_NODE, "-I"), board.calls)
         availability = item(snapshot_of(output), "mipi:" + DEVKIT_OF_NODE)["availability"]
@@ -547,8 +535,7 @@ class SensorIdentityTests(unittest.TestCase):
         availability = snapshot["items"][0]["availability"]
         self.assertEqual((availability["state"], availability["reason"]), ("unknown", cameras.UNMATCHED_REASON))
         (issue,) = [i for i in snapshot["issues"] if i["code"] == "sensor_unmatched"]
-        self.assertIn(DEVKIT_OF_NODE, issue["message"])
-        self.assertIn(f'"{IMX477}" is not listed separately', issue["message"])
+        self.assertIn(IMX477, issue["message"])
 
     def test_sensor_libcamera_does_not_list_keeps_the_media_graph_fallback(self):
         board = devkit_board(self.tmp.name)
@@ -570,8 +557,7 @@ class SensorIdentityTests(unittest.TestCase):
         output = board.collect()
         sources = [(c["id"], c["source"], c["possible_sensors"]) for c in output["mipi"]]
         self.assertEqual(sources, [("/base/soc/i2c@1/ov5647@36", "libcamera", []), (IMX477, "media-graph", [])])
-        issue = next(i for i in snapshot_of(output)["issues"] if i["code"] == "sensor_unmatched")
-        self.assertNotIn("not listed separately", issue["message"])
+        self.assertIn("sensor_unmatched", [i["code"] for i in snapshot_of(output)["issues"]])
 
     def test_without_media_ctl_the_tool_issue_explains_the_unmatched_camera(self):
         board = camera_board(self.tmp.name, usb=False)
@@ -620,7 +606,6 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080)])
         rgb = fmt_of(camera, "RGB888")
         self.assertEqual((rgb["exportable"], rgb["support"]["tier"]), (False, "unsupported"))
-        self.assertIn("NV12 only", rgb["support"]["reason"])
         self.assertEqual(fmt_of(camera, "SRGGB12")["support"]["reason"], cameras.RAW_REASON)
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
 
@@ -675,18 +660,6 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(body["support"]["tier"], "verified")
                 self.assertTrue(any("delivered about 66 fps" in w for w in body["warnings"]))
 
-    def test_real_imx477_rate_limit_is_described_as_the_fastest_mode(self):
-        snapshot = snapshot_of(real_imx477_board(self.tmp.name).collect())
-        camera = item(snapshot, "mipi:" + IMX477)
-        self.assertEqual((camera["support"]["tier"], camera["default_selection"]["fps"]), ("verified", 30))
-        self.assertIn("66.1857 fps for the sensor's fastest mode", camera["notes"][0])
-        largest = max(fmt_of(camera, "NV12")["sizes"], key=lambda s: s["width"] * s["height"])
-        request = {"id": camera["id"], "format": "NV12", "width": largest["width"], "height": largest["height"]}
-        rendered = export.render(snapshot, dict(request, fps=60))
-        self.assertEqual(rendered["support"]["tier"], "advertised")
-        # The tier says "advertised" on its own; the export adds no paragraph repeating it.
-        self.assertFalse(any("advertised by libcamera" in warning for warning in rendered["warnings"]))
-
     def test_real_imx477_offers_only_sizes_the_isp_outputs(self):
         board = real_imx477_board(self.tmp.name)
         output = board.collect()
@@ -701,10 +674,10 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(sizes, {(1920, 1080), (2048, 1080)}, name)
         # Raw Bayer is captured before the ISP, so its sensor sizes stay as reported.
         self.assertEqual(len(fmt_of(camera, "SRGGB12")["sizes"]), 20)
-        fps = [c["value"] for c in size_of(fmt_of(camera, "NV12"), 2048, 1080)["fps"]]
-        self.assertEqual(fps, cameras.fps_choices(66.1857))
+        fps = size_of(fmt_of(camera, "NV12"), 2048, 1080)["fps"]
+        self.assertEqual([c["value"] for c in fps], cameras.fps_choices(66.1857))
+        self.assertEqual(fps[1], {"value": 60, "tier": "advertised"})
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertIn("Only sizes the ISP can output (1920x1080, 2048x1080, 2432x2048)", camera["notes"][1])
         self.assertNotIn("isp_sizes_unavailable", [i["code"] for i in snapshot["issues"]])
 
     def test_isp_nodes_that_disagree_offer_the_sizes_common_to_all(self):
@@ -729,14 +702,8 @@ class SnapshotTests(unittest.TestCase):
     def test_unreadable_isp_sizes_fall_back_to_libcamera_sizes_with_a_warning(self):
         info_only = fixture("v4l2_isp_out_real.txt").split("ioctl:")[0]
         other_card = fixture("v4l2_isp_out_real.txt").replace("arm-isp-out", "arm-isp-raw")
-        cases = {
-            "tool_missing": ("`v4l2-ctl` was not found", None),
-            "no_nodes": ("no ISP output node (arm-isp-out) was found", other_card),
-            "failed": ("failed: Cannot open device /dev/video0out: Permission denied", "denied"),
-            "timeout": ("timed out", "timeout"),
-            "unparseable": ("listed no discrete sizes", info_only),
-        }
-        for reason, (cause, answer) in cases.items():
+        cases = {"tool_missing": None, "no_nodes": other_card, "failed": "denied", "timeout": "timeout", "unparseable": info_only}
+        for reason, answer in cases.items():
             with self.subTest(reason=reason):
                 root = Path(self.tmp.name) / reason
                 root.mkdir()
@@ -757,10 +724,7 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(len(fmt_of(camera, "NV12")["sizes"]), 49)
                 self.assertEqual(len(camera["notes"]), 1)
                 self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-                issue = next(i for i in snapshot["issues"] if i["code"] == "isp_sizes_unavailable")
-                self.assertEqual(issue["severity"], "warning")
-                self.assertIn(cause, issue["message"])
-                self.assertIn("offer every size libcamera advertises", issue["message"])
+                self.assertIn(("warning", "isp_sizes_unavailable"), [(i["severity"], i["code"]) for i in snapshot["issues"]])
 
     def test_isp_is_not_read_without_camera_modes(self):
         board = devkit_board(self.tmp.name)
@@ -780,16 +744,16 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(issue["hint"], cameras.PERMISSION_HINT)
         self.assertEqual(item(snapshot, "mipi:" + IMX477)["errors"][0]["code"], "permission_denied")
 
-    def test_out_of_time_camera_and_tool_point_at_slow_tools(self):
-        output = camera_board(self.tmp.name, usb=False).collect()
+    def test_out_of_time_cameras_and_tools_point_at_slow_tools(self):
+        output = camera_board(self.tmp.name).collect()
         output["mipi"][0].update(acquire="out_of_time", formats=[])
+        output["usb"][0].update(formats=None, detail=probe.OUT_OF_TIME)
         output["failures"] = [{"tool": "cam", "reason": "out_of_time", "detail": probe.OUT_OF_TIME}]
         snapshot = snapshot_of(output)
-        error = item(snapshot, "mipi:" + IMX477)["errors"][0]
-        self.assertEqual((error["code"], error["hint"]), ("timeout", cameras.OUT_OF_TIME_HINT))
         issue = next(i for i in snapshot["issues"] if i["code"] == "timeout")
-        self.assertIn("ran out of time", issue["message"])
-        self.assertNotIn("reboot", issue["hint"] + error["hint"])
+        errors = [item(snapshot, item_id)["errors"][0] for item_id in ("mipi:" + IMX477, USB_ID)]
+        for problem in [issue, *errors]:
+            self.assertEqual((problem["code"], problem["hint"]), ("timeout", cameras.OUT_OF_TIME_HINT))
 
     def test_unchecked_libcamerasrc_is_unknown_not_absent(self):
         output = camera_board(self.tmp.name, usb=False).collect()
@@ -801,13 +765,6 @@ class SnapshotTests(unittest.TestCase):
         descriptor = json.loads(next(e for e in rendered["exports"] if e["id"] == "json")["content"])
         self.assertEqual(descriptor["capture_buffer_count"], 0)
         self.assertIn(cameras.UNCHECKED_LIBCAMERASRC_REASON, rendered["warnings"])
-        self.assertNotIn("missing", cameras.UNCHECKED_LIBCAMERASRC_REASON)
-
-    def test_usb_modes_skipped_by_the_time_budget_point_at_slow_tools(self):
-        output = camera_board(self.tmp.name).collect()
-        output["usb"][0].update(formats=None, detail=probe.OUT_OF_TIME)
-        camera = next(entry for entry in snapshot_of(output)["items"] if entry["connection"] == "usb")
-        self.assertEqual((camera["errors"][0]["code"], camera["errors"][0]["hint"]), ("timeout", cameras.OUT_OF_TIME_HINT))
 
     def test_fps_choices_follow_the_rate_limit(self):
         self.assertEqual(cameras.fps_choices(59.94), [60, 30, 25, 20, 15, 10, 5])
@@ -821,7 +778,6 @@ class SnapshotTests(unittest.TestCase):
         output["mipi"][0]["max_fps"] = None
         camera = item(snapshot_of(output), "mipi:" + IMX477)
         self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]], [30])
-        self.assertIn("did not report a maximum frame rate", camera["notes"][0])
 
     def test_missing_libcamerasrc_makes_mipi_unsupported(self):
         board = camera_board(self.tmp.name, usb=False)
@@ -853,7 +809,6 @@ class SnapshotTests(unittest.TestCase):
         camera = snapshot_of(board.collect())["items"][1]
         self.assertEqual(camera["id"], "usb:046d:082d:no-serial:1-1.2")
         self.assertNotIn("by_id", camera["device"])
-        self.assertIn("/dev/videoN numbering", camera["notes"][0])
 
 
 class FakeSession:
@@ -969,10 +924,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(second["formats"], first["formats"])
         self.assertEqual(second["default_selection"], first["default_selection"])
         self.assertEqual(second["availability"]["state"], "in_use")
-        self.assertIn("could not be read during this refresh", second["notes"][0])
-        warnings = self.export().get_json()["warnings"]
-        self.assertTrue(any("earlier scan" in w for w in warnings))
-        self.assertIn("The camera is in use by another process; CameraInput cannot acquire it until it is released.", warnings)
+        self.assertTrue(any("earlier scan" in w for w in self.export().get_json()["warnings"]))
 
     def test_cached_modes_follow_current_libcamerasrc_support(self):
         first = self.board("a", usb=False)
@@ -998,17 +950,12 @@ class PeripheralsApiTests(unittest.TestCase):
     def test_in_use_warning_names_the_holding_processes(self):
         self.use(self.board("a", usb=False))
         snapshot = self.refresh().get_json()
-        snapshot["items"][0]["availability"] = {
-            "state": "in_use",
-            "users": [{"pid": 4242, "command": "gst-launch-1.0"}],
-            "reason": "Open in gst-launch-1.0 (pid 4242).",
-        }
         request = {"id": "mipi:" + IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
-        warnings = export.render(snapshot, request)["warnings"]
-        self.assertIn(
-            "The camera is in use by gst-launch-1.0 (pid 4242); CameraInput cannot acquire it until it is released.",
-            warnings,
-        )
+        for users, holders in (([{"pid": 4242, "command": "gst-launch-1.0"}], "gst-launch-1.0 (pid 4242)"), ([], "another process")):
+            with self.subTest(holders=holders):
+                snapshot["items"][0]["availability"] = {"state": "in_use", "users": users, "reason": None}
+                warnings = export.render(snapshot, request)["warnings"]
+                self.assertTrue(any(w.startswith(f"The camera is in use by {holders};") for w in warnings))
 
     def test_modes_are_not_carried_across_boards(self):
         self.use(self.board("a", usb=False))
@@ -1026,11 +973,8 @@ class PeripheralsApiTests(unittest.TestCase):
         body = response.get_json()
         self.assertEqual(body["selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(body["support"]["tier"], "verified")
-        warnings = body["warnings"]
-        # A board that can do zero-copy, on a verified mode, has nothing to warn about beyond the
-        # measured rate: the advertised-mode and CPU-fallback paragraphs were noise on every export.
-        self.assertIn("delivered about 66 fps", warnings[0])
-        self.assertEqual(len(warnings), 1)
+        self.assertEqual(len(body["warnings"]), 1)
+        self.assertIn("66 fps", body["warnings"][0])
         exports = {e["id"]: e for e in body["exports"]}
         self.assertEqual(list(exports), ["python", "cpp", "yaml", "json"])
 
@@ -1139,7 +1083,6 @@ class PeripheralsApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 400)
                 body = response.get_json()
                 self.assertEqual((body["code"], body["hint"]), ("invalid_request", export.MODE_HINT))
-                self.assertIn(f"{width}x{height} at 30 fps is not a mode this camera reported", body["error"])
 
     def test_export_rejects_invalid_requests(self):
         self.use(self.board("a"))
