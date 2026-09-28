@@ -26,8 +26,8 @@
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
-    {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "Discover MIPI and USB cameras on the selected board and export a camera input configuration. Discovery reads device information only: it does not capture frames, change sensor controls, or publish streams. Each camera and mode states whether Core `CameraInput` supports it."}
+    {"name": "Board", "description": "Select, test, and trust the one board that board-facing features use."},
+    {"name": "Peripherals", "description": "Discover cameras on the selected board and export camera input configurations."}
   ],
   "x-tagGroups": [
     {
@@ -700,7 +700,7 @@
       "get": {
         "tags": ["Board"],
         "summary": "Get the selected board",
-        "description": "Returns the board target, where it came from (`manual`, `on-board`, or `sdk-env`), the available defaults, and the last connection status. This call never connects to the board; use `POST /api/board/test` for a live check. `generation` changes whenever the target changes, so clients can discard data collected from a previous board.",
+        "description": "Returns the selected target, its source, the defaults, and the last status without connecting.",
         "operationId": "getBoard",
         "responses": {
           "200": {"description": "Selected board and last known status.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}
@@ -711,7 +711,7 @@
       "post": {
         "tags": ["Board"],
         "summary": "Select a board or restore the default",
-        "description": "Saves `{host, port, user}` as the manually selected board, or clears the saved selection when the body is `{\"reset\": true}` so the on-board or SDK default applies again. The selection holds no credentials.",
+        "description": "Saves `{host, port, user}` as the selected board, or restores the default with `{\"reset\": true}`.",
         "operationId": "selectBoard",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardSelectRequest"}, "examples": {"manual": {"value": {"host": "192.168.2.2", "port": 22, "user": "sima"}}, "reset": {"value": {"reset": true}}}}}},
         "responses": {
@@ -724,7 +724,7 @@
       "post": {
         "tags": ["Board"],
         "summary": "Connect to the selected board",
-        "description": "Connects to the selected board and reads its host name, machine type, and build version. A changed SSH host key returns `409` with `host_key_changed`, both fingerprints, and a hint; trust the new key with `POST /api/board/trust-host-key` once you have confirmed the board was reflashed.",
+        "description": "Connects to the selected board and reads its identity; a changed host key returns `409 host_key_changed`.",
         "operationId": "testBoard",
         "responses": {
           "200": {"description": "Board state with `status.state` set to `connected`.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
@@ -738,7 +738,7 @@
       "post": {
         "tags": ["Board"],
         "summary": "Trust a reflashed board's new host key",
-        "description": "Replaces Insight's stored SSH host key for the selected board with the key it presented during the last failed connection. The fingerprint must match `presented_fingerprint` from that `host_key_changed` error.",
+        "description": "Trusts the host key the board presented, identified by its `presented_fingerprint`.",
         "operationId": "trustBoardHostKey",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustHostKeyRequest"}}}},
         "responses": {
@@ -752,7 +752,7 @@
       "get": {
         "tags": ["Peripherals"],
         "summary": "Get the last camera scan",
-        "description": "Returns the snapshot from the last `POST /api/peripherals/refresh` of the selected board. Before the first scan, or after the selected board changes, `scanned_at` is `null` and `items` is empty. This call never connects to the board.",
+        "description": "Returns the last scan of the selected board without connecting; `scanned_at` is `null` before a scan.",
         "operationId": "getPeripherals",
         "responses": {
           "200": {"description": "Last camera snapshot, or an empty one.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
@@ -764,7 +764,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Scan the selected board for cameras",
-        "description": "Runs a read-only discovery script on the board with `python3`. MIPI cameras come from libcamera (`cam -l`, `cam -I`) and the media graph (`media-ctl`); USB cameras come from sysfs and `v4l2-ctl`. Reading a MIPI camera's modes opens it through libcamera without streaming; cameras another process holds are skipped and keep modes from the previous scan. `changes` lists cameras added or removed since that scan. Concurrent refreshes of one board share a single scan.",
+        "description": "Scans the selected board for MIPI and USB cameras without streaming from them.",
         "operationId": "refreshPeripherals",
         "responses": {
           "200": {"description": "New camera snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
@@ -778,7 +778,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the last scan without contacting the board. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name`; an Apps `config.yaml` `camera:` block is included only when the board's `libcamerasrc` supports `buffer-count`. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "description": "Renders one mode from the last scan as camera input code and config, or V4L2 descriptors for USB cameras.",
         "operationId": "exportCameraInput",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"id": "mipi:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
@@ -993,7 +993,7 @@
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "BoardErrorResponse": {"description": "The board or a command on it could not be used. `code` identifies the failure and `hint` names the recovery step.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardError"}}}}
+      "BoardErrorResponse": {"description": "The board or a command on it failed; see `code` and `hint`.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardError"}}}}
     },
     "schemas": {
       "Error": {
@@ -1217,10 +1217,10 @@
         "properties": {
           "error": {"type": "string", "description": "Human-readable failure reason."},
           "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout"]},
-          "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
+          "hint": {"type": ["string", "null"], "description": "Recovery step."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
-          "detail": {"type": "string", "description": "`command_failed` from a refresh: the tail of the discovery script's error output."},
+          "detail": {"type": "string", "description": "`command_failed` only: the probe's error output."},
           "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
           "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},
           "presented_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint the board presented."}
@@ -1233,7 +1233,7 @@
         "required": ["mode", "source", "label"],
         "properties": {
           "mode": {"type": "string", "enum": ["local", "ssh"]},
-          "source": {"type": "string", "enum": ["manual", "on-board", "sdk-env"], "description": "`sdk-env` is the DevKit paired with `sima-cli sdk setup` (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`)."},
+          "source": {"type": "string", "enum": ["manual", "on-board", "sdk-env"], "description": "`sdk-env` is the DevKit paired with `sima-cli sdk setup`."},
           "host": {"type": ["string", "null"]},
           "port": {"type": ["integer", "null"]},
           "user": {"type": ["string", "null"]},
@@ -1249,7 +1249,7 @@
           "defaults": {"type": "object", "properties": {"on_board": {"type": "boolean"}, "sdk_env": {"type": ["object", "null"]}}},
           "generation": {"type": "integer", "description": "Changes whenever the selected target changes."},
           "status": {"type": "object", "properties": {"state": {"type": "string", "enum": ["unknown", "connected", "error"]}, "checked_at": {"type": ["string", "null"], "format": "date-time"}, "error": {"oneOf": [{"$ref": "#/components/schemas/BoardError"}, {"type": "null"}]}}},
-          "board": {"type": ["object", "null"], "description": "Identity read from the board: `hostname`, `machine`, `build_version`, and a stable `fingerprint`."}
+          "board": {"type": ["object", "null"], "description": "Identity read from the board."}
         }
       },
       "BoardSelectRequest": {
@@ -1268,7 +1268,7 @@
       },
       "SupportTier": {
         "type": "object",
-        "description": "Whether Core `CameraInput` can use a camera, format, or mode. `verified`: validated with Core. `advertised`: reported by the camera, not validated. `unsupported`: Core cannot use it.",
+        "description": "Whether Core `CameraInput` has validated (`verified`), not validated (`advertised`), or cannot use (`unsupported`) it.",
         "required": ["tier", "reason"],
         "properties": {
           "tier": {"type": "string", "enum": ["verified", "advertised", "unsupported"]},
@@ -1280,12 +1280,12 @@
         "type": "object",
         "required": ["id", "kind", "connection", "name", "device", "availability", "support", "modes_source", "formats"],
         "properties": {
-          "id": {"type": "string", "description": "`mipi:<libcamera camera id>` or `usb:<vendor>:<product>:<serial or bus path>`.", "example": "mipi:imx477 5-001a"},
+          "id": {"type": "string", "description": "`mipi:<libcamera id>` or `usb:<vendor>:<product>:<serial>:<bus path>`.", "example": "mipi:imx477 5-001a"},
           "kind": {"type": "string", "enum": ["camera"]},
           "connection": {"type": "string", "enum": ["mipi", "usb"]},
           "name": {"type": "string"},
           "model": {"type": ["string", "null"]},
-          "device": {"type": "object", "description": "Known identifiers: `camera_name` and `camera_name_source` (MIPI), `media_device`, `bus_info`, `csi`, `video_node`, `by_id`, and `usb` identity.", "additionalProperties": true},
+          "device": {"type": "object", "description": "Known device identifiers.", "additionalProperties": true},
           "availability": {"type": "object", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
           "support": {"$ref": "#/components/schemas/SupportTier"},
           "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
@@ -1299,14 +1299,14 @@
         "type": "object",
         "required": ["board", "generation", "scanned_at", "items", "issues", "changes", "platform"],
         "properties": {
-          "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
-          "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
+          "board": {"type": "object", "description": "The scanned board."},
+          "generation": {"type": "integer", "description": "Board generation of the scan."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
-          "platform": {"type": ["object", "null"], "description": "Tools found on the board, libcamerasrc properties, and how camera users were detected."},
+          "platform": {"type": ["object", "null"], "description": "Board tools and libcamerasrc properties."},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
-          "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous scan of the same board."}
+          "changes": {"type": ["object", "null"], "description": "Cameras added and removed since the previous scan."}
         }
       },
       "CameraExportRequest": {
