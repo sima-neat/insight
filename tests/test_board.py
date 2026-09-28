@@ -102,6 +102,15 @@ class LocalTransportTests(unittest.TestCase):
             LocalTransport().exec(["sh", "-c", "exec >&- 2>&-; sleep 5"], timeout=0.3)
         self.assertEqual(ctx.exception.code, "timeout")
 
+    def test_exec_drains_output_while_writing_large_stdin(self):
+        data = b"x" * (512 * 1024)
+        # Reads a little stdin, then writes more than a pipe holds before reading the rest.
+        interleaved = "import sys; i, o = sys.stdin.buffer, sys.stdout.buffer; i.read(1); o.write(b'y' * (1 << 20)); o.write(i.read())"
+        cases = {"cat": (["cat"], data), "interleaved": ([sys.executable, "-c", interleaved], b"y" * (1 << 20) + data[1:])}
+        for name, (argv, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(LocalTransport().exec(argv, timeout=5, stdin=data).stdout, expected)
+
 
 class SshTransportErrorTests(unittest.TestCase):
     def setUp(self):

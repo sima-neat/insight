@@ -88,6 +88,8 @@ class LocalTransport:
             selector.register(proc.stderr, selectors.EVENT_READ)
             if proc.stdin:
                 if pending:
+                    # Writable only means some room: a blocking write could stall past the deadline.
+                    os.set_blocking(proc.stdin.fileno(), False)
                     selector.register(proc.stdin, selectors.EVENT_WRITE)
                 else:
                     proc.stdin.close()
@@ -99,6 +101,8 @@ class LocalTransport:
                     if key.fileobj is proc.stdin:
                         try:
                             pending = pending[os.write(key.fd, pending[:65536]):]
+                        except BlockingIOError:
+                            pass
                         except BrokenPipeError:
                             pending = pending[:0]
                         if not pending:
