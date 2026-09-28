@@ -811,7 +811,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Start a camera preview",
-        "description": "Captures the camera on the board and sends hardware-encoded H.264 to a reserved viewer channel until stopped, a scan starts, the board changes, or heartbeats lapse.",
+        "description": "Runs a PyNeat graph (`CameraInput` to `VideoSender`) on the board with the scan's `platform.neat.python`, sending hardware-encoded H.264 to a reserved viewer channel until stopped, a scan starts, the board changes, or heartbeats lapse. Without PyNeat it returns `502 tool_missing`.",
         "operationId": "startCameraPreview",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}}, "example": {"id": "mipi:imx477 5-001a"}}}},
         "responses": {
@@ -1387,7 +1387,7 @@
           "camera_id": {"type": "string"},
           "mode": {"type": "object", "properties": {"format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}},
           "channel": {"type": "integer", "description": "Reserved viewer channel."},
-          "ssrc": {"type": "integer", "description": "RTP SSRC the board sends with; any other SSRC on the channel is a second sender."},
+          "ssrc": {"type": "integer", "description": "RTP SSRC vf reported when the preview went live; any other SSRC on the channel is a second sender."},
           "viewer_url": {"type": "string", "format": "uri", "description": "vf viewer URL for that channel, built from this request's Host header."},
           "generation": {"type": "integer"},
           "started_at": {"type": "string", "format": "date-time"},

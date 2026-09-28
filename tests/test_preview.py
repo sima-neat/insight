@@ -13,6 +13,7 @@ from neat_insight.peripherals import api, preview
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
 PREVIEW = "/api/peripherals/cameras/preview"
 AWAIT_VIDEO = preview.PreviewManager._await_video
+PYTHON = "/home/sima/pyneat/bin/python"
 
 
 def camera(**overrides):
@@ -25,7 +26,7 @@ def camera(**overrides):
 
 class FakeTransport:
     def __init__(self, ssh_client=b"192.168.2.1 51234 22\n", started=b"4242\n"):
-        self.calls, self.replies = [], {"SSH_CLIENT": ssh_client, "echo alive": b"alive\n", "sleep 3": started}
+        self.calls, self.replies = [], {"SSH_CLIENT": ssh_client, "echo alive": b"alive\n", "grep -qx running": started}
 
     def exec(self, argv, *, timeout, stdin=None):
         self.calls.append(argv[-1])
@@ -51,8 +52,8 @@ class PreviewTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def start(self, session=None, item=None, mode=MODE):
-        return self.manager.start(session or self.session, item or camera(), dict(mode))
+    def start(self, session=None, item=None, mode=MODE, python=PYTHON):
+        return self.manager.start(session or self.session, item or camera(), dict(mode), python)
 
     def kills(self, session=None):
         return [call for call in (session or self.session).transport.calls if "kill $pid" in call]
@@ -65,7 +66,7 @@ class PreviewTests(unittest.TestCase):
 
     def test_a_busy_camera_is_refused_by_name_and_never_touched(self):
         busy = camera(formats=[], default_selection=None, availability={"state": "in_use", "reason": "Open in app (pid 7)."})
-        with mock.patch.object(api, "_camera_or_404", return_value=busy):
+        with mock.patch.object(api, "_camera_or_404", return_value=(busy, PYTHON)):
             response = self.client().post(PREVIEW, json={"id": busy["id"]})
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "camera_in_use"))
         self.assertIn("app (pid 7)", response.get_json()["error"])
@@ -73,7 +74,7 @@ class PreviewTests(unittest.TestCase):
 
     def test_each_browser_gets_a_viewer_url_for_its_own_validated_host(self):
         client = self.client()
-        with mock.patch.object(api, "_camera_or_404", return_value=camera()):
+        with mock.patch.object(api, "_camera_or_404", return_value=(camera(), PYTHON)):
             for host in ("evil.example/x", "evil:1:2", "[not-v6]:1", "@evil"):
                 response = client.post(PREVIEW, json={"id": "x"}, headers={"Host": host})
                 self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"), host)
@@ -94,13 +95,14 @@ class PreviewTests(unittest.TestCase):
             self.start(session)
         self.assertEqual(ctx.exception.code, "command_failed")
 
-    def test_unlisted_and_fractional_rates_are_refused_before_any_board_work(self):
+    def test_unlisted_rates_and_a_missing_pyneat_are_refused_before_any_board_work(self):
         no_rates = camera()
         no_rates["formats"][0]["sizes"][0]["fps"] = []
-        for item, fps in ((camera(), 120), (no_rates, 29.97)):
+        for item, fps, python, code in ((camera(), 120, PYTHON, "invalid_request"), (no_rates, 29.97, PYTHON, "invalid_request"),
+                                        (camera(), 30, None, "tool_missing")):
             with self.assertRaises(BoardError) as ctx:
-                self.start(item=item, mode={**MODE, "fps": fps})
-            self.assertEqual(ctx.exception.code, "invalid_request")
+                self.start(item=item, mode={**MODE, "fps": fps}, python=python)
+            self.assertEqual(ctx.exception.code, code)
         self.assertEqual(self.session.transport.calls, [])
 
     def test_a_failed_start_removes_its_saved_failure_log(self):
@@ -178,15 +180,17 @@ class PreviewTests(unittest.TestCase):
 
     def test_another_sender_on_the_channel_stops_the_preview_at_start_and_on_a_heartbeat(self):
         foreign = mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 777})
-        with mock.patch.object(preview, "_pick_ssrc", return_value=1234):
+        live = mock.patch.object(preview, "_channel_rtp", side_effect=[None, {"active": True, "ssrc": 1234}])
+        with live, mock.patch.object(preview.PreviewManager, "_await_video", AWAIT_VIDEO):
             started = self.start()
-            with foreign, mock.patch.object(preview.PreviewManager, "_await_video", AWAIT_VIDEO), \
-                    mock.patch.object(preview, "VIDEO_ARRIVAL_TIMEOUT_SEC", 0.01), mock.patch.object(preview.time, "sleep"):
-                for attempt in (lambda: self.manager.heartbeat(self.session, started["id"]), self.start):
-                    with self.assertRaises(BoardError) as ctx:
-                        attempt()
-                    self.assertEqual(ctx.exception.code, "channel_taken")
-                    self.assertIsNone(self.manager.current())
+        self.assertEqual(started["ssrc"], 1234)
+        with foreign, mock.patch.object(preview.PreviewManager, "_await_video", AWAIT_VIDEO), \
+                mock.patch.object(preview, "VIDEO_ARRIVAL_TIMEOUT_SEC", 0.01), mock.patch.object(preview.time, "sleep"):
+            for attempt in (lambda: self.manager.heartbeat(self.session, started["id"]), self.start):
+                with self.assertRaises(BoardError) as ctx:
+                    attempt()
+                self.assertEqual(ctx.exception.code, "channel_taken")
+                self.assertIsNone(self.manager.current())
         self.assertEqual(len(self.kills()), 2)
 
 

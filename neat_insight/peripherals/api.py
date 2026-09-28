@@ -167,7 +167,7 @@ def _camera_or_404(session, camera_id: str):
             f"Camera {camera_id} is not in the last scan.",
             hint="Refresh and pick a camera from the list.",
         )
-    return item
+    return item, ((snapshot.get("platform") or {}).get("neat") or {}).get("python")
 
 
 # API: report the preview running on the selected board, if any.
@@ -192,7 +192,7 @@ def start_preview():
     try:
         host = _preview_host()
         session = get_board_manager().session()
-        item = _camera_or_404(session, str(body.get("id") or ""))
+        item, python = _camera_or_404(session, str(body.get("id") or ""))
         require_camera_free(item)
         mode = item.get("default_selection")
         keys = ("format", "width", "height", "fps")
@@ -205,7 +205,7 @@ def start_preview():
                 "This camera has no mode Insight can preview.",
                 hint="Refresh; if the camera reports no usable modes, the errors on the camera say why.",
             )
-        return {"session": _for_browser(previews.start(session, item, mode), host)}
+        return {"session": _for_browser(previews.start(session, item, mode, python), host)}
     except BoardError as err:
         return err.to_dict(), err.status
 

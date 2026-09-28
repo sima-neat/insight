@@ -129,7 +129,7 @@ The scan also checks for PyNeat on the board; if it is missing, a warning gives 
 
 ### Preview a camera
 
-Select **Start preview** to stream the selected mode into the page. A preview uses one viewer channel and holds the camera, so your application cannot open it until you stop the preview. Insight does not start a preview on a camera another process is using. The preview stops when you select **Stop preview**, leave the page, refresh, or change the board, and on its own shortly after Insight stops watching. Preview is available for MIPI cameras only.
+Select **Start preview** to stream the selected mode into the page. A preview uses one viewer channel and holds the camera, so your application cannot open it until you stop the preview. Insight does not start a preview on a camera another process is using. The preview stops when you select **Stop preview**, leave the page, refresh, or change the board, and on its own shortly after Insight stops watching. Preview is available for MIPI cameras only and needs PyNeat on the board.
 
 ### Camera configuration
 

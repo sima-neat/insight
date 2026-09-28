@@ -1,7 +1,6 @@
 import ipaddress
 import json
 import logging
-import secrets
 import shlex
 import ssl
 import subprocess
@@ -12,10 +11,12 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from neat_insight.board import BoardError
 from neat_insight import port_map
+from neat_insight.peripherals.cameras import NEAT_INSTALL_HINT
 
 VIDEO_CHANNELS = 80
 DEFAULT_VIDEO_UDP_PORT = 9000
@@ -24,9 +25,9 @@ HEARTBEAT_INTERVAL_MS = 5000
 SESSION_TTL_SEC = 45.0
 START_TIMEOUT_SEC = 25.0
 VIDEO_ARRIVAL_TIMEOUT_SEC = 8.0
-BITRATE_KBPS = 6000
+PROGRAM = Path(__file__).with_name("preview_graph.py").read_bytes()
 WORKER_DIR = "/tmp/insight-preview"
-# The board-side worker kills the pipeline once Insight stops touching the heartbeat file.
+# The board-side worker stops the program once Insight stops touching the heartbeat file.
 WORKER_SCRIPT = """#!/bin/sh
 set -e
 sid="$1"; ttl="$2"; shift 2
@@ -46,7 +47,7 @@ while :; do
     beat_at=$(stat -c %Y "$beat" 2>/dev/null || echo 0)
     if [ $((now - beat_at)) -gt "$ttl" ]; then
         kill "$pipeline" 2>/dev/null || true
-        sleep 1
+        for i in 1 2 3 4 5 6 7 8; do kill -0 "$pipeline" 2>/dev/null || break; sleep 1; done
         kill -9 "$pipeline" 2>/dev/null || true
         break
     fi
@@ -133,14 +134,6 @@ def _channel_rtp(channel: int) -> Optional[dict]:
     return {"active": False, "ssrc": None}
 
 
-def _pick_ssrc(avoid: Optional[int]) -> int:
-    # Never 0 (vf omits it) nor 0xFFFFFFFF (rtph264pay's "random").
-    while True:
-        ssrc = secrets.randbelow(0xFFFFFFFE) + 1
-        if ssrc != avoid:
-            return ssrc
-
-
 def _channel_taken(channel: int) -> BoardError:
     return BoardError(
         "channel_taken",
@@ -167,7 +160,7 @@ class PreviewManager:
                 return None
             return None if _now() > datetime.fromisoformat(session["expires_at"]) else dict(session)
 
-    def start(self, session_ctx, item: dict, mode: dict) -> dict:
+    def start(self, session_ctx, item: dict, mode: dict, python: Optional[str]) -> dict:
         self.stop_stale()
         with self._lock:
             if self._scan_active:
@@ -193,28 +186,27 @@ class PreviewManager:
                 )
             self._starting = item["id"]
         try:
-            return self._start_locked(session_ctx, item, mode)
+            return self._start_locked(session_ctx, item, mode, python)
         finally:
             with self._lock:
                 self._starting = None
                 self._condition.notify_all()
 
-    def _start_locked(self, session_ctx, item: dict, mode: dict) -> dict:
+    def _start_locked(self, session_ctx, item: dict, mode: dict, python: Optional[str]) -> dict:
         self._stop_current(session_ctx)
-        _require_previewable(item, mode)
+        _require_previewable(item, mode, python)
         channel = self._reserve_channel(session_ctx)
         previous = (_channel_rtp(channel) or {}).get("ssrc")
-        ssrc = _pick_ssrc(previous)
-        target_host, target_port = self._insight_endpoint(session_ctx, channel)
+        target_host, port_base = self._insight_endpoint(session_ctx)
         session_id = uuid.uuid4().hex
-        pipeline = _pipeline(item, mode, target_host, target_port, ssrc)
-        self._start_worker(session_ctx, session_id, pipeline)
+        args = [item["device"]["camera_name"], target_host, mode["width"], mode["height"], int(mode["fps"]), port_base, channel]
+        self._start_worker(session_ctx, session_id, [python, f"{WORKER_DIR}/{session_id}/preview.py", *map(str, args)])
         session = {
             "id": session_id,
             "camera_id": item["id"],
             "mode": mode,
             "channel": channel,
-            "ssrc": ssrc,
+            "ssrc": None,
             "generation": session_ctx.generation,
             "started_at": _iso(_now()),
             "expires_at": _iso(_now() + timedelta(seconds=SESSION_TTL_SEC)),
@@ -224,21 +216,27 @@ class PreviewManager:
         with self._lock:
             self._session = session
             self._owner = session_ctx
-        self._await_video(session_ctx, session)
+        self._await_video(session_ctx, session, previous)
         return dict(session)
 
-    def _await_video(self, session_ctx, session: dict) -> None:
-        # A free channel is not reserved: only the preview's own SSRC proves its video arrived.
+    def _await_video(self, session_ctx, session: dict, previous: Optional[int]) -> None:
+        # Neat picks the SSRC: the first new one on the idle channel is the preview's, and any other is a second sender.
         deadline = time.monotonic() + VIDEO_ARRIVAL_TIMEOUT_SEC
         channel = session["channel"]
         foreign = False
         while time.monotonic() < deadline:
             rtp = _channel_rtp(channel)
             if rtp and rtp["active"] and rtp["ssrc"] is not None:
-                if rtp["ssrc"] == session["ssrc"]:
+                if rtp["ssrc"] != previous:
+                    with self._lock:
+                        session["ssrc"] = rtp["ssrc"]
                     return
                 foreign = True
             time.sleep(1.0)
+        try:
+            log = session_ctx.transport.exec(["sh", "-c", _log_tail(session["id"])], timeout=10).stdout
+        except BoardError:
+            log = b""
         self._stop_current(session_ctx, session["id"])
         if foreign:
             raise _channel_taken(channel)
@@ -248,6 +246,7 @@ class PreviewManager:
             hint="The board must reach Insight's video port. Check that the mapped UDP port is open "
             "(a host firewall usually blocks it) or run Insight on the board.",
             channel=session["channel"],
+            detail=log.decode("utf-8", errors="replace")[-1000:],
         )
 
     def heartbeat(self, session_ctx, session_id: str) -> dict:
@@ -336,7 +335,8 @@ class PreviewManager:
         directory = f"{WORKER_DIR}/{session['id']}"
         script = (
             f"pid=$(cat {directory}/pipeline.pid 2>/dev/null); "
-            f'if [ -n "$pid" ]; then kill $pid 2>/dev/null; sleep 1; kill -9 $pid 2>/dev/null; fi; '
+            f'if [ -n "$pid" ]; then kill $pid 2>/dev/null; for i in $(seq 16); do kill -0 $pid 2>/dev/null || break; '
+            f"sleep 0.5; done; kill -9 $pid 2>/dev/null; fi; "
             f"rm -rf {directory} {WORKER_DIR}/{session['id']}.log"
         )
         owner.transport.exec(["sh", "-c", script], timeout=20)
@@ -377,15 +377,15 @@ class PreviewManager:
             hint="Stop a streaming source or an application stream, then start the preview again.",
         )
 
-    def _insight_endpoint(self, session_ctx, channel: int):
+    def _insight_endpoint(self, session_ctx):
         if session_ctx.target.mode == "local":
-            return "127.0.0.1", DEFAULT_VIDEO_UDP_PORT + channel
+            return "127.0.0.1", DEFAULT_VIDEO_UDP_PORT
         published = port_map_video_range()
         base = published[0] if published else DEFAULT_VIDEO_UDP_PORT
         result = session_ctx.transport.exec(["sh", "-c", "echo $SSH_CLIENT"], timeout=10)
         client = (result.stdout.decode("utf-8", errors="replace").split() or [""])[0]
         try:
-            # $SSH_CLIENT is board-controlled and ends up in the udpsink host.
+            # $SSH_CLIENT is board-controlled and ends up in the program's arguments.
             ipaddress.ip_address(client)
         except ValueError:
             raise BoardError(
@@ -395,18 +395,17 @@ class PreviewManager:
                 else "The board could not report the address Insight connects from.",
                 hint="Preview needs the board to send video back to Insight; check the SSH connection.",
             ) from None
-        return client, base + channel
+        return client, base
 
-    def _start_worker(self, session_ctx, session_id: str, pipeline: list) -> None:
+    def _start_worker(self, session_ctx, session_id: str, command: list) -> None:
         directory = f"{WORKER_DIR}/{session_id}"
-        script = f"{directory}/worker.sh"
-        setup = f"mkdir -p {directory} && cat > {script} && chmod +x {script}"
-        session_ctx.transport.exec(["sh", "-c", setup], timeout=15, stdin=WORKER_SCRIPT.encode())
-        launch = f"setsid nohup {script} {session_id} {int(SESSION_TTL_SEC)} {' '.join(shlex.quote(part) for part in pipeline)} > {directory}/worker.log 2>&1 < /dev/null &"
+        for name, content in (("worker.sh", WORKER_SCRIPT.encode()), ("preview.py", PROGRAM)):
+            session_ctx.transport.exec(["sh", "-c", f"mkdir -p {directory} && cat > {directory}/{name}"], timeout=15, stdin=content)
+        launch = f"setsid nohup sh {directory}/worker.sh {session_id} {int(SESSION_TTL_SEC)} {shlex.join(command)} > {directory}/worker.log 2>&1 < /dev/null &"
         session_ctx.transport.exec(["sh", "-c", launch], timeout=START_TIMEOUT_SEC)
-        check = (f"sleep 3; cat {directory}/pipeline.pid 2>/dev/null; "
-                 f"tail -c 800 {directory}/pipeline.log 2>/dev/null || "
-                 f"tail -c 800 {WORKER_DIR}/{session_id}.log 2>/dev/null")
+        # The program prints "running" once PyNeat has built the graph.
+        check = (f"for i in $(seq 40); do grep -qx running {directory}/pipeline.log 2>/dev/null && break; "
+                 f"[ -d {directory} ] || break; sleep 0.5; done; cat {directory}/pipeline.pid 2>/dev/null; {_log_tail(session_id)}")
         result = session_ctx.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC)
         output = result.stdout.decode("utf-8", errors="replace")
         if not output.strip().split("\n")[0].strip().isdigit():
@@ -416,10 +415,16 @@ class PreviewManager:
                 pass
             raise BoardError(
                 "command_failed",
-                "The preview pipeline did not start on the board.",
-                hint="Check that the camera is free and that the board's encoder accepts this mode.",
+                "The preview did not start on the board.",
+                hint="Check that the camera is free and that the board's encoder accepts this mode; detail has "
+                "the Neat error.",
                 detail=output[-1000:],
             )
+
+
+def _log_tail(session_id: str) -> str:
+    directory = f"{WORKER_DIR}/{session_id}"
+    return f"tail -c 800 {directory}/pipeline.log 2>/dev/null || tail -c 800 {WORKER_DIR}/{session_id}.log 2>/dev/null"
 
 
 def _unknown_session() -> BoardError:
@@ -440,13 +445,16 @@ def require_camera_free(item: dict) -> None:
         )
 
 
-def _require_previewable(item: dict, mode: dict) -> None:
+def _require_previewable(item: dict, mode: dict, python: Optional[str]) -> None:
     if item["connection"] != "mipi":
         raise _unsupported(
             "Preview is available for MIPI cameras only in this release.",
             "USB cameras are discovered and can be exported, but preview is not implemented for them yet.",
         )
     require_camera_free(item)
+    if not python:
+        raise BoardError("tool_missing", "Preview runs on PyNeat, which the last scan did not find on this board.",
+                         hint=NEAT_INSTALL_HINT, tool="pyneat")
     _whole_fps(mode["fps"])
     fmt = next((entry for entry in item["formats"] if entry["format"] == mode["format"]), None)
     if fmt is None or not fmt["exportable"]:
@@ -473,52 +481,13 @@ def _require_previewable(item: dict, mode: dict) -> None:
 
 
 def _whole_fps(fps) -> int:
-    # enc-frame-rate and max-rate take integers, so caps, videorate and encoder need one whole rate.
+    # VideoSenderOptions and caps_raw take a whole frame rate.
     if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0 or fps != int(fps):
         raise _unsupported(
             f"{fps} fps cannot be previewed: preview needs a whole-number frame rate.",
             "Pick one of the rates Insight lists for this size.",
         )
     return int(fps)
-
-
-def _pipeline(item: dict, mode: dict, host: str, port: int, ssrc: int) -> list:
-    fps = _whole_fps(mode["fps"])
-    caps = f"video/x-raw,format={mode['format']},width={mode['width']},height={mode['height']},framerate={fps}/1"
-    return [
-        "gst-launch-1.0",
-        "-q",
-        "libcamerasrc",
-        f"camera-name={item['device']['camera_name']}",
-        "!",
-        caps,
-        "!",
-        # libcamera delivers the sensor mode's rate; max-rate drops the surplus.
-        "videorate",
-        f"max-rate={fps}",
-        "!",
-        "neatencoder",
-        "enc-type=h264",
-        f"enc-fmt={mode['format']}",
-        f"enc-width={mode['width']}",
-        f"enc-height={mode['height']}",
-        f"enc-bitrate={BITRATE_KBPS}",
-        f"enc-frame-rate={fps}",
-        "!",
-        "h264parse",
-        "config-interval=1",
-        "!",
-        "rtph264pay",
-        "pt=96",
-        f"ssrc={ssrc}",
-        "config-interval=1",
-        "mtu=1200",
-        "!",
-        "udpsink",
-        f"host={host}",
-        f"port={port}",
-        "sync=false",
-    ]
 
 
 def viewer_url(host: str, channel: int) -> str:
