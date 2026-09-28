@@ -317,7 +317,19 @@ class ProbeCollectTests(unittest.TestCase):
         self.assertIn("/dev/media0 (platform:csi2video@1)", snapshot["issues"][0]["message"])
 
     def test_real_devkit_probe_output_builds_an_empty_snapshot(self):
-        snapshot = snapshot_of(json.loads(fixture("probe_devkit_no_sensor.json")))
+        # Real: probe output captured on the DevKit with no sensor attached.
+        snapshot = snapshot_of({
+            "schema": 1,
+            "tools": dict.fromkeys(probe.TOOLS, True),
+            "libcamerasrc": {"present": True, "external_buffer_mode": True, "buffer_count": True},
+            "availability_method": "sudo-fuser",
+            "media_devices": [{
+                "path": "/dev/media0", "bus_info": "platform:csi2video@1", "csi": "csidev-40c3000.csi",
+                "sensors": [], "nodes": ["/dev/media0", "/dev/video0"],
+            }],
+            "libcamera": {"cameras": [], "no_sensor": ["/dev/media0"], "rates": {}, "listed": True},
+            "mipi": [], "usb": [], "failures": [],
+        })
         self.assertEqual(snapshot["platform"]["availability_method"], "sudo-fuser")
         self.assertEqual([i["code"] for i in snapshot["issues"]], ["no_sensor"])
 
