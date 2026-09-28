@@ -71,9 +71,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
-  // A browser can pair this script with an older cached settings resolver. Without
-  // the scope functions the dialog works as before: no scope line, tags or notes,
-  // each scope loaded and saved as a whole. Decided once, so no path calls them.
+  // A browser can pair this script with an older cached settings resolver or an older
+  // cached viewer page. Without the scope functions or the scope elements the dialog
+  // works as before: no scope line, tags or notes, each scope loaded and saved as a
+  // whole. Decided once, so no path calls the missing functions or touches the
+  // missing elements.
   const SCOPE_API_FUNCTIONS = [
     "readScopeOverrides",
     "clearScopeGeneralOverride",
@@ -82,11 +84,28 @@ document.addEventListener("DOMContentLoaded", () => {
     "generalKeysToStore"
   ];
   const missingScopeFunctions = SCOPE_API_FUNCTIONS.filter((name) => typeof settingsApi[name] !== "function");
-  const scopeApiAvailable = missingScopeFunctions.length === 0;
-  if (!scopeApiAvailable) {
+  const missingScopeElements = [
+    ["viewerSettingsScopeLine", viewerSettingsScopeLine],
+    ...SCOPED_GENERAL_SETTINGS.flatMap((setting) => [
+      [`${setting.key} tag`, setting.tag],
+      [`${setting.key} note row`, setting.noteRow],
+      [`${setting.key} note`, setting.note]
+    ])
+  ]
+    .filter(([, element]) => !element)
+    .map(([name]) => name);
+  const scopeUiAvailable = missingScopeFunctions.length === 0 && missingScopeElements.length === 0;
+  if (!scopeUiAvailable) {
+    const causes = [];
+    if (missingScopeFunctions.length > 0) {
+      causes.push(`viewerSettingsApi lacks ${missingScopeFunctions.join(", ")} (an older viewer-settings-resolver.js)`);
+    }
+    if (missingScopeElements.length > 0) {
+      causes.push(`the page lacks the elements for ${missingScopeElements.join(", ")} (an older viewer.html)`);
+    }
     console.warn(
-      `viewerSettingsApi lacks ${missingScopeFunctions.join(", ")} (an older viewer-settings-resolver.js); ` +
-        "the settings dialog does not show which values a channel sets itself. Reload the page to update it."
+      `${causes.join("; ")}; the settings dialog does not show which values a channel sets itself. ` +
+        "Reload the page to update it."
     );
   }
 
@@ -177,7 +196,7 @@ document.addEventListener("DOMContentLoaded", () => {
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
 
-    if (scopeApiAvailable && isChannelScope(scope)) {
+    if (scopeUiAvailable && isChannelScope(scope)) {
       settingsApi.writeScopeSettings(scope, settings, { generalKeys: generalKeysToStore() });
     } else {
       settingsApi.writeScopeSettings(scope, settings);
@@ -294,17 +313,18 @@ document.addEventListener("DOMContentLoaded", () => {
     setting.noteRow.hidden = false;
   }
 
-  // The fallback without the scope functions: tags and notes stay hidden.
+  // The fallback without the scope functions or elements: whatever of the tags and
+  // notes the page has stays hidden; elements an older page lacks are skipped.
   function hideGeneralScopeNotes() {
     SCOPED_GENERAL_SETTINGS.forEach((setting) => {
-      setting.tag.hidden = true;
-      setting.note.replaceChildren();
-      setting.noteRow.hidden = true;
+      if (setting.tag) setting.tag.hidden = true;
+      if (setting.note) setting.note.replaceChildren();
+      if (setting.noteRow) setting.noteRow.hidden = true;
     });
   }
 
   function renderGeneralScopeNotes() {
-    if (!scopeApiAvailable) {
+    if (!scopeUiAvailable) {
       hideGeneralScopeNotes();
       return;
     }
@@ -336,11 +356,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Fills the General tab: a channel dialog shows what the channel resolves to
   // (own, else global, else default), the global dialog the global values. Without
-  // the scope functions every dialog shows its scope's values, as before.
+  // the scope UI every dialog shows its scope's values, as before.
   function loadGeneralSettings() {
     let general;
     let ownGeneral = {};
-    if (scopeApiAvailable && isChannelScope(scope)) {
+    if (scopeUiAvailable && isChannelScope(scope)) {
       general = settingsApi.resolveTypeSettings(scopeToIndex(scope), metadataTypeSelector.value).general;
       ownGeneral = settingsApi.readScopeOverrides(scope).general;
     } else {
@@ -358,12 +378,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateScopeLine(value) {
-    if (scopeApiAvailable && isChannelScope(value)) {
+    if (scopeUiAvailable && isChannelScope(value)) {
       viewerSettingsScopeLine.textContent =
         `These settings apply to channel ${scopeToIndex(value)} only. ` +
         "Values you have not changed follow the global settings.";
       viewerSettingsScopeLine.hidden = false;
-    } else {
+    } else if (viewerSettingsScopeLine) {
+      // An older page has no scope line (see scopeUiAvailable).
       viewerSettingsScopeLine.textContent = "";
       viewerSettingsScopeLine.hidden = true;
     }
