@@ -284,8 +284,7 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
         <button type="button" className="btn-tonal" onClick={onOpenBoardPanel}>Choose a board</button>
       </Callout>
     )
-  } else if (activeKind !== 'camera') body = <p className="hint">Insight does not read this device kind yet.</p>
-  else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
+  } else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
   else if (!scannedAt) body = !scanError && <p className="hint">Not scanned yet. Refresh to discover cameras on {target.label}.</p>
   else if (!groups.length) {
     body = (
