@@ -2210,11 +2210,15 @@ def _run_pull_probe(record) -> None:
             return
         if result.status == "auth_failed":
             # Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
-            logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
-            try:
-                mediamtx_client.clear_pull_source(f"src{record.index}")
-            except MediamtxError as exc:
-                logging.warning("src%s: could not pause the pull: %s", record.index, exc)
+            with _slot_lock:
+                # A Stop and a new Pull may have replaced this record since apply_probe.
+                if pull_registry.get(record.index) is not record:
+                    return
+                logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
+                try:
+                    mediamtx_client.clear_pull_source(f"src{record.index}")
+                except MediamtxError as exc:
+                    logging.warning("src%s: could not pause the pull: %s", record.index, exc)
     finally:
         record.probing = False  # never leave the record marked in flight, even if the probe raised
 
@@ -2809,17 +2813,18 @@ def stop_source():
     index_error = _index_error(index)
     if index_error:
         return index_error
-    record = pull_registry.remove(index)
-    if record:
-        with _slot_lock:
+    with _slot_lock:
+        record = pull_registry.remove(index)
+        if record:
             _bump_slot(index)
-        logging.info("src%s: pull from %s stopped", index, record.host)
-        try:
-            mediamtx_client.clear_pull_source(f"src{index}")
-        except MediamtxError as exc:
-            # The registry entry is already gone so the UI is never stuck on a dead pull.
-            return _json_error(f"src{index} released, but mediamtx did not confirm: {exc}", 502)
-        return {"success": True}
+            try:
+                mediamtx_client.clear_pull_source(f"src{index}")
+            except MediamtxError as exc:
+                # mediamtx may still be pulling; keep the record so the row stays stoppable.
+                pull_registry.put(record)
+                return _json_error(f"Could not stop pulling into src{index}: {exc}. Try Stop again.", 502)
+            logging.info("src%s: pull from %s stopped", index, record.host)
+            return {"success": True}
     # Insight's own HTTP/MJPEG stream can share an index with an external publisher; it
     # stays stoppable, and only a slot holding nothing of ours is a conflict.
     holder = _external_holder(index)

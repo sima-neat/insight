@@ -668,7 +668,7 @@
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
           "409": {"$ref": "#/components/responses/Conflict"},
-          "502": {"description": "The pull was released, but mediamtx did not confirm the path reset.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+          "502": {"description": "mediamtx could not be told to stop pulling. The slot stays `pulled` so Stop can be retried.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
         }
       }
     },

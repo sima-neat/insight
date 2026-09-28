@@ -957,13 +957,32 @@ class PullSourceTests(_SourceFixture):
         self.assertEqual((slot["state"], slot["file"]), ("stopped", "clip.mp4"))
         self.assertNotIn("pull", slot)
 
-    def test_stop_removes_registry_entry_even_when_mediamtx_fails(self):
+    def test_stop_keeps_the_pull_when_mediamtx_fails_so_stop_can_be_retried(self):
         self._pull()
+        record = app_module.pull_registry.get(3)
         self.mtx.fail_patch = True
         response = self.client.post("/api/mediasrc/stop", json={"index": 3})
         self.assertEqual(response.status_code, 502)
+        self.assertIn("Try Stop again", response.get_json()["error"])
+        self.assertIs(app_module.pull_registry.get(3), record)
+        self.assertEqual(self._slot(3)["state"], "pulled")
+        self.mtx.fail_patch = False
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
+        self.assertEqual(self.mtx.cleared, ["src3"])
         self.assertIsNone(app_module.pull_registry.get(3))
-        self.assertEqual(self._slot(3)["state"], "stopped")
+
+    def test_background_auth_failure_never_clears_a_newer_pull(self):
+        self._pull()
+        old = app_module.pull_registry.get(3)
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("auth_failed", "The camera rejected the username or password")
+        # A Stop and a new Pull land after the old probe's apply_probe but before its clear.
+        newer = app_module.pull_sources.PullRecord(index=3, url="rtsp://10.0.0.9:554/b", scheme="rtsp",
+                                                   host="10.0.0.9:554", path="/b", started_at=0.0)
+        app_module.pull_registry.put(newer)
+        with mock.patch.object(app_module.pull_registry, "apply_probe", return_value=True):
+            app_module._run_pull_probe(old)
+        self.assertEqual(self.mtx.cleared, [])
+        self.assertIs(app_module.pull_registry.get(3), newer)
 
     def test_assign_start_prepare_and_takeover_are_409_on_a_pulled_slot(self):
         self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
