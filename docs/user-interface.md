@@ -131,6 +131,14 @@ If the sender runs on a DevKit or another external machine, use the mapped `vide
 
 The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and synchronization buffering. Metadata timestamps use source PTS milliseconds and are omitted when unavailable.
 
+### Global and channel settings
+
+Viewer settings exist in two scopes. The settings button of the viewer page opens the global settings. The button at the right end of a tile's status bar opens the settings of that channel; the dialog's title names the channel.
+
+A channel follows the global settings until a value is changed for it. A value that a channel sets itself takes precedence over the global value. On the **General** tab, the channel dialog marks each setting as **own value** or **global**, and the global dialog lists the channels that set their own value. **Use global value** removes a channel's own value.
+
+Settings are stored in the browser. They are not shared between browsers or machines.
+
 ### Metadata colors
 
 Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when a channel shows more than 20 identities at once. Each metadata type defines what identity means:
@@ -161,7 +169,14 @@ When at least half of the recent messages arrive after their frame, the tile sho
 | Video sync buffer | The buffer in effect for this channel. |
 | Late messages | Share of recent messages that arrived too late to be drawn. |
 
-**Raise buffer to N ms** sets the video sync buffer of this channel to a value that covers the measured lateness. Other channels and the global setting keep their values. The video of this channel is delayed by the additional time. The viewer never changes the buffer by itself.
+The panel offers two ways to raise the buffer to a value that covers the measured lateness:
+
+| Button | Effect |
+|---|---|
+| **Raise for this channel to N ms** | Sets the video sync buffer of this channel only. Other channels keep their setting. |
+| **Raise globally to N ms** | Sets the global video sync buffer. It applies to every channel that has no value of its own. If this channel had its own value, that value is removed. |
+
+The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
 
 The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner.
 
