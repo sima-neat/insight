@@ -605,14 +605,27 @@ function ChannelTile({ index, onActiveChange, debug }) {
     }
   };
 
-  const raiseVideoSyncBuffer = (targetMs) => {
-    const scope = `channel_${index}`;
-    const stored = window.viewerSettingsApi?.writeScopeGeneralOverride?.(scope, "videoSyncBufferMs", targetMs);
-    if (!stored) return false;
-    // The chip and its panel are about to disappear; leave focus on the tile.
-    settingsButtonRef.current?.focus();
-    window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope } }));
-    return true;
+  const raiseVideoSyncBuffer = (targetMs, target) => {
+    if (target === "channel") {
+      const scope = `channel_${index}`;
+      const stored = window.viewerSettingsApi?.writeScopeGeneralOverride?.(scope, "videoSyncBufferMs", targetMs);
+      if (!stored) return false;
+      // The chip and its panel are about to disappear; leave focus on the tile.
+      settingsButtonRef.current?.focus();
+      window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope } }));
+      return true;
+    }
+    if (target === "global") {
+      const storedGlobal = window.viewerSettingsApi?.writeScopeGeneralOverride?.("global", "videoSyncBufferMs", targetMs);
+      if (!storedGlobal) return false;
+      const cleared = window.viewerSettingsApi?.clearScopeGeneralOverride?.(`channel_${index}`, "videoSyncBufferMs");
+      if (cleared === null) return false;
+      // The chip and its panel are about to disappear; leave focus on the tile.
+      settingsButtonRef.current?.focus();
+      window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope: "global" } }));
+      return true;
+    }
+    return false;
   };
 
   return (
@@ -626,11 +639,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
         <button
           ref={settingsButtonRef}
           className="channel-menu-button"
-          title="Settings"
+          title={`Settings for channel ${index}`}
           onClick={openScopeSettings}
           type="button"
         >
-          <img src="/static/icons/menu.png" alt="Settings" className="channel-menu-icon" />
+          <img src="/static/icons/menu.png" alt={`Settings for channel ${index}`} className="channel-menu-icon" />
         </button>
       </div>
     </div>

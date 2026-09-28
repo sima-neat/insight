@@ -36,8 +36,8 @@ export default function MetadataLateNotice({ details, onRaise }) {
 
   if (!details) return null;
 
-  const raise = () => {
-    if (onRaise(details.suggestedBufferMs)) setOpen(false);
+  const raise = (target) => {
+    if (onRaise(details.suggestedBufferMs, target)) setOpen(false);
   };
 
   return (
@@ -66,9 +66,20 @@ export default function MetadataLateNotice({ details, onRaise }) {
           {details.blockedBy ? (
             <div className="metadata-late-blocked">{BLOCKED_TEXT[details.blockedBy]}</div>
           ) : (
-            <button type="button" className="metadata-late-action" onClick={raise}>
-              Raise buffer to {details.suggestedBufferMs} ms
-            </button>
+            <div className="metadata-late-actions">
+              <button type="button" className="metadata-late-action" onClick={() => raise("channel")}>
+                <span>Raise for this channel to {details.suggestedBufferMs} ms</span>
+                <span className="metadata-late-action-sub">Other channels keep their setting.</span>
+              </button>
+              <button
+                type="button"
+                className="metadata-late-action metadata-late-action--secondary"
+                onClick={() => raise("global")}
+              >
+                <span>Raise globally to {details.suggestedBufferMs} ms</span>
+                <span className="metadata-late-action-sub">Applies to every channel without its own value.</span>
+              </button>
+            </div>
           )}
         </div>
       )}
