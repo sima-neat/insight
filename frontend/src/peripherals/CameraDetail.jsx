@@ -87,23 +87,24 @@ function CopyConfig({ camera, selection, generation, appsYaml }) {
     return () => clearTimeout(timer)
   }, [state])
 
-  async function copy() {
+  function copy() {
     const run = ++seq.current
     setState({ status: 'busy' })
-    try {
-      const { format, width, height, fps } = selection
-      const data = await requestJson('/api/peripherals/cameras/export', {
-        method: 'POST',
-        body: { id: camera.id, format, width, height, fps, generation }
-      })
-      if (run !== seq.current) return
+    const { format, width, height, fps } = selection
+    const text = requestJson('/api/peripherals/cameras/export', {
+      method: 'POST',
+      body: { id: camera.id, format, width, height, fps, generation }
+    }).then((data) => {
+      if (run !== seq.current) throw new Error('The selection changed; nothing was copied.')
       const item = (data.exports || []).find((entry) => entry.id === id)
       if (!item) throw new Error(`${label} is not available for this mode.`)
-      await copyText(item.content)
-      if (run === seq.current) setState({ status: 'copied' })
-    } catch (err) {
-      if (run === seq.current) setState({ status: 'error', error: normalizeError(err) })
-    }
+      return item.content
+    })
+    // Started inside the click, before any await, so the browser still treats it as user-initiated.
+    copyText(text).then(
+      () => run === seq.current && setState({ status: 'copied' }),
+      (err) => run === seq.current && setState({ status: 'error', error: normalizeError(err) })
+    )
   }
 
   return (

@@ -24,7 +24,19 @@ export async function requestJson(url, { method = 'GET', body } = {}) {
   return data
 }
 
+// `text` may be a promise: handing it to ClipboardItem inside the click keeps the copy allowed while it
+// resolves, which Safari requires.
 export async function copyText(text) {
+  if (window.ClipboardItem && navigator.clipboard?.write) {
+    try {
+      const blob = Promise.resolve(text).then((value) => new Blob([value], { type: 'text/plain' }))
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })])
+      return
+    } catch {
+      // A failed lookup rethrows below; a refused write falls back to the older paths.
+    }
+  }
+  text = await text
   try {
     await navigator.clipboard.writeText(text)
     return
