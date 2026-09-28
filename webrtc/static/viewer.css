@@ -212,6 +212,12 @@ canvas {
   min-width: 0;
 }
 
+/* Lets the panel's max-height be measured against the tile's own height (cqh),
+   since the tile has no intrinsic content size of its own to lose. */
+.video-tile {
+  container-type: size;
+}
+
 .metadata-late-notice {
   flex: 0 0 auto;
   font-family: var(--viewer-font-sans);
@@ -243,15 +249,16 @@ canvas {
   outline-offset: 2px;
 }
 
-/* Anchored to the tile, not the chip: .video-tile clips its content, and a tile
-   in a dense grid is narrower than the panel would like to be. */
+/* Positioned against the banner wrapper, just above it. The tile clips its
+   content, so the panel's height is capped to the tile's and scrolls when a
+   tile in a dense grid is shorter than the panel. */
 .metadata-late-panel {
   position: absolute;
   right: 8px;
   bottom: calc(100% + 6px);
   box-sizing: border-box;
   width: min(290px, calc(100% - 16px));
-  max-height: 60vh;
+  max-height: calc(100cqh - 100% - 14px);
   overflow-y: auto;
   padding: 10px 12px;
   border-radius: 8px;
