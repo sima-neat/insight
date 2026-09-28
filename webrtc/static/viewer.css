@@ -266,8 +266,8 @@ canvas {
    does not fade out at the tile's edge. Overlays belong to a frame that is no
    longer current and stay hidden. */
 .video-tile[data-state="stopped"] video {
-  filter: blur(6px) saturate(0.7) brightness(0.8);
-  transform: scale(1.05);
+  filter: blur(9px) saturate(0.6) brightness(0.75);
+  transform: scale(1.07);
 }
 
 .video-tile[data-state="stopped"] canvas {
