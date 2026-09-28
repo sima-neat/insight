@@ -144,8 +144,6 @@ select:focus-visible,
 
 .masthead-actions {
   display: flex;
-  /* Every control in this row is the same height and centred on one line, so the board box sits on
-     the same axis as the round info button and the tour button rather than hanging above them. */
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
@@ -184,8 +182,6 @@ select:focus-visible,
   border-color: var(--line-strong);
 }
 
-/* A connected board tints its own box, so the masthead answers "is the board there?" at a glance
-   without reading the pill. */
 .board-trigger.ok {
   border-color: rgba(18, 122, 84, 0.34);
   background: #edfaf3;
@@ -3340,7 +3336,6 @@ button:disabled {
   font-weight: 700;
 }
 
-.periph-view code,
 .periph-camera-id,
 .periph-facts dd,
 .periph-detail-head .hint {
@@ -3359,12 +3354,10 @@ button:disabled {
 .periph-board-summary {
   display: flex;
   flex-wrap: wrap;
-  /* The 16px label and the 12px pills share a baseline instead of being centred against each other. */
   align-items: baseline;
   gap: 8px;
 }
 
-.periph-board-summary .hint,
 .periph-issues p,
 .periph-form .hint,
 .periph-form .periph-callout {
@@ -3379,8 +3372,6 @@ button:disabled {
 }
 
 .periph-facts {
-  /* A grid, not wrapped flex: hostname, build and machine line their values up in one column
-     instead of each pair starting wherever the previous one ended. */
   margin: 12px 0 0;
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -3462,21 +3453,6 @@ button:disabled {
   font-weight: 700;
 }
 
-.periph-code {
-  margin: 0;
-  max-height: 360px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  border: 1px solid #d9e5ee;
-  border-radius: 10px;
-  background: #f4f8fb;
-  color: #20384f;
-  padding: 12px;
-  font-size: 12px;
-  line-height: 1.55;
-  overflow-wrap: normal;
-}
-
 .periph-command {
   margin-top: 4px;
   display: grid;
@@ -3484,9 +3460,16 @@ button:disabled {
   gap: 8px;
 }
 
-.periph-command .periph-code {
+.periph-code {
   justify-self: stretch;
+  margin: 0;
+  border: 1px solid #d9e5ee;
+  border-radius: 10px;
   background: #fff;
+  color: #20384f;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3500,13 +3483,7 @@ button:disabled {
 
 .periph-form-fields {
   display: grid;
-  /* host, then the short port, then user */
   grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
-  gap: 8px;
-}
-
-.periph-mode-fields {
-  display: grid;
   gap: 8px;
 }
 
@@ -3519,7 +3496,6 @@ button:disabled {
   color: #2f4c61;
 }
 
-/* A menu's title with the chosen entry's tier as a pill, so no entry needs a suffix. */
 .periph-field-head {
   display: flex;
   align-items: center;
@@ -3529,18 +3505,10 @@ button:disabled {
 }
 
 .periph-refresh[aria-disabled='true'] {
-  /* Dim the surface, never the label: fading both drops "Scanning… N s" below AA contrast,
-     and that state is on screen for the whole scan. */
   background: #eef3fb;
   border-color: rgba(23, 79, 76, 0.25);
   cursor: progress;
   transform: none;
-}
-
-.periph-meta {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: var(--ink-soft);
 }
 
 .periph-issues {
@@ -3573,10 +3541,7 @@ button:disabled {
 }
 
 .periph-grid {
-  margin-top: 12px;
   display: grid;
-  /* The camera list takes only what its rows need (capped at 280px, long names wrap);
-     the detail column gets the rest. */
   grid-template-columns: fit-content(280px) minmax(0, 1fr);
   align-items: start;
   gap: 12px;
@@ -3623,7 +3588,6 @@ button:disabled {
 }
 
 .periph-camera-row:focus-visible,
-.periph-code:focus-visible,
 .periph-identity summary:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
@@ -3704,7 +3668,9 @@ button:disabled {
 }
 
 .periph-mode-fields {
+  display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  gap: 8px;
 }
 
 .periph-modes .hint {
@@ -3724,7 +3690,6 @@ button:disabled {
   }
 }
 
-/* Board settings panel (masthead indicator opens this) */
 .board-panel-card {
   width: min(720px, calc(100vw - 24px));
   max-height: min(820px, calc(100vh - 24px));
@@ -3750,7 +3715,6 @@ button:disabled {
   font-size: 17px;
 }
 
-/* The actions close the card, after what they act on, instead of floating beside the heading. */
 .periph-board-actions {
   margin-top: 16px;
   padding-top: 12px;
@@ -3761,7 +3725,6 @@ button:disabled {
   padding: 12px 16px 16px;
 }
 
-/* One rhythm down the panel: every block the card renders is spaced the same. */
 .board-panel-body .periph-board > * + * {
   margin-top: 12px;
 }
@@ -3773,12 +3736,10 @@ button:disabled {
   background: transparent;
 }
 
-/* The card only takes focus as a last resort, when a collapse removed every nearer control. */
 .periph-board:focus {
   outline: none;
 }
 
-/* Peripherals: device-kind icon rail. 56px wide: 46px buttons + 4px padding + 1px border. */
 .periph-kind-layout {
   margin-top: 12px;
   display: grid;
@@ -3819,7 +3780,6 @@ button:disabled {
   background: #fff;
 }
 
-/* No lift on hover (the global button rule): a transform would also re-anchor the phone-width tip. */
 .periph-kinds .periph-kind:hover {
   transform: none;
 }
@@ -3836,7 +3796,6 @@ button:disabled {
   border-color: var(--accent);
 }
 
-/* Greyed: not supported, or nothing detected. #7a8a99 keeps 3.39:1 on the rail and 3.55:1 on white. */
 .periph-kind[aria-disabled='true'] {
   cursor: not-allowed;
   color: #7a8a99;
@@ -3858,7 +3817,6 @@ button:disabled {
   display: block;
 }
 
-/* White on --accent-alt is 5.18:1; the greyed bubble (--ink-soft on #e8edf2) is 5.49:1. */
 .periph-kind-badge {
   position: absolute;
   top: -7px;
@@ -3911,19 +3869,10 @@ button:disabled {
   min-width: 0;
 }
 
-.periph-kind-panel .periph-grid {
-  margin-top: 0;
-}
-
-/* Detail pane: one explanation line, progressive disclosure */
 .periph-summary-line {
   margin: 8px 0 0;
   font-size: 13px;
   color: var(--ink-soft);
-}
-
-.periph-summary-line .periph-links {
-  color: inherit;
 }
 
 .periph-blocked-disclosure {
@@ -3948,8 +3897,7 @@ button:disabled {
   margin-top: 4px;
 }
 
-/* Phones: the rail becomes a row of icons above the panel (RAIL_ROW_QUERY in PeripheralsView.jsx).
-   The tip anchors to the whole row, so it spans the row's width and never runs off-screen. */
+/* Keep in sync with RAIL_ROW_QUERY in PeripheralsView.jsx. */
 @media (max-width: 640px) {
   .periph-kind-layout {
     grid-template-columns: minmax(0, 1fr);
