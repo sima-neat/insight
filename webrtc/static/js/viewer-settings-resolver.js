@@ -334,6 +334,24 @@
     return normalized;
   }
 
+  // writeScopeSettings stores every default, which turns a whole scope into
+  // overrides. This stores only what the scope already overrode plus one key, so
+  // the rest keeps following the global scope and the defaults.
+  function writeScopeGeneralOverride(scope, key, value) {
+    const overrides = settingsOverrides(readRawSettings(scope));
+    const stored = {
+      version: SETTINGS_VERSION,
+      general: { ...overrides.general, ...normalizeGeneral({ [key]: value }, false) },
+      types: overrides.types
+    };
+    try {
+      window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(stored));
+    } catch (_err) {
+      return null;
+    }
+    return stored;
+  }
+
   window.viewerSettingsApi = {
     version: SETTINGS_VERSION,
     metadataTypes: METADATA_TYPES,
@@ -343,6 +361,7 @@
     },
     readScopeSettings,
     writeScopeSettings,
+    writeScopeGeneralOverride,
     normalizeSettings,
     resolveTypeSettings
   };

@@ -171,3 +171,76 @@ test("channel object entries override global entries by label", () => {
   const byLabel = Object.fromEntries(resolved.type.objects.map((entry) => [entry.label, entry.color]));
   assert.deepEqual(byLabel, { person: "#333333", car: "#222222" });
 });
+
+function loadSettingsApiWithStorage(stored = {}, { failWrites = false } = {}) {
+  const values = new Map(Object.entries(stored).map(([key, value]) => [key, JSON.stringify(value)]));
+  const window = {
+    localStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        if (failWrites) throw new Error("quota exceeded");
+        values.set(key, value);
+      }
+    }
+  };
+  vm.runInNewContext(resolverSource, { window });
+  return {
+    api: realmSafeApi(window.viewerSettingsApi),
+    readStored: (key) => (values.has(key) ? JSON.parse(values.get(key)) : null)
+  };
+}
+
+test("writing one general override leaves the scope's other values inherited", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 500, showRoi: false }, types: {} }
+  });
+
+  api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 600);
+
+  assert.deepEqual(readStored("viewerSettings_channel_1").general, { videoSyncBufferMs: 600 });
+  const resolved = api.resolveTypeSettings(1, "pose-estimation");
+  assert.equal(resolved.general.videoSyncBufferMs, 600);
+  assert.equal(resolved.general.showRoi, false);
+});
+
+test("writing one general override leaves other scopes untouched", () => {
+  const global = { version: 4, general: { videoSyncBufferMs: 500 }, types: {} };
+  const { api, readStored } = loadSettingsApiWithStorage({ viewerSettings_global: global });
+
+  api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 600);
+
+  assert.deepEqual(readStored("viewerSettings_global"), global);
+  assert.equal(readStored("viewerSettings_channel_2"), null);
+  assert.equal(api.resolveTypeSettings(2, "pose-estimation").general.videoSyncBufferMs, 500);
+});
+
+test("writing one general override keeps the scope's existing overrides", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { metadataRetentionMs: 2500 },
+      types: { segmentation: { maskOpacity: 0.7 } }
+    }
+  });
+
+  api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 600);
+
+  const stored = readStored("viewerSettings_channel_1");
+  assert.deepEqual(stored.general, { metadataRetentionMs: 2500, videoSyncBufferMs: 600 });
+  assert.equal(stored.types.segmentation.maskOpacity, 0.7);
+  assert.equal(stored.version, 4);
+});
+
+test("writing one general override clamps the value like the settings dialog", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 9000);
+
+  assert.equal(readStored("viewerSettings_channel_1").general.videoSyncBufferMs, 4000);
+});
+
+test("writing one general override reports a storage failure", () => {
+  const { api } = loadSettingsApiWithStorage({}, { failWrites: true });
+
+  assert.equal(api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 600), null);
+});
