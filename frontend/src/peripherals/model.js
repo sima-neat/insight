@@ -371,10 +371,10 @@ export function formatRelativeTime(iso, now = Date.now()) {
   if (!Number.isFinite(time)) return ''
   const seconds = Math.round((now - time) / 1000)
   if (seconds < 10) return 'just now'
-  if (seconds < 60) return `${seconds} s ago`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`
-  return `${Math.floor(seconds / 86400)} d ago`
+  if (seconds < 60) return `${countLabel(seconds, 'second')} ago`
+  if (seconds < 3600) return `${countLabel(Math.floor(seconds / 60), 'minute')} ago`
+  if (seconds < 86400) return `${countLabel(Math.floor(seconds / 3600), 'hour')} ago`
+  return `${countLabel(Math.floor(seconds / 86400), 'day')} ago`
 }
 
 export function countLabel(count, noun) {
