@@ -157,8 +157,10 @@ canvas {
   box-sizing: border-box;
   width: 24px;
   height: 22px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  /* Solid, not translucent: over bright or busy video a see-through surface
+     disappears, and the button is the only way to a channel's settings. */
+  background: #4b525b;
+  border: 1px solid #8a929c;
   border-radius: 6px;
   padding: 2px;
   margin-left: 8px;
@@ -170,7 +172,7 @@ canvas {
 }
 
 .channel-menu-button:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: #626a74;
 }
 
 .channel-menu-button:focus-visible {
