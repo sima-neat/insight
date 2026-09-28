@@ -172,14 +172,18 @@ test("channel object entries override global entries by label", () => {
   assert.deepEqual(byLabel, { person: "#333333", car: "#222222" });
 });
 
-function loadSettingsApiWithStorage(stored = {}, { failWrites = false } = {}) {
+// `failWritesFor` lists storage keys whose writes fail while all others succeed.
+function loadSettingsApiWithStorage(stored = {}, { failWrites = false, failWritesFor = [] } = {}) {
   const values = new Map(Object.entries(stored).map(([key, value]) => [key, JSON.stringify(value)]));
   const window = {
     localStorage: {
       getItem: (key) => values.get(key) ?? null,
       setItem: (key, value) => {
-        if (failWrites) throw new Error("quota exceeded");
+        if (failWrites || failWritesFor.includes(key)) throw new Error("quota exceeded");
         values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
       },
       get length() {
         return values.size;
@@ -354,4 +358,150 @@ test("saving without the option stores every general key as before", () => {
     "showRoi",
     "videoSyncBufferMs"
   ]);
+});
+
+test("the followed value is the global scope's own value, else the default", () => {
+  const withGlobal = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 1000, metadataRetentionMs: 0 }, types: {} },
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} }
+  }).api;
+  assert.equal(withGlobal.followedGeneralValue("videoSyncBufferMs"), 1000);
+  assert.equal(withGlobal.followedGeneralValue("metadataRetentionMs"), 0);
+  assert.equal(withGlobal.followedGeneralValue("showRoi"), true);
+
+  const withoutGlobal = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  }).api;
+  assert.equal(withoutGlobal.followedGeneralValue("videoSyncBufferMs"), 350);
+});
+
+test("keys to store keep own keys, add changed keys and leave unchanged inherited keys out", () => {
+  const { api } = loadSettingsApiWithStorage();
+  const loaded = { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true, applyRoiFiltering: true };
+
+  assert.deepEqual(
+    api.generalKeysToStore(["metadataRetentionMs"], loaded, { ...loaded, videoSyncBufferMs: 600, showRoi: false }),
+    ["metadataRetentionMs", "videoSyncBufferMs", "showRoi"]
+  );
+  assert.deepEqual(api.generalKeysToStore([], loaded, { ...loaded }), []);
+  assert.deepEqual(
+    api.generalKeysToStore(["videoSyncBufferMs"], loaded, { ...loaded, videoSyncBufferMs: 600 }),
+    ["videoSyncBufferMs"]
+  );
+});
+
+test("applying globally raises the global value and removes the channel's own value", () => {
+  for (const stored of [
+    { viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} } },
+    {}
+  ]) {
+    const { api, readStored } = loadSettingsApiWithStorage({
+      ...stored,
+      viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} }
+    });
+
+    const result = api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 600);
+
+    assert.deepEqual(result, { applied: 600, raised: true });
+    assert.equal(readStored("viewerSettings_global").general.videoSyncBufferMs, 600);
+    assert.deepEqual(readStored("viewerSettings_channel_1").general, {});
+    assert.equal(api.resolveTypeSettings(1, "pose-estimation").general.videoSyncBufferMs, 600);
+  }
+});
+
+test("applying globally never lowers the global value", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 1000 }, types: {} },
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} }
+  });
+
+  const result = api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 600);
+
+  assert.deepEqual(result, { applied: 1000, raised: false });
+  assert.equal(readStored("viewerSettings_global").general.videoSyncBufferMs, 1000);
+  assert.deepEqual(readStored("viewerSettings_channel_1").general, {});
+  assert.equal(api.resolveTypeSettings(1, "pose-estimation").general.videoSyncBufferMs, 1000);
+});
+
+test("applying globally with a global value equal to the target does not write the global scope", () => {
+  const global = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+  // 600.4 and "600" normalize to 600, so they count as equal too.
+  for (const value of [600, 600.4, "600"]) {
+    const { api, readStored } = loadSettingsApiWithStorage(
+      {
+        viewerSettings_global: global,
+        viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} }
+      },
+      { failWritesFor: ["viewerSettings_global"] }
+    );
+
+    const result = api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", value);
+
+    assert.deepEqual(result, { applied: 600, raised: false });
+    assert.deepEqual(readStored("viewerSettings_global"), global);
+    assert.deepEqual(readStored("viewerSettings_channel_1").general, {});
+  }
+});
+
+test("applying globally keeps the channel's other own values and types", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 350, metadataRetentionMs: 2500, showRoi: false },
+      types: { segmentation: { maskOpacity: 0.7 } }
+    }
+  });
+
+  api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 600);
+
+  const stored = readStored("viewerSettings_channel_1");
+  assert.deepEqual(stored.general, { metadataRetentionMs: 2500, showRoi: false });
+  assert.equal(stored.types.segmentation.maskOpacity, 0.7);
+});
+
+test("applying globally does not touch other channels' own values", () => {
+  const channel2 = { version: 4, general: { videoSyncBufferMs: 450 }, types: {} };
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} },
+    viewerSettings_channel_2: channel2
+  });
+
+  api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 600);
+
+  assert.deepEqual(readStored("viewerSettings_channel_2"), channel2);
+  assert.equal(api.resolveTypeSettings(2, "pose-estimation").general.videoSyncBufferMs, 450);
+});
+
+test("applying globally reports a storage failure as null and leaves the global value as it was", () => {
+  const global = { version: 4, general: { videoSyncBufferMs: 350, showRoi: false }, types: {} };
+  const channel1 = { version: 4, general: { videoSyncBufferMs: 350 }, types: {} };
+  const { api, readStored } = loadSettingsApiWithStorage(
+    { viewerSettings_global: global, viewerSettings_channel_1: channel1 },
+    { failWritesFor: ["viewerSettings_channel_1"] }
+  );
+
+  assert.equal(api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 600), null);
+  assert.deepEqual(readStored("viewerSettings_global"), global);
+  assert.deepEqual(readStored("viewerSettings_channel_1"), channel1);
+});
+
+test("a failed global apply removes a global entry that did not exist before", () => {
+  const { api, readStored } = loadSettingsApiWithStorage(
+    { viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} } },
+    { failWritesFor: ["viewerSettings_channel_1"] }
+  );
+
+  assert.equal(api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 600), null);
+  assert.equal(readStored("viewerSettings_global"), null);
+});
+
+test("clearing a value the scope does not have writes nothing", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  const result = api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs");
+
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  // Still an object, so callers see success.
+  assert.deepEqual(result.general, {});
+  assert.deepEqual(result.types, {});
 });

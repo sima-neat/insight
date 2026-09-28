@@ -383,11 +383,72 @@
 
   // The inverse of writeScopeGeneralOverride: drops one key so the scope goes back
   // to following the global scope (or the default) for it, keeping everything else.
+  // A scope without its own value for `key` is left unwritten, so clearing never
+  // creates an empty scope entry; the unchanged overrides still signal success.
   function clearScopeGeneralOverride(scope, key) {
     const overrides = settingsOverrides(readRawSettings(scope));
+    if (!Object.prototype.hasOwnProperty.call(overrides.general, key)) return overrides;
     const general = { ...overrides.general };
     delete general[key];
     return storeScopeOverrides(scope, general, overrides.types);
+  }
+
+  // What a channel gets for a general key when it has no value of its own: the
+  // global scope's own value, otherwise the default. An unknown key yields null.
+  function followedGeneralValue(key) {
+    const globalOwn = readScopeOverrides("global").general;
+    if (Object.prototype.hasOwnProperty.call(globalOwn, key)) return globalOwn[key];
+    return Object.prototype.hasOwnProperty.call(GENERAL_DEFAULTS, key) ? GENERAL_DEFAULTS[key] : null;
+  }
+
+  // A channel dialog's save stores a general key as the channel's own if the channel
+  // had its own value at load, or if the control now holds something else than the
+  // dialog loaded into it. Values compare strictly (integers for sliders, booleans
+  // for toggles). Each key appears once, in order of first appearance.
+  function generalKeysToStore(ownKeys, loadedValues, currentValues) {
+    const keys = [];
+    const add = (key) => {
+      if (!keys.includes(key)) keys.push(key);
+    };
+    Array.from(ownKeys || []).forEach(add);
+    const loaded = loadedValues || {};
+    Object.keys(currentValues || {}).forEach((key) => {
+      if (currentValues[key] !== loaded[key]) add(key);
+    });
+    return keys;
+  }
+
+  // The panel's global action: the channel gives up its own value and follows the
+  // global one, which is raised to `value` if it is below it, never lowered. Either
+  // everything is stored or the global scope is put back as it was (null result).
+  function applyGlobalGeneral(channelScope, key, value) {
+    const normalized = normalizeGeneral({ [key]: value }, false)[key];
+    if (normalized === undefined) return null;
+    const globalStorageKey = "viewerSettings_global";
+    let previousGlobal;
+    try {
+      previousGlobal = window.localStorage.getItem(globalStorageKey);
+    } catch (_err) {
+      return null;
+    }
+    const followed = followedGeneralValue(key);
+    const raise = followed < normalized;
+    if (raise && !writeScopeGeneralOverride("global", key, normalized)) return null;
+    if (!clearScopeGeneralOverride(channelScope, key)) {
+      if (raise) {
+        try {
+          if (previousGlobal == null) {
+            window.localStorage.removeItem(globalStorageKey);
+          } else {
+            window.localStorage.setItem(globalStorageKey, previousGlobal);
+          }
+        } catch (_err) {
+          // Nothing more can be done; the caller still learns that the action failed.
+        }
+      }
+      return null;
+    }
+    return { applied: raise ? normalized : followed, raised: raise };
   }
 
   // Every channel scope in storage that has its own value for `key`, for the global
@@ -426,6 +487,9 @@
     readScopeOverrides,
     clearScopeGeneralOverride,
     listChannelGeneralOverrides,
+    followedGeneralValue,
+    generalKeysToStore,
+    applyGlobalGeneral,
     normalizeSettings,
     resolveTypeSettings
   };

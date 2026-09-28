@@ -462,6 +462,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
                       metadataSync,
                       synchronizationSettingsRef.current.videoSyncBufferMs,
                       videoSyncStatusRef.current.supported,
+                      // Read every second: the global value can change in another dialog.
+                      window.viewerSettingsApi?.followedGeneralValue?.("videoSyncBufferMs"),
                     )
                   : null,
               );
@@ -616,13 +618,16 @@ function ChannelTile({ index, onActiveChange, debug }) {
       return true;
     }
     if (target === "global") {
-      const storedGlobal = window.viewerSettingsApi?.writeScopeGeneralOverride?.("global", "videoSyncBufferMs", targetMs);
-      if (!storedGlobal) return false;
-      const cleared = window.viewerSettingsApi?.clearScopeGeneralOverride?.(`channel_${index}`, "videoSyncBufferMs");
-      if (!cleared) return false;
+      // One resolver call that stores everything or nothing; it never lowers the
+      // global value. Without it (an older cached resolver) the action fails closed.
+      const channelScope = `channel_${index}`;
+      const result = window.viewerSettingsApi?.applyGlobalGeneral?.(channelScope, "videoSyncBufferMs", targetMs);
+      if (!result) return false;
       // The chip and its panel are about to disappear; leave focus on the tile.
       settingsButtonRef.current?.focus();
-      window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope: "global" } }));
+      window.dispatchEvent(
+        new CustomEvent("viewer-settings-changed", { detail: { scope: result.raised ? "global" : channelScope } }),
+      );
       return true;
     }
     return false;

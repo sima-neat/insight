@@ -30,7 +30,18 @@ export function bufferSettleMs(previousBufferMs, nextBufferMs) {
   return raisedBy * SETTLE_MS_PER_RAISED_MS + SETTLE_BASE_MS;
 }
 
-export function lateNoticeDetails(snapshot, currentBufferMs, bufferSupported) {
+// The panel's second button: raise the value the channels follow, or, when that
+// already covers the suggestion, only let this channel follow it. The global value
+// is never lowered. Without a known followed value the button offers the raise.
+function globalActionFor(suggested, followedBufferMs) {
+  if (suggested === null) return null;
+  if (Number.isFinite(followedBufferMs) && followedBufferMs >= suggested) {
+    return { kind: "follow", valueMs: followedBufferMs };
+  }
+  return { kind: "raise", valueMs: suggested };
+}
+
+export function lateNoticeDetails(snapshot, currentBufferMs, bufferSupported, followedBufferMs) {
   const suggested = bufferSupported
     ? suggestedBufferMs(currentBufferMs, snapshot.recentLatenessP90Ms)
     : null;
@@ -44,5 +55,6 @@ export function lateNoticeDetails(snapshot, currentBufferMs, bufferSupported) {
     bufferMs: currentBufferMs,
     suggestedBufferMs: suggested,
     blockedBy,
+    globalAction: globalActionFor(suggested, followedBufferMs),
   };
 }

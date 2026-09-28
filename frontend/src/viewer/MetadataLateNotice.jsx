@@ -71,14 +71,26 @@ export default function MetadataLateNotice({ details, onRaise }) {
                 <span>Raise for this channel to {details.suggestedBufferMs} ms</span>
                 <span className="metadata-late-action-sub">Other channels keep their setting.</span>
               </button>
-              <button
-                type="button"
-                className="metadata-late-action metadata-late-action--secondary"
-                onClick={() => raise("global")}
-              >
-                <span>Raise globally to {details.suggestedBufferMs} ms</span>
-                <span className="metadata-late-action-sub">Applies to every channel without its own value.</span>
-              </button>
+              {details.globalAction && (
+                // Both kinds pass the suggestion; the resolver decides what is written.
+                <button
+                  type="button"
+                  className="metadata-late-action metadata-late-action--secondary"
+                  onClick={() => raise("global")}
+                >
+                  {details.globalAction.kind === "follow" ? (
+                    <>
+                      <span>Use global value ({details.globalAction.valueMs} ms)</span>
+                      <span className="metadata-late-action-sub">Removes this channel's own value.</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Raise globally to {details.globalAction.valueMs} ms</span>
+                      <span className="metadata-late-action-sub">Applies to every channel without its own value.</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>

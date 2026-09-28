@@ -52,13 +52,47 @@ test("there is no suggestion without a lateness measurement", () => {
 test("notice details carry the panel values", () => {
   const snapshot = { recentLateShare: 0.918, recentLatenessMedianMs: 153.4, recentLatenessP90Ms: 195 };
 
-  assert.deepEqual(lateNoticeDetails(snapshot, 350, true), {
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, 350), {
     latenessMs: 153,
     latePercent: 92,
     bufferMs: 350,
     suggestedBufferMs: 600,
     blockedBy: null,
+    globalAction: { kind: "raise", valueMs: 600 },
   });
+});
+
+test("the global action raises when the followed value is below the suggestion", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: 150, recentLatenessP90Ms: 195 };
+
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, 500).globalAction, { kind: "raise", valueMs: 600 });
+});
+
+test("the global action follows when the followed value is above the suggestion", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: 150, recentLatenessP90Ms: 195 };
+
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, 1000).globalAction, { kind: "follow", valueMs: 1000 });
+});
+
+test("the global action follows when the followed value equals the suggestion", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: 150, recentLatenessP90Ms: 195 };
+
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, 600).globalAction, { kind: "follow", valueMs: 600 });
+});
+
+test("there is no global action without a suggestion", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: 1200, recentLatenessP90Ms: 1300 };
+
+  assert.equal(lateNoticeDetails(snapshot, 3000, true, 350).globalAction, null);
+  assert.equal(lateNoticeDetails(snapshot, 350, false, 350).globalAction, null);
+});
+
+test("the global action raises when the followed value is missing", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: 150, recentLatenessP90Ms: 195 };
+
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true).globalAction, { kind: "raise", valueMs: 600 });
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, null).globalAction, { kind: "raise", valueMs: 600 });
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, Number.NaN).globalAction, { kind: "raise", valueMs: 600 });
 });
 
 test("notice details name the maximum as the blocker", () => {
@@ -80,12 +114,13 @@ test("notice details name the browser as the blocker", () => {
 test("notice details survive a window without lateness samples", () => {
   const snapshot = { recentLateShare: 1, recentLatenessMedianMs: null, recentLatenessP90Ms: null };
 
-  assert.deepEqual(lateNoticeDetails(snapshot, 350, true), {
+  assert.deepEqual(lateNoticeDetails(snapshot, 350, true, 350), {
     latenessMs: null,
     latePercent: 100,
     bufferMs: 350,
     suggestedBufferMs: null,
     blockedBy: "maximum",
+    globalAction: null,
   });
 });
 
