@@ -402,7 +402,7 @@ Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge netw
 | `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
 | `GET` | `/api/peripherals` | Last camera scan for the selected board, or an empty snapshot with `scanned_at: null`. |
 | `POST` | `/api/peripherals/refresh` | Scan the board for MIPI (libcamera, media graph) and USB (V4L2) cameras. |
-| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`; return Python, C++, and JSON input configurations, plus Apps `config.yaml` when the board's `libcamerasrc` supports `buffer-count`. |
+| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps", "generation"}` (`generation` from the same `/api/peripherals` snapshot); return Python, C++, and JSON input configurations, plus Apps `config.yaml` when the board's `libcamerasrc` supports `buffer-count`. |
 
 Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` separates `verified` Core `CameraInput` modes from `advertised` ones that the camera reports but Core has not validated; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838). An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first.
 
