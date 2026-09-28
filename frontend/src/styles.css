@@ -3588,7 +3588,8 @@ button:disabled {
 }
 
 .periph-camera-row:focus-visible,
-.periph-identity summary:focus-visible {
+.periph-identity summary:focus-visible,
+.periph-kind:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
   border-color: var(--accent);
@@ -3788,12 +3789,6 @@ button:disabled {
   border-color: rgba(15, 122, 116, 0.55);
   background: #f1fbfa;
   color: var(--accent-alt);
-}
-
-.periph-kind:focus-visible {
-  outline: 0;
-  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
-  border-color: var(--accent);
 }
 
 .periph-kind[aria-disabled='true'] {
