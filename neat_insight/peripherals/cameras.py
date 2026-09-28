@@ -545,9 +545,6 @@ def _issues(probe: dict, platform: dict, media: dict, isp_unread: bool) -> list:
     neat = platform["neat"]
     if neat and not neat.get("version"):
         issues.append(_issue("warning", "neat_missing", "Neat is not installed on this board.", NEAT_INSTALL_HINT))
-    elif neat and neat.get("update_available") and neat.get("latest_version"):
-        message = f"Neat {neat['version']} is installed; {neat['latest_version']} is available."
-        issues.append(_issue("info", "neat_update", message, "On the board, run `neat update`, then Refresh."))
     if platform["availability_method"] in AVAILABILITY_ISSUES:
         severity, message, hint = AVAILABILITY_ISSUES[platform["availability_method"]]
         issues.append(_issue(severity, "availability_limited", message, hint))

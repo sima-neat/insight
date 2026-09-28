@@ -125,7 +125,7 @@ Select **Refresh** to scan the board. For each camera Insight shows the identity
 
 Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
-The scan also checks Neat on the board. If PyNeat is missing, a warning gives the install command; if a newer Neat release is available, a note suggests `neat update`.
+The scan also checks for PyNeat on the board; if it is missing, a warning gives the command that installs the latest Neat.
 
 ### Camera configuration API
 

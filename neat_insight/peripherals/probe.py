@@ -1,4 +1,5 @@
 # Runs on the board as `python3 -`: stdlib only, Python 3.8, never captures or changes controls.
+import glob
 import json
 import os
 import re
@@ -13,7 +14,7 @@ DEV_ROOT = "/dev"
 COMMAND_TIMEOUT = 10
 SLOW_COMMAND_TIMEOUT = 15
 BUDGET_SEC = 70
-TOOLS = ("cam", "media-ctl", "v4l2-ctl", "gst-inspect-1.0", "fuser", "sudo", "neat")
+TOOLS = ("cam", "media-ctl", "v4l2-ctl", "gst-inspect-1.0", "fuser", "sudo")
 _deadline = None
 OUT_OF_TIME = "skipped: the probe's time budget was used up"
 SEARCH_PATH = os.pathsep.join(
@@ -585,29 +586,13 @@ def read_isp_sizes(tools):
     return result
 
 
-def probe_neat(tools):
+def probe_neat():
     venv = os.path.expanduser(os.environ.get("PYNEAT_VENV_DIR") or "~/pyneat")
     python = os.path.join(venv, "bin", "python")
-    neat = {"version": None, "python": None, "update_available": None, "latest_version": None}
-    if tools.get("neat"):
-        _, out, _ = run([tools["neat"], "--json"], SLOW_COMMAND_TIMEOUT)
-        try:
-            components = json.loads(out)["components"]
-            neat["version"] = components["pyneat"].get("version")
-            neat["update_available"] = components["core"].get("updateAvailable")
-            neat["latest_version"] = components["core"].get("latestVersion")
-        except (ValueError, KeyError, TypeError, AttributeError):
-            pass
-    if not os.access(python, os.X_OK):
-        return dict(neat, version=None)
-    neat["python"] = python
-    # `neat --json` reads ~/pyneat only.
-    if not neat["version"] or "PYNEAT_VENV_DIR" in os.environ:
-        code, out, _ = run([python, "-c", "import pyneat; print(pyneat.__version__)"], SLOW_COMMAND_TIMEOUT)
-        if code is None:
-            return None
-        neat["version"] = out.strip() if code == 0 else None
-    return neat
+    found = glob.glob(os.path.join(venv, "lib", "python3*", "site-packages", "pyneat-*.dist-info"))
+    if not found or not os.access(python, os.X_OK):
+        return {"version": None, "python": None}
+    return {"version": os.path.basename(found[0])[len("pyneat-"):-len(".dist-info")], "python": python}
 
 
 def collect():
@@ -631,7 +616,7 @@ def collect():
         "mipi": mipi,
         "isp": read_isp_sizes(tools) if any(camera["formats"] for camera in mipi) else None,
         "usb": collect_usb(tools, check_users, failures),
-        "neat": probe_neat(tools),
+        "neat": probe_neat(),
         "failures": failures,
     }
 
