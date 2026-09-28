@@ -619,7 +619,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       const storedGlobal = window.viewerSettingsApi?.writeScopeGeneralOverride?.("global", "videoSyncBufferMs", targetMs);
       if (!storedGlobal) return false;
       const cleared = window.viewerSettingsApi?.clearScopeGeneralOverride?.(`channel_${index}`, "videoSyncBufferMs");
-      if (cleared === null) return false;
+      if (!cleared) return false;
       // The chip and its panel are about to disappear; leave focus on the tile.
       settingsButtonRef.current?.focus();
       window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope: "global" } }));
