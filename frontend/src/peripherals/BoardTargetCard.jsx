@@ -148,7 +148,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
             {sourceLabel(target.source) && <Pill tone="periph-info">{sourceLabel(target.source)}</Pill>}
             <Pill tone={state.tone}>{state.label}</Pill>
           </div>
-          <p className="section-note">Insight discovers peripherals and reads device statistics over this connection.</p>
+          <p className="section-note">Insight discovers peripherals over this connection.</p>
           <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
           <div className="periph-actions periph-board-actions">
             {shell?.launch_supported && (
