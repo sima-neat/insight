@@ -308,7 +308,7 @@ export function cameraSummaryLine(camera) {
   const availability = availabilityInfo(camera?.availability)
   const tier = camera?.support?.tier
   if (camera?.availability?.state === 'in_use') {
-    return `${availability.label}. Stop that process on the board before an application, or a preview here, can open this camera.`
+    return `${availability.label}. Stop that process on the board before an application can open this camera.`
   }
   if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
@@ -319,12 +319,6 @@ export function blockedFormatSummary(options) {
   const blocked = (options || []).filter((option) => option.disabled)
   if (!blocked.length) return ''
   return `${countLabel(blocked.length, 'format')} cannot be used (${blocked.map((option) => option.value).join(', ')})`
-}
-
-export function selectionTier(camera, selection) {
-  if (!selection) return ''
-  const size = findSize(findFormat(camera, selection.format), selection.width, selection.height)
-  return findFps(size, selection.fps)?.tier || ''
 }
 
 export function resolveSelection(camera, wanted) {
@@ -346,16 +340,6 @@ export function resolveSelection(camera, wanted) {
 export function sameSelection(a, b) {
   if (!a || !b) return a === b
   return a.format === b.format && a.width === b.width && a.height === b.height && Number(a.fps) === Number(b.fps)
-}
-
-// A preview streams the mode it was started with. When the menus move, the picture and the menus
-// disagree until it is restarted on the new one.
-export function previewNeedsRestart(state, cameraId, next) {
-  const session = state?.session
-  if (!next || !session) return false
-  if (state.status !== 'starting' && state.status !== 'live') return false
-  if (session.camera_id !== cameraId) return false
-  return !sameSelection(session.mode, next)
 }
 
 export function resolveCameraId(snapshot, previousId) {
@@ -495,10 +479,6 @@ export function createFocusReturn() {
   }
 }
 
-// --- Camera preview -------------------------------------------------------
-// The preview is a small state machine driven entirely by the backend session
-// object. It lives here so the transitions can be tested without a DOM.
-
 export const PREVIEW_IDLE = Object.freeze({ status: 'idle', session: null, error: null })
 
 const PREVIEW_STATUS = {
@@ -521,43 +501,27 @@ const PREVIEW_ERROR_ACTIONS = {
   channel_taken: 'Another sender is using that viewer channel. Starting the preview again picks a channel nothing is sending to.'
 }
 
+const PREVIEW_EXPIRED = {
+  message: 'The preview stopped because the board stopped receiving heartbeats.',
+  code: 'not_found',
+  hint: 'Start the preview again. Insight only keeps a preview alive while this pane is open.',
+  details: {}
+}
+
 export function previewStatusInfo(state) {
   return PREVIEW_STATUS[state?.status] || PREVIEW_STATUS.idle
-}
-
-export function heartbeatDelay(session) {
-  const ms = Number(session?.heartbeat_interval_ms)
-  if (!Number.isFinite(ms) || ms <= 0) return 5000
-  return Math.min(60000, Math.max(1000, Math.round(ms)))
-}
-
-// What a failed heartbeat means for the pane, or null to keep beating (a transient error).
-export function heartbeatFailureEvent(error, sessionId) {
-  // A 404 for an id we no longer hold must never stop a newer session: `for` scopes it.
-  if (error?.code === 'not_found') return { type: 'expired', for: sessionId }
-  // The backend stopped the preview because another stream arrived on its channel.
-  if (error?.code === 'channel_taken') return { type: 'ended', for: sessionId, error }
-  return null
-}
-
-export function sessionMatches(session, cameraId, generation, selection = null) {
-  if (!session || !cameraId) return false
-  if (session.camera_id !== cameraId) return false
-  if (generation != null && session.generation !== undefined && Number(session.generation) !== Number(generation)) return false
-  return !selection || sameSelection(session.mode, selection)
 }
 
 export function previewErrorInfo(error) {
   if (!error) return null
   const code = error.code || ''
   const details = error.details || {}
-  const other = details.session || details.preview || {}
   return {
     code,
     message: error.message,
     hint: error.hint || '',
     action: PREVIEW_ERROR_ACTIONS[code] || '',
-    otherCamera: code === 'preview_active' ? String(other.camera_id || details.camera_id || '') : '',
+    otherCamera: code === 'preview_active' ? String(details.camera_id || '') : '',
     detail: typeof details.detail === 'string' ? details.detail : ''
   }
 }
@@ -573,7 +537,8 @@ export function previewBlock({ camera, selection, stale = false, session = null,
     }
   }
   if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
-  if (selectionTier(camera, selection) === 'unsupported') {
+  const size = findSize(findFormat(camera, selection.format), selection.width, selection.height)
+  if (findFps(size, selection.fps)?.tier === 'unsupported') {
     return { blocked: true, reason: `${modeLabel(selection)} is not validated on this board. Choose a verified or advertised mode.` }
   }
   if (camera.availability?.state === 'in_use') {
@@ -587,9 +552,7 @@ export function previewBlock({ camera, selection, stale = false, session = null,
 
 function outOfDate(state, event) {
   if (event.for == null) return false
-  // A preview that is still starting holds no session id yet, so an event tagged with one cannot
-  // be matched. The only preview it can refer to is that one: discarding it would strand the page
-  // in "Starting…" with a Stop button that has nothing to stop.
+  // A start holds no session id yet, so an event for any id can only mean that start.
   if (!state.session) return state.status !== 'starting' && state.status !== 'stopping'
   return state.session.id !== event.for
 }
@@ -600,7 +563,6 @@ export function nextPreviewState(state, event) {
     case 'start':
       return { status: 'starting', session: null, error: null }
     case 'adopt': {
-      // A session this browser did not start (page reload, second tab).
       const session = event.session
       if (!session || session.state === 'stopped') return PREVIEW_IDLE
       return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
@@ -608,10 +570,9 @@ export function nextPreviewState(state, event) {
     case 'session': {
       const session = event.session
       if (!session) return PREVIEW_IDLE
-      // A response for a session we already replaced or stopped must not revive it.
       if (current.session && current.session.id !== session.id) return current
       if (current.status === 'idle' || current.status === 'error') return current
-      if (session.state === 'stopped') return { status: 'idle', session: null, error: null }
+      if (session.state === 'stopped') return PREVIEW_IDLE
       if (current.status === 'stopping') return { status: 'stopping', session, error: null }
       return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
     }
@@ -624,22 +585,9 @@ export function nextPreviewState(state, event) {
     case 'stop-failed':
       if (outOfDate(current, event)) return current
       return { status: 'live', session: current.session || event.session || null, error: event.error || null }
-    case 'expired':
-      if (outOfDate(current, event)) return current
-      return {
-        status: 'idle',
-        session: null,
-        error: {
-          message: 'The preview stopped because the board stopped receiving heartbeats.',
-          code: 'not_found',
-          hint: 'Start the preview again. Insight only keeps a preview alive while this pane is open.',
-          details: {}
-        }
-      }
     case 'ended':
-      // A live preview the backend stopped, with its reason; nothing is left to stop.
       if (outOfDate(current, event)) return current
-      return { status: 'idle', session: null, error: event.error || null }
+      return { status: 'idle', session: null, error: event.error || PREVIEW_EXPIRED }
     case 'failed':
       if (outOfDate(current, event)) return current
       return { status: 'error', session: null, error: event.error || null }

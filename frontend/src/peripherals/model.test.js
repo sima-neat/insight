@@ -6,17 +6,12 @@ import {
   apiError,
   createBoardSync,
   createFocusReturn,
-  heartbeatDelay,
-  heartbeatFailureEvent,
   nextPreviewState,
   normalizeError,
   previewBlock,
   previewErrorInfo,
-  previewNeedsRestart,
   previewStatusInfo,
-  safeHref,
-  selectionTier,
-  sessionMatches
+  safeHref
 } from './model.js'
 
 test('only http(s) links are rendered', () => {
@@ -185,30 +180,6 @@ const usb = {
   errors: []
 }
 
-test('changing the mode restarts a preview, but only the one it belongs to', () => {
-  const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-  const live = { status: 'live', session: { id: 's1', camera_id: 'cam-a', mode } }
-  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, fps: 60 }), true, 'a different rate needs a restart')
-  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, width: 1280, height: 720 }), true)
-  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, format: 'RGB888' }), true)
-  // Re-selecting the mode it is already streaming must not interrupt the picture.
-  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode }), false)
-  // A preview belongs to one camera; another camera's menus must not touch it.
-  assert.equal(previewNeedsRestart(live, 'cam-b', { ...mode, fps: 60 }), false)
-  assert.equal(previewNeedsRestart({ status: 'starting', session: live.session }, 'cam-a', { ...mode, fps: 60 }), true)
-  assert.equal(previewNeedsRestart({ status: 'idle', session: null }, 'cam-a', { ...mode, fps: 60 }), false)
-  assert.equal(previewNeedsRestart({ status: 'stopping', session: live.session }, 'cam-a', { ...mode, fps: 60 }), false)
-  assert.equal(previewNeedsRestart(live, 'cam-a', null), false)
-})
-
-test('the selected mode keeps the tier the board reported for it', () => {
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), 'verified')
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1280, height: 720, fps: 60 }), 'advertised')
-  assert.equal(selectionTier(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), 'unsupported')
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 640, height: 480, fps: 30 }), '')
-  assert.equal(selectionTier(imx477, null), '')
-})
-
 const mipiMode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
 const boardTarget = { mode: 'ssh', label: 'sima@192.168.2.2' }
 const liveSession = {
@@ -279,13 +250,13 @@ test('preview transitions: a start that was never adopted still releases the pag
 
 test('preview transitions: a stale session id never disturbs a newer one', () => {
   const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
-  assert.equal(nextPreviewState(live, { type: 'expired', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, { type: 'ended', for: 'old-id' }), live)
   assert.equal(nextPreviewState(live, { type: 'stopped', for: 'old-id' }), live)
   assert.equal(nextPreviewState(live, { type: 'stopping', for: 'old-id' }), live)
   assert.equal(nextPreviewState(live, { type: 'failed', for: 'old-id', error: { message: 'boom' } }), live)
   assert.equal(nextPreviewState(live, { type: 'session', session: { ...liveSession, id: 'other' } }), live)
 
-  const expired = nextPreviewState(live, { type: 'expired', for: '8f1c' })
+  const expired = nextPreviewState(live, { type: 'ended', for: '8f1c' })
   assert.equal(expired.status, 'idle')
   assert.equal(expired.session, null)
   assert.match(expired.error.message, /stopped receiving heartbeats/)
@@ -317,25 +288,6 @@ test('preview transitions: failures, reset, and adopting an existing session', (
   assert.equal(nextPreviewState(undefined, { type: 'nonsense' }), PREVIEW_IDLE)
 })
 
-test('heartbeats follow the backend interval, clamped to something sane', () => {
-  assert.equal(heartbeatDelay(liveSession), 5000)
-  assert.equal(heartbeatDelay(null), 5000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 0 }), 5000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 50 }), 1000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 900000 }), 60000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: '2500' }), 2500)
-})
-
-test('a session belongs to the camera and board generation it was started for', () => {
-  assert.equal(sessionMatches(liveSession, imx477.id, 3), true)
-  assert.equal(sessionMatches(liveSession, imx477.id, 3, liveSession.mode), true)
-  assert.equal(sessionMatches(liveSession, imx477.id, 3, { ...liveSession.mode, fps: 60 }), false)
-  assert.equal(sessionMatches(liveSession, imx477.id, 4), false)
-  assert.equal(sessionMatches(liveSession, imx568.id, 3), false)
-  assert.equal(sessionMatches(liveSession, imx477.id), true)
-  assert.equal(sessionMatches(null, imx477.id, 3), false)
-})
-
 test('every preview failure carries a recovery action and nothing destructive', () => {
   assert.equal(previewErrorInfo(null), null)
 
@@ -346,14 +298,6 @@ test('every preview failure carries a recovery action and nothing destructive', 
   }, 409)))
   assert.equal(busy.hint, 'gst-launch-1.0 (pid 812) has /dev/video3 open.')
   assert.match(busy.action, /Insight never stops it for you/)
-
-  const other = previewErrorInfo(normalizeError(apiError({
-    error: 'A preview is already running.',
-    code: 'preview_active',
-    session: { camera_id: imx568.id }
-  }, 409)))
-  assert.equal(other.otherCamera, imx568.id)
-  assert.match(other.action, /Stop the preview that is already running/)
 
   // The backend puts camera_id at the top level of the 409 body.
   const flat = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409)))
@@ -375,21 +319,3 @@ test('a preview viewer address is only loaded when it is an http(s) URL', () => 
   assert.equal(safeHref('javascript:alert(1)'), null)
 })
 
-test('preview heartbeat: a taken channel ends the preview with the backend reason', () => {
-  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
-  const error = {
-    code: 'channel_taken',
-    message: 'An application started sending to this channel; the preview stopped so it would not corrupt that stream.',
-    hint: 'Start the preview again.'
-  }
-  const event = heartbeatFailureEvent(error, liveSession.id)
-  const ended = nextPreviewState(live, event)
-  assert.equal(ended.status, 'idle')
-  assert.equal(ended.session, null)
-  assert.equal(ended.error.message, error.message)
-  assert.ok(previewErrorInfo(ended.error).action, 'the pane says what to do next')
-  // Scoped to its session: it never ends a newer one.
-  assert.equal(nextPreviewState(live, heartbeatFailureEvent(error, 'old-id')), live)
-  assert.deepEqual(heartbeatFailureEvent({ code: 'not_found' }, 'abc'), { type: 'expired', for: 'abc' })
-  assert.equal(heartbeatFailureEvent({ code: 'timeout' }, 'abc'), null)
-})

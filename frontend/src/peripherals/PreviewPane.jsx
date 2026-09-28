@@ -1,4 +1,5 @@
 import {
+  CONNECTION_ERROR_CODES,
   fpsLabel,
   modeLabel,
   previewBlock,
@@ -16,11 +17,10 @@ function PreviewError({ error, onOpenBoardPanel }) {
     <>
       <p className="sr-only" role="alert">{info.message}</p>
       <Callout tone="danger" title={info.message}>
-        {/* One recovery line: the board's own hint when it sent one, ours otherwise. */}
         {(info.hint || info.action) && <p>{info.hint || info.action}</p>}
         {info.otherCamera && <p>The running preview is on <span className="periph-inline-code">{info.otherCamera}</span>.</p>}
         {info.detail && <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>}
-        {(info.code === 'no_target' || info.code === 'unreachable' || info.code === 'auth_failed' || info.code === 'host_key_changed') && (
+        {(info.code === 'no_target' || CONNECTION_ERROR_CODES.has(info.code)) && (
           <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
         )}
       </Callout>
@@ -28,8 +28,6 @@ function PreviewError({ error, onOpenBoardPanel }) {
   )
 }
 
-// The mode as three tags -- format, size, rate -- rather than one run of text, so each reads at a
-// glance. Screen readers get the same sentence the text used to be.
 function ModeBadges({ mode, label }) {
   if (!mode) return null
   return (
@@ -52,7 +50,6 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
     <section className="periph-preview" aria-labelledby="periph-preview-title">
       <div className="periph-preview-head">
         <h4 id="periph-preview-title">Video Preview</h4>
-        {/* The channel is Insight's own bookkeeping, not something to act on, so it is not shown. */}
         <span className="periph-pills">
           {running && <ModeBadges mode={session?.mode} label="Streaming" />}
           <Pill tone={status.tone}>{status.label}</Pill>
@@ -60,13 +57,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
       </div>
 
       <p className="sr-only" role="status">
-        {state?.status === 'live'
-          ? `Preview live on channel ${session?.channel ?? 'unknown'}`
-          : state?.status === 'starting'
-            ? 'Starting the preview'
-            : state?.status === 'stopping'
-              ? 'Stopping the preview'
-              : ''}
+        {{ live: `Preview live on channel ${session?.channel}`, starting: 'Starting the preview', stopping: 'Stopping the preview' }[state?.status] || ''}
       </p>
 
       {!running && (
@@ -89,8 +80,6 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
 
       {running && (
         <>
-          {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
-              describes a state the reader cannot walk away from. */}
           <div className="periph-actions">
             <button
               type="button"

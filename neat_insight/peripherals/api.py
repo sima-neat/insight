@@ -135,7 +135,6 @@ def export_camera():
 
 
 def _preview_host() -> str:
-    """The requesting browser's host, validated before it goes into a viewer URL."""
     host = browser_host(request.host)
     if host is None:
         raise BoardError(
@@ -147,7 +146,7 @@ def _preview_host() -> str:
 
 
 def _for_browser(preview_session, host: str):
-    """Add the viewer URL for this browser; the shared session never stores one."""
+    # The session is shared, so each response builds the viewer URL from its own validated Host.
     if preview_session is None:
         return None
     return {**preview_session, "viewer_url": viewer_url(host, preview_session["channel"])}

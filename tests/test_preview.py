@@ -801,7 +801,7 @@ class ActiveChannelTests(unittest.TestCase):
     def test_stats_come_from_the_vf_route_not_the_insight_proxy(self):
         payload = json.dumps({"channels": [{"channel": 2, "active": True}, {"channel": 0, "active": False}]}).encode()
         with self.urlopen(payload) as opened:
-            self.assertEqual(preview.active_channels(8081), {2})
+            self.assertEqual(preview.active_channels(), {2})
         self.assertEqual(opened.call_args.args[0], "https://127.0.0.1:8081/ingest/stats?all=1")
 
     def test_channel_ssrc_uses_the_real_nested_rtp_schema(self):

@@ -177,7 +177,16 @@ def _json_urlopen(url: str, timeout: float = 20.0) -> dict[str, Any]:
 
 
 def _request_host_name() -> str:
-    return port_map.request_host_name(request.host)
+    host = request.host.strip()
+    if host.startswith("["):
+        end = host.find("]")
+        if end > 0:
+            return host[1:end]
+    elif host.count(":") == 1:
+        name, maybe_port = host.rsplit(":", 1)
+        if maybe_port.isdigit():
+            host = name
+    return host or "127.0.0.1"
 
 
 def _format_browser_https_url(host, port, path="", query=""):
@@ -577,18 +586,6 @@ def _fake_sysinfo_payload():
     }
 
 
-def _coerce_port_value(value):
-    return port_map.coerce_port_value(value)
-
-
-def _port_protocol(name_parts, value):
-    return port_map.port_protocol(name_parts, value)
-
-
-def _collect_port_map_rows(name_parts, value, rows):
-    return port_map.collect_port_map_rows(name_parts, value, rows)
-
-
 def _sysinfo_port_map_candidates():
     yield from port_map.port_map_candidates()
 
@@ -598,7 +595,10 @@ def _iter_neat_port_maps():
 
 
 def _read_neat_port_map():
-    return port_map.read_neat_port_map(_iter_neat_port_maps())
+    for data in _iter_neat_port_maps():
+        if "insightVideoChannels" in data:
+            return data
+    return {}
 
 
 def _read_exposed_ports_from_port_map():
@@ -646,12 +646,9 @@ def _sanitize_viewer_sources(value, max_channels):
     return channels
 
 
-def _valid_port(value):
-    return port_map.valid_port(value)
-
-
 def _find_exposed_port(ports, name, protocol=None):
-    return port_map.find_exposed_port(ports, name, protocol)
+    entry = port_map.find_exposed_entry(ports, name, protocol)
+    return port_map.valid_port(entry.get("hostPortStart")) if entry else None
 
 
 def _resolve_video_ui_port():

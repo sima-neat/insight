@@ -92,7 +92,6 @@ class BoardManager:
         self._before_session_close: Optional[Callable[[BoardSession], None]] = None
 
     def set_before_session_close(self, callback: Callable[[BoardSession], None]) -> None:
-        """Register cleanup that must succeed before a board transport is replaced."""
         with self._lock:
             self._before_session_close = callback
 
@@ -168,14 +167,11 @@ class BoardManager:
                 }
 
     def _replace_session(self, target: Optional[BoardTarget], before_install=None) -> None:
-        # Preview cleanup can wait for an in-flight capture start and can itself report a transport
-        # error through `_record`. Run it without `_lock`, while `_change_lock` keeps target changes
-        # ordered, or those two paths can deadlock each other.
+        # The close callback runs without `_lock`, which `_record` takes on a transport error.
         with self._change_lock:
             self._replace_session_under_change(target, before_install)
 
     def _replace_session_under_change(self, target: Optional[BoardTarget], before_install=None) -> None:
-        """Replace the selected session while `_change_lock` is held."""
         with self._lock:
             current = self._session
             unchanged = (current.target if current else None) == target
@@ -192,7 +188,6 @@ class BoardManager:
             self._install_session(target)
 
     def _install_session(self, target: Optional[BoardTarget]) -> None:
-        """Install a new target while `_lock` and `_change_lock` are held."""
         self._generation += 1
         self._status = {"state": "unknown", "checked_at": None, "error": None}
         self._board = None

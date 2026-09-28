@@ -129,11 +129,7 @@ The scan also checks for PyNeat on the board; if it is missing, a warning gives 
 
 ### Preview a camera
 
-Select **Start preview** to see what a camera sees. The board captures video, encodes it in hardware, and sends it to Insight's viewer; the preview appears in the page and reserves one viewer channel.
-
-A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. It also stops by itself shortly after Insight stops watching, so a lost browser or a restarted Insight cannot leave the camera busy.
-
-Preview is available for MIPI cameras on modes Insight lists as usable. USB cameras are discovered and can be exported, but preview is not available for them yet.
+Select **Start preview** to stream the selected mode into the page. A preview uses one viewer channel and holds the camera, so your application cannot open it until you stop the preview. Insight does not start a preview on a camera another process is using. The preview stops when you select **Stop preview**, leave the page, refresh, or change the board, and on its own shortly after Insight stops watching. Preview is available for MIPI cameras only.
 
 ### Camera configuration
 
