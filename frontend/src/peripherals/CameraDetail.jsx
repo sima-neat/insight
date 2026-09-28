@@ -14,8 +14,6 @@ import {
 } from './model.js'
 import { Callout, ErrorNotice, Pill, SupportLinks } from './ui.jsx'
 
-export { cameraSubtitle }
-
 function BlockedFormats({ options }) {
   const summary = blockedFormatSummary(options)
   if (!summary) return null

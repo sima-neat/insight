@@ -27,21 +27,7 @@ function Facts({ rows }) {
   )
 }
 
-export default function BoardTargetCard({
-  board,
-  loading = false,
-  error = null,
-  connectionError = null,
-  description = 'Insight discovers peripherals on this board.',
-  onBoardChange,
-  onRetry,
-  onReload,
-  onStatus,
-  onError,
-  shell = null,
-  shellBusy = false,
-  onOpenShell
-}) {
+export default function BoardTargetCard({ board, loading, error, onBoardChange, onReload, onStatus, onError, shell, shellBusy, onOpenShell }) {
   const target = board?.target || null
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState(null)
@@ -67,7 +53,7 @@ export default function BoardTargetCard({
 
   const values = form || initialBoardForm(board)
   const formOpen = Boolean(board) && (editing || !target)
-  const problem = actionError || connectionError || normalizeError(board?.status?.error)
+  const problem = actionError || normalizeError(board?.status?.error)
   const state = connectionStateInfo(board?.status)
   const checked = formatRelativeTime(board?.status?.checked_at)
   const identity = IDENTITY_FIELDS.filter(([key]) => board?.board?.[key]).map(([key, label]) => [label, board.board[key]])
@@ -85,7 +71,7 @@ export default function BoardTargetCard({
     } catch (err) {
       if (kind === 'select') setFormError(normalizeError(err))
       else setActionError(normalizeError(err))
-      if (kind === 'test') onReload?.()
+      if (kind === 'test') onReload()
       return null
     } finally {
       setBusy('')
@@ -94,7 +80,7 @@ export default function BoardTargetCard({
 
   async function testConnection() {
     const data = await post('test', '/api/board/test')
-    if (data) onStatus?.(`Connected to ${data.board?.hostname || data.target?.label || 'the board'}.`)
+    if (data) onStatus(`Connected to ${data.board?.hostname || data.target?.label || 'the board'}.`)
   }
 
   async function save(event) {
@@ -118,7 +104,7 @@ export default function BoardTargetCard({
     if (data) {
       setConfirmTrust(false)
       returnFocus(trustRef, testRef, changeRef)
-      onStatus?.('Host key updated. Test the connection or refresh.')
+      onStatus('Host key updated. Test the connection or refresh.')
     }
   }
 
@@ -127,7 +113,7 @@ export default function BoardTargetCard({
     setForm(null)
     setConfirmTrust(false)
     returnFocus(changeRef, hostRef)
-    onStatus?.(message)
+    onStatus(message)
   }
 
   function cancelForm() {
@@ -143,7 +129,7 @@ export default function BoardTargetCard({
   }
 
   function copyCommand(text) {
-    copyText(text).then(() => onStatus?.(`Copied: ${text}`), (err) => onError?.(err.message))
+    copyText(text).then(() => onStatus(`Copied: ${text}`), (err) => onError(err.message))
   }
 
   return (
@@ -152,7 +138,7 @@ export default function BoardTargetCard({
 
       {loading && !board && <p className="hint" role="status">Loading board…</p>}
       <ErrorNotice error={error}>
-        {onRetry && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
+        <button type="button" className="btn-ghost" onClick={onReload}>Retry</button>
       </ErrorNotice>
 
       {target && (
@@ -162,10 +148,10 @@ export default function BoardTargetCard({
             {sourceLabel(target.source) && <Pill tone="periph-info">{sourceLabel(target.source)}</Pill>}
             <Pill tone={state.tone}>{state.label}</Pill>
           </div>
-          <p className="section-note">{description}</p>
+          <p className="section-note">Insight discovers peripherals and reads device statistics over this connection.</p>
           <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
           <div className="periph-actions periph-board-actions">
-            {onOpenShell && shell?.launch_supported && (
+            {shell?.launch_supported && (
               <button
                 type="button"
                 className="btn-tonal"

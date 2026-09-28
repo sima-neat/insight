@@ -1,20 +1,7 @@
 import { useEffect, useRef } from 'react'
 import BoardTargetCard from './BoardTargetCard.jsx'
 
-export default function BoardPanel({
-  board,
-  loading = false,
-  error = null,
-  onBoardChange,
-  onRetry,
-  onReload,
-  onStatus,
-  onError,
-  onClose,
-  shell = null,
-  shellBusy = false,
-  onOpenShell
-}) {
+export default function BoardPanel({ onClose, ...cardProps }) {
   const cardRef = useRef(null)
   const closeRef = useRef(null)
 
@@ -71,20 +58,7 @@ export default function BoardPanel({
           <button type="button" ref={closeRef} onClick={onClose} aria-label="Close board settings">Close</button>
         </header>
         <div className="board-panel-body">
-          <BoardTargetCard
-            board={board}
-            loading={loading}
-            error={error}
-            description="Insight discovers peripherals and reads device statistics over this connection."
-            onBoardChange={onBoardChange}
-            onRetry={onRetry}
-            onReload={onReload}
-            onStatus={onStatus}
-            onError={onError}
-            shell={shell}
-            shellBusy={shellBusy}
-            onOpenShell={onOpenShell}
-          />
+          <BoardTargetCard {...cardProps} />
         </div>
       </div>
     </div>

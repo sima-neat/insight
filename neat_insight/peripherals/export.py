@@ -193,10 +193,6 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc:
     return warnings
 
 
-def _py_value(value) -> str:
-    return repr(value)
-
-
 def _cpp_value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -212,7 +208,7 @@ def _cpp_value(value) -> str:
 
 def _python(options: dict, capture_buffers: int) -> str:
     lines = ["import pyneat", "", "camera = pyneat.CameraInputOptions()"]
-    lines += [f"camera.{key} = {_py_value(value)}" for key, value in options.items()]
+    lines += [f"camera.{key} = {value!r}" for key, value in options.items()]
     node_args = f"camera, capture_buffer_count={capture_buffers}" if capture_buffers else "camera"
     lines += ["", 'graph = pyneat.Graph("camera_input")', f"graph.add(pyneat.nodes.camera_input({node_args}))"]
     return "\n".join(lines) + "\n"

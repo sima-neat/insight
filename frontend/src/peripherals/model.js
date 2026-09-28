@@ -1,9 +1,9 @@
 const TIER_RANK = { verified: 0, advertised: 1, unsupported: 2 }
 
 const TIERS = {
-  verified: { label: 'Verified with Core', short: 'verified', tone: 'ok' },
-  advertised: { label: 'Advertised, unverified', short: 'advertised', tone: 'warn' },
-  unsupported: { label: 'Not supported by Core CameraInput', short: 'unsupported', tone: 'periph-danger' }
+  verified: { label: 'Verified with Core', tone: 'ok' },
+  advertised: { label: 'Advertised, unverified', tone: 'warn' },
+  unsupported: { label: 'Not supported by Core CameraInput', tone: 'periph-danger' }
 }
 
 const CONNECTIONS = [
@@ -47,7 +47,7 @@ const USB_FIELDS = [
 export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
 
 export function tierInfo(tier) {
-  return TIERS[tier] || { label: 'Support unknown', short: 'unknown', tone: '' }
+  return TIERS[tier] || { label: 'Support unknown', tone: '' }
 }
 
 export function severityInfo(severity) {
@@ -58,7 +58,7 @@ export function sourceLabel(source) {
   return SOURCES[source] || ''
 }
 
-export function connectionLabel(connection) {
+function connectionLabel(connection) {
   return CONNECTIONS.find((c) => c.id === connection)?.label || String(connection || 'Unknown')
 }
 
@@ -115,11 +115,6 @@ function kindLabel(kind) {
   return text.charAt(0).toUpperCase() + text.slice(1) + (text.endsWith('s') ? '' : 's')
 }
 
-function kindCountBadge(count) {
-  if (!count) return ''
-  return count > 99 ? '99+' : String(count)
-}
-
 export function deviceTabs(items, { scanned = true } = {}) {
   const counts = new Map()
   for (const item of items || []) {
@@ -153,7 +148,7 @@ export function deviceTabs(items, { scanned = true } = {}) {
       supported,
       disabled: Boolean(note),
       note,
-      badge: kindCountBadge(kind.count),
+      badge: kind.count > 99 ? '99+' : kind.count ? String(kind.count) : '',
       name,
       tooltip: note ? `${kind.label} — ${note}` : name
     }
@@ -167,13 +162,9 @@ export function resolveDeviceKind(tabs, wanted) {
   return usable[0]?.id || list.find((tab) => tab.supported)?.id || null
 }
 
-export function cameraDeviceId(camera) {
-  const device = camera?.device || {}
-  return device.camera_name || device.by_id || device.video_node || ''
-}
-
 export function cameraSubtitle(camera) {
-  const deviceId = cameraDeviceId(camera)
+  const device = camera?.device || {}
+  const deviceId = device.camera_name || device.by_id || device.video_node || ''
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
 }
@@ -231,11 +222,11 @@ export function sizeKey(width, height) {
   return `${width}x${height}`
 }
 
-export function sizeLabel(width, height) {
+function sizeLabel(width, height) {
   return `${width}×${height}`
 }
 
-export function fpsLabel(value) {
+function fpsLabel(value) {
   const n = Number(value)
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
@@ -386,11 +377,6 @@ export function formatRelativeTime(iso, now = Date.now()) {
   return `${Math.floor(seconds / 86400)} d ago`
 }
 
-export function formatDuration(ms) {
-  if (!Number.isFinite(ms)) return ''
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
-}
-
 export function countLabel(count, noun) {
   return `${count} ${noun}${count === 1 ? '' : 's'}`
 }
@@ -404,7 +390,6 @@ export function apiError(body, status) {
   const err = new Error(data.error || data.message || `Request failed${status ? `: ${status}` : ''}`)
   err.code = data.code || ''
   err.hint = data.hint || ''
-  err.status = status || 0
   err.details = data
   return err
 }

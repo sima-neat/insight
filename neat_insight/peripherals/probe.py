@@ -1,7 +1,6 @@
 # Runs on the board as `python3 -`: stdlib only, Python 3.8, never captures or changes controls.
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -339,15 +338,14 @@ def discover_media(tools, failures):
     devices = []
     for name in _names(DEV_ROOT, r"media\d+"):
         path = "/dev/" + name
-        device = {"path": path, "driver": None, "model": None, "bus_info": None, "csi": None}
-        device.update(sensors=[], nodes=[path])
+        device = {"path": path, "bus_info": None, "csi": None, "sensors": [], "nodes": [path]}
         if tools.get("media-ctl"):
             code, out, err = run([tools["media-ctl"], "-d", path, "-p"])
             if code == 0:
                 graph = parse_media_ctl(out)
                 if graph["driver"] == "uvcvideo" or (graph["bus_info"] or "").startswith("usb-"):
                     continue
-                device.update(driver=graph["driver"], model=graph["model"], bus_info=graph["bus_info"])
+                device["bus_info"] = graph["bus_info"]
                 for entity in graph["entities"]:
                     if "subtype Sensor" in entity["type"]:
                         sensor = {"name": entity["name"], "node": entity["node"]}
@@ -557,7 +555,7 @@ def collect_usb(tools, check_users, failures):
 
 
 def read_isp_sizes(tools):
-    result = {"nodes": [], "sizes": None, "differs": False, "reason": None, "node": None, "detail": None}
+    result = {"sizes": None, "reason": None, "node": None, "detail": None}
     if not tools.get("v4l2-ctl"):
         result["reason"] = "tool_missing"
         return result
@@ -577,8 +575,6 @@ def read_isp_sizes(tools):
         if not sizes:
             result.update(reason="unparseable", node=node)
             return result
-        result["nodes"].append(node)
-        result["differs"] = result["differs"] or (common is not None and sizes != common)
         common = sizes if common is None else common & sizes
     if common is None:
         result["reason"] = "no_nodes"
@@ -602,8 +598,6 @@ def collect():
     mipi = collect_mipi(tools, media, listing, check_users)
     return {
         "schema": SCHEMA,
-        "python": platform.python_version(),
-        "euid": os.geteuid(),
         "tools": {name: bool(path) for name, path in tools.items()},
         "libcamerasrc": probe_libcamerasrc(tools, failures),
         "availability_method": method,

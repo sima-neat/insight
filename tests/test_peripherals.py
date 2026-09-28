@@ -692,7 +692,7 @@ class SnapshotTests(unittest.TestCase):
         output = board.collect()
         self.assertEqual(board.calls.count(ISP_QUERY), 1)
         isp = output["isp"]
-        self.assertEqual((isp["nodes"], isp["reason"], isp["differs"]), (["/dev/video0out"], None, False))
+        self.assertIsNone(isp["reason"])
         self.assertEqual([(s["width"], s["height"]) for s in isp["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
         snapshot = snapshot_of(output)
         camera = item(snapshot, "mipi:" + IMX477)
@@ -715,7 +715,6 @@ class SnapshotTests(unittest.TestCase):
         )
         board.command("v4l2-ctl", "-d", "/dev/video1out", "--info", "--list-formats-ext", out=only_1080p)
         output = board.collect()
-        self.assertEqual((output["isp"]["nodes"], output["isp"]["differs"]), (["/dev/video0out", "/dev/video1out"], True))
         camera = item(snapshot_of(output), "mipi:" + IMX477)
         self.assertEqual([(s["width"], s["height"]) for s in fmt_of(camera, "NV12")["sizes"]], [(1920, 1080)])
 

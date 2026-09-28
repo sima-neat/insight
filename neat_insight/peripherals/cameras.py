@@ -115,10 +115,6 @@ def _permission_denied(text: Optional[str]) -> bool:
     return "permission denied" in (text or "").lower()
 
 
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 def _support(tier: str, reason: str, links: list) -> dict:
     return {"tier": tier, "reason": reason, "links": links}
 
@@ -161,7 +157,7 @@ def empty_snapshot(board: dict, generation: int) -> dict:
 
 
 def build_snapshot(probe: dict, board: dict, generation: int, previous: Optional[dict], scan_ms: int):
-    scanned_at = now_iso()
+    scanned_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     platform = _platform(probe)
     modes = dict(previous["modes"]) if previous else {}
     media = {device["path"]: device for device in probe.get("media_devices") or []}
@@ -248,7 +244,7 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         if isp_sizes is not None and not _RAW_BAYER_RE.match(fmt["format"]):
             sizes = [size for size in sizes if (size["width"], size["height"]) in isp_sizes]
             hidden += len(fmt["sizes"]) - len(sizes)
-        formats.append(_mipi_format(dict(fmt, sizes=sizes), model, camera.get("max_fps"), libcamerasrc))
+        formats.append(_mipi_format(dict(fmt, sizes=sizes), model, libcamerasrc, fps_choices(camera.get("max_fps"))))
     if formats:
         modes_source, default = "live", _mipi_default(formats)
         if camera.get("max_fps"):
@@ -269,7 +265,7 @@ def _mipi_item(camera: dict, probe: dict, platform: dict, media: dict, modes: di
         previous = modes.get(item_id)
         if previous:
             modes_source = "previous-scan"
-            formats = _reclassify_mipi_formats(previous["formats"], model, libcamerasrc)
+            formats = [_mipi_format(fmt, model, libcamerasrc) for fmt in previous["formats"]]
             default = previous["default_selection"]
             scanned_at = previous["scanned_at"]
             notes.append(f"Modes are from the scan at {scanned_at}; they could not be read during this refresh.")
@@ -344,7 +340,7 @@ def _mipi_format_support(name: str, sizes: list, libcamerasrc: Optional[bool]) -
     return _support("advertised", ADVERTISED_REASON, [CORE_883])
 
 
-def _mipi_format(fmt: dict, model: str, max_fps: Optional[float], libcamerasrc: Optional[bool]) -> dict:
+def _mipi_format(fmt: dict, model: str, libcamerasrc: Optional[bool], fps: Optional[list] = None) -> dict:
     name = fmt["format"]
     raw = bool(_RAW_BAYER_RE.match(name))
     sizes = [
@@ -352,7 +348,8 @@ def _mipi_format(fmt: dict, model: str, max_fps: Optional[float], libcamerasrc: 
             "width": size["width"],
             "height": size["height"],
             "fps": [
-                {"value": fps, "tier": _fps_tier(model, name, size, fps, libcamerasrc)} for fps in fps_choices(max_fps)
+                {"value": value, "tier": _fps_tier(model, name, size, value, libcamerasrc)}
+                for value in (fps or [choice["value"] for choice in size["fps"]])
             ],
         }
         for size in fmt["sizes"]
@@ -365,23 +362,6 @@ def _mipi_format(fmt: dict, model: str, max_fps: Optional[float], libcamerasrc: 
         "range": fmt.get("range"),
         "sizes": sizes,
     }
-
-
-def _reclassify_mipi_formats(formats: list, model: str, libcamerasrc: Optional[bool]) -> list:
-    rebuilt = []
-    for fmt in formats:
-        sizes = [
-            {
-                **size,
-                "fps": [
-                    {**choice, "tier": _fps_tier(model, fmt["format"], size, choice["value"], libcamerasrc)}
-                    for choice in size["fps"]
-                ],
-            }
-            for size in fmt["sizes"]
-        ]
-        rebuilt.append({**fmt, "support": _mipi_format_support(fmt["format"], sizes, libcamerasrc), "sizes": sizes})
-    return rebuilt
 
 
 def _mipi_default(formats: list) -> Optional[dict]:

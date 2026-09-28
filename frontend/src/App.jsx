@@ -2678,7 +2678,6 @@ export default function App() {
             loading={boardLoading}
             error={boardError}
             onBoardChange={handleBoardChange}
-            onRetry={loadBoard}
             onReload={loadBoard}
             onStatus={setUploadStatus}
             onError={setError}

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import CameraDetail, { cameraSubtitle } from './peripherals/CameraDetail.jsx'
+import CameraDetail from './peripherals/CameraDetail.jsx'
 import KindIcon from './peripherals/KindIcon.jsx'
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
   availabilityInfo,
+  cameraSubtitle,
   changeSummary,
   countLabel,
   deviceTabs,
@@ -46,15 +47,13 @@ function IssueList({ issues }) {
 const RAIL_ROW_QUERY = '(max-width: 640px)'
 
 function useMediaQuery(query) {
-  const get = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.(query).matches)
-  const [matches, setMatches] = useState(get)
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
   useEffect(() => {
-    const list = typeof window !== 'undefined' ? window.matchMedia?.(query) : null
-    if (!list) return undefined
+    const list = window.matchMedia(query)
     const update = () => setMatches(list.matches)
     update()
-    list.addEventListener?.('change', update)
-    return () => list.removeEventListener?.('change', update)
+    list.addEventListener('change', update)
+    return () => list.removeEventListener('change', update)
   }, [query])
   return matches
 }
@@ -172,14 +171,7 @@ function CameraList({ groups, selectedId, onSelect }) {
   )
 }
 
-export default function PeripheralsView({
-  board,
-  boardLoading = false,
-  boardError = null,
-  onReloadBoard,
-  onOpenBoardPanel,
-  onStatus
-}) {
+export default function PeripheralsView({ board, boardLoading, boardError, onReloadBoard, onOpenBoardPanel, onStatus }) {
   const [snapshot, setSnapshot] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -211,10 +203,6 @@ export default function PeripheralsView({
   const connectionError = scanError && CONNECTION_ERROR_CODES.has(scanError.code) ? scanError : null
   const scannedLabel = snapshot?.board?.label || target?.label || 'the board'
 
-  async function loadBoard() {
-    return onReloadBoard ? onReloadBoard() : null
-  }
-
   async function refresh() {
     setScanning(true)
     setScanStartedAt(Date.now())
@@ -224,12 +212,12 @@ export default function PeripheralsView({
       setSnapshot(data)
       setLoadError(null)
       const count = groupCameras(data.items).reduce((total, group) => total + group.items.length, 0)
-      onStatus?.(`Scan complete: ${countLabel(count, 'camera')} on ${data.board?.label || 'the board'}.`)
+      onStatus(`Scan complete: ${countLabel(count, 'camera')} on ${data.board?.label || 'the board'}.`)
     } catch (err) {
       setScanError(normalizeError(err))
     } finally {
       setScanning(false)
-      loadBoard()
+      onReloadBoard()
     }
   }
 
@@ -240,7 +228,7 @@ export default function PeripheralsView({
 
   async function loadInitial() {
     const [boardData, snap] = await Promise.all([
-      loadBoard(),
+      onReloadBoard(),
       requestJson('/api/peripherals').then(
         (data) => {
           setLoadError(null)

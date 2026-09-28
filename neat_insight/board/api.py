@@ -12,7 +12,7 @@ def _board_error(exc: BoardError):
 
 
 @board_bp.after_request
-def _no_store(response):
+def no_store(response):
     response.headers["Cache-Control"] = "no-store"
     return response
 

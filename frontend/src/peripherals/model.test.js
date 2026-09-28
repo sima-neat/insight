@@ -6,7 +6,6 @@ import {
   availabilityInfo,
   blockedFormatSummary,
   boardIndicator,
-  cameraDeviceId,
   cameraSubtitle,
   cameraSummaryLine,
   changeSummary,
@@ -15,7 +14,6 @@ import {
   defaultTargetText,
   deviceRows,
   deviceTabs,
-  formatDuration,
   formatOptions,
   formatRangeLabel,
   formatRelativeTime,
@@ -240,7 +238,7 @@ test('labels for tiers, availability, sources, and defaults', () => {
   assert.equal(tierInfo('verified').label, 'Verified with Core')
   assert.equal(tierInfo('advertised').label, 'Advertised, unverified')
   assert.equal(tierInfo('unsupported').label, 'Not supported by Core CameraInput')
-  assert.equal(tierInfo('bogus').short, 'unknown')
+  assert.equal(tierInfo('bogus').label, 'Support unknown')
   assert.equal(availabilityInfo(inUse.availability).label, 'In use by gst-launch-1.0 (pid 812)')
   assert.deepEqual(availabilityInfo(imx568.availability), { label: 'Availability unknown', tone: '', reason: 'fuser is not installed on the board.' })
   assert.equal(availabilityInfo(available).label, 'Available')
@@ -252,8 +250,6 @@ test('labels for tiers, availability, sources, and defaults', () => {
 })
 
 test('identity rows list only known device fields', () => {
-  assert.equal(cameraDeviceId(imx477), imx477.device.camera_name)
-  assert.equal(cameraDeviceId(usb), usb.device.by_id)
   const rows = Object.fromEntries(deviceRows(usb))
   assert.equal(rows['USB ID'], '046d:0825')
   assert.equal(rows['USB speed'], '480 Mb/s')
@@ -285,8 +281,6 @@ test('relative times and durations', () => {
   assert.equal(formatRelativeTime('2026-09-21T07:00:00Z', now), '3 h ago')
   assert.equal(formatRelativeTime('2026-09-19T10:00:00Z', now), '2 d ago')
   assert.equal(formatRelativeTime(null, now), '')
-  assert.equal(formatDuration(3400), '3.4 s')
-  assert.equal(formatDuration(250), '250 ms')
 })
 
 test('API errors keep code, hint, and extra fields', () => {
