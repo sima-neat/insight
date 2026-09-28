@@ -323,7 +323,10 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
     setLoading(false)
     if (existing) {
       dispatchPreview({ type: 'adopt', session: existing })
-      if (existing.camera_id) setSelectedId(existing.camera_id)
+      if (existing.camera_id) {
+        setSelectedId(existing.camera_id)
+        setWanted({ id: existing.camera_id, ...existing.mode })
+      }
     }
     if (snap && !snap.scanned_at && boardData?.target && !autoRefreshed.current) {
       autoRefreshed.current = true
