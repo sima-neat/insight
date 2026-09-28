@@ -399,3 +399,115 @@ canvas {
     width: 100%;
   }
 }
+
+/* Settings dialog: which scope a value comes from (spec addendum B). The dialog's
+   base rules live in css/settings.css, which loads after this file, so the rules
+   that meet one of its rules on the same element carry the higher specificity. */
+.settings-scope-line[hidden],
+.settings-scope-tag[hidden],
+.settings-scope-note-row[hidden] {
+  display: none;
+}
+
+.settings-scope-line {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.settings-scope-line,
+.settings-scope-note--info {
+  background: rgba(0, 188, 212, 0.12);
+  border: 1px solid rgba(0, 188, 212, 0.45);
+  color: #b8eef6;
+}
+
+[data-theme="light"] .settings-scope-line,
+[data-theme="light"] .settings-scope-note--info {
+  background: #e3f6fa;
+  border-color: #7fd3e2;
+  color: #0b4f5c;
+}
+
+.settings-scope-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.settings-scope-tag--own {
+  background: rgba(255, 190, 60, 0.16);
+  border-color: #ffbe3c;
+  color: #ffd98a;
+}
+
+[data-theme="light"] .settings-scope-tag--own {
+  background: #fff1d1;
+  border-color: #c98a00;
+  color: #5c3d00;
+}
+
+.settings-scope-tag--global {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #c8c8c8;
+}
+
+[data-theme="light"] .settings-scope-tag--global {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.25);
+  color: #3a3a3a;
+}
+
+/* The note sits in its own row under the setting, spanning both columns. */
+.filter-table td.settings-scope-note {
+  padding: 0 12px 8px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #aaa;
+}
+
+[data-theme="light"] .filter-table td.settings-scope-note {
+  color: #4a4a4a;
+}
+
+.settings-scope-note--info {
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.filter-table td.settings-scope-note .settings-scope-note--info {
+  color: #b8eef6;
+}
+
+[data-theme="light"] .filter-table td.settings-scope-note .settings-scope-note--info {
+  color: #0b4f5c;
+}
+
+.settings-scope-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #4dd0e1;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+[data-theme="light"] .settings-scope-link {
+  color: #00707f;
+}
+
+.settings-scope-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

@@ -39,7 +39,32 @@ document.addEventListener("DOMContentLoaded", () => {
   const roiFilteringToggle = document.getElementById("toggleRoiFiltering");
   const trackHistoryToggle = document.getElementById("toggleTrackHistory");
   const trackHistoryDependentRows = document.querySelectorAll(".track-history-dependent");
+  const viewerSettingsScopeLine = document.getElementById("viewerSettingsScopeLine");
   const settingsApi = window.viewerSettingsApi;
+  // Every general key a channel can set itself; the save of a channel dialog decides per key.
+  const GENERAL_KEYS = ["videoSyncBufferMs", "metadataRetentionMs", "showRoi", "applyRoiFiltering"];
+  // The General tab's settings that show whether a channel sets them itself.
+  const SCOPED_GENERAL_SETTINGS = [
+    {
+      key: "videoSyncBufferMs",
+      slider: videoSyncBufferSlider,
+      display: videoSyncBufferDisplay,
+      tag: document.getElementById("videoSyncBufferScopeTag"),
+      noteRow: document.getElementById("videoSyncBufferScopeNoteRow"),
+      note: document.getElementById("videoSyncBufferScopeNote")
+    },
+    {
+      key: "metadataRetentionMs",
+      slider: metadataRetentionSlider,
+      display: metadataRetentionDisplay,
+      tag: document.getElementById("metadataRetentionScopeTag"),
+      noteRow: document.getElementById("metadataRetentionScopeNoteRow"),
+      note: document.getElementById("metadataRetentionScopeNote")
+    }
+  ];
+  // What loadSettings put into the general controls, and which keys the scope set
+  // itself at that moment; the channel dialog's save compares against it.
+  let loadedGeneral = { values: {}, ownKeys: new Set() };
 
   if (!settingsApi) {
     console.error("viewerSettingsApi is not available");
@@ -133,17 +158,186 @@ document.addEventListener("DOMContentLoaded", () => {
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
 
-    settingsApi.writeScopeSettings(scope, settings);
+    if (isChannelScope(scope)) {
+      settingsApi.writeScopeSettings(scope, settings, { generalKeys: generalKeysToStore() });
+    } else {
+      settingsApi.writeScopeSettings(scope, settings);
+    }
     viewerSettingsOverlay.classList.add("hidden");
+    dispatchSettingsChanged(scope);
+  });
+
+  function dispatchSettingsChanged(targetScope) {
     window.dispatchEvent(
       new CustomEvent("viewer-settings-changed", {
         detail: {
-          scope,
+          scope: targetScope,
           metadataType: metadataTypeSelector.value
         }
       })
     );
-  });
+  }
+
+  function isChannelScope(value) {
+    return value !== "global";
+  }
+
+  function formatMs(value) {
+    return `${value} ms`;
+  }
+
+  // What a channel follows for a general key when it has no value of its own.
+  function followedGeneralValue(key) {
+    const globalOwn = settingsApi.readScopeOverrides("global").general;
+    return Object.prototype.hasOwnProperty.call(globalOwn, key) ? globalOwn[key] : settingsApi.defaults.general[key];
+  }
+
+  function readGeneralControls() {
+    return {
+      videoSyncBufferMs: parseInt(videoSyncBufferSlider.value, 10),
+      metadataRetentionMs: parseInt(metadataRetentionSlider.value, 10),
+      showRoi: roiToggle.checked,
+      applyRoiFiltering: roiFilteringToggle.checked
+    };
+  }
+
+  // A channel keeps a general key as its own if it had one at load, or if the
+  // control now holds something else than the dialog put there.
+  function generalKeysToStore() {
+    const current = readGeneralControls();
+    return GENERAL_KEYS.filter(
+      (key) => loadedGeneral.ownKeys.has(key) || current[key] !== loadedGeneral.values[key]
+    );
+  }
+
+  function setSliderValue(setting, value) {
+    setting.slider.value = value;
+    setting.display.textContent = setting.slider.value;
+  }
+
+  function createUseGlobalButton(onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "settings-scope-link";
+    button.textContent = "Use global value";
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function createNoteLine(text, button) {
+    const line = document.createElement("div");
+    line.className = "settings-scope-note-line";
+    line.appendChild(document.createTextNode(text));
+    if (button) {
+      line.appendChild(document.createTextNode(" "));
+      line.appendChild(button);
+    }
+    return line;
+  }
+
+  function renderChannelSettingScope(setting, ownGeneral) {
+    const isOwn = Object.prototype.hasOwnProperty.call(ownGeneral, setting.key);
+    setting.tag.textContent = isOwn ? "own value" : "global";
+    setting.tag.classList.toggle("settings-scope-tag--own", isOwn);
+    setting.tag.classList.toggle("settings-scope-tag--global", !isOwn);
+    setting.tag.hidden = false;
+    setting.note.replaceChildren();
+    if (isOwn) {
+      setting.note.appendChild(
+        createNoteLine(
+          `Global value: ${formatMs(followedGeneralValue(setting.key))}.`,
+          createUseGlobalButton(() => useGlobalValueInChannelDialog(setting))
+        )
+      );
+    }
+    setting.noteRow.hidden = !isOwn;
+  }
+
+  function renderGlobalSettingScope(setting) {
+    const overrides = settingsApi.listChannelGeneralOverrides(setting.key);
+    setting.tag.hidden = true;
+    setting.note.replaceChildren();
+    if (overrides.length === 0) {
+      setting.noteRow.hidden = true;
+      return;
+    }
+    const box = document.createElement("div");
+    box.className = "settings-scope-note--info";
+    overrides.forEach(({ channel, value }) => {
+      box.appendChild(
+        createNoteLine(
+          `Channel ${channel} uses its own value: ${formatMs(value)}.`,
+          createUseGlobalButton(() => useGlobalValueForChannel(channel, setting.key))
+        )
+      );
+    });
+    box.appendChild(
+      createNoteLine(overrides.length === 1 ? "Changes here do not affect it." : "Changes here do not affect them.")
+    );
+    setting.note.appendChild(box);
+    setting.noteRow.hidden = false;
+  }
+
+  function renderGeneralScopeNotes() {
+    if (isChannelScope(scope)) {
+      const ownGeneral = settingsApi.readScopeOverrides(scope).general;
+      SCOPED_GENERAL_SETTINGS.forEach((setting) => renderChannelSettingScope(setting, ownGeneral));
+    } else {
+      SCOPED_GENERAL_SETTINGS.forEach(renderGlobalSettingScope);
+    }
+  }
+
+  // "Use global value" in a channel dialog: takes effect at once, without Save.
+  function useGlobalValueInChannelDialog(setting) {
+    if (!settingsApi.clearScopeGeneralOverride(scope, setting.key)) return;
+    dispatchSettingsChanged(scope);
+    setSliderValue(setting, followedGeneralValue(setting.key));
+    loadedGeneral.ownKeys.delete(setting.key);
+    loadedGeneral.values[setting.key] = parseInt(setting.slider.value, 10);
+    renderGeneralScopeNotes();
+  }
+
+  // "Use global value" in the global dialog: one channel goes back to the global value.
+  function useGlobalValueForChannel(channel, key) {
+    const channelScope = `channel_${channel}`;
+    if (!settingsApi.clearScopeGeneralOverride(channelScope, key)) return;
+    dispatchSettingsChanged(channelScope);
+    renderGeneralScopeNotes();
+  }
+
+  // Fills the General tab: a channel dialog shows what the channel resolves to
+  // (own, else global, else default), the global dialog the global values.
+  function loadGeneralSettings() {
+    let general;
+    let ownGeneral = {};
+    if (isChannelScope(scope)) {
+      general = settingsApi.resolveTypeSettings(scopeToIndex(scope), metadataTypeSelector.value).general;
+      ownGeneral = settingsApi.readScopeOverrides(scope).general;
+    } else {
+      general = settingsApi.readScopeSettings(scope).general;
+    }
+    setSliderValue(SCOPED_GENERAL_SETTINGS[0], general.videoSyncBufferMs ?? 350);
+    setSliderValue(SCOPED_GENERAL_SETTINGS[1], general.metadataRetentionMs ?? 0);
+    roiToggle.checked = general.showRoi !== false;
+    roiFilteringToggle.checked = general.applyRoiFiltering !== false;
+    loadedGeneral = {
+      values: readGeneralControls(),
+      ownKeys: new Set(GENERAL_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(ownGeneral, key)))
+    };
+    renderGeneralScopeNotes();
+  }
+
+  function updateScopeLine(value) {
+    if (isChannelScope(value)) {
+      viewerSettingsScopeLine.textContent =
+        `These settings apply to channel ${scopeToIndex(value)} only. ` +
+        "Values you have not changed follow the global settings.";
+      viewerSettingsScopeLine.hidden = false;
+    } else {
+      viewerSettingsScopeLine.textContent = "";
+      viewerSettingsScopeLine.hidden = true;
+    }
+  }
 
   let selectedRow = null;
 
@@ -159,6 +353,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const index = scopeToIndex(scope);
     connectToStream(index.toString());
     updateViewerTitle(scope);
+    updateScopeLine(scope);
     loadSettings();
     viewerSettingsOverlay.classList.remove("hidden");
     loadPolygons(index);
@@ -167,7 +362,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateViewerTitle(value) {
     const viewerSettingsTitle = document.getElementById("viewerSettingsTitle");
     viewerSettingsTitle.textContent =
-      "Viewer Configuration" + (value === "global" ? " (Global)" : ` (${value})`);
+      "Viewer Configuration" + (value === "global" ? " (Global)" : ` (Channel ${scopeToIndex(value)})`);
   }
 
   function updateMetadataTypeSection() {
@@ -337,12 +532,7 @@ document.addEventListener("DOMContentLoaded", () => {
     trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
     trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
     lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
-    videoSyncBufferSlider.value = settings.general.videoSyncBufferMs ?? 350;
-    videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
-    metadataRetentionSlider.value = settings.general.metadataRetentionMs ?? 0;
-    metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
-    roiToggle.checked = settings.general.showRoi !== false;
-    roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
+    loadGeneralSettings();
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
     updateTrackTrailLengthDisplay();
     updateLostTrackTtlDisplay();

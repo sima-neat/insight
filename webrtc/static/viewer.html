@@ -15,6 +15,7 @@
         <span id="viewerSettingsTitle" class="settings-popup-title">Viewer Configuration</span>
         <button id="viewerSettingsClose" title="Close">&times;</button>
       </div>
+      <p id="viewerSettingsScopeLine" class="settings-scope-line" hidden></p>
       <div class="settings-popup-body">
         <div class="settings-tab-header">
           <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
@@ -149,18 +150,30 @@
           <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td><label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label></td>
+                <td>
+                  <label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label>
+                  <span id="videoSyncBufferScopeTag" class="settings-scope-tag" hidden></span>
+                </td>
                 <td>
                   <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="350">
                   <span id="videoSyncBufferDisplay">350</span>
                 </td>
               </tr>
+              <tr id="videoSyncBufferScopeNoteRow" class="settings-scope-note-row" hidden>
+                <td id="videoSyncBufferScopeNote" class="settings-scope-note" colspan="2"></td>
+              </tr>
               <tr>
-                <td><label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label></td>
+                <td>
+                  <label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label>
+                  <span id="metadataRetentionScopeTag" class="settings-scope-tag" hidden></span>
+                </td>
                 <td>
                   <input type="range" id="metadataRetentionSlider" class="settings-slider" min="0" max="30000" step="250" value="0">
                   <span id="metadataRetentionDisplay">0</span>
                 </td>
+              </tr>
+              <tr id="metadataRetentionScopeNoteRow" class="settings-scope-note-row" hidden>
+                <td id="metadataRetentionScopeNote" class="settings-scope-note" colspan="2"></td>
               </tr>
             </table>
           </div>
