@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from flask import Flask
 
-from neat_insight.board import ExecResult
+from neat_insight.board import BoardError, ExecResult
 from neat_insight.peripherals import api, cameras, export, probe
 from neat_insight.peripherals.api import peripherals_bp
 
@@ -150,6 +150,25 @@ class ProbeTests(unittest.TestCase):
         board.webcam("video4", "1-1.3")
         ids = [entry["id"] for entry in snapshot_of(board.collect())["items"]]
         self.assertEqual(ids, ["usb:046d:082d:A1B2C3D4:1-1.2", "usb:046d:082d:A1B2C3D4:1-1.3"])
+
+    def test_stepwise_usb_intervals_offer_and_export_only_rates_on_the_step(self):
+        board = FakeBoard(self.tmp.name)
+        board.webcam("video2", "1-1.2")
+        board.command(
+            "v4l2-ctl", "-d", "/dev/video2", "--list-formats-ext",
+            out="\t[0]: 'MJPG' (Motion-JPEG, compressed)\n"
+            "\t\tSize: Discrete 1280x720\n\t\t\tInterval: Continuous 0.017s - 1.000s (1.000-60.000 fps)\n"
+            "\t\tSize: Discrete 640x480\n\t\t\tInterval: Stepwise 0.033s - 0.200s with step 0.033s (5.000-30.000 fps)\n",
+        )
+        snapshot = snapshot_of(board.collect())
+        camera = snapshot["items"][0]
+        rates = {(s["width"], s["height"]): [c["value"] for c in s["fps"]] for s in camera["formats"][0]["sizes"]}
+        self.assertEqual(rates, {(1280, 720): [60, 30, 25, 20, 15, 10, 5], (640, 480): [30, 15, 10, 5]})
+        request = {"id": camera["id"], "format": "MJPG", "width": 640, "height": 480}
+        self.assertEqual(export.render(snapshot, {**request, "fps": 15})["selection"]["fps"], 15)
+        with self.assertRaises(BoardError) as ctx:
+            export.render(snapshot, {**request, "fps": 25})
+        self.assertEqual(ctx.exception.code, "invalid_request")
 
     def test_process_holding_the_camera_skips_cam_info(self):
         board = camera_board(self.tmp.name)

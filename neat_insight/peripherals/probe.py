@@ -42,7 +42,10 @@ _V4L2_RANGE_SIZE_RE = re.compile(
     r"^\s*Size:\s*(?:Stepwise|Continuous)\s+(\d+)x(\d+)\s*-\s*(\d+)x(\d+)(?:\s+with step\s+(\d+)/(\d+))?"
 )
 _V4L2_DISCRETE_INTERVAL_RE = re.compile(r"^\s*Interval:\s*Discrete\s.*\(([\d.]+)\s*fps\)")
-_V4L2_RANGE_INTERVAL_RE = re.compile(r"^\s*Interval:\s*(?:Stepwise|Continuous)\s.*\(([\d.]+)-([\d.]+)\s*fps\)")
+_V4L2_RANGE_INTERVAL_RE = re.compile(
+    r"^\s*Interval:\s*(?:Stepwise|Continuous)\s+([\d.]+)s\s*-\s*[\d.]+s(?:\s+with step\s+([\d.]+)s)?\s*"
+    r"\(([\d.]+)-([\d.]+)\s*fps\)"
+)
 _V4L2_CARD_RE = re.compile(r"^\s*Card type\s*:\s*(.*?)\s*$", re.MULTILINE)
 ISP_OUTPUT_NAME = "isp_v4l2-vid-cap-out"
 ISP_OUTPUT_CARD = "arm-isp-out"
@@ -245,7 +248,9 @@ def parse_v4l2_formats(text):
             continue
         match = _V4L2_RANGE_INTERVAL_RE.match(line)
         if match and size is not None:
-            size["fps_range"] = [float(match.group(1)), float(match.group(2))]
+            size["fps_range"] = [float(match.group(3)), float(match.group(4))]
+            if match.group(2):
+                size["interval_step"] = {"min": float(match.group(1)), "step": float(match.group(2))}
     return formats
 
 

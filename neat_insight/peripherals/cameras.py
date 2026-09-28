@@ -471,8 +471,17 @@ def _usb_fps(size: dict) -> list:
     values = list(size.get("fps") or [])
     if size.get("fps_range"):
         low, high = size["fps_range"]
-        values += [fps for fps in STANDARD_FPS if low - 1e-3 <= fps <= high + 1e-3]
+        step = size.get("interval_step")
+        values += [fps for fps in STANDARD_FPS if low - 1e-3 <= fps <= high + 1e-3 and _on_step(1 / fps, step)]
     return sorted({int(round(v)) if abs(v - round(v)) < 1e-3 else round(v, 3) for v in values}, reverse=True)
+
+
+def _on_step(interval: float, step: Optional[dict]) -> bool:
+    if not step or step["step"] <= 0:
+        return True
+    k = round((interval - step["min"]) / step["step"])
+    # v4l2-ctl prints seconds to 1 ms, so min + k * step carries up to (k + 1) * 0.5 ms of rounding.
+    return abs(step["min"] + k * step["step"] - interval) <= (k + 1) * 0.0005 + 1e-9
 
 
 def _usb_format(fmt: dict) -> dict:
