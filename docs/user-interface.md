@@ -149,6 +149,24 @@ Tracks and poses without an `id` draw in one neutral color. Senders that want pe
 
 Object detection and segmentation settings hold optional per-class overrides. An entry for a label fixes that class's color and line style. An entry labelled `default` fixes the color of every class without its own entry. Without any entries, all classes are colored automatically.
 
+### Late metadata
+
+An overlay is drawn only if its metadata has reached the browser by the time the video frame is shown. The viewer holds video back by the video sync buffer (350 ms by default) to give metadata that time. An application that sends metadata later than the buffer allows loses its overlays, even though video and message rate look healthy.
+
+When at least half of the recent messages arrive after their frame, the tile shows a **Metadata late** chip in its status bar. Select it to see:
+
+| Value | Meaning |
+|---|---|
+| Arrives after its frame | How long after the frame was shown its metadata arrived, as measured by this browser. |
+| Video sync buffer | The buffer in effect for this channel. |
+| Late messages | Share of recent messages that arrived too late to be drawn. |
+
+**Raise buffer to N ms** sets the video sync buffer of this channel to a value that covers the measured lateness. Other channels and the global setting keep their values. The video of this channel is delayed by the additional time. The viewer never changes the buffer by itself.
+
+The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner.
+
+Applications that forward the encoded input stream unchanged and send metadata only after decode and inference are the typical case, because their video does not wait for inference.
+
 Use the Video Viewer to confirm:
 
 - The application is sending video to the expected channel.
