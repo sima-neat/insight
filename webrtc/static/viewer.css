@@ -206,11 +206,72 @@ canvas {
   inset: 0;
   display: grid;
   place-items: center;
-  color: rgba(240, 240, 240, 0.56);
-  font-size: 1.05rem;
   text-align: center;
   pointer-events: none;
   z-index: 2;
+}
+
+/* The notice scales with the tile (cqw needs the tile to be a container, see
+   container-type below), so it stays readable on a page of 48 tiles. */
+.tile-no-video-text {
+  padding: 0.5em 1.1em;
+  border-radius: 8px;
+  background: rgba(120, 126, 134, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-family: var(--viewer-font-sans);
+  font-size: clamp(10px, 4.2cqw, 18px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* A tile that has not shown a frame. One surface lies behind the whole page and
+   each empty tile shows its part of it: the gradients are attached to the
+   viewport, not to the tile. The video element is hidden because its own black
+   background would cover the surface. A playing tile is not touched, so the bars
+   around video of another aspect ratio stay black. */
+.video-tile[data-state="empty"] {
+  background-color: #1b1f24;
+  background-image:
+    radial-gradient(ellipse at 22% 30%, #42546a 0%, transparent 45%),
+    radial-gradient(ellipse at 78% 72%, #55463a 0%, transparent 42%),
+    radial-gradient(ellipse at 60% 20%, #2f3f4a 0%, transparent 38%);
+  background-attachment: fixed;
+}
+
+.video-tile[data-state="empty"] video,
+.video-tile[data-state="empty"] canvas {
+  visibility: hidden;
+}
+
+[data-theme="light"] .video-tile[data-state="empty"] {
+  background-color: #e4e7ea;
+  background-image:
+    radial-gradient(ellipse at 22% 30%, #c3d2e2 0%, transparent 45%),
+    radial-gradient(ellipse at 78% 72%, #e6d6c6 0%, transparent 42%),
+    radial-gradient(ellipse at 60% 20%, #d3dfe6 0%, transparent 38%);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .video-tile[data-state="empty"] .tile-no-video-text {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #2a2f36;
+}
+
+/* A stream that stopped keeps its last frame, frosted: recognisable as what was
+   playing, and not mistakable for live video. The frame is scaled up so the blur
+   does not fade out at the tile's edge. Overlays belong to a frame that is no
+   longer current and stay hidden. */
+.video-tile[data-state="stopped"] video {
+  filter: blur(14px) saturate(0.45) brightness(0.65);
+  transform: scale(1.1);
+}
+
+.video-tile[data-state="stopped"] canvas {
+  visibility: hidden;
 }
 
 .layout-presets {

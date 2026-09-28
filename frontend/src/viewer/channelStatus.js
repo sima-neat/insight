@@ -18,6 +18,14 @@ export function channelLabel(index, codec) {
   return codec ? `Channel ${index} | ${codec}` : `Channel ${index}`;
 }
 
+// tileState names what a tile shows: video, the frosted last frame of a stream
+// that stopped, or the empty surface. Without a frame there is nothing to frost
+// and nothing to play, whatever the connection reports.
+export function tileState(active, hasShownFrame) {
+  if (!hasShownFrame) return "empty";
+  return active ? "playing" : "stopped";
+}
+
 export function formatChannelStatus({ index, codec, width, height, fps, bitrate, messageRate }) {
   return `${channelLabel(index, codec)} | ${width}x${height} | ${fps} fps | ${bitrate} kbps | ${messageRate} msgs/sec`;
 }
