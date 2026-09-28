@@ -5,8 +5,11 @@ import {
   createMetadataQueue,
   enqueueMetadata,
   metadataQueueSnapshot,
+  resetLatenessWindow,
   takeMetadataForFrame,
 } from "./metadataSync.js";
+import { lateNoticeDetails, nextWarningActive } from "./metadataLateness.js";
+import MetadataLateNotice from "./MetadataLateNotice.jsx";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import { drawMetadata } from "./metadataDrawing.js";
@@ -116,6 +119,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
   });
   const playbackRef = useRef({ lastFrameAt: 0 });
   const activeRef = useRef(false);
+  const lateWarningActiveRef = useRef(false);
+  const [lateNotice, setLateNotice] = useState(null);
   const [banner, setBanner] = useState(`Channel ${index}`);
   const [active, setActive] = useState(false);
 
@@ -202,6 +207,8 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
+      lateWarningActiveRef.current = false;
+      setLateNotice(null);
       trackHistoryRef.current.clear();
       colorAllocatorRef.current?.clear();
       rtcpRef.current = {
@@ -427,9 +434,23 @@ function ChannelTile({ index, onActiveChange, debug }) {
               currentTime: videoRef.current?.currentTime,
             });
 
+            const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
+            lateWarningActiveRef.current = nextWarningActive(
+              lateWarningActiveRef.current,
+              metadataSync.recentLateShare,
+            );
+            setLateNotice(
+              lateWarningActiveRef.current
+                ? lateNoticeDetails(
+                    metadataSync,
+                    synchronizationSettingsRef.current.videoSyncBufferMs,
+                    videoSyncStatusRef.current.supported,
+                  )
+                : null,
+            );
+
             if (metadataChannel?.readyState === "open") {
               const video = videoRef.current;
-              const metadataSync = metadataQueueSnapshot(metadataQueueRef.current);
               const videoSync = videoSyncStatusRef.current;
               const lastFrameAgeMs =
                 playbackRef.current.lastFrameAt > 0 ? Date.now() - playbackRef.current.lastFrameAt : undefined;
@@ -485,6 +506,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
                     frame_misses: metadataSync.frameMisses,
                     metadata_expired: metadataSync.expired,
                     metadata_evicted: metadataSync.evicted,
+                    metadata_late: metadataSync.late,
+                    metadata_lateness_recent_median_ms: metadataSync.recentLatenessMedianMs ?? undefined,
+                    metadata_lateness_recent_max_ms: metadataSync.recentLatenessMaxMs ?? undefined,
                     untimestamped_metadata_received: metadataSync.untimestampedReceived,
                     timestamped_metadata_pending: metadataSync.timestampedPending,
                     arrival_metadata_pending: metadataSync.arrivalPending,
@@ -563,6 +587,18 @@ function ChannelTile({ index, onActiveChange, debug }) {
     }
   };
 
+  const raiseVideoSyncBuffer = (targetMs) => {
+    const scope = `channel_${index}`;
+    const stored = window.viewerSettingsApi?.writeScopeGeneralOverride?.(scope, "videoSyncBufferMs", targetMs);
+    if (!stored) return false;
+    // What was measured belongs to the old buffer; the chip must reflect the new one only.
+    resetLatenessWindow(metadataQueueRef.current);
+    lateWarningActiveRef.current = false;
+    setLateNotice(null);
+    window.dispatchEvent(new CustomEvent("viewer-settings-changed", { detail: { scope } }));
+    return true;
+  };
+
   return (
     <div className="video-tile" style={{ position: "relative" }} data-active={active ? "1" : "0"}>
       <video ref={videoRef} autoPlay playsInline muted />
@@ -570,6 +606,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       {!active && <div className="tile-no-video">No active video received</div>}
       <div className="tile-banner-wrapper">
         <div className="tile-banner-text">{banner}</div>
+        <MetadataLateNotice details={lateNotice} onRaise={raiseVideoSyncBuffer} />
         <button className="channel-menu-button" title="Settings" onClick={openScopeSettings} type="button">
           <img src="/static/icons/menu.png" alt="Settings" className="channel-menu-icon" />
         </button>
