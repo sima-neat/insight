@@ -455,7 +455,7 @@ func main() {
 	http.HandleFunc("/egress/stats", handleEgressStats)
 	http.HandleFunc("/reverse", serveReverse)
 	http.HandleFunc("/reverse-offer", handleReverseOffer)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	http.Handle("/static/", staticFileHandler(http.Dir("static")))
 
 	addr := ":8081"
 
@@ -466,6 +466,17 @@ func main() {
 		log.Printf("⚠️ No TLS cert/key provided, serving plain HTTP on %s", addr)
 		log.Fatal(http.ListenAndServe(addr, nil))
 	}
+}
+
+// staticFileHandler serves /static/ from root. Without Cache-Control, browsers keep
+// the scripts by heuristic freshness and can pair a new script with an old one;
+// no-cache makes them revalidate each time (a 304 when nothing changed).
+func staticFileHandler(root http.FileSystem) http.Handler {
+	files := http.StripPrefix("/static/", http.FileServer(root))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})
 }
 
 func serveViewer(w http.ResponseWriter, r *http.Request) {
