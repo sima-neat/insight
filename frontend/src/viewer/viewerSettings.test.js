@@ -180,7 +180,11 @@ function loadSettingsApiWithStorage(stored = {}, { failWrites = false } = {}) {
       setItem: (key, value) => {
         if (failWrites) throw new Error("quota exceeded");
         values.set(key, value);
-      }
+      },
+      get length() {
+        return values.size;
+      },
+      key: (i) => Array.from(values.keys())[i] ?? null
     }
   };
   vm.runInNewContext(resolverSource, { window });
@@ -243,4 +247,111 @@ test("writing one general override reports a storage failure", () => {
   const { api } = loadSettingsApiWithStorage({}, { failWrites: true });
 
   assert.equal(api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 600), null);
+});
+
+test("scope overrides are read without defaults", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  });
+
+  assert.deepEqual(api.readScopeOverrides("channel_1").general, { videoSyncBufferMs: 600 });
+  assert.deepEqual(api.readScopeOverrides("channel_2"), { general: {}, types: {} });
+});
+
+test("clearing one own general value keeps the others and the types", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 600, metadataRetentionMs: 2500 },
+      types: { segmentation: { maskOpacity: 0.7 } }
+    }
+  });
+
+  api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs");
+
+  const stored = readStored("viewerSettings_channel_1");
+  assert.deepEqual(stored.general, { metadataRetentionMs: 2500 });
+  assert.equal(stored.types.segmentation.maskOpacity, 0.7);
+  assert.equal(api.resolveTypeSettings(1, "pose-estimation").general.videoSyncBufferMs, 350);
+});
+
+test("clearing a value the scope does not have succeeds and changes nothing else", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { metadataRetentionMs: 2500 }, types: {} }
+  });
+
+  const result = api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs");
+
+  assert.deepEqual(result.general, { metadataRetentionMs: 2500 });
+  assert.deepEqual(readStored("viewerSettings_channel_1").general, { metadataRetentionMs: 2500 });
+});
+
+test("clearing reports a storage failure as null", () => {
+  const { api } = loadSettingsApiWithStorage(
+    { viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} } },
+    { failWrites: true }
+  );
+
+  assert.equal(api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs"), null);
+});
+
+test("listing finds channels with their own value, sorted by channel number", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_channel_10: { version: 4, general: { videoSyncBufferMs: 900 }, types: {} },
+    viewerSettings_channel_2: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+    viewerSettings_channel_7: { version: 4, general: { videoSyncBufferMs: 700 }, types: {} },
+    viewerSettings_channel_3: { version: 4, general: { metadataRetentionMs: 2500 }, types: {} }
+  });
+
+  assert.deepEqual(api.listChannelGeneralOverrides("videoSyncBufferMs"), [
+    { channel: 2, value: 500 },
+    { channel: 7, value: 700 },
+    { channel: 10, value: 900 }
+  ]);
+});
+
+test("listing ignores the global scope, malformed entries and foreign keys", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+    viewerSettings_channel_abc: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+    viewerSettings_channel_4: "not json",
+    layoutCount: 3
+  });
+
+  assert.deepEqual(api.listChannelGeneralOverrides("videoSyncBufferMs"), []);
+});
+
+test("listing reports a channel whose own value equals the global value", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} }
+  });
+
+  assert.deepEqual(api.listChannelGeneralOverrides("videoSyncBufferMs"), [{ channel: 1, value: 500 }]);
+});
+
+test("saving with general keys stores only those keys", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+  const settings = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+
+  const stored = api.writeScopeSettings("channel_1", settings, { generalKeys: ["videoSyncBufferMs"] });
+  assert.deepEqual(stored.general, { videoSyncBufferMs: 600 });
+  assert.deepEqual(readStored("viewerSettings_channel_1").general, { videoSyncBufferMs: 600 });
+  assert.deepEqual(stored.types, api.normalizeSettings(settings).types);
+
+  const storedEmpty = api.writeScopeSettings("channel_1", settings, { generalKeys: [] });
+  assert.deepEqual(storedEmpty.general, {});
+});
+
+test("saving without the option stores every general key as before", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  api.writeScopeSettings("channel_1", { version: 4, general: { videoSyncBufferMs: 600 }, types: {} });
+
+  assert.deepEqual(Object.keys(readStored("viewerSettings_channel_1").general).sort(), [
+    "applyRoiFiltering",
+    "metadataRetentionMs",
+    "showRoi",
+    "videoSyncBufferMs"
+  ]);
 });

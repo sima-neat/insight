@@ -328,21 +328,35 @@
     return normalizeSettings(readRawSettings(scope));
   }
 
-  function writeScopeSettings(scope, settings) {
+  function writeScopeSettings(scope, settings, options = {}) {
     const normalized = normalizeSettings(settings);
-    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(normalized));
-    return normalized;
-  }
-
-  // writeScopeSettings stores every default, which turns a whole scope into
-  // overrides. This stores only what the scope already overrode plus one key, so
-  // the rest keeps following the global scope and the defaults.
-  function writeScopeGeneralOverride(scope, key, value) {
-    const overrides = settingsOverrides(readRawSettings(scope));
+    if (!options.generalKeys) {
+      window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(normalized));
+      return normalized;
+    }
+    // A settings dialog only owns some of the general keys (see spec addendum B); the
+    // rest keeps following the global scope and the defaults, so only the listed keys
+    // are carried over from the freshly normalized values.
+    const general = {};
+    options.generalKeys.forEach((key) => {
+      general[key] = normalized.general[key];
+    });
     const stored = {
       version: SETTINGS_VERSION,
-      general: { ...overrides.general, ...normalizeGeneral({ [key]: value }, false) },
-      types: overrides.types
+      general,
+      types: normalized.types
+    };
+    window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(stored));
+    return stored;
+  }
+
+  // Shared by every function that stores a scope's own values in the
+  // { version, general, types } shape, so a storage failure is handled once.
+  function storeScopeOverrides(scope, general, types) {
+    const stored = {
+      version: SETTINGS_VERSION,
+      general,
+      types
     };
     try {
       window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(stored));
@@ -350,6 +364,53 @@
       return null;
     }
     return stored;
+  }
+
+  // writeScopeSettings stores every default, which turns a whole scope into
+  // overrides. This stores only what the scope already overrode plus one key, so
+  // the rest keeps following the global scope and the defaults.
+  function writeScopeGeneralOverride(scope, key, value) {
+    const overrides = settingsOverrides(readRawSettings(scope));
+    const general = { ...overrides.general, ...normalizeGeneral({ [key]: value }, false) };
+    return storeScopeOverrides(scope, general, overrides.types);
+  }
+
+  // The scope's own values, with no defaults filled in: what the tile button and
+  // the dialogs need to show what a channel or the global scope actually set.
+  function readScopeOverrides(scope) {
+    return settingsOverrides(readRawSettings(scope));
+  }
+
+  // The inverse of writeScopeGeneralOverride: drops one key so the scope goes back
+  // to following the global scope (or the default) for it, keeping everything else.
+  function clearScopeGeneralOverride(scope, key) {
+    const overrides = settingsOverrides(readRawSettings(scope));
+    const general = { ...overrides.general };
+    delete general[key];
+    return storeScopeOverrides(scope, general, overrides.types);
+  }
+
+  // Every channel scope in storage that has its own value for `key`, for the global
+  // dialog's "Channel N uses its own value" lines. Storage access itself can throw
+  // (e.g. a disabled localStorage), so the whole scan is guarded.
+  function listChannelGeneralOverrides(key) {
+    const found = [];
+    try {
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const storageKey = window.localStorage.key(i);
+        const match = typeof storageKey === "string" && storageKey.match(/^viewerSettings_channel_(\d+)$/);
+        if (!match) continue;
+        const channel = Number(match[1]);
+        const overrides = readScopeOverrides(`channel_${channel}`);
+        if (Object.prototype.hasOwnProperty.call(overrides.general, key)) {
+          found.push({ channel, value: overrides.general[key] });
+        }
+      }
+    } catch (_err) {
+      return [];
+    }
+    return found.sort((a, b) => a.channel - b.channel);
   }
 
   window.viewerSettingsApi = {
@@ -362,6 +423,9 @@
     readScopeSettings,
     writeScopeSettings,
     writeScopeGeneralOverride,
+    readScopeOverrides,
+    clearScopeGeneralOverride,
+    listChannelGeneralOverrides,
     normalizeSettings,
     resolveTypeSettings
   };
