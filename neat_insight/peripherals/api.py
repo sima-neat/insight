@@ -78,10 +78,7 @@ def _export_generation(body: dict) -> int:
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
     """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
-    try:
-        session = get_board_manager().session()
-    except BoardError as err:
-        return err.to_dict(), err.status
+    session = get_board_manager().session()
     return scans.snapshot(session.generation) or empty_snapshot(_board_summary(session), session.generation)
 
 
@@ -90,48 +87,42 @@ def get_peripherals():
 def refresh_peripherals():
     """Run the discovery probe on the board and return a new snapshot, or the result of a refresh in flight."""
     requested = time.monotonic()
-    try:
-        session = get_board_manager().session()
-        with scans.refresh_lock(session.generation):
-            in_flight = scans.completed_since(session.generation, requested)
-            if in_flight:
-                return in_flight
-            with previews.scan_guard(session):
-                board = _board_summary(session, session.identity())
-                started = time.monotonic()
-                probe = _run_probe(session)
-            scan_ms = int((time.monotonic() - started) * 1000)
-            return scans.record(session.generation, board, probe, scan_ms)
-    except BoardError as err:
-        return err.to_dict(), err.status
+    session = get_board_manager().session()
+    with scans.refresh_lock(session.generation):
+        in_flight = scans.completed_since(session.generation, requested)
+        if in_flight:
+            return in_flight
+        with previews.scan_guard(session):
+            board = _board_summary(session, session.identity())
+            started = time.monotonic()
+            probe = _run_probe(session)
+        scan_ms = int((time.monotonic() - started) * 1000)
+        return scans.record(session.generation, board, probe, scan_ms)
 
 
 # API: render an input configuration for one camera mode from the last scan.
 @peripherals_bp.post("/api/peripherals/cameras/export")
 def export_camera():
     """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
-    try:
-        body = request.get_json(silent=True)
-        selection = export.parse_request(body)
-        expected_generation = _export_generation(body)
-        session = get_board_manager().session()
-        if expected_generation != session.generation:
-            raise BoardError(
-                "stale_snapshot",
-                "The selected board changed since this camera scan was read, so no configuration was exported.",
-                hint="Refresh the selected board, then export again.",
-                expected_generation=expected_generation,
-            )
-        snapshot = scans.snapshot(session.generation)
-        if snapshot is None:
-            raise BoardError(
-                "stale_snapshot",
-                "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
-                hint="Click Refresh, then export again.",
-            )
-        return export.render(snapshot, selection)
-    except BoardError as err:
-        return err.to_dict(), err.status
+    body = request.get_json(silent=True)
+    selection = export.parse_request(body)
+    expected_generation = _export_generation(body)
+    session = get_board_manager().session()
+    if expected_generation != session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The selected board changed since this camera scan was read, so no configuration was exported.",
+            hint="Refresh the selected board, then export again.",
+            expected_generation=expected_generation,
+        )
+    snapshot = scans.snapshot(session.generation)
+    if snapshot is None:
+        raise BoardError(
+            "stale_snapshot",
+            "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
+            hint="Click Refresh, then export again.",
+        )
+    return export.render(snapshot, selection)
 
 
 def _preview_host() -> str:
@@ -174,11 +165,8 @@ def _camera_or_404(session, camera_id: str):
 @peripherals_bp.get("/api/peripherals/preview")
 def get_preview():
     """Return the current preview session for the selected board, or null; never contacts the board."""
-    try:
-        host = _preview_host()
-        session = get_board_manager().session()
-    except BoardError as err:
-        return err.to_dict(), err.status
+    host = _preview_host()
+    session = get_board_manager().session()
     previews.stop_stale()
     return {"session": _for_browser(previews.current(session.generation), host)}
 
@@ -189,46 +177,37 @@ def start_preview():
     """Capture and hardware-encode one camera into a reserved viewer channel until stopped or expired."""
     body = request.get_json(silent=True)
     body = body if isinstance(body, dict) else {}
-    try:
-        host = _preview_host()
-        session = get_board_manager().session()
-        item, python = _camera_or_404(session, str(body.get("id") or ""))
-        require_camera_free(item)
-        mode = item.get("default_selection")
-        keys = ("format", "width", "height", "fps")
-        if any(key in body for key in keys):
-            mode = export.parse_request({"id": item["id"], **{key: body.get(key) for key in keys}})
-            mode = {key: mode[key] for key in keys}
-        if not mode:
-            raise BoardError(
-                "invalid_request",
-                "This camera has no mode Insight can preview.",
-                hint="Refresh; if the camera reports no usable modes, the errors on the camera say why.",
-            )
-        return {"session": _for_browser(previews.start(session, item, mode, python), host)}
-    except BoardError as err:
-        return err.to_dict(), err.status
+    host = _preview_host()
+    session = get_board_manager().session()
+    item, python = _camera_or_404(session, str(body.get("id") or ""))
+    require_camera_free(item)
+    mode = item.get("default_selection")
+    keys = ("format", "width", "height", "fps")
+    if any(key in body for key in keys):
+        mode = export.parse_request({"id": item["id"], **{key: body.get(key) for key in keys}})
+        mode = {key: mode[key] for key in keys}
+    if not mode:
+        raise BoardError(
+            "invalid_request",
+            "This camera has no mode Insight can preview.",
+            hint="Refresh; if the camera reports no usable modes, the errors on the camera say why.",
+        )
+    return {"session": _for_browser(previews.start(session, item, mode, python), host)}
 
 
 # API: keep a preview alive while a viewer is watching.
 @peripherals_bp.post("/api/peripherals/cameras/preview/<session_id>/heartbeat")
 def heartbeat_preview(session_id):
     """Extend the preview; without heartbeats the board-side worker stops capture on its own."""
-    try:
-        host = _preview_host()
-        session = get_board_manager().session()
-        return {"session": _for_browser(previews.heartbeat(session, session_id), host)}
-    except BoardError as err:
-        return err.to_dict(), err.status
+    host = _preview_host()
+    session = get_board_manager().session()
+    return {"session": _for_browser(previews.heartbeat(session, session_id), host)}
 
 
 # API: stop a preview and release the camera and the channel.
 @peripherals_bp.post("/api/peripherals/cameras/preview/<session_id>/stop")
 def stop_preview(session_id):
     """Stop capture on the board; an older session id cannot stop a newer session."""
-    try:
-        host = _preview_host()
-        session = get_board_manager().session()
-        return {"session": _for_browser(previews.stop(session, session_id), host)}
-    except BoardError as err:
-        return err.to_dict(), err.status
+    host = _preview_host()
+    session = get_board_manager().session()
+    return {"session": _for_browser(previews.stop(session, session_id), host)}

@@ -8,6 +8,7 @@ from flask import Flask
 
 from neat_insight import port_map
 from neat_insight.board import BoardError, ExecResult
+from neat_insight.board.api import board_bp
 from neat_insight.peripherals import api, preview
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
@@ -60,6 +61,7 @@ class PreviewTests(unittest.TestCase):
 
     def client(self):
         app = Flask(__name__)
+        app.register_blueprint(board_bp)
         app.register_blueprint(api.peripherals_bp)
         app.extensions["neat_board"] = SimpleNamespace(session=lambda: self.session)
         return app.test_client()
