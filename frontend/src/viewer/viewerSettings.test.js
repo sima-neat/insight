@@ -303,6 +303,28 @@ test("clearing reports a storage failure as null", () => {
   assert.equal(api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs"), null);
 });
 
+test("clearing a general value through clearScopeGeneralOverride removes the entry when nothing is left", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  });
+
+  const result = api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs");
+
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.ok(result && typeof result === "object");
+});
+
+test("a clear that cannot remove the entry reports a failure", () => {
+  const channel1 = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+  const { api, readStored } = loadSettingsApiWithStorage(
+    { viewerSettings_channel_1: channel1 },
+    { failWritesFor: ["viewerSettings_channel_1"] }
+  );
+
+  assert.equal(api.clearScopeGeneralOverride("channel_1", "videoSyncBufferMs"), null);
+  assert.deepEqual(readStored("viewerSettings_channel_1"), channel1);
+});
+
 test("listing finds channels with their own value, sorted by channel number", () => {
   const { api } = loadSettingsApiWithStorage({
     viewerSettings_channel_10: { version: 4, general: { videoSyncBufferMs: 900 }, types: {} },
@@ -394,6 +416,17 @@ test("keys to store keep own keys, add changed keys and leave unchanged inherite
   );
 });
 
+test("raising for a channel and then applying globally leaves no entry for the channel", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  api.writeScopeGeneralOverride("channel_1", "videoSyncBufferMs", 600);
+  const result = api.applyGlobalGeneral("channel_1", "videoSyncBufferMs", 800);
+
+  assert.deepEqual(result, { applied: 800, raised: true });
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.equal(readStored("viewerSettings_global").general.videoSyncBufferMs, 800);
+});
+
 test("applying globally raises the global value and removes the channel's own value", () => {
   for (const stored of [
     { viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 350 }, types: {} } },
@@ -408,7 +441,9 @@ test("applying globally raises the global value and removes the channel's own va
 
     assert.deepEqual(result, { applied: 600, raised: true });
     assert.equal(readStored("viewerSettings_global").general.videoSyncBufferMs, 600);
-    assert.deepEqual(readStored("viewerSettings_channel_1").general, {});
+    // Nothing was left of the channel's own values, so its entry is gone rather
+    // than an empty stub.
+    assert.equal(readStored("viewerSettings_channel_1"), null);
     assert.equal(api.resolveTypeSettings(1, "pose-estimation").general.videoSyncBufferMs, 600);
   }
 });
@@ -423,7 +458,9 @@ test("applying globally never lowers the global value", () => {
 
   assert.deepEqual(result, { applied: 1000, raised: false });
   assert.equal(readStored("viewerSettings_global").general.videoSyncBufferMs, 1000);
-  assert.deepEqual(readStored("viewerSettings_channel_1").general, {});
+  // Nothing was left of the channel's own values, so its entry is gone rather
+  // than an empty stub.
+  assert.equal(readStored("viewerSettings_channel_1"), null);
   assert.equal(api.resolveTypeSettings(1, "pose-estimation").general.videoSyncBufferMs, 1000);
 });
 
@@ -443,7 +480,9 @@ test("applying globally with a global value equal to the target does not write t
 
     assert.deepEqual(result, { applied: 600, raised: false });
     assert.deepEqual(readStored("viewerSettings_global"), global);
-    assert.deepEqual(readStored("viewerSettings_channel_1").general, {});
+    // Nothing was left of the channel's own values, so its entry is gone rather
+    // than an empty stub.
+    assert.equal(readStored("viewerSettings_channel_1"), null);
   }
 });
 
@@ -759,6 +798,52 @@ test("clearing a value the scope does not have writes nothing, own or unknown", 
   assert.deepEqual(unknownResult, { general: {}, types: {} });
 });
 
+test("clearing a channel's last own value removes its entry", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  });
+
+  const result = api.clearScopeOwnValue("channel_1", "general.videoSyncBufferMs");
+
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.ok(result && typeof result === "object");
+});
+
+test("clearing a channel's last nested own value removes its entry", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: {},
+      types: { tracking: { history: { trailLength: 30 } } }
+    }
+  });
+
+  const result = api.clearScopeOwnValue("channel_1", "types.tracking.history.trailLength");
+
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.ok(result && typeof result === "object");
+});
+
+test("clearing a value keeps the entry while class colour entries remain", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 600 },
+      types: {
+        "object-detection": { objects: [{ label: "car", color: "#ff0000", style: "solid", width: 1 }] }
+      }
+    }
+  });
+
+  api.clearScopeOwnValue("channel_1", "general.videoSyncBufferMs");
+
+  const stored = readStored("viewerSettings_channel_1");
+  assert.notEqual(stored, null);
+  assert.deepEqual(stored.types["object-detection"].objects, [
+    { label: "car", color: "#ff0000", style: "solid", width: 1 }
+  ]);
+});
+
 test("listing channel overrides works for a nested id, sorted by channel, ignoring the global scope and malformed entries", () => {
   const { api } = loadSettingsApiWithStorage({
     viewerSettings_global: { version: 4, general: {}, types: { tracking: { history: { trailLength: 99 } } } },
@@ -795,8 +880,10 @@ test("counting and clearing channel scopes leaves regions, the global scope and 
     viewerSettings_channel_2: { version: 4, general: { videoSyncBufferMs: 700 }, types: {} },
     viewerSettings_channel_3: { version: 4, general: { videoSyncBufferMs: 800 }, types: {} },
     viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
-    viewerROI_channel_1: { regions: [] },
-    viewerROI_global: { regions: [] },
+    // Regions are stored as viewerROI_<index> (see webrtc/static/js/roi.js), not
+    // viewerROI_channel_<N>.
+    viewerROI_1: { regions: [] },
+    viewerROI_0: { regions: [] },
     foreignKey: 42
   });
 
@@ -807,9 +894,42 @@ test("counting and clearing channel scopes leaves regions, the global scope and 
   assert.equal(removed, 3);
   assert.equal(api.countChannelScopes(), 0);
   assert.notEqual(readStored("viewerSettings_global"), null);
-  assert.notEqual(readStored("viewerROI_channel_1"), null);
-  assert.notEqual(readStored("viewerROI_global"), null);
+  assert.notEqual(readStored("viewerROI_1"), null);
+  assert.notEqual(readStored("viewerROI_0"), null);
   assert.notEqual(readStored("foreignKey"), null);
+});
+
+test("empty channel entries are not counted", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: {}, types: {} },
+    viewerSettings_channel_2: {
+      version: 4,
+      general: {},
+      types: { tracking: { history: {} }, segmentation: { objects: [] }, classification: {} }
+    },
+    viewerSettings_channel_3: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  });
+
+  assert.equal(api.countChannelScopes(), 1);
+});
+
+test("a reset still removes empty channel entries", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: {}, types: {} },
+    viewerSettings_channel_2: {
+      version: 4,
+      general: {},
+      types: { tracking: { history: {} }, segmentation: { objects: [] }, classification: {} }
+    },
+    viewerSettings_channel_3: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  });
+
+  const removed = api.clearAllChannelScopes();
+
+  assert.equal(removed, 3);
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.equal(readStored("viewerSettings_channel_2"), null);
+  assert.equal(readStored("viewerSettings_channel_3"), null);
 });
 
 test("storage failures make writeScopeOwnSettings, clearScopeOwnValue and clearAllChannelScopes return null", () => {

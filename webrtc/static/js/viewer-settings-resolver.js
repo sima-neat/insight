@@ -496,12 +496,14 @@
   // to following the global scope (or the default) for it, keeping everything else.
   // A scope without its own value for `key` is left unwritten, so clearing never
   // creates an empty scope entry; the unchanged overrides still signal success.
+  // When the key was the scope's last own value, the scope's storage entry is
+  // removed instead of storing an empty one.
   function clearScopeGeneralOverride(scope, key) {
     const overrides = settingsOverrides(readRawSettings(scope));
     if (!Object.prototype.hasOwnProperty.call(overrides.general, key)) return overrides;
     const general = { ...overrides.general };
     delete general[key];
-    return storeScopeOverrides(scope, general, overrides.types);
+    return storeOrRemoveScopeOverrides(scope, general, overrides.types);
   }
 
   // What a channel gets for a general key when it has no value of its own: the
@@ -615,6 +617,38 @@
     return values;
   }
 
+  // What it takes for a scope's own values to be worth keeping stored: at least
+  // one scalar value (what readScopeOwnValues reports) or at least one class
+  // colour entry in any metadata type. An empty object, a `history: {}` or an
+  // `objects: []` left behind by clearing the last value hold nothing, so a scope
+  // reduced to those is removed rather than stored, defined once here for every
+  // caller (clearScopeGeneralOverride, clearScopeOwnValue, countChannelScopes).
+  function overridesHoldSomething(overrides) {
+    const hasScalarValue = SCALAR_SETTINGS.some(
+      (setting) => scalarValueAt(overrides, setting.path) !== undefined
+    );
+    if (hasScalarValue) return true;
+    return Object.values(overrides.types || {}).some(
+      (type) => Array.isArray(type?.objects) && type.objects.length > 0
+    );
+  }
+
+  // Stores the overrides if they still hold something, otherwise removes the
+  // scope's storage entry so an empty scope is never left behind. Either way
+  // returns an object (the overrides as they are after the change) on success,
+  // or null when storage failed, matching storeScopeOverrides' contract.
+  function storeOrRemoveScopeOverrides(scope, general, types) {
+    if (overridesHoldSomething({ general, types })) {
+      return storeScopeOverrides(scope, general, types);
+    }
+    try {
+      window.localStorage.removeItem(`viewerSettings_${scope}`);
+    } catch (_err) {
+      return null;
+    }
+    return { general: {}, types: {} };
+  }
+
   // Every channel scope in storage that has its own value for `id`, generalizing
   // listChannelGeneralOverrides to any scalar id, nested ones included.
   function listChannelOverrides(id) {
@@ -681,25 +715,31 @@
   // goes back to following the global scope (or the default) for it, keeping its
   // other own values and class colour entries. A scope without an own value for
   // `id`, or an unknown id, is left unwritten; the unchanged overrides still
-  // signal success, as clearScopeGeneralOverride's do.
+  // signal success, as clearScopeGeneralOverride's do. When the id was the
+  // scope's last own value, the scope's storage entry is removed instead of
+  // storing an empty one.
   function clearScopeOwnValue(scope, id) {
     const setting = findScalarSetting(id);
     const overrides = readScopeOverrides(scope);
     if (!setting) return overrides;
     if (scalarValueAt(overrides, setting.path) === undefined) return overrides;
     deleteScalarValueAt(overrides, setting.path);
-    return storeScopeOverrides(scope, overrides.general, overrides.types);
+    return storeOrRemoveScopeOverrides(scope, overrides.general, overrides.types);
   }
 
-  // The number of stored channel scopes, for the global dialog's reset link
-  // (which the dialog hides when this is zero).
+  // The number of stored channel scopes that hold something of their own, for
+  // the global dialog's reset link (which the dialog hides when this is zero).
+  // A channel scope left holding nothing (see overridesHoldSomething), e.g. one
+  // stored by an earlier build of this branch, does not count.
   function countChannelScopes() {
     try {
       let count = 0;
       const total = window.localStorage.length;
       for (let i = 0; i < total; i++) {
         const key = window.localStorage.key(i);
-        if (typeof key === "string" && /^viewerSettings_channel_\d+$/.test(key)) count++;
+        const match = typeof key === "string" && key.match(/^viewerSettings_channel_(\d+)$/);
+        if (!match) continue;
+        if (overridesHoldSomething(readScopeOverrides(`channel_${match[1]}`))) count++;
       }
       return count;
     } catch (_err) {
