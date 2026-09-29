@@ -2714,7 +2714,14 @@ def auto_assign_all_sources():
 # API: start streaming one assigned media source.
 @app.post("/api/mediasrc/start")
 def start_source():
-    """Accept JSON {'index': int}; start the assigned file for that source and mark its state as playing."""
+    """Accept JSON {'index': int, 'expect_type'?: 'webcam'|'file'}; start the assigned
+    source and mark its state as playing.
+
+    A webcam start is confirmed over several /start polls (the browser waits for
+    MediaMTX to see the path). `expect_type` lets the caller name what it believes
+    it is starting, so a slot another tab turned into a different type between
+    polls is refused (410) instead of started as that other thing — otherwise a
+    webcam confirm could launch a file a second tab assigned to the slot."""
     data = request.get_json() or {}
     index = data.get("index")
     if index is None:
@@ -2723,6 +2730,12 @@ def start_source():
     sources = load_sources()
     for src in sources:
         if src["index"] == index:
+            # Early, cross-poll guard (the per-type merges below still re-check
+            # under the lock). Refuse rather than start a slot that is no longer
+            # the type the caller expected.
+            expect_type = data.get("expect_type")
+            if expect_type and src.get("type") != expect_type:
+                return _json_error("Source changed to a different type before it could start", 410)
             if src.get("type") == SOURCE_TYPE_WEBCAM:
                 # The browser is what actually publishes to MediaMTX (see
                 # /api/mediasrc/assign-webcam); this just confirms it landed

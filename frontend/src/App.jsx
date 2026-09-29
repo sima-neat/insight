@@ -1557,11 +1557,14 @@ export default function App() {
     await loadSources()
   }
 
-  async function startSource(index) {
+  async function startSource(index, { expectType = null } = {}) {
+    // expectType lets a webcam confirm say "only start this if it is still a
+    // webcam", so a file another tab assigned to the slot between confirm polls
+    // is refused (410) rather than started in the webcam's place.
     await fetchJson('/api/mediasrc/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
+      body: JSON.stringify(expectType ? { index, expect_type: expectType } : { index })
     })
     await loadSources()
   }
@@ -1862,7 +1865,11 @@ export default function App() {
       await confirmWebcamPublishing(
         () => {
           if (superseded()) throw WEBCAM_START_SUPERSEDED
-          return startSource(index)
+          // expect_type=webcam: if another tab turned this slot into a file
+          // between polls, the backend returns 410 (terminal below) instead of
+          // starting that file. superseded() only catches reassignments this tab
+          // made; a second tab's file assignment does not move this generation.
+          return startSource(index, { expectType: 'webcam' })
         },
         // Stop retrying on outcomes that will not change within the window:
         //  - 410: another tab made the slot a file source; it can never become

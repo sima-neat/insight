@@ -491,6 +491,37 @@ class WebcamSourceTests(unittest.TestCase):
         # A webcam is published by the browser; Insight must not spawn ffmpeg.
         start_media_stream.assert_not_called()
 
+    def test_expect_type_webcam_refuses_a_slot_another_tab_turned_into_a_file(self):
+        """A webcam confirm must not start a file that replaced the slot.
+
+        The browser confirms a webcam over several /start polls. If another tab
+        assigns a file to the slot between polls, an unqualified start would
+        launch that file (webcam confirmation starting another tab's file).
+        expect_type=webcam makes the backend refuse with 410 and start nothing.
+        """
+        (self.media_dir / "other.mp4").write_bytes(b"not-a-real-video")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "other.mp4", "state": "stopped", "type": "file"}]',
+            encoding="utf-8",
+        )
+        with mock.patch.object(app_module, "start_media_stream") as start_media_stream:
+            response = self.client.post(
+                "/api/mediasrc/start", json={"index": 1, "expect_type": "webcam"}
+            )
+        self.assertEqual(response.status_code, 410)
+        start_media_stream.assert_not_called()
+        self.assertEqual(app_module.load_sources()[0]["state"], "stopped")
+
+    def test_expect_type_webcam_still_confirms_a_real_webcam(self):
+        """The guard must not break the normal webcam confirm path."""
+        self._assign_webcam(1)
+        with mock.patch.object(app_module, "webcam_is_publishing", return_value=True):
+            response = self.client.post(
+                "/api/mediasrc/start", json={"index": 1, "expect_type": "webcam"}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app_module.load_sources()[0]["state"], "playing")
+
     def test_a_persisted_playing_webcam_reads_as_stopped_when_nothing_publishes(self):
         """A webcam slot is only live while a browser is actually publishing to it.
 
