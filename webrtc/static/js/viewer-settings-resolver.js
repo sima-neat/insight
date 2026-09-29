@@ -708,26 +708,43 @@
   }
 
   // The reset action: removes every channel's own values, leaving the global
-  // scope and the drawn regions (viewerROI_*) alone. Keys are collected before
-  // any are removed, since removing while iterating by index skips entries.
+  // scope and the drawn regions (viewerROI_*) alone. This is destructive and
+  // user-triggered on purpose, so it is all-or-nothing, the way applyGlobalGeneral
+  // already is for the global scope: the raw string of every entry is read before
+  // any is removed (so nothing has changed yet if that fails), and a removal that
+  // throws partway through is rolled back by restoring every entry already
+  // removed, byte for byte.
   function clearAllChannelScopes() {
-    let keys;
+    let entries;
     try {
-      keys = [];
+      entries = new Map();
       const total = window.localStorage.length;
       for (let i = 0; i < total; i++) {
         const key = window.localStorage.key(i);
-        if (typeof key === "string" && /^viewerSettings_channel_\d+$/.test(key)) keys.push(key);
+        if (typeof key === "string" && /^viewerSettings_channel_\d+$/.test(key)) {
+          entries.set(key, window.localStorage.getItem(key));
+        }
       }
     } catch (_err) {
       return null;
     }
+    const removedKeys = [];
     try {
-      keys.forEach((key) => window.localStorage.removeItem(key));
+      entries.forEach((_raw, key) => {
+        window.localStorage.removeItem(key);
+        removedKeys.push(key);
+      });
     } catch (_err) {
+      removedKeys.forEach((key) => {
+        try {
+          window.localStorage.setItem(key, entries.get(key));
+        } catch (_restoreErr) {
+          // Nothing more can be done; the caller still learns that the action failed.
+        }
+      });
       return null;
     }
-    return keys.length;
+    return entries.size;
   }
 
   window.viewerSettingsApi = {

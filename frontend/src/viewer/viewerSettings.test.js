@@ -195,7 +195,10 @@ function loadSettingsApiWithStorage(stored = {}, { failWrites = false, failWrite
   vm.runInNewContext(resolverSource, { window });
   return {
     api: realmSafeApi(window.viewerSettingsApi),
-    readStored: (key) => (values.has(key) ? JSON.parse(values.get(key)) : null)
+    readStored: (key) => (values.has(key) ? JSON.parse(values.get(key)) : null),
+    // The exact string in storage, to check a restore came back byte for byte
+    // rather than merely equal after a re-serialize.
+    readRaw: (key) => values.get(key) ?? null
   };
 }
 
@@ -836,4 +839,60 @@ test("storage failures make writeScopeOwnSettings, clearScopeOwnValue and clearA
     { failWritesFor: ["viewerSettings_channel_1"] }
   );
   assert.equal(failingRemoveAll.api.clearAllChannelScopes(), null);
+});
+
+test("a reset that fails halfway puts back what it had removed", () => {
+  const channel1 = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+  const channel2 = { version: 4, general: { videoSyncBufferMs: 700 }, types: {} };
+  const channel3 = { version: 4, general: { videoSyncBufferMs: 800 }, types: {} };
+  const { api, readStored, readRaw } = loadSettingsApiWithStorage(
+    {
+      viewerSettings_channel_1: channel1,
+      viewerSettings_channel_2: channel2,
+      viewerSettings_channel_3: channel3
+    },
+    { failWritesFor: ["viewerSettings_channel_2"] }
+  );
+  const rawBefore = {
+    1: readRaw("viewerSettings_channel_1"),
+    2: readRaw("viewerSettings_channel_2"),
+    3: readRaw("viewerSettings_channel_3")
+  };
+
+  assert.equal(api.clearAllChannelScopes(), null);
+
+  assert.deepEqual(readStored("viewerSettings_channel_1"), channel1);
+  assert.deepEqual(readStored("viewerSettings_channel_2"), channel2);
+  assert.deepEqual(readStored("viewerSettings_channel_3"), channel3);
+  assert.equal(readRaw("viewerSettings_channel_1"), rawBefore[1]);
+  assert.equal(readRaw("viewerSettings_channel_2"), rawBefore[2]);
+  assert.equal(readRaw("viewerSettings_channel_3"), rawBefore[3]);
+});
+
+test("a reset that fails on the last entry puts back all earlier ones", () => {
+  const channel1 = { version: 4, general: { videoSyncBufferMs: 600 }, types: {} };
+  const channel2 = { version: 4, general: { videoSyncBufferMs: 700 }, types: {} };
+  const channel3 = { version: 4, general: { videoSyncBufferMs: 800 }, types: {} };
+  const { api, readStored, readRaw } = loadSettingsApiWithStorage(
+    {
+      viewerSettings_channel_1: channel1,
+      viewerSettings_channel_2: channel2,
+      viewerSettings_channel_3: channel3
+    },
+    { failWritesFor: ["viewerSettings_channel_3"] }
+  );
+  const rawBefore = {
+    1: readRaw("viewerSettings_channel_1"),
+    2: readRaw("viewerSettings_channel_2"),
+    3: readRaw("viewerSettings_channel_3")
+  };
+
+  assert.equal(api.clearAllChannelScopes(), null);
+
+  assert.deepEqual(readStored("viewerSettings_channel_1"), channel1);
+  assert.deepEqual(readStored("viewerSettings_channel_2"), channel2);
+  assert.deepEqual(readStored("viewerSettings_channel_3"), channel3);
+  assert.equal(readRaw("viewerSettings_channel_1"), rawBefore[1]);
+  assert.equal(readRaw("viewerSettings_channel_2"), rawBefore[2]);
+  assert.equal(readRaw("viewerSettings_channel_3"), rawBefore[3]);
 });
