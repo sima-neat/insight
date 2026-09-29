@@ -15,7 +15,7 @@
         <span id="viewerSettingsTitle" class="settings-popup-title">Viewer Configuration</span>
         <button id="viewerSettingsClose" title="Close">&times;</button>
       </div>
-      <p id="viewerSettingsScopeLine" class="settings-scope-line" hidden></p>
+      <p id="viewerSettingsScopeLine" class="settings-scope-line settings-channel-only"></p>
       <div class="settings-popup-body">
         <div class="settings-tab-header">
           <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
@@ -45,7 +45,7 @@
               <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="viewerObjectList">
                 <table class="viewer-object-table">
-                  <tbody id="viewerObjectInheritedBody" class="settings-inherited-body" hidden></tbody>
+                  <tbody id="viewerObjectInheritedBody" class="settings-inherited-body settings-channel-only" hidden></tbody>
                   <tbody id="viewerObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -75,7 +75,7 @@
               <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="segmentationObjectList">
                 <table class="viewer-object-table">
-                  <tbody id="segmentationObjectInheritedBody" class="settings-inherited-body" hidden></tbody>
+                  <tbody id="segmentationObjectInheritedBody" class="settings-inherited-body settings-channel-only" hidden></tbody>
                   <tbody id="segmentationObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -175,9 +175,9 @@
       </div>
       <div class="modal-footer">
         <div class="settings-reset">
-          <button type="button" id="resetChannelScopes" class="settings-scope-link" hidden>Reset all channels to the global settings…</button>
-          <div id="resetChannelScopesConfirm" class="settings-reset-confirm" role="group" aria-labelledby="resetChannelScopesMessage" hidden>
-            <span id="resetChannelScopesMessage"></span>
+          <button type="button" id="resetChannelScopes" class="settings-scope-link settings-global-only" hidden>Reset all channels to the global settings…</button>
+          <div id="resetChannelScopesConfirm" class="settings-reset-confirm settings-global-only" role="group" aria-labelledby="resetChannelScopesMessage" hidden>
+            <span id="resetChannelScopesMessage" class="settings-reset-message"></span>
             <button type="button" id="resetChannelScopesConfirmButton" class="settings-reset-button settings-reset-button--danger">Reset</button>
             <button type="button" id="resetChannelScopesCancel" class="settings-reset-button">Cancel</button>
           </div>

@@ -19,6 +19,7 @@
 
   // The page elements this UI needs besides the controls of the table below.
   const REQUIRED_ELEMENT_IDS = [
+    "viewerSettingsOverlay",
     "viewerSettingsScopeLine",
     "viewerObjectInheritedBody",
     "viewerObjectTableBody",
@@ -237,7 +238,7 @@
 
   function createSwitch(controlId, container) {
     const wrapper = document.createElement(container.tagName === "TR" ? "td" : "span");
-    wrapper.className = "settings-own-switch";
+    wrapper.className = "settings-own-switch settings-channel-only";
     const input = document.createElement("input");
     input.type = "checkbox";
     input.id = `${controlId}OwnValue`;
@@ -275,6 +276,7 @@
 
   function create(options) {
     const { settingsApi, createObjectEntry, readObjectEntries, dispatchSettingsChanged } = options;
+    const dialog = document.getElementById("viewerSettingsOverlay");
     const scopeLine = document.getElementById("viewerSettingsScopeLine");
     const saveButton = document.getElementById("saveViewerSettings");
     const resetLink = document.getElementById("resetChannelScopes");
@@ -400,15 +402,14 @@
       const ownValues = settingsApi.readScopeOwnValues(scope);
       settings.forEach((setting) => {
         const isOwn = hasOwn(ownValues, setting.id);
-        setting.own.wrapper.hidden = false;
         setting.own.input.checked = isOwn;
         writeValue(setting, isOwn ? ownValues[setting.id] : settingsApi.followedValue(setting.id));
       });
     }
 
+    // The global dialog has no own values; no switch keeps a channel's state.
     function loadGlobalSettings() {
       settings.forEach((setting) => {
-        setting.own.wrapper.hidden = true;
         setting.own.input.checked = false;
       });
     }
@@ -478,7 +479,7 @@
     }
 
     function renderResetLink() {
-      resetLink.hidden = inChannelDialog() || !resetConfirm.hidden || settingsApi.countChannelScopes() === 0;
+      resetLink.hidden = !resetConfirm.hidden || settingsApi.countChannelScopes() === 0;
     }
 
     function openResetConfirm() {
@@ -511,16 +512,12 @@
       else saveButton.focus();
     }
 
+    // The scope line is channel-only (see the dialog's kind); only its text is set here.
     function renderScopeLine() {
-      if (inChannelDialog()) {
-        scopeLine.textContent =
-          `These settings apply to channel ${channelOfScope(scope)} only. ` +
-          "Switch on a setting to give this channel its own value.";
-        scopeLine.hidden = false;
-      } else {
-        scopeLine.textContent = "";
-        scopeLine.hidden = true;
-      }
+      scopeLine.textContent = inChannelDialog()
+        ? `These settings apply to channel ${channelOfScope(scope)} only. ` +
+          "Switch on a setting to give this channel its own value."
+        : "";
     }
 
     // The scope-dependent parts of the dialog, without touching values the user may
@@ -539,6 +536,9 @@
     // channel dialog then shows, per setting, the own value or the followed one.
     function load(targetScope) {
       scope = targetScope;
+      // The one statement of the dialog's kind; viewer.css derives from it which of
+      // the settings-channel-only and settings-global-only elements are displayed.
+      dialog.dataset.settingsScope = inChannelDialog() ? "channel" : "global";
       hideResetConfirm();
       if (inChannelDialog()) loadChannelSettings();
       else loadGlobalSettings();

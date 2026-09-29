@@ -405,13 +405,24 @@ canvas {
 /* Settings dialog: which scope a value comes from (spec part 3). The dialog's
    base rules live in css/settings.css, which loads after this file, so the rules
    that meet one of its rules on the same element carry the higher specificity. */
-.settings-scope-line[hidden],
-.settings-scope-note-row[hidden],
-.settings-scope-note[hidden],
-.settings-own-switch[hidden],
-.settings-inherited-body[hidden],
-.settings-reset-confirm[hidden],
-.settings-scope-link[hidden] {
+
+/* The kind of dialog: this block is the only place where it decides what is
+   displayed. settings-scope.js states the kind once, as data-settings-scope on
+   #viewerSettingsOverlay; without the scope UI (fallback) the attribute is absent
+   and neither kind's elements are displayed. The rules are anchored on the id so
+   that they outweigh every layout rule of the dialog by specificity; no layout
+   rule below may use an id selector. */
+#viewerSettingsOverlay[data-settings-scope="global"] .settings-channel-only,
+#viewerSettingsOverlay[data-settings-scope="channel"] .settings-global-only,
+#viewerSettingsOverlay:not([data-settings-scope]) .settings-channel-only,
+#viewerSettingsOverlay:not([data-settings-scope]) .settings-global-only {
+  display: none;
+}
+
+/* State that depends on data or interaction (an empty note or list, the reset
+   link with no channel scope, the confirmation closed) is the hidden attribute,
+   authoritative anywhere in the dialog. */
+#viewerSettingsOverlay [hidden] {
   display: none;
 }
 
@@ -676,7 +687,7 @@ canvas {
 /* The dialog is a fixed 700px, so the message plus both buttons never fit on one
    line. Forcing the message to its own full-width row leaves Reset and Cancel
    together on the row below it, instead of Cancel wrapping alone. */
-#resetChannelScopesMessage {
+.settings-reset-confirm .settings-reset-message {
   flex-basis: 100%;
 }
 
