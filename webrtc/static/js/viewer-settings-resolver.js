@@ -40,6 +40,62 @@
     applyRoiFiltering: true
   };
 
+  // The one table that drives every own-value function: an id is the setting's
+  // path in the stored scope, split for the generic path helpers below.
+  const SCALAR_SETTINGS = [
+    { id: "general.videoSyncBufferMs", tab: "General", metadataType: null, path: ["general", "videoSyncBufferMs"] },
+    { id: "general.metadataRetentionMs", tab: "General", metadataType: null, path: ["general", "metadataRetentionMs"] },
+    { id: "general.showRoi", tab: "ROI", metadataType: null, path: ["general", "showRoi"] },
+    { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null, path: ["general", "applyRoiFiltering"] },
+    {
+      id: "types.object-detection.confidenceThreshold",
+      tab: "Metadata",
+      metadataType: "object-detection",
+      path: ["types", "object-detection", "confidenceThreshold"]
+    },
+    {
+      id: "types.segmentation.confidenceThreshold",
+      tab: "Metadata",
+      metadataType: "segmentation",
+      path: ["types", "segmentation", "confidenceThreshold"]
+    },
+    {
+      id: "types.segmentation.maskOpacity",
+      tab: "Metadata",
+      metadataType: "segmentation",
+      path: ["types", "segmentation", "maskOpacity"]
+    },
+    {
+      id: "types.tracking.confidenceThreshold",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "confidenceThreshold"]
+    },
+    {
+      id: "types.tracking.history.enabled",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "history", "enabled"]
+    },
+    {
+      id: "types.tracking.history.trailLength",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "history", "trailLength"]
+    },
+    {
+      id: "types.tracking.history.lostTrackTtlMs",
+      tab: "Metadata",
+      metadataType: "tracking",
+      path: ["types", "tracking", "history", "lostTrackTtlMs"]
+    }
+  ];
+
+  // What a scalar setting is worth with nothing stored anywhere: the same shape
+  // ({ general, types }) as the overrides a scope reads, so the generic path
+  // helpers work on either one.
+  const DEFAULTS_ROOT = { general: GENERAL_DEFAULTS, types: TYPE_DEFAULTS };
+
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
@@ -164,6 +220,61 @@
       Object.assign(type, rawType);
     }
     return type;
+  }
+
+  function findScalarSetting(id) {
+    return SCALAR_SETTINGS.find((setting) => setting.id === id) || null;
+  }
+
+  // Reads a scalar setting's value out of a { general, types } shaped object
+  // (overrides or DEFAULTS_ROOT) by its id's path; undefined when absent.
+  function scalarValueAt(root, path) {
+    let node = root;
+    for (const key of path) {
+      if (node == null || typeof node !== "object") return undefined;
+      node = node[key];
+    }
+    return node;
+  }
+
+  // Writes a scalar setting's value into a { general, types } shaped object,
+  // creating the intermediate objects (e.g. types.tracking.history) as needed.
+  function setScalarValueAt(root, path, value) {
+    let node = root;
+    for (let i = 0; i < path.length - 1; i++) {
+      const key = path[i];
+      if (!node[key] || typeof node[key] !== "object") node[key] = {};
+      node = node[key];
+    }
+    node[path[path.length - 1]] = value;
+  }
+
+  // The inverse of setScalarValueAt: removes one leaf, leaving its siblings (and
+  // any other setting under a different path) untouched.
+  function deleteScalarValueAt(root, path) {
+    let node = root;
+    for (let i = 0; i < path.length - 1; i++) {
+      node = node && node[path[i]];
+      if (node == null || typeof node !== "object") return;
+    }
+    if (node && typeof node === "object") delete node[path[path.length - 1]];
+  }
+
+  // Normalizes one raw value the way the dialog's own control would, reusing the
+  // file's existing normalizers so clamping and rounding match exactly. The
+  // setting's path shape says which normalizer applies: general.<key>,
+  // types.<type>.<key>, or the nested types.tracking.history.<key>.
+  function normalizeScalarValue(setting, rawValue) {
+    const path = setting.path;
+    if (path[0] === "general") {
+      return normalizeGeneral({ [path[1]]: rawValue }, false)[path[1]];
+    }
+    const metadataType = path[1];
+    if (path.length === 3) {
+      return normalizeTypeSettings(metadataType, { [path[2]]: rawValue }, false)[path[2]];
+    }
+    const key = path[3];
+    return normalizeTypeSettings(metadataType, { history: { [key]: rawValue } }, false).history[key];
   }
 
   function readRawSettings(scope) {
@@ -474,6 +585,151 @@
     return found.sort((a, b) => a.channel - b.channel);
   }
 
+  // The eleven scalar settings the dialog's switches cover, for building their
+  // controls without a second, hand-kept list.
+  function scalarSettings() {
+    return SCALAR_SETTINGS.map(({ id, tab, metadataType }) => ({ id, tab, metadataType }));
+  }
+
+  // What a channel gets for a scalar setting when it has no value of its own: the
+  // global scope's own value, otherwise the default. An unknown id yields null.
+  function followedValue(id) {
+    const setting = findScalarSetting(id);
+    if (!setting) return null;
+    const globalOwn = scalarValueAt(readScopeOverrides("global"), setting.path);
+    if (globalOwn !== undefined) return globalOwn;
+    const fallback = scalarValueAt(DEFAULTS_ROOT, setting.path);
+    return fallback !== undefined ? fallback : null;
+  }
+
+  // The scope's own scalar values, nested ones included, keyed by id. Presence,
+  // not equality with the followed value, is what makes a value "own" (see
+  // applyGlobalGeneral's channel scopes, which can equal the global one).
+  function readScopeOwnValues(scope) {
+    const overrides = readScopeOverrides(scope);
+    const values = {};
+    SCALAR_SETTINGS.forEach((setting) => {
+      const value = scalarValueAt(overrides, setting.path);
+      if (value !== undefined) values[setting.id] = value;
+    });
+    return values;
+  }
+
+  // Every channel scope in storage that has its own value for `id`, generalizing
+  // listChannelGeneralOverrides to any scalar id, nested ones included.
+  function listChannelOverrides(id) {
+    const setting = findScalarSetting(id);
+    if (!setting) return [];
+    const found = [];
+    try {
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const storageKey = window.localStorage.key(i);
+        const match = typeof storageKey === "string" && storageKey.match(/^viewerSettings_channel_(\d+)$/);
+        if (!match) continue;
+        const channel = Number(match[1]);
+        const value = scalarValueAt(readScopeOverrides(`channel_${channel}`), setting.path);
+        if (value !== undefined) found.push({ channel, value });
+      }
+    } catch (_err) {
+      return [];
+    }
+    return found.sort((a, b) => a.channel - b.channel);
+  }
+
+  // The global scope's own class colour entries for a metadata type, for the
+  // channel dialog's inherited, greyed-out list.
+  function inheritedObjects(metadataType) {
+    const type = metadataTypeOrDefault(metadataType);
+    const globalType = readScopeOverrides("global").types[type];
+    return globalType && Array.isArray(globalType.objects) ? globalType.objects : [];
+  }
+
+  // Stores exactly the given scalar values and class colour entries as the
+  // scope's own, replacing whatever it had before. What is not given is not
+  // stored; a scope left with nothing at all is removed instead of holding an
+  // empty stub.
+  function writeScopeOwnSettings(scope, ownValues, ownObjects) {
+    const general = {};
+    const types = {};
+    Object.entries(ownValues || {}).forEach(([id, value]) => {
+      const setting = findScalarSetting(id);
+      if (!setting) return;
+      const normalized = normalizeScalarValue(setting, value);
+      setScalarValueAt(setting.path[0] === "general" ? general : types, setting.path.slice(1), normalized);
+    });
+    Object.entries(ownObjects || {}).forEach(([metadataType, entries]) => {
+      if (!METADATA_TYPES.some((type) => type.value === metadataType)) return;
+      const normalized = normalizeObjects(entries);
+      if (normalized.length === 0) return;
+      if (!types[metadataType]) types[metadataType] = {};
+      types[metadataType].objects = normalized;
+    });
+
+    if (Object.keys(general).length === 0 && Object.keys(types).length === 0) {
+      try {
+        window.localStorage.removeItem(`viewerSettings_${scope}`);
+      } catch (_err) {
+        return null;
+      }
+      return { version: SETTINGS_VERSION, general: {}, types: {} };
+    }
+    return storeScopeOverrides(scope, general, types);
+  }
+
+  // The inverse of one writeScopeOwnSettings value: drops one id so the scope
+  // goes back to following the global scope (or the default) for it, keeping its
+  // other own values and class colour entries. A scope without an own value for
+  // `id`, or an unknown id, is left unwritten; the unchanged overrides still
+  // signal success, as clearScopeGeneralOverride's do.
+  function clearScopeOwnValue(scope, id) {
+    const setting = findScalarSetting(id);
+    const overrides = readScopeOverrides(scope);
+    if (!setting) return overrides;
+    if (scalarValueAt(overrides, setting.path) === undefined) return overrides;
+    deleteScalarValueAt(overrides, setting.path);
+    return storeScopeOverrides(scope, overrides.general, overrides.types);
+  }
+
+  // The number of stored channel scopes, for the global dialog's reset link
+  // (which the dialog hides when this is zero).
+  function countChannelScopes() {
+    try {
+      let count = 0;
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const key = window.localStorage.key(i);
+        if (typeof key === "string" && /^viewerSettings_channel_\d+$/.test(key)) count++;
+      }
+      return count;
+    } catch (_err) {
+      return 0;
+    }
+  }
+
+  // The reset action: removes every channel's own values, leaving the global
+  // scope and the drawn regions (viewerROI_*) alone. Keys are collected before
+  // any are removed, since removing while iterating by index skips entries.
+  function clearAllChannelScopes() {
+    let keys;
+    try {
+      keys = [];
+      const total = window.localStorage.length;
+      for (let i = 0; i < total; i++) {
+        const key = window.localStorage.key(i);
+        if (typeof key === "string" && /^viewerSettings_channel_\d+$/.test(key)) keys.push(key);
+      }
+    } catch (_err) {
+      return null;
+    }
+    try {
+      keys.forEach((key) => window.localStorage.removeItem(key));
+    } catch (_err) {
+      return null;
+    }
+    return keys.length;
+  }
+
   window.viewerSettingsApi = {
     version: SETTINGS_VERSION,
     metadataTypes: METADATA_TYPES,
@@ -490,6 +746,15 @@
     followedGeneralValue,
     generalKeysToStore,
     applyGlobalGeneral,
+    scalarSettings,
+    followedValue,
+    readScopeOwnValues,
+    listChannelOverrides,
+    inheritedObjects,
+    writeScopeOwnSettings,
+    clearScopeOwnValue,
+    countChannelScopes,
+    clearAllChannelScopes,
     normalizeSettings,
     resolveTypeSettings
   };

@@ -183,6 +183,7 @@ function loadSettingsApiWithStorage(stored = {}, { failWrites = false, failWrite
         values.set(key, value);
       },
       removeItem: (key) => {
+        if (failWrites || failWritesFor.includes(key)) throw new Error("quota exceeded");
         values.delete(key);
       },
       get length() {
@@ -504,4 +505,335 @@ test("clearing a value the scope does not have writes nothing", () => {
   // Still an object, so callers see success.
   assert.deepEqual(result.general, {});
   assert.deepEqual(result.types, {});
+});
+
+// Maps a scalar id to the value resolveTypeSettings reports for it, following the
+// id's own path (general.<key>, types.<type>.<key> or types.tracking.history.<key>).
+function resolvedValueForId(api, channel, id) {
+  const parts = id.split(".");
+  if (parts[0] === "general") {
+    return api.resolveTypeSettings(channel, "object-detection").general[parts[1]];
+  }
+  const resolvedType = api.resolveTypeSettings(channel, parts[1]).type;
+  return parts.length === 3 ? resolvedType[parts[2]] : resolvedType.history[parts[3]];
+}
+
+test("the scalar settings list has the eleven ids of the spec, each with its tab and metadata type", () => {
+  const { api } = loadSettingsApiWithStorage();
+
+  assert.deepEqual(api.scalarSettings(), [
+    { id: "general.videoSyncBufferMs", tab: "General", metadataType: null },
+    { id: "general.metadataRetentionMs", tab: "General", metadataType: null },
+    { id: "general.showRoi", tab: "ROI", metadataType: null },
+    { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null },
+    { id: "types.object-detection.confidenceThreshold", tab: "Metadata", metadataType: "object-detection" },
+    { id: "types.segmentation.confidenceThreshold", tab: "Metadata", metadataType: "segmentation" },
+    { id: "types.segmentation.maskOpacity", tab: "Metadata", metadataType: "segmentation" },
+    { id: "types.tracking.confidenceThreshold", tab: "Metadata", metadataType: "tracking" },
+    { id: "types.tracking.history.enabled", tab: "Metadata", metadataType: "tracking" },
+    { id: "types.tracking.history.trailLength", tab: "Metadata", metadataType: "tracking" },
+    { id: "types.tracking.history.lostTrackTtlMs", tab: "Metadata", metadataType: "tracking" }
+  ]);
+});
+
+test("the followed value is the global scope's own value, else the default, for general, type and nested ids", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_global: {
+      version: 4,
+      general: { videoSyncBufferMs: 900 },
+      types: { tracking: { history: { trailLength: 40 } } }
+    }
+  });
+
+  assert.equal(api.followedValue("general.videoSyncBufferMs"), 900);
+  assert.equal(api.followedValue("general.metadataRetentionMs"), 0);
+  assert.equal(api.followedValue("types.tracking.confidenceThreshold"), 0);
+  assert.equal(api.followedValue("types.tracking.history.trailLength"), 40);
+  assert.equal(api.followedValue("types.tracking.history.lostTrackTtlMs"), 2000);
+  assert.equal(api.followedValue("no.such.id"), null);
+});
+
+test("own values are read by id, nested ones included, empty for an empty scope", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 600 },
+      types: { tracking: { history: { trailLength: 25 } } }
+    }
+  });
+
+  assert.deepEqual(api.readScopeOwnValues("channel_1"), {
+    "general.videoSyncBufferMs": 600,
+    "types.tracking.history.trailLength": 25
+  });
+  assert.deepEqual(api.readScopeOwnValues("channel_2"), {});
+});
+
+test("own values of a scope stored by the old dialog are all reported", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 700, metadataRetentionMs: 3000, showRoi: false, applyRoiFiltering: false },
+      types: {
+        "object-detection": { confidenceThreshold: 0.4 },
+        segmentation: { confidenceThreshold: 0.5, maskOpacity: 0.6 },
+        tracking: { confidenceThreshold: 0.3, history: { enabled: false, trailLength: 30, lostTrackTtlMs: 6000 } }
+      }
+    }
+  });
+
+  assert.deepEqual(api.readScopeOwnValues("channel_1"), {
+    "general.videoSyncBufferMs": 700,
+    "general.metadataRetentionMs": 3000,
+    "general.showRoi": false,
+    "general.applyRoiFiltering": false,
+    "types.object-detection.confidenceThreshold": 0.4,
+    "types.segmentation.confidenceThreshold": 0.5,
+    "types.segmentation.maskOpacity": 0.6,
+    "types.tracking.confidenceThreshold": 0.3,
+    "types.tracking.history.enabled": false,
+    "types.tracking.history.trailLength": 30,
+    "types.tracking.history.lostTrackTtlMs": 6000
+  });
+});
+
+test("own values of a legacy tracking scope with flat keys are reported under the history ids", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: {},
+      types: { tracking: { showTrackHistory: false, trailLength: 20, lostTrackTtlMs: 5000 } }
+    }
+  });
+
+  assert.deepEqual(api.readScopeOwnValues("channel_1"), {
+    "types.tracking.history.enabled": false,
+    "types.tracking.history.trailLength": 20,
+    "types.tracking.history.lostTrackTtlMs": 5000
+  });
+});
+
+test("writing own settings stores exactly what is given", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  const stored = api.writeScopeOwnSettings(
+    "channel_1",
+    { "general.videoSyncBufferMs": 600, "types.tracking.confidenceThreshold": 0.5, "no.such.id": 1 },
+    { "object-detection": [{ label: "car", color: "#ff0000", style: "dashed", width: 3 }] }
+  );
+
+  assert.deepEqual(readStored("viewerSettings_channel_1"), stored);
+  assert.deepEqual(stored.general, { videoSyncBufferMs: 600 });
+  assert.deepEqual(stored.types, {
+    tracking: { confidenceThreshold: 0.5 },
+    "object-detection": { objects: [{ label: "car", color: "#ff0000", style: "dashed", width: 3 }] }
+  });
+  assert.deepEqual(api.readScopeOwnValues("channel_1"), {
+    "general.videoSyncBufferMs": 600,
+    "types.tracking.confidenceThreshold": 0.5
+  });
+});
+
+test("writing own settings replaces what the scope had before", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 600, showRoi: false },
+      types: {
+        segmentation: {
+          maskOpacity: 0.7,
+          objects: [{ label: "old", color: "#123456", style: "solid", width: 1 }]
+        }
+      }
+    }
+  });
+
+  api.writeScopeOwnSettings("channel_1", { "general.metadataRetentionMs": 1000 }, {});
+
+  const stored = readStored("viewerSettings_channel_1");
+  assert.deepEqual(stored.general, { metadataRetentionMs: 1000 });
+  assert.deepEqual(stored.types, {});
+});
+
+test("writing with nothing to store removes the scope's entry", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} }
+  });
+
+  const result = api.writeScopeOwnSettings("channel_1", {}, {});
+
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.deepEqual(result, { version: 4, general: {}, types: {} });
+});
+
+test("written values are normalized like the dialog's controls", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  api.writeScopeOwnSettings("channel_1", {
+    "general.videoSyncBufferMs": 9000,
+    "types.tracking.confidenceThreshold": 1.7,
+    "types.tracking.history.trailLength": 500
+  });
+
+  const stored = readStored("viewerSettings_channel_1");
+  assert.equal(stored.general.videoSyncBufferMs, 4000);
+  assert.equal(stored.types.tracking.confidenceThreshold, 1);
+  assert.equal(stored.types.tracking.history.trailLength, 120);
+});
+
+test("a switched-on value equal to the followed value is still an own value", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} }
+  });
+
+  api.writeScopeOwnSettings("channel_1", { "general.videoSyncBufferMs": 500 });
+
+  assert.deepEqual(api.readScopeOwnValues("channel_1"), { "general.videoSyncBufferMs": 500 });
+  assert.deepEqual(api.listChannelOverrides("general.videoSyncBufferMs"), [{ channel: 1, value: 500 }]);
+});
+
+test("resolving a channel agrees with its own values and the followed values for all eleven ids", () => {
+  const { api } = loadSettingsApiWithStorage();
+
+  api.writeScopeOwnSettings("global", {
+    "general.videoSyncBufferMs": 900,
+    "general.showRoi": false,
+    "types.object-detection.confidenceThreshold": 0.6,
+    "types.tracking.history.trailLength": 50
+  });
+  api.writeScopeOwnSettings("channel_1", {
+    "general.metadataRetentionMs": 5000,
+    "general.applyRoiFiltering": false,
+    "types.segmentation.confidenceThreshold": 0.3,
+    "types.segmentation.maskOpacity": 0.9,
+    "types.tracking.confidenceThreshold": 0.2,
+    "types.tracking.history.enabled": false,
+    "types.tracking.history.lostTrackTtlMs": 4000
+  });
+
+  const own = api.readScopeOwnValues("channel_1");
+  api.scalarSettings().forEach(({ id }) => {
+    const expected = Object.prototype.hasOwnProperty.call(own, id) ? own[id] : api.followedValue(id);
+    assert.equal(resolvedValueForId(api, 1, id), expected);
+  });
+});
+
+test("clearing one own value keeps the others and the class colour entries", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: {
+      version: 4,
+      general: { videoSyncBufferMs: 600, metadataRetentionMs: 2500 },
+      types: {
+        tracking: { history: { enabled: false, trailLength: 20, lostTrackTtlMs: 5000 } },
+        segmentation: { objects: [{ label: "car", color: "#ff0000", style: "solid", width: 1 }] }
+      }
+    }
+  });
+
+  api.clearScopeOwnValue("channel_1", "general.videoSyncBufferMs");
+  let stored = readStored("viewerSettings_channel_1");
+  assert.deepEqual(stored.general, { metadataRetentionMs: 2500 });
+  assert.deepEqual(stored.types.segmentation.objects, [
+    { label: "car", color: "#ff0000", style: "solid", width: 1 }
+  ]);
+
+  // Clearing a nested id leaves its siblings under the same parent untouched.
+  api.clearScopeOwnValue("channel_1", "types.tracking.history.enabled");
+  stored = readStored("viewerSettings_channel_1");
+  assert.deepEqual(stored.types.tracking.history, { trailLength: 20, lostTrackTtlMs: 5000 });
+});
+
+test("clearing a value the scope does not have writes nothing, own or unknown", () => {
+  const { api, readStored } = loadSettingsApiWithStorage();
+
+  const result = api.clearScopeOwnValue("channel_1", "types.tracking.history.trailLength");
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.deepEqual(result, { general: {}, types: {} });
+
+  // An unknown id is ignored the same way: nothing to remove, nothing written.
+  const unknownResult = api.clearScopeOwnValue("channel_1", "no.such.id");
+  assert.equal(readStored("viewerSettings_channel_1"), null);
+  assert.deepEqual(unknownResult, { general: {}, types: {} });
+});
+
+test("listing channel overrides works for a nested id, sorted by channel, ignoring the global scope and malformed entries", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_global: { version: 4, general: {}, types: { tracking: { history: { trailLength: 99 } } } },
+    viewerSettings_channel_10: { version: 4, general: {}, types: { tracking: { history: { trailLength: 90 } } } },
+    viewerSettings_channel_2: { version: 4, general: {}, types: { tracking: { history: { trailLength: 20 } } } },
+    viewerSettings_channel_4: "not json",
+    layoutCount: 3
+  });
+
+  assert.deepEqual(api.listChannelOverrides("types.tracking.history.trailLength"), [
+    { channel: 2, value: 20 },
+    { channel: 10, value: 90 }
+  ]);
+});
+
+test("inherited objects are the global scope's own entries for the type", () => {
+  const { api } = loadSettingsApiWithStorage({
+    viewerSettings_global: {
+      version: 4,
+      general: {},
+      types: { "object-detection": { objects: [{ label: "car", color: "#ff0000", style: "solid", width: 1 }] } }
+    }
+  });
+
+  assert.deepEqual(api.inheritedObjects("object-detection"), [
+    { label: "car", color: "#ff0000", style: "solid", width: 1 }
+  ]);
+  assert.deepEqual(api.inheritedObjects("segmentation"), []);
+});
+
+test("counting and clearing channel scopes leaves regions, the global scope and foreign keys alone", () => {
+  const { api, readStored } = loadSettingsApiWithStorage({
+    viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} },
+    viewerSettings_channel_2: { version: 4, general: { videoSyncBufferMs: 700 }, types: {} },
+    viewerSettings_channel_3: { version: 4, general: { videoSyncBufferMs: 800 }, types: {} },
+    viewerSettings_global: { version: 4, general: { videoSyncBufferMs: 500 }, types: {} },
+    viewerROI_channel_1: { regions: [] },
+    viewerROI_global: { regions: [] },
+    foreignKey: 42
+  });
+
+  assert.equal(api.countChannelScopes(), 3);
+
+  const removed = api.clearAllChannelScopes();
+
+  assert.equal(removed, 3);
+  assert.equal(api.countChannelScopes(), 0);
+  assert.notEqual(readStored("viewerSettings_global"), null);
+  assert.notEqual(readStored("viewerROI_channel_1"), null);
+  assert.notEqual(readStored("viewerROI_global"), null);
+  assert.notEqual(readStored("foreignKey"), null);
+});
+
+test("storage failures make writeScopeOwnSettings, clearScopeOwnValue and clearAllChannelScopes return null", () => {
+  const failingWrite = loadSettingsApiWithStorage({}, { failWrites: true });
+  assert.equal(
+    failingWrite.api.writeScopeOwnSettings("channel_1", { "general.videoSyncBufferMs": 600 }),
+    null
+  );
+
+  const failingRemoveWhenEmpty = loadSettingsApiWithStorage(
+    { viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} } },
+    { failWrites: true }
+  );
+  assert.equal(failingRemoveWhenEmpty.api.writeScopeOwnSettings("channel_1", {}, {}), null);
+
+  const failingClear = loadSettingsApiWithStorage(
+    { viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} } },
+    { failWrites: true }
+  );
+  assert.equal(failingClear.api.clearScopeOwnValue("channel_1", "general.videoSyncBufferMs"), null);
+
+  const failingRemoveAll = loadSettingsApiWithStorage(
+    {
+      viewerSettings_channel_1: { version: 4, general: { videoSyncBufferMs: 600 }, types: {} },
+      viewerSettings_channel_2: { version: 4, general: { videoSyncBufferMs: 700 }, types: {} }
+    },
+    { failWritesFor: ["viewerSettings_channel_1"] }
+  );
+  assert.equal(failingRemoveAll.api.clearAllChannelScopes(), null);
 });
