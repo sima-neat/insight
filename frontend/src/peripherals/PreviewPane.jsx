@@ -8,23 +8,19 @@ import {
   safeHref,
   sizeLabel
 } from './model.js'
-import { Callout, Pill } from './ui.jsx'
+import { Callout, ErrorNotice, Pill } from './ui.jsx'
 
 function PreviewError({ error, onOpenBoardPanel }) {
   const info = previewErrorInfo(error)
   if (!info) return null
   return (
-    <>
-      <p className="sr-only" role="alert">{info.message}</p>
-      <Callout tone="danger" title={info.message}>
-        {(info.hint || info.action) && <p>{info.hint || info.action}</p>}
-        {info.otherCamera && <p>The running preview is on <span className="periph-inline-code">{info.otherCamera}</span>.</p>}
-        {info.detail && <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>}
-        {(info.code === 'no_target' || CONNECTION_ERROR_CODES.has(info.code)) && (
-          <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
-        )}
-      </Callout>
-    </>
+    <ErrorNotice error={{ message: info.message, hint: info.hint || info.action }}>
+      {info.otherCamera && <p>The running preview is on <span className="periph-inline-code">{info.otherCamera}</span>.</p>}
+      {info.detail && <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>}
+      {(info.code === 'no_target' || CONNECTION_ERROR_CODES.has(info.code)) && (
+        <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
+      )}
+    </ErrorNotice>
   )
 }
 
