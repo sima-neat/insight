@@ -135,7 +135,9 @@ The viewer can render metadata overlays for common vision outputs, including obj
 
 Viewer settings exist in two scopes. The settings button of the viewer page opens the global settings. The button at the right end of a tile's status bar opens the settings of that channel; the dialog's title names the channel.
 
-A channel follows the global settings until a value is changed for it. A value that a channel sets itself takes precedence over the global value. On the **General** tab, the channel dialog marks each setting as **own value** or **global**, and the global dialog lists the channels that set their own value. **Use global value** removes a channel's own value at once, without **Save**.
+A channel follows the global settings. To give a channel its own value, open its settings, switch on **Own value** next to the setting, set the value and select **Save**. A value that a channel sets itself takes precedence over the global value. Switching **Own value** off again makes the channel follow the global value. Class colors work per entry: the channel's dialog shows the global entries as **from global**, and **Override** copies one into an entry of the channel.
+
+The global dialog lists, under each setting, the channels that set their own value. **Use global value** removes a channel's own value at once, without **Save**. **Reset all channels to the global settings…** removes the own values of every channel; regions of interest are kept.
 
 Settings are stored in the browser. They are not shared between browsers or machines.
 
@@ -179,7 +181,7 @@ The panel offers two ways to raise the buffer to a value that covers the measure
 
 The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself, and the panel never lowers the global buffer. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
 
-The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner.
+The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner. If the lateness could not be measured, because the metadata does not belong to the frames that were shown, the panel says so and offers no button either.
 
 Applications that forward the encoded input stream unchanged and send metadata only after decode and inference are the typical case, because their video does not wait for inference.
 
