@@ -78,6 +78,24 @@ test("a rejected publish reports the HTTP status", async () => {
   );
 });
 
+test("a transport failure reports actionable setup guidance, not 'Failed to fetch'", async () => {
+  // fetch throws a TypeError when the endpoint is unreachable or its certificate
+  // is rejected; the raw browser message ("Failed to fetch") is useless, so the
+  // publish must surface something the user can act on (#120).
+  await assert.rejects(
+    publishWebcamOffer(fakePeerConnection(), "https://insight.local:8889/cam1/whip", async () => {
+      throw new TypeError("Failed to fetch");
+    }),
+    (error) => {
+      assert.equal(error.transport, true);
+      assert.match(error.message, /certificate is trusted/);
+      assert.match(error.message, /reachable/);
+      assert.doesNotMatch(error.message, /Failed to fetch/);
+      return true;
+    },
+  );
+});
+
 test("the session delete URL is resolved against the publish URL", async () => {
   const { deleteUrl } = await publishWebcamOffer(
     fakePeerConnection(),

@@ -67,11 +67,28 @@ export async function publishWebcamOffer(peerConnection, whipUrl, fetchRequest =
   const offer = await peerConnection.createOffer()
   await peerConnection.setLocalDescription(offer)
 
-  const response = await fetchRequest(whipUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/sdp' },
-    body: peerConnection.localDescription.sdp,
-  })
+  let response
+  try {
+    response = await fetchRequest(whipUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/sdp' },
+      body: peerConnection.localDescription.sdp,
+    })
+  } catch (cause) {
+    // fetch throws (a TypeError) only for transport-level failures: the endpoint
+    // unreachable, or — the common one here — the browser rejecting the WHIP
+    // endpoint's certificate. That listener is a separate https origin from the
+    // main UI (its own host:port), so it has to be trusted on its own. The
+    // browser deliberately will not say which cause it was, so give one hint
+    // that covers both, per #120's ask for setup feedback the user can act on.
+    const error = new Error(
+      'Could not reach the webcam publish endpoint. Check that its certificate is trusted — '
+      + 'open the publish URL once in this browser to accept it — and that the endpoint is reachable.'
+    )
+    error.transport = true
+    error.cause = cause
+    throw error
+  }
 
   if (!response.ok) {
     const error = new Error(`Webcam publish was rejected (HTTP ${response.status}).`)
