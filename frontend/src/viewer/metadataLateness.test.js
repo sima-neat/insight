@@ -119,9 +119,27 @@ test("notice details survive a window without lateness samples", () => {
     latePercent: 100,
     bufferMs: 350,
     suggestedBufferMs: null,
-    blockedBy: "maximum",
+    blockedBy: "unmeasured",
     globalAction: null,
   });
+});
+
+test("notice details name unmeasured as the blocker", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: null, recentLatenessP90Ms: Number.NaN };
+
+  const details = lateNoticeDetails(snapshot, 350, true);
+  assert.equal(details.suggestedBufferMs, null);
+  assert.equal(details.blockedBy, "unmeasured");
+  assert.equal(details.globalAction, null);
+});
+
+test("notice details let unsupported win over an unmeasured window", () => {
+  const snapshot = { recentLateShare: 1, recentLatenessMedianMs: null, recentLatenessP90Ms: null };
+
+  const details = lateNoticeDetails(snapshot, 350, false);
+  assert.equal(details.suggestedBufferMs, null);
+  assert.equal(details.blockedBy, "unsupported");
+  assert.equal(details.globalAction, null);
 });
 
 test("a raised buffer needs time to settle, in proportion to the raise", () => {

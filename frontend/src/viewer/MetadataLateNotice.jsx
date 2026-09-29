@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 const BLOCKED_TEXT = {
   maximum: "The buffer needed exceeds the 4000 ms maximum. The application must send metadata sooner.",
   unsupported: "This browser cannot delay video; overlays cannot be synchronized.",
+  unmeasured: "Lateness could not be measured. The metadata does not belong to the frames that were shown.",
 };
 
 function formatLateness(latenessMs) {
-  return latenessMs == null ? "more than 5 s" : `~${latenessMs} ms`;
+  return latenessMs == null ? "not measured" : `~${latenessMs} ms`;
 }
 
 export default function MetadataLateNotice({ details, onRaise }) {

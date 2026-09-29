@@ -47,6 +47,7 @@ export function lateNoticeDetails(snapshot, currentBufferMs, bufferSupported, fo
     : null;
   let blockedBy = null;
   if (!bufferSupported) blockedBy = "unsupported";
+  else if (!Number.isFinite(snapshot.recentLatenessP90Ms)) blockedBy = "unmeasured";
   else if (suggested === null) blockedBy = "maximum";
   return {
     latenessMs:
