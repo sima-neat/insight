@@ -57,6 +57,8 @@ Read `/api/mediasrc` before changing assignments or playback state. Stop active 
 
 A slot published to by something other than Insight reports `state: "external"` with an `external` object (protocol, address, since, codec support, dimensions, bit rate); every slot also lists its current `readers`. `start` and `assign` return `409` for such a slot, and so does `stop` once Insight has no stream of its own left on it; `POST /api/mediasrc/takeover` disconnects the publisher. Bulk operations leave the external stream running and list the slots in `skipped_external`; `reset` still clears the stored record of every slot. `GET /stream/preview/src<N>.mjpg` renders an MJPEG preview of any live slot at the source frame rate.
 
+`POST /api/mediasrc/pull` with `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` pulls an existing RTSP/RTSPS stream into a slot; the slot then reports `state: "pulled"` with a `pull` object (`status` of `connecting`, `live`, `unreachable` or `auth_failed`, plus scheme, host, path, error, since, codec support, dimensions, frame rate and bit rate; never the credentials). Rejected credentials answer `400` with `"reason": "auth_failed"`; a slot that is streaming, external or already pulled answers `409`; `503` means the mediamtx control API was disabled at launch, and `502` means mediamtx refused the configuration or could not be reached. `stop` releases the pull. `assign`, `start`, `prepare` and `takeover` return `409` for a pulled slot, and bulk operations skip it and list it in `skipped_pulled`. Pulls are session-only.
+
 ## Response and streaming conventions
 
 - Most endpoints return JSON. Errors generally use `{"error": "message"}` with an HTTP error status.

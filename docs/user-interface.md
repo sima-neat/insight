@@ -94,6 +94,16 @@ Auto Assign, Bulk Start, Stop All and Reset never touch an External stream; the 
 
 External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
 
+### Pulled streams
+
+A stream that already exists on the network, typically an IP camera, can be pulled into a slot. Click the file button of an Idle slot, switch the dialog to **Stream URL**, enter the camera's `rtsp://` or `rtsps://` URL and, if the camera needs them, its username and password, then press **Pull**. Insight configures mediamtx to pull the stream and forward it unchanged to `rtsp://…:8554/srcN`; nothing is decoded or re-encoded, and applications read the slot like any other.
+
+The row shows **Pulled** in teal once frames arrive, with the source host, resolution and frame rate in the chip and the codec in the codec cell. Before that it shows **Connecting…**. If the camera cannot be reached the row turns amber, **Unreachable**, with the reason; mediamtx keeps retrying and the row returns to Pulled by itself when the camera is back. If the camera rejects the username or password when you press **Pull**, the dialog shows the message and the slot is unchanged. The row shows **Auth failed** in red only if the camera starts rejecting the credentials later, for example after it was unreachable at first, and stays there: press **Stop** and pull again with the right credentials. A password is only ever kept in memory; Insight never writes it to disk, shows it again, or logs it, and a pulled slot is not restored after Insight restarts.
+
+**Stop** on the row releases the pull and the slot returns to Idle with its previous file assignment. Assigning a file, starting, or taking over a pulled slot is rejected. Auto Assign, Bulk Start, Stop All and Reset skip pulled slots like External ones and list them in the result message.
+
+The Source Preview panel works for pulled slots exactly like for External ones (preview off by default). Pulling needs the loopback mediamtx control API; when it was unavailable at start (see Ports & network) the Pull button reports that. An `rtsps://` camera with a self-signed certificate is reported as unreachable with a certificate message in this release.
+
 ### Frame rate
 
 The Source Preview panel shows an FPS control under the file name of the selected source, and the row notes the chosen rate next to the file once it is set. When you assign a video, the control shows the frame rate detected in the file. Use the `−` and `+` buttons to change it in steps of 5, or type a whole number between 1 and 240.

@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, liveFor,
   latestOnly, previewSrc, previewUrl, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
+  isPulled, pullStatusLabel, pullStatusClass, pullChipText, pullSourceText,
 } from './externalSource.js'
 
 const ext = { protocol: 'rtsp', address: '172.19.0.1', since: '2026-09-16T13:09:59Z', codec_supported: true, width: 640, height: 480, fps: 30, bitrate_bps: 1800000 }
@@ -85,4 +86,33 @@ test('live-for, bitrate and readers formatting', () => {
   assert.equal(formatBitrate(null), '-')
   assert.equal(readersText([{ protocol: 'rtsp', address: '10.42.0.79' }, { protocol: 'rtsp', address: '127.0.0.1', label: 'insight preview' }]), '2 · 10.42.0.79, insight preview')
   assert.equal(readersText([]), '0')
+})
+
+const pull = { status: 'live', scheme: 'rtsp', host: '172.18.51.40:554', path: '/h264Preview_01_main', error: null, since: '2026-09-24T15:16:24Z', codec_supported: true, width: 2560, height: 1440, fps: 25, bitrate_bps: 4100000 }
+
+test('isPulled only for the pulled state', () => {
+  assert.equal(isPulled({ state: 'pulled' }), true)
+  assert.equal(isPulled({ state: 'external' }), false)
+  assert.equal(isPulled(undefined), false)
+})
+
+test('pull status label and class per status', () => {
+  assert.deepEqual([pullStatusLabel(pull), pullStatusClass(pull)], ['Pulled', ''])
+  assert.deepEqual([pullStatusLabel({ status: 'connecting' }), pullStatusClass({ status: 'connecting' })], ['Connecting…', 'connecting'])
+  assert.deepEqual([pullStatusLabel({ status: 'unreachable' }), pullStatusClass({ status: 'unreachable' })], ['Unreachable', 'warn'])
+  assert.deepEqual([pullStatusLabel({ status: 'auth_failed' }), pullStatusClass({ status: 'auth_failed' })], ['Auth failed', 'failed'])
+  assert.deepEqual([pullStatusLabel(undefined), pullStatusClass(undefined)], ['Connecting…', 'connecting'])
+})
+
+test('pull chip text shows host and dimensions while live, and the reason otherwise', () => {
+  assert.equal(pullChipText(pull), '⇠ RTSP · 172.18.51.40:554 · 2560×1440 · 25 fps')
+  assert.equal(pullChipText({ ...pull, status: 'connecting', width: null, height: null, fps: null }), '⇠ RTSP · 172.18.51.40:554 · connecting…')
+  assert.equal(pullChipText({ ...pull, status: 'unreachable', error: 'Connection refused', width: null, height: null, fps: null }), '⇠ RTSP · 172.18.51.40:554 · retrying… (Connection refused)')
+  assert.equal(pullChipText({ ...pull, status: 'auth_failed', error: 'The camera rejected the username or password' }), '⇠ RTSP · 172.18.51.40:554 · The camera rejected the username or password')
+  assert.equal(pullChipText({ scheme: 'rtsps', host: 'cam:322', status: 'unreachable', error: null }), '⇠ RTSPS · cam:322 · retrying…')
+})
+
+test('pull source text never includes credentials', () => {
+  assert.equal(pullSourceText(pull), 'rtsp://172.18.51.40:554/h264Preview_01_main')
+  assert.equal(pullSourceText({ scheme: 'rtsps', host: 'cam:322', path: '' }), 'rtsps://cam:322')
 })

@@ -74,6 +74,14 @@ When the application runs outside the SDK container, resolve the RTSP, video UDP
 
 `sima-ai/tool-mediasources` (`mediasrc.sh`) starts its own MediaMTX on the same RTSP port and numbers streams from `src0`; run it on a different port or use Insight's slots instead of running both.
 
+## Pull an IP camera into a slot
+
+1. Open Streaming Sources and click the file button of a slot that shows Idle.
+2. Switch the dialog to **Stream URL**, enter the camera's RTSP URL (for example `rtsp://192.168.1.10:554/h264Preview_01_main`) and its username and password, then press **Pull**.
+3. The slot shows Connecting…, then Pulled with the codec, resolution and frame rate. Unreachable means the camera did not answer (Insight keeps retrying). If the camera rejects the username or password when you press Pull, the dialog shows the message and the slot is unchanged; Auth failed on the row means the camera started rejecting them later (for example after being unreachable at first): press Stop and pull again.
+4. Run the application against the slot's RTSP URL as with any other source. Only H.264, H.265 and MJPEG cameras can be decoded by Neat pipelines; the codec cell turns amber otherwise.
+5. Press Stop on the row to release the slot.
+
 ## Configure application endpoints from the SDK port map
 
 Use this workflow when the application runs on a DevKit and Insight runs inside the SDK:
