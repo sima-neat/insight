@@ -1,6 +1,10 @@
 (() => {
-  const SETTINGS_VERSION = 3;
-  const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
+  const SETTINGS_VERSION = 4;
+  const SUPPORTED_VERSIONS = [2, 3, 4];
+  // Unlisted classes are colored automatically (see metadata-colors.js), so the
+  // defaults hold no entries. A user-added `default` entry overrides all unlisted classes.
+  const DEFAULT_OBJECTS = [];
+  const LEGACY_DEFAULT_COLOR = "#00ff00";
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
     { value: "tracking", label: "Tracking" },
@@ -65,10 +69,19 @@
     };
   }
 
-  function normalizeObjects(objects, fallback = DEFAULT_OBJECTS) {
-    if (!Array.isArray(objects)) return clone(fallback);
+  // Before version 4 every list carried an injected `default` entry in the stock
+  // green. Dropping it lets the automatic colors take over; a recolored default is
+  // a deliberate user override and stays.
+  function dropStockDefault(entries) {
+    return entries.filter(
+      (entry) => !(entry.label === "default" && entry.color.toLowerCase() === LEGACY_DEFAULT_COLOR)
+    );
+  }
+
+  function normalizeObjects(objects, { legacy = false } = {}) {
+    if (!Array.isArray(objects)) return [];
     const normalized = objects.map(normalizeObjectEntry).filter(Boolean);
-    return normalized.length ? normalized : clone(fallback);
+    return legacy ? dropStockDefault(normalized) : normalized;
   }
 
   function mergeObjectStyles(...objectLists) {
@@ -77,9 +90,6 @@
       const normalized = normalizeObjectEntry(entry);
       if (normalized) byLabel.set(normalized.label, normalized);
     });
-    if (!byLabel.has("default")) {
-      byLabel.set("default", clone(DEFAULT_OBJECTS[0]));
-    }
     return Array.from(byLabel.values());
   }
 
@@ -121,14 +131,14 @@
     return history;
   }
 
-  function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
+  function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true, { legacy = false } = {}) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
     if (metadataType === "object-detection" || metadataType === "segmentation") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
         type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
       }
       if (Object.prototype.hasOwnProperty.call(rawType, "objects")) {
-        type.objects = normalizeObjects(rawType.objects);
+        type.objects = normalizeObjects(rawType.objects, { legacy });
       }
       if (metadataType === "segmentation" && Object.prototype.hasOwnProperty.call(rawType, "maskOpacity")) {
         type.maskOpacity = clampNumber(rawType.maskOpacity, 0, 1, TYPE_DEFAULTS.segmentation.maskOpacity);
@@ -177,10 +187,11 @@
 
     if (!rawSettings || typeof rawSettings !== "object") return settings;
 
-    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
+    if (SUPPORTED_VERSIONS.includes(rawSettings.version)) {
+      const legacy = rawSettings.version < SETTINGS_VERSION;
       settings.general = normalizeGeneral(rawSettings.general);
       METADATA_TYPES.forEach((type) => {
-        settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value]);
+        settings.types[type.value] = normalizeTypeSettings(type.value, rawSettings.types?.[type.value], true, { legacy });
       });
       return settings;
     }
@@ -192,7 +203,7 @@
     settings.types["object-detection"] = normalizeTypeSettings("object-detection", {
       confidenceThreshold: rawSettings.confidenceThreshold,
       objects: rawSettings.objects
-    });
+    }, true, { legacy: true });
     settings.types.tracking = normalizeTypeSettings("tracking", {
       confidenceThreshold: rawSettings.trackingConfidenceThreshold,
       showTrackHistory: rawSettings.showTrackHistory,
@@ -209,12 +220,13 @@
     const overrides = { general: {}, types: {} };
     if (!rawSettings || typeof rawSettings !== "object") return overrides;
 
-    if (rawSettings.version === 2 || rawSettings.version === SETTINGS_VERSION) {
+    if (SUPPORTED_VERSIONS.includes(rawSettings.version)) {
+      const legacy = rawSettings.version < SETTINGS_VERSION;
       overrides.general = normalizeGeneral(rawSettings.general, false);
       METADATA_TYPES.forEach((type) => {
         const rawType = rawSettings.types?.[type.value];
         if (rawType && typeof rawType === "object") {
-          overrides.types[type.value] = normalizeTypeSettings(type.value, rawType, false);
+          overrides.types[type.value] = normalizeTypeSettings(type.value, rawType, false, { legacy });
         }
       });
       return overrides;
@@ -239,7 +251,8 @@
     overrides.types["object-detection"] = normalizeTypeSettings(
       "object-detection",
       legacyObjectDetection,
-      false
+      false,
+      { legacy: true }
     );
 
     const legacyTracking = {};

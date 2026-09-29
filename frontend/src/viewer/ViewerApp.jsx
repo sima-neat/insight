@@ -98,6 +98,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
   const trackHistoryRef = useRef(new Map());
+  const colorAllocatorRef = useRef(null);
+  if (colorAllocatorRef.current === null) {
+    colorAllocatorRef.current = window.metadataColors?.createColorAllocator() ?? null;
+  }
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
@@ -199,6 +203,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
       trackHistoryRef.current.clear();
+      colorAllocatorRef.current?.clear();
       rtcpRef.current = {
         lastBytes: null,
         lastTs: null,
@@ -321,6 +326,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               const drawContext = {
                 settings: resolvedSettings,
                 trackHistory: trackHistoryRef.current,
+                colorAllocator: colorAllocatorRef.current ?? undefined,
                 now,
                 frameState,
               };
@@ -330,6 +336,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           trackHistoryRef.current.clear();
+          colorAllocatorRef.current?.clear();
         }
       };
 
@@ -394,6 +401,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               const canvas = canvasRef.current;
               canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
               trackHistoryRef.current.clear();
+              colorAllocatorRef.current?.clear();
             }
             setBanner(
               formatChannelStatus({
