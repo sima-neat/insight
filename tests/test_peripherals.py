@@ -11,6 +11,7 @@ from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult
 from neat_insight.peripherals import api, cameras, export, probe
+from neat_insight.board.api import board_bp
 from neat_insight.peripherals.api import peripherals_bp
 
 IMX477 = "imx477 5-001a"
@@ -270,6 +271,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.manager = SimpleNamespace(current=None)
         self.manager.session = lambda: self.manager.current
         app = Flask(__name__)
+        app.register_blueprint(board_bp)
         app.register_blueprint(peripherals_bp)
         app.extensions["neat_board"] = self.manager
         self.client = app.test_client()
