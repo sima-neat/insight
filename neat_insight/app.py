@@ -170,7 +170,6 @@ server_ssl_context = None
 DEFAULT_DEVKIT_SSH_USERNAME = "sima"
 DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
 
-ALLOWED_EXTENSIONS = STREAMABLE_MEDIA_EXTENSIONS
 ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
 LOG_DIR = "/var/log"
 
@@ -482,37 +481,65 @@ def _proxy_vf_stats(path: str, label: str):
         return _json_error(f"{label} unavailable: {exc}", 502)
 
 
+def _is_streamable_media(name: str) -> bool:
+    """Return whether the media-source streamer accepts this file, judged by its suffix."""
+    return Path(name).suffix.lower() in STREAMABLE_MEDIA_EXTENSIONS
+
+
+def build_media_tree(base_path: Path, rel_path: str = "") -> list:
+    """Return the visible entries under base_path/rel_path as tree nodes.
+
+    Folders come first, then files, both ordered case-insensitively. Hidden entries and macOS
+    archive metadata are skipped. File nodes carry ``streamable``; folder nodes carry
+    ``streamable_count``, the number of streamable files anywhere beneath them (issue #113).
+    """
+    result = []
+    full_path = base_path / rel_path
+    try:
+        entries = [e for e in os.listdir(full_path) if not e.startswith(".") and e != "__MACOSX"]
+    except (OSError, RecursionError):
+        return result
+    entries.sort(key=lambda e: (not (os.path.isdir(full_path / e) and not os.path.islink(full_path / e)), e.lower()))
+    for entry in entries:
+        abs_entry_path = full_path / entry
+        rel_entry_path = os.path.join(rel_path, entry).replace(os.path.sep, "/")
+        if abs_entry_path.is_dir() and not abs_entry_path.is_symlink():
+            try:
+                children = build_media_tree(base_path, rel_entry_path)
+            except RecursionError:
+                children = []
+            count = sum(
+                child["streamable_count"] if child["type"] == "folder" else int(child["streamable"])
+                for child in children
+            )
+            result.append(
+                {
+                    "name": "/" + entry,
+                    "path": rel_entry_path,
+                    "type": "folder",
+                    "streamable_count": count,
+                    "children": children,
+                }
+            )
+        else:
+            result.append(
+                {
+                    "name": entry,
+                    "path": rel_entry_path,
+                    "type": "file",
+                    "streamable": _is_streamable_media(entry) and not abs_entry_path.is_dir(),
+                }
+            )
+    return result
+
+
 # API: enumerate uploaded media as a folder tree for the Media Sources UI.
 @app.get("/api/media-files")
 def list_media_files():
-    """Return a recursive tree of files under MEDIA_DIR, excluding hidden files and macOS archive metadata."""
-    def build_tree(base_path: Path, rel_path: str = ""):
-        result = []
-        full_path = base_path / rel_path
-        try:
-            entries = [e for e in os.listdir(full_path) if not e.startswith(".") and not e.startswith("__MACOSX")]
-            entries.sort(key=lambda e: (not os.path.isdir(full_path / e), e.lower()))
-            for entry in entries:
-                abs_entry_path = full_path / entry
-                rel_entry_path = os.path.join(rel_path, entry)
-                if abs_entry_path.is_dir():
-                    result.append(
-                        {
-                            "name": "/" + entry,
-                            "path": rel_entry_path,
-                            "type": "folder",
-                            "children": build_tree(base_path, rel_entry_path),
-                        }
-                    )
-                else:
-                    result.append({"name": entry, "path": rel_entry_path, "type": "file"})
-        except Exception:
-            pass
-        return result
-
+    """Return a recursive tree of files under MEDIA_DIR with streamable flags and per-folder streamable counts."""
     if not MEDIA_DIR.exists():
         return jsonify([])
-    return jsonify(build_tree(MEDIA_DIR))
+    return jsonify(build_media_tree(MEDIA_DIR))
 
 
 # API: report whether optional media inspection/streaming tools are installed.
@@ -2034,11 +2061,11 @@ def list_video_files():
 def _collect_video_files():
     video_files = []
     for root, dirs, files in os.walk(MEDIA_DIR):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__MACOSX"]
         for fname in files:
             if fname.startswith("."):
                 continue
-            if Path(fname).suffix.lower() in ALLOWED_EXTENSIONS:
+            if _is_streamable_media(fname):
                 full_path = Path(root) / fname
                 rel = os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")
                 video_files.append(rel)
