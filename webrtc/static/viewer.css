@@ -402,13 +402,31 @@ canvas {
   }
 }
 
-/* Settings dialog: which scope a value comes from (spec addendum B). The dialog's
+/* Settings dialog: which scope a value comes from (spec part 3). The dialog's
    base rules live in css/settings.css, which loads after this file, so the rules
    that meet one of its rules on the same element carry the higher specificity. */
 .settings-scope-line[hidden],
-.settings-scope-tag[hidden],
-.settings-scope-note-row[hidden] {
+.settings-scope-note-row[hidden],
+.settings-scope-note[hidden],
+.settings-own-switch[hidden],
+.settings-inherited-body[hidden],
+.settings-reset-confirm[hidden],
+.settings-scope-link[hidden] {
   display: none;
+}
+
+/* The dialog keeps its size; the tab content scrolls so the footer stays visible. */
+.settings-popup-modal .settings-popup-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-popup-modal .settings-tab-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .settings-scope-line {
@@ -434,51 +452,132 @@ canvas {
   color: #0b4f5c;
 }
 
-.settings-scope-tag {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 6px;
-  border: 1px solid;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  line-height: 1.5;
+/* The switch that gives a channel its own value: a real checkbox drawn as a switch. */
+.settings-own-switch {
   white-space: nowrap;
-  vertical-align: middle;
-}
-
-.settings-scope-tag--own {
-  background: rgba(255, 190, 60, 0.16);
-  border-color: #ffbe3c;
-  color: #ffd98a;
-}
-
-[data-theme="light"] .settings-scope-tag--own {
-  background: #fff1d1;
-  border-color: #c98a00;
-  color: #5c3d00;
-}
-
-.settings-scope-tag--global {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.3);
+  font-family: var(--viewer-font-sans);
+  font-size: 0.8rem;
   color: #c8c8c8;
 }
 
-[data-theme="light"] .settings-scope-tag--global {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.25);
+.filter-table td.settings-own-switch {
+  padding-left: 4px;
+}
+
+.settings-own-switch label {
+  margin-left: 6px;
+  cursor: pointer;
+}
+
+[data-theme="light"] .settings-own-switch {
   color: #3a3a3a;
 }
 
-/* The note sits in its own row under the setting, spanning both columns. */
-.filter-table td.settings-scope-note {
+.settings-own-switch .settings-own-switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid #8a8a8a;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.settings-own-switch .settings-own-switch-input::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c8c8c8;
+  transition: transform 0.15s;
+}
+
+.settings-own-switch .settings-own-switch-input:checked {
+  background: #00bcd4;
+  border-color: #00bcd4;
+}
+
+.settings-own-switch .settings-own-switch-input:checked::before {
+  transform: translateX(12px);
+  background: #ffffff;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input {
+  border-color: #6a6a6a;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input::before {
+  background: #6a6a6a;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input:checked {
+  background: #00838f;
+  border-color: #00838f;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input:checked::before {
+  background: #ffffff;
+}
+
+.settings-own-switch .settings-own-switch-input:focus-visible {
+  outline: 2px solid #4dd0e1;
+  outline-offset: 2px;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input:focus-visible {
+  outline-color: #00707f;
+}
+
+/* A locked control (switch off, or track history off) looks disabled; its switch
+   and its note stay as they are. */
+.settings-scope-locked > :not(.settings-own-switch):not(.settings-scope-note) {
+  opacity: 0.45;
+}
+
+.settings-scope-locked input:disabled {
+  cursor: not-allowed;
+}
+
+/* The ROI tab's two settings: each a group in the row, its note below it. */
+.roi-scope-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.roi-scope-setting .settings-own-switch {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The note under a setting: its own row spanning the table, or a line in a group. */
+.filter-table td.settings-scope-note,
+.roi-scope-setting .settings-scope-note {
   padding: 0 12px 8px;
   font-size: 0.8rem;
   line-height: 1.5;
   color: #aaa;
 }
 
-[data-theme="light"] .filter-table td.settings-scope-note {
+.roi-scope-setting .settings-scope-note {
+  flex-basis: 100%;
+  max-width: 320px;
+  padding: 0;
+}
+
+[data-theme="light"] .filter-table td.settings-scope-note,
+[data-theme="light"] .roi-scope-setting .settings-scope-note {
   color: #4a4a4a;
 }
 
@@ -487,11 +586,13 @@ canvas {
   border-radius: 6px;
 }
 
-.filter-table td.settings-scope-note .settings-scope-note--info {
+.filter-table td.settings-scope-note .settings-scope-note--info,
+.roi-scope-setting .settings-scope-note .settings-scope-note--info {
   color: #b8eef6;
 }
 
-[data-theme="light"] .filter-table td.settings-scope-note .settings-scope-note--info {
+[data-theme="light"] .filter-table td.settings-scope-note .settings-scope-note--info,
+[data-theme="light"] .roi-scope-setting .settings-scope-note .settings-scope-note--info {
   color: #0b4f5c;
 }
 
@@ -509,7 +610,91 @@ canvas {
   color: #00707f;
 }
 
-.settings-scope-link:focus-visible {
+.settings-scope-link:focus-visible,
+.settings-reset-button:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
+}
+
+/* Inherited class colour entries: read-only rows above the channel's own. */
+.viewer-object-table .settings-inherited-row td {
+  color: #9a9a9a;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+[data-theme="light"] .viewer-object-table .settings-inherited-row td {
+  color: #5a5a5a;
+}
+
+.settings-inherited-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .settings-inherited-tag {
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.settings-inherited-swatch {
+  display: inline-block;
+  width: 40px;
+  height: 14px;
+  border-radius: 3px;
+  opacity: 0.6;
+  vertical-align: middle;
+}
+
+.viewer-object-table .settings-inherited-row .settings-scope-link {
+  font-size: 0.8rem;
+}
+
+/* The footer: the reset link and its confirmation on the left, Save on the right. */
+.settings-popup-modal .modal-footer {
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-reset {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.85rem;
+}
+
+.settings-reset-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-reset-button {
+  padding: 4px 12px;
+  border: 1px solid #8a8a8a;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-reset-button--danger {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
+[data-theme="light"] .settings-reset-button {
+  border-color: #6a6a6a;
+}
+
+[data-theme="light"] .settings-reset-button--danger {
+  border-color: #b91c1c;
+  background: #fee2e2;
+  color: #7f1d1d;
 }

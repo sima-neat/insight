@@ -45,6 +45,7 @@
               <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="viewerObjectList">
                 <table class="viewer-object-table">
+                  <tbody id="viewerObjectInheritedBody" class="settings-inherited-body" hidden></tbody>
                   <tbody id="viewerObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -74,6 +75,7 @@
               <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="segmentationObjectList">
                 <table class="viewer-object-table">
+                  <tbody id="segmentationObjectInheritedBody" class="settings-inherited-body" hidden></tbody>
                   <tbody id="segmentationObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -127,10 +129,14 @@
                 <option value="inclusion">Inclusion Regions</option>
                 <option value="exclusion">Exclusion Regions</option>
               </select>
-              <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
-              <input type="checkbox" id="toggleRoiFiltering" checked />
-              <label for="toggleRoiVisibility">Show ROI Overlay:</label>
-              <input type="checkbox" id="toggleRoiVisibility" checked />
+              <div class="roi-scope-setting">
+                <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
+                <input type="checkbox" id="toggleRoiFiltering" checked />
+              </div>
+              <div class="roi-scope-setting">
+                <label for="toggleRoiVisibility">Show ROI Overlay:</label>
+                <input type="checkbox" id="toggleRoiVisibility" checked />
+              </div>
             </div>
 
             <div id="roiDrawingArea" class="roi-canvas-container">
@@ -150,36 +156,32 @@
           <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td>
-                  <label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label>
-                  <span id="videoSyncBufferScopeTag" class="settings-scope-tag" hidden></span>
-                </td>
+                <td><label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label></td>
                 <td>
                   <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="350">
                   <span id="videoSyncBufferDisplay">350</span>
                 </td>
               </tr>
-              <tr id="videoSyncBufferScopeNoteRow" class="settings-scope-note-row" hidden>
-                <td id="videoSyncBufferScopeNote" class="settings-scope-note" colspan="2"></td>
-              </tr>
               <tr>
-                <td>
-                  <label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label>
-                  <span id="metadataRetentionScopeTag" class="settings-scope-tag" hidden></span>
-                </td>
+                <td><label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label></td>
                 <td>
                   <input type="range" id="metadataRetentionSlider" class="settings-slider" min="0" max="30000" step="250" value="0">
                   <span id="metadataRetentionDisplay">0</span>
                 </td>
-              </tr>
-              <tr id="metadataRetentionScopeNoteRow" class="settings-scope-note-row" hidden>
-                <td id="metadataRetentionScopeNote" class="settings-scope-note" colspan="2"></td>
               </tr>
             </table>
           </div>
         </div>
       </div>
       <div class="modal-footer">
+        <div class="settings-reset">
+          <button type="button" id="resetChannelScopes" class="settings-scope-link" hidden>Reset all channels to the global settings…</button>
+          <div id="resetChannelScopesConfirm" class="settings-reset-confirm" role="group" aria-labelledby="resetChannelScopesMessage" hidden>
+            <span id="resetChannelScopesMessage"></span>
+            <button type="button" id="resetChannelScopesConfirmButton" class="settings-reset-button settings-reset-button--danger">Reset</button>
+            <button type="button" id="resetChannelScopesCancel" class="settings-reset-button">Cancel</button>
+          </div>
+        </div>
         <button id="saveViewerSettings" class="app-button">Save</button>
       </div>
     </div>
@@ -191,6 +193,7 @@
   </button>
 
   <script src="/static/js/viewer-settings-resolver.js"></script>
+  <script src="/static/js/settings-scope.js"></script>
   <script src="/static/js/metadata-colors.js"></script>
   <script src="/static/drawing.js"></script>
   <script src="/static/viewer-react.js"></script>
