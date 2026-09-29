@@ -210,6 +210,9 @@ const (
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
+	// Larger deltas are treated as sender discontinuities so one bad source
+	// cannot move the browser's presentation clock several seconds at once.
+	maxSourceRTPTimestampStep    = uint32(5 * videoRTPClockRate)
 	rtpReceiveBufferBytes        = 2 * 1024 * 1024
 	metadataCorrelationCapacity  = 256
 	metadataForwardQueueCapacity = 16
@@ -229,9 +232,11 @@ type udpPortRangeConfig struct {
 }
 
 type rtpTimestampRewriter struct {
-	nextTimestamp uint32
-	lastFrameAt   time.Time
-	haveFrameTime bool
+	nextTimestamp       uint32
+	lastSourceTimestamp uint32
+	lastSourceSSRC      uint32
+	lastFrameAt         time.Time
+	haveFrame           bool
 }
 
 type rtpPacketRewriter struct {
@@ -405,7 +410,9 @@ func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet
 	}
 
 	frameAt := time.Now()
-	frameTimestamp := f.timestampRewriter.timestampForFrame(frameAt)
+	frameTimestamp := f.timestampRewriter.timestampForSourceFrame(
+		accessUnit.timestamp, accessUnit.ssrc, frameAt,
+	)
 	frameForwarded := false
 	for _, rawPacket := range accessUnit.packets {
 		packetToWrite, err := f.packetRewriter.rewrite(rawPacket, frameTimestamp)
@@ -811,15 +818,24 @@ func newRTPTimestampRewriter() rtpTimestampRewriter {
 }
 
 func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
-	if r.haveFrameTime {
-		step := uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
-		if step == 0 {
-			step = 1
+	return r.timestampForSourceFrame(r.lastSourceTimestamp, r.lastSourceSSRC, now)
+}
+
+func (r *rtpTimestampRewriter) timestampForSourceFrame(sourceTimestamp, sourceSSRC uint32, now time.Time) uint32 {
+	if r.haveFrame {
+		step := sourceTimestamp - r.lastSourceTimestamp
+		if sourceSSRC != r.lastSourceSSRC || step == 0 || step > maxSourceRTPTimestampStep {
+			step = uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
+			if step == 0 {
+				step = 1
+			}
 		}
 		r.nextTimestamp += step
 	}
+	r.lastSourceTimestamp = sourceTimestamp
+	r.lastSourceSSRC = sourceSSRC
 	r.lastFrameAt = now
-	r.haveFrameTime = true
+	r.haveFrame = true
 	return r.nextTimestamp
 }
 
