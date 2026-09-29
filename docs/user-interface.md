@@ -69,6 +69,29 @@ This view is useful when you need repeatable input streams for an object detecti
 
 The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
 
+### External streams
+
+Any RTSP, WebRTC (WHIP) or SRT tool can publish directly to a source slot, for example a webcam from the host:
+
+```bash
+ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p \
+  -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2
+```
+
+Only the RTSP port (8554) is mapped out of the SDK container by default; WHIP and SRT publishers must run inside the container or on a DevKit-native install.
+
+Insight shows such a slot as **External** within about two seconds: the row is read-only, the chip lists protocol, publisher address and, once probed, resolution and frame rate. The codec cell turns amber with a warning when the stream uses a codec Neat pipelines cannot decode (anything other than H.264, H.265 or MJPEG). Copy URL stays available; applications keep reading `rtsp://…/srcN` as usual, regardless of the publish protocol.
+
+Whoever publishes first holds the slot. Starting a file on an External slot, or publishing to a slot Insight is already streaming, is rejected instead of silently replacing the running stream. **Take over** — the square stop glyph in the External row — disconnects the external publisher (and its readers) after a confirmation; the slot returns to Idle with its previous file assignment. A publisher that reconnects automatically may re-take an idle slot, so stop the external tool first when you want to reuse the slot for a file.
+
+The Source Preview panel can show an External slot live at the source's own frame rate; the preview is **off by default** (remembered per browser) and decodes nothing while off. After selecting another external slot, a "Connecting" indicator is shown until the first frame of the new stream arrives. That wait is mostly the time until the publisher's next keyframe, so give streams you intend to preview a keyframe interval of about a second (`-g 30` at 30 fps in the example above; encoder defaults are often several seconds). Inside the SDK container, publishers and readers outside the container appear with the Docker bridge address rather than their real IP.
+
+Auto Assign, Bulk Start, Stop All and Reset never touch an External stream; the result message lists which slots were skipped. Reset still clears the stored assignment of every slot, External ones included.
+
+![Insight Streaming Sources view with two External slots, one of them flagged for an unsupported codec.](images/insight-external-source.png)
+
+External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
+
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.

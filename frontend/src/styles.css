@@ -47,6 +47,10 @@
   --danger-soft: #fff0f3;
   --ok: #19713e;
   --ok-soft: #ecf9f0;
+  --ext: #6b3fb3;
+  --ext-soft: #f1eafc;
+  --warn: #8a5a00;
+  --warn-soft: #fff6e0;
 
   --radius-sm: 10px;
   --radius-md: 14px;
@@ -594,6 +598,7 @@ input {
 }
 
 .preview {
+  position: relative;
   min-height: 190px;
   border: 1px dashed #c9d5e2;
   border-radius: var(--radius-md);
@@ -608,6 +613,30 @@ input {
   max-width: 100%;
   max-height: 280px;
   border-radius: 10px;
+}
+
+/* Keeps loading (hidden elements still fetch) without showing a stale or partial frame. */
+.preview img.loading {
+  visibility: hidden;
+  position: absolute;
+}
+
+.preview-loading {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  width: min(240px, 100%);
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.preview-loading .upload-progress-track {
+  width: 100%;
+}
+
+/* The live region stays mounted so screen readers announce it; keep it out of the grid while idle. */
+.preview-loading:empty {
+  display: none;
 }
 
 .actions {
@@ -715,7 +744,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 48px minmax(180px, 1fr) 100px 100px auto auto auto;
+  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -752,6 +781,7 @@ button:hover:not(:disabled) {
 
 .codec-lock {
   min-height: 36px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #eef2f6;
@@ -768,6 +798,58 @@ button:hover:not(:disabled) {
 .codec-lock.empty {
   color: #7b8c9c;
   font-weight: 700;
+}
+
+.src-state.external {
+  background: var(--ext-soft);
+  color: var(--ext);
+}
+
+.source-row.external {
+  border-color: #cdb8ef;
+  background: #faf7ff;
+}
+
+.source-row.external.active {
+  border-color: var(--ext);
+  background: var(--ext-soft);
+}
+
+.external-chip {
+  min-height: 36px;
+  border: 1px solid #d9c8f3;
+  border-radius: var(--radius-sm);
+  background: var(--ext-soft);
+  color: var(--ext);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.codec-lock.warn {
+  background: var(--warn-soft);
+  border-color: #f0d49a;
+  color: var(--warn);
+}
+
+.icon-action-btn.takeover {
+  color: var(--ext);
+  border-color: #d9c8f3;
+}
+
+.preview-badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.warn-text {
+  color: var(--warn);
+  font-weight: 600;
 }
 
 .icon-action-btn svg {
@@ -3249,7 +3331,7 @@ button:disabled {
   }
 
   .source-row {
-    grid-template-columns: 54px 48px minmax(0, 1fr) 96px 96px auto auto auto;
+    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px auto auto auto;
   }
 
   .masthead {

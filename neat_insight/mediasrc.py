@@ -5,6 +5,8 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from neat_insight.mediamtx import PUBLISHER_TAG
+
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
@@ -153,6 +155,20 @@ def http_snapshot_command(file_path: str, source_codec: Optional[str] = None) ->
     ]
 
 
+def preview_command(rtsp_url: str) -> list[str]:
+    # The SDP already carries the codec parameters, so stream probing only adds about a
+    # second before the first frame; skipping it leaves the frame rate unknown, hence
+    # passthrough timing (ffmpeg would otherwise guess H.264 at twice the rate and
+    # duplicate every frame). No rate filter, so the preview follows the source rate.
+    return [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp",
+        "-analyzeduration", "0", "-probesize", "32",
+        "-i", rtsp_url, "-fps_mode", "passthrough", "-an",
+        "-vf", "scale=min(640\\,iw):-2",
+        "-c:v", "mjpeg", "-q:v", "7", "-f", "mpjpeg", "-boundary_tag", "frame", "pipe:1",
+    ]
+
+
 @dataclass
 class MediaStream:
     index: int
@@ -230,7 +246,7 @@ def start_media_stream(
         return False, "No file assigned"
 
     slot = index - 1
-    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}"
+    rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PUBLISHER_TAG}"
     transport = normalize_transport(transport)
     codec = normalize_codec(codec)
 

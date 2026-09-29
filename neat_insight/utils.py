@@ -21,6 +21,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import logging
 import os
 import sys
 import subprocess
@@ -37,6 +38,8 @@ from collections import Counter
 import psutil
 import ipaddress
 import socket
+
+from neat_insight import mediamtx
 
 CERT_FILE = "cert.pem"
 KEY_FILE = "key.pem"
@@ -197,6 +200,7 @@ def init_environment():
 
 processes = []
 process_logs = []
+runtime_files = []
 _cleanup_done = False
 webssh_proc = None
 
@@ -268,7 +272,8 @@ def _terminate_conflicting_port_specs(port_specs):
 
 
 def _terminate_conflicting_ports():
-    # mediamtx uses 8554/tcp and a default UDP helper port 8000.
+    # mediamtx uses 8554/tcp and a default UDP helper port 8000. Its control API port is
+    # left alone: whoever holds it keeps it, and Insight starts without the API.
     # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
     port_specs = [
         (8554, "TCP"),
@@ -282,6 +287,45 @@ def _terminate_conflicting_ports():
         port_specs.append((get_webssh_port(), "TCP"))
 
     _terminate_conflicting_port_specs(port_specs)
+
+
+def _tcp_port_is_bound(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # Like mediamtx's own listener (Go sets SO_REUSEADDR), so a socket the previous
+        # mediamtx left in TIME_WAIT does not count as a foreign owner of the port. On
+        # Windows the same option would let the bind succeed over a live listener.
+        if os.name == "posix":
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return True
+    return False
+
+
+def _write_mediamtx_runtime_config(mtx_config, api_port=mediamtx.API_PORT):
+    # The shipped config holds an unusable API password; mediamtx runs from a private copy
+    # carrying this run's password (mkstemp creates the file readable by the owner only).
+    with open(mtx_config, encoding="utf-8") as handle:
+        text = handle.read()
+    # mediamtx exits when it cannot bind its API port, so a port Insight does not own turns
+    # the API off: every stream still works, only external-publisher detection is lost.
+    api_enabled = not _tcp_port_is_bound(api_port)
+    if not api_enabled:
+        logging.warning(
+            "mediamtx API port %s is already in use; external publisher detection is disabled", api_port
+        )
+        # Whatever owns the port may be another mediamtx with an open API; its paths must
+        # never be read as this Insight's slots.
+        mediamtx.api_disabled_at_launch = True
+    try:
+        rendered = mediamtx.render_config(text, mediamtx.API_PASSWORD, api_enabled=api_enabled)
+    except mediamtx.MediamtxError as exc:
+        raise RuntimeError(f"Invalid mediamtx config at {mtx_config}: {exc}. Rebuild package with build.sh.") from exc
+    fd, path = tempfile.mkstemp(prefix="neat-insight-mediamtx-", suffix=".yml")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(rendered)
+    return path
 
 
 def start_processes(ssl_context):
@@ -318,8 +362,10 @@ def start_processes(ssl_context):
     )
     processes.append(vf_proc)
 
+    mtx_runtime_config = _write_mediamtx_runtime_config(mtx_config)
+    runtime_files.append(mtx_runtime_config)
     mtx_proc = subprocess.Popen(
-        [mtx, mtx_config],
+        [mtx, mtx_runtime_config],
         stdout=mtx_log,
         stderr=subprocess.STDOUT
     )
@@ -476,6 +522,13 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
         except Exception:
             pass
     process_logs.clear()
+
+    for path in list(runtime_files):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    runtime_files.clear()
 
     if exit_process:
         sys.exit(0)
