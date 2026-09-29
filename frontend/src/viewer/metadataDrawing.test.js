@@ -73,7 +73,8 @@ test("detection styles do not leak into pose skeletons or the next frame", (t) =
     drawMetadata(ctx, canvas, pose, video, 0, { settings });
     drawMetadata(ctx, canvas, pose, video, 0, { settings });
 
-    assert.deepEqual(ctx.strokes, [dash, [], []]);
+    // Each pose strokes its box and its skeleton.
+    assert.deepEqual(ctx.strokes, [dash, [], [], [], []]);
     assert.deepEqual(ctx.lineDash, []);
   }
 });
