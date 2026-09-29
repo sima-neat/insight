@@ -449,13 +449,13 @@ func main() {
 		go startMetadataForwarder(channels[i])
 	}
 
-	http.HandleFunc("/", serveViewer)
+	http.Handle("/", viewerPageHandler())
 	http.HandleFunc("/offer", handleOffer)
 	http.HandleFunc("/ingest/stats", handleIngestStats)
 	http.HandleFunc("/egress/stats", handleEgressStats)
 	http.HandleFunc("/reverse", serveReverse)
 	http.HandleFunc("/reverse-offer", handleReverseOffer)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	http.Handle("/static/", staticFileHandler(http.Dir("static")))
 
 	addr := ":8081"
 
@@ -466,6 +466,27 @@ func main() {
 		log.Printf("⚠️ No TLS cert/key provided, serving plain HTTP on %s", addr)
 		log.Fatal(http.ListenAndServe(addr, nil))
 	}
+}
+
+// revalidate adds Cache-Control: no-cache to what next serves. Without it, browsers
+// keep the viewer page and its scripts by heuristic freshness and can pair a new file
+// with an old one; no-cache makes them revalidate each time (a 304 when nothing
+// changed). Status codes, content and conditional requests stay with next.
+func revalidate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// staticFileHandler serves /static/ from root, revalidated.
+func staticFileHandler(root http.FileSystem) http.Handler {
+	return revalidate(http.StripPrefix("/static/", http.FileServer(root)))
+}
+
+// viewerPageHandler serves the viewer page, revalidated like its scripts.
+func viewerPageHandler() http.Handler {
+	return revalidate(http.HandlerFunc(serveViewer))
 }
 
 func serveViewer(w http.ResponseWriter, r *http.Request) {

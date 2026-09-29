@@ -6,6 +6,7 @@ import {
   createMetadataQueue,
   enqueueMetadata,
   metadataQueueSnapshot,
+  resetLatenessWindow,
   takeMetadataForFrame,
 } from "./metadataSync.js";
 
@@ -79,8 +80,13 @@ test("missing frame identity selects the newest arrival across metadata queues",
     expired: 0,
     evicted: 0,
     untimestampedReceived: 1,
+    late: 0,
     timestampedPending: 0,
     arrivalPending: 0,
+    recentLateShare: null,
+    recentLatenessMedianMs: null,
+    recentLatenessP90Ms: null,
+    recentLatenessMaxMs: null,
   });
 });
 
@@ -360,4 +366,220 @@ test("matching, fallback, and expiry release timestamped queue capacity", () => 
     assert.equal(metadataQueueSnapshot(queue).evicted, 0, release);
     assert.equal(takeMetadataForFrame(queue, 100, 0, 21).length, 1, release);
   }
+});
+
+const FRAME_TICKS = 3600; // 40 ms at the 90 kHz RTP clock
+
+function timestamped(rtpTimestamp) {
+  return { type: "pose-estimation", data: { poses: [] }, _insight: { rtp_timestamp: rtpTimestamp } };
+}
+
+// Presents `count` frames 40 ms apart. Each frame's metadata arrives `latenessMs`
+// after the frame when late, or 10 ms before it otherwise.
+function playFrames(queue, { count, startFrame = 0, latenessMs = null }) {
+  for (let i = startFrame; i < startFrame + count; i += 1) {
+    const rtpTimestamp = i * FRAME_TICKS;
+    const presentedAt = i * 40;
+    if (latenessMs === null) {
+      enqueueMetadata(queue, timestamped(rtpTimestamp), presentedAt - 10);
+      takeMetadataForFrame(queue, rtpTimestamp, 0, presentedAt);
+    } else {
+      takeMetadataForFrame(queue, rtpTimestamp, 0, presentedAt);
+      enqueueMetadata(queue, timestamped(rtpTimestamp), presentedAt + latenessMs);
+    }
+  }
+}
+
+test("metadata for a frame that was already presented is counted late and not queued", () => {
+  const queue = createMetadataQueue();
+  takeMetadataForFrame(queue, 9000, 0, 1000);
+
+  enqueueMetadata(queue, timestamped(9000), 1150);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 1);
+  assert.equal(snapshot.timestampedPending, 0);
+  assert.equal(snapshot.evicted, 0);
+  assert.equal(snapshot.recentLatenessMaxMs, 150);
+});
+
+test("metadata older than the presented frame is late", () => {
+  const queue = createMetadataQueue();
+  takeMetadataForFrame(queue, 5 * FRAME_TICKS, 0, 200);
+  takeMetadataForFrame(queue, 6 * FRAME_TICKS, 0, 240);
+
+  enqueueMetadata(queue, timestamped(5 * FRAME_TICKS), 300);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 1);
+  assert.equal(snapshot.recentLatenessMaxMs, 100);
+});
+
+test("metadata newer than the presented frame is still queued and matched", () => {
+  const queue = createMetadataQueue();
+  takeMetadataForFrame(queue, 9000, 0, 1000);
+
+  enqueueMetadata(queue, timestamped(9000 + FRAME_TICKS), 1010);
+
+  assert.equal(metadataQueueSnapshot(queue).late, 0);
+  assert.equal(takeMetadataForFrame(queue, 9000 + FRAME_TICKS, 0, 1040).length, 1);
+});
+
+test("no metadata is late before the first frame was presented", () => {
+  const queue = createMetadataQueue();
+
+  enqueueMetadata(queue, timestamped(0), 10);
+
+  assert.equal(metadataQueueSnapshot(queue).late, 0);
+  assert.equal(metadataQueueSnapshot(queue).timestampedPending, 1);
+});
+
+test("late comparison is wrap-safe on 32 bits", () => {
+  const afterWrap = createMetadataQueue();
+  takeMetadataForFrame(afterWrap, 5, 0, 1000);
+  enqueueMetadata(afterWrap, timestamped(0xffffff00), 1100);
+  assert.equal(metadataQueueSnapshot(afterWrap).late, 1);
+
+  const beforeWrap = createMetadataQueue();
+  takeMetadataForFrame(beforeWrap, 0xfffffff0, 0, 1000);
+  enqueueMetadata(beforeWrap, timestamped(16), 1010);
+  assert.equal(metadataQueueSnapshot(beforeWrap).late, 0);
+  assert.equal(metadataQueueSnapshot(beforeWrap).timestampedPending, 1);
+});
+
+test("late is judged against the frame presented last, so a backwards jump recovers", () => {
+  const queue = createMetadataQueue();
+  takeMetadataForFrame(queue, 900_000, 0, 1000);
+  takeMetadataForFrame(queue, 1000, 0, 1040); // source restarted with lower timestamps
+
+  enqueueMetadata(queue, timestamped(1000 + FRAME_TICKS), 1050);
+
+  assert.equal(metadataQueueSnapshot(queue).late, 0);
+  assert.equal(takeMetadataForFrame(queue, 1000 + FRAME_TICKS, 0, 1080).length, 1);
+});
+
+test("a late message whose frame is no longer remembered counts without a lateness sample", () => {
+  const queue = createMetadataQueue();
+  takeMetadataForFrame(queue, 0, 0, 0);
+  takeMetadataForFrame(queue, 200 * FRAME_TICKS, 0, 8000); // frame 0 is older than the 5 s memory
+
+  enqueueMetadata(queue, timestamped(0), 8010);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 1);
+  assert.equal(snapshot.recentLatenessMedianMs, null);
+  assert.equal(snapshot.recentLatenessP90Ms, null);
+  assert.equal(snapshot.recentLatenessMaxMs, null);
+});
+
+test("a late message for a frame that was never presented counts without a lateness sample", () => {
+  const queue = createMetadataQueue();
+  takeMetadataForFrame(queue, 0, 0, 0);
+  takeMetadataForFrame(queue, 2 * FRAME_TICKS, 0, 80); // frame 1 was dropped
+
+  enqueueMetadata(queue, timestamped(FRAME_TICKS), 100);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 1);
+  assert.equal(snapshot.recentLatenessMaxMs, null);
+});
+
+test("late share and lateness describe the recent window", () => {
+  const queue = createMetadataQueue();
+  playFrames(queue, { count: 5 });
+  playFrames(queue, { count: 15, startFrame: 5, latenessMs: 150 });
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.timestampMatches, 5);
+  assert.equal(snapshot.late, 15);
+  assert.equal(snapshot.recentLateShare, 0.75);
+  assert.equal(snapshot.recentLatenessMedianMs, 150);
+  assert.equal(snapshot.recentLatenessP90Ms, 150);
+  assert.equal(snapshot.recentLatenessMaxMs, 150);
+});
+
+test("late share is not calculated from fewer than 10 messages", () => {
+  const queue = createMetadataQueue();
+  playFrames(queue, { count: 9, latenessMs: 150 });
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 9);
+  assert.equal(snapshot.recentLateShare, null);
+});
+
+test("the window forgets outcomes older than 5 s of presented frames", () => {
+  const queue = createMetadataQueue();
+  playFrames(queue, { count: 20, latenessMs: 150 }); // frames at 0..760 ms
+
+  takeMetadataForFrame(queue, 500 * FRAME_TICKS, 0, 20_000);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 20); // cumulative counter is kept
+  assert.equal(snapshot.recentLateShare, null);
+  assert.equal(snapshot.recentLatenessMaxMs, null);
+});
+
+test("the window does not advance while no frame is presented", () => {
+  const queue = createMetadataQueue();
+  playFrames(queue, { count: 20, latenessMs: 150 });
+
+  // A hidden tab presents no frames; a message arriving a minute later changes nothing.
+  enqueueMetadata(queue, timestamped(10_000 * FRAME_TICKS), 60_000);
+
+  assert.equal(metadataQueueSnapshot(queue).recentLateShare, 1);
+});
+
+test("resetting the lateness window keeps the cumulative counters", () => {
+  const queue = createMetadataQueue();
+  playFrames(queue, { count: 20, latenessMs: 150 });
+
+  resetLatenessWindow(queue);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 20);
+  assert.equal(snapshot.recentLateShare, null);
+  assert.equal(snapshot.recentLatenessMedianMs, null);
+});
+
+test("lateness percentiles use the nearest rank", () => {
+  const queue = createMetadataQueue();
+  for (let i = 0; i < 10; i += 1) {
+    takeMetadataForFrame(queue, i * FRAME_TICKS, 0, i * 40);
+    enqueueMetadata(queue, timestamped(i * FRAME_TICKS), i * 40 + (i + 1) * 10); // 10..100 ms
+  }
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.recentLatenessMedianMs, 50);
+  assert.equal(snapshot.recentLatenessP90Ms, 90);
+  assert.equal(snapshot.recentLatenessMaxMs, 100);
+});
+
+test("a type that arrives after its frame is late although another type was on time", () => {
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, { type: "pose-estimation", _insight: { rtp_timestamp: 9000 } }, 990);
+  assert.equal(takeMetadataForFrame(queue, 9000, 0, 1000).length, 1);
+
+  enqueueMetadata(queue, { type: "tracking", _insight: { rtp_timestamp: 9000 } }, 1150);
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.late, 1);
+  assert.equal(snapshot.timestampedPending, 0);
+  assert.equal(snapshot.recentLatenessMaxMs, 150);
+});
+
+test("the late share counts every type of a matched frame as one message on time", () => {
+  const queue = createMetadataQueue();
+  // Six frames with two types each on time, then four frames whose single message is late.
+  for (let i = 0; i < 6; i += 1) {
+    for (const type of ["pose-estimation", "tracking"]) {
+      enqueueMetadata(queue, { type, _insight: { rtp_timestamp: i * FRAME_TICKS } }, i * 40 - 10);
+    }
+    takeMetadataForFrame(queue, i * FRAME_TICKS, 0, i * 40);
+  }
+  playFrames(queue, { count: 4, startFrame: 6, latenessMs: 150 });
+
+  const snapshot = metadataQueueSnapshot(queue);
+  assert.equal(snapshot.timestampMatches, 6);
+  assert.equal(snapshot.late, 4);
+  assert.equal(snapshot.recentLateShare, 0.25);
 });

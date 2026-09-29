@@ -15,6 +15,7 @@
         <span id="viewerSettingsTitle" class="settings-popup-title">Viewer Configuration</span>
         <button id="viewerSettingsClose" title="Close">&times;</button>
       </div>
+      <p id="viewerSettingsScopeLine" class="settings-scope-line settings-channel-only"></p>
       <div class="settings-popup-body">
         <div class="settings-tab-header">
           <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
@@ -44,6 +45,7 @@
               <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="viewerObjectList">
                 <table class="viewer-object-table">
+                  <tbody id="viewerObjectInheritedBody" class="settings-inherited-body settings-channel-only" hidden></tbody>
                   <tbody id="viewerObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -73,6 +75,7 @@
               <p class="object-list-hint">Unlisted classes are colored automatically. Add a <code>default</code> row to override them all.</p>
               <div id="segmentationObjectList">
                 <table class="viewer-object-table">
+                  <tbody id="segmentationObjectInheritedBody" class="settings-inherited-body settings-channel-only" hidden></tbody>
                   <tbody id="segmentationObjectTableBody">
                     <!-- Rows dynamically inserted here -->
                   </tbody>
@@ -126,10 +129,14 @@
                 <option value="inclusion">Inclusion Regions</option>
                 <option value="exclusion">Exclusion Regions</option>
               </select>
-              <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
-              <input type="checkbox" id="toggleRoiFiltering" checked />
-              <label for="toggleRoiVisibility">Show ROI Overlay:</label>
-              <input type="checkbox" id="toggleRoiVisibility" checked />
+              <div class="roi-scope-setting">
+                <label for="toggleRoiFiltering">Apply ROI Filtering:</label>
+                <input type="checkbox" id="toggleRoiFiltering" checked />
+              </div>
+              <div class="roi-scope-setting">
+                <label for="toggleRoiVisibility">Show ROI Overlay:</label>
+                <input type="checkbox" id="toggleRoiVisibility" checked />
+              </div>
             </div>
 
             <div id="roiDrawingArea" class="roi-canvas-container">
@@ -167,6 +174,14 @@
         </div>
       </div>
       <div class="modal-footer">
+        <div class="settings-reset">
+          <button type="button" id="resetChannelScopes" class="settings-scope-link settings-global-only" hidden>Reset all channels to the global settings…</button>
+          <div id="resetChannelScopesConfirm" class="settings-reset-confirm settings-global-only" role="group" aria-labelledby="resetChannelScopesMessage" hidden>
+            <span id="resetChannelScopesMessage" class="settings-reset-message"></span>
+            <button type="button" id="resetChannelScopesConfirmButton" class="settings-reset-button settings-reset-button--danger">Reset</button>
+            <button type="button" id="resetChannelScopesCancel" class="settings-reset-button">Cancel</button>
+          </div>
+        </div>
         <button id="saveViewerSettings" class="app-button">Save</button>
       </div>
     </div>
@@ -178,6 +193,7 @@
   </button>
 
   <script src="/static/js/viewer-settings-resolver.js"></script>
+  <script src="/static/js/settings-scope.js"></script>
   <script src="/static/js/metadata-colors.js"></script>
   <script src="/static/drawing.js"></script>
   <script src="/static/viewer-react.js"></script>
