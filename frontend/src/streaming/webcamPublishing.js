@@ -14,7 +14,7 @@ export function describeWebcamError(error) {
     return 'Camera permission was denied. Allow camera access for this site and try again.'
   }
   if (error?.name === 'NotFoundError' || error?.name === 'OverconstrainedError') {
-    return 'That camera is no longer available. Detect webcams again and reselect one.'
+    return 'That camera is no longer available. Refresh cameras and reselect one.'
   }
   if (error?.name === 'NotReadableError') {
     return 'The camera could not be started (it may be in use by another application).'

@@ -73,22 +73,24 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
 
-1. Select **Detect webcam** in the Streaming Sources toolbar. The browser asks for camera permission; Insight cannot grant it for you.
-2. After you allow access, each connected camera appears in every source dropdown marked `<webcam>`, alongside your media files:
+1. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. The browser asks for camera permission; Insight cannot grant it for you.
+2. After you allow access, your cameras appear in each source dropdown under a **Cameras** group, above your video files:
 
    ```text
    Not assigned
-   Integrated Camera <webcam>
-   USB Camera <webcam>
-   catalog/parking_garage_cars/parking_garage_cars_1080p.mp4
+   Cameras
+     Integrated Camera
+     USB Camera
+   Video files
+     catalog/parking_garage_cars/parking_garage_cars_1080p.mp4
    ```
 
-3. Select a camera for a source slot, then select **Start**. The browser publishes the camera to Insight and the slot reports `Live`.
+3. Select a camera for a source slot, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
 
-The preview beside the source list shows your camera directly, so it keeps working even when publishing fails. It is not the video the board received, and it does not show the delay that a receiving application sees.
+The preview beside the source list shows your local camera feed while capture is active. It is not the video the board received, and it does not show the delay that a receiving application sees; if publishing fails, capture stops and the preview clears.
 
 Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
 
@@ -96,12 +98,13 @@ If starting a webcam fails, the message names the cause:
 
 | What you see | What to do |
 | --- | --- |
-| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then select **Detect webcam** again. |
-| That camera is no longer available | The camera was disconnected. Select **Detect webcam** again and reselect it. |
+| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then re-enable camera access under Media Sources → Local cameras. |
+| That camera is no longer available | The camera was disconnected. Select **Refresh cameras** and reselect it. |
 | The camera could not be started | Another application is using the camera. Close it and retry. |
+| Could not reach the webcam publish endpoint | The browser could not reach the publish listener. Trust the `webrtcWhip` endpoint's certificate (open its URL once to accept it) and confirm the port is reachable (see [Ports and Network Behavior](ports-network.md)). |
 | Webcam publish was rejected | Insight could not accept the stream. Confirm the `webrtcWhip` port is reachable (see [Ports and Network Behavior](ports-network.md)) and that your browser trusts the Insight certificate. |
 
-Browsers only allow camera access on pages they consider secure. If **Detect webcam** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
+Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
 
 ## Video Viewer
 
