@@ -625,9 +625,10 @@ input {
   display: grid;
   gap: 10px;
   justify-items: center;
-  width: min(240px, 100%);
+  width: min(260px, 100%);
   color: var(--ink-soft);
   font-size: 13px;
+  text-align: center;
 }
 
 .preview-loading .upload-progress-track {
@@ -637,6 +638,19 @@ input {
 /* The live region stays mounted so screen readers announce it; keep it out of the grid while idle. */
 .preview-loading:empty {
   display: none;
+}
+
+.ok-text {
+  color: var(--ok);
+}
+
+.muted-text {
+  color: #7b8c9c;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .actions {
@@ -850,6 +864,128 @@ button:hover:not(:disabled) {
 .warn-text {
   color: var(--warn);
   font-weight: 600;
+}
+
+.fps-stepper {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.fps-stepper:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.fps-stepper button {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: var(--surface-soft);
+  color: #405f72;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.fps-stepper button:first-child {
+  border-right: 1px solid var(--line);
+}
+
+.fps-stepper button:last-child {
+  border-left: 1px solid var(--line);
+}
+
+.fps-stepper button:hover:not(:disabled) {
+  transform: none;
+  background: var(--accent-soft);
+}
+
+/* The file select plus a small note when the slot streams at an fps override. */
+.src-file-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.src-file-cell select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fps-note {
+  flex: 0 0 auto;
+  font-size: 0.8em;
+  color: var(--muted, #8b95a5);
+  white-space: nowrap;
+}
+
+/* The stepper's home in the Source Preview panel. */
+.fps-field-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 4px 0 8px;
+}
+
+.fps-field {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.fps-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: transparent;
+}
+
+.fps-field input:focus-visible {
+  box-shadow: none;
+}
+
+.fps-field small {
+  color: #7b8c9c;
+  font-size: 10px;
+}
+
+.fps-stepper.changed {
+  border-color: rgba(14, 90, 184, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(14, 90, 184, 0.12);
+}
+
+.fps-stepper.invalid {
+  border-color: #edb1be;
+  box-shadow: inset 0 0 0 1px rgba(179, 66, 90, 0.2);
+}
+
+.fps-stepper.changed:focus-within,
+.fps-stepper.invalid:focus-within {
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.fps-stepper.locked {
+  opacity: 0.55;
+}
+
+.src-state.encoding {
+  background: var(--accent-soft);
+  color: #174f4c;
 }
 
 .icon-action-btn svg {

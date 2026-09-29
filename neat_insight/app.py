@@ -39,6 +39,7 @@ from neat_insight.mediasrc import (
     DEFAULT_TRANSPORT,
     http_mjpeg_command,
     http_snapshot_command,
+    media_stream_file,
     media_stream_identity,
     media_stream_is_running,
     normalize_codec,
@@ -51,6 +52,7 @@ from neat_insight.mediasrc import (
 from neat_insight import mediasrc
 from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound, PREVIEW_READER_TAG
 from neat_insight.api_docs import api_docs_bp
+from neat_insight import renditions
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_metrics,
@@ -92,6 +94,7 @@ PREVIEW_MAX_STREAMS = 4
 PREVIEW_IDLE_TIMEOUT_SECONDS = 15
 _preview_lock = threading.Lock()
 _preview_count = 0
+RENDITIONS_INDEX_FILE = Path(env["NEAT_INSIGHT_DATA"]) / "renditions.json"
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
@@ -249,6 +252,7 @@ def _default_source(index: int):
         "state": "stopped",
         "transport": DEFAULT_TRANSPORT,
         "codec": DEFAULT_CODEC,
+        "fps": None,
     }
 
 
@@ -280,6 +284,7 @@ def _normalize_source(src, index: Optional[int] = None):
         "state": state,
         "transport": transport,
         "codec": codec,
+        "fps": renditions.coerce_fps(src.get("fps")),
     }
 
 
@@ -308,7 +313,10 @@ def save_sources(sources):
 
 def reset_sources():
     sources = [_default_source(i + 1) for i in range(DEFAULT_SOURCE_COUNT)]
-    save_sources(sources)
+    with _slot_lock:
+        for src in sources:
+            _bump_slot(src["index"])
+        save_sources(sources)
 
 
 def _safe_media_path(rel_path: str) -> Path:
@@ -1875,20 +1883,35 @@ def delete_media():
 
     try:
         if full_path.is_file():
-            file_name = os.path.relpath(full_path, MEDIA_DIR)
+            removed_files = [full_path]
+        else:
+            removed_files = [Path(root) / name for root, _dirs, names in os.walk(full_path) for name in names]
+        removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
+
+        with _slot_lock:
             sources = load_sources()
             modified = False
             for src in sources:
-                if src.get("file") == file_name:
+                if (src.get("file") or "").replace(os.path.sep, "/") in removed_names:
+                    _bump_slot(src["index"])
                     stop_media_stream(src["index"])
                     src["file"] = ""
                     src["state"] = "stopped"
                     modified = True
             if modified:
                 save_sources(sources)
+
+        # Unlink first, then forget renditions: an encode that publishes before the unlink is
+        # cleaned up by remove_source, and one that publishes after it finds no source and aborts.
+        if full_path.is_file():
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
+        for file_name in sorted(removed_names):
+            try:
+                renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name)
+            except Exception as exc:
+                logging.warning("Failed to remove renditions for %s: %s", file_name, exc)
         return {"message": "Deleted successfully"}
     except Exception as exc:
         return _json_error(str(exc), 500)
@@ -2010,8 +2033,11 @@ def list_video_files():
 
 def _collect_video_files():
     video_files = []
-    for root, _, files in os.walk(MEDIA_DIR):
+    for root, dirs, files in os.walk(MEDIA_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         for fname in files:
+            if fname.startswith("."):
+                continue
             if Path(fname).suffix.lower() in ALLOWED_EXTENSIONS:
                 full_path = Path(root) / fname
                 rel = os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")
@@ -2115,11 +2141,12 @@ def _index_error(index):
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
 
 
+def _external_conflict_message(index, path) -> str:
+    return f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it."
+
+
 def _external_conflict_error(index, path):
-    return _json_error(
-        f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it.",
-        409,
-    )
+    return _json_error(_external_conflict_message(index, path), 409)
 
 
 def _skipped_suffix(skipped_external, phrase="Skipped external"):
@@ -2128,7 +2155,49 @@ def _skipped_suffix(skipped_external, phrase="Skipped external"):
     return f" {phrase}: " + ", ".join(f"src{i}" for i in skipped_external) + "."
 
 
-def _source_with_urls(src, snapshot=None):
+def _source_native_fps(file_name: str) -> Optional[int]:
+    if not file_name:
+        return None
+    try:
+        _safe_media_path(file_name)
+        return renditions.source_info(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name).get("native_fps")
+    except Exception as exc:
+        logging.debug("Failed to detect the frame rate of %s: %s", file_name, exc)
+        return None
+
+
+def _active_stream_file(index: Optional[int]) -> Optional[str]:
+    if index is None:
+        return None
+    file_path = media_stream_file(index)
+    if not file_path:
+        return None
+    try:
+        return os.path.relpath(file_path, MEDIA_DIR).replace(os.path.sep, "/")
+    except ValueError:
+        return file_path
+
+
+def _native_fps_by_file(sources) -> dict[str, dict]:
+    """One cached probe pass for every assigned file in `sources`; {} when the index cannot be read."""
+    files = []
+    for src in sources:
+        file_name = src.get("file") or ""
+        if not file_name:
+            continue
+        try:
+            _safe_media_path(file_name)
+        except ValueError:
+            continue
+        files.append(file_name)
+    try:
+        return renditions.source_infos(RENDITIONS_INDEX_FILE, MEDIA_DIR, files)
+    except Exception as exc:
+        logging.debug("Failed to detect the frame rates of the assigned media sources: %s", exc)
+        return {}
+
+
+def _source_with_urls(src, snapshot=None, native_fps_by_file: Optional[dict] = None):
     enriched = dict(src)
     stored_codec = src.get("codec")
     if stored_codec in {"h264", "h265", "mjpeg", UNKNOWN_CODEC}:
@@ -2142,6 +2211,13 @@ def _source_with_urls(src, snapshot=None):
     enriched["transport"] = transport
     enriched["codec"] = codec
     enriched["allowed_transports"] = allowed_transports
+    enriched["fps"] = renditions.coerce_fps(src.get("fps"))
+    file_name = src.get("file") or ""
+    if native_fps_by_file is None:
+        enriched["native_fps"] = _source_native_fps(file_name)
+    else:
+        enriched["native_fps"] = native_fps_by_file.get(file_name, {}).get("native_fps")
+    enriched["active_file"] = _active_stream_file(src.get("index"))
     urls = {}
     if "rtsp" in allowed_transports:
         urls["rtsp"] = _source_url(src, "rtsp")
@@ -2188,13 +2264,14 @@ def get_sources():
     """Return persisted media-source objects, including index, assigned file path, and playback state."""
     sources = _sync_source_runtime_states(load_sources())
     snapshot = _path_snapshot()
-    return jsonify([_source_with_urls(src, snapshot) for src in sources])
+    native = _native_fps_by_file(sources)
+    return jsonify([_source_with_urls(src, snapshot, native_fps_by_file=native) for src in sources])
 
 
 # API: assign or clear a media file for one RTSP source slot.
 @app.post("/api/mediasrc/assign")
 def assign_source():
-    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str}; update and restart if already playing."""
+    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str, 'fps': int|null}; update and restart if already playing. Changing the file resets fps."""
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
@@ -2205,69 +2282,76 @@ def assign_source():
     if holder:
         return _external_conflict_error(index, holder)
     requested_transport = data.get("transport")
+    fps_requested = "fps" in data
+    requested_fps = None
+    if fps_requested and data.get("fps") not in (None, ""):
+        try:
+            requested_fps = renditions.validate_fps(data.get("fps"))
+        except ValueError as exc:
+            return _json_error(str(exc))
 
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            was_playing = src.get("state") == "playing" and media_stream_is_running(index)
-            if was_playing:
-                stop_media_stream(index)
-            src["file"] = file_name
-            transport, codec, _allowed_transports = _derive_source_stream_settings(file_name, requested_transport or src.get("transport"))
-            src["transport"] = transport
-            src["codec"] = codec
-            if was_playing and file_name:
-                if not _allowed_transports:
-                    src["state"] = "stopped"
-                    save_sources(sources)
-                    return _json_error(_codec_detection_error(file_name), 400)
-                file_path = MEDIA_DIR / file_name
-                ok, err = start_media_stream(
-                    index,
-                    str(file_path),
-                    src.get("transport"),
-                    src.get("codec"),
-                    _source_media_codec(file_name),
-                )
-                if not ok:
-                    return _json_error(err, 500)
-                src["state"] = "playing"
-            elif not file_name:
-                src["state"] = "stopped"
-            save_sources(sources)
-            return {"success": True}
-
-    return _json_error("Source not found", 404)
+    with _slot_lock:
+        src = next((s for s in load_sources() if s["index"] == index), None)
+        if src is None:
+            return _json_error("Source not found", 404)
+        _bump_slot(index)
+        was_playing = src.get("state") == "playing" and media_stream_is_running(index)
+        if was_playing:
+            stop_media_stream(index)
+        file_changed = file_name != (src.get("file") or "")
+        src["file"] = file_name
+        if fps_requested:
+            src["fps"] = requested_fps
+        elif file_changed:
+            src["fps"] = None
+        transport, codec, _allowed_transports = _derive_source_stream_settings(file_name, requested_transport or src.get("transport"))
+        src["transport"] = transport
+        src["codec"] = codec
+        if not file_name or was_playing:
+            src["state"] = "stopped"
+        # Persist the new assignment first: a restart re-reads the slot after preparing its
+        # input (outside this lock, since that may encode) and abandons it if it moved on.
+        _persist_slot(src)
+        generation = _slot_generation(index)  # captured while this request still owns the slot
+    if was_playing and file_name:
+        ok, err, status = _start_source_slot(src, generation=generation)
+        if not ok:
+            return _json_error(err, status)
+    return {"success": True}
 
 
 # API: assign available videos to all source slots in index order.
 @app.post("/api/mediasrc/auto-assign-all")
 def auto_assign_all_sources():
     """Stop active sources, assign each slot a unique video when available, persist the stopped assignments."""
-    sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
     video_files = _collect_video_files()
-
     snapshot = _path_snapshot()
-    skipped_external = [src.get("index") for src in sources if _external_holder(src.get("index"), snapshot)]
-    # An external slot keeps its file, so that file is not available to the other slots.
-    kept = {src.get("file") for src in sources if src.get("index") in skipped_external}
-    remaining = iter(name for name in video_files if name not in kept)
-    assigned_count = 0
-    for src in sources:
-        source_index = src.get("index")
-        # Insight's own HTTP/MJPEG stream can share an index with an external publisher:
-        # it is stopped like every other active source.
-        if src.get("state") == "playing":
-            stop_media_stream(source_index)
-        src["state"] = "stopped"
-        if source_index in skipped_external:
-            continue
-        src["file"] = next(remaining, "")
-        assigned_count += bool(src["file"])
-        src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
-        src["state"] = "stopped"
+    with _slot_lock:
+        sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
+        skipped_external = [src.get("index") for src in sources if _external_holder(src.get("index"), snapshot)]
+        # An external slot keeps its file, so that file is not available to the other slots.
+        kept = {src.get("file") for src in sources if src.get("index") in skipped_external}
+        remaining = iter(name for name in video_files if name not in kept)
+        assigned_count = 0
+        for src in sources:
+            source_index = src.get("index")
+            _bump_slot(source_index)
+            # Insight's own HTTP/MJPEG stream can share an index with an external publisher:
+            # it is stopped like every other active source.
+            if src.get("state") == "playing":
+                stop_media_stream(source_index)
+            src["state"] = "stopped"
+            if source_index in skipped_external:
+                continue
+            new_file = next(remaining, "")
+            if new_file != (src.get("file") or ""):
+                src["fps"] = None  # an fps override belongs to the clip it was chosen for
+            src["file"] = new_file
+            assigned_count += bool(src["file"])
+            src["transport"], src["codec"], _allowed_transports = _derive_source_stream_settings(src["file"])
+            src["state"] = "stopped"
 
-    save_sources(sources)
+        save_sources(sources)
     return {
         "success": True,
         "assigned_count": assigned_count,
@@ -2278,10 +2362,239 @@ def auto_assign_all_sources():
     }
 
 
+def _resolve_stream_input(src) -> tuple[Optional[Path], Optional[str], Optional[str], int]:
+    """Return (input path, rendition rel path or None, error, http status). Encodes a missing rendition synchronously."""
+    file_name = src.get("file") or ""
+    fps = renditions.coerce_fps(src.get("fps"))
+    if fps is None:
+        return MEDIA_DIR / file_name, None, None, 200
+    result = None
+    try:
+        for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, _source_media_codec(file_name)):
+            if event.get("event") == "done":
+                result = event
+    except renditions.UnsupportedRendition as exc:
+        return None, None, str(exc), 400
+    except (renditions.RenditionError, OSError) as exc:
+        # OSError covers a failing stat/read of the source or the rendition directory.
+        return None, None, f"Encoding {file_name} at {fps} fps failed: {exc}", 500
+    if not result:
+        return None, None, "Rendition preparation ended unexpectedly", 500
+    return Path(result["path"]), result.get("rendition"), None, 200
+
+
+_sources_write_lock = threading.Lock()
+# Serialises slot mutations (stop, assign, delete, ...) against a start's final check-and-launch.
+# Never held while a rendition encodes; only around the short bump/stop/launch/persist sections.
+_slot_lock = threading.RLock()
+# Per-slot generation, bumped by every user action that changes a slot (assign, stop, delete, ...).
+# A start compares it after preparing its input, which can take minutes, and abandons the slot if it moved.
+_slot_generations: dict[int, int] = {}
+
+
+def _bump_slot(index) -> None:
+    _slot_generations[index] = _slot_generations.get(index, 0) + 1
+
+
+def _slot_generation(index) -> int:
+    return _slot_generations.get(index, 0)
+
+
+def _persist_slot(src) -> None:
+    """Write one slot into a freshly loaded source list.
+
+    Starting a slot can block for minutes while a rendition encodes, and other
+    requests keep editing sources meanwhile. Saving the whole pre-encode
+    snapshot would overwrite those edits, so only the started slot is written.
+    """
+    with _sources_write_lock:
+        sources = load_sources()
+        for position, existing in enumerate(sources):
+            if existing.get("index") == src.get("index"):
+                sources[position] = src
+                break
+        else:
+            sources.append(src)
+        save_sources(sources)
+
+
+def _persist_slot_if_current(src, generation: int) -> bool:
+    """Persist `src` unless the slot moved on since `generation`; returns whether it was written."""
+    with _slot_lock:
+        if _slot_changed_since(src, generation):
+            return False
+        _persist_slot(src)
+        return True
+
+
+def _slot_changed_since(src, generation: int) -> bool:
+    """True when the slot was touched (stop, assign, delete, ...) or no longer has the file and fps `src` started with."""
+    if _slot_generation(src.get("index")) != generation:
+        return True
+    current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
+    if current is None:
+        return True
+    return (current.get("file") or "") != (src.get("file") or "") or renditions.coerce_fps(current.get("fps")) != renditions.coerce_fps(src.get("fps"))
+
+
+def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Optional[str], int]:
+    """Derive stream settings, prepare the input (source or FPS rendition), start the slot and persist it.
+
+    Mutates src; returns (ok, error, http status). Preparing the input can encode for
+    minutes, so the slot is re-read afterwards: if another request reassigned, reset or
+    unassigned it meanwhile, the start is abandoned (409) and nothing is persisted.
+    `generation` is the slot generation the caller observed while it still held the slot
+    lock; a caller that captured none lets this helper read it now.
+    """
+    file_name = src.get("file") or ""
+    if generation is None:
+        generation = _slot_generation(src.get("index"))
+    stale = (False, "Source changed while its rendition was being prepared; start it again", 409)
+    transport, codec, allowed_transports = _derive_source_stream_settings(file_name, src.get("transport"))
+    src["transport"] = transport
+    src["codec"] = codec
+    if not allowed_transports:
+        if not _persist_slot_if_current(src, generation):
+            return stale
+        return False, _codec_detection_error(file_name), 400
+    for attempt in range(2):
+        input_path, rendition, error, status = _resolve_stream_input(src)
+        if error:
+            # A failed encode must not write the pre-encode snapshot back over a slot that was
+            # stopped, reassigned or cleared meanwhile (delete-media makes the encode fail this way).
+            if not _persist_slot_if_current(src, generation):
+                return stale
+            return False, error, status
+        # The final check, the launch and the persist are one step under the slot lock, so a stop or
+        # reassignment cannot slip in between the check and the process being registered.
+        with _slot_lock:
+            current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
+            same_input = current is not None and (current.get("file") or "") == file_name \
+                and renditions.coerce_fps(current.get("fps")) == renditions.coerce_fps(src.get("fps"))
+            if same_input and current.get("state") == "playing" and media_stream_is_running(src["index"]):
+                # A concurrent start already launched this same file/fps and persisted it as playing.
+                # Repeated starts are idempotent; do not write this request's older snapshot back.
+                # A different file or fps running here means this request was superseded (409 below).
+                return True, None, 200
+            if _slot_changed_since(src, generation):
+                return stale
+            holder = _external_holder(src["index"])
+            if holder:
+                # An external publisher took the slot while the input was being prepared; mediamtx
+                # is first-publisher-wins and would reject our process only after launch.
+                return False, _external_conflict_message(src["index"], holder), 409
+            if rendition and not input_path.is_file():
+                # Clear renditions ran between the cache lookup and this launch; prepare again.
+                if attempt == 0:
+                    logging.info("Rendition %s was cleared before src%s could start; preparing it again", rendition, src.get("index"))
+                    continue
+                return False, f"Rendition {rendition} was removed before the stream could start", 500
+            # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
+            ok, err = start_media_stream(
+                src["index"],
+                str(input_path),
+                src.get("transport"),
+                src.get("codec"),
+                _source_media_codec(file_name),
+                rendition=rendition,
+            )
+            if not ok:
+                _persist_slot(src)
+                return False, err, 500
+            src["state"] = "playing"
+            _bump_slot(src["index"])  # invalidate any other request's pre-launch snapshot of this slot
+            _persist_slot(src)
+        return True, None, 200
+    return False, "Rendition preparation did not settle", 500  # unreachable: the loop returns on every path
+
+
+# API: create or reuse the FPS rendition for one source slot, streaming progress.
+@app.post("/api/mediasrc/prepare")
+def prepare_source():
+    """Accept JSON {'index': int}; stream plain-text progress while the slot's FPS rendition is created or reused."""
+    data = request.get_json() or {}
+    index = data.get("index")
+    if index is None:
+        return _json_error("Missing index")
+
+    src = next((s for s in load_sources() if s["index"] == index), None)
+    if src is None:
+        return _json_error("Source not found", 404)
+    file_name = src.get("file") or ""
+    if not file_name:
+        return _json_error("No file assigned to source")
+
+    fps = renditions.coerce_fps(src.get("fps"))
+    source_codec = _source_media_codec(file_name)
+    native_fps = _source_native_fps(file_name)
+    needs_rendition = fps is not None and fps != native_fps
+    if needs_rendition and source_codec == "mjpeg":
+        return _json_error("FPS changes are not supported for MJPEG sources")
+    if needs_rendition and source_codec not in renditions.PROFILES:
+        return _json_error(_codec_detection_error(file_name))
+
+    def generate():
+        if fps is None:
+            yield "Source frame rate matches; no rendition needed.\n"
+            return
+        try:
+            for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, source_codec):
+                kind = event.get("event")
+                if kind == "encoding":
+                    yield f"Encoding {event['file']} at {event['fps']} fps ({event['encoder']})...\n"
+                elif kind == "progress":
+                    total = event.get("total")
+                    if total is not None:
+                        yield f"progress {event['seconds']:.1f}/{total:.1f}\n"
+                    else:
+                        yield f"progress {event['seconds']:.1f}\n"
+                elif kind == "done":
+                    if event.get("native"):
+                        yield "Source frame rate matches; no rendition needed.\n"
+                    elif event.get("reused"):
+                        yield f"Reusing rendition: {event['rendition']}\n"
+                    else:
+                        yield f"Rendition ready: {event['rendition']}\n"
+        except Exception as exc:
+            logging.warning("Rendition preparation failed for %s: %s", file_name, exc)
+            yield f"Error: {exc}\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
+
+
+# API: report cached FPS rendition disk usage.
+@app.get("/api/mediasrc/renditions")
+def get_rendition_usage():
+    """Return {'count': int, 'bytes': int} for every currently stored FPS rendition."""
+    count, total_bytes = renditions.rendition_usage(RENDITIONS_INDEX_FILE, MEDIA_DIR)
+    return jsonify({"count": count, "bytes": total_bytes})
+
+
+# API: delete cached FPS renditions that no playing source is using.
+@app.post("/api/mediasrc/renditions/clear")
+def clear_rendition_cache():
+    """Delete every rendition file and record except ones a playing source is currently streaming.
+    Returns {'removed': int, 'freed_bytes': int, 'kept': [rel paths]}."""
+    try:
+        # The keep set comes from the process registry, not the persisted state: a slot whose
+        # process was just launched still reads "stopped" on disk until the start persists it.
+        # Holding the slot lock keeps launches out of the window between listing and deleting.
+        with _slot_lock:
+            keep = set()
+            for src in load_sources():
+                active_file = _active_stream_file(src.get("index"))
+                if active_file and active_file.startswith(f"{renditions.RENDITIONS_DIRNAME}/"):
+                    keep.add(active_file)
+            removed, freed_bytes = renditions.clear_renditions(RENDITIONS_INDEX_FILE, MEDIA_DIR, keep)
+        return jsonify({"removed": len(removed), "freed_bytes": freed_bytes, "kept": sorted(keep)})
+    except Exception as exc:
+        return _json_error(str(exc), 500)
+
+
 # API: start streaming one assigned media source.
 @app.post("/api/mediasrc/start")
 def start_source():
-    """Accept JSON {'index': int}; start the assigned file for that source and mark its state as playing."""
+    """Accept JSON {'index': int}; start the assigned file (or the slot's FPS rendition, encoding it first if missing) and mark the state as playing."""
     data = request.get_json() or {}
     index = data.get("index")
     index_error = _index_error(index)
@@ -2291,32 +2604,17 @@ def start_source():
     if holder:
         return _external_conflict_error(index, holder)
 
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            filename = src.get("file")
-            if not filename:
-                return _json_error("No file assigned to source")
-            transport, codec, allowed_transports = _derive_source_stream_settings(filename, src.get("transport"))
-            src["transport"] = transport
-            src["codec"] = codec
-            if not allowed_transports:
-                save_sources(sources)
-                return _json_error(_codec_detection_error(filename), 400)
-            ok, err = start_media_stream(
-                index,
-                str(MEDIA_DIR / filename),
-                src.get("transport"),
-                src.get("codec"),
-                _source_media_codec(filename),
-            )
-            if not ok:
-                return _json_error(err, 500)
-            src["state"] = "playing"
-            save_sources(sources)
-            return {"success": True}
-
-    return _json_error("Source not found", 404)
+    with _slot_lock:  # snapshot and generation belong together; a stop after this is detected
+        src = next((s for s in load_sources() if s["index"] == index), None)
+        generation = _slot_generation(index)
+    if src is None:
+        return _json_error("Source not found", 404)
+    if not src.get("file"):
+        return _json_error("No file assigned to source")
+    ok, err, status = _start_source_slot(src, generation=generation)
+    if not ok:
+        return _json_error(err, status)
+    return {"success": True}
 
 
 # API: start multiple assigned media sources in source-index order.
@@ -2352,31 +2650,25 @@ def start_sources_bulk():
     already_running = []
     errors = []
 
-    for src in targets:
-        source_index = src["index"]
+    for target in targets:
+        source_index = target["index"]
+        # Re-read the slot: an earlier target may have encoded for minutes, and the
+        # slot's file or fps may have changed in the meantime.
+        with _slot_lock:  # snapshot and generation belong together; a stop after this is detected
+            src = next((s for s in load_sources() if s.get("index") == source_index), None)
+            generation = _slot_generation(source_index)
+        if src is None or not src.get("file"):
+            errors.append({"index": source_index, "error": "No file assigned to source"})
+            continue
         if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
             continue
-        transport, codec, allowed_transports = _derive_source_stream_settings(src["file"], src.get("transport"))
-        src["transport"] = transport
-        src["codec"] = codec
-        if not allowed_transports:
-            errors.append({"index": source_index, "error": _codec_detection_error(src["file"])})
-            continue
-        ok, err = start_media_stream(
-            source_index,
-            str(MEDIA_DIR / src["file"]),
-            src.get("transport"),
-            src.get("codec"),
-            _source_media_codec(src["file"]),
-        )
+        ok, err, _status = _start_source_slot(src, generation=generation)
         if ok:
-            src["state"] = "playing"
             started.append(source_index)
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})
 
-    save_sources(sources)
     started_or_running = len(started) + len(already_running)
     return {
         "success": len(errors) == 0,
@@ -2409,13 +2701,15 @@ def stop_source():
     if holder and not media_stream_is_running(index):
         return _external_conflict_error(index, holder)
 
-    sources = load_sources()
-    for src in sources:
-        if src["index"] == index:
-            stop_media_stream(index)
-            src["state"] = "stopped"
-            save_sources(sources)
-            return {"success": True}
+    with _slot_lock:
+        sources = load_sources()
+        for src in sources:
+            if src["index"] == index:
+                _bump_slot(index)
+                stop_media_stream(index)
+                src["state"] = "stopped"
+                save_sources(sources)
+                return {"success": True}
 
     return _json_error("Source not found", 404)
 
@@ -2424,25 +2718,27 @@ def stop_source():
 @app.post("/api/mediasrc/stop-all")
 def stop_all_sources():
     """Stop all source processes, persist every source as stopped, and return how many were previously playing."""
-    sources = load_sources()
     snapshot = _path_snapshot()
-    skipped_external = []
-    stopped_count = 0
-    for src in sources:
-        source_index = src.get("index")
-        # Classify before stopping: _external_holder only discounts a path while our own
-        # publisher is alive, so stopping first would report our just-stopped slot as external.
-        holder = _external_holder(source_index, snapshot)
-        # Stop our own process for every slot: it is a no-op for an externally held slot
-        # and prevents an orphaned Insight process the user could no longer stop.
-        stop_media_stream(source_index)
-        if holder:
-            skipped_external.append(source_index)
-        if src.get("state") == "playing":
-            stopped_count += 1
-        src["state"] = "stopped"
+    with _slot_lock:
+        sources = load_sources()
+        skipped_external = []
+        stopped_count = 0
+        for src in sources:
+            source_index = src.get("index")
+            # Classify before stopping: _external_holder only discounts a path while our own
+            # publisher is alive, so stopping first would report our just-stopped slot as external.
+            holder = _external_holder(source_index, snapshot)
+            _bump_slot(source_index)
+            # Stop our own process for every slot: it is a no-op for an externally held slot
+            # and prevents an orphaned Insight process the user could no longer stop.
+            stop_media_stream(source_index)
+            if holder:
+                skipped_external.append(source_index)
+            if src.get("state") == "playing":
+                stopped_count += 1
+            src["state"] = "stopped"
 
-    save_sources(sources)
+        save_sources(sources)
     return {
         "success": True,
         "stopped_count": stopped_count,
@@ -2457,15 +2753,18 @@ def reset_all_sources():
     """Stop all source processes, rewrite the default source assignment file, and return a success message."""
     snapshot = _path_snapshot()
     skipped_external = []
-    for src in load_sources():
-        source_index = src.get("index")
-        # Classify before stopping: _external_holder only discounts a path while our own
-        # publisher is alive, so stopping first would report our just-stopped slot as external.
-        if _external_holder(source_index, snapshot):
-            skipped_external.append(source_index)
-        # Reset clears every stored record; the external stream itself is never touched.
-        stop_media_stream(source_index)
-    reset_sources()
+    # Stop and rewrite under the slot lock so a start cannot launch between the two and leave a
+    # live process attached to a slot that reset just reported as empty.
+    with _slot_lock:
+        for src in load_sources():
+            source_index = src.get("index")
+            # Classify before stopping: _external_holder only discounts a path while our own
+            # publisher is alive, so stopping first would report our just-stopped slot as external.
+            if _external_holder(source_index, snapshot):
+                skipped_external.append(source_index)
+            # Reset clears every stored record; the external stream itself is never touched.
+            stop_media_stream(source_index)
+        reset_sources()
     return {"success": True, "skipped_external": skipped_external,
             "message": "Reset all source assignments." + _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)}
 
