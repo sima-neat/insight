@@ -31,6 +31,13 @@ export function createAuxiliaryRendererRegistry() {
 
 export const auxiliaryRendererRegistry = createAuxiliaryRendererRegistry();
 
+export function mergeAuxiliarySessionSettings(configured, stored) {
+  return {
+    ...(configured && typeof configured === "object" ? configured : {}),
+    ...(stored && typeof stored === "object" ? stored : {}),
+  };
+}
+
 export function shouldAnimateAuxiliaryView(mode, hasPayload, session) {
   if (mode === "collapsed" || mode === "hidden" || !hasPayload) return false;
   return session?.isAnimating?.() === true;
