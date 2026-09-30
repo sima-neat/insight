@@ -3634,7 +3634,8 @@ button:disabled {
   margin: 8px 0;
 }
 
-.periph-identity summary {
+.periph-identity summary,
+.periph-blocked-disclosure > summary {
   width: max-content;
   border-radius: 6px;
   cursor: pointer;
@@ -3793,6 +3794,7 @@ button:disabled {
 
 .periph-camera-row:focus-visible,
 .periph-identity summary:focus-visible,
+.periph-blocked-disclosure > summary:focus-visible,
 .periph-kind:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
@@ -3884,14 +3886,10 @@ button:disabled {
 }
 
 .periph-blocked-disclosure > summary {
-  width: max-content;
-  border-radius: 6px;
-  cursor: pointer;
   color: #40596d;
   font-weight: 700;
 }
 
-.periph-blocked-disclosure > summary:focus-visible,
 .periph-preview-frame:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);

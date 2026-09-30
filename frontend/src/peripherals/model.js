@@ -141,10 +141,7 @@ export function deviceTabs(items, { scanned = true } = {}) {
     }
     const name = scanned || kind.count ? `${kind.label}, ${countLabel(kind.count, 'device')}` : kind.label
     return {
-      id: kind.id,
-      label: kind.label,
-      icon: kind.icon,
-      count: kind.count,
+      ...kind,
       supported,
       disabled: Boolean(note),
       note,
@@ -256,8 +253,7 @@ export function formatOptions(camera) {
       label: f.label || f.format,
       tier: selectable ? f.support?.tier || '' : 'unsupported',
       disabled: !selectable,
-      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
-      range: f.range || null
+      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`
     }
   })
 }

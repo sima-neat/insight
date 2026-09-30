@@ -21,10 +21,6 @@ def model_token(camera_id: str, model: Optional[str] = None) -> str:
     return sensor_model(model) or sensor_model(camera_id)
 
 
-def has_model(model: str) -> bool:
-    return any(mode["model"] == model for mode in VERIFIED_MODES)
-
-
 def verified_mode(model: str, fmt: str, width: int, height: int, fps: float) -> Optional[dict]:
     for mode in VERIFIED_MODES:
         if (

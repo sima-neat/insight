@@ -121,9 +121,6 @@ class BoardManager:
         target = resolve_target(None, self.on_board, sdk_env_target())
         self._replace_session(target, before_install=self._store.clear)
 
-    def test(self) -> None:
-        self.session().identity()
-
     def trust_host_key(self, fingerprint: str) -> None:
         session = self.session()
         with self._change_lock:
@@ -156,11 +153,10 @@ class BoardManager:
             target = self.target()
             self._replace_session_under_change(target)
             with self._lock:
-                sdk_env = sdk_env_target()
                 return {
                     "target": target.to_dict() if target else None,
                     "saved": self._store.load(),
-                    "defaults": {"on_board": self.on_board, "sdk_env": sdk_env},
+                    "defaults": {"on_board": self.on_board, "sdk_env": sdk_env_target()},
                     "generation": self._generation,
                     "status": dict(self._status),
                     "board": self._board,
