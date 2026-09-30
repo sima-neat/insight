@@ -136,13 +136,14 @@ body {
 }
 
 .auxiliary-panel {
-  --auxiliary-panel-background: rgba(15, 23, 42, 0.84);
-  --auxiliary-header-background: rgba(2, 6, 23, 0.74);
-  --auxiliary-tabs-background: rgba(15, 23, 42, 0.64);
-  --auxiliary-content-glow: rgba(14, 165, 233, 0.07);
-  --auxiliary-content-top: rgba(15, 23, 42, 0.25);
-  --auxiliary-content-bottom: rgba(2, 6, 23, 0.52);
-  --auxiliary-controls-background: rgba(2, 6, 23, 0.78);
+  --auxiliary-surface-opacity: 1;
+  --auxiliary-panel-background: rgb(15 23 42 / calc(0.84 * var(--auxiliary-surface-opacity)));
+  --auxiliary-header-background: rgb(2 6 23 / calc(0.74 * var(--auxiliary-surface-opacity)));
+  --auxiliary-tabs-background: rgb(15 23 42 / calc(0.64 * var(--auxiliary-surface-opacity)));
+  --auxiliary-content-glow: rgb(14 165 233 / calc(0.07 * var(--auxiliary-surface-opacity)));
+  --auxiliary-content-top: rgb(15 23 42 / calc(0.25 * var(--auxiliary-surface-opacity)));
+  --auxiliary-content-bottom: rgb(2 6 23 / calc(0.52 * var(--auxiliary-surface-opacity)));
+  --auxiliary-controls-background: rgb(2 6 23 / calc(0.78 * var(--auxiliary-surface-opacity)));
   position: absolute;
   top: 8px;
   right: 8px;
@@ -166,13 +167,13 @@ body {
 }
 
 .auxiliary-panel-expanded {
-  --auxiliary-panel-background: rgba(2, 6, 23, 0.16);
-  --auxiliary-header-background: rgba(2, 6, 23, 0.54);
-  --auxiliary-tabs-background: rgba(2, 6, 23, 0.46);
-  --auxiliary-content-glow: rgba(14, 165, 233, 0.035);
-  --auxiliary-content-top: rgba(15, 23, 42, 0.04);
-  --auxiliary-content-bottom: rgba(2, 6, 23, 0.12);
-  --auxiliary-controls-background: rgba(2, 6, 23, 0.54);
+  --auxiliary-panel-background: rgb(2 6 23 / calc(0.16 * var(--auxiliary-surface-opacity)));
+  --auxiliary-header-background: rgb(2 6 23 / calc(0.54 * var(--auxiliary-surface-opacity)));
+  --auxiliary-tabs-background: rgb(2 6 23 / calc(0.46 * var(--auxiliary-surface-opacity)));
+  --auxiliary-content-glow: rgb(14 165 233 / calc(0.035 * var(--auxiliary-surface-opacity)));
+  --auxiliary-content-top: rgb(15 23 42 / calc(0.04 * var(--auxiliary-surface-opacity)));
+  --auxiliary-content-bottom: rgb(2 6 23 / calc(0.12 * var(--auxiliary-surface-opacity)));
+  --auxiliary-controls-background: rgb(2 6 23 / calc(0.54 * var(--auxiliary-surface-opacity)));
   inset: 8px 8px 38px 8px;
   width: auto;
   max-width: none;
