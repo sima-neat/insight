@@ -56,7 +56,7 @@ test("version two settings migrate without retaining overlay delay", () => {
   });
 
   const settings = api.readScopeSettings("global");
-  assert.equal(settings.version, 6);
+  assert.equal(settings.version, 7);
   assert.equal(settings.general.videoSyncBufferMs, 350);
   assert.equal(settings.general.metadataRetentionMs, 0);
   assert.equal(settings.general.showRoi, false);
@@ -75,9 +75,32 @@ test("BlazePose 3D settings have visible reference-box defaults", () => {
       yawDegrees: -45,
       pitchDegrees: 20,
       showReferenceBox: true,
-      stabilizePose: true,
     },
   );
+});
+
+test("legacy animation and stabilization settings are discarded", () => {
+  const api = loadSettingsApi();
+  const settings = api.normalizeSettings({
+    version: 6,
+    auxiliary: {
+      "blazepose-3d": {
+        autoRotate: true,
+        rotationSpeed: 80,
+        paused: true,
+        stabilizePose: true,
+        yawDegrees: 35,
+      },
+    },
+  });
+  const pose3D = settings.auxiliary["blazepose-3d"];
+
+  assert.equal(settings.version, 7);
+  assert.equal(pose3D.yawDegrees, 35);
+  assert.equal("autoRotate" in pose3D, false);
+  assert.equal("rotationSpeed" in pose3D, false);
+  assert.equal("paused" in pose3D, false);
+  assert.equal("stabilizePose" in pose3D, false);
 });
 
 test("BlazePose 3D settings resolve independently for each channel", () => {
@@ -104,7 +127,6 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
       yawDegrees: -20,
       pitchDegrees: 10,
       showReferenceBox: true,
-      stabilizePose: true,
     },
   );
   assert.deepEqual(
@@ -115,7 +137,6 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
       yawDegrees: 75,
       pitchDegrees: 10,
       showReferenceBox: true,
-      stabilizePose: true,
     },
   );
 });
@@ -194,11 +215,11 @@ test("a channel can discard its 3D override and inherit global settings", () => 
   const api = loadSettingsApi({
     viewerSettings_global: JSON.stringify({
       version: 5,
-      auxiliary: { "blazepose-3d": { showReferenceBox: false, stabilizePose: false } },
+      auxiliary: { "blazepose-3d": { showReferenceBox: false } },
     }),
     viewerSettings_channel_2: JSON.stringify({
       version: 5,
-      auxiliary: { "blazepose-3d": { showReferenceBox: true, stabilizePose: true } },
+      auxiliary: { "blazepose-3d": { showReferenceBox: true } },
     }),
   });
 
@@ -206,5 +227,4 @@ test("a channel can discard its 3D override and inherit global settings", () => 
   api.clearScopeAuxiliarySettings("channel_2", "blazepose-3d");
   assert.equal(api.hasScopeAuxiliarySettings("channel_2", "blazepose-3d"), false);
   assert.equal(api.resolveAuxiliarySettings(2, "blazepose-3d").showReferenceBox, false);
-  assert.equal(api.resolveAuxiliarySettings(2, "blazepose-3d").stabilizePose, false);
 });

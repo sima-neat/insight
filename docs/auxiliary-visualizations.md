@@ -74,34 +74,20 @@ that channel. Select **Use Global Settings** to discard a channel override and
 resume inheriting global changes. The tile's collapse, expand, and hide buttons
 update the same channel setting.
 
-Temporal stabilization is enabled by default. It applies a low-latency adaptive
-filter to each world landmark: small stationary noise is damped strongly, while
-fast motion increases the cutoff so the 3D pose follows the current 2D frame.
-Disable **Stabilize Pose** in Viewer Configuration or **Stabilize** below the
-panel when raw world-landmark output is needed.
-
-The BlazePose view orbits around the world-landmark skeleton by default so depth
-and limb placement are visible from more than one angle. The controls below the
+The BlazePose view renders the current frame's world landmarks directly. It does
+not smooth pose coordinates or animate the camera independently, so its motion
+stays aligned with the frame-correlated 2D pose overlay. The controls below the
 canvas can:
 
 - show or hide the labeled reference cube;
-- enable or disable temporal stabilization;
-- enable or disable automatic orbit;
-- change the orbit speed;
-- pause or resume the current orbit; and
 - reset the camera to its default angle.
 
-Drag directly on the canvas to inspect the pose manually. Dragging pauses the
-orbit at the selected angle; select **Resume** to continue. The cube and camera
-settings stay synchronized with Viewer Configuration for that channel. Orbit
-speed and pause state remain browser-local and are stored separately for every
-channel and auxiliary view ID, so adjusting one stream does not change another
-stream.
+Drag directly on the canvas to choose a fixed inspection angle. The cube and
+camera settings stay synchronized with Viewer Configuration for that channel,
+and adjusting one stream does not change another stream.
 
-Animation runs only while the selected view has current or grace-held correlated
-data and its panel is visible. It stops after the short delivery grace expires,
-when the panel is collapsed or hidden, another tab is selected, or the viewer is
-closed.
+The panel redraws when a correlated pose frame arrives, its fixed camera changes,
+or its layout changes. It does not run a continuous animation loop.
 
 ## Multiple views and overlays
 
