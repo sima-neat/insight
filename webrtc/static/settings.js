@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const viewerSettingsClose = document.getElementById("viewerSettingsClose");
   const saveViewerSettings = document.getElementById("saveViewerSettings");
   const metadataTypeSelector = document.getElementById("metadataTypeSelector");
+  const metadataVisibilityToggle = document.getElementById("toggleMetadataVisibility");
   const confidenceSlider = document.getElementById("confidenceSlider");
   const trackingConfidenceSlider = document.getElementById("trackingConfidenceSlider");
   const trackTrailLengthSlider = document.getElementById("trackTrailLengthSlider");
@@ -46,10 +47,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const blazePose3DPitchSlider = document.getElementById("blazePose3DPitchSlider");
   const blazePose3DPitchDisplay = document.getElementById("blazePose3DPitchDisplay");
   const blazePose3DReferenceBoxToggle = document.getElementById("toggleBlazePose3DReferenceBox");
+  const blazePose3DStabilizationToggle = document.getElementById("toggleBlazePose3DStabilization");
   const blazePose3DDependentRows = document.querySelectorAll(".blazepose-3d-dependent");
   const blazePose3DScopeNote = document.getElementById("blazePose3DScopeNote");
   const resetBlazePose3DView = document.getElementById("resetBlazePose3DView");
+  const useGlobalBlazePose3DView = document.getElementById("useGlobalBlazePose3DView");
   const settingsApi = window.viewerSettingsApi;
+  let metadataVisibilityDraft = {};
 
   if (!settingsApi) {
     console.error("viewerSettingsApi is not available");
@@ -131,6 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
     blazePose3DYawSlider.value = defaults.yawDegrees;
     blazePose3DPitchSlider.value = defaults.pitchDegrees;
     blazePose3DReferenceBoxToggle.checked = defaults.showReferenceBox;
+    blazePose3DStabilizationToggle.checked = defaults.stabilizePose;
     updateBlazePose3DDisplays();
     updateBlazePose3DControls();
   });
@@ -146,6 +151,20 @@ document.addEventListener("DOMContentLoaded", () => {
   metadataTypeSelector.addEventListener("change", () => {
     localStorage.setItem("lastViewerMetadataType", metadataTypeSelector.value);
     updateMetadataTypeSection();
+  });
+
+  metadataVisibilityToggle.addEventListener("change", () => {
+    metadataVisibilityDraft[metadataTypeSelector.value] = metadataVisibilityToggle.checked;
+  });
+
+  useGlobalBlazePose3DView.addEventListener("click", () => {
+    if (scope === "global") return;
+    settingsApi.clearScopeAuxiliarySettings(scope, "blazepose-3d");
+    loadSettings();
+    window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
+      detail: { scope, auxiliaryRenderer: "blazepose-3d" },
+    }));
+    viewerSettingsOverlay.classList.add("hidden");
   });
 
   saveViewerSettings.addEventListener("click", () => {
@@ -165,12 +184,16 @@ document.addEventListener("DOMContentLoaded", () => {
       trailLength: parseInt(trackTrailLengthSlider.value, 10),
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
+    settingsApi.metadataTypes.forEach(({ value }) => {
+      settings.types[value].visible = metadataVisibilityDraft[value] !== false;
+    });
     settings.auxiliary["blazepose-3d"] = {
       enabled: blazePose3DPanelToggle.checked,
       panelMode: blazePose3DPanelMode.value,
       yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
       pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
-      showReferenceBox: blazePose3DReferenceBoxToggle.checked
+      showReferenceBox: blazePose3DReferenceBoxToggle.checked,
+      stabilizePose: blazePose3DStabilizationToggle.checked
     };
 
     settingsApi.writeScopeSettings(scope, settings);
@@ -214,6 +237,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateMetadataTypeSection() {
     const selectedType = metadataTypeSelector.value;
+    metadataVisibilityToggle.checked = metadataVisibilityDraft[selectedType] !== false;
     objectDetectionSettings.style.display = selectedType === "object-detection" ? "flex" : "none";
     segmentationSettings.style.display = selectedType === "segmentation" ? "flex" : "none";
     trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
@@ -258,9 +282,27 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateBlazePose3DScopeNote(value, index) {
-    blazePose3DScopeNote.textContent = value === "global"
-      ? "Sets the default 3D Pose view for every channel. Channel settings can override it."
-      : `Controls the 3D Pose view for Channel ${index} only.`;
+    const isGlobal = value === "global";
+    const hasOverride = !isGlobal && settingsApi.hasScopeAuxiliarySettings(value, "blazepose-3d");
+    blazePose3DScopeNote.textContent = isGlobal
+      ? "Sets the default 3D Pose view for channels without a channel-specific override."
+      : hasOverride
+        ? `Channel ${index} is using channel-specific 3D Pose settings.`
+        : `Channel ${index} is inheriting the global 3D Pose settings.`;
+    useGlobalBlazePose3DView.style.display = isGlobal || !hasOverride ? "none" : "inline-flex";
+  }
+
+  function settingsForEditor() {
+    if (scope === "global") return settingsApi.readScopeSettings(scope);
+    const index = scopeToIndex(scope);
+    const settings = settingsApi.readScopeSettings(scope);
+    settingsApi.metadataTypes.forEach(({ value }) => {
+      const resolved = settingsApi.resolveTypeSettings(index, value);
+      settings.general = resolved.general;
+      settings.types[value] = resolved.type;
+    });
+    settings.auxiliary["blazepose-3d"] = settingsApi.resolveAuxiliarySettings(index, "blazepose-3d");
+    return settings;
   }
 
   function createObjectEntry(label, color, lineStyle, lineWidth) {
@@ -384,7 +426,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function loadSettings() {
-    const settings = settingsApi.readScopeSettings(scope);
+    const settings = settingsForEditor();
     const objectDetectionTypeSettings = settings.types["object-detection"];
     const segmentationTypeSettings = settings.types.segmentation;
     const trackingTypeSettings = settings.types.tracking;
@@ -414,6 +456,10 @@ document.addEventListener("DOMContentLoaded", () => {
     blazePose3DYawSlider.value = blazePose3DSettings.yawDegrees ?? -45;
     blazePose3DPitchSlider.value = blazePose3DSettings.pitchDegrees ?? 20;
     blazePose3DReferenceBoxToggle.checked = blazePose3DSettings.showReferenceBox !== false;
+    blazePose3DStabilizationToggle.checked = blazePose3DSettings.stabilizePose !== false;
+    metadataVisibilityDraft = Object.fromEntries(
+      settingsApi.metadataTypes.map(({ value }) => [value, settings.types[value]?.visible !== false])
+    );
     updateTrackTrailLengthDisplay();
     updateLostTrackTtlDisplay();
     updateTrackHistoryControls();
@@ -426,6 +472,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const supportedType = settingsApi.metadataTypes.some((metadataType) => metadataType.value === lastMetadataType);
     metadataTypeSelector.value = supportedType ? lastMetadataType : "object-detection";
     updateMetadataTypeSection();
+    updateBlazePose3DScopeNote(scope, scopeToIndex(scope));
   }
 
   addViewerObjectBtn?.addEventListener("click", () => {

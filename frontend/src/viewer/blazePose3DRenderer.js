@@ -24,6 +24,12 @@ const MAX_PITCH = Math.PI * 0.48;
 const MIN_ORBIT_SPEED = 5;
 const MAX_ORBIT_SPEED = 90;
 const CUBE_MIN_EXTENT = 0.5;
+const RTP_CLOCK_RATE = 90000;
+const DEFAULT_FRAME_INTERVAL_SECONDS = 1 / 30;
+const MAX_SMOOTHING_GAP_SECONDS = 0.25;
+const SMOOTHING_MIN_CUTOFF = 2.5;
+const SMOOTHING_BETA = 1;
+const SMOOTHING_DERIVATIVE_CUTOFF = 1;
 
 const CUBE_EDGES = [
   [0, 1], [1, 2], [2, 3], [3, 0],
@@ -42,6 +48,7 @@ export const DEFAULT_BLAZEPOSE_VIEW_SETTINGS = Object.freeze({
   autoRotate: true,
   rotationSpeed: 25,
   paused: false,
+  stabilizePose: true,
   yaw: DEFAULT_YAW,
   pitch: DEFAULT_PITCH,
 });
@@ -75,6 +82,10 @@ export function normalizeBlazePoseViewSettings(value) {
       typeof candidate.paused === "boolean"
         ? candidate.paused
         : DEFAULT_BLAZEPOSE_VIEW_SETTINGS.paused,
+    stabilizePose:
+      typeof candidate.stabilizePose === "boolean"
+        ? candidate.stabilizePose
+        : DEFAULT_BLAZEPOSE_VIEW_SETTINGS.stabilizePose,
     yaw: finiteOr(candidate.yaw, DEFAULT_YAW),
     pitch: clamp(finiteOr(candidate.pitch, DEFAULT_PITCH), MIN_PITCH, MAX_PITCH),
   };
@@ -85,6 +96,101 @@ function normalizeWorldPoint(point) {
   const y = -Number(point?.y);
   const z = Number(point?.z);
   return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
+}
+
+function lowPassAlpha(cutoff, intervalSeconds) {
+  const tau = 1 / (2 * Math.PI * cutoff);
+  return 1 / (1 + tau / intervalSeconds);
+}
+
+function filterAxis(state, value, intervalSeconds) {
+  if (!state) return { raw: value, filtered: value, derivative: 0 };
+  const rawDerivative = (value - state.raw) / intervalSeconds;
+  const derivativeAlpha = lowPassAlpha(SMOOTHING_DERIVATIVE_CUTOFF, intervalSeconds);
+  const derivative = derivativeAlpha * rawDerivative + (1 - derivativeAlpha) * state.derivative;
+  const cutoff = SMOOTHING_MIN_CUTOFF + SMOOTHING_BETA * Math.abs(derivative);
+  const valueAlpha = lowPassAlpha(cutoff, intervalSeconds);
+  return {
+    raw: value,
+    filtered: valueAlpha * value + (1 - valueAlpha) * state.filtered,
+    derivative,
+  };
+}
+
+function rtpIntervalSeconds(current, previous) {
+  if (!Number.isInteger(current) || !Number.isInteger(previous)) return DEFAULT_FRAME_INTERVAL_SECONDS;
+  const delta = ((current >>> 0) - (previous >>> 0)) >>> 0;
+  if (delta === 0 || delta > 0x7fffffff) return DEFAULT_FRAME_INTERVAL_SECONDS;
+  return delta / RTP_CLOCK_RATE;
+}
+
+export function createBlazePosePoseSmoother() {
+  let states = new Map();
+  let previousRtpTimestamp = null;
+  let previousInput = null;
+  let previousOutput = null;
+
+  const reset = () => {
+    states = new Map();
+    previousRtpTimestamp = null;
+    previousInput = null;
+    previousOutput = null;
+  };
+
+  const filter = (payload, rtpTimestamp) => {
+    if (payload === previousInput && previousOutput) return previousOutput;
+    if (!Array.isArray(payload?.poses) || payload.poses.length === 0) {
+      previousInput = payload;
+      previousOutput = payload;
+      previousRtpTimestamp = rtpTimestamp;
+      return payload;
+    }
+
+    let intervalSeconds = rtpIntervalSeconds(rtpTimestamp, previousRtpTimestamp);
+    if (intervalSeconds > MAX_SMOOTHING_GAP_SECONDS) {
+      states = new Map();
+      intervalSeconds = DEFAULT_FRAME_INTERVAL_SECONDS;
+    }
+    intervalSeconds = clamp(intervalSeconds, 1 / 240, MAX_SMOOTHING_GAP_SECONDS);
+    const activePoseIds = new Set();
+    const poses = payload.poses.map((pose, poseIndex) => {
+      const poseId = String(pose?.id ?? `pose_${poseIndex + 1}`);
+      activePoseIds.add(poseId);
+      const pointStates = states.get(poseId) ?? new Map();
+      const activePointNames = new Set();
+      const keypoints = Array.isArray(pose?.keypoints) ? pose.keypoints.map((point) => {
+        const name = typeof point?.name === "string" ? point.name : null;
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        const z = Number(point?.z);
+        if (!name || ![x, y, z].every(Number.isFinite)) return point;
+        activePointNames.add(name);
+        const previous = pointStates.get(name);
+        const next = {
+          x: filterAxis(previous?.x, x, intervalSeconds),
+          y: filterAxis(previous?.y, y, intervalSeconds),
+          z: filterAxis(previous?.z, z, intervalSeconds),
+        };
+        pointStates.set(name, next);
+        return { ...point, x: next.x.filtered, y: next.y.filtered, z: next.z.filtered };
+      }) : pose?.keypoints;
+      for (const name of pointStates.keys()) {
+        if (!activePointNames.has(name)) pointStates.delete(name);
+      }
+      states.set(poseId, pointStates);
+      return { ...pose, keypoints };
+    });
+    for (const poseId of states.keys()) {
+      if (!activePoseIds.has(poseId)) states.delete(poseId);
+    }
+
+    previousInput = payload;
+    previousOutput = { ...payload, poses };
+    previousRtpTimestamp = rtpTimestamp;
+    return previousOutput;
+  };
+
+  return { filter, reset };
 }
 
 function projectNormalizedPoint(world, camera) {
@@ -292,6 +398,7 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
 
 export function createBlazePose3DSession({ initialSettings, onSettingsChange, requestDraw } = {}) {
   let settings = normalizeBlazePoseViewSettings(initialSettings);
+  const poseSmoother = createBlazePosePoseSmoother();
   let lastAnimationTime = null;
   let drag = null;
   let destroyed = false;
@@ -322,7 +429,10 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
     draw(ctx, viewport, payload, frame = {}) {
       if (destroyed) return;
       advanceOrbit(frame.animationTimeMs);
-      hasRenderablePose = drawBlazePose3D(ctx, viewport, payload, {
+      const renderedPayload = settings.stabilizePose
+        ? poseSmoother.filter(payload, frame.rtpTimestamp)
+        : payload;
+      hasRenderablePose = drawBlazePose3D(ctx, viewport, renderedPayload, {
         ...frame,
         camera: settings,
         showReferenceCube: settings.showReferenceCube,
@@ -334,6 +444,7 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
     getControls() {
       return [
         { id: "showReferenceCube", type: "toggle", label: "Cube", value: settings.showReferenceCube },
+        { id: "stabilizePose", type: "toggle", label: "Stabilize", value: settings.stabilizePose },
         { id: "autoRotate", type: "toggle", label: "Orbit", value: settings.autoRotate },
         {
           id: "rotationSpeed",
@@ -357,7 +468,9 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
     },
     applySettings(nextSettings) {
       if (destroyed || !nextSettings || typeof nextSettings !== "object") return;
+      const wasStabilized = settings.stabilizePose;
       settings = normalizeBlazePoseViewSettings({ ...settings, ...nextSettings });
+      if (wasStabilized !== settings.stabilizePose) poseSmoother.reset();
       stopAnimationClock();
       notify(false);
     },
@@ -366,6 +479,10 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
       switch (id) {
         case "showReferenceCube":
           settings.showReferenceCube = Boolean(value);
+          break;
+        case "stabilizePose":
+          settings.stabilizePose = Boolean(value);
+          poseSmoother.reset();
           break;
         case "autoRotate":
           settings.autoRotate = Boolean(value);
@@ -420,6 +537,7 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
       destroyed = true;
       drag = null;
       hasRenderablePose = false;
+      poseSmoother.reset();
       stopAnimationClock();
     },
   };

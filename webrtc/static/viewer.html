@@ -28,6 +28,8 @@
             <div class="metadata-type-row">
               <label for="metadataTypeSelector">Metadata Type</label>
               <select id="metadataTypeSelector"></select>
+              <label for="toggleMetadataVisibility">Show Overlay</label>
+              <input type="checkbox" id="toggleMetadataVisibility" checked>
             </div>
             <div id="objectDetectionSettings" class="metadata-type-section">
               <table class="filter-table metadata-filter-table">
@@ -152,9 +154,14 @@
                 <td><label for="toggleBlazePose3DReferenceBox">Show 3D Reference Box</label></td>
                 <td><input type="checkbox" id="toggleBlazePose3DReferenceBox" checked></td>
               </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="toggleBlazePose3DStabilization">Stabilize Pose</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DStabilization" checked></td>
+              </tr>
             </table>
             <div class="settings-inline-actions">
               <button id="resetBlazePose3DView" type="button" class="app-button">Reset View</button>
+              <button id="useGlobalBlazePose3DView" type="button" class="app-button" style="display:none">Use Global Settings</button>
             </div>
           </div>
 
@@ -220,14 +227,14 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
-  <script src="/static/js/viewer-settings-resolver.js?v=5"></script>
+  <script src="/static/js/viewer-settings-resolver.js?v=8"></script>
   <script src="/static/drawing.js"></script>
-  <script src="/static/viewer-react.js?v=5"></script>
-  <link rel="stylesheet" href="/static/css/settings.css?v=5">
+  <script src="/static/viewer-react.js?v=8"></script>
+  <link rel="stylesheet" href="/static/css/settings.css?v=8">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script type="module" src="/static/js/roi.js"></script>
-  <script src="/static/settings.js?v=5"></script>
+  <script src="/static/settings.js?v=8"></script>
 
 </body>
 </html>

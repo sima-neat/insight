@@ -56,7 +56,7 @@ test("version two settings migrate without retaining overlay delay", () => {
   });
 
   const settings = api.readScopeSettings("global");
-  assert.equal(settings.version, 4);
+  assert.equal(settings.version, 5);
   assert.equal(settings.general.videoSyncBufferMs, 350);
   assert.equal(settings.general.metadataRetentionMs, 0);
   assert.equal(settings.general.showRoi, false);
@@ -75,6 +75,7 @@ test("BlazePose 3D settings have visible reference-box defaults", () => {
       yawDegrees: -45,
       pitchDegrees: 20,
       showReferenceBox: true,
+      stabilizePose: true,
     },
   );
 });
@@ -103,6 +104,7 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
       yawDegrees: -20,
       pitchDegrees: 10,
       showReferenceBox: true,
+      stabilizePose: true,
     },
   );
   assert.deepEqual(
@@ -113,6 +115,7 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
       yawDegrees: 75,
       pitchDegrees: 10,
       showReferenceBox: true,
+      stabilizePose: true,
     },
   );
 });
@@ -150,4 +153,39 @@ test("panel shortcuts do not create unrelated channel overrides", () => {
 
   assert.equal(api.resolveTypeSettings(3, "object-detection").type.confidenceThreshold, 0.8);
   assert.equal(api.resolveAuxiliarySettings(3, "blazepose-3d").panelMode, "expanded");
+});
+
+test("metadata overlay visibility resolves globally and per channel", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 5,
+      types: { "object-detection": { visible: false } },
+    }),
+    viewerSettings_channel_2: JSON.stringify({
+      version: 5,
+      types: { "object-detection": { visible: true } },
+    }),
+  });
+
+  assert.equal(api.resolveTypeSettings(1, "object-detection").type.visible, false);
+  assert.equal(api.resolveTypeSettings(2, "object-detection").type.visible, true);
+});
+
+test("a channel can discard its 3D override and inherit global settings", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 5,
+      auxiliary: { "blazepose-3d": { showReferenceBox: false, stabilizePose: false } },
+    }),
+    viewerSettings_channel_2: JSON.stringify({
+      version: 5,
+      auxiliary: { "blazepose-3d": { showReferenceBox: true, stabilizePose: true } },
+    }),
+  });
+
+  assert.equal(api.hasScopeAuxiliarySettings("channel_2", "blazepose-3d"), true);
+  api.clearScopeAuxiliarySettings("channel_2", "blazepose-3d");
+  assert.equal(api.hasScopeAuxiliarySettings("channel_2", "blazepose-3d"), false);
+  assert.equal(api.resolveAuxiliarySettings(2, "blazepose-3d").showReferenceBox, false);
+  assert.equal(api.resolveAuxiliarySettings(2, "blazepose-3d").stabilizePose, false);
 });
