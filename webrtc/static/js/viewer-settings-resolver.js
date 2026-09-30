@@ -1,6 +1,6 @@
 (() => {
-  const SETTINGS_VERSION = 5;
-  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, SETTINGS_VERSION]);
+  const SETTINGS_VERSION = 6;
+  const SUPPORTED_SETTINGS_VERSIONS = new Set([2, 3, 4, 5, SETTINGS_VERSION]);
   const DEFAULT_OBJECTS = [{ label: "default", color: "#00ff00", style: "solid", width: 1 }];
   const METADATA_TYPES = [
     { value: "object-detection", label: "Object Detection" },
@@ -24,7 +24,11 @@
         lostTrackTtlMs: 2000
       }
     },
-    "pose-estimation": { visible: true },
+    "pose-estimation": {
+      visible: true,
+      showKeypoints: true,
+      showKeypointLabels: false
+    },
     segmentation: {
       visible: true,
       confidenceThreshold: 0,
@@ -167,6 +171,13 @@
       }
       if (fillDefaults || Object.keys(history).length > 0) {
         type.history = history;
+      }
+    } else if (metadataType === "pose-estimation") {
+      if (Object.prototype.hasOwnProperty.call(rawType, "showKeypoints")) {
+        type.showKeypoints = rawType.showKeypoints !== false;
+      }
+      if (Object.prototype.hasOwnProperty.call(rawType, "showKeypointLabels")) {
+        type.showKeypointLabels = rawType.showKeypointLabels === true;
       }
     } else if (rawType && typeof rawType === "object") {
       Object.assign(type, rawType);

@@ -56,7 +56,7 @@ test("version two settings migrate without retaining overlay delay", () => {
   });
 
   const settings = api.readScopeSettings("global");
-  assert.equal(settings.version, 5);
+  assert.equal(settings.version, 6);
   assert.equal(settings.general.videoSyncBufferMs, 350);
   assert.equal(settings.general.metadataRetentionMs, 0);
   assert.equal(settings.general.showRoi, false);
@@ -169,6 +169,25 @@ test("metadata overlay visibility resolves globally and per channel", () => {
 
   assert.equal(api.resolveTypeSettings(1, "object-detection").type.visible, false);
   assert.equal(api.resolveTypeSettings(2, "object-detection").type.visible, true);
+});
+
+test("pose overlay defaults stay readable and resolve per channel", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 6,
+      types: { "pose-estimation": { showKeypoints: false, showKeypointLabels: true } },
+    }),
+    viewerSettings_channel_2: JSON.stringify({
+      version: 6,
+      types: { "pose-estimation": { showKeypoints: true, showKeypointLabels: false } },
+    }),
+  });
+
+  assert.equal(api.defaults.types["pose-estimation"].showKeypointLabels, false);
+  assert.equal(api.resolveTypeSettings(1, "pose-estimation").type.showKeypoints, false);
+  assert.equal(api.resolveTypeSettings(1, "pose-estimation").type.showKeypointLabels, true);
+  assert.equal(api.resolveTypeSettings(2, "pose-estimation").type.showKeypoints, true);
+  assert.equal(api.resolveTypeSettings(2, "pose-estimation").type.showKeypointLabels, false);
 });
 
 test("a channel can discard its 3D override and inherit global settings", () => {
