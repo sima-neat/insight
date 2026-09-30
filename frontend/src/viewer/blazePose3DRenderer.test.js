@@ -51,6 +51,29 @@ test("BlazePose 3D renderer draws connected world keypoints", () => {
   assert.equal(ctx.calls.filter(([name]) => name === "arc").length, 3);
 });
 
+test("metric camera framing does not move a keypoint when pose bounds change", () => {
+  const compactPose = {
+    poses: [{ keypoints: [{ name: "left_shoulder", x: -0.2, y: -0.4, z: 0.1 }] }],
+  };
+  const extendedPose = {
+    poses: [{ keypoints: [
+      ...compactPose.poses[0].keypoints,
+      { name: "left_wrist", x: -1.1, y: 0.8, z: 0.6 },
+    ] }],
+  };
+  const compact = recordingContext();
+  const extended = recordingContext();
+
+  drawBlazePose3D(compact, { width: 240, height: 180 }, compactPose, { showReferenceCube: false });
+  drawBlazePose3D(extended, { width: 240, height: 180 }, extendedPose, { showReferenceCube: false });
+
+  const stablePoint = compact.calls.find(([name]) => name === "arc")?.slice(1, 3);
+  assert.ok(stablePoint);
+  assert.ok(extended.calls
+    .filter(([name]) => name === "arc")
+    .some((call) => call[1] === stablePoint[0] && call[2] === stablePoint[1]));
+});
+
 test("BlazePose 3D renderer draws an optional labeled reference cube", () => {
   const payload = {
     poses: [{
