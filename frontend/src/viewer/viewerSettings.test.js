@@ -14,6 +14,11 @@ function loadSettingsApi(stored = {}) {
     localStorage: {
       getItem: (key) => values.get(key) ?? null,
       setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+      key: (index) => [...values.keys()][index] ?? null,
+      get length() {
+        return values.size;
+      },
     },
   };
   vm.runInNewContext(resolverSource, { window });
@@ -242,4 +247,29 @@ test("a channel can discard its 3D override and inherit global settings", () => 
   api.clearScopeAuxiliarySettings("channel_2", "blazepose-3d");
   assert.equal(api.hasScopeAuxiliarySettings("channel_2", "blazepose-3d"), false);
   assert.equal(api.resolveAuxiliarySettings(2, "blazepose-3d").showReferenceBox, false);
+});
+
+test("a global save can clear all channel settings overrides", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 8,
+      types: { "pose-estimation": { visible: false } },
+      auxiliary: { "blazepose-3d": { enabled: false, backgroundTransparency: 0.8 } },
+    }),
+    viewerSettings_channel_0: JSON.stringify({
+      version: 8,
+      types: { "pose-estimation": { visible: true } },
+      auxiliary: { "blazepose-3d": { enabled: true, backgroundTransparency: 0.25 } },
+    }),
+    viewerSettings_channel_3: JSON.stringify({ version: 8, general: { videoSyncBufferMs: 900 } }),
+  });
+
+  assert.equal(api.resolveTypeSettings(0, "pose-estimation").type.visible, true);
+  assert.equal(api.resolveAuxiliarySettings(0, "blazepose-3d").enabled, true);
+  assert.equal(api.clearAllChannelSettings(), 2);
+  assert.equal(api.resolveTypeSettings(0, "pose-estimation").type.visible, false);
+  assert.equal(api.resolveAuxiliarySettings(0, "blazepose-3d").enabled, false);
+  assert.equal(api.resolveAuxiliarySettings(0, "blazepose-3d").backgroundTransparency, 0.8);
+  assert.equal(api.clearAllChannelSettings(), 0);
+  assert.equal(api.hasScopeAuxiliarySettings("channel_0", "blazepose-3d"), false);
 });
