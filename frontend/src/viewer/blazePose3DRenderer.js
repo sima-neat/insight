@@ -15,7 +15,30 @@ export const BLAZEPOSE_CONNECTIONS = [
   ["right_heel", "right_foot_index"], ["right_ankle", "right_foot_index"],
 ];
 
-const POSE_COLORS = ["#38bdf8", "#fb7185", "#4ade80", "#facc15", "#c084fc", "#fb923c"];
+export const BLAZEPOSE_BODY_COLORS = Object.freeze({
+  head: "#facc15",
+  torso: "#c084fc",
+  left: "#fb7185",
+  right: "#38bdf8",
+});
+const BODY_COLOR_LEGEND = [
+  ["head", "Head"],
+  ["torso", "Torso"],
+  ["left", "Left"],
+  ["right", "Right"],
+];
+const POSE_ACCENT_COLORS = ["#f8fafc", "#4ade80", "#fb923c", "#e879f9", "#2dd4bf", "#f87171"];
+const HEAD_LANDMARKS = new Set([
+  "nose", "left_eye_inner", "left_eye", "left_eye_outer", "left_ear",
+  "right_eye_inner", "right_eye", "right_eye_outer", "right_ear",
+  "mouth_left", "mouth_right",
+]);
+const TORSO_CONNECTIONS = new Set([
+  "left_shoulder:right_shoulder",
+  "left_shoulder:left_hip",
+  "right_shoulder:right_hip",
+  "left_hip:right_hip",
+]);
 const MIN_CONFIDENCE = 0.3;
 const DEFAULT_YAW = -Math.PI / 4;
 const DEFAULT_PITCH = Math.PI / 9;
@@ -71,6 +94,26 @@ function normalizeWorldPoint(point) {
   return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
 }
 
+export function blazePoseBodyRegion(name) {
+  if (HEAD_LANDMARKS.has(name)) return "head";
+  if (typeof name === "string" && name.startsWith("left_")) return "left";
+  if (typeof name === "string" && name.startsWith("right_")) return "right";
+  return "torso";
+}
+
+function connectionBodyRegion(fromName, toName) {
+  if (TORSO_CONNECTIONS.has(`${fromName}:${toName}`)) return "torso";
+  const fromRegion = blazePoseBodyRegion(fromName);
+  const toRegion = blazePoseBodyRegion(toName);
+  return fromRegion === toRegion ? fromRegion : "torso";
+}
+
+const BLAZEPOSE_RENDER_CONNECTIONS = BLAZEPOSE_CONNECTIONS.map(([fromName, toName]) => ({
+  fromName,
+  toName,
+  color: BLAZEPOSE_BODY_COLORS[connectionBodyRegion(fromName, toName)],
+}));
+
 function projectionCamera(settings) {
   const camera = normalizeBlazePoseViewSettings(settings);
   return {
@@ -110,7 +153,7 @@ function normalizedPoses(payload) {
     return {
       id: pose?.id ?? `pose_${poseIndex + 1}`,
       points,
-      color: POSE_COLORS[poseIndex % POSE_COLORS.length],
+      accent: POSE_ACCENT_COLORS[poseIndex % POSE_ACCENT_COLORS.length],
     };
   }).filter((pose) => pose.points.size > 0);
 }
@@ -207,6 +250,26 @@ function drawReferenceCube(ctx, vertices) {
   }
 }
 
+function drawBodyColorLegend(ctx, width, height) {
+  if (width < 240 || height < 180) return;
+  const gap = 54;
+  const startX = Math.max(12, width - BODY_COLOR_LEGEND.length * gap - 4);
+  const y = height - 12;
+  ctx.font = '600 9px "Roboto Condensed", sans-serif';
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  for (const [index, [region, label]] of BODY_COLOR_LEGEND.entries()) {
+    const x = startX + index * gap;
+    ctx.beginPath();
+    ctx.arc(x, y, 2.7, 0, 2 * Math.PI);
+    ctx.fillStyle = BLAZEPOSE_BODY_COLORS[region];
+    ctx.globalAlpha = 1;
+    ctx.fill();
+    ctx.fillStyle = "rgba(226, 232, 240, 0.82)";
+    ctx.fillText(label, x + 6, y);
+  }
+}
+
 export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   const width = viewport?.width ?? 0;
   const height = viewport?.height ?? 0;
@@ -240,26 +303,28 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
 
   const segments = [];
   for (const pose of screenPoses) {
-    for (const [fromName, toName] of BLAZEPOSE_CONNECTIONS) {
+    for (const { fromName, toName, color } of BLAZEPOSE_RENDER_CONNECTIONS) {
       const from = pose.points.get(fromName);
       const to = pose.points.get(toName);
       if (!from || !to) continue;
       segments.push({
         from,
         to,
-        color: pose.color,
+        color,
+        accent: pose.accent,
         depth: (from.depth + to.depth) / 2,
       });
     }
   }
   segments.sort((left, right) => left.depth - right.depth);
 
+  const distinguishPoses = screenPoses.length > 1;
   ctx.lineCap = "round";
   for (const segment of segments) {
     ctx.beginPath();
     ctx.moveTo(segment.from.x, segment.from.y);
     ctx.lineTo(segment.to.x, segment.to.y);
-    ctx.strokeStyle = "rgba(2, 6, 23, 0.74)";
+    ctx.strokeStyle = distinguishPoses ? segment.accent : "rgba(2, 6, 23, 0.74)";
     ctx.globalAlpha = 1;
     ctx.lineWidth = 4.8;
     ctx.stroke();
@@ -273,18 +338,23 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   }
 
   const points = screenPoses.flatMap((pose) =>
-    [...pose.points.values()].map((point) => ({ ...point, color: pose.color })),
+    [...pose.points].map(([name, point]) => ({
+      ...point,
+      color: BLAZEPOSE_BODY_COLORS[blazePoseBodyRegion(name)],
+      accent: pose.accent,
+    })),
   ).sort((left, right) => left.depth - right.depth);
   for (const point of points) {
     ctx.beginPath();
     ctx.arc(point.x, point.y, 3.1, 0, 2 * Math.PI);
     ctx.fillStyle = point.color;
-    ctx.strokeStyle = "rgba(2, 6, 23, 0.9)";
+    ctx.strokeStyle = distinguishPoses ? point.accent : "rgba(2, 6, 23, 0.9)";
     ctx.lineWidth = 1.2;
     ctx.globalAlpha = 1;
     ctx.fill();
     ctx.stroke();
   }
+  drawBodyColorLegend(ctx, width, height);
   ctx.globalAlpha = 1;
   return true;
 }
