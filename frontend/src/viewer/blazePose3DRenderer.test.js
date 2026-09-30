@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DEFAULT_BLAZEPOSE_VIEW_SETTINGS,
   createBlazePose3DSession,
+  createBlazePosePoseSmoother,
   drawBlazePose3D,
   normalizeBlazePoseViewSettings,
   projectWorldPoint,
@@ -98,6 +99,7 @@ test("saved view settings normalize malformed and out-of-range values", () => {
     autoRotate: false,
     rotationSpeed: 1000,
     paused: true,
+    stabilizePose: false,
     yaw: "bad",
     pitch: 100,
   });
@@ -106,6 +108,7 @@ test("saved view settings normalize malformed and out-of-range values", () => {
   assert.equal(normalized.autoRotate, false);
   assert.equal(normalized.rotationSpeed, 90);
   assert.equal(normalized.paused, true);
+  assert.equal(normalized.stabilizePose, false);
   assert.equal(normalized.yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
   assert.ok(normalized.pitch < Math.PI / 2);
 });
@@ -147,13 +150,46 @@ test("viewer configuration can update a live renderer session", () => {
     showReferenceCube: false,
     yaw: Math.PI / 2,
     pitch: 0,
+    stabilizePose: false,
   });
 
   assert.equal(session.snapshot().showReferenceCube, false);
   assert.equal(session.snapshot().yaw, Math.PI / 2);
   assert.equal(session.snapshot().pitch, 0);
+  assert.equal(session.snapshot().stabilizePose, false);
   assert.equal(session.getControls().find(({ id }) => id === "showReferenceCube").value, false);
   assert.equal(drawRequests, 1);
+});
+
+test("adaptive stabilization reduces stationary world-landmark jitter", () => {
+  const smoother = createBlazePosePoseSmoother();
+  const raw = [];
+  const filtered = [];
+  for (let frame = 0; frame < 60; frame += 1) {
+    const x = frame % 2 === 0 ? -0.02 : 0.02;
+    raw.push(x);
+    const result = smoother.filter({
+      poses: [{ id: "pose_1", keypoints: [{ name: "nose", x, y: 0, z: 0 }] }],
+    }, frame * 3600);
+    filtered.push(result.poses[0].keypoints[0].x);
+  }
+  const meanStep = (values) => values.slice(1)
+    .reduce((total, value, index) => total + Math.abs(value - values[index]), 0) / (values.length - 1);
+
+  assert.ok(meanStep(filtered) < meanStep(raw) * 0.4);
+});
+
+test("adaptive stabilization follows a fast pose change without multi-frame lag", () => {
+  const smoother = createBlazePosePoseSmoother();
+  const payload = (x) => ({
+    poses: [{ id: "pose_1", keypoints: [{ name: "nose", x, y: 0, z: 0 }] }],
+  });
+  smoother.filter(payload(0), 0);
+  const firstMovingFrame = smoother.filter(payload(1), 3600).poses[0].keypoints[0].x;
+  const secondMovingFrame = smoother.filter(payload(1), 7200).poses[0].keypoints[0].x;
+
+  assert.ok(firstMovingFrame > 0.6);
+  assert.ok(secondMovingFrame > 0.85);
 });
 
 test("manual drag pauses orbit, persists the angle on release, and reset restores the camera", () => {
