@@ -84,7 +84,10 @@ decides which payload fields are valid.
 
 The `blazepose-3d` payload accepts `poses[]`; every pose contains an ID and named
 `keypoints[]` with finite `x`, `y`, and `z` world coordinates. `confidence` is
-optional and points below `0.3` are omitted. Each pose uses anatomical colors:
+optional. Finite points fade with confidence instead of disappearing abruptly
+at a single draw threshold; even a zero-confidence estimate remains faintly
+visible so connected limbs do not pop in and out between adjacent frames.
+Each pose uses anatomical colors:
 amber for the head, violet for the torso, coral for the
 subject's left side, and blue for the subject's right side. A compact legend is
 shown whenever the panel is wide enough to keep the labels readable. When a
