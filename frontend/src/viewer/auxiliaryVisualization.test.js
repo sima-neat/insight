@@ -5,6 +5,7 @@ import {
   AUXILIARY_METADATA_TYPE,
   createAuxiliaryRendererRegistry,
   inspectAuxiliaryMessage,
+  mergeAuxiliarySessionSettings,
   partitionFrameMetadata,
   shouldAnimateAuxiliaryView,
   shouldHoldLastAuxiliaryFrame,
@@ -47,6 +48,19 @@ test("generic renderer registration preserves renderer-owned settings integratio
 
   assert.equal(registry.get("point-cloud-3d").viewerSettings, viewerSettings);
   assert.deepEqual(registry.get("point-cloud-3d").viewerSettings.toSession({ scale: 2 }), { scale: 2 });
+});
+
+test("per-view session preferences override only their renderer configuration baseline", () => {
+  const configured = { showReferenceCube: true, yaw: 0.25, pitch: 0.5 };
+
+  assert.deepEqual(
+    mergeAuxiliarySessionSettings(configured, { yaw: 1.25 }),
+    { showReferenceCube: true, yaw: 1.25, pitch: 0.5 },
+  );
+  assert.deepEqual(
+    mergeAuxiliarySessionSettings(configured, { yaw: -0.75 }),
+    { showReferenceCube: true, yaw: -0.75, pitch: 0.5 },
+  );
 });
 
 test("generic transport preserves an arbitrary renderer-owned 3D payload", () => {
