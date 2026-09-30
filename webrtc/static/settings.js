@@ -207,6 +207,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     settingsApi.writeScopeSettings(scope, settings);
+    if (scope === "global") settingsApi.clearAllChannelSettings();
     viewerSettingsOverlay.classList.add("hidden");
     window.dispatchEvent(
       new CustomEvent("viewer-settings-changed", {
@@ -298,7 +299,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const isGlobal = value === "global";
     const hasOverride = !isGlobal && settingsApi.hasScopeAuxiliarySettings(value, "blazepose-3d");
     blazePose3DScopeNote.textContent = isGlobal
-      ? "Sets the default 3D Pose view for channels without a channel-specific override."
+      ? "Saving applies these settings to every channel and clears channel-specific overrides."
       : hasOverride
         ? `Channel ${index} is using channel-specific 3D Pose settings.`
         : `Channel ${index} is inheriting the global 3D Pose settings.`;
