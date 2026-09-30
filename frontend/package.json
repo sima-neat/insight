@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:viewer": "vite build --config viewer.vite.config.js",
+    "test:auxiliary": "node --test src/viewer/auxiliaryVisualization.test.js src/viewer/blazePose3DRenderer.test.js",
     "test:viewer": "node --test src/viewer/*.test.js",
     "preview": "vite preview"
   },
