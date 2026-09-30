@@ -83,7 +83,9 @@ and tracks can be aligned with the displayed WebRTC frame.
 
 Frame-correlated data that should not cover the video can use an auxiliary
 visualization panel. See [`docs/auxiliary-visualizations.md`](docs/auxiliary-visualizations.md)
-for the generic message contract and the built-in BlazePose 3D renderer.
+for the generic message contract and the built-in BlazePose 3D renderer. The
+BlazePose panel includes an optional reference cube, automatic orbit controls,
+and pointer-drag manual viewing, persisted independently per channel and view.
 
 ## Build from source
 
