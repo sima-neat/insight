@@ -163,38 +163,17 @@ type, all carrying the source frame's `timestamp` in integer milliseconds; the
 correlator matches each against the retained frame mapping, and the viewer draws
 every type it holds for that frame.
 A separate panel accepts `type: "auxiliary-visualization"` for data that should
-not cover the video. Its `data` object requires `schema_version: 1`, a stable
-`id`, a registered `renderer`, and an object `payload`. The envelope is generic:
-the payload stays opaque to the transport and panel, and the registered renderer
-owns its schema, validation, drawing, and optional Viewer Configuration adapters.
-Unlike ordinary overlays,
-auxiliary views require the exact correlated RTP timestamp. The panel holds the
-last exactly correlated view for at most 160 ms across a brief delivery gap,
-then clears; late or expired messages are not selected. Multiple IDs for one
-frame become tabs; keep their channel and source PTS identical to the
-corresponding video and overlay messages. The
-built-in `blazepose-3d` renderer expects `payload.poses[].keypoints[]` with named
-finite `x`, `y`, and `z` world coordinates. Unknown versions/renderers are
-ignored and warned once in the browser console.
-Viewer Configuration has a **3D Pose** tab. Open it globally to set defaults or
-from a tile menu to control that channel's panel visibility, panel size, camera
-yaw/pitch, and 3D reference cube independently. Cube and camera changes from the
-panel controls stay synchronized with the corresponding channel configuration.
-Expanded mode is intentionally translucent so the source video remains visible
-behind the larger 3D visualization.
-The BlazePose panel can show a labeled reference cube around the world landmarks.
-Its skeleton uses an anatomical palette with a compact legend: amber head,
-violet torso, coral subject-left, and blue subject-right.
-Its panel-local controls toggle the cube and reset the camera; dragging the
-canvas selects a fixed manual inspection angle. The renderer uses each correlated
-frame's world landmarks directly, without temporal smoothing or automatic camera
-motion, so its pose timing remains aligned with the 2D overlay. It uses a fixed
-metric camera frame by default instead of refitting to changing pose bounds;
-`payload.view.center` and `payload.view.half_extent` can override that fixed frame.
-These preferences are browser-local and isolated by channel and auxiliary-view ID.
-The **Pose Estimation** metadata settings independently control overlay
-visibility, joint markers, and landmark names. Landmark names default off to
-avoid covering the subject in full-body demos.
+not cover the video. Its generic `data` object requires `schema_version: 1`, a
+stable `id`, a registered `renderer`, and an object `payload`. Auxiliary views
+require the exact correlated RTP timestamp; a matched view may remain for 160 ms
+across a delivery gap. Multiple IDs become tabs. Keep their channel and source
+PTS identical to the video and overlay messages.
+The built-in `blazepose-3d` renderer reads named finite `x`, `y`, and `z` values
+from `payload.poses[].keypoints[]`. Its **3D Pose** Viewer Configuration tab sets
+panel visibility, size, transparency, camera angle, and reference-cube visibility
+globally or per channel. The renderer draws each correlated frame directly,
+without smoothing or automatic motion. Pose Estimation settings separately
+control the 2D overlay, joint markers, and landmark names.
 A second ordinary message of the same type for the same frame replaces the first;
 auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses

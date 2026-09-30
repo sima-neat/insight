@@ -1,6 +1,6 @@
 import { auxiliaryRendererRegistry } from "./auxiliaryVisualization.js";
 
-export const BLAZEPOSE_CONNECTIONS = [
+const BLAZEPOSE_CONNECTIONS = [
   ["nose", "left_eye_inner"], ["left_eye_inner", "left_eye"], ["left_eye", "left_eye_outer"],
   ["left_eye_outer", "left_ear"], ["nose", "right_eye_inner"], ["right_eye_inner", "right_eye"],
   ["right_eye", "right_eye_outer"], ["right_eye_outer", "right_ear"], ["mouth_left", "mouth_right"],
@@ -15,7 +15,7 @@ export const BLAZEPOSE_CONNECTIONS = [
   ["right_heel", "right_foot_index"], ["right_ankle", "right_foot_index"],
 ];
 
-export const BLAZEPOSE_BODY_COLORS = Object.freeze({
+const BLAZEPOSE_BODY_COLORS = Object.freeze({
   head: "#facc15",
   torso: "#c084fc",
   left: "#fb7185",
@@ -59,7 +59,7 @@ const CUBE_FACES = [
   [1, 2, 6, 5], [3, 0, 4, 7],
 ];
 
-export const DEFAULT_BLAZEPOSE_VIEW_SETTINGS = Object.freeze({
+const DEFAULT_BLAZEPOSE_VIEW_SETTINGS = Object.freeze({
   showReferenceCube: true,
   yaw: DEFAULT_YAW,
   pitch: DEFAULT_PITCH,
@@ -74,7 +74,7 @@ function finiteOr(value, fallback) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-export function normalizeBlazePoseViewSettings(value) {
+function normalizeBlazePoseViewSettings(value) {
   const candidate = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
     showReferenceCube:
@@ -97,7 +97,7 @@ function confidenceAlpha(confidence) {
   return 0.18 + 0.82 * clamp(finiteOr(confidence, 1), 0, 1);
 }
 
-export function blazePoseBodyRegion(name) {
+function blazePoseBodyRegion(name) {
   if (HEAD_LANDMARKS.has(name)) return "head";
   if (typeof name === "string" && name.startsWith("left_")) return "left";
   if (typeof name === "string" && name.startsWith("right_")) return "right";
@@ -135,11 +135,6 @@ function projectNormalizedPoint(world, camera) {
     y: camera.pitchCos * world.y - camera.pitchSin * yawZ,
     depth: camera.pitchSin * world.y + camera.pitchCos * yawZ,
   };
-}
-
-export function projectWorldPoint(point, camera = DEFAULT_BLAZEPOSE_VIEW_SETTINGS) {
-  const world = normalizeWorldPoint(point);
-  return world ? projectNormalizedPoint(world, projectionCamera(camera)) : null;
 }
 
 function normalizedPoses(payload) {
@@ -276,7 +271,7 @@ function drawBodyColorLegend(ctx, width, height) {
   }
 }
 
-export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
+function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   const width = viewport?.width ?? 0;
   const height = viewport?.height ?? 0;
   if (width <= 0 || height <= 0) return false;
@@ -369,7 +364,7 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   return true;
 }
 
-export function createBlazePose3DSession({ initialSettings, onSettingsChange, requestDraw } = {}) {
+function createBlazePose3DSession({ initialSettings, onSettingsChange, requestDraw } = {}) {
   let settings = normalizeBlazePoseViewSettings(initialSettings);
   let drag = null;
   let destroyed = false;
@@ -388,9 +383,6 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
         camera: settings,
         showReferenceCube: settings.showReferenceCube,
       });
-    },
-    isAnimating() {
-      return false;
     },
     getControls() {
       return [
@@ -459,14 +451,6 @@ auxiliaryRendererRegistry.register("blazepose-3d", {
         showReferenceCube: settings.showReferenceBox !== false,
         yaw: settings.yawDegrees * Math.PI / 180,
         pitch: settings.pitchDegrees * Math.PI / 180,
-      };
-    },
-    toViewer(settings, current) {
-      return {
-        ...current,
-        showReferenceBox: settings.showReferenceCube !== false,
-        yawDegrees: Math.round(settings.yaw * 180 / Math.PI),
-        pitchDegrees: Math.round(settings.pitch * 180 / Math.PI),
       };
     },
   },

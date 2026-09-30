@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  BLAZEPOSE_BODY_COLORS,
-  DEFAULT_BLAZEPOSE_VIEW_SETTINGS,
-  blazePoseBodyRegion,
-  createBlazePose3DSession,
-  drawBlazePose3D,
-  normalizeBlazePoseViewSettings,
-  projectWorldPoint,
-} from "./blazePose3DRenderer.js";
+import { auxiliaryRendererRegistry } from "./auxiliaryVisualization.js";
+import "./blazePose3DRenderer.js";
+
+const { draw: drawBlazePose3D, createSession: createBlazePose3DSession } =
+  auxiliaryRendererRegistry.get("blazepose-3d");
+const BODY_COLORS = ["#facc15", "#c084fc", "#fb7185", "#38bdf8"];
 
 function recordingContext() {
   const calls = [];
@@ -31,16 +28,6 @@ function recordingContext() {
   }
   return context;
 }
-
-test("the native projection preserves depth as a visible screen displacement", () => {
-  const near = projectWorldPoint({ x: 0, y: 0, z: 0 });
-  const deep = projectWorldPoint({ x: 0, y: 0, z: 1 });
-
-  assert.ok(near);
-  assert.ok(deep);
-  assert.notEqual(near.x, deep.x);
-  assert.notEqual(near.y, deep.y);
-});
 
 test("BlazePose 3D renderer draws connected world keypoints", () => {
   const ctx = recordingContext();
@@ -75,11 +62,6 @@ test("low-confidence 3D joints fade instead of dropping out", () => {
 });
 
 test("BlazePose 3D renderer colors anatomical regions and labels the legend", () => {
-  assert.equal(blazePoseBodyRegion("nose"), "head");
-  assert.equal(blazePoseBodyRegion("left_wrist"), "left");
-  assert.equal(blazePoseBodyRegion("right_ankle"), "right");
-  assert.equal(blazePoseBodyRegion("unknown"), "torso");
-
   const ctx = recordingContext();
   drawBlazePose3D(ctx, { width: 480, height: 280 }, {
     poses: [{
@@ -98,8 +80,8 @@ test("BlazePose 3D renderer colors anatomical regions and labels the legend", ()
     .filter(([name]) => name === "fillStyle" || name === "strokeStyle")
     .map(([, value]) => value));
   assert.deepEqual(
-    new Set(Object.values(BLAZEPOSE_BODY_COLORS).filter((color) => appliedColors.has(color))),
-    new Set(Object.values(BLAZEPOSE_BODY_COLORS)),
+    new Set(BODY_COLORS.filter((color) => appliedColors.has(color))),
+    new Set(BODY_COLORS),
   );
   assert.deepEqual(
     ctx.calls.filter(([name, text]) => name === "fillText" && ["Head", "Torso", "Left", "Right"].includes(text)).map(([, text]) => text),
@@ -124,7 +106,7 @@ test("multiple poses retain distinct identity accents around anatomical colors",
     .map(([, value]) => value));
   assert.ok(strokes.has("#f8fafc"));
   assert.ok(strokes.has("#4ade80"));
-  assert.ok(strokes.has(BLAZEPOSE_BODY_COLORS.left));
+  assert.ok(strokes.has("#fb7185"));
 });
 
 test("metric camera framing does not move a keypoint when pose bounds change", () => {
@@ -194,45 +176,36 @@ test("empty or invalid BlazePose payloads render a stable empty state", () => {
   }
 });
 
-test("malformed pose data does not keep a renderer animation loop alive", () => {
-  const session = createBlazePose3DSession();
-  session.draw(recordingContext(), { width: 120, height: 90 }, { poses: [{ keypoints: [] }] }, {
-    animationTimeMs: 0,
-  });
-
-  assert.equal(session.isAnimating(), false);
-});
-
 test("saved view settings normalize malformed and out-of-range values", () => {
-  assert.deepEqual(normalizeBlazePoseViewSettings(null), DEFAULT_BLAZEPOSE_VIEW_SETTINGS);
-  const normalized = normalizeBlazePoseViewSettings({
-    showReferenceCube: "yes",
-    autoRotate: false,
-    rotationSpeed: 1000,
-    paused: true,
-    stabilizePose: false,
-    yaw: "bad",
-    pitch: 100,
-  });
+  const normalized = createBlazePose3DSession({
+    initialSettings: {
+      showReferenceCube: "yes",
+      autoRotate: false,
+      rotationSpeed: 1000,
+      paused: true,
+      stabilizePose: false,
+      yaw: "bad",
+      pitch: 100,
+    },
+  }).snapshot();
 
   assert.equal(normalized.showReferenceCube, true);
   assert.equal("autoRotate" in normalized, false);
   assert.equal("rotationSpeed" in normalized, false);
   assert.equal("paused" in normalized, false);
   assert.equal("stabilizePose" in normalized, false);
-  assert.equal(normalized.yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
+  assert.equal(normalized.yaw, -Math.PI / 4);
   assert.ok(normalized.pitch < Math.PI / 2);
 });
 
-test("the 3D session does not animate independently from pose frames", () => {
+test("drawing does not mutate the fixed camera", () => {
   const session = createBlazePose3DSession();
   const payload = { poses: [{ keypoints: [{ name: "nose", x: 0, y: 0, z: 0 }] }] };
   const initialYaw = session.snapshot().yaw;
 
-  session.draw(recordingContext(), { width: 120, height: 90 }, payload, { animationTimeMs: 0 });
-  session.draw(recordingContext(), { width: 120, height: 90 }, payload, { animationTimeMs: 100 });
+  session.draw(recordingContext(), { width: 120, height: 90 }, payload);
+  session.draw(recordingContext(), { width: 120, height: 90 }, payload);
   assert.equal(session.snapshot().yaw, initialYaw);
-  assert.equal(session.isAnimating(), false);
   assert.deepEqual(session.getControls().map(({ id }) => id), ["showReferenceCube", "resetCamera"]);
 });
 
@@ -262,25 +235,24 @@ test("manual drag persists a fixed camera angle and reset restores the default",
     onSettingsChange(settings) { saved.push(settings); },
     requestDraw() { drawRequests += 1; },
   });
+  const defaults = session.snapshot();
 
   assert.equal(session.pointerDown({ x: 10, y: 20, pointerId: 7 }), true);
   assert.equal(session.pointerMove({ x: 30, y: 5, pointerId: 7 }), true);
   assert.equal(session.pointerMove({ x: 40, y: 5, pointerId: 8 }), false);
   assert.equal(session.pointerUp({ pointerId: 7 }), true);
-  assert.notEqual(session.snapshot().yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
+  assert.notEqual(session.snapshot().yaw, defaults.yaw);
   assert.equal(saved.length, 1);
   assert.ok(drawRequests >= 3);
 
   session.applyControl("resetCamera");
-  assert.equal(session.snapshot().yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
-  assert.equal(session.snapshot().pitch, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.pitch);
+  assert.deepEqual(session.snapshot(), defaults);
 });
 
-test("destroyed renderer sessions stop animation and ignore later interaction", () => {
+test("destroyed renderer sessions ignore later interaction", () => {
   const session = createBlazePose3DSession();
   session.destroy();
 
-  assert.equal(session.isAnimating(), false);
   assert.equal(session.pointerDown({ x: 1, y: 1, pointerId: 1 }), false);
   const ctx = recordingContext();
   session.draw(ctx, { width: 120, height: 90 }, { poses: [] }, { animationTimeMs: 0 });

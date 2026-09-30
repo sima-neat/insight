@@ -3,19 +3,18 @@ import test from "node:test";
 
 import {
   AUXILIARY_METADATA_TYPE,
-  createAuxiliaryRendererRegistry,
-  inspectAuxiliaryMessage,
-  mergeAuxiliarySessionSettings,
+  auxiliaryRendererRegistry,
+  createAuxiliaryViewPreference,
   partitionFrameMetadata,
-  shouldAnimateAuxiliaryView,
-  shouldHoldLastAuxiliaryFrame,
+  reconcileAuxiliaryPanelMode,
+  restoreAuxiliaryViewPreference,
+  retainAuxiliaryViews,
 } from "./auxiliaryVisualization.js";
 import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
 
 function registryWith(...names) {
-  const registry = createAuxiliaryRendererRegistry();
-  for (const name of names) registry.register(name, { title: name, draw() {} });
-  return registry;
+  const renderers = new Map(names.map((name) => [name, { title: name, draw() {} }]));
+  return { get: (name) => renderers.get(name) ?? null };
 }
 
 function message({ id = "pose", renderer = "blazepose-3d", rtp = 42, payload = { poses: [] } } = {}) {
@@ -30,36 +29,55 @@ function message({ id = "pose", renderer = "blazepose-3d", rtp = 42, payload = {
 
 test("renderer selection uses the registered renderer named by the generic payload", () => {
   const registry = registryWith("blazepose-3d", "plot");
-  const result = inspectAuxiliaryMessage(message({ renderer: "plot" }), registry);
+  const result = partitionFrameMetadata([{ data: message({ renderer: "plot" }) }], 42, registry);
+  const view = result.auxiliaryViews[0];
 
-  assert.equal(result.reason, null);
-  assert.equal(result.view.renderer, "plot");
-  assert.equal(result.view.id, "pose");
-  assert.equal(result.view.frameId, "frame-1");
+  assert.equal(view.renderer, "plot");
+  assert.equal(view.id, "pose");
+  assert.equal(view.frameId, "frame-1");
 });
 
 test("generic renderer registration preserves renderer-owned settings integration", () => {
-  const registry = createAuxiliaryRendererRegistry();
   const viewerSettings = {
     toSession(settings) { return { scale: settings.scale }; },
-    toViewer(settings) { return { scale: settings.scale }; },
   };
-  registry.register("point-cloud-3d", { title: "Point Cloud", draw() {}, viewerSettings });
+  auxiliaryRendererRegistry.register(
+    "point-cloud-3d-test",
+    { title: "Point Cloud", draw() {}, viewerSettings },
+  );
 
-  assert.equal(registry.get("point-cloud-3d").viewerSettings, viewerSettings);
-  assert.deepEqual(registry.get("point-cloud-3d").viewerSettings.toSession({ scale: 2 }), { scale: 2 });
+  const renderer = auxiliaryRendererRegistry.get("point-cloud-3d-test");
+  assert.equal(renderer.viewerSettings, viewerSettings);
+  assert.deepEqual(renderer.viewerSettings.toSession({ scale: 2 }), { scale: 2 });
 });
 
-test("per-view session preferences override only their renderer configuration baseline", () => {
+test("per-view preferences apply only while their Viewer Configuration baseline is current", () => {
   const configured = { showReferenceCube: true, yaw: 0.25, pitch: 0.5 };
+  const preference = createAuxiliaryViewPreference(configured, { yaw: 1.25 });
 
   assert.deepEqual(
-    mergeAuxiliarySessionSettings(configured, { yaw: 1.25 }),
+    restoreAuxiliaryViewPreference(configured, preference),
     { showReferenceCube: true, yaw: 1.25, pitch: 0.5 },
   );
   assert.deepEqual(
-    mergeAuxiliarySessionSettings(configured, { yaw: -0.75 }),
+    restoreAuxiliaryViewPreference({ ...configured, yaw: -0.75 }, preference),
     { showReferenceCube: true, yaw: -0.75, pitch: 0.5 },
+  );
+  assert.deepEqual(restoreAuxiliaryViewPreference(configured, { yaw: 2 }, false), configured);
+});
+
+test("a restored auxiliary view reconciles its panel mode with explicit viewer settings", () => {
+  assert.equal(
+    reconcileAuxiliaryPanelMode("compact", { enabled: false, panelMode: "expanded" }, true),
+    "hidden",
+  );
+  assert.equal(
+    reconcileAuxiliaryPanelMode("hidden", { enabled: true, panelMode: "expanded" }, true),
+    "expanded",
+  );
+  assert.equal(
+    reconcileAuxiliaryPanelMode("expanded", { enabled: true, panelMode: "compact" }, false),
+    "expanded",
   );
 });
 
@@ -70,10 +88,13 @@ test("generic transport preserves an arbitrary renderer-owned 3D payload", () =>
     triangles: [[0, 1, 2]],
     coordinateSystem: { handedness: "right", units: "millimeters" },
   };
-  const result = inspectAuxiliaryMessage(message({ renderer: "mesh-3d", payload }), registry);
+  const result = partitionFrameMetadata(
+    [{ data: message({ renderer: "mesh-3d", payload }) }],
+    42,
+    registry,
+  );
 
-  assert.equal(result.reason, null);
-  assert.equal(result.view.payload, payload);
+  assert.equal(result.auxiliaryViews[0].payload, payload);
 });
 
 test("unknown and malformed auxiliary payloads are rejected without becoming overlays", () => {
@@ -116,6 +137,17 @@ test("untimestamped auxiliary data cannot use the ordinary arrival fallback", ()
 
   assert.deepEqual(result.auxiliaryViews, []);
   assert.deepEqual(result.overlays, []);
+});
+
+test("timestamped auxiliary data uses the selected frame in the video callback fallback", () => {
+  const registry = registryWith("blazepose-3d");
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, message(), 10);
+
+  const candidates = takeMetadataForFrame(queue, undefined, 0, 11);
+  const result = partitionFrameMetadata(candidates, undefined, registry);
+
+  assert.equal(result.auxiliaryViews[0]?.id, "pose");
 });
 
 test("one frame can carry several independently selected auxiliary views", () => {
@@ -168,23 +200,26 @@ test("channel-local queues cannot display another channel's auxiliary payload", 
   assert.equal(takeMetadataForFrame(channelZero, 42, 0, 12).length, 0);
 });
 
-test("auxiliary animation runs only for a visible payload that requests it", () => {
-  const animating = { isAnimating: () => true };
-  const still = { isAnimating: () => false };
+test("each auxiliary view keeps an independent dropout grace", () => {
+  const pose = { id: "pose", renderer: "blazepose-3d" };
+  const chart = { id: "chart", renderer: "plot" };
+  const first = retainAuxiliaryViews(new Map(), [pose, chart], new Map(), 1000);
+  const partial = retainAuxiliaryViews(first.views, [chart], first.lastSeenById, 1160);
 
-  assert.equal(shouldAnimateAuxiliaryView("compact", true, animating), true);
-  assert.equal(shouldAnimateAuxiliaryView("expanded", true, animating), true);
-  assert.equal(shouldAnimateAuxiliaryView("collapsed", true, animating), false);
-  assert.equal(shouldAnimateAuxiliaryView("hidden", true, animating), false);
-  assert.equal(shouldAnimateAuxiliaryView("compact", false, animating), false);
-  assert.equal(shouldAnimateAuxiliaryView("compact", true, still), false);
-  assert.equal(shouldAnimateAuxiliaryView("compact", true, null), false);
+  assert.deepEqual([...partial.views.keys()], ["pose", "chart"]);
+  const expired = retainAuxiliaryViews(partial.views, [chart], partial.lastSeenById, 1161);
+  assert.deepEqual([...expired.views.keys()], ["chart"]);
+  assert.equal(expired.lastSeenById.has("pose"), false);
 });
 
-test("a correlated auxiliary view is held only through a brief delivery gap", () => {
-  assert.equal(shouldHoldLastAuxiliaryFrame(true, 1000, 1160), true);
-  assert.equal(shouldHoldLastAuxiliaryFrame(true, 1000, 1161), false);
-  assert.equal(shouldHoldLastAuxiliaryFrame(false, 1000, 1050), false);
-  assert.equal(shouldHoldLastAuxiliaryFrame(true, Number.NEGATIVE_INFINITY, 1050), false);
-  assert.equal(shouldHoldLastAuxiliaryFrame(true, 1100, 1050), false);
+test("one frame cannot create an unbounded auxiliary tab set", () => {
+  const registry = registryWith("plot");
+  const candidates = Array.from({ length: 18 }, (_, id) => ({
+    data: message({ id: `view-${id}`, renderer: "plot" }),
+  }));
+  const result = partitionFrameMetadata(candidates, 42, registry);
+
+  assert.equal(result.auxiliaryViews.length, 16);
+  assert.equal(result.ignoredAuxiliary.length, 2);
+  assert.match(result.ignoredAuxiliary[0].reason, /exceeds/);
 });

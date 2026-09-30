@@ -150,7 +150,8 @@ body {
   z-index: 10;
   display: flex;
   flex-direction: column;
-  width: clamp(220px, 31%, 300px);
+  width: auto;
+  height: min(300px, calc(100% - 54px));
   max-width: calc(100% - 16px);
   aspect-ratio: 1 / 1;
   overflow: hidden;
@@ -176,6 +177,7 @@ body {
   --auxiliary-controls-background: rgb(2 6 23 / calc(0.54 * var(--auxiliary-surface-opacity)));
   inset: 8px 8px 38px 8px;
   width: auto;
+  height: auto;
   max-width: none;
   aspect-ratio: auto;
   border-color: rgba(125, 211, 252, 0.24);
@@ -324,8 +326,7 @@ body {
   white-space: nowrap;
 }
 
-.auxiliary-control-toggle,
-.auxiliary-control-range {
+.auxiliary-control-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -334,11 +335,6 @@ body {
 .auxiliary-control-toggle input {
   width: 13px;
   height: 13px;
-  margin: 0;
-}
-
-.auxiliary-control-range input {
-  width: clamp(72px, 8vw, 104px);
   margin: 0;
 }
 
@@ -363,12 +359,6 @@ body {
   color: rgba(18, 18, 18, 0.68);
 }
 
-@media (max-width: 900px) {
-  .auxiliary-panel {
-    width: clamp(200px, 38%, 260px);
-  }
-}
-
 .auxiliary-control-action:hover,
 .auxiliary-control-action:focus-visible {
   background: rgba(71, 85, 105, 0.9);
@@ -378,22 +368,6 @@ body {
 .auxiliary-control-action:disabled {
   cursor: not-allowed;
   opacity: 0.42;
-}
-
-.auxiliary-panel-no-data {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  padding: 8px;
-  color: rgba(226, 232, 240, 0.68);
-  font-size: 10px;
-  text-align: center;
-  place-items: center;
-  pointer-events: none;
-}
-
-.auxiliary-panel-no-data[hidden] {
-  display: none;
 }
 
 video,
