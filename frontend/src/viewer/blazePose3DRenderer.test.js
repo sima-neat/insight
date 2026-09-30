@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  BLAZEPOSE_BODY_COLORS,
   DEFAULT_BLAZEPOSE_VIEW_SETTINGS,
+  blazePoseBodyRegion,
   createBlazePose3DSession,
   drawBlazePose3D,
   normalizeBlazePoseViewSettings,
@@ -11,7 +13,7 @@ import {
 
 function recordingContext() {
   const calls = [];
-  return {
+  const context = {
     calls,
     beginPath() { calls.push(["beginPath"]); },
     moveTo(x, y) { calls.push(["moveTo", x, y]); },
@@ -22,6 +24,12 @@ function recordingContext() {
     fill() { calls.push(["fill"]); },
     fillText(text) { calls.push(["fillText", text]); },
   };
+  for (const property of ["fillStyle", "strokeStyle", "font", "textAlign", "textBaseline", "globalAlpha", "lineWidth", "lineCap"]) {
+    Object.defineProperty(context, property, {
+      set(value) { calls.push([property, value]); },
+    });
+  }
+  return context;
 }
 
 test("the native projection preserves depth as a visible screen displacement", () => {
@@ -48,7 +56,60 @@ test("BlazePose 3D renderer draws connected world keypoints", () => {
   });
 
   assert.ok(ctx.calls.some(([name]) => name === "lineTo"));
-  assert.equal(ctx.calls.filter(([name]) => name === "arc").length, 3);
+  assert.equal(ctx.calls.filter(([name, , , radius]) => name === "arc" && radius === 3.1).length, 3);
+});
+
+test("BlazePose 3D renderer colors anatomical regions and labels the legend", () => {
+  assert.equal(blazePoseBodyRegion("nose"), "head");
+  assert.equal(blazePoseBodyRegion("left_wrist"), "left");
+  assert.equal(blazePoseBodyRegion("right_ankle"), "right");
+  assert.equal(blazePoseBodyRegion("unknown"), "torso");
+
+  const ctx = recordingContext();
+  drawBlazePose3D(ctx, { width: 480, height: 280 }, {
+    poses: [{
+      keypoints: [
+        { name: "nose", x: 0, y: -0.8, z: 0 },
+        { name: "left_eye_inner", x: -0.03, y: -0.82, z: 0 },
+        { name: "left_shoulder", x: -0.2, y: -0.4, z: 0 },
+        { name: "right_shoulder", x: 0.2, y: -0.4, z: 0 },
+        { name: "left_elbow", x: -0.4, y: 0, z: 0 },
+        { name: "right_elbow", x: 0.4, y: 0, z: 0 },
+      ],
+    }],
+  }, { showReferenceCube: false });
+
+  const appliedColors = new Set(ctx.calls
+    .filter(([name]) => name === "fillStyle" || name === "strokeStyle")
+    .map(([, value]) => value));
+  assert.deepEqual(
+    new Set(Object.values(BLAZEPOSE_BODY_COLORS).filter((color) => appliedColors.has(color))),
+    new Set(Object.values(BLAZEPOSE_BODY_COLORS)),
+  );
+  assert.deepEqual(
+    ctx.calls.filter(([name, text]) => name === "fillText" && ["Head", "Torso", "Left", "Right"].includes(text)).map(([, text]) => text),
+    ["Head", "Torso", "Left", "Right"],
+  );
+});
+
+test("multiple poses retain distinct identity accents around anatomical colors", () => {
+  const ctx = recordingContext();
+  drawBlazePose3D(ctx, { width: 200, height: 160 }, {
+    poses: [0, 1].map((index) => ({
+      id: `pose_${index + 1}`,
+      keypoints: [
+        { name: "left_shoulder", x: -0.4 + index * 0.6, y: -0.2, z: 0 },
+        { name: "left_elbow", x: -0.5 + index * 0.6, y: 0.1, z: 0 },
+      ],
+    })),
+  }, { showReferenceCube: false });
+
+  const strokes = new Set(ctx.calls
+    .filter(([name]) => name === "strokeStyle")
+    .map(([, value]) => value));
+  assert.ok(strokes.has("#f8fafc"));
+  assert.ok(strokes.has("#4ade80"));
+  assert.ok(strokes.has(BLAZEPOSE_BODY_COLORS.left));
 });
 
 test("metric camera framing does not move a keypoint when pose bounds change", () => {

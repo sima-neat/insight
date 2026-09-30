@@ -183,6 +183,8 @@ panel controls stay synchronized with the corresponding channel configuration.
 Expanded mode is intentionally translucent so the source video remains visible
 behind the larger 3D visualization.
 The BlazePose panel can show a labeled reference cube around the world landmarks.
+Its skeleton uses an anatomical palette with a compact legend: amber head,
+violet torso, coral subject-left, and blue subject-right.
 Its panel-local controls toggle the cube and reset the camera; dragging the
 canvas selects a fixed manual inspection angle. The renderer uses each correlated
 frame's world landmarks directly, without temporal smoothing or automatic camera
