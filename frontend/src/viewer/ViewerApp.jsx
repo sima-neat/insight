@@ -8,6 +8,7 @@ import {
   takeMetadataForFrame,
 } from "./metadataSync.js";
 import AuxiliaryPanel from "./AuxiliaryPanel.jsx";
+import "./blazePose3DRenderer.js";
 import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";

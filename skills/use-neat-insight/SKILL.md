@@ -163,7 +163,10 @@ correlator matches each against the retained frame mapping, and the viewer draws
 every type it holds for that frame.
 A separate panel accepts `type: "auxiliary-visualization"` for data that should
 not cover the video. Its `data` object requires `schema_version: 1`, a stable
-`id`, a registered `renderer`, and an object `payload`. Unlike ordinary overlays,
+`id`, a registered `renderer`, and an object `payload`. The envelope is generic:
+the payload stays opaque to the transport and panel, and the registered renderer
+owns its schema, validation, drawing, and optional Viewer Configuration adapters.
+Unlike ordinary overlays,
 auxiliary views require the exact correlated RTP timestamp. The panel holds the
 last exactly correlated view for at most 160 ms across a brief delivery gap,
 then clears; late or expired messages are not selected. Multiple IDs for one
@@ -182,8 +185,10 @@ The BlazePose panel can show a labeled reference cube around the world landmarks
 Its panel-local controls toggle the cube and reset the camera; dragging the
 canvas selects a fixed manual inspection angle. The renderer uses each correlated
 frame's world landmarks directly, without temporal smoothing or automatic camera
-motion, so its pose timing remains aligned with the 2D overlay. These preferences
-are browser-local and isolated by channel and auxiliary-view ID.
+motion, so its pose timing remains aligned with the 2D overlay. It uses a fixed
+metric camera frame by default instead of refitting to changing pose bounds;
+`payload.view.center` and `payload.view.half_extent` can override that fixed frame.
+These preferences are browser-local and isolated by channel and auxiliary-view ID.
 The **Pose Estimation** metadata settings independently control overlay
 visibility, joint markers, and landmark names. Landmark names default off to
 avoid covering the subject in full-body demos.
