@@ -48,7 +48,7 @@ function getResolvedViewerSettings(channelIndex, metadataType = "object-detectio
     return window.resolveTypeSettings(channelIndex, metadataType);
   }
   return {
-    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    general: { videoSyncBufferMs: 300, metadataRetentionMs: 0, showRoi: true },
     type: {},
   };
 }
@@ -57,7 +57,7 @@ function getSynchronizationSettings(channelIndex) {
   const settings = getResolvedViewerSettings(channelIndex);
   return {
     videoSyncBufferMs:
-      typeof settings.general.videoSyncBufferMs === "number" ? settings.general.videoSyncBufferMs : 350,
+      typeof settings.general.videoSyncBufferMs === "number" ? settings.general.videoSyncBufferMs : 300,
     metadataRetentionMs:
       typeof settings.general.metadataRetentionMs === "number" ? settings.general.metadataRetentionMs : 0,
   };
