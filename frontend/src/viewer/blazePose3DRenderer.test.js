@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   DEFAULT_BLAZEPOSE_VIEW_SETTINGS,
   createBlazePose3DSession,
-  createBlazePosePoseSmoother,
   drawBlazePose3D,
   normalizeBlazePoseViewSettings,
   projectWorldPoint,
@@ -105,44 +104,29 @@ test("saved view settings normalize malformed and out-of-range values", () => {
   });
 
   assert.equal(normalized.showReferenceCube, true);
-  assert.equal(normalized.autoRotate, false);
-  assert.equal(normalized.rotationSpeed, 90);
-  assert.equal(normalized.paused, true);
-  assert.equal(normalized.stabilizePose, false);
+  assert.equal("autoRotate" in normalized, false);
+  assert.equal("rotationSpeed" in normalized, false);
+  assert.equal("paused" in normalized, false);
+  assert.equal("stabilizePose" in normalized, false);
   assert.equal(normalized.yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
   assert.ok(normalized.pitch < Math.PI / 2);
 });
 
-test("session orbit timing honors speed, pause, and the auto-orbit toggle", () => {
-  const session = createBlazePose3DSession({
-    initialSettings: { autoRotate: true, rotationSpeed: 30 },
-  });
+test("the 3D session does not animate independently from pose frames", () => {
+  const session = createBlazePose3DSession();
   const payload = { poses: [{ keypoints: [{ name: "nose", x: 0, y: 0, z: 0 }] }] };
   const initialYaw = session.snapshot().yaw;
 
   session.draw(recordingContext(), { width: 120, height: 90 }, payload, { animationTimeMs: 0 });
   session.draw(recordingContext(), { width: 120, height: 90 }, payload, { animationTimeMs: 100 });
-  assert.ok(Math.abs(session.snapshot().yaw - initialYaw - Math.PI / 60) < 1e-9);
-  assert.equal(session.isAnimating(), true);
-
-  session.applyControl("paused");
-  const pausedYaw = session.snapshot().yaw;
-  session.draw(recordingContext(), { width: 120, height: 90 }, payload, { animationTimeMs: 300 });
-  assert.equal(session.snapshot().yaw, pausedYaw);
+  assert.equal(session.snapshot().yaw, initialYaw);
   assert.equal(session.isAnimating(), false);
-  assert.equal(session.getControls().find(({ id }) => id === "paused").label, "Resume");
-
-  session.applyControl("paused");
-  session.applyControl("autoRotate", false);
-  session.draw(recordingContext(), { width: 120, height: 90 }, payload, { animationTimeMs: 500 });
-  assert.equal(session.snapshot().yaw, pausedYaw);
-  assert.equal(session.isAnimating(), false);
+  assert.deepEqual(session.getControls().map(({ id }) => id), ["showReferenceCube", "resetCamera"]);
 });
 
 test("viewer configuration can update a live renderer session", () => {
   let drawRequests = 0;
   const session = createBlazePose3DSession({
-    initialSettings: { autoRotate: false },
     requestDraw() { drawRequests += 1; },
   });
 
@@ -150,49 +134,16 @@ test("viewer configuration can update a live renderer session", () => {
     showReferenceCube: false,
     yaw: Math.PI / 2,
     pitch: 0,
-    stabilizePose: false,
   });
 
   assert.equal(session.snapshot().showReferenceCube, false);
   assert.equal(session.snapshot().yaw, Math.PI / 2);
   assert.equal(session.snapshot().pitch, 0);
-  assert.equal(session.snapshot().stabilizePose, false);
   assert.equal(session.getControls().find(({ id }) => id === "showReferenceCube").value, false);
   assert.equal(drawRequests, 1);
 });
 
-test("adaptive stabilization reduces stationary world-landmark jitter", () => {
-  const smoother = createBlazePosePoseSmoother();
-  const raw = [];
-  const filtered = [];
-  for (let frame = 0; frame < 60; frame += 1) {
-    const x = frame % 2 === 0 ? -0.02 : 0.02;
-    raw.push(x);
-    const result = smoother.filter({
-      poses: [{ id: "pose_1", keypoints: [{ name: "nose", x, y: 0, z: 0 }] }],
-    }, frame * 3600);
-    filtered.push(result.poses[0].keypoints[0].x);
-  }
-  const meanStep = (values) => values.slice(1)
-    .reduce((total, value, index) => total + Math.abs(value - values[index]), 0) / (values.length - 1);
-
-  assert.ok(meanStep(filtered) < meanStep(raw) * 0.4);
-});
-
-test("adaptive stabilization follows a fast pose change without multi-frame lag", () => {
-  const smoother = createBlazePosePoseSmoother();
-  const payload = (x) => ({
-    poses: [{ id: "pose_1", keypoints: [{ name: "nose", x, y: 0, z: 0 }] }],
-  });
-  smoother.filter(payload(0), 0);
-  const firstMovingFrame = smoother.filter(payload(1), 3600).poses[0].keypoints[0].x;
-  const secondMovingFrame = smoother.filter(payload(1), 7200).poses[0].keypoints[0].x;
-
-  assert.ok(firstMovingFrame > 0.6);
-  assert.ok(secondMovingFrame > 0.85);
-});
-
-test("manual drag pauses orbit, persists the angle on release, and reset restores the camera", () => {
+test("manual drag persists a fixed camera angle and reset restores the default", () => {
   const saved = [];
   let drawRequests = 0;
   const session = createBlazePose3DSession({
@@ -204,7 +155,6 @@ test("manual drag pauses orbit, persists the angle on release, and reset restore
   assert.equal(session.pointerMove({ x: 30, y: 5, pointerId: 7 }), true);
   assert.equal(session.pointerMove({ x: 40, y: 5, pointerId: 8 }), false);
   assert.equal(session.pointerUp({ pointerId: 7 }), true);
-  assert.equal(session.snapshot().paused, true);
   assert.notEqual(session.snapshot().yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
   assert.equal(saved.length, 1);
   assert.ok(drawRequests >= 3);
@@ -212,7 +162,6 @@ test("manual drag pauses orbit, persists the angle on release, and reset restore
   session.applyControl("resetCamera");
   assert.equal(session.snapshot().yaw, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.yaw);
   assert.equal(session.snapshot().pitch, DEFAULT_BLAZEPOSE_VIEW_SETTINGS.pitch);
-  assert.equal(session.snapshot().paused, false);
 });
 
 test("destroyed renderer sessions stop animation and ignore later interaction", () => {

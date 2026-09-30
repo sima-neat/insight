@@ -50,7 +50,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const blazePose3DPitchSlider = document.getElementById("blazePose3DPitchSlider");
   const blazePose3DPitchDisplay = document.getElementById("blazePose3DPitchDisplay");
   const blazePose3DReferenceBoxToggle = document.getElementById("toggleBlazePose3DReferenceBox");
-  const blazePose3DStabilizationToggle = document.getElementById("toggleBlazePose3DStabilization");
   const blazePose3DDependentRows = document.querySelectorAll(".blazepose-3d-dependent");
   const blazePose3DScopeNote = document.getElementById("blazePose3DScopeNote");
   const resetBlazePose3DView = document.getElementById("resetBlazePose3DView");
@@ -138,7 +137,6 @@ document.addEventListener("DOMContentLoaded", () => {
     blazePose3DYawSlider.value = defaults.yawDegrees;
     blazePose3DPitchSlider.value = defaults.pitchDegrees;
     blazePose3DReferenceBoxToggle.checked = defaults.showReferenceBox;
-    blazePose3DStabilizationToggle.checked = defaults.stabilizePose;
     updateBlazePose3DDisplays();
     updateBlazePose3DControls();
   });
@@ -197,8 +195,7 @@ document.addEventListener("DOMContentLoaded", () => {
       panelMode: blazePose3DPanelMode.value,
       yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
       pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
-      showReferenceBox: blazePose3DReferenceBoxToggle.checked,
-      stabilizePose: blazePose3DStabilizationToggle.checked
+      showReferenceBox: blazePose3DReferenceBoxToggle.checked
     };
 
     settingsApi.writeScopeSettings(scope, settings);
@@ -466,7 +463,6 @@ document.addEventListener("DOMContentLoaded", () => {
     blazePose3DYawSlider.value = blazePose3DSettings.yawDegrees ?? -45;
     blazePose3DPitchSlider.value = blazePose3DSettings.pitchDegrees ?? 20;
     blazePose3DReferenceBoxToggle.checked = blazePose3DSettings.showReferenceBox !== false;
-    blazePose3DStabilizationToggle.checked = blazePose3DSettings.stabilizePose !== false;
     metadataVisibilityDraft = Object.fromEntries(
       settingsApi.metadataTypes.map(({ value }) => [value, settings.types[value]?.visible !== false])
     );
