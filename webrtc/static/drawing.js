@@ -100,7 +100,7 @@ function resolveViewerDrawSettings(index, metadataType) {
     return window.resolveTypeSettings(index, metadataType);
   }
   return {
-    general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: true },
+    general: { videoSyncBufferMs: 300, metadataRetentionMs: 0, showRoi: true },
     type: {}
   };
 }
