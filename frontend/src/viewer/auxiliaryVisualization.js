@@ -1,5 +1,6 @@
 export const AUXILIARY_METADATA_TYPE = "auxiliary-visualization";
 export const AUXILIARY_SCHEMA_VERSION = 1;
+export const AUXILIARY_DROPOUT_GRACE_MS = 160;
 
 const MAX_ID_LENGTH = 128;
 const MAX_TITLE_LENGTH = 80;
@@ -33,6 +34,23 @@ export const auxiliaryRendererRegistry = createAuxiliaryRendererRegistry();
 export function shouldAnimateAuxiliaryView(mode, hasPayload, session) {
   if (mode === "collapsed" || mode === "hidden" || !hasPayload) return false;
   return session?.isAnimating?.() === true;
+}
+
+// Decoded video can briefly outrun its exactly correlated auxiliary message.
+// Retain only the already-validated view for a few frames so the panel does not
+// flash empty; a real outage still clears promptly and no unmatched message is
+// ever selected.
+export function shouldHoldLastAuxiliaryFrame(
+  hasCurrentViews,
+  lastViewAtMs,
+  nowMs,
+  graceMs = AUXILIARY_DROPOUT_GRACE_MS,
+) {
+  return hasCurrentViews
+    && Number.isFinite(lastViewAtMs)
+    && Number.isFinite(nowMs)
+    && nowMs >= lastViewAtMs
+    && nowMs - lastViewAtMs <= graceMs;
 }
 
 function boundedString(value, maxLength) {

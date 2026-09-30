@@ -164,9 +164,11 @@ every type it holds for that frame.
 A separate panel accepts `type: "auxiliary-visualization"` for data that should
 not cover the video. Its `data` object requires `schema_version: 1`, a stable
 `id`, a registered `renderer`, and an object `payload`. Unlike ordinary overlays,
-auxiliary views require the exact correlated RTP timestamp and clear on missing,
-late, or expired data. Multiple IDs for one frame become tabs; keep their channel
-and source PTS identical to the corresponding video and overlay messages. The
+auxiliary views require the exact correlated RTP timestamp. The panel holds the
+last exactly correlated view for at most 160 ms across a brief delivery gap,
+then clears; late or expired messages are not selected. Multiple IDs for one
+frame become tabs; keep their channel and source PTS identical to the
+corresponding video and overlay messages. The
 built-in `blazepose-3d` renderer expects `payload.poses[].keypoints[]` with named
 finite `x`, `y`, and `z` world coordinates. Unknown versions/renderers are
 ignored and warned once in the browser console.
@@ -180,6 +182,9 @@ pause or resume, and reset the camera; dragging the canvas pauses orbit for
 manual inspection. These preferences are browser-local and isolated by channel
 and auxiliary-view ID. Animation stops without a selected correlated payload or
 when the panel is collapsed, hidden, reset, or unmounted.
+The **Pose Estimation** metadata settings independently control overlay
+visibility, joint markers, and landmark names. Landmark names default off to
+avoid covering the subject in full-body demos.
 A second ordinary message of the same type for the same frame replaces the first;
 auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses

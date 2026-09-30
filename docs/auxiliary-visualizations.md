@@ -15,8 +15,10 @@ Send auxiliary data through the same metadata UDP port as overlays: channel `N`
 uses `metadataUDP + N` (UDP `9100 + N` with the default mapping). Set the
 top-level `timestamp` to the source video PTS in integer milliseconds. Auxiliary
 data is frame-strict: the panel updates only when Insight correlates the message
-to the exact decoded RTP frame, and it clears for a frame with no matching data.
-`frame_id` is retained for diagnostics but is not used for correlation.
+to the exact decoded RTP frame. To prevent a one-frame delivery gap from
+flashing the panel, the viewer may keep the last validated view for up to 160
+milliseconds; it then clears if correlated data has not resumed. `frame_id` is
+retained for diagnostics but is not used for correlation.
 
 ## Message contract
 
@@ -96,9 +98,10 @@ speed and pause state remain browser-local and are stored separately for every
 channel and auxiliary view ID, so adjusting one stream does not change another
 stream.
 
-Animation runs only while the selected view has frame-correlated data and its
-panel is visible. It stops when data is missing, the panel is collapsed or
-hidden, another tab is selected, or the viewer is closed.
+Animation runs only while the selected view has current or grace-held correlated
+data and its panel is visible. It stops after the short delivery grace expires,
+when the panel is collapsed or hidden, another tab is selected, or the viewer is
+closed.
 
 ## Multiple views and overlays
 
@@ -108,8 +111,10 @@ ordinary overlay messages such as `pose-estimation`; overlays continue to draw
 on the video while auxiliary data renders separately. All messages for the frame
 must use the same source PTS timestamp and channel.
 
-The selected tab is stored per channel in the browser. Missing, late, expired,
-malformed, and unknown-renderer messages never reuse data from a previous frame.
+The selected tab is stored per channel in the browser. Missing data may retain
+the last exactly correlated view only for the 160-millisecond display grace.
+Late, expired, malformed, and unknown-renderer messages are never selected as a
+new view.
 
 ## Adding a renderer
 

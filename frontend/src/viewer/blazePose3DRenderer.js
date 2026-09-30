@@ -250,7 +250,7 @@ function referenceCube(bounds) {
     bounds.maxY - bounds.minY,
     bounds.maxZ - bounds.minZ,
     CUBE_MIN_EXTENT,
-  ) * 0.68;
+  ) * 0.6;
   return [
     { x: center.x - extent, y: center.y - extent, z: center.z - extent },
     { x: center.x + extent, y: center.y - extent, z: center.z - extent },
@@ -270,7 +270,7 @@ function fitProjection(points, width, height) {
   const maxY = Math.max(...points.map((point) => point.y));
   const rangeX = Math.max(maxX - minX, 0.25);
   const rangeY = Math.max(maxY - minY, 0.25);
-  const scale = Math.min((width * 0.78) / rangeX, (height * 0.78) / rangeY);
+  const scale = Math.min((width * 0.88) / rangeX, (height * 0.88) / rangeY);
   return {
     point(point) {
       return {
@@ -283,8 +283,8 @@ function fitProjection(points, width, height) {
 }
 
 function drawEmpty(ctx, width, height) {
-  ctx.fillStyle = "rgba(226, 232, 240, 0.72)";
-  ctx.font = "12px sans-serif";
+  ctx.fillStyle = "rgba(226, 232, 240, 0.68)";
+  ctx.font = '500 11px "Roboto Condensed", sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("No 3D pose for this frame", width / 2, height / 2);
@@ -304,11 +304,11 @@ function drawReferenceCube(ctx, vertices) {
       else ctx.lineTo(vertex.x, vertex.y);
     });
     ctx.closePath();
-    ctx.fillStyle = "rgba(56, 189, 248, 0.035)";
+    ctx.fillStyle = "rgba(56, 189, 248, 0.025)";
     ctx.fill();
   }
 
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.58)";
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.48)";
   ctx.lineWidth = 1;
   for (const [fromIndex, toIndex] of CUBE_EDGES) {
     ctx.beginPath();
@@ -318,8 +318,8 @@ function drawReferenceCube(ctx, vertices) {
   }
 
   const labels = [[1, "X"], [3, "Y"], [4, "Z"]];
-  ctx.fillStyle = "rgba(226, 232, 240, 0.78)";
-  ctx.font = "10px sans-serif";
+  ctx.fillStyle = "rgba(226, 232, 240, 0.72)";
+  ctx.font = '600 10px "Roboto Condensed", sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const [index, label] of labels) {
@@ -373,9 +373,16 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
     ctx.beginPath();
     ctx.moveTo(segment.from.x, segment.from.y);
     ctx.lineTo(segment.to.x, segment.to.y);
+    ctx.strokeStyle = "rgba(2, 6, 23, 0.74)";
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 4.8;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(segment.from.x, segment.from.y);
+    ctx.lineTo(segment.to.x, segment.to.y);
     ctx.strokeStyle = segment.color;
-    ctx.globalAlpha = 0.82;
-    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 2.35;
     ctx.stroke();
   }
 
@@ -387,10 +394,13 @@ export function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   ).sort((left, right) => left.depth - right.depth);
   for (const point of points) {
     ctx.beginPath();
-    ctx.arc(point.x, point.y, 2.8, 0, 2 * Math.PI);
+    ctx.arc(point.x, point.y, 3.1, 0, 2 * Math.PI);
     ctx.fillStyle = point.color;
+    ctx.strokeStyle = "rgba(2, 6, 23, 0.9)";
+    ctx.lineWidth = 1.2;
     ctx.globalAlpha = 1;
     ctx.fill();
+    ctx.stroke();
   }
   ctx.globalAlpha = 1;
   return true;

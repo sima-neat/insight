@@ -1,6 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
-import { auxiliaryRendererRegistry, shouldAnimateAuxiliaryView } from "./auxiliaryVisualization.js";
+import {
+  auxiliaryRendererRegistry,
+  shouldAnimateAuxiliaryView,
+  shouldHoldLastAuxiliaryFrame,
+} from "./auxiliaryVisualization.js";
 import "./blazePose3DRenderer.js";
 
 const VALID_MODES = new Set(["compact", "collapsed", "expanded", "hidden"]);
@@ -149,7 +153,12 @@ function RendererControls({ controls, onControl }) {
       {controls.map((control) => {
         if (control.type === "toggle") {
           return (
-            <label className="auxiliary-control-toggle" key={control.id} title={control.label}>
+            <label
+              className="auxiliary-control-toggle"
+              data-control-id={control.id}
+              key={control.id}
+              title={control.label}
+            >
               <input
                 type="checkbox"
                 checked={Boolean(control.value)}
@@ -162,7 +171,12 @@ function RendererControls({ controls, onControl }) {
         }
         if (control.type === "range") {
           return (
-            <label className="auxiliary-control-range" key={control.id} title={control.valueLabel ?? control.label}>
+            <label
+              className="auxiliary-control-range"
+              data-control-id={control.id}
+              key={control.id}
+              title={control.valueLabel ?? control.label}
+            >
               <span>{control.label}</span>
               <input
                 type="range"
@@ -181,6 +195,7 @@ function RendererControls({ controls, onControl }) {
           return (
             <button
               className="auxiliary-control-action"
+              data-control-id={control.id}
               key={control.id}
               type="button"
               disabled={Boolean(control.disabled)}
@@ -213,6 +228,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   const canvasRef = useRef(null);
   const emptyRef = useRef(null);
   const payloadsRef = useRef(new Map());
+  const lastViewAtRef = useRef(Number.NEGATIVE_INFINITY);
   const knownViewsRef = useRef([]);
   const selectedIdRef = useRef(selectedId);
   const sessionsRef = useRef(new Map());
@@ -323,8 +339,18 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
 
   useImperativeHandle(ref, () => ({
     showFrame(views) {
+      const now = performance.now();
+      if (views.length === 0 && shouldHoldLastAuxiliaryFrame(
+        payloadsRef.current.size > 0,
+        lastViewAtRef.current,
+        now,
+      )) {
+        scheduleDraw();
+        return;
+      }
       payloadsRef.current = new Map(views.map((view) => [view.id, view]));
       if (views.length > 0) {
+        lastViewAtRef.current = now;
         const byId = new Map(knownViewsRef.current.map((view) => [view.id, view]));
         for (const view of views) {
           byId.set(view.id, { id: view.id, renderer: view.renderer, title: view.title });
@@ -346,10 +372,12 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     },
     clearFrame() {
       payloadsRef.current = new Map();
+      lastViewAtRef.current = Number.NEGATIVE_INFINITY;
       scheduleDraw();
     },
     reset() {
       payloadsRef.current = new Map();
+      lastViewAtRef.current = Number.NEGATIVE_INFINITY;
       knownViewsRef.current = [];
       setKnownViews([]);
       destroySessions();

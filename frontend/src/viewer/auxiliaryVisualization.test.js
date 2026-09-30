@@ -7,6 +7,7 @@ import {
   inspectAuxiliaryMessage,
   partitionFrameMetadata,
   shouldAnimateAuxiliaryView,
+  shouldHoldLastAuxiliaryFrame,
 } from "./auxiliaryVisualization.js";
 import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
 
@@ -139,4 +140,12 @@ test("auxiliary animation runs only for a visible payload that requests it", () 
   assert.equal(shouldAnimateAuxiliaryView("compact", false, animating), false);
   assert.equal(shouldAnimateAuxiliaryView("compact", true, still), false);
   assert.equal(shouldAnimateAuxiliaryView("compact", true, null), false);
+});
+
+test("a correlated auxiliary view is held only through a brief delivery gap", () => {
+  assert.equal(shouldHoldLastAuxiliaryFrame(true, 1000, 1160), true);
+  assert.equal(shouldHoldLastAuxiliaryFrame(true, 1000, 1161), false);
+  assert.equal(shouldHoldLastAuxiliaryFrame(false, 1000, 1050), false);
+  assert.equal(shouldHoldLastAuxiliaryFrame(true, Number.NEGATIVE_INFINITY, 1050), false);
+  assert.equal(shouldHoldLastAuxiliaryFrame(true, 1100, 1050), false);
 });
