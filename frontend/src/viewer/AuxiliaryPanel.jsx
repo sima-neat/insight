@@ -475,7 +475,15 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     setRendererControls([]);
     setSelectedId(viewId);
     const renderer = knownViewsRef.current.find((view) => view.id === viewId)?.renderer;
-    setSurfaceOpacity(panelSurfaceOpacity(effectiveRendererSettings(renderer)));
+    const rendererSettings = effectiveRendererSettings(renderer);
+    const nextMode = reconcileAuxiliaryPanelMode(
+      modeRef.current,
+      rendererSettings,
+      hasExplicitRendererSettings(channelIndex, renderer),
+    );
+    modeRef.current = nextMode;
+    setMode(nextMode);
+    setSurfaceOpacity(panelSurfaceOpacity(rendererSettings));
     scheduleDraw();
   };
   const setPanelMode = (nextMode) => {
