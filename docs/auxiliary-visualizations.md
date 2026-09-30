@@ -72,7 +72,8 @@ cube can also be hidden when only the skeleton is wanted. Global Viewer
 Configuration establishes defaults, while settings opened from a tile apply to
 that channel. Select **Use Global Settings** to discard a channel override and
 resume inheriting global changes. The tile's collapse, expand, and hide buttons
-update the same channel setting.
+update the same channel setting. Expanded mode uses a translucent surface so the
+source video remains visible behind the larger 3D skeleton.
 
 The BlazePose view renders the current frame's world landmarks directly. It does
 not smooth pose coordinates or animate the camera independently, so its motion
