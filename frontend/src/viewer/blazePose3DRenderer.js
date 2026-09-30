@@ -355,6 +355,12 @@ export function createBlazePose3DSession({ initialSettings, onSettingsChange, re
         { id: "resetCamera", type: "action", label: "Reset view" },
       ];
     },
+    applySettings(nextSettings) {
+      if (destroyed || !nextSettings || typeof nextSettings !== "object") return;
+      settings = normalizeBlazePoseViewSettings({ ...settings, ...nextSettings });
+      stopAnimationClock();
+      notify(false);
+    },
     applyControl(id, value) {
       if (destroyed) return;
       switch (id) {

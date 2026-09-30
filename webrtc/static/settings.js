@@ -39,6 +39,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const roiFilteringToggle = document.getElementById("toggleRoiFiltering");
   const trackHistoryToggle = document.getElementById("toggleTrackHistory");
   const trackHistoryDependentRows = document.querySelectorAll(".track-history-dependent");
+  const blazePose3DPanelToggle = document.getElementById("toggleBlazePose3DPanel");
+  const blazePose3DPanelMode = document.getElementById("blazePose3DPanelMode");
+  const blazePose3DYawSlider = document.getElementById("blazePose3DYawSlider");
+  const blazePose3DYawDisplay = document.getElementById("blazePose3DYawDisplay");
+  const blazePose3DPitchSlider = document.getElementById("blazePose3DPitchSlider");
+  const blazePose3DPitchDisplay = document.getElementById("blazePose3DPitchDisplay");
+  const blazePose3DReferenceBoxToggle = document.getElementById("toggleBlazePose3DReferenceBox");
+  const blazePose3DDependentRows = document.querySelectorAll(".blazepose-3d-dependent");
+  const blazePose3DScopeNote = document.getElementById("blazePose3DScopeNote");
+  const resetBlazePose3DView = document.getElementById("resetBlazePose3DView");
   const settingsApi = window.viewerSettingsApi;
 
   if (!settingsApi) {
@@ -102,6 +112,29 @@ document.addEventListener("DOMContentLoaded", () => {
     updateTrackHistoryControls();
   });
 
+  blazePose3DPanelToggle.addEventListener("change", () => {
+    updateBlazePose3DControls();
+  });
+
+  blazePose3DYawSlider.addEventListener("input", () => {
+    updateBlazePose3DDisplays();
+  });
+
+  blazePose3DPitchSlider.addEventListener("input", () => {
+    updateBlazePose3DDisplays();
+  });
+
+  resetBlazePose3DView.addEventListener("click", () => {
+    const defaults = settingsApi.defaults.auxiliary["blazepose-3d"];
+    blazePose3DPanelToggle.checked = defaults.enabled;
+    blazePose3DPanelMode.value = defaults.panelMode;
+    blazePose3DYawSlider.value = defaults.yawDegrees;
+    blazePose3DPitchSlider.value = defaults.pitchDegrees;
+    blazePose3DReferenceBoxToggle.checked = defaults.showReferenceBox;
+    updateBlazePose3DDisplays();
+    updateBlazePose3DControls();
+  });
+
   videoSyncBufferSlider.addEventListener("input", () => {
     videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
   });
@@ -132,6 +165,13 @@ document.addEventListener("DOMContentLoaded", () => {
       trailLength: parseInt(trackTrailLengthSlider.value, 10),
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
+    settings.auxiliary["blazepose-3d"] = {
+      enabled: blazePose3DPanelToggle.checked,
+      panelMode: blazePose3DPanelMode.value,
+      yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
+      pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
+      showReferenceBox: blazePose3DReferenceBoxToggle.checked
+    };
 
     settingsApi.writeScopeSettings(scope, settings);
     viewerSettingsOverlay.classList.add("hidden");
@@ -139,7 +179,8 @@ document.addEventListener("DOMContentLoaded", () => {
       new CustomEvent("viewer-settings-changed", {
         detail: {
           scope,
-          metadataType: metadataTypeSelector.value
+          metadataType: metadataTypeSelector.value,
+          auxiliaryRenderer: "blazepose-3d"
         }
       })
     );
@@ -159,6 +200,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const index = scopeToIndex(scope);
     connectToStream(index.toString());
     updateViewerTitle(scope);
+    updateBlazePose3DScopeNote(scope, index);
     loadSettings();
     viewerSettingsOverlay.classList.remove("hidden");
     loadPolygons(index);
@@ -198,6 +240,27 @@ document.addEventListener("DOMContentLoaded", () => {
         control.disabled = !enabled;
       });
     });
+  }
+
+  function updateBlazePose3DDisplays() {
+    blazePose3DYawDisplay.textContent = `${blazePose3DYawSlider.value}\u00b0`;
+    blazePose3DPitchDisplay.textContent = `${blazePose3DPitchSlider.value}\u00b0`;
+  }
+
+  function updateBlazePose3DControls() {
+    const enabled = blazePose3DPanelToggle.checked;
+    blazePose3DDependentRows.forEach((row) => {
+      row.classList.toggle("is-disabled", !enabled);
+      row.querySelectorAll("input, select, button").forEach((control) => {
+        control.disabled = !enabled;
+      });
+    });
+  }
+
+  function updateBlazePose3DScopeNote(value, index) {
+    blazePose3DScopeNote.textContent = value === "global"
+      ? "Sets the default 3D Pose view for every channel. Channel settings can override it."
+      : `Controls the 3D Pose view for Channel ${index} only.`;
   }
 
   function createObjectEntry(label, color, lineStyle, lineWidth) {
@@ -326,6 +389,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const segmentationTypeSettings = settings.types.segmentation;
     const trackingTypeSettings = settings.types.tracking;
     const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
+    const blazePose3DSettings = settings.auxiliary["blazepose-3d"]
+      || settingsApi.defaults.auxiliary["blazepose-3d"];
 
     confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
     confidenceDisplay.textContent = confidenceSlider.value;
@@ -344,9 +409,16 @@ document.addEventListener("DOMContentLoaded", () => {
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
+    blazePose3DPanelToggle.checked = blazePose3DSettings.enabled !== false;
+    blazePose3DPanelMode.value = blazePose3DSettings.panelMode || "compact";
+    blazePose3DYawSlider.value = blazePose3DSettings.yawDegrees ?? -45;
+    blazePose3DPitchSlider.value = blazePose3DSettings.pitchDegrees ?? 20;
+    blazePose3DReferenceBoxToggle.checked = blazePose3DSettings.showReferenceBox !== false;
     updateTrackTrailLengthDisplay();
     updateLostTrackTtlDisplay();
     updateTrackHistoryControls();
+    updateBlazePose3DDisplays();
+    updateBlazePose3DControls();
     loadObjectEntries(objectDetectionTypeSettings.objects || settingsApi.defaults.types["object-detection"].objects);
     loadSegmentationEntries(segmentationTypeSettings.objects || settingsApi.defaults.types.segmentation.objects);
 
@@ -382,6 +454,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById(initialTab).style.display = "flex";
   }
 
+  updateBlazePose3DScopeNote(scope, scopeToIndex(scope));
   loadSettings();
   window.openSettingsForScope = openSettingsForScope;
   window.loadPolygons = loadPolygons;

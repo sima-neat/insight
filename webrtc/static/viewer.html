@@ -18,6 +18,7 @@
       <div class="settings-popup-body">
         <div class="settings-tab-header">
           <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
+          <button class="settings-tab-link" data-tab="viewer-pose3d">3D Pose</button>
           <button class="settings-tab-link" data-tab="viewer-roi">ROI</button>
           <button class="settings-tab-link" data-tab="viewer-general">General</button>
         </div>
@@ -113,6 +114,50 @@
             </div>
           </div>
 
+          <!-- BlazePose 3D Config Tab -->
+          <div id="viewer-pose3d" class="settings-tab-section">
+            <p id="blazePose3DScopeNote" class="settings-scope-note">
+              Configure the BlazePose world-landmark panel for this viewer scope.
+            </p>
+            <table class="filter-table">
+              <tr>
+                <td><label for="toggleBlazePose3DPanel">Show 3D Pose Panel</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DPanel" checked></td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DPanelMode">Panel Size</label></td>
+                <td>
+                  <select id="blazePose3DPanelMode">
+                    <option value="compact">Compact</option>
+                    <option value="collapsed">Collapsed</option>
+                    <option value="expanded">Expanded</option>
+                  </select>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DYawSlider">Camera Yaw</label></td>
+                <td>
+                  <input type="range" id="blazePose3DYawSlider" class="settings-slider" min="-180" max="180" step="5" value="-45">
+                  <span id="blazePose3DYawDisplay">-45&deg;</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DPitchSlider">Camera Pitch</label></td>
+                <td>
+                  <input type="range" id="blazePose3DPitchSlider" class="settings-slider" min="-60" max="60" step="5" value="20">
+                  <span id="blazePose3DPitchDisplay">20&deg;</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="toggleBlazePose3DReferenceBox">Show 3D Reference Box</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DReferenceBox" checked></td>
+              </tr>
+            </table>
+            <div class="settings-inline-actions">
+              <button id="resetBlazePose3DView" type="button" class="app-button">Reset View</button>
+            </div>
+          </div>
+
           <!-- ROI Tab -->
           <div id="viewer-roi" class="settings-tab-section">
             <p id="roiInstruction">Draw one or more polygons on the video below to indicate Region Of Interest.</p>
@@ -175,14 +220,14 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
-  <script src="/static/js/viewer-settings-resolver.js"></script>
+  <script src="/static/js/viewer-settings-resolver.js?v=5"></script>
   <script src="/static/drawing.js"></script>
-  <script src="/static/viewer-react.js"></script>
-  <link rel="stylesheet" href="/static/css/settings.css">
+  <script src="/static/viewer-react.js?v=5"></script>
+  <link rel="stylesheet" href="/static/css/settings.css?v=5">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script type="module" src="/static/js/roi.js"></script>
-  <script src="/static/settings.js"></script>
+  <script src="/static/settings.js?v=5"></script>
 
 </body>
 </html>
