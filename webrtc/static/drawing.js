@@ -30,6 +30,11 @@ const COCO_SKELETON = [
   ['right_hip', 'right_knee'], ['right_knee', 'right_ankle']
 ];
 
+function poseConfidenceAlpha(confidence) {
+  const value = Number.isFinite(Number(confidence)) ? Number(confidence) : 1;
+  return 0.18 + 0.82 * Math.min(1, Math.max(0, value));
+}
+
 
 function computeScaleAndOffset(video, canvas) {
   const containerWidth = canvas.clientWidth;
@@ -391,16 +396,19 @@ window.drawStrategies = {
 
       COCO_SKELETON.forEach(([a, b]) => {
         const kpA = kpMap[a], kpB = kpMap[b];
-        if (kpA && kpB && kpA.confidence > 0.3 && kpB.confidence > 0.3) {
+        const confidence = Math.min(kpA?.confidence ?? 1, kpB?.confidence ?? 1);
+        if (kpA && kpB) {
           ctx.beginPath();
           ctx.moveTo(kpA.x * scaleX + offsetX, kpA.y * scaleY + offsetY);
           ctx.lineTo(kpB.x * scaleX + offsetX, kpB.y * scaleY + offsetY);
+          ctx.globalAlpha = poseConfidenceAlpha(confidence);
           ctx.stroke();
         }
       });
 
       pose.keypoints.forEach(kp => {
-        if (kp.confidence > 0.3) {
+        if (kp) {
+          ctx.globalAlpha = poseConfidenceAlpha(kp.confidence);
           if (showKeypoints) {
             ctx.beginPath();
             ctx.arc(kp.x * scaleX + offsetX, kp.y * scaleY + offsetY, 3, 0, 2 * Math.PI);
@@ -411,6 +419,7 @@ window.drawStrategies = {
           }
         }
       });
+      ctx.globalAlpha = 1;
     });
   },
 

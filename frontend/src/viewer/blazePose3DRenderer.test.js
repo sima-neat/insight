@@ -59,6 +59,21 @@ test("BlazePose 3D renderer draws connected world keypoints", () => {
   assert.equal(ctx.calls.filter(([name, , , radius]) => name === "arc" && radius === 3.1).length, 3);
 });
 
+test("low-confidence 3D joints fade instead of dropping out", () => {
+  const ctx = recordingContext();
+  drawBlazePose3D(ctx, { width: 240, height: 180 }, {
+    poses: [{
+      keypoints: [
+        { name: "left_shoulder", x: -0.2, y: -0.4, z: 0.1, confidence: 0 },
+        { name: "left_elbow", x: -0.4, y: 0, z: 0.2, confidence: 0 },
+      ],
+    }],
+  }, { showReferenceCube: false });
+
+  assert.ok(ctx.calls.some(([name]) => name === "lineTo"));
+  assert.ok(ctx.calls.some(([name, value]) => name === "globalAlpha" && value > 0 && value < 0.9));
+});
+
 test("BlazePose 3D renderer colors anatomical regions and labels the legend", () => {
   assert.equal(blazePoseBodyRegion("nose"), "head");
   assert.equal(blazePoseBodyRegion("left_wrist"), "left");
