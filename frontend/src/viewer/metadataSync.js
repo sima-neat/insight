@@ -1,7 +1,11 @@
+import { auxiliaryMessageQueueKey } from "./auxiliaryVisualization.js";
+
 const METADATA_QUEUE_LIMIT = 300;
 const UNTYPED = "";
 
 function metadataTypeOf(data) {
+  const auxiliaryKey = auxiliaryMessageQueueKey(data);
+  if (auxiliaryKey) return auxiliaryKey;
   return typeof data?.type === "string" ? data.type : UNTYPED;
 }
 
