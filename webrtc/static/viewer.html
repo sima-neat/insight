@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="/static/viewer.css?v=12">
+  <link rel="stylesheet" href="/static/viewer.css?v=13">
   <link rel="stylesheet" href="/static/pagination.css">
 </head>
 <body>
@@ -152,6 +152,13 @@
                 </td>
               </tr>
               <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DTransparencySlider">Panel Transparency</label></td>
+                <td>
+                  <input type="range" id="blazePose3DTransparencySlider" class="settings-slider" min="0" max="100" step="5" value="0">
+                  <span id="blazePose3DTransparencyDisplay">0%</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
                 <td><label for="blazePose3DYawSlider">Camera Yaw</label></td>
                 <td>
                   <input type="range" id="blazePose3DYawSlider" class="settings-slider" min="-180" max="180" step="5" value="-45">
@@ -170,6 +177,9 @@
                 <td><input type="checkbox" id="toggleBlazePose3DReferenceBox" checked></td>
               </tr>
             </table>
+            <p class="settings-field-note">
+              Transparency affects panel surfaces only; the pose and controls remain fully visible.
+            </p>
             <div class="settings-inline-actions">
               <button id="resetBlazePose3DView" type="button" class="app-button">Reset View</button>
               <button id="useGlobalBlazePose3DView" type="button" class="app-button" style="display:none">Use Global Settings</button>
@@ -238,14 +248,14 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
-  <script src="/static/js/viewer-settings-resolver.js?v=12"></script>
-  <script src="/static/drawing.js?v=12"></script>
-  <script src="/static/viewer-react.js?v=12"></script>
-  <link rel="stylesheet" href="/static/css/settings.css?v=12">
+  <script src="/static/js/viewer-settings-resolver.js?v=13"></script>
+  <script src="/static/drawing.js?v=13"></script>
+  <script src="/static/viewer-react.js?v=13"></script>
+  <link rel="stylesheet" href="/static/css/settings.css?v=13">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script type="module" src="/static/js/roi.js"></script>
-  <script src="/static/settings.js?v=12"></script>
+  <script src="/static/settings.js?v=13"></script>
 
 </body>
 </html>

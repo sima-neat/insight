@@ -82,6 +82,11 @@ function displayMode(settings) {
   return settings.enabled === false ? "hidden" : settings.panelMode;
 }
 
+function panelSurfaceOpacity(settings) {
+  const transparency = Number(settings?.backgroundTransparency);
+  return 1 - Math.max(0, Math.min(1, Number.isFinite(transparency) ? transparency : 0));
+}
+
 function rendererForSelection(selectedId, payloads, knownViews) {
   return payloads.get(selectedId)?.renderer
     ?? knownViews.find((view) => view.id === selectedId)?.renderer
@@ -213,6 +218,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   const [knownViews, setKnownViews] = useState([]);
   const [selectedId, setSelectedId] = useState(initialPreference.current.selectedId);
   const [rendererControls, setRendererControls] = useState([]);
+  const [surfaceOpacity, setSurfaceOpacity] = useState(1);
   const modeRef = useRef(mode);
   const canvasRef = useRef(null);
   const emptyRef = useRef(null);
@@ -356,6 +362,8 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
           modeRef.current = nextMode;
           setMode(nextMode);
         }
+        const renderer = rendererForSelection(selectedIdRef.current, payloadsRef.current, nextKnown);
+        setSurfaceOpacity(panelSurfaceOpacity(resolveRendererSettings(channelIndex, renderer)));
       }
       scheduleDraw();
     },
@@ -396,6 +404,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       const nextMode = displayMode(resolved);
       modeRef.current = nextMode;
       setMode(nextMode);
+      setSurfaceOpacity(panelSurfaceOpacity(resolved));
       const current = sessionsRef.current.get(selectedIdRef.current)?.session;
       const toSession = auxiliaryRendererRegistry.get(renderer)?.viewerSettings?.toSession;
       if (typeof toSession === "function") current?.applySettings?.(toSession(resolved));
@@ -459,6 +468,8 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     controlsSignatureRef.current = "";
     setRendererControls([]);
     setSelectedId(viewId);
+    const renderer = knownViewsRef.current.find((view) => view.id === viewId)?.renderer;
+    setSurfaceOpacity(panelSurfaceOpacity(resolveRendererSettings(channelIndex, renderer)));
     scheduleDraw();
   };
   const setPanelMode = (nextMode) => {
@@ -495,6 +506,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   return (
     <div
       className={`auxiliary-panel auxiliary-panel-${mode}${hasViews ? "" : " auxiliary-panel-empty"}`}
+      style={{ "--auxiliary-surface-opacity": surfaceOpacity }}
       aria-hidden={!hasViews}
       data-channel={channelIndex}
     >

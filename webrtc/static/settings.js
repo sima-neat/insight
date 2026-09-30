@@ -45,6 +45,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const trackHistoryDependentRows = document.querySelectorAll(".track-history-dependent");
   const blazePose3DPanelToggle = document.getElementById("toggleBlazePose3DPanel");
   const blazePose3DPanelMode = document.getElementById("blazePose3DPanelMode");
+  const blazePose3DTransparencySlider = document.getElementById("blazePose3DTransparencySlider");
+  const blazePose3DTransparencyDisplay = document.getElementById("blazePose3DTransparencyDisplay");
   const blazePose3DYawSlider = document.getElementById("blazePose3DYawSlider");
   const blazePose3DYawDisplay = document.getElementById("blazePose3DYawDisplay");
   const blazePose3DPitchSlider = document.getElementById("blazePose3DPitchSlider");
@@ -130,10 +132,15 @@ document.addEventListener("DOMContentLoaded", () => {
     updateBlazePose3DDisplays();
   });
 
+  blazePose3DTransparencySlider.addEventListener("input", () => {
+    updateBlazePose3DDisplays();
+  });
+
   resetBlazePose3DView.addEventListener("click", () => {
     const defaults = settingsApi.defaults.auxiliary["blazepose-3d"];
     blazePose3DPanelToggle.checked = defaults.enabled;
     blazePose3DPanelMode.value = defaults.panelMode;
+    blazePose3DTransparencySlider.value = Math.round((defaults.backgroundTransparency ?? 0) * 100);
     blazePose3DYawSlider.value = defaults.yawDegrees;
     blazePose3DPitchSlider.value = defaults.pitchDegrees;
     blazePose3DReferenceBoxToggle.checked = defaults.showReferenceBox;
@@ -193,6 +200,7 @@ document.addEventListener("DOMContentLoaded", () => {
     settings.auxiliary["blazepose-3d"] = {
       enabled: blazePose3DPanelToggle.checked,
       panelMode: blazePose3DPanelMode.value,
+      backgroundTransparency: parseInt(blazePose3DTransparencySlider.value, 10) / 100,
       yawDegrees: parseInt(blazePose3DYawSlider.value, 10),
       pitchDegrees: parseInt(blazePose3DPitchSlider.value, 10),
       showReferenceBox: blazePose3DReferenceBoxToggle.checked
@@ -271,6 +279,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateBlazePose3DDisplays() {
+    blazePose3DTransparencyDisplay.textContent = `${blazePose3DTransparencySlider.value}%`;
     blazePose3DYawDisplay.textContent = `${blazePose3DYawSlider.value}\u00b0`;
     blazePose3DPitchDisplay.textContent = `${blazePose3DPitchSlider.value}\u00b0`;
   }
@@ -460,6 +469,7 @@ document.addEventListener("DOMContentLoaded", () => {
     poseKeypointLabelsToggle.checked = poseTypeSettings.showKeypointLabels === true;
     blazePose3DPanelToggle.checked = blazePose3DSettings.enabled !== false;
     blazePose3DPanelMode.value = blazePose3DSettings.panelMode || "compact";
+    blazePose3DTransparencySlider.value = Math.round((blazePose3DSettings.backgroundTransparency ?? 0) * 100);
     blazePose3DYawSlider.value = blazePose3DSettings.yawDegrees ?? -45;
     blazePose3DPitchSlider.value = blazePose3DSettings.pitchDegrees ?? 20;
     blazePose3DReferenceBoxToggle.checked = blazePose3DSettings.showReferenceBox !== false;
