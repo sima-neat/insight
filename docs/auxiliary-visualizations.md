@@ -63,6 +63,14 @@ colors.
 
 ## BlazePose camera controls
 
+Open a tile's menu and select **3D Pose** in Viewer Configuration to control
+that channel independently. The panel can be shown or hidden, rendered compact,
+collapsed, or expanded, and given an initial camera yaw and pitch. The reference
+cube can also be hidden when only the skeleton is wanted. Global Viewer
+Configuration establishes defaults, while settings opened from a tile apply to
+that channel. The tile's collapse, expand, and hide buttons update the same
+channel setting.
+
 The BlazePose view orbits around the world-landmark skeleton by default so depth
 and limb placement are visible from more than one angle. The controls below the
 canvas can:
@@ -75,8 +83,10 @@ canvas can:
 
 Drag directly on the canvas to inspect the pose manually. Dragging pauses the
 orbit at the selected angle; select **Resume** to continue. The cube and camera
-settings are browser-local and stored separately for every channel and auxiliary
-view ID, so adjusting one stream does not change another stream.
+settings stay synchronized with Viewer Configuration for that channel. Orbit
+speed and pause state remain browser-local and are stored separately for every
+channel and auxiliary view ID, so adjusting one stream does not change another
+stream.
 
 Animation runs only while the selected view has frame-correlated data and its
 panel is visible. It stops when data is missing, the panel is collapsed or
@@ -90,8 +100,7 @@ ordinary overlay messages such as `pose-estimation`; overlays continue to draw
 on the video while auxiliary data renders separately. All messages for the frame
 must use the same source PTS timestamp and channel.
 
-The panel can be collapsed, expanded over its tile, or hidden. Its mode and
-selected tab are stored per channel in the browser. Missing, late, expired,
+The selected tab is stored per channel in the browser. Missing, late, expired,
 malformed, and unknown-renderer messages never reuse data from a previous frame.
 
 ## Adding a renderer

@@ -136,6 +136,26 @@ test("session orbit timing honors speed, pause, and the auto-orbit toggle", () =
   assert.equal(session.isAnimating(), false);
 });
 
+test("viewer configuration can update a live renderer session", () => {
+  let drawRequests = 0;
+  const session = createBlazePose3DSession({
+    initialSettings: { autoRotate: false },
+    requestDraw() { drawRequests += 1; },
+  });
+
+  session.applySettings({
+    showReferenceCube: false,
+    yaw: Math.PI / 2,
+    pitch: 0,
+  });
+
+  assert.equal(session.snapshot().showReferenceCube, false);
+  assert.equal(session.snapshot().yaw, Math.PI / 2);
+  assert.equal(session.snapshot().pitch, 0);
+  assert.equal(session.getControls().find(({ id }) => id === "showReferenceCube").value, false);
+  assert.equal(drawRequests, 1);
+});
+
 test("manual drag pauses orbit, persists the angle on release, and reset restores the camera", () => {
   const saved = [];
   let drawRequests = 0;
