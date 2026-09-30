@@ -14,7 +14,6 @@
   overflow: hidden;
 }
 
-.viewer-embed .single-tile .video-tile,
 .viewer-embed .video-tile {
   flex: 1 1 0;
   width: auto;

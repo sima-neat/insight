@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.request
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -32,7 +32,6 @@ WORKER_SCRIPT = """#!/bin/sh
 set -e
 sid="$1"; ttl="$2"; shift 2
 dir="{worker_dir}/$sid"
-mkdir -p "$dir"
 find "{worker_dir}" -maxdepth 1 -name '*.log' -mmin +60 -delete 2>/dev/null || true
 started=$(date +%s)
 beat="$dir/heartbeat"
@@ -417,10 +416,8 @@ class PreviewManager:
         result = session_ctx.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC)
         output = result.stdout.decode("utf-8", errors="replace")
         if not output.strip().split("\n")[0].strip().isdigit():
-            try:
+            with suppress(BoardError):
                 session_ctx.transport.exec(["sh", "-c", f"rm -rf {directory} {WORKER_DIR}/{session_id}.log"], timeout=10)
-            except BoardError:
-                pass
             raise BoardError(
                 "command_failed",
                 "The preview did not start on the board.",
@@ -463,7 +460,13 @@ def _require_previewable(item: dict, mode: dict, python: Optional[str]) -> None:
     if not python:
         raise BoardError("tool_missing", "Preview runs on PyNeat, which the last scan did not find on this board.",
                          hint=NEAT_INSTALL_HINT, tool="pyneat")
-    _whole_fps(mode["fps"])
+    fps = mode["fps"]
+    # VideoSenderOptions and caps_raw take a whole frame rate.
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0 or fps != int(fps):
+        raise _unsupported(
+            f"{fps} fps cannot be previewed: preview needs a whole-number frame rate.",
+            "Pick one of the rates Insight lists for this size.",
+        )
     fmt = next((entry for entry in item["formats"] if entry["format"] == mode["format"]), None)
     if fmt is None or not fmt["exportable"]:
         raise _unsupported(
@@ -486,16 +489,6 @@ def _require_previewable(item: dict, mode: dict, python: Optional[str]) -> None:
             f"{mode['fps']} fps is not a rate this camera reported for {mode['width']}x{mode['height']}.",
             f"Pick one of: {listed}.",
         )
-
-
-def _whole_fps(fps) -> int:
-    # VideoSenderOptions and caps_raw take a whole frame rate.
-    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0 or fps != int(fps):
-        raise _unsupported(
-            f"{fps} fps cannot be previewed: preview needs a whole-number frame rate.",
-            "Pick one of the rates Insight lists for this size.",
-        )
-    return int(fps)
 
 
 def viewer_url(host: str, channel: int) -> str:

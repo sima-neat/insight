@@ -138,8 +138,6 @@ def _preview_host() -> str:
 
 def _for_browser(preview_session, host: str):
     # The session is shared, so each response builds the viewer URL from its own validated Host.
-    if preview_session is None:
-        return None
     return {**preview_session, "viewer_url": viewer_url(host, preview_session["channel"])}
 
 
@@ -168,7 +166,8 @@ def get_preview():
     host = _preview_host()
     session = get_board_manager().session()
     previews.stop_stale()
-    return {"session": _for_browser(previews.current(session.generation), host)}
+    current = previews.current(session.generation)
+    return {"session": current and _for_browser(current, host)}
 
 
 # API: start an explicit, temporary camera preview on the selected board.

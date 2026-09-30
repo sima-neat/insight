@@ -193,6 +193,7 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
   const [preview, setPreview] = useState(PREVIEW_IDLE)
   const autoRefreshed = useRef(false)
   const previewRef = useRef(PREVIEW_IDLE)
+  previewRef.current = preview
   const mounted = useRef(false)
 
   const tabs = useMemo(() => deviceTabs(snapshot?.items, { scanned: Boolean(snapshot?.scanned_at) }), [snapshot])
@@ -218,10 +219,6 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
   const issues = useMemo(() => sortIssues(snapshot?.issues), [snapshot])
   const connectionError = scanError && CONNECTION_ERROR_CODES.has(scanError.code) ? scanError : null
   const scannedLabel = snapshot?.board?.label || target?.label || 'the board'
-
-  useEffect(() => {
-    previewRef.current = preview
-  }, [preview])
 
   function dispatchPreview(event) {
     setPreview((prev) => nextPreviewState(prev, event))

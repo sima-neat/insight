@@ -477,7 +477,7 @@ export function createFocusReturn() {
 
 export const PREVIEW_IDLE = Object.freeze({ status: 'idle', session: null, error: null })
 
-const PREVIEW_STATUS = {
+export const PREVIEW_STATUS = {
   idle: { label: 'Not running', tone: '' },
   starting: { label: 'Starting…', tone: 'periph-info' },
   live: { label: 'Live', tone: 'ok' },
@@ -499,13 +499,7 @@ const PREVIEW_ERROR_ACTIONS = {
 
 const PREVIEW_EXPIRED = {
   message: 'The preview stopped because the board stopped receiving heartbeats.',
-  code: 'not_found',
-  hint: 'Start the preview again. Insight only keeps a preview alive while this pane is open.',
-  details: {}
-}
-
-export function previewStatusInfo(state) {
-  return PREVIEW_STATUS[state?.status] || PREVIEW_STATUS.idle
+  hint: 'Start the preview again. Insight only keeps a preview alive while this pane is open.'
 }
 
 export function previewErrorInfo(error) {

@@ -189,10 +189,6 @@ def _request_host_name() -> str:
     return host or "127.0.0.1"
 
 
-def _format_browser_https_url(host, port, path="", query=""):
-    return port_map.format_browser_https_url(host, port, path, query)
-
-
 def _shell_target():
     try:
         target = board.get_board_manager().target()
@@ -224,7 +220,7 @@ def _build_devkit_shell_payload():
                 "title": f"DevKit {devkit_ip}",
             }
         )
-        launch_url = _format_browser_https_url(_request_host_name(), webssh_host_port, "/", params)
+        launch_url = port_map.format_browser_https_url(_request_host_name(), webssh_host_port, "/", params)
 
     return {
         "configured": configured,
@@ -655,7 +651,7 @@ def _resolve_webssh_host_port():
 
 
 def _format_sysinfo_web_ui_url(host, port):
-    return _format_browser_https_url(host, port)
+    return port_map.format_browser_https_url(host, port)
 
 
 def _enrich_sysinfo_payload(payload):
@@ -2397,7 +2393,7 @@ def viewer_url():
     viewer_port = _resolve_video_ui_port()
     query = urllib.parse.urlencode({"mode": mode, "src": src, "max_channels": max_channels})
     return {
-        "url": _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
+        "url": port_map.format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
         "max_video_channels": max_channels,
         "channel_limit_source": limit_source,
         "sdk_channel_limited": sdk_limited,

@@ -2,9 +2,9 @@ import {
   CONNECTION_ERROR_CODES,
   fpsLabel,
   modeLabel,
+  PREVIEW_STATUS,
   previewBlock,
   previewErrorInfo,
-  previewStatusInfo,
   safeHref,
   sizeLabel
 } from './model.js'
@@ -37,7 +37,7 @@ function ModeBadges({ mode, label }) {
 
 export default function PreviewPane({ camera, selection, stale, target, state, onStart, onStop, onOpenBoardPanel }) {
   const block = previewBlock({ camera, selection, stale, target, session: state?.session })
-  const status = previewStatusInfo(state)
+  const status = PREVIEW_STATUS[state?.status]
   const session = state?.session || null
   const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
   const frameUrl = state?.status === 'live' ? safeHref(session?.viewer_url) : null

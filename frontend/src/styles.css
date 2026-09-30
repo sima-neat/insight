@@ -3338,7 +3338,8 @@ button:disabled {
 
 .periph-camera-id,
 .periph-facts dd,
-.periph-detail-head .hint {
+.periph-detail-head .hint,
+.periph-inline-code {
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
@@ -3559,7 +3560,8 @@ button:disabled {
 
 .periph-group-title,
 .periph-identity summary,
-.periph-modes legend {
+.periph-modes legend,
+.periph-preview-head h4 {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -3919,11 +3921,6 @@ button:disabled {
 
 .periph-preview-head h4 {
   margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #40596d;
 }
 
 .periph-preview .hint,
@@ -3953,11 +3950,6 @@ button:disabled {
   background: #fff;
   color: var(--ink-soft);
   font-size: 13px;
-}
-
-.periph-inline-code {
-  font-family: var(--font-mono);
-  overflow-wrap: anywhere;
 }
 
 .periph-mode-badges {

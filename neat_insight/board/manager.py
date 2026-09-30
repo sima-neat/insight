@@ -145,7 +145,6 @@ class BoardManager:
                 transport.replace_host_key(key)
                 # A new key may mean a different board: start a new generation.
                 transport.close()
-                self._session = None
                 self._install_session(target)
 
     def state(self) -> dict:
