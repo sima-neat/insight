@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-import { drawMetadata } from "./metadataDrawing.js";
+import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
 
 const drawingSource = readFileSync(
   new URL("../../../webrtc/static/drawing.js", import.meta.url),
@@ -51,6 +51,42 @@ function recordingContext() {
     fillText(text) { this.texts.push(text); },
   };
 }
+
+test("ROI rendering remains independent of per-type overlay visibility", (t) => {
+  loadStrategies(t, [{ type: "inclusion", points: [
+    { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
+  ] }]);
+  const message = {
+    type: "object-detection",
+    data: { objects: [{ bbox: [10, 20, 30, 40], label: "person", confidence: 1 }] },
+  };
+  const settings = { general: { showRoi: true }, type: { visible: false } };
+  const ctx = recordingContext();
+
+  assert.equal(hasDrawableMetadata(message, settings), true);
+  drawMetadata(
+    ctx,
+    { clientWidth: 640, clientHeight: 480 },
+    message,
+    { videoWidth: 640, videoHeight: 480 },
+    0,
+    { settings, frameState: {} },
+  );
+
+  assert.equal(ctx.fills.filter((color) => color === "rgba(0,255,0,0.1)").length, 1);
+  assert.equal(ctx.boxes.length, 0);
+  assert.equal(
+    hasDrawableMetadata(message, { general: { showRoi: false }, type: { visible: false } }),
+    false,
+  );
+  assert.equal(
+    hasDrawableMetadata(
+      { type: "classification", data: { top_classes: [{ label: "person", confidence: 1 }] } },
+      settings,
+    ),
+    false,
+  );
+});
 
 test("detection styles do not leak into pose skeletons or the next frame", (t) => {
   loadStrategies(t);
@@ -159,6 +195,30 @@ test("a malformed pose does not stop tracking or later frames", (t) => {
     }
   }
   assert.equal(ctx.boxes.length, 2);
+});
+
+test("hiding tracking clears its saved trails", (t) => {
+  loadStrategies(t);
+  const history = new Map();
+  const message = { type: "tracking", data: { tracks: [{ id: 1, bbox: [10, 20, 30, 40] }] } };
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+
+  drawMetadata(recordingContext(), canvas, message, video, 0, {
+    settings: { general: { showRoi: false }, type: { visible: true } },
+    trackHistory: history,
+    now: 1,
+  });
+  assert.equal(history.size, 1);
+
+  const hiddenSettings = { general: { showRoi: false }, type: { visible: false } };
+  assert.equal(hasDrawableMetadata(message, hiddenSettings), true);
+  drawMetadata(recordingContext(), canvas, message, video, 0, {
+    settings: hiddenSettings,
+    trackHistory: history,
+    now: 2,
+  });
+  assert.equal(history.size, 0);
 });
 
 test("shared ROI is drawn once in any metadata order and filtering still applies", (t) => {

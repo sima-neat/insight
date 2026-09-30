@@ -12,7 +12,7 @@ import "./blazePose3DRenderer.js";
 import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
-import { drawMetadata } from "./metadataDrawing.js";
+import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
 import {
   gridDimensions,
   normalizeMaxChannels,
@@ -61,28 +61,6 @@ function getSynchronizationSettings(channelIndex) {
     metadataRetentionMs:
       typeof settings.general.metadataRetentionMs === "number" ? settings.general.metadataRetentionMs : 0,
   };
-}
-
-function hasDrawableMetadata(message, channelIndex) {
-  const data = message?.data;
-  const settings = getResolvedViewerSettings(channelIndex, message?.type);
-  if (settings.type.visible === false) return false;
-  switch (message?.type) {
-    case "object-detection": {
-      const threshold = settings.type.confidenceThreshold ?? 0;
-      return Array.isArray(data?.objects) && data.objects.some((obj) => (obj?.confidence ?? 1) >= threshold);
-    }
-    case "classification":
-      return Array.isArray(data?.top_classes) && data.top_classes.length > 0;
-    case "pose-estimation":
-      return Array.isArray(data?.poses) && data.poses.length > 0;
-    case "segmentation":
-      return Array.isArray(data?.segments) && data.segments.length > 0;
-    case "tracking":
-      return Array.isArray(data?.tracks);
-    default:
-      return Boolean(message?.type);
-  }
 }
 
 function applyLayout(count) {
@@ -336,8 +314,11 @@ function ChannelTile({ index, onActiveChange, debug }) {
             const frameState = {};
             for (const candidate of overlays) {
               const metadataType = candidate.data?.type;
-              if (typeof metadataType !== "string" || !hasDrawableMetadata(candidate.data, index)) continue;
               const resolvedSettings = getResolvedViewerSettings(index, metadataType);
+              if (
+                typeof metadataType !== "string"
+                || !hasDrawableMetadata(candidate.data, resolvedSettings)
+              ) continue;
               const drawContext = {
                 settings: resolvedSettings,
                 trackHistory: trackHistoryRef.current,

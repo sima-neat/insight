@@ -1,11 +1,12 @@
 export const AUXILIARY_METADATA_TYPE = "auxiliary-visualization";
-export const AUXILIARY_SCHEMA_VERSION = 1;
-export const AUXILIARY_DROPOUT_GRACE_MS = 160;
-
+const AUXILIARY_SCHEMA_VERSION = 1;
+const AUXILIARY_DROPOUT_GRACE_MS = 160;
+const MAX_AUXILIARY_VIEWS_PER_PANEL = 16;
 const MAX_ID_LENGTH = 128;
 const MAX_TITLE_LENGTH = 80;
+const VIEW_PREFERENCE_VERSION = 1;
 
-export function createAuxiliaryRendererRegistry() {
+function createAuxiliaryRendererRegistry() {
   const renderers = new Map();
   return {
     register(name, renderer) {
@@ -23,31 +24,58 @@ export function createAuxiliaryRendererRegistry() {
     get(name) {
       return renderers.get(name) ?? null;
     },
-    has(name) {
-      return renderers.has(name);
-    },
   };
 }
 
 export const auxiliaryRendererRegistry = createAuxiliaryRendererRegistry();
 
-export function mergeAuxiliarySessionSettings(configured, stored) {
+function mergeAuxiliarySessionSettings(configured, stored) {
   return {
     ...(configured && typeof configured === "object" ? configured : {}),
     ...(stored && typeof stored === "object" ? stored : {}),
   };
 }
 
-export function shouldAnimateAuxiliaryView(mode, hasPayload, session) {
-  if (mode === "collapsed" || mode === "hidden" || !hasPayload) return false;
-  return session?.isAnimating?.() === true;
+function comparableSettings(value) {
+  if (Array.isArray(value)) return value.map(comparableSettings);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, comparableSettings(value[key])]),
+  );
 }
 
-// Decoded video can briefly outrun its exactly correlated auxiliary message.
-// Retain only the already-validated view for a few frames so the panel does not
-// flash empty; a real outage still clears promptly and no unmatched message is
-// ever selected.
-export function shouldHoldLastAuxiliaryFrame(
+function settingsMatch(left, right) {
+  return JSON.stringify(comparableSettings(left)) === JSON.stringify(comparableSettings(right));
+}
+
+export function createAuxiliaryViewPreference(configured, settings) {
+  return {
+    preference_version: VIEW_PREFERENCE_VERSION,
+    baseline: configured && typeof configured === "object" ? configured : {},
+    settings: settings && typeof settings === "object" ? settings : {},
+  };
+}
+
+export function restoreAuxiliaryViewPreference(configured, stored, acceptLegacy = true) {
+  const baseline = configured && typeof configured === "object" ? configured : {};
+  if (stored?.preference_version === VIEW_PREFERENCE_VERSION) {
+    return settingsMatch(baseline, stored.baseline)
+      ? mergeAuxiliarySessionSettings(baseline, stored.settings)
+      : baseline;
+  }
+  return acceptLegacy ? mergeAuxiliarySessionSettings(baseline, stored) : baseline;
+}
+
+export function reconcileAuxiliaryPanelMode(currentMode, settings, hasExplicitSettings) {
+  if (!hasExplicitSettings) return currentMode;
+  if (settings?.enabled === false) return "hidden";
+  return ["compact", "collapsed", "expanded"].includes(settings?.panelMode)
+    ? settings.panelMode
+    : "compact";
+}
+
+// Keep only previously correlated data across a brief video/metadata delivery gap.
+function shouldHoldLastAuxiliaryFrame(
   hasCurrentViews,
   lastViewAtMs,
   nowMs,
@@ -58,6 +86,29 @@ export function shouldHoldLastAuxiliaryFrame(
     && Number.isFinite(nowMs)
     && nowMs >= lastViewAtMs
     && nowMs - lastViewAtMs <= graceMs;
+}
+
+export function retainAuxiliaryViews(currentViews, incomingViews, lastSeenById, nowMs) {
+  const nextViews = new Map();
+  const nextLastSeen = new Map(lastSeenById);
+  const incomingById = new Map(incomingViews.map((view) => [view.id, view]));
+
+  for (const [id, view] of currentViews) {
+    if (incomingById.has(id)) {
+      nextViews.set(id, incomingById.get(id));
+      nextLastSeen.set(id, nowMs);
+      incomingById.delete(id);
+    } else if (shouldHoldLastAuxiliaryFrame(true, nextLastSeen.get(id), nowMs)) {
+      nextViews.set(id, view);
+    } else {
+      nextLastSeen.delete(id);
+    }
+  }
+  for (const [id, view] of incomingById) {
+    nextViews.set(id, view);
+    nextLastSeen.set(id, nowMs);
+  }
+  return { views: nextViews, lastSeenById: nextLastSeen };
 }
 
 function boundedString(value, maxLength) {
@@ -73,7 +124,7 @@ export function auxiliaryMessageQueueKey(message) {
   return id ? `${AUXILIARY_METADATA_TYPE}\u0000${id}` : AUXILIARY_METADATA_TYPE;
 }
 
-export function inspectAuxiliaryMessage(message, registry = auxiliaryRendererRegistry) {
+function inspectAuxiliaryMessage(message, registry = auxiliaryRendererRegistry) {
   if (message?.type !== AUXILIARY_METADATA_TYPE) {
     return { view: null, reason: "not-auxiliary" };
   }
@@ -116,6 +167,10 @@ export function partitionFrameMetadata(candidates, rtpTimestamp, registry = auxi
   const overlays = [];
   const auxiliaryViews = [];
   const ignoredAuxiliary = [];
+  const correlatedRtpTimestamp = Number.isInteger(rtpTimestamp)
+    ? rtpTimestamp
+    : candidates.find(({ data }) => Number.isInteger(data?._insight?.rtp_timestamp))
+      ?.data?._insight?.rtp_timestamp;
 
   for (const candidate of candidates) {
     const message = candidate?.data;
@@ -129,9 +184,14 @@ export function partitionFrameMetadata(candidates, rtpTimestamp, registry = auxi
       ignoredAuxiliary.push({ message, reason: inspected.reason });
       continue;
     }
-    if (!sameRtpTimestamp(inspected.view.rtpTimestamp, rtpTimestamp)) {
-      // Auxiliary views are frame-strict. Ordinary overlays retain the queue's
-      // arrival fallback, but a separate panel must never describe another frame.
+    if (!sameRtpTimestamp(inspected.view.rtpTimestamp, correlatedRtpTimestamp)) {
+      continue;
+    }
+    if (auxiliaryViews.length >= MAX_AUXILIARY_VIEWS_PER_PANEL) {
+      ignoredAuxiliary.push({
+        message,
+        reason: `frame exceeds ${MAX_AUXILIARY_VIEWS_PER_PANEL} auxiliary views`,
+      });
       continue;
     }
     auxiliaryViews.push(inspected.view);

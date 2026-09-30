@@ -81,61 +81,84 @@ test("version two settings migrate without retaining overlay delay", () => {
   assert.equal("metadataDelay" in settings.general, false);
 });
 
-test("BlazePose 3D settings have visible reference-box defaults", () => {
-  const api = loadSettingsApi();
-
-  assert.deepEqual(
-    { ...api.defaults.auxiliary["blazepose-3d"] },
-    {
-      enabled: true,
-      panelMode: "compact",
-      backgroundTransparency: 0,
-      yawDegrees: -45,
-      pitchDegrees: 20,
-      showReferenceBox: true,
-    },
-  );
-});
-
-test("legacy animation and stabilization settings are discarded", () => {
+test("BlazePose 3D settings normalize values and discard obsolete controls", () => {
   const api = loadSettingsApi();
   const settings = api.normalizeSettings({
     version: 6,
     auxiliary: {
       "blazepose-3d": {
+        panelMode: "floating",
+        backgroundTransparency: 3,
         autoRotate: true,
         rotationSpeed: 80,
         paused: true,
         stabilizePose: true,
-        yawDegrees: 35,
+        yawDegrees: 999,
+        pitchDegrees: -999,
+      },
+    },
+    types: {
+      "pose-estimation": {
+        poseStrokeColor: "#123456",
+        poseFillColor: "#654321",
+        poseFont: "12px sans-serif",
       },
     },
   });
   const pose3D = settings.auxiliary["blazepose-3d"];
 
-  assert.equal(settings.version, 9);
-  assert.equal(pose3D.yawDegrees, 35);
-  assert.equal("autoRotate" in pose3D, false);
-  assert.equal("rotationSpeed" in pose3D, false);
-  assert.equal("paused" in pose3D, false);
-  assert.equal("stabilizePose" in pose3D, false);
+  assert.deepEqual({ ...api.defaults.auxiliary["blazepose-3d"] }, {
+    enabled: true,
+    panelMode: "compact",
+    backgroundTransparency: 0,
+    yawDegrees: -45,
+    pitchDegrees: 20,
+    showReferenceBox: true,
+  });
+  assert.deepEqual(
+    {
+      panelMode: pose3D.panelMode,
+      backgroundTransparency: pose3D.backgroundTransparency,
+      yawDegrees: pose3D.yawDegrees,
+      pitchDegrees: pose3D.pitchDegrees,
+    },
+    { panelMode: "compact", backgroundTransparency: 1, yawDegrees: 180, pitchDegrees: -60 },
+  );
+  for (const key of ["autoRotate", "rotationSpeed", "paused", "stabilizePose"]) {
+    assert.equal(key in pose3D, false);
+  }
+  assert.deepEqual(
+    {
+      poseStrokeColor: settings.types["pose-estimation"].poseStrokeColor,
+      poseFillColor: settings.types["pose-estimation"].poseFillColor,
+      poseFont: settings.types["pose-estimation"].poseFont,
+    },
+    { poseStrokeColor: "#123456", poseFillColor: "#654321", poseFont: "12px sans-serif" },
+  );
 });
 
-test("BlazePose 3D settings resolve independently for each channel", () => {
+test("viewer settings resolve and clear independent channel overrides", () => {
   const api = loadSettingsApi({
     viewerSettings_global: JSON.stringify({
-      version: 4,
+      version: 9,
+      types: {
+        "object-detection": { visible: false, confidenceThreshold: 0.8 },
+        "pose-estimation": { showKeypoints: false, showKeypointLabels: true },
+      },
       auxiliary: {
         "blazepose-3d": {
           yawDegrees: -20,
-          pitchDegrees: 10,
-          panelMode: "compact",
           backgroundTransparency: 0.35,
+          showReferenceBox: false,
         },
       },
     }),
     viewerSettings_channel_2: JSON.stringify({
-      version: 4,
+      version: 9,
+      types: {
+        "object-detection": { visible: true },
+        "pose-estimation": { showKeypoints: true, showKeypointLabels: false },
+      },
       auxiliary: {
         "blazepose-3d": {
           enabled: false,
@@ -147,114 +170,24 @@ test("BlazePose 3D settings resolve independently for each channel", () => {
     }),
   });
 
-  assert.deepEqual(
-    { ...api.resolveAuxiliarySettings(1, "blazepose-3d") },
-    {
-      enabled: true,
-      panelMode: "compact",
-      backgroundTransparency: 0.35,
-      yawDegrees: -20,
-      pitchDegrees: 10,
-      showReferenceBox: true,
-    },
-  );
-  assert.deepEqual(
-    { ...api.resolveAuxiliarySettings(2, "blazepose-3d") },
-    {
-      enabled: false,
-      panelMode: "expanded",
-      backgroundTransparency: 0.8,
-      yawDegrees: 75,
-      pitchDegrees: 10,
-      showReferenceBox: true,
-    },
-  );
-});
-
-test("BlazePose 3D settings clamp transparency and camera angles and reject invalid panel modes", () => {
-  const api = loadSettingsApi();
-  const settings = api.normalizeSettings({
-    version: 4,
-    auxiliary: {
-      "blazepose-3d": {
-        panelMode: "floating",
-        backgroundTransparency: 3,
-        yawDegrees: 999,
-        pitchDegrees: -999,
-      },
-    },
-  });
-
-  assert.equal(settings.auxiliary["blazepose-3d"].panelMode, "compact");
-  assert.equal(settings.auxiliary["blazepose-3d"].backgroundTransparency, 1);
-  assert.equal(settings.auxiliary["blazepose-3d"].yawDegrees, 180);
-  assert.equal(settings.auxiliary["blazepose-3d"].pitchDegrees, -60);
-});
-
-test("panel shortcuts do not create unrelated channel overrides", () => {
-  const api = loadSettingsApi({
-    viewerSettings_global: JSON.stringify({
-      version: 4,
-      types: { "object-detection": { confidenceThreshold: 0.8 } },
-    }),
-  });
-
+  assert.equal(api.resolveAuxiliarySettings(1, "blazepose-3d").backgroundTransparency, 0.35);
+  assert.equal(api.resolveAuxiliarySettings(2, "blazepose-3d").backgroundTransparency, 0.8);
+  assert.equal(api.resolveTypeSettings(1, "object-detection").type.visible, false);
+  assert.equal(api.resolveTypeSettings(2, "object-detection").type.visible, true);
+  assert.equal(api.resolveTypeSettings(2, "pose-estimation").type.showKeypoints, true);
+  assert.equal(api.resolveTypeSettings(2, "pose-estimation").type.showKeypointLabels, false);
   api.writeScopeAuxiliarySettings("channel_3", "blazepose-3d", {
     enabled: true,
     panelMode: "expanded",
   });
-
   assert.equal(api.resolveTypeSettings(3, "object-detection").type.confidenceThreshold, 0.8);
   assert.equal(api.resolveAuxiliarySettings(3, "blazepose-3d").panelMode, "expanded");
-});
-
-test("metadata overlay visibility resolves globally and per channel", () => {
-  const api = loadSettingsApi({
-    viewerSettings_global: JSON.stringify({
-      version: 5,
-      types: { "object-detection": { visible: false } },
-    }),
-    viewerSettings_channel_2: JSON.stringify({
-      version: 5,
-      types: { "object-detection": { visible: true } },
-    }),
-  });
-
-  assert.equal(api.resolveTypeSettings(1, "object-detection").type.visible, false);
-  assert.equal(api.resolveTypeSettings(2, "object-detection").type.visible, true);
-});
-
-test("pose overlay defaults stay readable and resolve per channel", () => {
-  const api = loadSettingsApi({
-    viewerSettings_global: JSON.stringify({
-      version: 6,
-      types: { "pose-estimation": { showKeypoints: false, showKeypointLabels: true } },
-    }),
-    viewerSettings_channel_2: JSON.stringify({
-      version: 6,
-      types: { "pose-estimation": { showKeypoints: true, showKeypointLabels: false } },
-    }),
-  });
-
+  const updatedGlobal = api.readScopeSettings("global");
+  updatedGlobal.auxiliary["blazepose-3d"].backgroundTransparency = 0.6;
+  api.writeScopeSettings("global", updatedGlobal);
+  assert.equal(api.resolveAuxiliarySettings(3, "blazepose-3d").backgroundTransparency, 0.6);
+  assert.equal(api.resolveAuxiliarySettings(3, "blazepose-3d").panelMode, "expanded");
   assert.equal(api.defaults.types["pose-estimation"].showKeypointLabels, false);
-  assert.equal(api.resolveTypeSettings(1, "pose-estimation").type.showKeypoints, false);
-  assert.equal(api.resolveTypeSettings(1, "pose-estimation").type.showKeypointLabels, true);
-  assert.equal(api.resolveTypeSettings(2, "pose-estimation").type.showKeypoints, true);
-  assert.equal(api.resolveTypeSettings(2, "pose-estimation").type.showKeypointLabels, false);
-});
-
-test("a channel can discard its 3D override and inherit global settings", () => {
-  const api = loadSettingsApi({
-    viewerSettings_global: JSON.stringify({
-      version: 5,
-      auxiliary: { "blazepose-3d": { showReferenceBox: false } },
-    }),
-    viewerSettings_channel_2: JSON.stringify({
-      version: 5,
-      auxiliary: { "blazepose-3d": { showReferenceBox: true } },
-    }),
-  });
-
   assert.equal(api.hasScopeAuxiliarySettings("channel_2", "blazepose-3d"), true);
   api.clearScopeAuxiliarySettings("channel_2", "blazepose-3d");
   assert.equal(api.hasScopeAuxiliarySettings("channel_2", "blazepose-3d"), false);

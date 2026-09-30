@@ -2,9 +2,10 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 
 import {
   auxiliaryRendererRegistry,
-  mergeAuxiliarySessionSettings,
-  shouldAnimateAuxiliaryView,
-  shouldHoldLastAuxiliaryFrame,
+  createAuxiliaryViewPreference,
+  reconcileAuxiliaryPanelMode,
+  restoreAuxiliaryViewPreference,
+  retainAuxiliaryViews,
 } from "./auxiliaryVisualization.js";
 
 const VALID_MODES = new Set(["compact", "collapsed", "expanded", "hidden"]);
@@ -34,9 +35,7 @@ function loadPreference(channelIndex) {
 function savePreference(channelIndex, mode, selectedId) {
   try {
     window.localStorage.setItem(preferenceKey(channelIndex), JSON.stringify({ mode, selectedId }));
-  } catch (_err) {
-    // Viewer preferences are optional; private browsing can reject storage.
-  }
+  } catch (_err) {}
 }
 
 function loadRendererPreference(channelIndex, view) {
@@ -49,10 +48,16 @@ function loadRendererPreference(channelIndex, view) {
 
 function saveRendererPreference(channelIndex, view, settings) {
   try {
-    window.localStorage.setItem(rendererPreferenceKey(channelIndex, view), JSON.stringify(settings));
-  } catch (_err) {
-    // Renderer preferences are optional; private browsing can reject storage.
-  }
+    const renderer = auxiliaryRendererRegistry.get(view.renderer);
+    const toSession = renderer?.viewerSettings?.toSession;
+    const preference = typeof toSession === "function"
+      ? createAuxiliaryViewPreference(
+        toSession(resolveRendererSettings(channelIndex, view.renderer)),
+        settings,
+      )
+      : settings;
+    window.localStorage.setItem(rendererPreferenceKey(channelIndex, view), JSON.stringify(preference));
+  } catch (_err) {}
 }
 
 function resolveRendererSettings(channelIndex, renderer) {
@@ -99,12 +104,11 @@ function settingsForSession(channelIndex, view) {
   const stored = loadRendererPreference(channelIndex, view);
   const renderer = auxiliaryRendererRegistry.get(view.renderer);
   const toSession = renderer?.viewerSettings?.toSession;
-  if (typeof toSession !== "function" || !hasExplicitRendererSettings(channelIndex, view.renderer)) {
-    return stored;
-  }
-  return mergeAuxiliarySessionSettings(
+  if (typeof toSession !== "function") return stored;
+  return restoreAuxiliaryViewPreference(
     toSession(resolveRendererSettings(channelIndex, view.renderer)),
     stored,
+    !hasExplicitRendererSettings(channelIndex, view.renderer),
   );
 }
 
@@ -148,28 +152,6 @@ function RendererControls({ controls, onControl }) {
             </label>
           );
         }
-        if (control.type === "range") {
-          return (
-            <label
-              className="auxiliary-control-range"
-              data-control-id={control.id}
-              key={control.id}
-              title={control.valueLabel ?? control.label}
-            >
-              <span>{control.label}</span>
-              <input
-                type="range"
-                min={control.min}
-                max={control.max}
-                step={control.step}
-                value={control.value}
-                disabled={Boolean(control.disabled)}
-                aria-valuetext={control.valueLabel}
-                onChange={(event) => onControl(control.id, Number(event.target.value))}
-              />
-            </label>
-          );
-        }
         if (control.type === "action") {
           return (
             <button
@@ -206,9 +188,8 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
   const [surfaceOpacity, setSurfaceOpacity] = useState(1);
   const modeRef = useRef(mode);
   const canvasRef = useRef(null);
-  const emptyRef = useRef(null);
   const payloadsRef = useRef(new Map());
-  const lastViewAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const lastViewAtRef = useRef(new Map());
   const knownViewsRef = useRef([]);
   const selectedIdRef = useRef(selectedId);
   const sessionsRef = useRef(new Map());
@@ -239,6 +220,14 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     if (updateUi) setRendererControls([]);
   }, []);
 
+  const suspendPanel = useCallback(() => {
+    if (drawFrameRef.current != null) {
+      cancelAnimationFrame(drawFrameRef.current);
+      drawFrameRef.current = null;
+    }
+    destroySessions();
+  }, [destroySessions]);
+
   const getRendererSession = useCallback((view) => {
     const existing = sessionsRef.current.get(view.id);
     if (existing?.rendererName === view.renderer) return existing.session;
@@ -268,12 +257,12 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     return session;
   }, [channelIndex, updateControls]);
 
-  const drawCurrent = useCallback((animationTimeMs) => {
+  const drawCurrent = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || mode === "collapsed" || mode === "hidden") return false;
+    if (!canvas || mode === "collapsed" || mode === "hidden") return;
     const cssWidth = Math.max(0, canvas.clientWidth);
     const cssHeight = Math.max(0, canvas.clientHeight);
-    if (cssWidth === 0 || cssHeight === 0) return false;
+    if (cssWidth === 0 || cssHeight === 0) return;
 
     const pixelRatio = Math.min(MAX_CANVAS_PIXEL_RATIO, Math.max(1, window.devicePixelRatio || 1));
     const width = Math.round(cssWidth * pixelRatio);
@@ -281,15 +270,14 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
+    if (!ctx) return;
     ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
     const current = payloadsRef.current.get(selectedIdRef.current);
-    if (emptyRef.current) emptyRef.current.hidden = Boolean(current);
-    if (!current) return false;
+    if (!current) return;
     const session = getRendererSession(current);
-    if (!session) return false;
+    if (!session) return;
     updateControls(session);
 
     ctx.save();
@@ -298,7 +286,6 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         channelIndex,
         frameId: current.frameId,
         rtpTimestamp: current.rtpTimestamp,
-        animationTimeMs,
         settings: effectiveRendererSettings(current.renderer),
       });
     } catch (error) {
@@ -307,72 +294,79 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         drawWarnings.add(warningKey);
         console.warn(`auxiliary: channel ${channelIndex} failed to draw ${current.renderer}`, error);
       }
-      return false;
     } finally {
       ctx.restore();
     }
-    return shouldAnimateAuxiliaryView(mode, true, session);
   }, [channelIndex, effectiveRendererSettings, getRendererSession, mode, updateControls]);
 
   const scheduleDraw = useCallback(() => {
     if (modeRef.current === "collapsed" || modeRef.current === "hidden") return;
     if (drawFrameRef.current != null) return;
-    drawFrameRef.current = requestAnimationFrame((animationTimeMs) => {
+    drawFrameRef.current = requestAnimationFrame(() => {
       drawFrameRef.current = null;
-      if (drawCurrent(animationTimeMs)) scheduleDrawRef.current();
+      drawCurrent();
     });
   }, [drawCurrent]);
   scheduleDrawRef.current = scheduleDraw;
 
+  const clear = useCallback(() => {
+    payloadsRef.current = new Map();
+    lastViewAtRef.current = new Map();
+    knownViewsRef.current = [];
+    setKnownViews([]);
+    destroySessions();
+    scheduleDraw();
+  }, [destroySessions, scheduleDraw]);
+
   useImperativeHandle(ref, () => ({
     showFrame(views) {
       const now = performance.now();
-      if (views.length === 0 && shouldHoldLastAuxiliaryFrame(
-        payloadsRef.current.size > 0,
+      const retained = retainAuxiliaryViews(
+        payloadsRef.current,
+        views,
         lastViewAtRef.current,
         now,
-      )) {
-        scheduleDraw();
-        return;
+      );
+      payloadsRef.current = retained.views;
+      lastViewAtRef.current = retained.lastSeenById;
+      const nextKnown = [...retained.views.values()].map((view) => ({
+        id: view.id,
+        renderer: view.renderer,
+        title: view.title,
+      }));
+      const knownIds = new Set(nextKnown.map((view) => view.id));
+      for (const [viewId, entry] of sessionsRef.current) {
+        if (knownIds.has(viewId)) continue;
+        entry.session.destroy?.();
+        sessionsRef.current.delete(viewId);
       }
-      payloadsRef.current = new Map(views.map((view) => [view.id, view]));
-      if (views.length > 0) {
-        lastViewAtRef.current = now;
-        const byId = new Map(knownViewsRef.current.map((view) => [view.id, view]));
-        for (const view of views) {
-          byId.set(view.id, { id: view.id, renderer: view.renderer, title: view.title });
+      if (descriptorSignature(nextKnown) !== descriptorSignature(knownViewsRef.current)) {
+        knownViewsRef.current = nextKnown;
+        setKnownViews(nextKnown);
+      }
+      if (nextKnown.length > 0) {
+        if (!selectedIdRef.current || !knownIds.has(selectedIdRef.current)) {
+          selectedIdRef.current = nextKnown[0].id;
+          setSelectedId(nextKnown[0].id);
         }
-        const nextKnown = [...byId.values()];
-        if (descriptorSignature(nextKnown) !== descriptorSignature(knownViewsRef.current)) {
-          knownViewsRef.current = nextKnown;
-          setKnownViews(nextKnown);
-        }
-        if (!selectedIdRef.current || !byId.has(selectedIdRef.current)) {
-          selectedIdRef.current = views[0].id;
-          setSelectedId(views[0].id);
-          const nextMode = displayMode(effectiveRendererSettings(views[0].renderer));
+        const renderer = rendererForSelection(selectedIdRef.current, payloadsRef.current, nextKnown);
+        const rendererSettings = effectiveRendererSettings(renderer);
+        const nextMode = reconcileAuxiliaryPanelMode(
+          modeRef.current,
+          rendererSettings,
+          hasExplicitRendererSettings(channelIndex, renderer),
+        );
+        if (nextMode !== modeRef.current) {
           modeRef.current = nextMode;
           setMode(nextMode);
         }
-        const renderer = rendererForSelection(selectedIdRef.current, payloadsRef.current, nextKnown);
-        setSurfaceOpacity(panelSurfaceOpacity(effectiveRendererSettings(renderer)));
+        setSurfaceOpacity(panelSurfaceOpacity(rendererSettings));
       }
       scheduleDraw();
     },
-    clearFrame() {
-      payloadsRef.current = new Map();
-      lastViewAtRef.current = Number.NEGATIVE_INFINITY;
-      scheduleDraw();
-    },
-    reset() {
-      payloadsRef.current = new Map();
-      lastViewAtRef.current = Number.NEGATIVE_INFINITY;
-      knownViewsRef.current = [];
-      setKnownViews([]);
-      destroySessions();
-      scheduleDraw();
-    },
-  }), [destroySessions, effectiveRendererSettings, scheduleDraw]);
+    clearFrame: clear,
+    reset: clear,
+  }), [channelIndex, clear, effectiveRendererSettings, scheduleDraw]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -406,9 +400,16 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       modeRef.current = nextMode;
       setMode(nextMode);
       setSurfaceOpacity(panelSurfaceOpacity(resolved));
+      if (nextMode === "collapsed" || nextMode === "hidden") suspendPanel();
       const current = sessionsRef.current.get(selectedIdRef.current)?.session;
       const toSession = auxiliaryRendererRegistry.get(renderer)?.viewerSettings?.toSession;
-      if (typeof toSession === "function") current?.applySettings?.(toSession(resolved));
+      if (typeof toSession === "function") {
+        const view = payloadsRef.current.get(selectedIdRef.current)
+          ?? knownViewsRef.current.find(({ id }) => id === selectedIdRef.current);
+        current?.applySettings?.(
+          isPreview || !view ? toSession(resolved) : settingsForSession(channelIndex, view),
+        );
+      }
       updateControls(current);
       scheduleDraw();
     };
@@ -418,7 +419,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
       window.removeEventListener("viewer-settings-changed", refreshSettings);
       window.removeEventListener("viewer-settings-preview", refreshSettings);
     };
-  }, [channelIndex, effectiveRendererSettings, scheduleDraw, updateControls]);
+  }, [channelIndex, effectiveRendererSettings, scheduleDraw, suspendPanel, updateControls]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -483,28 +484,16 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     const settingsApi = window.viewerSettingsApi;
     if (renderer && settingsApi?.writeScopeAuxiliarySettings) {
       const targetScope = `channel_${channelIndex}`;
-      const current = resolveRendererSettings(channelIndex, renderer);
       settingsApi.writeScopeAuxiliarySettings(targetScope, renderer, {
-        ...current,
         enabled: nextMode !== "hidden",
-        panelMode: nextMode === "hidden" ? current.panelMode : nextMode,
+        ...(nextMode === "hidden" ? {} : { panelMode: nextMode }),
       });
       window.dispatchEvent(new CustomEvent("viewer-settings-changed", {
         detail: { scope: targetScope, auxiliaryRenderer: renderer },
       }));
     }
     modeRef.current = nextMode;
-    if (nextMode === "collapsed" || nextMode === "hidden") {
-      if (drawFrameRef.current != null) {
-        cancelAnimationFrame(drawFrameRef.current);
-        drawFrameRef.current = null;
-      }
-      const current = sessionsRef.current.get(selectedIdRef.current);
-      current?.session.destroy?.();
-      sessionsRef.current.delete(selectedIdRef.current);
-      controlsSignatureRef.current = "";
-      setRendererControls([]);
-    }
+    if (nextMode === "collapsed" || nextMode === "hidden") suspendPanel();
     setMode(nextMode);
   };
 
@@ -582,9 +571,6 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
                   onPointerUp={endPointer}
                   onPointerCancel={endPointer}
                 />
-                <div ref={emptyRef} className="auxiliary-panel-no-data">
-                  No data for this frame
-                </div>
               </div>
               <RendererControls controls={rendererControls} onControl={applyRendererControl} />
             </>

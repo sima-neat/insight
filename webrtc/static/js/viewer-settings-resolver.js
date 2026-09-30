@@ -147,9 +147,6 @@
 
   function normalizeTypeSettings(metadataType, rawType = {}, fillDefaults = true) {
     const type = fillDefaults ? clone(TYPE_DEFAULTS[metadataType] || {}) : {};
-    if (Object.prototype.hasOwnProperty.call(rawType, "visible")) {
-      type.visible = rawType.visible !== false;
-    }
     if (metadataType === "object-detection" || metadataType === "segmentation") {
       if (Object.prototype.hasOwnProperty.call(rawType, "confidenceThreshold")) {
         type.confidenceThreshold = clampNumber(rawType.confidenceThreshold, 0, 1, 0);
@@ -178,6 +175,7 @@
         type.history = history;
       }
     } else if (metadataType === "pose-estimation") {
+      Object.assign(type, rawType);
       if (Object.prototype.hasOwnProperty.call(rawType, "showKeypoints")) {
         type.showKeypoints = rawType.showKeypoints !== false;
       }
@@ -186,6 +184,9 @@
       }
     } else if (rawType && typeof rawType === "object") {
       Object.assign(type, rawType);
+    }
+    if (Object.prototype.hasOwnProperty.call(rawType, "visible")) {
+      type.visible = rawType.visible !== false;
     }
     return type;
   }
@@ -432,6 +433,7 @@
     next.auxiliary[renderer] = normalizeAuxiliarySettings(
       renderer,
       { ...existing, ...auxiliarySettings },
+      false,
     );
     window.localStorage.setItem(`viewerSettings_${scope}`, JSON.stringify(next));
     return clone(next.auxiliary[renderer]);

@@ -334,6 +334,7 @@ window.drawStrategies = {
     if (showRoi) {
       drawRoiPolygons(ctx, roiPolygons, video, scale, drawContext.frameState);
     }
+    if (settings.type.visible === false) return;
 
     data.objects.forEach(obj => {
       if (obj.confidence < threshold) return;
@@ -444,6 +445,7 @@ window.drawStrategies = {
     if (showRoi) {
       drawRoiPolygons(ctx, roiPolygons, video, scale, drawContext.frameState);
     }
+    if (settings.type.visible === false) return;
 
     data.segments.forEach(seg => {
       if ((seg.confidence ?? 1) < threshold) return;
@@ -560,6 +562,13 @@ window.drawStrategies = {
 
     if (showRoi) {
       drawRoiPolygons(ctx, roiPolygons, video, scale, drawContext.frameState);
+    }
+    if (settings.type.visible === false) {
+      updateTrackHistory(trackHistory, index, [], drawContext.now || performance.now(), {
+        ...historySettings,
+        enabled: false
+      });
+      return;
     }
 
     updateTrackHistory(trackHistory, index, visibleTracks, drawContext.now || performance.now(), historySettings);

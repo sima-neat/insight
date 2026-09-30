@@ -186,7 +186,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   saveViewerSettings.addEventListener("click", () => {
-    const settings = settingsApi.readScopeSettings(scope);
+    const settings = settingsForEditor();
     settings.general.videoSyncBufferMs = parseInt(videoSyncBufferSlider.value, 10);
     settings.general.metadataRetentionMs = parseInt(metadataRetentionSlider.value, 10);
     settings.general.showRoi = roiToggle.checked;
@@ -207,10 +207,22 @@ document.addEventListener("DOMContentLoaded", () => {
     settingsApi.metadataTypes.forEach(({ value }) => {
       settings.types[value].visible = metadataVisibilityDraft[value] !== false;
     });
-    settings.auxiliary["blazepose-3d"] = blazePose3DDraftSettings();
+    const blazePose3DSettings = blazePose3DDraftSettings();
+    settings.auxiliary["blazepose-3d"] = blazePose3DSettings;
 
     settingsApi.writeScopeSettings(scope, settings);
-    if (scope === "global") settingsApi.clearAllChannelSettings();
+    if (scope === "global") {
+      settingsApi.clearAllChannelSettings();
+    } else {
+      const inherited = settingsApi.readScopeSettings("global").auxiliary["blazepose-3d"];
+      const overrides = Object.fromEntries(
+        Object.entries(blazePose3DSettings).filter(([key, value]) => value !== inherited[key])
+      );
+      settingsApi.clearScopeAuxiliarySettings(scope, "blazepose-3d");
+      if (Object.keys(overrides).length > 0) {
+        settingsApi.writeScopeAuxiliarySettings(scope, "blazepose-3d", overrides);
+      }
+    }
     viewerSettingsOverlay.classList.add("hidden");
     window.dispatchEvent(
       new CustomEvent("viewer-settings-changed", {
