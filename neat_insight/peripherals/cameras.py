@@ -321,7 +321,7 @@ def _mipi_support(model: str, libcamerasrc: Optional[bool]) -> dict:
         return _support("unsupported", NO_LIBCAMERASRC_REASON, [])
     if libcamerasrc is None:
         return _support("advertised", UNCHECKED_LIBCAMERASRC_REASON, [CORE_883])
-    if compat.has_model(model):
+    if any(mode["model"] == model for mode in compat.VERIFIED_MODES):
         return _support("verified", VERIFIED_REASON, [CORE_883])
     return _support("advertised", ADVERTISED_REASON, [CORE_883])
 

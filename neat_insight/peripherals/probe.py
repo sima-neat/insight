@@ -183,10 +183,6 @@ def parse_cam_info(text):
     return formats
 
 
-def acquire_failed(text):
-    return bool(_ACQUIRE_FAILED_RE.search(text))
-
-
 def _size_range(groups):
     if groups[0] is None:
         return None
@@ -258,12 +254,8 @@ def parse_fuser_pids(text):
     return sorted({int(pid) for pid in re.findall(r"\d+", text)})
 
 
-def _command(pid):
-    return _read(os.path.join(PROC_ROOT, str(pid), "comm")) or "?"
-
-
 def _users(pids):
-    return [{"pid": pid, "command": _command(pid)} for pid in sorted(pids)]
+    return [{"pid": pid, "command": _read(os.path.join(PROC_ROOT, str(pid), "comm")) or "?"} for pid in sorted(pids)]
 
 
 def availability_method(tools):
@@ -469,7 +461,7 @@ def _read_modes(tools, camera):
     text = err + "\n" + out
     if code is None:
         camera["acquire"] = _reason(code, err)
-    elif acquire_failed(text):
+    elif _ACQUIRE_FAILED_RE.search(text):
         camera["acquire"] = "busy"
     elif code != 0:
         camera["acquire"] = "failed"

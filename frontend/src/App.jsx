@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
+import { Pill } from './peripherals/ui.jsx'
 import { boardIndicator, createBoardSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
@@ -1717,7 +1718,7 @@ export default function App() {
       : null
 
   const temperatureValue = metrics?.temperature_celsius_avg
-  const boardIndicatorInfo = boardIndicator(boardLoading && !board ? null : board)
+  const boardIndicatorInfo = boardIndicator(board)
 
   return (
     <div className="app-shell">
@@ -1739,9 +1740,7 @@ export default function App() {
             aria-expanded={boardPanelOpen}
           >
             <span className="board-trigger-label">{boardIndicatorInfo.label}</span>
-            <span className={['sysinfo-pill', 'periph-pill', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}>
-              {boardIndicatorInfo.state.short}
-            </span>
+            <Pill tone={boardIndicatorInfo.state.tone}>{boardIndicatorInfo.state.short}</Pill>
           </button>
           <button
             type="button"

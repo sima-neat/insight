@@ -206,15 +206,10 @@ def _shell_target():
         target = board.get_board_manager().target()
     except Exception:
         target = None
-    if target is not None and target.mode == "ssh" and target.host:
+    if target is not None and target.mode == "ssh":
         # The bundled password is valid only for the SDK-paired DevKit's default account.
-        ssh_user = target.user or DEFAULT_DEVKIT_SSH_USERNAME
-        return (
-            target.host,
-            target.port or 22,
-            ssh_user,
-            target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
-        )
+        prefilled = target.source == "sdk-env" and target.user == DEFAULT_DEVKIT_SSH_USERNAME
+        return target.host, target.port, target.user, prefilled
     devkit_ip = get_devkit_sync_devkit_ip()
     return devkit_ip or None, 22, DEFAULT_DEVKIT_SSH_USERNAME, bool(devkit_ip)
 

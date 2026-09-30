@@ -47,7 +47,7 @@ def select_board():
 def test_board():
     """Connect to the selected board, read its host name and build, and return the updated board state."""
     manager = get_board_manager()
-    manager.test()
+    manager.session().identity()
     return manager.state()
 
 
