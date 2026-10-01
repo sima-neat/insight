@@ -74,6 +74,35 @@ export function getMicrophoneTest(token, signal) {
   return requestJson(`/api/peripherals/microphones/test/${encodeURIComponent(token)}`, { signal })
 }
 
+const TERMINAL_MICROPHONE_STATUS_ERRORS = new Set(['not_found', 'stale_snapshot'])
+
+export async function pollMicrophoneTest(token, {
+  request = getMicrophoneTest,
+  isActive = () => true,
+  onStatus = () => {},
+  onError = () => {},
+  wait = () => new Promise((resolve) => setTimeout(resolve, 100))
+} = {}) {
+  while (isActive()) {
+    let answer
+    try {
+      answer = (await request(token)).test
+    } catch (error) {
+      if (!isActive()) return null
+      if (TERMINAL_MICROPHONE_STATUS_ERRORS.has(error?.code)) throw error
+      onError(error)
+      await wait()
+      continue
+    }
+    if (!isActive()) return null
+    onError(null)
+    onStatus(answer)
+    if (answer.state === 'ready' || answer.state === 'failed') return answer
+    await wait()
+  }
+  return null
+}
+
 export function stopMicrophoneTest(token) {
   return requestJson(`/api/peripherals/microphones/test/${encodeURIComponent(token)}/stop`, {
     method: 'POST'

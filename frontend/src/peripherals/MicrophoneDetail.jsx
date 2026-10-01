@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { getMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './api.js'
+import { pollMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './api.js'
 import { microphoneAvailability, microphoneModeLabel, normalizeError } from './model.js'
 import { Callout, ErrorNotice, Pill } from './ui.jsx'
 
-const POLL_MS = 100
 const METER_SEGMENTS = 28
 const METER_FLOOR_DBFS = -50
 
@@ -92,18 +91,15 @@ function MicrophoneTest({ device, catalog }) {
   }, [])
 
   async function poll(token) {
-    while (mounted.current && activeToken.current === token) {
-      const answer = (await getMicrophoneTest(token)).test
-      if (!mounted.current || activeToken.current !== token) return
-      setTest(answer)
-      recording.current = answer.state === 'recording'
-      if (answer.state === 'failed') {
-        setError(normalizeError(answer.error))
-        return
+    await pollMicrophoneTest(token, {
+      isActive: () => mounted.current && activeToken.current === token,
+      onError: (nextError) => setError(normalizeError(nextError)),
+      onStatus: (answer) => {
+        setTest(answer)
+        recording.current = answer.state === 'recording'
+        if (answer.state === 'failed') setError(normalizeError(answer.error))
       }
-      if (answer.state === 'ready') return
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-    }
+    })
   }
 
   async function start() {
@@ -135,7 +131,12 @@ function MicrophoneTest({ device, catalog }) {
       setTest(next)
       await poll(next.token)
     } catch (nextError) {
-      if (mounted.current) setError(normalizeError(nextError))
+      if (mounted.current) {
+        activeToken.current = null
+        recording.current = false
+        setTest(null)
+        setError(normalizeError(nextError))
+      }
     } finally {
       if (mounted.current) setStarting(false)
     }
