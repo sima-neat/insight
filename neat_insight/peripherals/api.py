@@ -1,8 +1,8 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.api import no_store
-from neat_insight.peripherals import export
+from neat_insight.peripherals import export, mictest
 from neat_insight.peripherals.client import PeripheralClient
 
 peripherals_bp = Blueprint("peripherals", __name__)
@@ -105,3 +105,50 @@ def get_peripheral_events():
         request.args.get("instance_id") or None,
     )
     return _with_board(session, payload)
+
+
+@peripherals_bp.post("/api/peripherals/microphones/test")
+def start_microphone_test():
+    """Test one microphone from an exact daemon catalog snapshot."""
+    selection = mictest.parse_request(request.get_json(silent=True))
+    session = _session()
+    if selection["board_generation"] != session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The selected board changed since this microphone was selected.",
+            hint="Read the current peripheral catalog, then select the microphone again.",
+            expected_generation=selection["board_generation"],
+            current_generation=session.generation,
+        )
+    catalog = PeripheralClient(session).catalog()
+    bound = mictest.bind_microphone(catalog, selection)
+    session.require_current()
+    return {"test": mictest.tests.start(session, selection, bound)}, 202
+
+
+@peripherals_bp.get("/api/peripherals/microphones/test/<token>")
+def get_microphone_test(token):
+    """Return one token-owned microphone test."""
+    session = _session()
+    return {"test": mictest.tests.status(token, session.generation)}
+
+
+@peripherals_bp.post("/api/peripherals/microphones/test/<token>/stop")
+def stop_microphone_test(token):
+    """Request that one token-owned microphone test stop recording."""
+    session = _session()
+    return {"test": mictest.tests.stop(token, session.generation)}
+
+
+@peripherals_bp.get("/api/peripherals/microphones/test/<token>.wav")
+def get_microphone_test_audio(token):
+    """Return one completed test recording while its token remains retained."""
+    session = _session()
+    audio = mictest.tests.audio(token, session.generation)
+    if audio is None:
+        raise BoardError(
+            "not_found",
+            "This microphone test has no finished recording.",
+            hint="Wait for it to finish or start a new test.",
+        )
+    return Response(audio, mimetype="audio/wav")

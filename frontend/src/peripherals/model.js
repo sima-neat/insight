@@ -105,6 +105,23 @@ export function isExportableMode(camera, mode) {
   return Boolean(camera?.camera_name && mode?.supported === true && Number.isInteger(mode.width) && Number.isInteger(mode.height))
 }
 
+export function microphoneModeLabel(mode) {
+  const rates = Array.isArray(mode?.rates_hz)
+    ? mode.rates_hz.map((rate) => `${Number((rate / 1000).toFixed(3))} kHz`).join(' · ')
+    : mode?.rate_range_hz
+      ? `${Number((mode.rate_range_hz.min / 1000).toFixed(3))}–${Number((mode.rate_range_hz.max / 1000).toFixed(3))} kHz`
+      : 'Rates unavailable'
+  return [mode?.format || 'Unknown format', `${mode?.channels || '?'} ch`, `${mode?.sample_bits || '?'}-bit`, rates].join(' · ')
+}
+
+export function microphoneAvailability(microphone) {
+  switch (microphone?.availability?.state) {
+    case 'available': return { label: 'Available', tone: 'ok', canTest: true }
+    case 'in_use': return { label: 'In use', tone: 'warn', canTest: false }
+    default: return { label: 'Availability unknown', tone: 'warn', canTest: true }
+  }
+}
+
 export function formatTime(value) {
   const parsed = Date.parse(value || '')
   return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : 'Never'

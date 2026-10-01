@@ -62,3 +62,20 @@ export function createLatestRequest() {
     }
   }
 }
+
+export function startMicrophoneTest(selection) {
+  return requestJson('/api/peripherals/microphones/test', {
+    method: 'POST',
+    body: selection
+  })
+}
+
+export function getMicrophoneTest(token, signal) {
+  return requestJson(`/api/peripherals/microphones/test/${encodeURIComponent(token)}`, { signal })
+}
+
+export function stopMicrophoneTest(token) {
+  return requestJson(`/api/peripherals/microphones/test/${encodeURIComponent(token)}/stop`, {
+    method: 'POST'
+  })
+}

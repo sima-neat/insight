@@ -51,34 +51,67 @@ def _output_too_large(argv: List[str]) -> BoardError:
 
 
 class LocalTransport:
-    def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active = set()
+        self._closed = False
+
+    def exec(
+        self,
+        argv: List[str],
+        *,
+        timeout: float,
+        stdin: Optional[bytes] = None,
+        on_stdout=None,
+    ) -> ExecResult:
         deadline = time.monotonic() + timeout
+        with self._lock:
+            if self._closed:
+                raise BoardError(
+                    "stale_snapshot",
+                    "The selected board changed while this request was running.",
+                    hint="Retry to use the newly selected board.",
+                )
+            try:
+                proc = subprocess.Popen(
+                    argv,
+                    stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
+            self._active.add(proc)
         try:
-            proc = subprocess.Popen(
-                argv,
-                stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
-        try:
-            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout)
+            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout, on_stdout)
             try:
                 exit_code = proc.wait(max(deadline - time.monotonic(), 0))
             except subprocess.TimeoutExpired:
                 raise _timeout_error(argv, timeout, "this board") from None
+            with self._lock:
+                closed = self._closed
+            if closed:
+                raise BoardError(
+                    "stale_snapshot",
+                    "The selected board changed while this request was running.",
+                    hint="Retry to use the newly selected board.",
+                )
             return ExecResult(exit_code, stdout, stderr)
         finally:
             if proc.poll() is None:
-                proc.kill()
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
                 proc.wait()
             for pipe in (proc.stdin, proc.stdout, proc.stderr):
                 if pipe and not pipe.closed:
                     pipe.close()
+            with self._lock:
+                self._active.discard(proc)
 
     @staticmethod
-    def _collect(proc, argv, stdin, deadline, timeout):
+    def _collect(proc, argv, stdin, deadline, timeout, on_stdout=None):
         chunks = {proc.stdout: [], proc.stderr: []}
         pending = memoryview(stdin or b"")
         size = 0
@@ -113,6 +146,8 @@ class LocalTransport:
                         continue
                     chunks[key.fileobj].append(chunk)
                     size += len(chunk)
+                    if on_stdout is not None and key.fileobj is proc.stdout:
+                        on_stdout(chunk)
                     if size > MAX_OUTPUT_BYTES:
                         raise _output_too_large(argv)
         return b"".join(chunks[proc.stdout]), b"".join(chunks[proc.stderr])
@@ -121,7 +156,15 @@ class LocalTransport:
         return None
 
     def close(self) -> None:
-        pass
+        with self._lock:
+            self._closed = True
+            active = list(self._active)
+        for proc in active:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
 
 
 class SshTransport:
@@ -140,7 +183,14 @@ class SshTransport:
     def host_key_name(self) -> str:
         return self.host if self.port == 22 else f"[{self.host}]:{self.port}"
 
-    def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
+    def exec(
+        self,
+        argv: List[str],
+        *,
+        timeout: float,
+        stdin: Optional[bytes] = None,
+        on_stdout=None,
+    ) -> ExecResult:
         channel = self._open_channel()
         try:
             channel.settimeout(timeout)
@@ -148,7 +198,7 @@ class SshTransport:
             if stdin:
                 channel.sendall(stdin)
             channel.shutdown_write()
-            return self._collect(channel, argv, timeout)
+            return self._collect(channel, argv, timeout, on_stdout)
         except socket.timeout:
             raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
         except (paramiko.SSHException, OSError, EOFError) as exc:
@@ -178,7 +228,7 @@ class SshTransport:
         self._closed = True
         self._drop()
 
-    def _collect(self, channel, argv: List[str], timeout: float) -> ExecResult:
+    def _collect(self, channel, argv: List[str], timeout: float, on_stdout=None) -> ExecResult:
         deadline = time.monotonic() + timeout
         stdout, stderr, size = [], [], 0
         while True:
@@ -186,6 +236,8 @@ class SshTransport:
             while channel.recv_ready():
                 stdout.append(channel.recv(65536))
                 size += len(stdout[-1])
+                if on_stdout is not None:
+                    on_stdout(stdout[-1])
                 progressed = True
             while channel.recv_stderr_ready():
                 stderr.append(channel.recv_stderr(65536))

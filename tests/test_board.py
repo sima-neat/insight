@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock as mock
@@ -137,6 +138,66 @@ class LocalTransportTests(unittest.TestCase):
             LocalTransport().exec(["yes"], timeout=5)
         self.assertEqual(ctx.exception.code, "command_failed")
         self.assertIn("4096 bytes", ctx.exception.message)
+
+    def test_exec_streams_stdout_before_the_command_finishes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "seen"
+            script = f"printf ab; while [ ! -e {marker} ]; do sleep 0.01; done; printf cd"
+            result = LocalTransport().exec(
+                ["sh", "-c", script],
+                timeout=5,
+                on_stdout=lambda _chunk: marker.touch(),
+            )
+        self.assertEqual(result.stdout, b"abcd")
+
+    def test_callback_exception_terminates_the_command(self):
+        pids = []
+
+        def stop(chunk):
+            pids.append(int(chunk))
+            raise RuntimeError("stop")
+
+        with self.assertRaisesRegex(RuntimeError, "stop"):
+            LocalTransport().exec(
+                ["sh", "-c", "echo $$; exec sleep 30"],
+                timeout=60,
+                on_stdout=stop,
+            )
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pids[0], 0)
+
+    def test_close_terminates_active_local_commands_and_rejects_new_work(self):
+        transport = LocalTransport()
+        ready = threading.Event()
+        outcome = []
+        pids = []
+
+        def on_stdout(chunk):
+            pids.append(int(chunk))
+            ready.set()
+
+        def run():
+            try:
+                transport.exec(
+                    ["sh", "-c", "echo $$; exec sleep 30"],
+                    timeout=60,
+                    on_stdout=on_stdout,
+                )
+            except Exception as error:
+                outcome.append(error)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        self.assertTrue(ready.wait(2))
+        transport.close()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome[0].code, "stale_snapshot")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pids[0], 0)
+        with self.assertRaises(BoardError) as ctx:
+            transport.exec(["true"], timeout=1)
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
 
 
 class SshTransportTests(unittest.TestCase):

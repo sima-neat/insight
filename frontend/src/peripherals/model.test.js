@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, isExportableMode, modeLabel, validateBoardForm } from './model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, isExportableMode, microphoneAvailability, microphoneModeLabel, modeLabel, validateBoardForm } from './model.js'
 
 test('device tabs are generic, counted, and sorted', () => {
   assert.deepEqual(deviceTypes([
@@ -29,6 +29,21 @@ test('only exact supported CameraInput modes can be exported', () => {
   assert.equal(isExportableMode({}, mode), false)
   assert.equal(isExportableMode(camera, { ...mode, supported: false }), false)
   assert.equal(isExportableMode(camera, { supported: true, size_range: {} }), false)
+})
+
+test('microphone modes retain discrete and ranged ALSA capabilities', () => {
+  assert.equal(microphoneModeLabel({
+    format: 'S24_3LE', channels: 2, sample_bits: 24, rates_hz: [32000, 44100, 48000]
+  }), 'S24_3LE · 2 ch · 24-bit · 32 kHz · 44.1 kHz · 48 kHz')
+  assert.equal(microphoneModeLabel({
+    format: 'S16_LE', channels: 1, sample_bits: 16, rate_range_hz: { min: 8000, max: 48000 }
+  }), 'S16_LE · 1 ch · 16-bit · 8–48 kHz')
+})
+
+test('in-use microphones cannot start an explicit capture test', () => {
+  assert.equal(microphoneAvailability({ availability: { state: 'available' } }).canTest, true)
+  assert.equal(microphoneAvailability({ availability: { state: 'unknown' } }).canTest, true)
+  assert.equal(microphoneAvailability({ availability: { state: 'in_use' } }).canTest, false)
 })
 
 test('daemon restarts invalidate selections even when revisions collide', () => {

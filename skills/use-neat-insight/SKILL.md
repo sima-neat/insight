@@ -407,8 +407,14 @@ Peripheral discovery is owned by the board's `simaai-peripherals` daemon. Insigh
 | `POST` | `/api/peripherals/refresh` | Ask the daemon to reconcile and wait for its target scan sequence. |
 | `GET` | `/api/peripherals/events` | Forward the daemon's bounded event long-poll; re-read the catalog on events or `resync_required`. |
 | `POST` | `/api/peripherals/cameras/export` | Revalidate one exact supported camera mode and generate CameraInput examples. |
+| `POST` | `/api/peripherals/microphones/test` | Revalidate one microphone against the exact board/daemon catalog and start a bounded, token-owned capture. |
+| `GET` | `/api/peripherals/microphones/test/<token>` | Poll only that token's live level or completed result. |
+| `POST` | `/api/peripherals/microphones/test/<token>/stop` | Stop only that token's recording; never stop another test or an unrelated application. |
+| `GET` | `/api/peripherals/microphones/test/<token>.wav` | Read the completed bounded WAV while the token is retained. |
 
 Daemon absence, refusal, permission denial, timeout, malformed responses, and schema mismatch are errors. Clients must surface them rather than probing hardware independently.
+
+Microphone tests are explicit capture operations, not discovery. Start must include `board_generation`, `instance_id`, `revision`, and `device_id` from the rendered catalog. Insight re-reads the daemon and uses only its current `capture_target.selector`; it never synthesizes routing from an ALSA card index. Treat `409 stale_snapshot`, `409 microphone_in_use`, missing `arecord`, stop failures, and a silent result as visible outcomes rather than switching to another device or stopping a process.
 
 ## Environment And Viewer
 
