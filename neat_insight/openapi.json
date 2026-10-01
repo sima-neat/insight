@@ -25,7 +25,9 @@
     {"name": "Media sources", "description": "Manage one-based source slots that publish assigned media over RTSP or HTTP MJPEG. A normal workflow is list videos → assign a slot → start it → inspect state → stop it before changing or deleting media."},
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
-    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."}
+    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
+    {"name": "Board", "description": "Select the local or SSH-connected DevKit used by board-backed Insight APIs."},
+    {"name": "Peripherals", "description": "Read and refresh the authoritative peripheral daemon catalog. Insight forwards the daemon's generic records and events without rescanning, caching, or applying support policy."}
   ],
   "x-tagGroups": [
     {
@@ -34,7 +36,7 @@
     },
     {
       "name": "Automate Insight",
-      "tags": ["Media library", "Media imports", "Media sources", "Workspace"]
+      "tags": ["Media library", "Media imports", "Media sources", "Workspace", "Board", "Peripherals"]
     },
     {
       "name": "API resources",
@@ -805,6 +807,78 @@
         }
       }
     },
+    "/api/board": {
+      "get": {
+        "tags": ["Board"],
+        "summary": "Get the selected board",
+        "description": "Returns the local, manually selected, or SDK-configured board target and its generation. Reading this endpoint does not connect to the board.",
+        "operationId": "getSelectedBoard",
+        "responses": {"200": {"description": "Selected target and last connection status.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}}
+      }
+    },
+    "/api/board/select": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Select a board",
+        "description": "Saves one SSH target, or clears the manual target when `reset` is true. Changing targets advances the board generation and invalidates in-flight peripheral results.",
+        "operationId": "selectBoard",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"host": {"type": "string"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "user": {"type": "string"}, "reset": {"type": "boolean"}}}}}},
+        "responses": {"200": {"description": "Updated selected-board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}}
+      }
+    },
+    "/api/board/test": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Test the selected board connection",
+        "description": "Connects locally or over SSH and reads stable board identity and build metadata.",
+        "operationId": "testSelectedBoard",
+        "responses": {"200": {"description": "Connected board state and identity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
+      }
+    },
+    "/api/board/trust-host-key": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Trust a replacement SSH host key",
+        "description": "Trusts only the exact fingerprint presented by the currently selected board after a host-key mismatch.",
+        "operationId": "trustSelectedBoardHostKey",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["fingerprint"], "properties": {"fingerprint": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "Updated selected-board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}}
+      }
+    },
+    "/api/peripherals": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Get the current peripheral catalog",
+        "description": "Reads the selected board's authoritative daemon catalog. Insight preserves the generic v1 envelope and device records and adds selected-board context; it never performs a backup scan.",
+        "operationId": "getPeripheralCatalog",
+        "responses": {"200": {"description": "Current daemon catalog and board generation.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralCatalog"}}}}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
+      }
+    },
+    "/api/peripherals/refresh": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Refresh the peripheral catalog",
+        "description": "Asks the daemon to reconcile providers, then waits until `scan_sequence` reaches its returned `target_scan_sequence`. Insight does not scan hardware itself.",
+        "operationId": "refreshPeripheralCatalog",
+        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"board_generation": {"type": "integer", "minimum": 0, "description": "Generation from a previously read catalog; mismatches fail instead of refreshing another board."}}}}}},
+        "responses": {"200": {"description": "Catalog produced by or after the requested reconciliation.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralCatalog"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
+      }
+    },
+    "/api/peripherals/events": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Poll peripheral catalog events",
+        "description": "Forwards a bounded daemon event long-poll. Use `instance_id` and `after_sequence` from the previous response; when `resync_required` is true, read the full catalog and start a new cursor.",
+        "operationId": "getPeripheralEvents",
+        "parameters": [
+          {"name": "after_sequence", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}},
+          {"name": "wait_ms", "in": "query", "schema": {"type": "integer", "minimum": 0, "maximum": 30000, "default": 0}},
+          {"name": "instance_id", "in": "query", "schema": {"type": "string"}},
+          {"name": "board_generation", "in": "query", "schema": {"type": "integer", "minimum": 0}, "description": "Optional selected-board generation guard."}
+        ],
+        "responses": {"200": {"description": "Daemon events or an explicit resynchronization request.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralEvents"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
+      }
+    },
     "/api/workspace/root": {
       "get": {
         "tags": ["Workspace"],
@@ -991,14 +1065,15 @@
       "WebcamNotConfirmedStopped": {"description": "Insight could not reach MediaMTX to verify the slot's publisher, so nothing was changed. If the camera has in fact stopped, the slot updates on its own once MediaMTX is reachable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+      "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "ServiceUnavailable": {"description": "The selected board's required local daemon is not installed, running, or accessible.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
     },
     "schemas": {
       "Error": {
         "type": "object",
         "description": "Standard JSON error envelope returned by most failed API operations.",
         "required": ["error"],
-        "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}},
+        "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}, "code": {"type": "string", "description": "Stable machine-readable error code when available."}, "hint": {"type": ["string", "null"], "description": "Actionable recovery guidance when available."}},
         "example": {"error": "Missing index"}
       },
       "Success": {
@@ -1186,6 +1261,41 @@
           "channel_limit_source": {"type": "string", "enum": ["sdk-port-map", "devkit", "legacy-default"], "description": "Why the capacity was selected: explicit SDK port publication, unrestricted DevKit behavior, or the backward-compatible fallback."},
           "sdk_channel_limited": {"type": "boolean", "description": "Whether SDK Docker port publication restricts the viewer below the 80-channel engine ceiling."}
         }
+      },
+      "BoardState": {
+        "type": "object",
+        "description": "Selected-board target, source, generation, last connection status, and identity when tested.",
+        "required": ["target", "saved", "defaults", "generation", "status", "board"],
+        "additionalProperties": true
+      },
+      "PeripheralDevice": {
+        "type": "object",
+        "description": "Consumer-neutral daemon record. The object named by `type` holds provider-specific details; unknown types and optional fields must be preserved.",
+        "required": ["id", "type", "provider"],
+        "properties": {"id": {"type": "string"}, "type": {"type": "string"}, "provider": {"type": "string"}},
+        "additionalProperties": true
+      },
+      "PeripheralCatalog": {
+        "type": "object",
+        "description": "The daemon v1 catalog plus Insight's selected-board context.",
+        "required": ["schema_version", "instance_id", "state", "ready", "stale", "revision", "sequence", "scan_sequence", "devices", "board_generation", "board"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1}, "instance_id": {"type": "string"}, "state": {"type": "string", "enum": ["starting", "ready", "degraded"]}, "ready": {"type": "boolean"}, "stale": {"type": "boolean"},
+          "revision": {"type": "integer", "minimum": 0}, "sequence": {"type": "integer", "minimum": 0}, "scan_sequence": {"type": "integer", "minimum": 0},
+          "last_success_at": {"type": ["string", "null"], "format": "date-time"}, "last_attempt_at": {"type": ["string", "null"], "format": "date-time"}, "error": {"type": ["object", "null"], "additionalProperties": true},
+          "devices": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralDevice"}}, "board_generation": {"type": "integer", "minimum": 0}, "board": {"type": "object", "required": ["label", "source"], "properties": {"label": {"type": "string"}, "source": {"type": "string"}}}
+        },
+        "additionalProperties": true
+      },
+      "PeripheralEvents": {
+        "type": "object",
+        "description": "The daemon v1 event envelope plus Insight's selected-board context. Event objects are passed through without local diffing.",
+        "required": ["schema_version", "instance_id", "revision", "sequence", "scan_sequence", "resync_required", "shutting_down", "events", "board_generation", "board"],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1}, "instance_id": {"type": "string"}, "revision": {"type": "integer", "minimum": 0}, "sequence": {"type": "integer", "minimum": 0}, "scan_sequence": {"type": "integer", "minimum": 0},
+          "resync_required": {"type": "boolean"}, "shutting_down": {"type": "boolean"}, "events": {"type": "array", "items": {"type": "object", "additionalProperties": true}}, "board_generation": {"type": "integer", "minimum": 0}, "board": {"type": "object", "additionalProperties": true}
+        },
+        "additionalProperties": true
       },
       "WorkspaceKind": {
         "type": "string",
