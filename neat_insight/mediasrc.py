@@ -127,6 +127,12 @@ def _loader_safe_shim(shim: str) -> str:
     # Keep private symlinks alive until exit, including across concurrent starts.
     with _FFMPEG_PRELOAD_LOCK:
         directory = _FFMPEG_PRELOAD_ALIASES.get(shim)
+        if directory is not None:
+            alias = os.path.join(directory.name, "ffmpeg_nodelay.so")
+            if not os.path.isfile(alias):
+                _FFMPEG_PRELOAD_ALIASES.pop(shim)
+                directory.cleanup()
+                directory = None
         if directory is None:
             root = tempfile.gettempdir()
             if any(char.isspace() or char in ":$" for char in root):
