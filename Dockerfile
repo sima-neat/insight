@@ -18,11 +18,6 @@ COPY dist/*.whl .
 # Install the Python package
 RUN pip install --no-cache-dir *.whl
 
-# TCP_NODELAY preload shim for the ffmpeg RTSP publishers.
-COPY tools/ffmpeg_nodelay.c /tmp/ffmpeg_nodelay.c
-RUN gcc -shared -fPIC -O2 -o /usr/local/lib/ffmpeg_nodelay.so /tmp/ffmpeg_nodelay.c -ldl \
-    && rm /tmp/ffmpeg_nodelay.c
-
 # Final stage with minimal runtime dependencies
 FROM python:3.13-slim
 
@@ -39,7 +34,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the installed Python environment and neat-insight binaries from the builder
 COPY --from=builder /usr/local/lib/python3.13 /usr/local/lib/python3.13
 COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=builder /usr/local/lib/ffmpeg_nodelay.so /usr/local/lib/ffmpeg_nodelay.so
 COPY neat_insight/bin /app/neat_insight/bin
 
 # Expose required ports

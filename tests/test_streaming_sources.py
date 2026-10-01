@@ -293,6 +293,30 @@ class FfmpegPreloadEnvTests(unittest.TestCase):
             self.assertIsNotNone(env)
             self.assertEqual(env["LD_PRELOAD"], str(shim))
 
+    def test_finds_the_shim_packaged_in_the_wheel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "ffmpeg_nodelay.so"
+            shim.write_bytes(b"")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop(mediasrc._FFMPEG_PRELOAD_ENV, None)
+                with mock.patch.object(
+                    mediasrc, "_FFMPEG_PRELOAD_PATHS", (str(shim), "/usr/local/lib/ffmpeg_nodelay.so")
+                ):
+                    env = mediasrc._ffmpeg_env()
+            self.assertEqual(env["LD_PRELOAD"], str(shim))
+
+    def test_falls_back_to_the_image_path_when_the_package_has_no_shim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "ffmpeg_nodelay.so"
+            shim.write_bytes(b"")
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop(mediasrc._FFMPEG_PRELOAD_ENV, None)
+                with mock.patch.object(
+                    mediasrc, "_FFMPEG_PRELOAD_PATHS", ("/nonexistent/pkg.so", str(shim))
+                ):
+                    env = mediasrc._ffmpeg_env()
+            self.assertEqual(env["LD_PRELOAD"], str(shim))
+
     def test_prepends_to_an_existing_preload(self):
         with tempfile.TemporaryDirectory() as tmp:
             shim = Path(tmp) / "ffmpeg_nodelay.so"

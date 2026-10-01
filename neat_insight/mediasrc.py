@@ -109,7 +109,19 @@ def _codec_args(codec: str, source_codec: Optional[str]) -> list[str]:
 
 # ffmpeg's RTSP muxer offers no way to disable Nagle on the socket it opens.
 _FFMPEG_PRELOAD_ENV = "NEAT_INSIGHT_FFMPEG_PRELOAD"
-_FFMPEG_PRELOAD_DEFAULT = "/usr/local/lib/ffmpeg_nodelay.so"
+_FFMPEG_PRELOAD_NAME = "ffmpeg_nodelay.so"
+# Wheel installs carry the shim in the package; the container image puts it here.
+_FFMPEG_PRELOAD_PATHS = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", _FFMPEG_PRELOAD_NAME),
+    os.path.join("/usr/local/lib", _FFMPEG_PRELOAD_NAME),
+)
+
+
+def _ffmpeg_preload_path() -> Optional[str]:
+    override = os.environ.get(_FFMPEG_PRELOAD_ENV)
+    if override:
+        return override if os.path.isfile(override) else None
+    return next((p for p in _FFMPEG_PRELOAD_PATHS if os.path.isfile(p)), None)
 
 
 def _ffmpeg_env() -> Optional[dict]:
@@ -117,8 +129,8 @@ def _ffmpeg_env() -> Optional[dict]:
 
     Returns None when the shim is absent so a source checkout still runs.
     """
-    shim = os.environ.get(_FFMPEG_PRELOAD_ENV, _FFMPEG_PRELOAD_DEFAULT)
-    if not shim or not os.path.isfile(shim):
+    shim = _ffmpeg_preload_path()
+    if not shim:
         return None
     env = dict(os.environ)
     existing = env.get("LD_PRELOAD")
