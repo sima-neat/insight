@@ -104,6 +104,20 @@ class BoardManagerTests(unittest.TestCase):
         self.assertEqual(tested.status_code, 200)
         self.assertEqual(tested.get_json()["board"]["hostname"], "modalix")
 
+    def test_board_api_rejects_non_boolean_reset_without_changing_target(self):
+        app = Flask(__name__)
+        board.init_app(app, Path(self.tmp.name), on_board=False)
+        client = app.test_client()
+        client.post("/api/board/select", json={"host": "192.168.2.3", "port": 22, "user": "sima"})
+
+        for reset in ("false", 1, None, []):
+            with self.subTest(reset=reset):
+                response = client.post("/api/board/select", json={"reset": reset})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["code"], "invalid_request")
+
+        self.assertEqual(client.get("/api/board").get_json()["target"]["host"], "192.168.2.3")
+
 
 class LocalTransportTests(unittest.TestCase):
     def test_exec_uses_argv_without_shell_interpretation(self):

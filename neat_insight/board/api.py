@@ -32,8 +32,10 @@ def board_state():
 def select_board():
     """Save a manual SSH target, or clear it to use the environment default."""
     body = _json_body()
+    if "reset" in body and not isinstance(body["reset"], bool):
+        raise BoardError("invalid_request", "`reset` must be a boolean.")
     manager = get_board_manager()
-    if body.get("reset"):
+    if body.get("reset") is True:
         manager.reset()
     else:
         manager.select(body.get("host"), body.get("port"), body.get("user"))
