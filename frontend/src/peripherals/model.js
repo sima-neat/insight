@@ -131,6 +131,17 @@ export function catalogIdentity(catalog) {
   return `${catalog?.instance_id || ''}:${Number.isInteger(catalog?.revision) ? catalog.revision : ''}`
 }
 
+export function createDeviceSelectionPolicy() {
+  let scope = null
+  return {
+    select(currentId, devices, nextScope) {
+      const preserve = scope === nextScope && devices.some((device) => device.id === currentId)
+      scope = nextScope
+      return preserve ? currentId : devices[0]?.id || ''
+    }
+  }
+}
+
 export function canRefreshCatalog(catalog, refreshing = false) {
   return Boolean(catalog?.instance_id) && !refreshing
 }

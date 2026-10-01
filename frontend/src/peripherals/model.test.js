@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, isExportableMode, microphoneAvailability, microphoneModeLabel, modeLabel, validateBoardForm } from './model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createDeviceSelectionPolicy, createEventCursor, deviceTypes, isExportableMode, microphoneAvailability, microphoneModeLabel, modeLabel, validateBoardForm } from './model.js'
 
 test('device tabs are generic, counted, and sorted', () => {
   assert.deepEqual(deviceTypes([
@@ -50,6 +50,32 @@ test('daemon restarts invalidate selections even when revisions collide', () => 
   assert.notEqual(
     catalogIdentity({ instance_id: 'daemon-a', revision: 1 }),
     catalogIdentity({ instance_id: 'daemon-b', revision: 1 })
+  )
+})
+
+test('device selection survives catalog revisions while the device remains present', () => {
+  const selection = createDeviceSelectionPolicy()
+  const devices = [{ id: 'microphone:first' }, { id: 'microphone:selected' }]
+  const scope = '7:daemon-a:microphone'
+  assert.equal(selection.select('', devices, scope), 'microphone:first')
+  assert.equal(selection.select('microphone:selected', devices, scope), 'microphone:selected')
+})
+
+test('device selection resets when the device disappears or the daemon changes', () => {
+  const devices = [{ id: 'microphone:first' }, { id: 'microphone:selected' }]
+
+  const removal = createDeviceSelectionPolicy()
+  removal.select('', devices, '7:daemon-a:microphone')
+  assert.equal(
+    removal.select('microphone:selected', devices.slice(0, 1), '7:daemon-a:microphone'),
+    'microphone:first'
+  )
+
+  const restart = createDeviceSelectionPolicy()
+  restart.select('', devices, '7:daemon-a:microphone')
+  assert.equal(
+    restart.select('microphone:selected', devices, '7:daemon-b:microphone'),
+    'microphone:first'
   )
 })
 
