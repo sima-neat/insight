@@ -974,11 +974,12 @@
       "post": {
         "tags": ["Sentinel"],
         "summary": "Stop the active trace",
-        "description": "Stops the active trace and saves it as a run; `409 stale_snapshot` when `generation` names a board that is no longer selected.",
+        "description": "Stops the displayed active trace and saves it as a run; `409 trace_conflict` when its stable id is no longer active, and `409 stale_snapshot` when `generation` names a board that is no longer selected.",
         "operationId": "stopSentinelTrace",
         "parameters": [
           {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped."}
         ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceStopRequest"}, "example": {"id": "20260924T175231.958Z-baseline"}}}},
         "responses": {
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "200": {"description": "The run Sentinel saved.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
@@ -1610,6 +1611,11 @@
           "note": {"type": ["string", "null"], "maxLength": 512},
           "tags": {"type": ["array", "null"], "maxItems": 16, "items": {"type": "string", "minLength": 1}}
         }
+      },
+      "TraceStopRequest": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {"id": {"type": "string", "minLength": 1, "description": "The stable id from the displayed active trace."}}
       },
       "WorkspaceKind": {
         "type": "string",

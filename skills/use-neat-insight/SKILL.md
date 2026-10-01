@@ -420,7 +420,7 @@ Stats reads board telemetry from the `simaai-sentinel` daemon on the selected bo
 | `POST` | `/api/sentinel/install` | Install Sentinel with `sima-cli` (needs passwordless sudo); refuses a healthy daemon with `409 already_installed`. |
 | `GET` | `/api/sentinel/metrics` | Latest value of every metric with recent history; a value the board cannot measure is `null`. |
 | `GET`, `POST` | `/api/sentinel/traces` | The active trace; `POST` JSON `{"name", "note", "tags"}` starts one. |
-| `POST` | `/api/sentinel/traces/stop` | Stop the active trace and save it as a run. |
+| `POST` | `/api/sentinel/traces/stop` | Stop the displayed active trace and save it as a run; JSON `{"id":"<stable trace id>"}` is required. |
 | `GET` | `/api/sentinel/runs`, `/api/sentinel/runs/<id>` | Saved runs; one run with its samples. |
 | `DELETE` | `/api/sentinel/runs/<id>` | Delete a completed run. |
 | `GET` | `/api/sentinel/compare?runs=a,b` | Compare two to eight runs against the first; `raw=1` adds samples. |

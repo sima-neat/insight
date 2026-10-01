@@ -677,7 +677,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setTraceError(null)
     await send('trace-action', {
       busy: setTraceBusy,
-      call: () => stopTrace(traces?.generation),
+      call: () => stopTrace(traces?.generation, trace.id),
       done: async () => {
         onStatus?.('Trace stopped and saved as a run.')
         await loadTraces({ quiet: true })

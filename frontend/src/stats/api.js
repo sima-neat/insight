@@ -12,7 +12,7 @@ export const installSentinel = (generation) => requestJson(withGeneration('/api/
 export const fetchMetrics = () => requestJson(`/api/sentinel/metrics?history=${HISTORY_SAMPLES}`)
 export const fetchActiveTrace = () => requestJson('/api/sentinel/traces')
 export const startTrace = (body, generation) => requestJson(withGeneration('/api/sentinel/traces', generation), { method: 'POST', body })
-export const stopTrace = (generation) => requestJson(withGeneration('/api/sentinel/traces/stop', generation), { method: 'POST' })
+export const stopTrace = (generation, id) => requestJson(withGeneration('/api/sentinel/traces/stop', generation), { method: 'POST', body: { id } })
 export const fetchRuns = () => requestJson('/api/sentinel/runs')
 export const fetchRun = (ref) => requestJson(`/api/sentinel/runs/${encodeURIComponent(ref)}`)
 export const deleteRun = (ref, generation) => requestJson(withGeneration(`/api/sentinel/runs/${encodeURIComponent(ref)}`, generation), { method: 'DELETE' })

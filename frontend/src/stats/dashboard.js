@@ -269,10 +269,16 @@ export function compareOverlay(payload, seriesId) {
 }
 
 export function tightScale(valueLists) {
-  const values = valueLists.flat().filter(isNumber)
-  if (!values.length) return { min: 0, max: 1 }
-  const low = Math.min(...values)
-  const high = Math.max(...values)
+  let low = null
+  let high = null
+  for (const values of valueLists) {
+    for (const value of values) {
+      if (!isNumber(value)) continue
+      low = low === null || value < low ? value : low
+      high = high === null || value > high ? value : high
+    }
+  }
+  if (low === null) return { min: 0, max: 1 }
   const pad = (high - low) / 6 || Math.abs(high) * 0.05 || 1
   const step = 10 ** Math.floor(Math.log10(high - low + 2 * pad))
   const clean = (value) => Number(value.toPrecision(12))

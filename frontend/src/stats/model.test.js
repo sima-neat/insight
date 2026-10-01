@@ -63,6 +63,8 @@ test('long runs compute extrema without spreading every sample as a function arg
 test('a trace cannot start before the active trace of its board has been read', () => {
   assert.equal(traceBar(traceModel(null)).disabled, true)
   assert.equal(traceBar(traceModel({ generation: 3, sentinel: { trace: null } })).disabled, false)
+  assert.equal(traceBar(traceModel({ generation: 3, sentinel: { trace: { name: 'old daemon' } } })).disabled, true)
+  assert.equal(traceBar(traceModel({ generation: 3, sentinel: { trace: { id: 'trace-1', name: 'baseline' } } })).disabled, false)
 })
 
 test('run actions use the stable id when another run is named after it', () => {

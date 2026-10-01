@@ -99,6 +99,16 @@ def _trace_request(body) -> dict:
     return wanted
 
 
+def _trace_id(body) -> str:
+    trace_id = body.get("id") if isinstance(body, dict) else None
+    if not isinstance(trace_id, str) or not trace_id:
+        raise _invalid(
+            "`id` must be the active trace's stable identifier.",
+            "Read the active trace again, then send its `id`.",
+        )
+    return trace_id
+
+
 # API: report whether Sentinel can be used on the selected board.
 @sentinel_bp.get("/api/sentinel")
 def get_sentinel():
@@ -174,8 +184,20 @@ def start_trace():
 # API: stop the active trace on the selected board.
 @sentinel_bp.post("/api/sentinel/traces/stop")
 def stop_trace():
-    """Stop and persist the active trace; 409 when no trace is active or the board changed since `generation`."""
+    """Stop the displayed trace; 409 when it is no longer active or the board changed."""
+    trace_id = _trace_id(request.get_json(silent=True))
     context = _Context(_generation(required=True))
+    active = context.client.get("/v1/traces/active").get("trace")
+    active_id = active.get("id") if isinstance(active, dict) else None
+    if active_id != trace_id:
+        raise SentinelError(
+            "trace_conflict",
+            "The trace shown is no longer active, so it was not stopped.",
+            hint="Read the active trace again before stopping it.",
+            expected_trace_id=trace_id,
+            active_trace_id=active_id,
+        )
+    context.session.require_current()
     return context.passthrough(context.client.post("/v1/traces/stop"))
 
 

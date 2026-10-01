@@ -106,7 +106,8 @@ class ApiTests(unittest.TestCase):
             ("post", "/api/sentinel/traces?generation=7", {"name": "baseline"}, 409, "stale_snapshot"),
             ("post", "/api/sentinel/traces?generation=1", {"name": "before,after"}, 400, "invalid_request"),
             ("post", "/api/sentinel/traces/stop", None, 400, "invalid_request"),
-            ("post", "/api/sentinel/traces/stop?generation=7", None, 409, "stale_snapshot"),
+            ("post", "/api/sentinel/traces/stop?generation=1", {"id": ""}, 400, "invalid_request"),
+            ("post", "/api/sentinel/traces/stop?generation=7", {"id": RUN_A["id"]}, 409, "stale_snapshot"),
             ("delete", "/api/sentinel/runs/baseline", None, 400, "invalid_request"),
             ("delete", "/api/sentinel/runs/baseline?generation=7", None, 409, "stale_snapshot"),
         )
@@ -115,6 +116,29 @@ class ApiTests(unittest.TestCase):
                 response = getattr(self.client, method)(path, json=body)
                 self.assertEqual((response.status_code, response.get_json()["code"]), (status, code))
         self.assertEqual(self.transport.calls, [])
+
+    def test_stop_refuses_a_replacement_trace_before_issuing_the_daemon_stop(self):
+        self.transport.api[("GET", "/v1/traces/active")] = {"schema": 1, "trace": RUN_B}
+        response = self.client.post(
+            "/api/sentinel/traces/stop?generation=1",
+            json={"id": RUN_A["id"]},
+        )
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "trace_conflict"))
+        self.assertEqual([call[2:4] for call in self.transport.calls], [["GET", "/v1/traces/active"]])
+
+    def test_stop_revalidates_the_stable_id_immediately_before_stopping(self):
+        self.transport.api[("GET", "/v1/traces/active")] = {"schema": 1, "trace": RUN_A}
+        self.transport.api[("POST", "/v1/traces/stop")] = {"schema": 1, "run": RUN_A}
+        response = self.client.post(
+            "/api/sentinel/traces/stop?generation=1",
+            json={"id": RUN_A["id"]},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(
+            [call[2:4] for call in self.transport.calls],
+            [["GET", "/v1/traces/active"], ["POST", "/v1/traces/stop"]],
+        )
+        self.assertEqual(self.transport.calls[1][4], "", "the daemon stop contract takes no request body")
 
     def test_a_response_is_refused_when_the_board_changes_while_it_is_read(self):
         self.session.require_current = mock.Mock(
