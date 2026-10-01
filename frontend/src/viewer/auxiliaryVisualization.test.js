@@ -184,6 +184,21 @@ test("untimestamped auxiliary data cannot use the ordinary arrival fallback", ()
   assert.deepEqual(result.overlays, []);
 });
 
+test("invalid RTP timestamps cannot infer or alias an exact frame", () => {
+  const registry = registryWith("blazepose-3d");
+  const negative = [{ data: message({ rtp: -1 }) }];
+  const overflow = [{ data: message({ rtp: 0x100000000 }) }];
+
+  assert.deepEqual(partitionFrameMetadata(negative, undefined, registry).auxiliaryViews, []);
+  assert.deepEqual(partitionFrameMetadata(negative, 0xffffffff, registry).auxiliaryViews, []);
+  assert.deepEqual(partitionFrameMetadata(overflow, 0, registry).auxiliaryViews, []);
+  assert.equal(
+    partitionFrameMetadata([{ data: message({ rtp: 0xffffffff }) }], 0xffffffff, registry)
+      .auxiliaryViews.length,
+    1,
+  );
+});
+
 test("timestamped auxiliary data uses the selected frame in the video callback fallback", () => {
   const registry = registryWith("blazepose-3d");
   const queue = createMetadataQueue();

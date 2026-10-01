@@ -211,17 +211,21 @@ function inspectAuxiliaryMessage(message, registry = auxiliaryRendererRegistry) 
   };
 }
 
+function isRtpTimestamp(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+}
+
 function sameRtpTimestamp(left, right) {
-  return Number.isInteger(left) && Number.isInteger(right) && (left >>> 0) === (right >>> 0);
+  return isRtpTimestamp(left) && isRtpTimestamp(right) && left === right;
 }
 
 export function partitionFrameMetadata(candidates, rtpTimestamp, registry = auxiliaryRendererRegistry) {
   const overlays = [];
   const auxiliaryViews = [];
   const ignoredAuxiliary = [];
-  const correlatedRtpTimestamp = Number.isInteger(rtpTimestamp)
+  const correlatedRtpTimestamp = isRtpTimestamp(rtpTimestamp)
     ? rtpTimestamp
-    : candidates.find(({ data }) => Number.isInteger(data?._insight?.rtp_timestamp))
+    : candidates.find(({ data }) => isRtpTimestamp(data?._insight?.rtp_timestamp))
       ?.data?._insight?.rtp_timestamp;
 
   for (const candidate of candidates) {
