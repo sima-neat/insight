@@ -1,5 +1,6 @@
 """Reach the Sentinel daemon's unix-socket API from the selected board."""
 import json
+from http.client import HTTPException
 from pathlib import Path
 
 from neat_insight.board import BoardError
@@ -94,6 +95,8 @@ class SentinelClient:
             return socket_client.request(method, path, body, socket_path=self.socket_path)
         except socket_client.ResponseTooLarge as exc:
             raise self._too_large(str(exc)) from exc
+        except HTTPException as exc:
+            raise self._socket_error(socket_client.FAILED, str(exc)) from exc
         except OSError as exc:
             raise self._socket_error(socket_client.socket_failure(exc), str(exc)) from exc
 

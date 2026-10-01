@@ -880,6 +880,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                     onCompare={runCompare}
                     onDelete={deleteSelected}
                     onClear={() => {
+                      guard.current.cancel('compare')
+                      setCompareBusy(false)
                       setSelected([])
                       setCompare(null)
                       setCompareError(null)

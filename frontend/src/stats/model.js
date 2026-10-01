@@ -530,17 +530,27 @@ export function runDetail(payload) {
   const samples = Array.isArray(body.samples) ? body.samples : []
   const stamps = samples.map((sample) => sample?.timestamp).filter((stamp) => typeof stamp === 'string')
   const metrics = (Array.isArray(body.metrics) ? body.metrics : []).filter((metric) => metric?.key).map((definition) => {
-    const numbers = samples.map((sample) => sample?.values?.[definition.key]).filter(isNumber)
-    const maximum = numbers.length ? Math.max(...numbers) : null
+    let count = 0
+    let total = 0
+    let minimum = null
+    let maximum = null
+    for (const sample of samples) {
+      const value = sample?.values?.[definition.key]
+      if (!isNumber(value)) continue
+      count += 1
+      total += value
+      minimum = minimum === null || value < minimum ? value : minimum
+      maximum = maximum === null || value > maximum ? value : maximum
+    }
     return {
       key: definition.key,
       label: definition.label || titleCase(definition.key),
       description: definition.description || null,
       group: definition.group || OTHER_GROUP,
       unit: definition.unit || null,
-      minimum: numbers.length ? Math.min(...numbers) : null,
+      minimum,
       maximum,
-      mean: numbers.length ? numbers.reduce((total, value) => total + value, 0) / numbers.length : null,
+      mean: count ? total / count : null,
       status: statusOf(maximum, definition.warn, definition.critical)
     }
   })

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, responseMatchesGeneration, runList, traceBar, traceModel } from './model.js'
+import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, responseMatchesGeneration, runDetail, runList, traceBar, traceModel } from './model.js'
 
 test('keyboard-only Stats controls keep a visible focus indicator', () => {
   const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
@@ -33,11 +33,31 @@ test('the request guard admits one call per key and drops answers from a board l
   assert.ok(guard.current(second))
 })
 
-test('a Sentinel response applies only to the board generation shown by Insight', () => {
-  assert.equal(responseMatchesGeneration({ generation: 4 }, 4), true)
-  assert.equal(responseMatchesGeneration({ generation: 5 }, 4), false)
+test('Sentinel state recovery reloads instead of exposing a newer board under the old label', () => {
+  const shown = { generation: 4, label: 'board-a' }
+  const recovered = { generation: 5, board: { label: 'board-b' } }
+  assert.equal(responseMatchesGeneration({ generation: 4 }, shown.generation), true)
+  assert.equal(responseMatchesGeneration(recovered, shown.generation), false)
   assert.equal(responseMatchesGeneration({}, 4), false)
   assert.equal(responseMatchesGeneration({ generation: 4 }, null), false)
+})
+
+test('clearing a selection cancels its pending comparison response', () => {
+  const guard = createRequestGuard()
+  guard.switchTo(4)
+  const pending = guard.begin('compare')
+  guard.cancel('compare')
+  assert.equal(guard.current(pending), false)
+  assert.ok(guard.begin('compare'), 'a later selection can start a new comparison')
+})
+
+test('long runs compute extrema without spreading every sample as a function argument', () => {
+  const samples = Array.from({ length: 200000 }, (_, value) => ({ values: { load: value % 11 } }))
+  const detail = runDetail({ sentinel: { metrics: [{ key: 'load' }], samples } })
+  assert.deepEqual(
+    { minimum: detail.metrics[0].minimum, maximum: detail.metrics[0].maximum, mean: detail.metrics[0].mean },
+    { minimum: 0, maximum: 10, mean: 4.999955 }
+  )
 })
 
 test('a trace cannot start before the active trace of its board has been read', () => {

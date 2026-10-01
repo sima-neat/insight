@@ -9,6 +9,7 @@ import threading
 import time
 import unittest
 import unittest.mock as mock
+from http.client import HTTPException, IncompleteRead
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
@@ -16,7 +17,7 @@ from urllib.parse import quote
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult, transport
-from neat_insight.sentinel import api, install, metrics, runs, socket_client, state
+from neat_insight.sentinel import api, client, install, metrics, runs, socket_client, state
 from neat_insight.sentinel.api import sentinel_bp
 from neat_insight.sentinel.errors import SentinelError
 
@@ -130,6 +131,15 @@ class ApiTests(unittest.TestCase):
 
 
 class ResponseLimitTests(unittest.TestCase):
+    def test_local_http_protocol_failures_are_structured_sentinel_errors(self):
+        session = SimpleNamespace(target=SimpleNamespace(mode="local", label="this board"))
+        for failure in (IncompleteRead(b"{}", 98), HTTPException("malformed status line")):
+            with self.subTest(failure=failure), mock.patch.object(socket_client, "request", side_effect=failure):
+                with self.assertRaises(SentinelError) as ctx:
+                    client.SentinelClient(session).get("/v1/health")
+                self.assertEqual((ctx.exception.code, ctx.exception.status), ("sentinel_failed", 502))
+                self.assertIn(str(failure), ctx.exception.extra["detail"])
+
     def test_an_answer_over_the_limit_is_refused_not_truncated(self):
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "api.sock")
