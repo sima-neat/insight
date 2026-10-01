@@ -50,10 +50,9 @@ export function thermalMaxSeries(model) {
 }
 
 export function lastNumber(values) {
-  for (let index = (values || []).length - 1; index >= 0; index -= 1) {
-    if (isNumber(values[index])) return values[index]
-  }
-  return null
+  const list = values || []
+  const value = list[list.length - 1]
+  return isNumber(value) ? value : null
 }
 
 /** Add a complete measured set; one missing term makes the aggregate unknown rather than zero. */
