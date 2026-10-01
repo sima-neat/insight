@@ -3,17 +3,21 @@
  * ffmpeg's RTSP muxer opens its own TCP connection and never applies
  * -tcp_nodelay to it. Remove this once the base image ships an ffmpeg that
  * propagates the option (libavformat/rtsp.c, ff_rtsp_connect).
+ *
+ * Issues the syscall rather than calling dlsym(RTLD_NEXT, "connect"): dlsym is
+ * GLIBC_2.34, and the wheels are tagged manylinux2014, which promises glibc
+ * 2.17. The cost is that a connect() hook in another preloaded object is
+ * bypassed rather than chained to.
  */
 #define _GNU_SOURCE
-#include <dlfcn.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 int connect(int fd, const struct sockaddr *addr, socklen_t len) {
-    static int (*real_connect)(int, const struct sockaddr *, socklen_t);
-    if (!real_connect) real_connect = dlsym(RTLD_NEXT, "connect");
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    return real_connect(fd, addr, len);
+    return syscall(SYS_connect, fd, addr, len);
 }
