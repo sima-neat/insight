@@ -49,6 +49,12 @@ export function thermalMaxSeries(model) {
   })
 }
 
+export function hottestMetric(metrics) {
+  return (metrics || []).reduce((hottest, metric) => (
+    isNumber(metric?.value) && (!hottest || metric.value > hottest.value) ? metric : hottest
+  ), null)
+}
+
 export function lastNumber(values) {
   const list = values || []
   const value = list[list.length - 1]

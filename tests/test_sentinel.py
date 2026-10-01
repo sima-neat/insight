@@ -153,19 +153,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertEqual(self.transport.calls[0][0], "python3")
 
-    def test_metrics_discard_same_board_history_after_a_daemon_restart(self):
-        key = (self.session.generation, "fp-1")
+    def test_metrics_refresh_daemon_instance_before_appending_after_a_restart(self):
         self.transport.api[("GET", "/v1/metrics")] = {"schema": 1, "metrics": [{"key": "load"}]}
         self.transport.api[("GET", "/v1/samples/latest")] = {
             "schema": 1,
             "sample": {"timestamp": "2026-09-23T17:54:21Z", "values": {"load": 1}},
         }
-        api.cache.record(key, "daemon", {"instance_id": "daemon-1"}, 60)
-        with mock.patch.object(api.cache_history, "read", return_value=[]):
+        daemon_statuses = [
+            {"instance_id": "daemon-1"},
+            {"instance_id": "daemon-2"},
+        ]
+        with mock.patch.object(api.install, "status", side_effect=daemon_statuses) as read_status, mock.patch.object(
+            api.cache_history, "read", return_value=[]
+        ):
             first = self.client.get("/api/sentinel/metrics?history=240")
             self.assertEqual(first.status_code, 200, first.get_json())
 
-            api.cache.record(key, "daemon", {"instance_id": "daemon-2"}, 60)
             self.transport.api[("GET", "/v1/samples/latest")]["sample"] = {
                 "timestamp": "2026-09-23T17:54:22Z",
                 "values": {"load": 2},
@@ -174,6 +177,7 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(restarted.status_code, 200, restarted.get_json())
         self.assertEqual(restarted.get_json()["history"]["timestamps"], ["2026-09-23T17:54:22Z"])
+        self.assertEqual(read_status.call_count, 2, "each sample must use a fresh daemon invocation ID")
 
 
 class ResponseLimitTests(unittest.TestCase):

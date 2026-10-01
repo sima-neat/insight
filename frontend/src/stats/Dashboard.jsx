@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { CoreHeatmap, StackedChart, StatTile, TimeChart } from './Charts.jsx'
-import { lastNumber, niceCeil, scaleFor, stackTotals, sumMeasured, thermalMaxSeries, thresholdLines } from './dashboard.js'
+import { hottestMetric, lastNumber, niceCeil, scaleFor, stackTotals, sumMeasured, thermalMaxSeries, thresholdLines } from './dashboard.js'
 import { formatRelativeTime, formatValue, isThermalMetric, metricAlert, sessionCsv, sessionCsvFilename, sparkline, statusInfo, thresholdText } from './model.js'
 import { FailureCallout, SegmentedTabs, downloadText, useStoredTab } from './ui.jsx'
 
@@ -62,7 +62,7 @@ function ThermalMaxChart({ model, height }) {
   if (!sensors.length) return null
   const values = thermalMaxSeries(model)
   const now = lastNumber(values)
-  const worst = sensors.reduce((hot, metric) => (typeof metric.value === 'number' && (!hot || metric.value > hot.value) ? metric : hot), null)
+  const worst = hottestMetric(sensors)
   return (
     <TimeChart
       title="Thermal max"
@@ -71,7 +71,7 @@ function ThermalMaxChart({ model, height }) {
       scale={scaleFor('C', [values])}
       unit="C"
       timestamps={model.timestamps}
-      thresholds={thresholdLines(sensors[0])}
+      thresholds={thresholdLines(worst)}
       tone={worst?.status}
       height={height}
     />
