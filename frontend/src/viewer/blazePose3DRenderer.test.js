@@ -169,7 +169,12 @@ test("BlazePose 3D renderer draws an optional labeled reference cube", () => {
 });
 
 test("empty or invalid BlazePose payloads render a stable empty state", () => {
-  for (const payload of [{}, { poses: [] }, { poses: [{ keypoints: [{ name: "nose", x: "bad" }] }] }]) {
+  for (const payload of [
+    {},
+    { poses: [] },
+    { poses: [{ keypoints: [{ name: "nose", x: "bad" }] }] },
+    { poses: [{ keypoints: [{ name: "nose", x: null, y: 0, z: 0 }] }] },
+  ]) {
     const ctx = recordingContext();
     assert.doesNotThrow(() => drawBlazePose3D(ctx, { width: 120, height: 90 }, payload));
     assert.ok(ctx.calls.some(([name, text]) => name === "fillText" && /No 3D pose/.test(text)));

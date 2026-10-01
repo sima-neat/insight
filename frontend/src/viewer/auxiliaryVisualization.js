@@ -93,6 +93,17 @@ export function routeAuxiliarySettingsEvent(
   };
 }
 
+export function initialAuxiliarySessionSettings(
+  savedSettings,
+  effectiveSettings,
+  toSession,
+  hasActivePreview,
+) {
+  return hasActivePreview && typeof toSession === "function"
+    ? toSession(effectiveSettings)
+    : savedSettings;
+}
+
 // Keep only previously correlated data across a brief video/metadata delivery gap.
 function shouldHoldLastAuxiliaryFrame(
   hasCurrentViews,

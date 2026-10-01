@@ -5,6 +5,7 @@ import {
   AUXILIARY_METADATA_TYPE,
   auxiliaryRendererRegistry,
   createAuxiliaryViewPreference,
+  initialAuxiliarySessionSettings,
   partitionFrameMetadata,
   reconcileAuxiliaryPanelMode,
   restoreAuxiliaryViewPreference,
@@ -91,6 +92,20 @@ test("closing a preview still refreshes after its view stops being selected", ()
       "blazepose-3d",
     ),
     { isPreview: false, cancelsPreview: true, appliesToSelection: true },
+  );
+});
+
+test("a recreated renderer session starts from the active preview", () => {
+  const toSession = ({ yawDegrees }) => ({ yaw: yawDegrees * Math.PI / 180 });
+
+  assert.deepEqual(
+    initialAuxiliarySessionSettings(
+      { yaw: 0 },
+      { yawDegrees: 90 },
+      toSession,
+      true,
+    ),
+    { yaw: Math.PI / 2 },
   );
 });
 
