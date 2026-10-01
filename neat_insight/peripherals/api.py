@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.api import no_store
+from neat_insight.peripherals import export
 from neat_insight.peripherals.client import PeripheralClient
 
 peripherals_bp = Blueprint("peripherals", __name__)
@@ -64,6 +65,25 @@ def refresh_peripherals():
                 current_generation=session.generation,
             )
     return _with_board(session, PeripheralClient(session).refresh())
+
+
+@peripherals_bp.post("/api/peripherals/cameras/export")
+def export_camera():
+    """Re-read the daemon catalog and render one exact supported CameraInput mode."""
+    selection = export.parse_request(request.get_json(silent=True))
+    session = _session()
+    if selection["board_generation"] != session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The selected board changed since this mode was selected.",
+            hint=export.MODE_HINT,
+            expected_generation=selection["board_generation"],
+            current_generation=session.generation,
+        )
+    catalog = PeripheralClient(session).catalog()
+    result = export.render(catalog, selection)
+    session.require_current()
+    return result
 
 
 @peripherals_bp.get("/api/peripherals/events")

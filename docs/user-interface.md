@@ -106,6 +106,16 @@ If starting a webcam fails, the message names the cause:
 
 Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
 
+## Peripherals
+
+The Peripherals view reads the authoritative catalog maintained by the Core peripheral daemon on the selected board. Insight can use the board it is running on, the DevKit configured by the SDK, or one manually entered SSH target. It does not scan hardware or keep a second catalog; if the daemon is missing, stopped, incompatible, or inaccessible, the page reports that failure and how to correct it.
+
+The catalog header shows the daemon state, revision, scan sequence, last attempt, and last successful scan. A degraded daemon can return its stale last-good catalog together with the provider error. Hot-plug events are long-polled from the daemon and cause Insight to re-read the full catalog, so the daemon remains the only source of revisions and device changes.
+
+Devices are grouped by their generic `type`, so future microphone, LiDAR, and other providers can appear without a new transport. Camera details include the backend and all reported modes. A mode marked supported can be exported as matching C++, PyNeat, or JSON CameraInput configuration only when it has a discrete size and a `camera_name`. Insight re-reads the daemon catalog during export and rejects a stale device, revision, or selected-board generation.
+
+Use **Refresh catalog** to ask the daemon for an explicit reconciliation. The request completes only after the daemon's returned target scan sequence has been reached; it never falls back to an Insight-side probe.
+
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.

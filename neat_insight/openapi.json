@@ -864,6 +864,16 @@
         "responses": {"200": {"description": "Catalog produced by or after the requested reconciliation.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralCatalog"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
       }
     },
+    "/api/peripherals/cameras/export": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Generate CameraInput examples",
+        "description": "Re-reads the authoritative daemon catalog and generates Python, C++, and JSON examples only when the selected camera and exact discrete mode still exist and are marked supported.",
+        "operationId": "exportPeripheralCameraMode",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraInputExportRequest"}}}},
+        "responses": {"200": {"description": "Examples bound to the validated daemon catalog revision.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraInputExport"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
+      }
+    },
     "/api/peripherals/events": {
       "get": {
         "tags": ["Peripherals"],
@@ -1296,6 +1306,24 @@
           "resync_required": {"type": "boolean"}, "shutting_down": {"type": "boolean"}, "events": {"type": "array", "items": {"type": "object", "additionalProperties": true}}, "board_generation": {"type": "integer", "minimum": 0}, "board": {"type": "object", "additionalProperties": true}
         },
         "additionalProperties": true
+      },
+      "CameraInputExportRequest": {
+        "type": "object",
+        "required": ["board_generation", "instance_id", "revision", "device_id", "format", "width", "height", "framerate_num", "framerate_den"],
+        "properties": {
+          "board_generation": {"type": "integer", "minimum": 0}, "instance_id": {"type": "string", "minLength": 1}, "revision": {"type": "integer", "minimum": 0}, "device_id": {"type": "string", "minLength": 1}, "format": {"type": "string", "minLength": 1},
+          "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}, "framerate_num": {"type": "integer", "minimum": 1}, "framerate_den": {"type": "integer", "minimum": 1}
+        },
+        "additionalProperties": false
+      },
+      "CameraInputExport": {
+        "type": "object",
+        "required": ["device_id", "mode", "exports"],
+        "properties": {
+          "device_id": {"type": "string"},
+          "mode": {"type": "object", "additionalProperties": true},
+          "exports": {"type": "array", "items": {"type": "object", "required": ["id", "label", "filename", "language", "content"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
+        }
       },
       "WorkspaceKind": {
         "type": "string",

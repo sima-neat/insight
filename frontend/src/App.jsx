@@ -1,4 +1,8 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+import { requestJson as requestBoardJson } from './peripherals/api.js'
+import { boardIndicator, createBoardSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
+import { Pill } from './peripherals/ui.jsx'
 
 import {
   closeAllWebcamSessions,
@@ -13,6 +17,8 @@ import {
 } from './streaming/webcamPublishing.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
+const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
+const BoardDialog = lazy(() => import('./peripherals/BoardDialog.jsx'))
 
 const SOURCE_COUNT = 48
 const WEBCAM_OPTION_PREFIX = '__webcam__:'
@@ -34,6 +40,7 @@ const TABS = [
   { id: 'media', label: 'Media Sources', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
+  { id: 'peripherals', label: 'Peripherals', icon: '/icons/peripherals.svg' },
   { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const YOUTUBE_IMPORT_TARGETS = [
@@ -53,6 +60,7 @@ const ROUTE_TO_TAB = {
   streaming: 'rtsp',
   rtsp: 'rtsp',
   viewer: 'viewer',
+  peripherals: 'peripherals',
   stats: 'visualizer',
   visualizer: 'visualizer'
 }
@@ -61,6 +69,7 @@ const TAB_TO_ROUTE = {
   media: '/media',
   rtsp: '/streaming',
   viewer: '/viewer',
+  peripherals: '/peripherals',
   visualizer: '/stats'
 }
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
@@ -68,7 +77,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'intro',
     tab: null,
-    eyebrow: 'Step 1 of 6',
+    eyebrow: 'Step 1 of 7',
     title: 'What is Insight?',
     summary: 'Insight helps developers inspect a workspace, set up test streams, view inference results, and watch system performance while they test an application.',
     details:
@@ -77,7 +86,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'workspace',
     tab: 'workspace',
-    eyebrow: 'Step 2 of 6',
+    eyebrow: 'Step 2 of 7',
     title: 'Explore the Workspace',
     summary: 'Workspace is for browsing the shared files a developer works with across the SDK container, host, and paired DevKit.',
     details:
@@ -86,7 +95,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'media',
     tab: 'media',
-    eyebrow: 'Step 3 of 6',
+    eyebrow: 'Step 3 of 7',
     title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
@@ -95,7 +104,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'rtsp',
     tab: 'rtsp',
-    eyebrow: 'Step 4 of 6',
+    eyebrow: 'Step 4 of 7',
     title: 'Set up streaming sources',
     summary: 'This tab turns files from the library into live source slots such as src1, src2, and src3.',
     details:
@@ -104,16 +113,25 @@ const ONBOARDING_STEPS = [
   {
     id: 'viewer',
     tab: 'viewer',
-    eyebrow: 'Step 5 of 6',
+    eyebrow: 'Step 5 of 7',
     title: 'Live viewer',
     summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
     details:
       'Your application can send video into UDP ports 9000-9079, where each port maps to one viewer channel. It can also send matching metadata into UDP ports 9100-9179 so overlays appear on the same channel. For setup guidance and application examples, see docs.sima-neat.com.'
   },
   {
+    id: 'peripherals',
+    tab: 'peripherals',
+    eyebrow: 'Step 6 of 7',
+    title: 'Inspect connected peripherals',
+    summary: 'Peripherals shows the authoritative device catalog maintained by the selected board’s daemon.',
+    details:
+      'Review camera modes, refresh the daemon catalog, and generate CameraInput examples. Hot-plug events update this page without making Insight scan hardware itself.'
+  },
+  {
     id: 'visualizer',
     tab: 'visualizer',
-    eyebrow: 'Step 6 of 6',
+    eyebrow: 'Step 7 of 7',
     title: 'Check system stats',
     summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
     details:
@@ -767,6 +785,23 @@ export default function App() {
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
   const [devkitShellBusy, setDevkitShellBusy] = useState(false)
+  const [board, setBoard] = useState(null)
+  const [boardError, setBoardError] = useState(null)
+  const [boardLoading, setBoardLoading] = useState(true)
+  const [boardDialogOpen, setBoardDialogOpen] = useState(false)
+  const closeBoardDialog = useCallback(() => setBoardDialogOpen(false), [])
+  const boardSyncRef = useRef(null)
+  if (!boardSyncRef.current) {
+    boardSyncRef.current = createBoardSync({
+      fetchBoard: () => requestBoardJson('/api/board'),
+      onBoard: (next) => {
+        setBoard(next)
+        setBoardError(null)
+      },
+      onError: (nextError) => setBoardError(normalizeBoardError(nextError)),
+      onLoading: setBoardLoading
+    })
+  }
   const [sysInfoOpen, setSysInfoOpen] = useState(false)
   const [sysInfo, setSysInfo] = useState(null)
   const [sysInfoLoading, setSysInfoLoading] = useState(false)
@@ -963,6 +998,10 @@ export default function App() {
 
   useEffect(() => {
     Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
+  }, [])
+
+  useEffect(() => {
+    boardSyncRef.current.load()
   }, [])
 
   useEffect(() => {
@@ -2075,6 +2114,19 @@ export default function App() {
     loadSysInfo()
   }
 
+  function loadBoard() {
+    return boardSyncRef.current.load()
+  }
+
+  function handleBoardChange(next) {
+    boardSyncRef.current.apply(next)
+  }
+
+  function openBoardDialog() {
+    setBoardDialogOpen(true)
+    if (!board) loadBoard()
+  }
+
   function nextTourStep() {
     if (tourStep >= ONBOARDING_STEPS.length - 1) {
       closeTour(true)
@@ -2167,6 +2219,7 @@ export default function App() {
       : null
 
   const temperatureValue = metrics?.temperature_celsius_avg
+  const boardInfo = boardIndicator(board)
 
   return (
     <div className="app-shell">
@@ -2179,6 +2232,17 @@ export default function App() {
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
         <div className="masthead-actions">
+          <button
+            type="button"
+            className={['board-trigger', boardInfo.state.tone].filter(Boolean).join(' ')}
+            onClick={openBoardDialog}
+            title={boardInfo.title}
+            aria-haspopup="dialog"
+            aria-expanded={boardDialogOpen}
+          >
+            <span className="board-trigger-label">{boardInfo.label}</span>
+            <Pill tone={boardInfo.state.tone}>{boardInfo.state.short}</Pill>
+          </button>
           {devkitShellInfo?.configured && (
             <button
               type="button"
@@ -2657,6 +2721,19 @@ export default function App() {
             </div>
             {viewerUrl ? <iframe title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
           </section>
+        )}
+
+        {tab === 'peripherals' && (
+          <Suspense fallback={<section className="panel"><p className="hint">Loading peripherals…</p></section>}>
+            <PeripheralsView
+              board={board}
+              boardError={boardError}
+              boardLoading={boardLoading}
+              onOpenBoard={openBoardDialog}
+              onReloadBoard={loadBoard}
+              onStatus={setUploadStatus}
+            />
+          </Suspense>
         )}
 
         {tab === 'visualizer' && (
@@ -3205,6 +3282,20 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {boardDialogOpen && (
+        <Suspense fallback={null}>
+          <BoardDialog
+            board={board}
+            error={boardError}
+            loading={boardLoading}
+            onChange={handleBoardChange}
+            onClose={closeBoardDialog}
+            onReload={loadBoard}
+            onStatus={setUploadStatus}
+          />
+        </Suspense>
       )}
 
       {sysInfoOpen && (

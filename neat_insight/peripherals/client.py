@@ -53,6 +53,10 @@ def _non_negative_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def _positive_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 class PeripheralClient:
     def __init__(self, session, socket_path: str = socket_client.SOCKET_PATH):
         self.session = session
@@ -191,8 +195,10 @@ class PeripheralClient:
             or not all(_non_negative_int(payload.get(key)) for key in ("revision", "sequence", "scan_sequence"))
             or not isinstance(payload.get("devices"), list)
             or not (payload.get("error") is None or isinstance(payload.get("error"), dict))
+            or not isinstance(payload.get("issues", []), list)
         ):
             raise self._response_error("The peripheral daemon catalog does not match the v1 schema.", payload)
+        device_ids = set()
         for device in payload["devices"]:
             if (
                 not isinstance(device, dict)
@@ -200,6 +206,65 @@ class PeripheralClient:
                 or not isinstance(device.get(device.get("type")), dict)
             ):
                 raise self._response_error("The peripheral daemon returned a malformed device record.", device)
+            if device["id"] in device_ids:
+                raise self._response_error("The peripheral daemon returned duplicate device identities.", device)
+            device_ids.add(device["id"])
+            if device["type"] == "camera":
+                self._validate_camera(device)
+        for issue in payload.get("issues", []):
+            if (
+                not isinstance(issue, dict)
+                or not all(isinstance(issue.get(key), str) and issue[key] for key in ("provider", "code", "reason"))
+                or not isinstance(issue.get("retained_last_good"), bool)
+            ):
+                raise self._response_error("The peripheral daemon returned a malformed provider issue.", issue)
+
+    def _validate_camera(self, device: dict) -> None:
+        camera = device["camera"]
+        if (
+            not isinstance(camera.get("backend"), str)
+            or not camera["backend"]
+            or not isinstance(camera.get("modes"), list)
+            or not (camera.get("camera_name") is None or isinstance(camera.get("camera_name"), str))
+            or not (camera.get("model") is None or isinstance(camera.get("model"), str))
+        ):
+            raise self._response_error("The peripheral daemon returned malformed camera details.", device)
+        for mode in camera["modes"]:
+            if (
+                not isinstance(mode, dict)
+                or not isinstance(mode.get("format"), str)
+                or not mode["format"]
+                or not _positive_int(mode.get("framerate_num"))
+                or not _positive_int(mode.get("framerate_den"))
+                or not isinstance(mode.get("supported"), bool)
+                or not isinstance(mode.get("reason"), str)
+            ):
+                raise self._response_error("The peripheral daemon returned a malformed camera mode.", mode)
+            has_discrete = "width" in mode or "height" in mode
+            has_range = "size_range" in mode
+            discrete = (
+                has_discrete
+                and _positive_int(mode.get("width"))
+                and _positive_int(mode.get("height"))
+            )
+            ranged = has_range and self._valid_size_range(mode.get("size_range"))
+            if (
+                has_discrete == has_range
+                or (has_discrete and not discrete)
+                or (has_range and not ranged)
+            ):
+                raise self._response_error(
+                    "A camera mode must contain exactly one discrete size or size range.", mode
+                )
+
+    @staticmethod
+    def _valid_size_range(value) -> bool:
+        if not isinstance(value, dict):
+            return False
+        keys = ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")
+        if not all(_positive_int(value.get(key)) for key in keys):
+            return False
+        return value["min_width"] <= value["max_width"] and value["min_height"] <= value["max_height"]
 
     def _validate_events(self, payload: dict) -> None:
         self._validate_schema(payload)
