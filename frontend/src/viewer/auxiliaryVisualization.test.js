@@ -9,6 +9,7 @@ import {
   reconcileAuxiliaryPanelMode,
   restoreAuxiliaryViewPreference,
   retainAuxiliaryViews,
+  routeAuxiliarySettingsEvent,
 } from "./auxiliaryVisualization.js";
 import { createMetadataQueue, enqueueMetadata, takeMetadataForFrame } from "./metadataSync.js";
 
@@ -78,6 +79,18 @@ test("a restored auxiliary view reconciles its panel mode with explicit viewer s
   assert.equal(
     reconcileAuxiliaryPanelMode("expanded", { enabled: true, panelMode: "compact" }, false),
     "expanded",
+  );
+});
+
+test("closing a preview still refreshes after its view stops being selected", () => {
+  assert.deepEqual(
+    routeAuxiliarySettingsEvent(
+      "viewer-settings-changed",
+      "blazepose-3d",
+      "point-cloud-3d",
+      "blazepose-3d",
+    ),
+    { isPreview: false, cancelsPreview: true, appliesToSelection: true },
   );
 });
 

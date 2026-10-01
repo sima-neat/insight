@@ -1,11 +1,20 @@
 const warnedStrategies = new Set();
 const roiMetadataTypes = new Set(["object-detection", "segmentation", "tracking"]);
+const configurableMetadataTypes = new Set([
+  "object-detection",
+  "tracking",
+  "pose-estimation",
+  "segmentation",
+  "classification",
+]);
 
 export function hasDrawableMetadata(message, settings) {
   const type = message?.type;
   const data = message?.data;
   const showRoi = settings?.general?.showRoi !== false && roiMetadataTypes.has(type);
-  if (settings?.type?.visible === false) return type === "tracking" || showRoi;
+  if (configurableMetadataTypes.has(type) && settings?.type?.visible === false) {
+    return type === "tracking" || showRoi;
+  }
 
   switch (type) {
     case "object-detection": {

@@ -88,6 +88,18 @@ test("ROI rendering remains independent of per-type overlay visibility", (t) => 
   );
 });
 
+test("custom metadata visibility is independent of object detection settings", () => {
+  const hiddenDetectionSettings = {
+    general: { showRoi: false },
+    type: { visible: false },
+  };
+
+  assert.equal(
+    hasDrawableMetadata({ type: "custom-heatmap", data: {} }, hiddenDetectionSettings),
+    true,
+  );
+});
+
 test("detection styles do not leak into pose skeletons or the next frame", (t) => {
   loadStrategies(t);
   const canvas = { clientWidth: 640, clientHeight: 480 };
