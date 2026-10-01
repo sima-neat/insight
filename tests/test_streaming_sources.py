@@ -269,8 +269,6 @@ class StreamingSourceTests(unittest.TestCase):
         self.assertEqual(app_module._media_codec_display_name("hvc1", None), "H.265")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class FfmpegPreloadEnvTests(unittest.TestCase):
@@ -280,7 +278,17 @@ class FfmpegPreloadEnvTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: "/nonexistent/shim.so"}, clear=False
         ):
-            self.assertIsNone(mediasrc._ffmpeg_env())
+            with mock.patch.object(mediasrc.sys, "platform", "darwin"):
+                self.assertIsNone(mediasrc._ffmpeg_env())
+
+    def test_warns_on_linux_when_shim_is_absent(self):
+        with mock.patch.dict(
+            os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: "/nonexistent/shim.so"}, clear=False
+        ):
+            with mock.patch.object(mediasrc.sys, "platform", "linux"):
+                with self.assertLogs(level="WARNING") as logs:
+                    self.assertIsNone(mediasrc._ffmpeg_env())
+        self.assertIn("TCP_NODELAY shim not found", logs.output[0])
 
     def test_preloads_shim_when_present(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -299,21 +307,7 @@ class FfmpegPreloadEnvTests(unittest.TestCase):
             shim.write_bytes(b"")
             with mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop(mediasrc._FFMPEG_PRELOAD_ENV, None)
-                with mock.patch.object(
-                    mediasrc, "_FFMPEG_PRELOAD_PATHS", (str(shim), "/usr/local/lib/ffmpeg_nodelay.so")
-                ):
-                    env = mediasrc._ffmpeg_env()
-            self.assertEqual(env["LD_PRELOAD"], str(shim))
-
-    def test_falls_back_to_the_image_path_when_the_package_has_no_shim(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            shim = Path(tmp) / "ffmpeg_nodelay.so"
-            shim.write_bytes(b"")
-            with mock.patch.dict(os.environ, {}, clear=False):
-                os.environ.pop(mediasrc._FFMPEG_PRELOAD_ENV, None)
-                with mock.patch.object(
-                    mediasrc, "_FFMPEG_PRELOAD_PATHS", ("/nonexistent/pkg.so", str(shim))
-                ):
+                with mock.patch.object(mediasrc, "_FFMPEG_PRELOAD_DEFAULT", str(shim)):
                     env = mediasrc._ffmpeg_env()
             self.assertEqual(env["LD_PRELOAD"], str(shim))
 
@@ -328,3 +322,7 @@ class FfmpegPreloadEnvTests(unittest.TestCase):
             ):
                 env = mediasrc._ffmpeg_env()
             self.assertEqual(env["LD_PRELOAD"], f"{shim}:/opt/other.so")
+
+
+if __name__ == "__main__":
+    unittest.main()

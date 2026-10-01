@@ -191,6 +191,8 @@ jobs:
         run: |
           set -euo pipefail
           .venv-insight/bin/python - <<'PY'
+          import platform
+          import sys
           import neat_insight
           from pathlib import Path
 
@@ -201,6 +203,13 @@ jobs:
           assert vf.exists(), f"missing {vf}"
           assert mediamtx.exists(), f"missing {mediamtx}"
           assert cfg.exists(), f"missing {cfg}"
+          if sys.platform.startswith("linux"):
+              shim = root / "bin" / "ffmpeg_nodelay.so"
+              assert shim.exists(), f"missing {shim}"
+              e_machine = shim.read_bytes()[18:20]
+              expected = {"x86_64": b"\x3e\x00", "aarch64": b"\xb7\x00"}[platform.machine()]
+              assert e_machine == expected, f"{shim} is built for the wrong architecture"
+              print("shim:", shim)
           print("package_root:", root)
           print("vf:", vf)
           print("mediamtx:", mediamtx)
