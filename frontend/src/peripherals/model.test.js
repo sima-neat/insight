@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, isExportableMode, modeLabel, validateBoardForm } from './model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, isExportableMode, modeLabel, validateBoardForm } from './model.js'
 
 test('device tabs are generic, counted, and sorted', () => {
   assert.deepEqual(deviceTypes([
@@ -63,6 +63,24 @@ test('refresh stays disabled until it can be bound to a known daemon instance', 
   assert.equal(canRefreshCatalog({ instance_id: '' }), false)
   assert.equal(canRefreshCatalog({ instance_id: 'daemon-a' }), true)
   assert.equal(canRefreshCatalog({ instance_id: 'daemon-a' }, true), false)
+})
+
+test('event cursor advances only after a changed catalog is synchronized', () => {
+  const cursor = createEventCursor({ instance_id: 'daemon-a', sequence: 4 })
+  assert.equal(cursor.observe({ instance_id: 'daemon-a', sequence: 5, events: [], resync_required: false, shutting_down: false }), false)
+  assert.deepEqual(cursor.current(), { instanceId: 'daemon-a', sequence: 5 })
+  assert.equal(cursor.observe({ instance_id: 'daemon-a', sequence: 6, events: [{ kind: 'changed' }], resync_required: false, shutting_down: false }), true)
+  assert.deepEqual(cursor.current(), { instanceId: 'daemon-a', sequence: 5 })
+  cursor.synchronize({ instance_id: 'daemon-a', sequence: 6 })
+  assert.deepEqual(cursor.current(), { instanceId: 'daemon-a', sequence: 6 })
+})
+
+test('event cursor retains the prior daemon until its replacement catalog loads', () => {
+  const cursor = createEventCursor({ instance_id: 'daemon-a', sequence: 9 })
+  assert.equal(cursor.observe({ instance_id: 'daemon-b', sequence: 0, events: [], resync_required: true, shutting_down: false }), true)
+  assert.deepEqual(cursor.current(), { instanceId: 'daemon-a', sequence: 9 })
+  cursor.synchronize({ instance_id: 'daemon-b', sequence: 0 })
+  assert.deepEqual(cursor.current(), { instanceId: 'daemon-b', sequence: 0 })
 })
 
 test('board selection rejects unsafe or invalid endpoint fields', () => {

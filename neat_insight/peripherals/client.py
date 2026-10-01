@@ -81,6 +81,7 @@ class PeripheralClient:
         return payload
 
     def refresh(self) -> dict:
+        expected_instance_id = self.catalog()["instance_id"]
         accepted = self._call("POST", "/v1/refresh")
         target = accepted.get("target_scan_sequence") if isinstance(accepted, dict) else None
         if accepted.get("accepted") is not True or not _non_negative_int(target):
@@ -89,6 +90,14 @@ class PeripheralClient:
         deadline = time.monotonic() + REFRESH_TIMEOUT_SEC
         while True:
             catalog = self.catalog()
+            if catalog["instance_id"] != expected_instance_id:
+                raise BoardError(
+                    "stale_snapshot",
+                    "The peripheral daemon restarted while refreshing its catalog.",
+                    hint="Retry the refresh against the new daemon instance.",
+                    expected_instance_id=expected_instance_id,
+                    observed_instance_id=catalog["instance_id"],
+                )
             if catalog["scan_sequence"] >= target:
                 return catalog
             if time.monotonic() >= deadline:

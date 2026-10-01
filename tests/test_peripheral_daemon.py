@@ -152,6 +152,7 @@ class PeripheralClientTests(unittest.TestCase):
 
     def test_refresh_waits_for_the_daemon_target_scan(self):
         replies = [
+            (200, json.dumps(catalog(scan_sequence=3))),
             (202, json.dumps({"accepted": True, "target_scan_sequence": 5})),
             (200, json.dumps(catalog(scan_sequence=4))),
             (200, json.dumps(catalog(scan_sequence=5))),
@@ -161,7 +162,23 @@ class PeripheralClientTests(unittest.TestCase):
         ):
             result = PeripheralClient(FakeSession()).refresh()
         self.assertEqual(result["scan_sequence"], 5)
-        self.assertEqual([call.args[:2] for call in request.call_args_list], [("POST", "/v1/refresh"), ("GET", "/v1/catalog"), ("GET", "/v1/catalog")])
+        self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/v1/catalog"), ("POST", "/v1/refresh"), ("GET", "/v1/catalog"), ("GET", "/v1/catalog")])
+
+    def test_refresh_rejects_a_daemon_restart_before_completing_the_target(self):
+        before = catalog(scan_sequence=3)
+        restarted = catalog(scan_sequence=5)
+        restarted["instance_id"] = "daemon-2"
+        replies = [
+            (200, json.dumps(before)),
+            (202, json.dumps({"accepted": True, "target_scan_sequence": 5})),
+            (200, json.dumps(restarted)),
+        ]
+        with mock.patch.object(socket_client, "request", side_effect=replies):
+            with self.assertRaises(BoardError) as ctx:
+                PeripheralClient(FakeSession()).refresh()
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
+        self.assertEqual(ctx.exception.extra["expected_instance_id"], before["instance_id"])
+        self.assertEqual(ctx.exception.extra["observed_instance_id"], "daemon-2")
 
     def test_events_are_forwarded_with_a_bounded_wait(self):
         response = {

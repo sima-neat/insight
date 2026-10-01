@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { copyText, createLatestRequest, requestJson } from './peripherals/api.js'
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
 function deviceLabel(device) {
@@ -128,29 +128,29 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   useEffect(() => {
     if (!catalog?.instance_id || !board?.target) return undefined
     const controller = new AbortController()
-    let cursor = catalog.sequence
-    let instanceId = catalog.instance_id
+    const eventCursor = createEventCursor(catalog)
 
     async function watch() {
       while (!controller.signal.aborted) {
+        const cursor = eventCursor.current()
         const query = new URLSearchParams({
           board_generation: String(catalog.board_generation),
-          instance_id: instanceId,
-          after_sequence: String(cursor),
+          instance_id: cursor.instanceId,
+          after_sequence: String(cursor.sequence),
           wait_ms: '30000'
         })
         try {
           const response = await requestJson(`/api/peripherals/events?${query}`, { signal: controller.signal })
           if (controller.signal.aborted) return
-          const changed = response.resync_required || response.shutting_down || response.instance_id !== instanceId || response.events.length > 0
-          cursor = response.sequence
-          instanceId = response.instance_id
+          const changed = eventCursor.observe(response)
           setEventError(null)
           if (changed) {
             const next = await load({ quiet: true })
             if (next) {
-              cursor = next.sequence
-              instanceId = next.instance_id
+              eventCursor.synchronize(next)
+            } else {
+              setEventError({ message: 'A peripheral change was detected, but the updated catalog could not be loaded. Retrying…' })
+              await new Promise((resolve) => setTimeout(resolve, 1500))
             }
           }
         } catch (nextError) {
