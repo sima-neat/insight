@@ -3,6 +3,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import {
   auxiliaryRendererRegistry,
   createAuxiliaryViewPreference,
+  initialAuxiliarySessionSettings,
   reconcileAuxiliaryPanelMode,
   restoreAuxiliaryViewPreference,
   retainAuxiliaryViews,
@@ -238,8 +239,15 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     if (!renderer) return null;
     let session;
     if (typeof renderer.createSession === "function") {
+      const toSession = renderer.viewerSettings?.toSession;
+      const initialSettings = initialAuxiliarySessionSettings(
+        settingsForSession(channelIndex, view),
+        effectiveRendererSettings(view.renderer),
+        toSession,
+        previewSettingsRef.current?.renderer === view.renderer,
+      );
       session = renderer.createSession({
-        initialSettings: settingsForSession(channelIndex, view),
+        initialSettings,
         onSettingsChange(settings) {
           saveRendererPreference(channelIndex, view, settings);
           if (selectedIdRef.current === view.id) {
@@ -256,7 +264,7 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
     if (!session || typeof session.draw !== "function") return null;
     sessionsRef.current.set(view.id, { rendererName: view.renderer, session });
     return session;
-  }, [channelIndex, updateControls]);
+  }, [channelIndex, effectiveRendererSettings, updateControls]);
 
   const drawCurrent = useCallback(() => {
     const canvas = canvasRef.current;

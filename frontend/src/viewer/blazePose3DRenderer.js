@@ -87,10 +87,11 @@ function normalizeBlazePoseViewSettings(value) {
 }
 
 function normalizeWorldPoint(point) {
-  const x = Number(point?.x);
-  const y = -Number(point?.y);
-  const z = Number(point?.z);
-  return [x, y, z].every(Number.isFinite) ? { x, y, z } : null;
+  const { x, y, z } = point || {};
+  const hasFiniteCoordinates = [x, y, z]
+    .every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate));
+  if (!hasFiniteCoordinates) return null;
+  return { x, y: -y, z };
 }
 
 function confidenceAlpha(confidence) {
