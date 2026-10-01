@@ -212,6 +212,17 @@ test("each auxiliary view keeps an independent dropout grace", () => {
   assert.equal(expired.lastSeenById.has("pose"), false);
 });
 
+test("current-frame auxiliary views replace retained IDs before the panel limit", () => {
+  const previous = Array.from({ length: 16 }, (_, id) => ({ id: `previous-${id}` }));
+  const incoming = Array.from({ length: 16 }, (_, id) => ({ id: `incoming-${id}` }));
+  const first = retainAuxiliaryViews(new Map(), previous, new Map(), 1000);
+  const next = retainAuxiliaryViews(first.views, incoming, first.lastSeenById, 1016);
+
+  assert.equal(next.views.size, 16);
+  assert.deepEqual([...next.views.keys()], incoming.map(({ id }) => id));
+  assert.deepEqual([...next.lastSeenById.keys()], incoming.map(({ id }) => id));
+});
+
 test("one frame cannot create an unbounded auxiliary tab set", () => {
   const registry = registryWith("plot");
   const candidates = Array.from({ length: 18 }, (_, id) => ({

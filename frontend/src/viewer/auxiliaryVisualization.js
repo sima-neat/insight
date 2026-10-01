@@ -90,18 +90,30 @@ function shouldHoldLastAuxiliaryFrame(
 
 export function retainAuxiliaryViews(currentViews, incomingViews, lastSeenById, nowMs) {
   const nextViews = new Map();
-  const nextLastSeen = new Map(lastSeenById);
-  const incomingById = new Map(incomingViews.map((view) => [view.id, view]));
+  const nextLastSeen = new Map();
+  const incomingById = new Map();
+  for (const view of incomingViews) {
+    if (incomingById.has(view.id)) {
+      incomingById.set(view.id, view);
+    } else if (incomingById.size < MAX_AUXILIARY_VIEWS_PER_PANEL) {
+      incomingById.set(view.id, view);
+    }
+  }
+  const retainedCapacity = MAX_AUXILIARY_VIEWS_PER_PANEL - incomingById.size;
+  let retainedCount = 0;
 
   for (const [id, view] of currentViews) {
     if (incomingById.has(id)) {
       nextViews.set(id, incomingById.get(id));
       nextLastSeen.set(id, nowMs);
       incomingById.delete(id);
-    } else if (shouldHoldLastAuxiliaryFrame(true, nextLastSeen.get(id), nowMs)) {
+    } else if (
+      retainedCount < retainedCapacity
+      && shouldHoldLastAuxiliaryFrame(true, lastSeenById.get(id), nowMs)
+    ) {
       nextViews.set(id, view);
-    } else {
-      nextLastSeen.delete(id);
+      nextLastSeen.set(id, lastSeenById.get(id));
+      retainedCount += 1;
     }
   }
   for (const [id, view] of incomingById) {
