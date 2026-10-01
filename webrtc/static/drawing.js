@@ -118,7 +118,8 @@ function scaledRoiPoints(points, video, scale) {
   ]);
 }
 
-function drawRoiPolygons(ctx, roiPolygons, video, scale) {
+function drawRoiPolygons(ctx, roiPolygons, video, scale, frameState) {
+  if (frameState?.roiDrawn) return;
   roiPolygons.forEach(({ points, type }) => {
     const absPoints = scaledRoiPoints(points, video, scale);
     if (absPoints.length < 3) return;
@@ -135,6 +136,7 @@ function drawRoiPolygons(ctx, roiPolygons, video, scale) {
     ctx.fill();
     ctx.stroke();
   });
+  if (frameState) frameState.roiDrawn = true;
 }
 
 function pointInsidePolygon(x, y, polygon, video, scale) {
@@ -325,7 +327,7 @@ window.drawStrategies = {
     const scale = computeScaleAndOffset(video, canvas);
     const { scaleX, scaleY, offsetX, offsetY } = scale;
     if (showRoi) {
-      drawRoiPolygons(ctx, roiPolygons, video, scale);
+      drawRoiPolygons(ctx, roiPolygons, video, scale, drawContext.frameState);
     }
 
     data.objects.forEach(obj => {
@@ -425,7 +427,7 @@ window.drawStrategies = {
     const scale = computeScaleAndOffset(video, canvas);
     const { scaleX, scaleY, offsetX, offsetY } = scale;
     if (showRoi) {
-      drawRoiPolygons(ctx, roiPolygons, video, scale);
+      drawRoiPolygons(ctx, roiPolygons, video, scale, drawContext.frameState);
     }
 
     data.segments.forEach(seg => {
@@ -542,7 +544,7 @@ window.drawStrategies = {
     });
 
     if (showRoi) {
-      drawRoiPolygons(ctx, roiPolygons, video, scale);
+      drawRoiPolygons(ctx, roiPolygons, video, scale, drawContext.frameState);
     }
 
     updateTrackHistory(trackHistory, index, visibleTracks, drawContext.now || performance.now(), historySettings);

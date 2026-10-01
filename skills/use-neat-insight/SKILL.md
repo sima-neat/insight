@@ -156,6 +156,19 @@ capture.
 | `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
 
+A frame may be described by several metadata types at once. Send one message per
+type, all carrying the source frame's `timestamp` in integer milliseconds; the
+correlator matches each against the retained frame mapping, and the viewer draws
+every type it holds for that frame.
+A second message of the same type for the same frame replaces the first; retained
+messages draw in arrival order. Metadata without a correlated RTP timestamp uses
+the single-message arrival fallback, since types cannot safely be grouped without
+a shared frame identity.
+
+A failing drawing strategy does not stop other types or subsequent frames. Check
+the browser console for a warning, emitted once per channel and metadata type.
+Shared ROI polygons draw once per frame; each type still applies its ROI filter.
+
 Every timestamped message leaves through exactly one of matched, expired, or
 evicted, or is still counted in `pending_metadata`. The video fields describe
 the lifetime of reusable timestamp mappings, not match or loss outcomes.
@@ -211,6 +224,10 @@ A peer is `active` when its connection is up. That is not a statement about how 
 Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
 
 Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
+
+`synchronization.timestamped_metadata_pending` counts queued messages, including
+each metadata type for a shared frame. Both pending counts and the expiry/eviction
+counters use messages; `timestamp_matches` counts matched video-frame callbacks.
 
 Examples:
 

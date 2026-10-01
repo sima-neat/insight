@@ -18,6 +18,8 @@ Insight uses several ports during normal operation. The default ports are the po
 | `videoUDP` | `9000-9079` | UDP | Video RTP ingest for viewer channels `0-79`. |
 | `metadataUDP` | `9100-9179` | UDP | Metadata JSON ingest for viewer channels `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
+| `webrtcWhip` | `8889` | HTTPS/TCP | Browser webcam publishing into MediaMTX over WHIP, republished as an RTSP source. |
+| `webrtcWhipIce` | `8189` | UDP | ICE media for browser webcam publishing. Signalling uses `webrtcWhip`; the video itself arrives here, so both must be reachable. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
 ## Find the actual SDK port map
@@ -39,6 +41,8 @@ The output includes `insight.webUiUrl` and an `exposedPorts` array:
     {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
     {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
   ],
   "insight": {
