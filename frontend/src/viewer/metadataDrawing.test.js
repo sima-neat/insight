@@ -123,7 +123,12 @@ test("shared ROI is drawn once in any metadata order and filtering still applies
   const boxes = [[10, 20, 30, 40], [500, 300, 30, 40]];
   const messages = [
     { type: "object-detection", data: { objects: boxes.map(bbox => ({ bbox, label: "person", confidence: 1 })) } },
-    { type: "segmentation", data: { segments: boxes.map(bbox => ({ bbox, mask_format: "polygon", mask: [[10, 20], [40, 20], [10, 60]] })) } },
+    { type: "segmentation", data: { segments: boxes.map(bbox => ({
+      bbox,
+      mask_format: "polygon",
+      show_rectangle: true,
+      mask: [[10, 20], [40, 20], [10, 60]],
+    })) } },
     { type: "tracking", data: { tracks: boxes.map((bbox, id) => ({ bbox, id })) } },
   ];
   const settings = { general: { showRoi: true }, type: {} };

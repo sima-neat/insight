@@ -286,7 +286,7 @@ The metadata sender targets UDP `9100+channel` by default and emits JSON compati
 
 ## Segmentation Metadata
 
-`type: "segmentation"` carries `data.segments[]`, one entry per instance with `label`, `confidence`, `bbox` in frame pixels, `mask_format`, and `mask`.
+`type: "segmentation"` carries `data.segments[]`, one entry per instance with `label`, `confidence`, `bbox` in frame pixels, `mask_format`, `mask`, and optional `show_rectangle`.
 
 The two mask formats use different coordinate frames:
 
@@ -294,6 +294,14 @@ The two mask formats use different coordinate frames:
 | --- | --- | --- |
 | `polygon` | `[[x, y], ...]`, at least three points | Frame-absolute. `bbox` optional, derived from the extent when absent. |
 | `rle` | `{"size": [h, w], "counts": [...]}` | Bbox-local: `size` covers the `bbox` rectangle, not the image. `bbox` required. |
+
+Outer bounding rectangles are hidden by default for both polygon and RLE masks.
+Set `show_rectangle: true` on an individual segment to draw one. The `bbox` still
+controls RLE mask placement, label placement, and ROI filtering when its border is
+hidden; polygons derive that bbox from `mask` when it is omitted. When calling
+Core's `MetadataSender::send_metadata("segmentation", ...)`, include
+`show_rectangle` inside the relevant segment in `data_json`. Only boolean `true`
+opts in; omitted or other values keep the rectangle hidden.
 
 RLE runs are column-major, the first run is background, and `counts` is a JSON array of integers — not the compressed byte string `pycocotools.mask.encode()` returns. Send the mask at mask-head resolution; the viewer stretches it onto `bbox` with interpolation.
 
