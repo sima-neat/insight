@@ -93,6 +93,16 @@ export function routeAuxiliarySettingsEvent(
   };
 }
 
+export function nextAuxiliaryPreview(
+  currentPreview,
+  routing,
+  renderer,
+  settings,
+) {
+  if (routing.isPreview) return { renderer, settings };
+  return routing.cancelsPreview ? null : currentPreview;
+}
+
 export function initialAuxiliarySessionSettings(
   savedSettings,
   effectiveSettings,

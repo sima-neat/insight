@@ -4,6 +4,7 @@ import {
   auxiliaryRendererRegistry,
   createAuxiliaryViewPreference,
   initialAuxiliarySessionSettings,
+  nextAuxiliaryPreview,
   reconcileAuxiliaryPanelMode,
   restoreAuxiliaryViewPreference,
   retainAuxiliaryViews,
@@ -399,18 +400,15 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         renderer,
         previewSettingsRef.current?.renderer,
       );
-      if (routing.cancelsPreview) previewSettingsRef.current = null;
+      previewSettingsRef.current = nextAuxiliaryPreview(
+        previewSettingsRef.current,
+        routing,
+        changedRenderer ?? renderer,
+        event?.detail?.auxiliarySettings || {},
+      );
       if (!routing.appliesToSelection) return;
 
       const isPreview = routing.isPreview;
-      if (isPreview) {
-        previewSettingsRef.current = {
-          renderer,
-          settings: event?.detail?.auxiliarySettings || {},
-        };
-      } else {
-        previewSettingsRef.current = null;
-      }
       const resolved = effectiveRendererSettings(renderer);
       const nextMode = displayMode(resolved);
       modeRef.current = nextMode;

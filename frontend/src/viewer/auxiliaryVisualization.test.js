@@ -6,6 +6,7 @@ import {
   auxiliaryRendererRegistry,
   createAuxiliaryViewPreference,
   initialAuxiliarySessionSettings,
+  nextAuxiliaryPreview,
   partitionFrameMetadata,
   reconcileAuxiliaryPanelMode,
   restoreAuxiliaryViewPreference,
@@ -92,6 +93,22 @@ test("closing a preview still refreshes after its view stops being selected", ()
       "blazepose-3d",
     ),
     { isPreview: false, cancelsPreview: true, appliesToSelection: true },
+  );
+});
+
+test("a preview is retained before its renderer becomes selected", () => {
+  const routing = routeAuxiliarySettingsEvent(
+    "viewer-settings-preview",
+    "blazepose-3d",
+    "point-cloud-3d",
+    null,
+  );
+  const settings = { yawDegrees: 90 };
+
+  assert.equal(routing.appliesToSelection, false);
+  assert.deepEqual(
+    nextAuxiliaryPreview(null, routing, "blazepose-3d", settings),
+    { renderer: "blazepose-3d", settings },
   );
 });
 
