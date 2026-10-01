@@ -271,3 +271,36 @@ class StreamingSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FfmpegPreloadEnvTests(unittest.TestCase):
+    """The RTSP publishers must run with the TCP_NODELAY shim preloaded."""
+
+    def test_returns_none_when_shim_is_absent(self):
+        with mock.patch.dict(
+            os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: "/nonexistent/shim.so"}, clear=False
+        ):
+            self.assertIsNone(mediasrc._ffmpeg_env())
+
+    def test_preloads_shim_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "ffmpeg_nodelay.so"
+            shim.write_bytes(b"")
+            with mock.patch.dict(
+                os.environ, {mediasrc._FFMPEG_PRELOAD_ENV: str(shim)}, clear=False
+            ):
+                env = mediasrc._ffmpeg_env()
+            self.assertIsNotNone(env)
+            self.assertEqual(env["LD_PRELOAD"], str(shim))
+
+    def test_prepends_to_an_existing_preload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = Path(tmp) / "ffmpeg_nodelay.so"
+            shim.write_bytes(b"")
+            with mock.patch.dict(
+                os.environ,
+                {mediasrc._FFMPEG_PRELOAD_ENV: str(shim), "LD_PRELOAD": "/opt/other.so"},
+                clear=False,
+            ):
+                env = mediasrc._ffmpeg_env()
+            self.assertEqual(env["LD_PRELOAD"], f"{shim}:/opt/other.so")
