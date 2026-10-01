@@ -11,6 +11,7 @@ import uuid
 import wave
 
 from neat_insight.board import BoardError
+from neat_insight.board.transport import CommandCancelled
 
 MAX_SECONDS = 30
 MAX_TESTS = 4
@@ -184,6 +185,7 @@ class MicrophoneTest:
         self.error = None
         self.wav = None
         self.stop_requested = False
+        self.cancel_event = threading.Event()
         self.pcm = bytearray()
         self.bytes_received = 0
         self.lock = threading.Lock()
@@ -205,6 +207,7 @@ class MicrophoneTest:
                     hint="Start a new test to record again.",
                 )
             self.stop_requested = True
+            self.cancel_event.set()
 
     def on_chunk(self, chunk: bytes) -> None:
         with self.lock:
@@ -271,9 +274,10 @@ class MicrophoneTest:
                     command,
                     timeout=self.seconds + 10,
                     on_stdout=self.on_chunk,
+                    cancel_event=self.cancel_event,
                 )
                 pcm = _checked(result)
-            except _Stopped:
+            except (_Stopped, CommandCancelled):
                 with self.lock:
                     pcm = bytes(self.pcm)
                 if len(pcm) < self.rate * self.channels * 2 // 10:

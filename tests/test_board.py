@@ -16,7 +16,7 @@ from neat_insight.board import transport as transport_module
 from neat_insight.board.errors import BoardError
 from neat_insight.board.manager import BoardManager
 from neat_insight.board.target import BoardTarget, TargetStore, resolve_target
-from neat_insight.board.transport import ExecResult, LocalTransport, SshTransport, key_fingerprint
+from neat_insight.board.transport import CommandCancelled, ExecResult, LocalTransport, SshTransport, key_fingerprint
 
 SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "sima", "DEVKIT_SYNC_DEVKIT_PORT": "22"}
 IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
@@ -166,6 +166,24 @@ class LocalTransportTests(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.kill(pids[0], 0)
 
+    def test_cancel_event_terminates_a_command_without_waiting_for_output(self):
+        cancel = threading.Event()
+        outcome = []
+
+        def run():
+            try:
+                LocalTransport().exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+            except Exception as error:
+                outcome.append(error)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        time.sleep(0.05)
+        cancel.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertIsInstance(outcome[0], CommandCancelled)
+
     def test_close_terminates_active_local_commands_and_rejects_new_work(self):
         transport = LocalTransport()
         ready = threading.Event()
@@ -210,6 +228,19 @@ class SshTransportTests(unittest.TestCase):
         with mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc), self.assertRaises(BoardError) as ctx:
             self.transport.exec(["true"], timeout=1)
         return ctx.exception
+
+    def test_cancel_event_closes_only_the_active_command_channel(self):
+        channel = mock.Mock()
+        channel.recv_ready.return_value = False
+        channel.recv_stderr_ready.return_value = False
+        channel.exit_status_ready.return_value = False
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+        channel.close.assert_called_once_with()
+        self.assertFalse(self.transport._closed)
 
     def test_changed_host_key_is_not_silently_accepted(self):
         old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)

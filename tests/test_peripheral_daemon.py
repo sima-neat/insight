@@ -15,7 +15,7 @@ from flask import Flask
 from neat_insight import board
 from neat_insight.board.errors import BoardError
 from neat_insight.board.target import BoardTarget
-from neat_insight.board.transport import ExecResult
+from neat_insight.board.transport import CommandCancelled, ExecResult
 from neat_insight.peripherals import peripherals_bp
 from neat_insight.peripherals import export
 from neat_insight.peripherals import mictest
@@ -441,8 +441,9 @@ class MicrophoneTestTests(unittest.TestCase):
         pcm = sine(0.5)
 
         class CaptureTransport:
-            def exec(self, _argv, *, timeout, on_stdout):
+            def exec(self, _argv, *, timeout, on_stdout, cancel_event):
                 self.timeout = timeout
+                self.cancel_event = cancel_event
                 on_stdout(pcm[:999])
                 on_stdout(pcm[999:])
                 return ExecResult(0, pcm, b"")
@@ -459,6 +460,31 @@ class MicrophoneTestTests(unittest.TestCase):
         self.assertEqual(status["state"], "ready")
         self.assertFalse(status["level"]["silent"])
         self.assertTrue(test.wav.startswith(b"RIFF"))
+
+    def test_stop_interrupts_a_stalled_capture_without_waiting_for_output(self):
+        pcm = sine(0.5)
+        started = threading.Event()
+
+        class StalledTransport:
+            def exec(self, _argv, *, timeout, on_stdout, cancel_event):
+                on_stdout(pcm)
+                started.set()
+                self.assert_cancelled = cancel_event.wait(timeout)
+                raise CommandCancelled()
+
+        transport = StalledTransport()
+        test = mictest.MicrophoneTest(
+            FakeSession(transport=transport, generation=7),
+            microphone_selection(seconds=30),
+            {"selector": "plughw:CARD=Nano,DEV=0", "rate": 48000, "channels": 2},
+        )
+        test.start()
+        self.assertTrue(started.wait(1))
+        test.request_stop()
+        test.thread.join(2)
+        self.assertFalse(test.thread.is_alive())
+        self.assertTrue(transport.assert_cancelled)
+        self.assertEqual(test.status()["state"], "ready")
 
     def test_tokens_isolate_concurrent_tabs(self):
         store = mictest.TestStore()

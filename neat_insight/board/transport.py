@@ -26,6 +26,10 @@ class ExecResult:
     stderr: bytes
 
 
+class CommandCancelled(Exception):
+    pass
+
+
 def key_fingerprint(key) -> str:
     digest = hashlib.sha256(key.asbytes()).digest()
     return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
@@ -63,6 +67,7 @@ class LocalTransport:
         timeout: float,
         stdin: Optional[bytes] = None,
         on_stdout=None,
+        cancel_event=None,
     ) -> ExecResult:
         deadline = time.monotonic() + timeout
         with self._lock:
@@ -83,7 +88,7 @@ class LocalTransport:
                 return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
             self._active.add(proc)
         try:
-            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout, on_stdout)
+            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout, on_stdout, cancel_event)
             try:
                 exit_code = proc.wait(max(deadline - time.monotonic(), 0))
             except subprocess.TimeoutExpired:
@@ -111,7 +116,7 @@ class LocalTransport:
                 self._active.discard(proc)
 
     @staticmethod
-    def _collect(proc, argv, stdin, deadline, timeout, on_stdout=None):
+    def _collect(proc, argv, stdin, deadline, timeout, on_stdout=None, cancel_event=None):
         chunks = {proc.stdout: [], proc.stderr: []}
         pending = memoryview(stdin or b"")
         size = 0
@@ -125,10 +130,13 @@ class LocalTransport:
                 else:
                     proc.stdin.close()
             while selector.get_map():
+                if cancel_event is not None and cancel_event.is_set():
+                    raise CommandCancelled()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise _timeout_error(argv, timeout, "this board")
-                for key, _ in selector.select(remaining):
+                wait = min(remaining, 0.1) if cancel_event is not None else remaining
+                for key, _ in selector.select(wait):
                     if key.fileobj is proc.stdin:
                         try:
                             pending = pending[os.write(key.fd, pending[:65536]):]
@@ -190,6 +198,7 @@ class SshTransport:
         timeout: float,
         stdin: Optional[bytes] = None,
         on_stdout=None,
+        cancel_event=None,
     ) -> ExecResult:
         channel = self._open_channel()
         try:
@@ -198,7 +207,7 @@ class SshTransport:
             if stdin:
                 channel.sendall(stdin)
             channel.shutdown_write()
-            return self._collect(channel, argv, timeout, on_stdout)
+            return self._collect(channel, argv, timeout, on_stdout, cancel_event)
         except socket.timeout:
             raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
         except (paramiko.SSHException, OSError, EOFError) as exc:
@@ -228,10 +237,12 @@ class SshTransport:
         self._closed = True
         self._drop()
 
-    def _collect(self, channel, argv: List[str], timeout: float, on_stdout=None) -> ExecResult:
+    def _collect(self, channel, argv: List[str], timeout: float, on_stdout=None, cancel_event=None) -> ExecResult:
         deadline = time.monotonic() + timeout
         stdout, stderr, size = [], [], 0
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CommandCancelled()
             progressed = False
             while channel.recv_ready():
                 stdout.append(channel.recv(65536))
