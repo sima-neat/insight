@@ -6,6 +6,7 @@ import {
   reconcileAuxiliaryPanelMode,
   restoreAuxiliaryViewPreference,
   retainAuxiliaryViews,
+  routeAuxiliarySettingsEvent,
 } from "./auxiliaryVisualization.js";
 
 const VALID_MODES = new Set(["compact", "collapsed", "expanded", "hidden"]);
@@ -384,9 +385,16 @@ const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref)
         knownViewsRef.current,
       );
       const changedRenderer = event?.detail?.auxiliaryRenderer;
-      if (changedRenderer && changedRenderer !== renderer) return;
+      const routing = routeAuxiliarySettingsEvent(
+        event?.type,
+        changedRenderer,
+        renderer,
+        previewSettingsRef.current?.renderer,
+      );
+      if (routing.cancelsPreview) previewSettingsRef.current = null;
+      if (!routing.appliesToSelection) return;
 
-      const isPreview = event?.type === "viewer-settings-preview";
+      const isPreview = routing.isPreview;
       if (isPreview) {
         previewSettingsRef.current = {
           renderer,

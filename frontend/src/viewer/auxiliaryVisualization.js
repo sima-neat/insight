@@ -74,6 +74,25 @@ export function reconcileAuxiliaryPanelMode(currentMode, settings, hasExplicitSe
     : "compact";
 }
 
+export function routeAuxiliarySettingsEvent(
+  eventType,
+  changedRenderer,
+  selectedRenderer,
+  previewRenderer,
+) {
+  const isPreview = eventType === "viewer-settings-preview";
+  const cancelsPreview = !isPreview
+    && Boolean(previewRenderer)
+    && (!changedRenderer || changedRenderer === previewRenderer);
+  return {
+    isPreview,
+    cancelsPreview,
+    appliesToSelection: !changedRenderer
+      || changedRenderer === selectedRenderer
+      || cancelsPreview,
+  };
+}
+
 // Keep only previously correlated data across a brief video/metadata delivery gap.
 function shouldHoldLastAuxiliaryFrame(
   hasCurrentViews,
