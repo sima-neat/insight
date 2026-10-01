@@ -27,7 +27,7 @@ class FakeTransport:
         self.closed = False
         self.presented_host_key = None
 
-    def exec(self, argv, *, timeout, stdin=None):
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
         return ExecResult(0, IDENTITY_OUTPUT, b"")
 
     def remote_host_key_fingerprint(self):
@@ -118,6 +118,13 @@ class BoardManagerTests(unittest.TestCase):
                 self.assertEqual(response.get_json()["code"], "invalid_request")
 
         self.assertEqual(client.get("/api/board").get_json()["target"]["host"], "192.168.2.3")
+
+    def test_session_transport_forwards_command_cancellation(self):
+        session = BoardManager(Path(self.tmp.name), on_board=True).session()
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(CommandCancelled):
+            session.transport.exec(["sleep", "30"], timeout=60, cancel_event=cancel)
 
 
 class LocalTransportTests(unittest.TestCase):

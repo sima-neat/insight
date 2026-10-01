@@ -28,17 +28,15 @@ class _ReportingTransport:
         self._generation = generation
         self._transport = transport
 
-    def exec(self, argv, *, timeout, stdin=None, on_stdout=None):
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
         try:
-            if on_stdout is None:
-                result = self._transport.exec(argv, timeout=timeout, stdin=stdin)
-            else:
-                result = self._transport.exec(
-                    argv,
-                    timeout=timeout,
-                    stdin=stdin,
-                    on_stdout=on_stdout,
-                )
+            result = self._transport.exec(
+                argv,
+                timeout=timeout,
+                stdin=stdin,
+                on_stdout=on_stdout,
+                cancel_event=cancel_event,
+            )
         except BoardError as exc:
             self._manager._record(self._generation, error=exc)
             raise
