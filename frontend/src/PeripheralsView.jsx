@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { copyText, createLatestRequest, requestJson } from './peripherals/api.js'
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createDeviceSelectionPolicy, createEventCursor, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
+import MicrophoneDetail from './peripherals/MicrophoneDetail.jsx'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
 function deviceLabel(device) {
@@ -70,10 +71,12 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   const refreshRequests = useRef(null)
   const exportRequests = useRef(null)
   const catalogPolicy = useRef(null)
+  const deviceSelectionPolicy = useRef(null)
   if (!catalogRequests.current) catalogRequests.current = createLatestRequest()
   if (!refreshRequests.current) refreshRequests.current = createLatestRequest()
   if (!exportRequests.current) exportRequests.current = createLatestRequest()
   if (!catalogPolicy.current) catalogPolicy.current = createCatalogPolicy()
+  if (!deviceSelectionPolicy.current) deviceSelectionPolicy.current = createDeviceSelectionPolicy()
 
   const commitCatalog = useCallback((next, request) => {
     const selected = catalogPolicy.current.merge(next, request)
@@ -170,18 +173,20 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   const devices = (catalog?.devices || []).filter((device) => device.type === activeType)
   const selectedDevice = devices.find((device) => device.id === deviceId) || devices[0] || null
   const camera = selectedDevice?.type === 'camera' ? selectedDevice.camera : null
+  const microphone = selectedDevice?.type === 'microphone' ? selectedDevice.microphone : null
   const selectedMode = camera?.modes?.[modeIndex] || camera?.modes?.[0] || null
   const canExport = isExportableMode(camera, selectedMode)
   const selectionEpoch = catalogIdentity(catalog)
+  const selectionScope = `${catalog?.board_generation ?? ''}:${catalog?.instance_id || ''}:${activeType}`
 
   useEffect(() => {
     exportRequests.current.cancel()
     setExporting(false)
-    setDeviceId(devices[0]?.id || '')
+    setDeviceId((current) => deviceSelectionPolicy.current.select(current, devices, selectionScope))
     setModeIndex(0)
     setExportResult(null)
     setExportError(null)
-  }, [activeType, selectionEpoch])
+  }, [activeType, selectionEpoch, selectionScope])
 
   async function refresh() {
     if (!catalog?.instance_id) return
@@ -324,6 +329,12 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
                     {!canExport && selectedMode && <p className="hint">Export is available only for a supported discrete mode with a CameraInput name.</p>}
                     <ExportPanel result={exportResult} error={exportError} onCopy={copyExport} />
                   </>
+                ) : microphone ? (
+                  <MicrophoneDetail
+                    key={`${selectionScope}:${selectedDevice.id}`}
+                    device={selectedDevice}
+                    catalog={catalog}
+                  />
                 ) : (
                   <><p>This device type is preserved by the generic catalog.</p><pre className="periph-code"><code>{JSON.stringify(selectedDevice[activeType] || {}, null, 2)}</code></pre></>
                 )}

@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock as mock
@@ -15,7 +16,7 @@ from neat_insight.board import transport as transport_module
 from neat_insight.board.errors import BoardError
 from neat_insight.board.manager import BoardManager
 from neat_insight.board.target import BoardTarget, TargetStore, resolve_target
-from neat_insight.board.transport import ExecResult, LocalTransport, SshTransport, key_fingerprint
+from neat_insight.board.transport import CommandCancelled, ExecResult, LocalTransport, SshTransport, key_fingerprint
 
 SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "sima", "DEVKIT_SYNC_DEVKIT_PORT": "22"}
 IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
@@ -26,7 +27,7 @@ class FakeTransport:
         self.closed = False
         self.presented_host_key = None
 
-    def exec(self, argv, *, timeout, stdin=None):
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
         return ExecResult(0, IDENTITY_OUTPUT, b"")
 
     def remote_host_key_fingerprint(self):
@@ -118,6 +119,13 @@ class BoardManagerTests(unittest.TestCase):
 
         self.assertEqual(client.get("/api/board").get_json()["target"]["host"], "192.168.2.3")
 
+    def test_session_transport_forwards_command_cancellation(self):
+        session = BoardManager(Path(self.tmp.name), on_board=True).session()
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(CommandCancelled):
+            session.transport.exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+
 
 class LocalTransportTests(unittest.TestCase):
     def test_exec_uses_argv_without_shell_interpretation(self):
@@ -138,6 +146,84 @@ class LocalTransportTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "command_failed")
         self.assertIn("4096 bytes", ctx.exception.message)
 
+    def test_exec_streams_stdout_before_the_command_finishes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "seen"
+            script = f"printf ab; while [ ! -e {marker} ]; do sleep 0.01; done; printf cd"
+            result = LocalTransport().exec(
+                ["sh", "-c", script],
+                timeout=5,
+                on_stdout=lambda _chunk: marker.touch(),
+            )
+        self.assertEqual(result.stdout, b"abcd")
+
+    def test_callback_exception_terminates_the_command(self):
+        pids = []
+
+        def stop(chunk):
+            pids.append(int(chunk))
+            raise RuntimeError("stop")
+
+        with self.assertRaisesRegex(RuntimeError, "stop"):
+            LocalTransport().exec(
+                ["sh", "-c", "echo $$; exec sleep 30"],
+                timeout=60,
+                on_stdout=stop,
+            )
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pids[0], 0)
+
+    def test_cancel_event_terminates_a_command_without_waiting_for_output(self):
+        cancel = threading.Event()
+        outcome = []
+
+        def run():
+            try:
+                LocalTransport().exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+            except Exception as error:
+                outcome.append(error)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        time.sleep(0.05)
+        cancel.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertIsInstance(outcome[0], CommandCancelled)
+
+    def test_close_terminates_active_local_commands_and_rejects_new_work(self):
+        transport = LocalTransport()
+        ready = threading.Event()
+        outcome = []
+        pids = []
+
+        def on_stdout(chunk):
+            pids.append(int(chunk))
+            ready.set()
+
+        def run():
+            try:
+                transport.exec(
+                    ["sh", "-c", "echo $$; exec sleep 30"],
+                    timeout=60,
+                    on_stdout=on_stdout,
+                )
+            except Exception as error:
+                outcome.append(error)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        self.assertTrue(ready.wait(2))
+        transport.close()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome[0].code, "stale_snapshot")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pids[0], 0)
+        with self.assertRaises(BoardError) as ctx:
+            transport.exec(["true"], timeout=1)
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
+
 
 class SshTransportTests(unittest.TestCase):
     def setUp(self):
@@ -149,6 +235,19 @@ class SshTransportTests(unittest.TestCase):
         with mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc), self.assertRaises(BoardError) as ctx:
             self.transport.exec(["true"], timeout=1)
         return ctx.exception
+
+    def test_cancel_event_closes_only_the_active_command_channel(self):
+        channel = mock.Mock()
+        channel.recv_ready.return_value = False
+        channel.recv_stderr_ready.return_value = False
+        channel.exit_status_ready.return_value = False
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+        channel.close.assert_called_once_with()
+        self.assertFalse(self.transport._closed)
 
     def test_changed_host_key_is_not_silently_accepted(self):
         old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)

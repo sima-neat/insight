@@ -220,6 +220,8 @@ class PeripheralClient:
             device_ids.add(device["id"])
             if device["type"] == "camera":
                 self._validate_camera(device)
+            elif device["type"] == "microphone":
+                self._validate_microphone(device)
         for issue in payload.get("issues", []):
             if (
                 not isinstance(issue, dict)
@@ -264,6 +266,91 @@ class PeripheralClient:
             ):
                 raise self._response_error(
                     "A camera mode must contain exactly one discrete size or size range.", mode
+                )
+
+    def _validate_microphone(self, device: dict) -> None:
+        microphone = device["microphone"]
+        target = microphone.get("capture_target")
+        identity = microphone.get("identity")
+        availability = microphone.get("availability")
+        issues = microphone.get("issues", [])
+        if (
+            not isinstance(microphone.get("name"), str)
+            or not microphone["name"]
+            or microphone.get("backend") != "alsa"
+            or microphone.get("connection") not in {"usb", "platform", "unknown"}
+            or not isinstance(target, dict)
+            or not _non_negative_int(target.get("device"))
+            or ("card_id" in target and not isinstance(target["card_id"], str))
+            or (
+                "selector" in target
+                and (not isinstance(target["selector"], str) or not target["selector"])
+            )
+            or not isinstance(identity, dict)
+            or not isinstance(identity.get("stable_key"), str)
+            or not identity["stable_key"]
+            or not isinstance(microphone.get("modes"), list)
+            or not isinstance(availability, dict)
+            or availability.get("state") not in {"available", "in_use", "unknown"}
+            or not isinstance(issues, list)
+        ):
+            raise self._response_error(
+                "The peripheral daemon returned malformed microphone details.", device
+            )
+        for mode in microphone["modes"]:
+            rates = mode.get("rates_hz") if isinstance(mode, dict) else None
+            rate_range = mode.get("rate_range_hz") if isinstance(mode, dict) else None
+            has_rates = "rates_hz" in mode if isinstance(mode, dict) else False
+            has_range = "rate_range_hz" in mode if isinstance(mode, dict) else False
+            valid_rates = (
+                isinstance(rates, list)
+                and bool(rates)
+                and all(_positive_int(rate) for rate in rates)
+            )
+            valid_range = (
+                isinstance(rate_range, dict)
+                and _positive_int(rate_range.get("min"))
+                and _positive_int(rate_range.get("max"))
+                and rate_range["min"] <= rate_range["max"]
+            )
+            if (
+                not isinstance(mode, dict)
+                or not isinstance(mode.get("format"), str)
+                or not mode["format"]
+                or ("interface" in mode and not _non_negative_int(mode["interface"]))
+                or ("altset" in mode and not _non_negative_int(mode["altset"]))
+                or ("channels" in mode and not _positive_int(mode["channels"]))
+                or ("sample_bits" in mode and not _positive_int(mode["sample_bits"]))
+                or (has_rates and not valid_rates)
+                or (has_range and not valid_range)
+                or (has_rates and has_range)
+                or (
+                    "channel_map" in mode
+                    and (
+                        not isinstance(mode["channel_map"], list)
+                        or not all(isinstance(channel, str) for channel in mode["channel_map"])
+                    )
+                )
+            ):
+                raise self._response_error(
+                    "The peripheral daemon returned a malformed microphone mode.", mode
+                )
+        for issue in issues:
+            if (
+                not isinstance(issue, dict)
+                or not isinstance(issue.get("code"), str)
+                or not issue["code"]
+                or not isinstance(issue.get("reason"), str)
+                or not issue["reason"]
+            ):
+                raise self._response_error(
+                    "The peripheral daemon returned a malformed microphone issue.", issue
+                )
+        for key in ("subdevices", "subdevices_available"):
+            if key in availability and not _non_negative_int(availability[key]):
+                raise self._response_error(
+                    "The peripheral daemon returned malformed microphone availability.",
+                    availability,
                 )
 
     @staticmethod

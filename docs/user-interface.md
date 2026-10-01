@@ -114,6 +114,8 @@ The catalog header shows the daemon state, revision, scan sequence, last attempt
 
 Devices are grouped by their generic `type`, so future microphone, LiDAR, and other providers can appear without a new transport. Camera details include the backend and all reported modes. A mode marked supported can be exported as matching C++, PyNeat, or JSON CameraInput configuration only when it has a discrete size and a `camera_name`. Insight re-reads the daemon catalog during export and rejects a stale device, revision, or selected-board generation.
 
+Microphone details show the daemon-reported ALSA identity, availability, and read-only capture modes. **Test microphone** re-reads the exact daemon instance and revision before it runs a bounded `arecord` capture on the selected board; it never derives a device from a card number or performs discovery. The live level and resulting WAV stay attached to an unguessable test token, so one browser tab cannot stop another tab's recording. Insight does not stop applications already using the microphone, and reports a busy device or missing `arecord` as an actionable error.
+
 Use **Refresh catalog** to ask the daemon for an explicit reconciliation. The request completes only after the daemon's returned target scan sequence has been reached; it never falls back to an Insight-side probe.
 
 ## Video Viewer

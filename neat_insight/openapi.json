@@ -889,6 +889,44 @@
         "responses": {"200": {"description": "Daemon events or an explicit resynchronization request.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralEvents"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
       }
     },
+    "/api/peripherals/microphones/test": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Start a microphone test",
+        "description": "Re-reads the authoritative daemon catalog, requires the exact selected board, daemon instance, revision, and microphone ID, then starts a bounded arecord capture using only the current daemon-provided ALSA selector. The returned token owns the test.",
+        "operationId": "startPeripheralMicrophoneTest",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MicrophoneTestRequest"}}}},
+        "responses": {"202": {"description": "Token-owned recording started.", "content": {"application/json": {"schema": {"type": "object", "required": ["test"], "properties": {"test": {"$ref": "#/components/schemas/MicrophoneTest"}}}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
+      }
+    },
+    "/api/peripherals/microphones/test/{token}": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Read one microphone test",
+        "operationId": "getPeripheralMicrophoneTest",
+        "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
+        "responses": {"200": {"description": "Current recording level or completed result.", "content": {"application/json": {"schema": {"type": "object", "required": ["test"], "properties": {"test": {"$ref": "#/components/schemas/MicrophoneTest"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}}
+      }
+    },
+    "/api/peripherals/microphones/test/{token}/stop": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Stop one token-owned microphone test",
+        "description": "Requests stop only for the named token on the currently selected board. A different browser tab's token is never selected implicitly.",
+        "operationId": "stopPeripheralMicrophoneTest",
+        "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
+        "responses": {"200": {"description": "Stop accepted; continue polling until ready or failed.", "content": {"application/json": {"schema": {"type": "object", "required": ["test"], "properties": {"test": {"$ref": "#/components/schemas/MicrophoneTest"}}}}}}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}}
+      }
+    },
+    "/api/peripherals/microphones/test/{token}.wav": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Play a completed microphone test",
+        "operationId": "getPeripheralMicrophoneTestAudio",
+        "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{32}$"}}],
+        "responses": {"200": {"description": "Bounded 16-bit PCM WAV recording.", "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}}}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}}
+      }
+    },
     "/api/workspace/root": {
       "get": {
         "tags": ["Workspace"],
@@ -1324,6 +1362,37 @@
           "mode": {"type": "object", "additionalProperties": true},
           "exports": {"type": "array", "items": {"type": "object", "required": ["id", "label", "filename", "language", "content"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
         }
+      },
+      "MicrophoneTestRequest": {
+        "type": "object",
+        "required": ["board_generation", "instance_id", "revision", "device_id"],
+        "properties": {
+          "board_generation": {"type": "integer", "minimum": 0},
+          "instance_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "revision": {"type": "integer", "minimum": 0},
+          "device_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "seconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30}
+        },
+        "additionalProperties": false
+      },
+      "MicrophoneTest": {
+        "type": "object",
+        "required": ["token", "device_id", "board_generation", "instance_id", "revision", "state", "format", "elapsed_ms", "level_dbfs"],
+        "properties": {
+          "token": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+          "device_id": {"type": "string"},
+          "board_generation": {"type": "integer", "minimum": 0},
+          "instance_id": {"type": "string"},
+          "revision": {"type": "integer", "minimum": 0},
+          "state": {"type": "string", "enum": ["recording", "ready", "failed"]},
+          "format": {"type": "object", "required": ["rate_hz", "channels", "sample_bits", "seconds"], "properties": {"rate_hz": {"type": "integer", "minimum": 1}, "channels": {"type": "integer", "minimum": 1, "maximum": 2}, "sample_bits": {"type": "integer", "const": 16}, "seconds": {"type": "integer", "minimum": 1, "maximum": 30}}},
+          "elapsed_ms": {"type": "integer", "minimum": 0},
+          "level_dbfs": {"type": ["number", "null"]},
+          "level": {"type": "object", "additionalProperties": true},
+          "audio_url": {"type": "string"},
+          "error": {"type": "object", "additionalProperties": true}
+        },
+        "additionalProperties": false
       },
       "WorkspaceKind": {
         "type": "string",
