@@ -63,6 +63,38 @@ test("the previous 350 ms default migrates to the measured 300 ms floor", () => 
   assert.equal(api.readScopeSettings("global").general.videoSyncBufferMs, 300);
 });
 
+test("auxiliary mutations migrate legacy settings without creating channel overrides", () => {
+  const api = loadSettingsApi({
+    viewerSettings_global: JSON.stringify({
+      version: 9,
+      general: { metadataRetentionMs: 2500 },
+      types: { "pose-estimation": { visible: false } },
+    }),
+    viewerSettings_channel_0: JSON.stringify({
+      version: 3,
+      general: { videoSyncBufferMs: 350 },
+      auxiliary: { "blazepose-3d": { panelMode: "expanded" } },
+    }),
+    viewerSettings_channel_1: JSON.stringify({
+      version: 3,
+      general: { videoSyncBufferMs: 350 },
+      auxiliary: { "blazepose-3d": { panelMode: "expanded" } },
+    }),
+  });
+
+  api.writeScopeAuxiliarySettings("channel_0", "blazepose-3d", { panelMode: "collapsed" });
+  api.clearScopeAuxiliarySettings("channel_1", "blazepose-3d");
+
+  for (const channelIndex of [0, 1]) {
+    const resolved = api.resolveTypeSettings(channelIndex, "pose-estimation");
+    assert.equal(resolved.general.videoSyncBufferMs, 300);
+    assert.equal(resolved.general.metadataRetentionMs, 2500);
+    assert.equal(resolved.type.visible, false);
+  }
+  assert.equal(api.resolveAuxiliarySettings(0, "blazepose-3d").panelMode, "collapsed");
+  assert.equal(api.hasScopeAuxiliarySettings("channel_1", "blazepose-3d"), false);
+});
+
 test("version two settings migrate without retaining overlay delay", () => {
   const api = loadSettingsApi({
     viewerSettings_global: JSON.stringify({

@@ -415,17 +415,22 @@
     return normalized;
   }
 
+  function scopeSettingsForMutation(raw) {
+    if (raw.version === SETTINGS_VERSION) return clone(raw);
+    if (SUPPORTED_SETTINGS_VERSIONS.has(raw.version)) {
+      return { version: SETTINGS_VERSION, ...settingsOverrides(raw) };
+    }
+    return normalizeSettings(raw);
+  }
+
   function writeScopeAuxiliarySettings(scope, renderer, auxiliarySettings) {
     const raw = readRawSettings(scope);
     let next;
     if (!raw || typeof raw !== "object") {
       next = { version: SETTINGS_VERSION, auxiliary: {} };
-    } else if (SUPPORTED_SETTINGS_VERSIONS.has(raw.version)) {
-      next = clone(raw);
-      next.version = SETTINGS_VERSION;
-      next.auxiliary = raw.auxiliary && typeof raw.auxiliary === "object" ? clone(raw.auxiliary) : {};
     } else {
-      next = normalizeSettings(raw);
+      next = scopeSettingsForMutation(raw);
+      next.auxiliary = next.auxiliary && typeof next.auxiliary === "object" ? next.auxiliary : {};
     }
     const existing = next.auxiliary[renderer] && typeof next.auxiliary[renderer] === "object"
       ? next.auxiliary[renderer]
@@ -447,7 +452,7 @@
   function clearScopeAuxiliarySettings(scope, renderer) {
     const raw = readRawSettings(scope);
     if (!raw || typeof raw !== "object") return;
-    const next = SUPPORTED_SETTINGS_VERSIONS.has(raw.version) ? clone(raw) : normalizeSettings(raw);
+    const next = scopeSettingsForMutation(raw);
     if (!next.auxiliary || typeof next.auxiliary !== "object") return;
     delete next.auxiliary[renderer];
     next.version = SETTINGS_VERSION;
