@@ -146,9 +146,21 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Stats
 
-The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.
+Stats reads the selected board's telemetry from Sentinel, the `simaai-sentinel` daemon, so you can separate application behavior from device behavior such as power, temperature, CPU load or memory pressure. It has two views, **DevKit** and **Host**.
 
-This feature is intended to be completed in the next release. Once complete, use Stats when you need to separate application behavior from system behavior. For example, a dropped frame problem may come from the application stream path, but it may also correlate with CPU load, memory pressure, or device runtime state.
+### DevKit
+
+When Sentinel is missing, stopped or cannot be reached on the board, the page says so. **Install Sentinel** runs `sima-cli neat install sentinel` on the board, which needs `sima-cli` and passwordless `sudo` there. A running daemon is never reinstalled, because that would end a trace in flight.
+
+The dashboard is laid out like Sentinel's own `simaai-sentinel ops` view, with **Overview**, **Thermal**, **Power**, **System**, **Storage & Network** and **Runs** tabs. Charts cover the last 240 samples Sentinel keeps (about eight minutes) and turn amber or red when a reading passes Sentinel's warning or critical level. A metric the board cannot measure reads as an em dash, never as zero. **Export CSV** downloads those samples, and **Pause updates** stops polling; polling also stops while the browser tab is hidden.
+
+### Traces and runs
+
+On **Runs**, name a trace, optionally add a note and tags, and select **Start trace**; **Stop trace** saves it on the board as a run. A trace name cannot contain a comma. Open a run to see each metric's minimum, mean and maximum. Select two to eight runs and **Compare** to overlay one series per run and list each metric's mean against the baseline run; hover a “—” to see why no change is shown. **Delete** removes the selected runs from the board.
+
+### Host
+
+The Host view shows the machine Insight runs on, from `/api/metrics`, and the NEAT profiling timeline, which plots numeric fields from the profiling events a running application streams to Insight.
 
 ## System Information
 

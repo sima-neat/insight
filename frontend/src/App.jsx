@@ -18,6 +18,7 @@ import {
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
+const StatsView = lazy(() => import('./StatsView.jsx'))
 const BoardDialog = lazy(() => import('./peripherals/BoardDialog.jsx'))
 
 const SOURCE_COUNT = 48
@@ -554,12 +555,6 @@ function extractNumericFields(obj, prefix = '', out = {}) {
   return out
 }
 
-function radialOffset(radius, percent) {
-  const pct = Math.max(0, Math.min(100, Number(percent) || 0))
-  const circumference = 2 * Math.PI * radius
-  return circumference - (circumference * pct) / 100
-}
-
 function safeDecodeURIComponent(value = '') {
   try {
     return decodeURIComponent(value)
@@ -604,36 +599,6 @@ function updateBrowserRoute(path, replace = false) {
   if (currentPath === nextPath) return
   const method = replace ? 'replaceState' : 'pushState'
   window.history[method]({}, '', nextPath)
-}
-
-function GaugeCard({ label, percent }) {
-  const radius = 28
-  const circumference = 2 * Math.PI * radius
-  const hasPercent = Number.isFinite(percent)
-  const safePercent = hasPercent ? Math.max(0, Math.min(100, percent)) : 0
-  const offset = radialOffset(radius, safePercent)
-
-  return (
-    <article className="gauge-card">
-      <h3>{label}</h3>
-      <div className="gauge-visual" aria-hidden="true">
-        <svg viewBox="0 0 72 72" className="gauge-svg">
-          <circle cx="36" cy="36" r={radius} className="gauge-track" />
-          <circle
-            cx="36"
-            cy="36"
-            r={radius}
-            className="gauge-progress"
-            style={{
-              strokeDasharray: `${circumference} ${circumference}`,
-              strokeDashoffset: offset
-            }}
-          />
-        </svg>
-        <div className="gauge-center">{hasPercent ? `${safePercent.toFixed(1)}%` : '--'}</div>
-      </div>
-    </article>
-  )
 }
 
 function MiniSeriesCard({ name, samples }) {
@@ -780,7 +745,6 @@ export default function App() {
   const [viewerUrl, setViewerUrl] = useState('')
   const [viewerCapacity, setViewerCapacity] = useState(null)
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
-  const [metrics, setMetrics] = useState(null)
   const [metricEvents, setMetricEvents] = useState([])
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
@@ -987,17 +951,8 @@ export default function App() {
     }
   }
 
-  async function refreshMetrics() {
-    try {
-      const data = await fetchJson('/api/metrics')
-      setMetrics(data)
-    } catch (e) {
-      setError(e.message)
-    }
-  }
-
   useEffect(() => {
-    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
+    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
   }, [])
 
   useEffect(() => {
@@ -1128,9 +1083,6 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== 'visualizer') return
-    refreshMetrics()
-
-    const timer = setInterval(refreshMetrics, 2000)
     metricEs.current?.close()
 
     const es = new EventSource('/api/neat-metrics')
@@ -1147,7 +1099,6 @@ export default function App() {
     es.onerror = () => es.close()
 
     return () => {
-      clearInterval(timer)
       es.close()
     }
   }, [tab])
@@ -2209,16 +2160,6 @@ export default function App() {
     return out
   }, [metricEvents, selectedProfileSeries])
 
-  const cpuPct = Number.isFinite(Number(metrics?.cpu_load)) ? Number(metrics?.cpu_load) : null
-  const memPct = Number.isFinite(Number(metrics?.memory?.percent)) ? Number(metrics.memory.percent) : null
-  const diskPct = Number.isFinite(Number(metrics?.disk?.percent)) ? Number(metrics.disk.percent) : null
-  const mlaBytes = Number.isFinite(Number(metrics?.mla_allocated_bytes)) ? Number(metrics.mla_allocated_bytes) : 0
-  const mlaPct =
-    Number.isFinite(Number(metrics?.memory?.total)) && Number(metrics.memory.total) > 0
-      ? Math.min(100, (mlaBytes / Number(metrics.memory.total)) * 100)
-      : null
-
-  const temperatureValue = metrics?.temperature_celsius_avg
   const boardInfo = boardIndicator(board)
 
   return (
@@ -2738,77 +2679,57 @@ export default function App() {
 
         {tab === 'visualizer' && (
           <div className="visualizer-layout">
-            <section className="panel">
-              <div className="panel-topbar">
-                <div>
-                  <h2>System Load</h2>
-                  <p className="section-note">Current device utilization snapshot.</p>
-                </div>
-              </div>
-              <div className="gauge-grid">
-                <GaugeCard
-                  label="CPU Load"
-                  percent={cpuPct}
-                />
-                <GaugeCard
-                  label="Memory Usage"
-                  percent={memPct}
-                />
-                <GaugeCard
-                  label="MLA Memory"
-                  percent={mlaPct}
-                />
-                <GaugeCard
-                  label="Disk Usage"
-                  percent={diskPct}
-                />
-              </div>
-              <div className="metric-summary-row">
-                <span>
-                  Temperature: <strong>{temperatureValue === null || temperatureValue === undefined ? '-' : `${Number(temperatureValue).toFixed(1)}°C`}</strong>
-                </span>
-              </div>
-            </section>
+            <Suspense fallback={<section className="panel"><p className="hint">Loading board telemetry…</p></section>}>
+              <StatsView
+                board={board}
+                boardError={boardError}
+                onOpenBoardPanel={openBoardDialog}
+                onReloadBoard={loadBoard}
+                onError={setError}
+                onStatus={setUploadStatus}
+                hostExtra={(
+                  <section className="panel">
+                    <div className="panel-topbar">
+                      <div>
+                        <h2>NEAT Profiling Timeline</h2>
+                        <p className="section-note">Select metrics to visualize profiling trends.</p>
+                      </div>
+                    </div>
 
-            <section className="panel">
-              <div className="panel-topbar">
-                <div>
-                  <h2>NEAT Profiling Timeline</h2>
-                  <p className="section-note">Select metrics to visualize profiling trends.</p>
-                </div>
-              </div>
+                    <div className="profile-filter-bar">
+                      {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
+                      {availableProfileKeys.map((key) => {
+                        const selected = selectedProfileSeries.includes(key)
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={selected ? 'profile-chip active' : 'profile-chip'}
+                            onClick={() => {
+                              setSelectedProfileSeries((prev) => {
+                                if (prev.includes(key)) return prev.filter((item) => item !== key)
+                                return [...prev, key].slice(0, 6)
+                              })
+                            }}
+                          >
+                            {key}
+                          </button>
+                        )
+                      })}
+                    </div>
 
-              <div className="profile-filter-bar">
-                {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
-                {availableProfileKeys.map((key) => {
-                  const selected = selectedProfileSeries.includes(key)
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      className={selected ? 'profile-chip active' : 'profile-chip'}
-                      onClick={() => {
-                        setSelectedProfileSeries((prev) => {
-                          if (prev.includes(key)) return prev.filter((item) => item !== key)
-                          return [...prev, key].slice(0, 6)
-                        })
-                      }}
-                    >
-                      {key}
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="series-grid">
-                {selectedProfileSeries.length === 0 && (
-                  <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
+                    <div className="series-grid">
+                      {selectedProfileSeries.length === 0 && (
+                        <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
+                      )}
+                      {selectedProfileSeries.map((key) => (
+                        <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
+                      ))}
+                    </div>
+                  </section>
                 )}
-                {selectedProfileSeries.map((key) => (
-                  <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
-                ))}
-              </div>
-            </section>
+              />
+            </Suspense>
           </div>
         )}
 
