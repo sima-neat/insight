@@ -58,6 +58,18 @@ test('a delayed response from a retired daemon instance cannot replace its succe
   assert.equal(policy.merge(oldDaemon), restarted)
 })
 
+test('an older in-flight response from an unknown daemon cannot replace a newer restart', () => {
+  const policy = createCatalogPolicy()
+  const original = { board_generation: 3, instance_id: 'daemon-a', scan_sequence: 9, revision: 7, sequence: 12 }
+  const delayed = { board_generation: 3, instance_id: 'daemon-b', scan_sequence: 1, revision: 1, sequence: 0 }
+  const current = { board_generation: 3, instance_id: 'daemon-c', scan_sequence: 1, revision: 1, sequence: 0 }
+  policy.merge(original)
+  const delayedRequest = policy.begin()
+  const currentRequest = policy.begin()
+  assert.equal(policy.merge(current, currentRequest), current)
+  assert.equal(policy.merge(delayed, delayedRequest), current)
+})
+
 test('refresh stays disabled until it can be bound to a known daemon instance', () => {
   assert.equal(canRefreshCatalog(null), false)
   assert.equal(canRefreshCatalog({ instance_id: '' }), false)

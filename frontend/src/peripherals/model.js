@@ -146,27 +146,37 @@ function compareOrder(left, right) {
 
 export function createCatalogPolicy() {
   let current = null
+  let requestSequence = 0
+  let acceptedRequest = 0
   const retiredInstances = new Set()
   return {
-    merge(next) {
+    begin() {
+      requestSequence += 1
+      return requestSequence
+    },
+    merge(next, request = ++requestSequence) {
       if (!next) return current
       if (!current || next.board_generation > current.board_generation) {
         current = next
+        acceptedRequest = request
         retiredInstances.clear()
         return current
       }
       if (next.board_generation < current.board_generation) return current
       if (next.instance_id !== current.instance_id) {
-        if (retiredInstances.has(next.instance_id)) return current
+        if (retiredInstances.has(next.instance_id) || request < acceptedRequest) return current
         retiredInstances.add(current.instance_id)
         current = next
+        acceptedRequest = request
         return current
       }
+      acceptedRequest = Math.max(acceptedRequest, request)
       if (compareOrder(catalogOrder(next), catalogOrder(current)) >= 0) current = next
       return current
     },
     reset() {
       current = null
+      acceptedRequest = 0
       retiredInstances.clear()
     }
   }

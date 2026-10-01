@@ -75,14 +75,15 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   if (!exportRequests.current) exportRequests.current = createLatestRequest()
   if (!catalogPolicy.current) catalogPolicy.current = createCatalogPolicy()
 
-  const commitCatalog = useCallback((next) => {
-    const selected = catalogPolicy.current.merge(next)
+  const commitCatalog = useCallback((next, request) => {
+    const selected = catalogPolicy.current.merge(next, request)
     if (selected === next) setCatalog(next)
     return selected
   }, [])
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!board?.target) return null
+    const catalogRequest = catalogPolicy.current.begin()
     if (!quiet) setLoading(true)
     let current = true
     try {
@@ -92,7 +93,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
         return null
       }
       const next = result.value
-      const selected = commitCatalog(next)
+      const selected = commitCatalog(next, catalogRequest)
       setError(null)
       setEventError(null)
       return selected
@@ -184,6 +185,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
 
   async function refresh() {
     if (!catalog?.instance_id) return
+    const catalogRequest = catalogPolicy.current.begin()
     setRefreshing(true)
     setError(null)
     try {
@@ -192,7 +194,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
         body: { board_generation: catalog?.board_generation ?? board.generation }
       }))
       if (result.current) {
-        const selected = commitCatalog(result.value)
+        const selected = commitCatalog(result.value, catalogRequest)
         onStatus(`Peripheral catalog refreshed at revision ${selected.revision}.`)
       }
     } catch (nextError) {
