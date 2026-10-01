@@ -156,6 +156,8 @@ def get_metrics():
     if limit < 0:
         raise _invalid("`history` must be a whole number of samples.", "Use `history=60`, or omit it.")
     context = _Context()
+    daemon = context.cached("daemon", STATUS_TTL_SEC, lambda: install.status(context.session))
+    cache.observe_daemon(context.key, daemon.get("instance_id"))
     latest = context.client.get("/v1/samples/latest")
     history = cache.add_sample(context.key, latest.get("sample"))
     if cache.needs_seed(context.key):

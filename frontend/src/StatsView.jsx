@@ -46,7 +46,7 @@ import {
 } from './stats/model.js'
 import CompareOverlay from './stats/CompareOverlay.jsx'
 import SentinelDashboard from './stats/Dashboard.jsx'
-import { pollWhileVisible } from './stats/polling.js'
+import { pollStats, pollWhileVisible } from './stats/polling.js'
 import { FailureCallout, KeyValueTable, OutputDetails, SegmentedTabs, downloadText, useStoredTab } from './stats/ui.jsx'
 
 const RUNS_POLL_MS = 30000
@@ -465,7 +465,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [metrics, setMetrics] = useState(null)
   const [metricsError, setMetricsError] = useState(null)
   const [metricsBusy, setMetricsBusy] = useState(false)
-  const [failures, setFailures] = useState(0)
   const [live, setLive] = useState(true)
   const [halted, setHalted] = useState(false)
   const [traces, setTraces] = useState(null)
@@ -502,6 +501,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const guard = useRef(createRequestGuard())
   const hostGuard = useRef(createRequestGuard())
   const tick = useRef(() => {})
+  const failures = useRef(0)
   const latest = useRef({})
   latest.current = { openRef, compare }
 
@@ -511,7 +511,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const runRows = useMemo(() => runList(runs), [runs])
   const hostModel = useMemo(() => hostMetricsModel(host), [host])
   const polling = info.available && live && !halted
-  const delay = pollDelay(failures)
 
   function fresh(ticket) {
     return mounted.current && guard.current.current(ticket)
@@ -545,7 +544,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     for (const clear of [setState, setMetrics, setMetricsError, setTraces, setTraceError, setRuns, setRunsError, setDetail, setDetailError, setCompare, setCompareError, setDeleteError, setInstallResult, setInstallError]) clear(null)
     setOpenRef('')
     setSelected([])
-    setFailures(0)
+    failures.current = 0
     setHalted(false)
   }
 
@@ -618,13 +617,12 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       done: (data) => {
         setMetrics(data)
         setMetricsError(null)
-        setFailures(0)
+        failures.current = 0
         setHalted(false)
-        if (trace.active) loadTraces({ quiet: true })
       },
       fail: (notice) => {
         setMetricsError(notice)
-        setFailures((count) => count + 1)
+        failures.current += 1
         // A missing board or stopped daemon will not answer the next tick either.
         if (notice.board || notice.daemon) {
           setHalted(true)
@@ -775,12 +773,12 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     loadState()
   }, [generation])
 
-  tick.current = () => pollMetrics()
+  tick.current = () => pollStats(() => pollMetrics(), () => loadTraces({ quiet: true }))
 
   useEffect(() => {
     if (!polling) return undefined
-    return pollWhileVisible(() => tick.current(), delay)
-  }, [polling, delay])
+    return pollWhileVisible(() => tick.current(), () => pollDelay(failures.current))
+  }, [polling])
 
   useEffect(() => {
     if (statsTab !== 'host') return undefined
@@ -853,7 +851,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                 onToggleLive={() => setLive((value) => !value)}
                 onRetry={() => {
                   setHalted(false)
-                  setFailures(0)
+                  failures.current = 0
                   pollMetrics({ manual: true })
                 }}
                 runs={(

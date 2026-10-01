@@ -39,6 +39,7 @@ class BoardCache:
         self._values = {}
         self._history = deque(maxlen=history_limit)
         self._seeded = False
+        self._daemon_instance = None
         self._identity = {}
 
     def identity(self, session, ttl: float = IDENTITY_TTL_SEC) -> dict:
@@ -66,6 +67,15 @@ class BoardCache:
             self._reset_unlocked(key)
             self._values[name] = (time.monotonic() + ttl, value)
         return value
+
+    def observe_daemon(self, key, instance_id) -> None:
+        """Start a fresh history when systemd reports another daemon invocation."""
+        with self._lock:
+            self._reset_unlocked(key)
+            if instance_id != self._daemon_instance:
+                self._history = deque(maxlen=self.history_limit)
+                self._seeded = False
+                self._daemon_instance = instance_id
 
     def add_sample(self, key, sample: Optional[dict]) -> list:
         with self._lock:
@@ -109,3 +119,4 @@ class BoardCache:
             self._values = {}
             self._history = deque(maxlen=self.history_limit)
             self._seeded = False
+            self._daemon_instance = None

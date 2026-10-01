@@ -153,6 +153,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertEqual(self.transport.calls[0][0], "python3")
 
+    def test_metrics_discard_same_board_history_after_a_daemon_restart(self):
+        key = (self.session.generation, "fp-1")
+        self.transport.api[("GET", "/v1/metrics")] = {"schema": 1, "metrics": [{"key": "load"}]}
+        self.transport.api[("GET", "/v1/samples/latest")] = {
+            "schema": 1,
+            "sample": {"timestamp": "2026-09-23T17:54:21Z", "values": {"load": 1}},
+        }
+        api.cache.record(key, "daemon", {"instance_id": "daemon-1"}, 60)
+        with mock.patch.object(api.cache_history, "read", return_value=[]):
+            first = self.client.get("/api/sentinel/metrics?history=240")
+            self.assertEqual(first.status_code, 200, first.get_json())
+
+            api.cache.record(key, "daemon", {"instance_id": "daemon-2"}, 60)
+            self.transport.api[("GET", "/v1/samples/latest")]["sample"] = {
+                "timestamp": "2026-09-23T17:54:22Z",
+                "values": {"load": 2},
+            }
+            restarted = self.client.get("/api/sentinel/metrics?history=240")
+
+        self.assertEqual(restarted.status_code, 200, restarted.get_json())
+        self.assertEqual(restarted.get_json()["history"]["timestamps"], ["2026-09-23T17:54:22Z"])
+
 
 class ResponseLimitTests(unittest.TestCase):
     def test_local_http_protocol_failures_are_structured_sentinel_errors(self):
@@ -212,6 +234,15 @@ touch "$FAKE_MARKER.ready"
 [ -n "$FAKE_INSTALL_WAIT" ] && sleep 30
 exit 0
 """
+
+
+class StatusTests(unittest.TestCase):
+    def test_status_exposes_the_active_systemd_invocation(self):
+        output = b"active\n@@\nyes\n@@\nyes\n@@\n/usr/bin/sima-cli\n@@\ndaemon-invocation-2\n@@\n7\n"
+        board = SimpleNamespace(exec=lambda argv, timeout: ExecResult(0, output, b""))
+        daemon = install.status(SimpleNamespace(transport=board))
+        self.assertEqual(daemon["instance_id"], "daemon-invocation-2")
+        self.assertIsNotNone(daemon["started_at"])
 
 
 class InstallScriptTests(unittest.TestCase):
@@ -278,6 +309,18 @@ class HistoryTests(unittest.TestCase):
         after = cache.add_sample(key, {"timestamp": "2026-09-23T19:39:58.301197766Z", "values": {}})
         self.assertEqual([s["timestamp"] for s in after], ["2026-09-23T19:39:58.301197766Z"])
         self.assertEqual(len(cache.add_sample(key, {"timestamp": "2026-09-23T19:40:28.3Z", "values": {}})), 2)
+
+    def test_a_new_daemon_invocation_discards_and_reseeds_same_board_history(self):
+        cache, key = state.BoardCache(), (1, "fp-1")
+        cache.observe_daemon(key, "daemon-1")
+        cache.add_sample(key, {"timestamp": "2026-09-23T17:54:21Z", "values": {"load": 1}})
+        cache.seed(key, [{"timestamp": "2026-09-23T17:54:20Z", "values": {"load": 0}}])
+        self.assertFalse(cache.needs_seed(key))
+
+        cache.observe_daemon(key, "daemon-2")
+        self.assertTrue(cache.needs_seed(key))
+        after = cache.add_sample(key, {"timestamp": "2026-09-23T17:54:22Z", "values": {"load": 2}})
+        self.assertEqual(after, [{"timestamp": "2026-09-23T17:54:22Z", "values": {"load": 2}}])
 
 
 if __name__ == "__main__":

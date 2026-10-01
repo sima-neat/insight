@@ -1512,7 +1512,7 @@
       "SentinelDaemon": {
         "type": "object",
         "description": "What the board reports about the simaai-sentinel service.",
-        "required": ["installed", "healthy", "service", "socket", "socket_path", "sima_cli"],
+        "required": ["installed", "healthy", "service", "socket", "socket_path", "sima_cli", "instance_id"],
         "properties": {
           "installed": {"type": "boolean", "description": "A simaai-sentinel unit or its socket exists on the board."},
           "healthy": {"type": "boolean", "description": "The service is active and its socket is present."},
@@ -1520,6 +1520,7 @@
           "socket": {"type": "boolean"},
           "socket_path": {"type": "string", "example": "/run/simaai-sentinel/api.sock"},
           "sima_cli": {"type": ["string", "null"], "description": "Path to sima-cli on the board, used to install Sentinel."},
+          "instance_id": {"type": ["string", "null"], "description": "systemd invocation ID for this daemon process; changes on every service restart."},
           "started_at": {"type": ["string", "null"], "format": "date-time", "description": "When the running daemon started, on Insight's clock; null when it is not running."}
         }
       },

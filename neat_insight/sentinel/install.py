@@ -22,6 +22,8 @@ systemctl cat {service}.service >/dev/null 2>&1 && echo yes || echo no
 echo @@
 command -v sima-cli 2>/dev/null || {{ [ -x "{fallback}" ] && printf '%s\\n' "{fallback}"; }} || true
 echo @@
+systemctl show {service} -p InvocationID --value 2>/dev/null || true
+echo @@
 since=$(systemctl show {service} -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
 [ "${{since:-0}}" -gt 0 ] 2>/dev/null && awk -v since="$since" '{{ printf "%d\\n", $1 - since / 1000000 }}' /proc/uptime || true
 """.format(
@@ -44,8 +46,8 @@ sudo -n env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 "$SIMA_CLI" neat 
 
 def status(session) -> dict:
     result = session.transport.exec(["sh", "-c", _STATUS_SCRIPT], timeout=STATUS_TIMEOUT_SEC)
-    parts = (result.stdout.decode("utf-8", errors="replace").split("@@") + [""] * 5)[:5]
-    service, socket_present, unit_present, sima_cli, running = (part.strip() for part in parts)
+    parts = (result.stdout.decode("utf-8", errors="replace").split("@@") + [""] * 6)[:6]
+    service, socket_present, unit_present, sima_cli, instance_id, running = (part.strip() for part in parts)
     started_at = None
     if service == "active" and running.isdigit():
         started_at = (datetime.now(timezone.utc) - timedelta(seconds=int(running))).isoformat(timespec="seconds")
@@ -56,6 +58,7 @@ def status(session) -> dict:
         "socket": socket_present == "yes",
         "socket_path": SOCKET_PATH,
         "sima_cli": sima_cli.splitlines()[0].strip() if sima_cli else None,
+        "instance_id": instance_id if service == "active" and instance_id else None,
         "started_at": started_at,
     }
 
