@@ -9,7 +9,8 @@
     "build:viewer": "vite build --config viewer.vite.config.js",
     "test:viewer": "node --test src/viewer/*.test.js",
     "test:streaming": "node --test src/streaming/*.test.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:genai": "node --test src/genai/*.test.js"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",
