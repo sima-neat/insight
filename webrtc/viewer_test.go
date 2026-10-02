@@ -702,6 +702,35 @@ func TestRTPTimestampRewriterAdvancesPerFrame(t *testing.T) {
 	}
 }
 
+func TestRTPTimestampRewriterPreservesBackwardSourceDeltas(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+	const ssrc = 0x1234
+	// Decode order of an I P B B P B B stream at 30 FPS: PTS moves backward
+	// for each B-frame. Starting near the wrap point also covers uint32 wrap.
+	base := uint32(0xffffffff - 4000)
+	sourceSteps := []uint32{0, 9000, 3000, 6000, 18000, 12000, 15000}
+	for i, sourceStep := range sourceSteps {
+		got := rewriter.timestampForSourceFrame(base+sourceStep, ssrc, start.Add(time.Duration(i)*33*time.Millisecond))
+		if want := initialRTPTimestamp + sourceStep; got != want {
+			t.Fatalf("frame %d: expected timestamp %d, got %d", i, want, got)
+		}
+	}
+}
+
+func TestRTPTimestampRewriterFallsBackOnLargeBackwardSourceJump(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+	const ssrc = 0x1234
+
+	first := rewriter.timestampForSourceFrame(1_000_000, ssrc, start)
+	second := rewriter.timestampForSourceFrame(1_000_000-uint32(maxSourceRTPTimestampStep)-1, ssrc, start.Add(40*time.Millisecond))
+
+	if want := first + 3600; second != want {
+		t.Fatalf("expected arrival-time step to %d, got %d", want, second)
+	}
+}
+
 func TestRTPPacketRewriterSetsTimestamp(t *testing.T) {
 	rewriter := rtpPacketRewriter{}
 	original := &rtp.Packet{

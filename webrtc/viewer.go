@@ -212,7 +212,7 @@ const (
 	initialRTPTimestamp          = uint32(1110000000)
 	// Larger deltas are treated as sender discontinuities so one bad source
 	// cannot move the browser's presentation clock several seconds at once.
-	maxSourceRTPTimestampStep    = uint32(5 * videoRTPClockRate)
+	maxSourceRTPTimestampStep    = int32(5 * videoRTPClockRate)
 	rtpReceiveBufferBytes        = 2 * 1024 * 1024
 	metadataCorrelationCapacity  = 256
 	metadataForwardQueueCapacity = 16
@@ -823,8 +823,12 @@ func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
 
 func (r *rtpTimestampRewriter) timestampForSourceFrame(sourceTimestamp, sourceSSRC uint32, now time.Time) uint32 {
 	if r.haveFrame {
-		step := sourceTimestamp - r.lastSourceTimestamp
-		if sourceSSRC != r.lastSourceSSRC || step == 0 || step > maxSourceRTPTimestampStep {
+		// Signed, so B-frames arriving in decode order keep their backward
+		// presentation deltas instead of reading as a huge forward jump.
+		sourceStep := int32(sourceTimestamp - r.lastSourceTimestamp)
+		step := uint32(sourceStep)
+		if sourceSSRC != r.lastSourceSSRC || sourceStep == 0 ||
+			sourceStep > maxSourceRTPTimestampStep || sourceStep < -maxSourceRTPTimestampStep {
 			step = uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
 			if step == 0 {
 				step = 1
