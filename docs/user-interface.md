@@ -140,6 +140,32 @@ The Stats view is a placeholder in the current release. It marks the planned loc
 
 This feature is intended to be completed in the next release. Once complete, use Stats when you need to separate application behavior from system behavior. For example, a dropped frame problem may come from the application stream path, but it may also correlate with CPU load, memory pressure, or device runtime state.
 
+## GenAI Studio
+
+The GenAI Studio view runs language, vision and speech models on a board. It talks to GenAI Studio from Neat Apps, which runs on the board in backend-only mode; Insight relays every call, so the browser never connects to the board directly.
+
+Start the backend on the board first, from the GenAI Studio application directory:
+
+```bash
+./run.sh --backend-only
+```
+
+The banner at the top shows the backend's state and what to do next:
+
+- **Not set up**: no board is selected. Open **Board settings** and enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
+- **Unavailable**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+- **Starting**: the backend answers but its model server is not ready yet.
+- **Busy**: a model is loading or the accelerator is resetting. Chat and speech wait until it finishes.
+- **Ready**: chat and speech are available. **Error** keeps them available and offers **Reset MLA**.
+
+**Chat** sends messages to the loaded chat model and shows the reply as it is generated. With a vision model you can attach an image or take one with the browser camera. **Thinking** lets reasoning models think before answering, shown folded above the reply. **Stop** ends a reply early, and **Speak** reads a reply aloud.
+
+**Speech** records from the microphone and transcribes it with the active speech model. Use **Ask the chat model** to send the transcript as a message. Pick a voice engine and voice, and turn on **Speak replies** to hear every reply. The browser asks for microphone and camera permission the first time.
+
+**Models** lists the chat and speech models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
+
+**Reset MLA** unloads every model and restarts the model server when a load leaves the accelerator stuck. It needs the reset token that `run.sh` prints on the board; Insight asks for it once and keeps it in **Board settings**.
+
 ## System Information
 
 The system information panel summarizes the environment Insight can see. In the Neat Development Environment, it can show SDK and component information, Insight status, update information, and exposed port mappings such as `mainUI` and `videoUI`.
