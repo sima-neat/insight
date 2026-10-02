@@ -62,6 +62,7 @@ from neat_insight.mediasrc import (
     stop_media_stream_if,
 )
 from neat_insight.api_docs import api_docs_bp
+from neat_insight.genai_relay import genai_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_metrics,
@@ -163,6 +164,7 @@ DEFAULT_VIDEO_UI_PORT = 8081
 app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
 app.register_blueprint(workspace_bp)
+app.register_blueprint(genai_bp)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None

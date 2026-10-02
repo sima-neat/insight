@@ -408,6 +408,25 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 
 Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
 
+## GenAI Studio
+
+Insight relays calls to the GenAI Studio backend on a board (started there with `run.sh --backend-only`, HTTPS port `5000`). The board's self-signed certificate is accepted by Insight, so clients only call Insight.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/genai/settings` | Return the board address in use (`url`), the configured and default addresses, and `hasResetToken`; the token itself is never returned. |
+| `POST` | `/api/genai/settings` | Set or clear `url` (`https://host[:port]`) and `resetToken`; an empty string clears a value. |
+| `GET`, `POST` | `/api/genai/<path>` | Forward a Studio API call (`health`, `voices`, `v1/…`, `audio/…`, `models/…`, `benchmark/…`, `tts/…`, `piperplus/…`, `supertonic/…`, `voices/…`) and stream the answer back unchanged; `shutdown` and other paths return 404. |
+
+The default address is `https://127.0.0.1:5000` on a board, otherwise `https://<DEVKIT_SYNC_DEVKIT_IP>:5000`. Relay errors carry a `reason`: `not-relayed` (404), `unreachable` (502), `not-configured` (503).
+
+```bash
+curl -k https://127.0.0.1:9900/api/genai/health
+curl -k -N https://127.0.0.1:9900/api/genai/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"<loaded-model>","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
 ## Error Handling
 
 Most JSON API errors return `{"error": "message"}` with an HTTP error status. Common statuses are:
@@ -416,7 +435,7 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `403` for unsafe media paths.
 - `404` for missing logs, media files, or media-source indexes.
 - `500` for local processing or stream startup failures.
-- `502` for unreachable or unreadable remote devkit build information.
+- `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
 - `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
 - `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 
