@@ -1,24 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import CameraDetail from './peripherals/CameraDetail.jsx'
+import CameraDetail, { cameraSubtitle } from './peripherals/CameraDetail.jsx'
 import KindIcon from './peripherals/KindIcon.jsx'
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
   PREVIEW_IDLE,
   availabilityInfo,
-  cameraSubtitle,
   changeSummary,
   countLabel,
   deviceTabs,
   groupCameras,
+  heartbeatDelay,
+  heartbeatFailureEvent,
   isSnapshotStale,
   modeLabel,
   nextPreviewState,
   normalizeError,
+  previewNeedsRestart,
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
   sameSelection,
+  sessionMatches,
   severityInfo,
   sortIssues,
   tierInfo
@@ -51,23 +54,27 @@ function IssueList({ issues }) {
   )
 }
 
-// Keep in sync with the rail breakpoint in styles.css.
+// Must match the breakpoint in styles.css where the rail turns into a row.
 const RAIL_ROW_QUERY = '(max-width: 640px)'
 
 function useMediaQuery(query) {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
+  const get = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.(query).matches)
+  const [matches, setMatches] = useState(get)
   useEffect(() => {
-    const list = window.matchMedia(query)
+    const list = typeof window !== 'undefined' ? window.matchMedia?.(query) : null
+    if (!list) return undefined
     const update = () => setMatches(list.matches)
     update()
-    list.addEventListener('change', update)
-    return () => list.removeEventListener('change', update)
+    list.addEventListener?.('change', update)
+    return () => list.removeEventListener?.('change', update)
   }, [query])
   return matches
 }
 
 function DeviceKindNav({ tabs, activeId, onSelect }) {
   const refs = useRef(new Map())
+  // Greyed kinds stay focusable (aria-disabled, not disabled) so a keyboard or
+  // screen-reader user can read why they are not selectable.
   const [focused, setFocused] = useState(null)
   const horizontal = useMediaQuery(RAIL_ROW_QUERY)
   const order = tabs.map((tab) => tab.id)
@@ -123,6 +130,8 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
             <KindIcon icon={tab.icon} />
             {tab.badge && <span className="periph-kind-badge" aria-hidden="true">{tab.badge}</span>}
           </span>
+          {/* The tip is for sighted users (hover and keyboard focus); assistive tech gets the
+              same words from aria-label and the description below. */}
           <span className="periph-kind-tip" aria-hidden="true">{tab.tooltip}</span>
           {tab.note && <span id={`periph-kind-note-${tab.id}`} className="sr-only">{tab.note}</span>}
         </button>
@@ -165,6 +174,8 @@ function CameraList({ groups, selectedId, onSelect }) {
                 onClick={() => onSelect(camera.id)}
               >
                 <span className="periph-camera-name">{camera.name}</span>
+                {/* An empty subtitle must not render: the row is a grid, and a blank span would
+                    leave this row taller than its neighbours. */}
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
                 <span className="periph-pills">
                   <Pill tone={availability.tone}>{availability.label}</Pill>
@@ -179,7 +190,14 @@ function CameraList({ groups, selectedId, onSelect }) {
   )
 }
 
-export default function PeripheralsView({ board, boardLoading, boardError, onReloadBoard, onOpenBoardPanel, onStatus }) {
+export default function PeripheralsView({
+  board,
+  boardLoading = false,
+  boardError = null,
+  onReloadBoard,
+  onOpenBoardPanel,
+  onStatus
+}) {
   const [snapshot, setSnapshot] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -193,7 +211,6 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
   const [preview, setPreview] = useState(PREVIEW_IDLE)
   const autoRefreshed = useRef(false)
   const previewRef = useRef(PREVIEW_IDLE)
-  previewRef.current = preview
   const mounted = useRef(false)
 
   const tabs = useMemo(() => deviceTabs(snapshot?.items, { scanned: Boolean(snapshot?.scanned_at) }), [snapshot])
@@ -220,6 +237,10 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
   const connectionError = scanError && CONNECTION_ERROR_CODES.has(scanError.code) ? scanError : null
   const scannedLabel = snapshot?.board?.label || target?.label || 'the board'
 
+  useEffect(() => {
+    previewRef.current = preview
+  }, [preview])
+
   function dispatchPreview(event) {
     setPreview((prev) => nextPreviewState(prev, event))
   }
@@ -230,6 +251,8 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
     try {
       await requestJson(previewUrl(sessionId, 'stop'), { method: 'POST' })
     } catch (err) {
+      // Keep ownership visible so the user can retry. The board-side TTL remains the final safety
+      // net, but it must not make a failed remote stop look successful.
       dispatchPreview({ type: 'stop-failed', for: sessionId, error: normalizeError(err) })
       return false
     }
@@ -245,14 +268,11 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
         method: 'POST',
         body: { id: camera.id, format: mode.format, width: mode.width, height: mode.height, fps: mode.fps }
       })
-      // The camera, mode or board may have changed while the board was starting this one.
+      // The user can select another camera while the board is starting this one. Adopting the
+      // session anyway would label camera A's video as camera B's. The same applies to a mode
+      // changed while the POST was in flight: the returned picture must match the menus.
       const latestSelection = selectionRef.current
-      const started = data.session
-      if (
-        started?.camera_id === activeIdRef.current &&
-        Number(started.generation) === Number(boardGenerationRef.current) &&
-        sameSelection(started.mode, latestSelection)
-      ) {
+      if (sessionMatches(data.session, activeIdRef.current, boardGenerationRef.current, latestSelection)) {
         dispatchPreview({ type: 'session', session: data.session })
       } else if (await stopPreview(data.session?.id, data.session)) {
         if (
@@ -270,6 +290,10 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
     }
   }
 
+  async function loadBoard() {
+    return onReloadBoard ? onReloadBoard() : null
+  }
+
   async function refresh() {
     await stopPreview()
     setScanning(true)
@@ -280,12 +304,12 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
       setSnapshot(data)
       setLoadError(null)
       const count = groupCameras(data.items).reduce((total, group) => total + group.items.length, 0)
-      onStatus(`Scan complete: ${countLabel(count, 'camera')} on ${data.board?.label || 'the board'}.`)
+      onStatus?.(`Scan complete: ${countLabel(count, 'camera')} on ${data.board?.label || 'the board'}.`)
     } catch (err) {
       setScanError(normalizeError(err))
     } finally {
       setScanning(false)
-      onReloadBoard()
+      loadBoard()
     }
   }
 
@@ -294,14 +318,15 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
     const wantedSelection = next ? { id: camera.id, ...next } : null
     selectionRef.current = wantedSelection
     setWanted(wantedSelection)
-    const { status, session } = previewRef.current
-    if (!next || (status !== 'starting' && status !== 'live') || session?.camera_id !== camera.id) return
-    if (!sameSelection(session.mode, next) && (await stopPreview(session.id))) await startPreview(next)
+    // A running preview was started with the old mode and keeps streaming it, so the picture would
+    // disagree with the menus above it. Restart it on the mode that is now selected.
+    if (!previewNeedsRestart(previewRef.current, camera.id, next)) return
+    if (await stopPreview(previewRef.current.session.id)) await startPreview(next)
   }
 
   async function loadInitial() {
     const [boardData, snap, existing] = await Promise.all([
-      onReloadBoard(),
+      loadBoard(),
       requestJson('/api/peripherals').then(
         (data) => {
           setLoadError(null)
@@ -320,10 +345,8 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
     setLoading(false)
     if (existing) {
       dispatchPreview({ type: 'adopt', session: existing })
-      if (existing.camera_id) {
-        setSelectedId(existing.camera_id)
-        setWanted({ id: existing.camera_id, ...existing.mode })
-      }
+      // Follow the running preview, so opening the page does not stop it.
+      if (existing.camera_id) setSelectedId(existing.camera_id)
     }
     if (snap && !snap.scanned_at && boardData?.target && !autoRefreshed.current) {
       autoRefreshed.current = true
@@ -341,13 +364,25 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
 
   useEffect(() => () => {
     const session = previewRef.current.session
-    if (session?.id) fetch(previewUrl(session.id, 'stop'), { method: 'POST' }).catch(() => {})
+    if (session?.id) {
+      // Best effort on unmount: there is no UI left to report a failure to, and the board stops
+      // capturing by itself once the heartbeats stop, so a lost stop cannot strand the camera.
+      fetch(previewUrl(session.id, 'stop'), { method: 'POST' }).catch((error) => {
+        console.debug('Preview stop on page exit failed; the board heartbeat timeout will release the camera.', error)
+      })
+    }
   }, [])
+
+  // Stop the preview when the selected camera, the device kind, or the board changes.
+  useEffect(() => {
+    const session = previewRef.current.session
+    if (session && activeId && session.camera_id !== activeId) stopPreview(session.id)
+  }, [activeId])
 
   useEffect(() => {
     const session = previewRef.current.session
-    if (session && (activeKind !== 'camera' || (activeId && session.camera_id !== activeId))) stopPreview(session.id)
-  }, [activeId, activeKind])
+    if (session && activeKind !== 'camera') stopPreview(session.id)
+  }, [activeKind])
 
   useEffect(() => {
     const session = previewRef.current.session
@@ -356,35 +391,34 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
   }, [board?.generation])
 
   const beatSessionId = preview.session?.id || ''
-  const beatMs = preview.session?.heartbeat_interval_ms || 5000
+  const beatMs = heartbeatDelay(preview.session)
   const beating = Boolean(beatSessionId) && (preview.status === 'starting' || preview.status === 'live')
 
   useEffect(() => {
+    // A hidden tab keeps beating on purpose: the board frees the camera 45 s after the last
+    // heartbeat, so pausing here would kill a preview the user only briefly switched away from.
     if (!beating) return
     let cancelled = false
-    let timer
     async function beat() {
       try {
         const data = await requestJson(previewUrl(beatSessionId, 'heartbeat'), { method: 'POST' })
         if (!cancelled) dispatchPreview({ type: 'session', session: data.session })
       } catch (err) {
-        const error = normalizeError(err)
-        if (!cancelled && (error.code === 'not_found' || error.code === 'channel_taken')) {
-          dispatchPreview({ type: 'ended', for: beatSessionId, error: error.code === 'channel_taken' ? error : null })
-        }
-      } finally {
-        // Schedule the next beat only after this one settles, so a slow board never overlaps them.
-        if (!cancelled) timer = setTimeout(beat, beatMs)
+        if (cancelled) return
+        const event = heartbeatFailureEvent(normalizeError(err), beatSessionId)
+        if (event) dispatchPreview(event)
       }
     }
     beat()
+    const timer = setInterval(beat, beatMs)
     return () => {
       cancelled = true
-      clearTimeout(timer)
+      clearInterval(timer)
     }
   }, [beating, beatSessionId, beatMs])
 
   useEffect(() => {
+    // Only the "Scanning… N s" counter needs a clock now that nothing on the page shows a relative time.
     if (!scanning) return undefined
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
@@ -410,7 +444,8 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
         <button type="button" className="btn-tonal" onClick={onOpenBoardPanel}>Choose a board</button>
       </Callout>
     )
-  } else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
+  } else if (activeKind !== 'camera') body = <p className="hint">Insight does not read this device kind yet.</p>
+  else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
   else if (!scannedAt) body = !scanError && <p className="hint">Not scanned yet. Refresh to discover cameras on {target.label}.</p>
   else if (!groups.length) {
     body = (
@@ -430,8 +465,6 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
             selection={selection}
             selectionNotice={selectionNotice}
             onSelectionChange={changeSelection}
-            generation={snapshot.generation}
-            appsYaml={Boolean(snapshot.platform?.libcamerasrc?.buffer_count)}
             preview={preview}
             onStartPreview={startPreview}
             onStopPreview={() => stopPreview()}
@@ -471,12 +504,12 @@ export default function PeripheralsView({ board, boardLoading, boardError, onRel
         </div>
 
         <p className="sr-only" role="status">
-          {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh to scan the board that is selected now.' : ''}
+          {scanning ? `Scanning ${target?.label || 'the board'}` : stale ? 'The board changed. Refresh before starting a preview.' : ''}
         </p>
 
         {stale && (
           <Callout title="Board changed — refresh">
-            <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}.</p>
+            <p>These results are from {scannedLabel}; the selected board is now {target?.label || 'not set'}. Preview is disabled until you refresh.</p>
             {target && <button type="button" className="btn-tonal" onClick={() => !scanning && refresh()}>Refresh now</button>}
           </Callout>
         )}

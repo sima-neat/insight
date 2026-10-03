@@ -27,7 +27,21 @@ function Facts({ rows }) {
   )
 }
 
-export default function BoardTargetCard({ board, loading, error, onBoardChange, onReload, onStatus, onError, shell, shellBusy, onOpenShell }) {
+export default function BoardTargetCard({
+  board,
+  loading = false,
+  error = null,
+  connectionError = null,
+  description = 'Insight discovers peripherals on this board.',
+  onBoardChange,
+  onRetry,
+  onReload,
+  onStatus,
+  onError,
+  shell = null,
+  shellBusy = false,
+  onOpenShell
+}) {
   const target = board?.target || null
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState(null)
@@ -43,6 +57,8 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
   const focusReturn = useRef(null)
   if (!focusReturn.current) focusReturn.current = createFocusReturn()
 
+  // Cancel, Save and Trust remove the button that has focus; give it back to the opener (or the
+  // nearest control still shown) so the next Tab continues from there, not from the panel's top.
   useEffect(() => {
     focusReturn.current.flush()
   })
@@ -53,7 +69,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
 
   const values = form || initialBoardForm(board)
   const formOpen = Boolean(board) && (editing || !target)
-  const problem = actionError || normalizeError(board?.status?.error)
+  const problem = actionError || connectionError || normalizeError(board?.status?.error)
   const state = connectionStateInfo(board?.status)
   const checked = formatRelativeTime(board?.status?.checked_at)
   const identity = IDENTITY_FIELDS.filter(([key]) => board?.board?.[key]).map(([key, label]) => [label, board.board[key]])
@@ -71,7 +87,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
     } catch (err) {
       if (kind === 'select') setFormError(normalizeError(err))
       else setActionError(normalizeError(err))
-      if (kind === 'test') onReload()
+      if (kind === 'test') onReload?.()
       return null
     } finally {
       setBusy('')
@@ -80,7 +96,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
 
   async function testConnection() {
     const data = await post('test', '/api/board/test')
-    if (data) onStatus(`Connected to ${data.board?.hostname || data.target?.label || 'the board'}.`)
+    if (data) onStatus?.(`Connected to ${data.board?.hostname || data.target?.label || 'the board'}.`)
   }
 
   async function save(event) {
@@ -104,7 +120,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
     if (data) {
       setConfirmTrust(false)
       returnFocus(trustRef, testRef, changeRef)
-      onStatus('Host key updated. Test the connection or refresh.')
+      onStatus?.('Host key updated. Test the connection or refresh.')
     }
   }
 
@@ -112,8 +128,9 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
     setEditing(false)
     setForm(null)
     setConfirmTrust(false)
+    // With no board left to use, the form stays open: continue in it.
     returnFocus(changeRef, hostRef)
-    onStatus(message)
+    onStatus?.(message)
   }
 
   function cancelForm() {
@@ -129,7 +146,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
   }
 
   function copyCommand(text) {
-    copyText(text).then(() => onStatus(`Copied: ${text}`), (err) => onError(err.message))
+    copyText(text).then(() => onStatus?.(`Copied: ${text}`), (err) => onError?.(err.message))
   }
 
   return (
@@ -138,7 +155,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
 
       {loading && !board && <p className="hint" role="status">Loading board…</p>}
       <ErrorNotice error={error}>
-        <button type="button" className="btn-ghost" onClick={onReload}>Retry</button>
+        {onRetry && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
       </ErrorNotice>
 
       {target && (
@@ -148,10 +165,11 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
             {sourceLabel(target.source) && <Pill tone="periph-info">{sourceLabel(target.source)}</Pill>}
             <Pill tone={state.tone}>{state.label}</Pill>
           </div>
-          <p className="section-note">Insight discovers peripherals over this connection.</p>
+          <p className="section-note">{description}</p>
+          {/* Identity and the last check read as one list rather than a line of prose and a grid. */}
           <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
           <div className="periph-actions periph-board-actions">
-            {shell?.launch_supported && (
+            {onOpenShell && shell?.launch_supported && (
               <button
                 type="button"
                 className="btn-tonal"
@@ -162,6 +180,7 @@ export default function BoardTargetCard({ board, loading, error, onBoardChange, 
                 {shellBusy ? 'Opening shell…' : 'Open shell'}
               </button>
             )}
+            {/* A board that just answered needs no test; the button is for when it did not. */}
             {state.tone !== 'ok' && (
               <button type="button" className="btn-tonal" ref={testRef} onClick={testConnection} disabled={Boolean(busy)}>
                 {busy === 'test' ? 'Testing…' : 'Test connection'}

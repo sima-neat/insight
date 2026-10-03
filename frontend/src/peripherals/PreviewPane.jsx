@@ -1,29 +1,35 @@
 import {
-  CONNECTION_ERROR_CODES,
   fpsLabel,
   modeLabel,
-  PREVIEW_STATUS,
   previewBlock,
   previewErrorInfo,
+  previewStatusInfo,
   safeHref,
   sizeLabel
 } from './model.js'
-import { Callout, ErrorNotice, Pill } from './ui.jsx'
+import { Callout, Pill } from './ui.jsx'
 
 function PreviewError({ error, onOpenBoardPanel }) {
   const info = previewErrorInfo(error)
   if (!info) return null
   return (
-    <ErrorNotice error={{ message: info.message, hint: info.hint || info.action }}>
-      {info.otherCamera && <p>The running preview is on <span className="periph-inline-code">{info.otherCamera}</span>.</p>}
-      {info.detail && <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>}
-      {(info.code === 'no_target' || CONNECTION_ERROR_CODES.has(info.code)) && (
-        <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
-      )}
-    </ErrorNotice>
+    <>
+      <p className="sr-only" role="alert">{info.message}</p>
+      <Callout tone="danger" title={info.message}>
+        {/* One recovery line: the board's own hint when it sent one, ours otherwise. */}
+        {(info.hint || info.action) && <p>{info.hint || info.action}</p>}
+        {info.otherCamera && <p>The running preview is on <span className="periph-inline-code">{info.otherCamera}</span>.</p>}
+        {info.detail && <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>}
+        {(info.code === 'no_target' || info.code === 'unreachable' || info.code === 'auth_failed' || info.code === 'host_key_changed') && (
+          <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
+        )}
+      </Callout>
+    </>
   )
 }
 
+// The mode as three tags -- format, size, rate -- rather than one run of text, so each reads at a
+// glance. Screen readers get the same sentence the text used to be.
 function ModeBadges({ mode, label }) {
   if (!mode) return null
   return (
@@ -37,16 +43,16 @@ function ModeBadges({ mode, label }) {
 
 export default function PreviewPane({ camera, selection, stale, target, state, onStart, onStop, onOpenBoardPanel }) {
   const block = previewBlock({ camera, selection, stale, target, session: state?.session })
-  const status = PREVIEW_STATUS[state?.status]
+  const status = previewStatusInfo(state)
   const session = state?.session || null
   const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
   const frameUrl = state?.status === 'live' ? safeHref(session?.viewer_url) : null
-  const otherCamera = session?.camera_id && camera && session.camera_id !== camera.id ? session.camera_id : ''
 
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
       <div className="periph-preview-head">
         <h4 id="periph-preview-title">Video Preview</h4>
+        {/* The channel is Insight's own bookkeeping, not something to act on, so it is not shown. */}
         <span className="periph-pills">
           {running && <ModeBadges mode={session?.mode} label="Streaming" />}
           <Pill tone={status.tone}>{status.label}</Pill>
@@ -54,7 +60,13 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
       </div>
 
       <p className="sr-only" role="status">
-        {{ live: `Preview live on channel ${session?.channel}`, starting: 'Starting the preview', stopping: 'Stopping the preview' }[state?.status] || ''}
+        {state?.status === 'live'
+          ? `Preview live on channel ${session?.channel ?? 'unknown'}`
+          : state?.status === 'starting'
+            ? 'Starting the preview'
+            : state?.status === 'stopping'
+              ? 'Stopping the preview'
+              : ''}
       </p>
 
       {!running && (
@@ -63,7 +75,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
             <button
               type="button"
               className="btn-tonal"
-              onClick={() => onStart()}
+              onClick={onStart}
               disabled={block.blocked}
               aria-describedby={block.blocked ? 'periph-preview-reason' : undefined}
             >
@@ -77,19 +89,14 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
 
       {running && (
         <>
+          {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
+              describes a state the reader cannot walk away from. */}
           <div className="periph-actions">
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={onStop}
-              disabled={!session?.id || state?.status === 'stopping'}
-            >
+            <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
             </button>
           </div>
-          {otherCamera ? (
-            <p className="hint">The preview of <span className="periph-inline-code">{otherCamera}</span> is still running.</p>
-          ) : frameUrl ? (
+          {frameUrl ? (
             <iframe
               className="periph-preview-frame"
               title={`Live preview of ${camera?.name || 'the camera'}`}

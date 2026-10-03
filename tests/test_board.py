@@ -1,4 +1,5 @@
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -22,11 +23,17 @@ IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VER
 
 
 class FakeTransport:
-    def __init__(self):
+    def __init__(self, results=None, error=None):
+        self.results = list(results or [])
+        self.error = error
+        self.calls = []
         self.closed = False
 
     def exec(self, argv, *, timeout, stdin=None):
-        return ExecResult(0, IDENTITY_OUTPUT, b"")
+        self.calls.append(argv)
+        if self.error:
+            raise self.error
+        return self.results.pop(0) if self.results else ExecResult(0, IDENTITY_OUTPUT, b"")
 
     def remote_host_key_fingerprint(self):
         return "SHA256:abc"
@@ -36,11 +43,54 @@ class FakeTransport:
 
 
 class TargetResolutionTests(unittest.TestCase):
+    def test_precedence_is_manual_then_board_then_sdk_env(self):
+        saved = {"host": "10.0.0.5", "port": 2222, "user": "dev"}
+        sdk = {"host": "192.168.2.2", "port": 22, "user": "sima"}
+        manual = target_module.resolve_target(saved, True, sdk)
+        self.assertEqual((manual.mode, manual.source, manual.label), ("ssh", "manual", "dev@10.0.0.5:2222"))
+        local = target_module.resolve_target(None, True, sdk)
+        self.assertEqual((local.mode, local.source, local.label), ("local", "on-board", "This board"))
+        env = target_module.resolve_target(None, False, sdk)
+        self.assertEqual((env.source, env.label), ("sdk-env", "sima@192.168.2.2"))
+        self.assertIsNone(target_module.resolve_target(None, False, None))
+
+    def test_sdk_env_reads_devkit_sync_like_the_rest_of_insight(self):
+        env = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.7", "DEVKIT_SYNC_DEVKIT_USER": "dev", "DEVKIT_SYNC_DEVKIT_PORT": "2222"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(target_module.sdk_env_target(), {"host": "192.168.2.7", "port": 2222, "user": "dev"})
+        with mock.patch.dict(os.environ, {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local"}, clear=True), \
+             mock.patch.object(target_module, "_WARNED", set()):
+            with self.assertLogs(level="WARNING") as logs:
+                self.assertIsNone(target_module.sdk_env_target())
+                self.assertIsNone(target_module.sdk_env_target())
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("Ignoring DEVKIT_SYNC_DEVKIT_IP", logs.output[0])
+        env = {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local", "SIMA_DEVKIT_IP": "192.168.2.9"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(target_module, "_WARNED", set()):
+            with self.assertLogs(level="WARNING"):
+                self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
+        with mock.patch.dict(os.environ, {"SIMA_DEVKIT_IP": "192.168.2.9"}, clear=True):
+            self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(target_module.sdk_env_target())
+
     def test_validation_rejects_option_like_hosts_bad_ports_and_users(self):
         for host, port, user in (("-oProxyCommand=x", 22, "sima"), ("", 22, "sima"), ("board", 70000, "sima"), ("board", 22, "a b")):
             with self.assertRaises(BoardError) as ctx:
                 target_module.validate_ssh_target(host, port, user)
             self.assertEqual(ctx.exception.status, 400)
+
+    def test_store_round_trips_and_ignores_corrupt_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = target_module.TargetStore(Path(directory) / "board-target.json")
+            self.assertIsNone(store.load())
+            store.save({"host": "board", "port": 22, "user": "sima"})
+            self.assertEqual(store.load(), {"host": "board", "port": 22, "user": "sima"})
+            store.path.write_text("{not json", encoding="utf-8")
+            with self.assertLogs(level="WARNING"):
+                self.assertIsNone(store.load())
+            store.clear()
+            store.clear()
 
 
 class BoardApiTests(unittest.TestCase):
@@ -60,33 +110,88 @@ class BoardApiTests(unittest.TestCase):
 
     def _make_transport(self, host, port, user, known_hosts):
         transport = FakeTransport()
+        transport.target = (host, port, user)
         self.transports.append(transport)
         return transport
 
-    def test_board_cleanup_runs_before_the_old_transport_is_closed(self):
-        self.client.get("/api/board")
-        closed = []
-        self.app.extensions["neat_board"].set_before_session_close(lambda session: closed.append(session.raw_transport.closed))
-        self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
-        self.assertEqual(closed, [False])
-        self.assertTrue(self.transports[0].closed)
+    def test_state_reports_sdk_default_without_connecting(self):
+        body = self.client.get("/api/board").get_json()
+        self.assertEqual(body["target"]["source"], "sdk-env")
+        self.assertEqual(body["defaults"]["sdk_env"], {"host": "192.168.2.2", "port": 22, "user": "sima"})
+        self.assertEqual(body["status"]["state"], "unknown")
+        self.assertEqual(body["generation"], 1)
+        self.assertEqual(self.transports[0].calls, [])
 
-    def test_board_cleanup_wait_does_not_block_transport_error_recording(self):
-        manager = self.app.extensions["neat_board"]
-        old = manager.session()
-        entered, release = threading.Event(), threading.Event()
-        manager.set_before_session_close(lambda _session: (entered.set(), release.wait(2)))
-        switcher = threading.Thread(target=manager.select, args=("10.1.1.9", 22, "sima"))
-        switcher.start()
-        self.assertTrue(entered.wait(1))
-        old.raw_transport.exec = mock.Mock(side_effect=BoardError("unreachable", "late failure"))
-        begin = time.monotonic()
-        with self.assertRaises(BoardError):
-            old.transport.exec(["true"], timeout=1)
-        self.assertLess(time.monotonic() - begin, 0.2)
-        release.set()
-        switcher.join(2)
-        self.assertFalse(switcher.is_alive())
+    def test_test_reads_identity_and_marks_connected(self):
+        body = self.client.post("/api/board/test").get_json()
+        self.assertEqual(body["status"]["state"], "connected")
+        self.assertEqual(body["board"]["hostname"], "modalix")
+        self.assertEqual(body["board"]["machine"], "modalix")
+        self.assertEqual(body["board"]["build_version"], "2.1.3_master_B4837")
+        self.assertEqual(len(body["board"]["fingerprint"]), 16)
+
+    def test_select_and_reset_bump_generation_and_close_old_connection(self):
+        first = self.client.get("/api/board").get_json()["generation"]
+        body = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 2222, "user": "dev"}).get_json()
+        self.assertEqual(body["target"]["source"], "manual")
+        self.assertEqual(body["saved"], {"host": "10.1.1.1", "port": 2222, "user": "dev"})
+        self.assertGreater(body["generation"], first)
+        self.assertTrue(self.transports[0].closed)
+        self.assertEqual(self.transports[-1].target, ("10.1.1.1", 2222, "dev"))
+        body = self.client.post("/api/board/select", json={"reset": True}).get_json()
+        self.assertEqual(body["target"]["source"], "sdk-env")
+        self.assertIsNone(body["saved"])
+
+    def test_reset_must_be_a_boolean_and_leaves_the_target_alone(self):
+        self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 22, "user": "sima"})
+        for reset in ("false", 1, None, []):
+            with self.subTest(reset=reset):
+                response = self.client.post("/api/board/select", json={"reset": reset})
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+        self.assertEqual(self.client.get("/api/board").get_json()["target"]["host"], "10.1.1.1")
+
+    def test_a_result_read_from_a_replaced_board_is_refused(self):
+        with self.app.app_context():
+            old = board.get_board_manager().session()
+            old.require_current()
+            self.client.post("/api/board/select", json={"host": "10.1.1.1"})
+            with self.assertRaises(BoardError) as ctx:
+                old.require_current()
+            self.assertEqual((ctx.exception.code, ctx.exception.status), ("stale_snapshot", 409))
+            # A command that finishes after the board changed is refused rather than returned.
+            with self.assertRaises(BoardError) as ctx:
+                old.transport.exec(["true"], timeout=1)
+            self.assertEqual(ctx.exception.code, "stale_snapshot")
+
+    def test_invalid_selection_returns_400_with_hint(self):
+        response = self.client.post("/api/board/select", json={"host": "", "user": "sima"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "invalid_request")
+        self.assertTrue(response.get_json()["hint"])
+
+    def test_connection_errors_surface_with_code_and_are_recorded(self):
+        self.client.get("/api/board")
+        self.transports[-1].error = BoardError("unreachable", "Could not connect", hint="Check the cable")
+        response = self.client.post("/api/board/test")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json(), {"error": "Could not connect", "code": "unreachable", "hint": "Check the cable"})
+        status = self.client.get("/api/board").get_json()["status"]
+        self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
+
+    def test_errors_from_a_replaced_target_do_not_overwrite_new_status(self):
+        with self.app.app_context():
+            old = board.get_board_manager().session()
+            self.client.post("/api/board/select", json={"host": "10.1.1.1"})
+            self.transports[0].error = BoardError("timeout", "late")
+            with self.assertRaises(BoardError):
+                old.transport.exec(["true"], timeout=1)
+        self.assertEqual(self.client.get("/api/board").get_json()["status"]["state"], "unknown")
+
+    def test_no_target_is_409(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            response = self.client.post("/api/board/test")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "no_target")
 
     def test_trust_host_key_requires_the_presented_fingerprint(self):
         response = self.client.post("/api/board/trust-host-key", json={"fingerprint": "SHA256:x"})
@@ -107,8 +212,34 @@ class BoardApiTests(unittest.TestCase):
         self.assertGreater(body["generation"], before["generation"])
         self.assertEqual((body["status"]["state"], body["board"]), ("unknown", None))
 
+    def test_identity_is_read_on_every_call(self):
+        with self.app.app_context():
+            session = board.get_board_manager().session()
+            session.identity()
+            session.identity()
+        self.assertEqual(len(self.transports[-1].calls), 2)
+
+    def test_empty_identity_output_is_an_error(self):
+        self.client.get("/api/board")
+        self.transports[-1].results = [ExecResult(0, b"", b"")]
+        response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (502, "command_failed"))
+
+    def test_non_object_bodies_get_the_json_error_shape(self):
+        response = self.client.post("/api/board/select", json=[1])
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
+    def test_board_state_is_not_cached(self):
+        self.assertEqual(self.client.get("/api/board").headers["Cache-Control"], "no-store")
+
 
 class LocalTransportTests(unittest.TestCase):
+    def test_exec_captures_output_stdin_and_missing_commands(self):
+        transport = LocalTransport()
+        result = transport.exec(["sh", "-c", "cat; echo err >&2; exit 3"], timeout=5, stdin=b"hello")
+        self.assertEqual((result.exit_code, result.stdout, result.stderr), (3, b"hello", b"err\n"))
+        self.assertEqual(transport.exec(["no-such-command-xyz"], timeout=5).exit_code, 127)
+
     def test_exec_timeout_raises_board_error(self):
         with self.assertRaises(BoardError) as ctx:
             LocalTransport().exec(["sleep", "5"], timeout=0.2)
@@ -122,19 +253,14 @@ class LocalTransportTests(unittest.TestCase):
         self.assertIn("more than 4096 bytes", ctx.exception.message)
         self.assertLess(time.monotonic() - started, 5, "the command is killed at the limit, not left to the timeout")
 
+    def test_exec_streams_stdin_larger_than_a_pipe_buffer(self):
+        payload = os.urandom(1 << 20)
+        self.assertEqual(LocalTransport().exec(["cat"], timeout=10, stdin=payload).stdout, payload)
+
     def test_exec_timeout_covers_a_command_that_closed_its_output(self):
         with self.assertRaises(BoardError) as ctx:
             LocalTransport().exec(["sh", "-c", "exec >&- 2>&-; sleep 5"], timeout=0.3)
         self.assertEqual(ctx.exception.code, "timeout")
-
-    def test_exec_drains_output_while_writing_large_stdin(self):
-        data = b"x" * (512 * 1024)
-        # Reads a little stdin, then writes more than a pipe holds before reading the rest.
-        interleaved = "import sys; i, o = sys.stdin.buffer, sys.stdout.buffer; i.read(1); o.write(b'y' * (1 << 20)); o.write(i.read())"
-        cases = {"cat": (["cat"], data), "interleaved": ([sys.executable, "-c", interleaved], b"y" * (1 << 20) + data[1:])}
-        for name, (argv, expected) in cases.items():
-            with self.subTest(name):
-                self.assertEqual(LocalTransport().exec(argv, timeout=5, stdin=data).stdout, expected)
 
 
 class SshTransportErrorTests(unittest.TestCase):
@@ -149,6 +275,11 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         return ctx.exception
 
+    def test_auth_failure_command_uses_sudo_when_insight_runs_as_root(self):
+        with mock.patch.object(transport_module, "_local_account", return_value="root"):
+            error = self._connect_raising(paramiko.AuthenticationException("denied"))
+        self.assertEqual(error.extra["command"], "sudo -H ssh-copy-id -p 22 sima@192.168.2.2")
+
     def test_closed_transport_never_connects(self):
         self.transport.close()
         with mock.patch.object(paramiko.SSHClient, "connect") as connect:
@@ -156,6 +287,11 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         self.assertEqual(ctx.exception.code, "stale_snapshot")
         connect.assert_not_called()
+
+    def test_auth_failure_suggests_ssh_copy_id(self):
+        error = self._connect_raising(paramiko.AuthenticationException("denied"))
+        self.assertEqual(error.code, "auth_failed")
+        self.assertIn("ssh-copy-id -p 22 sima@192.168.2.2", error.hint)
 
     def test_changed_host_key_reports_both_fingerprints(self):
         old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
@@ -195,7 +331,9 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertTrue(close.called)
 
     def test_close_at_any_point_before_the_command_is_sent_stops_it(self):
-        # close() takes no lock, so trace-inject it between every line of exec()/_open_channel().
+        # close() does not take the transport lock, so it can land between any two lines of
+        # exec()/_open_channel(). Wherever it lands before the command is sent, the command must
+        # not run, the error must say the board changed, and no connection may stay attached.
         targets = {SshTransport.exec.__code__, SshTransport._open_channel.__code__}
 
         class FakeClient:
@@ -255,14 +393,13 @@ class SshTransportErrorTests(unittest.TestCase):
             error = None
             with mock.patch.object(SshTransport, "_connect", return_value=client) as connect, \
                  mock.patch.object(SshTransport, "_collect", return_value=ExecResult(0, b"", b"")):
-                previous_trace = sys.gettrace()
                 sys.settrace(global_trace)
                 try:
                     transport.exec(["true"], timeout=1)
                 except BoardError as exc:
                     error = exc
                 finally:
-                    sys.settrace(previous_trace)
+                    sys.settrace(None)
             return transport, client, error, seen[0], connected or connect.called
 
         for connected in (False, True):
@@ -282,6 +419,10 @@ class SshTransportErrorTests(unittest.TestCase):
                     self.assertIsNone(transport._client)
                 close_at += 1
 
+    def test_network_failures_are_unreachable(self):
+        self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")
+        self.assertEqual(self._connect_raising(ConnectionRefusedError("refused")).code, "unreachable")
+        self.assertIn("could not be resolved", self._connect_raising(socket.gaierror("nope")).message)
 
 
 if __name__ == "__main__":

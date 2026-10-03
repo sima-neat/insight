@@ -1,11 +1,26 @@
 import { useEffect, useRef } from 'react'
 import BoardTargetCard from './BoardTargetCard.jsx'
 
-export default function BoardPanel({ onClose, ...cardProps }) {
+export default function BoardPanel({
+  board,
+  loading = false,
+  error = null,
+  onBoardChange,
+  onRetry,
+  onReload,
+  onStatus,
+  onError,
+  onClose,
+  shell = null,
+  shellBusy = false,
+  onOpenShell
+}) {
   const cardRef = useRef(null)
   const closeRef = useRef(null)
 
   useEffect(() => {
+    // aria-modal tells assistive technology the page behind is inert, so keyboard focus has to
+    // behave that way too: keep Tab inside the panel and give focus back where it came from.
     const opener = document.activeElement
     closeRef.current?.focus()
 
@@ -58,7 +73,20 @@ export default function BoardPanel({ onClose, ...cardProps }) {
           <button type="button" ref={closeRef} onClick={onClose} aria-label="Close board settings">Close</button>
         </header>
         <div className="board-panel-body">
-          <BoardTargetCard {...cardProps} />
+          <BoardTargetCard
+            board={board}
+            loading={loading}
+            error={error}
+            description="Insight discovers peripherals and reads device statistics over this connection."
+            onBoardChange={onBoardChange}
+            onRetry={onRetry}
+            onReload={onReload}
+            onStatus={onStatus}
+            onError={onError}
+            shell={shell}
+            shellBusy={shellBusy}
+            onOpenShell={onOpenShell}
+          />
         </div>
       </div>
     </div>

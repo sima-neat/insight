@@ -59,6 +59,7 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
 
 
 def sdk_env_target() -> Optional[dict]:
+    """The DevKit paired through `sima-cli sdk setup` / devkit.sh, exported as DEVKIT_SYNC_* variables."""
     try:
         host = get_devkit_sync_devkit_ip()
     except RuntimeError as exc:
@@ -89,6 +90,8 @@ def resolve_target(saved: Optional[dict], on_board: bool, sdk_env: Optional[dict
 
 
 class TargetStore:
+    """Persists the manually selected board. Holds no credentials; SSH keys authenticate."""
+
     def __init__(self, path: Path):
         self.path = Path(path)
 

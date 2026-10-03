@@ -79,7 +79,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
-- Peripherals captures video only during a Preview, a PyNeat `CameraInput` to `VideoSender` graph run by the board's per-user PyNeat python that sends RTP to a reserved vf channel: discovery and export only read device information. Reading a MIPI camera's modes briefly opens it through libcamera without streaming, and a camera another process holds is skipped and keeps the modes from the previous scan. vf answers unknown paths with the viewer page, so read its own counters at `https://127.0.0.1:8081/ingest/stats`.
+- SiMa Sentinel on the board discovers the cameras (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`); Insight only reads its catalog and checks which processes hold each camera. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
+- Preview is the only Peripherals operation that touches the sensor, and only while it runs: the board runs a PyNeat `CameraInput` graph (PyNeat installed for the SSH user, `sima-cli neat install core`) that encodes H.264 in hardware and sends RTP to a reserved vf channel, which the existing viewer serves. Discovery and export never capture. Read vf's own counters at `https://127.0.0.1:8081/ingest/stats` — `/api/ingest/stats` is Insight's proxy of it, and vf answers unknown paths with the viewer page rather than a 404.
 - Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
@@ -157,6 +158,19 @@ capture.
 | `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
 
+A frame may be described by several metadata types at once. Send one message per
+type, all carrying the source frame's `timestamp` in integer milliseconds; the
+correlator matches each against the retained frame mapping, and the viewer draws
+every type it holds for that frame.
+A second message of the same type for the same frame replaces the first; retained
+messages draw in arrival order. Metadata without a correlated RTP timestamp uses
+the single-message arrival fallback, since types cannot safely be grouped without
+a shared frame identity.
+
+A failing drawing strategy does not stop other types or subsequent frames. Check
+the browser console for a warning, emitted once per channel and metadata type.
+Shared ROI polygons draw once per frame; each type still applies its ROI filter.
+
 Every timestamped message leaves through exactly one of matched, expired, or
 evicted, or is still counted in `pending_metadata`. The video fields describe
 the lifetime of reusable timestamp mappings, not match or loss outcomes.
@@ -212,6 +226,10 @@ A peer is `active` when its connection is up. That is not a statement about how 
 Each channel includes a `metadata` summary with counts of metadata messages dropped due to having no open DataChannel. Each peer includes connection states, RTCP feedback, the latest browser report when the viewer is connected, and a `metadata` object that reflects vf's server-side metadata DataChannel sends (message/byte counters plus rate estimates and send errors). RTCP feedback can show receiver reports, PLI/FIR keyframe requests, NACKs, REMB bitrate estimates, loss, and jitter. Browser reports come from `RTCPeerConnection.getStats()` plus the video element state, including `frames_decoded`, `frames_dropped`, `frames_per_second`, `ready_state`, `current_time`, and `active`.
 
 Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbound_rtp.decoder_implementation`, `inbound_rtp.power_efficient_decoder`, and a `synchronization` object with the configured video buffer and metadata retention, jitter-buffer support, timestamp matches, arrival fallbacks, misses, expiry, eviction, and pending queue counts.
+
+`synchronization.timestamped_metadata_pending` counts queued messages, including
+each metadata type for a shared frame. Both pending counts and the expiry/eviction
+counters use messages; `timestamp_matches` counts matched video-frame callbacks.
 
 Examples:
 
@@ -401,14 +419,14 @@ Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge netw
 | `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
 | `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
 | `GET` | `/api/peripherals` | Last camera scan for the selected board, or an empty snapshot with `scanned_at: null`. |
-| `POST` | `/api/peripherals/refresh` | Scan the board for MIPI (libcamera, media graph) and USB (V4L2) cameras. |
-| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps", "generation"}` (`generation` from the same `/api/peripherals` snapshot); return Python, C++, and JSON input configurations, plus Apps `config.yaml` when the board's `libcamerasrc` supports `buffer-count`. |
+| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras, wait for its target `scan_sequence`, and check which processes hold each camera. |
+| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`; return Python, C++, and JSON input configurations without `capture_buffer_count` (Insight does not read the board's `libcamerasrc`, so there is no Apps `config.yaml`). |
 | `GET` | `/api/peripherals/preview` | The running preview session, or `null`. |
-| `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional mode; start capture and return the session with its `channel` and `viewer_url`. A busy camera returns `409 camera_in_use`. |
-| `POST` | `/api/peripherals/cameras/preview/<session_id>/heartbeat` | Extend the session; without heartbeats the board stops capture after 45 s. `409 channel_taken` means another sender joined the channel. |
+| `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional `{"format", "width", "height", "fps"}`; start capture on the board and return the session with its reserved `channel` and `viewer_url`. Refuses a busy camera (`409 camera_in_use`) and never stops the process holding it. |
+| `POST` | `/api/peripherals/cameras/preview/<session_id>/heartbeat` | Extend the session. Without heartbeats the board stops capturing after 45 s; a `404` means the preview is gone. A `409 channel_taken` means another stream arrived on the preview's channel (its RTP `ssrc` in `/ingest/stats` is not the session's `ssrc`) and Insight stopped the preview. |
 | `POST` | `/api/peripherals/cameras/preview/<session_id>/stop` | Stop capture and release the camera and the channel. |
 
-Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` separates `verified` Core `CameraInput` modes from `advertised` ones that the camera reports but Core has not validated; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838). An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first. `platform.neat` reports the board's PyNeat `version` (null when missing, with a `neat_missing` issue carrying the install command) and its venv `python`, read from the per-user PyNeat venv.
+Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` is `verified` when Neat Core's support rules, applied by Sentinel, accept a mode and `unsupported` with Sentinel's `reason` otherwise; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838), and without Neat Core no mode is supported. Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503) and `peripheral_version` or `peripheral_response` (502). An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first.
 
 ## Error Handling
 

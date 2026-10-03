@@ -12,7 +12,7 @@ def _board_error(exc: BoardError):
 
 
 @board_bp.after_request
-def no_store(response):
+def _no_store(response):
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -34,8 +34,10 @@ def board_state():
 def select_board():
     """Accept JSON {host, port, user} to save a manual target, or {reset: true} to clear it."""
     body = _json_body()
+    if "reset" in body and not isinstance(body["reset"], bool):
+        raise BoardError("invalid_request", "`reset` must be a boolean.")
     manager = get_board_manager()
-    if body.get("reset"):
+    if body.get("reset") is True:
         manager.reset()
     else:
         manager.select(body.get("host"), body.get("port"), body.get("user"))
@@ -47,7 +49,7 @@ def select_board():
 def test_board():
     """Connect to the selected board, read its host name and build, and return the updated board state."""
     manager = get_board_manager()
-    manager.session().identity()
+    manager.test()
     return manager.state()
 
 

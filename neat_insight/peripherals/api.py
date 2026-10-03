@@ -1,26 +1,27 @@
 import json
+import logging
 import time
 from pathlib import Path
 
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.board.api import no_store
 from neat_insight.peripherals import export
-from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
-from neat_insight.peripherals.preview import PreviewManager, require_camera_free, viewer_url
-from neat_insight.peripherals.probe import BUDGET_SEC, SCHEMA
-from neat_insight.port_map import browser_host
+from neat_insight.peripherals.cameras import ScanCache, camera_nodes, cameras_of, empty_snapshot
+from neat_insight.peripherals.client import PeripheralClient
 
 peripherals_bp = Blueprint("peripherals", __name__)
-peripherals_bp.after_request(no_store)
 
-PROBE_PATH = Path(__file__).with_name("probe.py")
-PROBE_TIMEOUT_SEC = BUDGET_SEC + 20.0
-DETAIL_LIMIT = 2000
+CHECK_PATH = Path(__file__).with_name("board_check.py")
+CHECK_TIMEOUT_SEC = 45.0
 
 scans = ScanCache()
-previews = PreviewManager()
+
+
+@peripherals_bp.after_request
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _board_summary(session, identity=None) -> dict:
@@ -32,181 +33,78 @@ def _board_summary(session, identity=None) -> dict:
     }
 
 
-def _run_probe(session) -> dict:
-    result = session.transport.exec(["python3", "-"], timeout=PROBE_TIMEOUT_SEC, stdin=PROBE_PATH.read_bytes())
-    if result.exit_code == 127:
-        raise BoardError(
-            "tool_missing",
-            "python3 was not found on the board.",
-            hint="Install python3 (3.8 or newer) on the board, then Refresh.",
-            tool="python3",
-        )
-    detail = result.stderr.decode("utf-8", errors="replace").strip()[-DETAIL_LIMIT:]
-    if result.exit_code != 0:
-        raise BoardError(
-            "command_failed",
-            "The camera discovery probe failed on the board.",
-            hint="Check that python3 on the board is 3.8 or newer; the probe's error output is in detail.",
-            detail=detail,
-        )
+def _check_board(session, catalog: dict):
+    """Run the read-only camera check on the board in one command; None when it cannot run.
+
+    Availability is an extra on top of Sentinel's catalog, so a failure here degrades it to unknown
+    instead of failing the scan.
+    """
+    cameras = cameras_of(catalog)
+    if not cameras:
+        return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
+    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
     try:
-        probe = json.loads(result.stdout.decode("utf-8", errors="replace"))
+        result = session.transport.exec(
+            ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
+        )
+        check = json.loads(result.stdout.decode("utf-8", errors="replace")) if result.exit_code == 0 else None
     except ValueError:
-        probe = None
-    if not isinstance(probe, dict) or probe.get("schema") != SCHEMA:
-        raise BoardError(
-            "command_failed",
-            "The camera discovery probe returned output Insight cannot read.",
-            hint="Refresh again; if it persists, check detail for errors from python3 on the board.",
-            detail=detail,
-        )
-    return probe
-
-
-def _export_generation(body: dict) -> int:
-    generation = body.get("generation")
-    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
-        raise BoardError(
-            "invalid_request",
-            "`generation` must be the whole-number board generation from the camera scan.",
-            hint="Send the `generation` returned by GET /api/peripherals with the selected mode.",
-        )
-    return generation
+        check = None
+    except BoardError as exc:
+        if exc.code == "stale_snapshot":
+            raise
+        logging.warning("The peripheral camera check failed on %s: %s", session.target.label, exc)
+        check = None
+    return check if isinstance(check, dict) else None
 
 
 # API: return the last camera scan of the selected board.
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
     """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
-    session = get_board_manager().session()
+    try:
+        session = get_board_manager().session()
+    except BoardError as err:
+        return err.to_dict(), err.status
     return scans.snapshot(session.generation) or empty_snapshot(_board_summary(session), session.generation)
 
 
 # API: rescan the selected board for cameras.
 @peripherals_bp.post("/api/peripherals/refresh")
 def refresh_peripherals():
-    """Run the discovery probe on the board and return a new snapshot, or the result of a refresh in flight."""
+    """Ask SiMa Sentinel to rescan, then return a new snapshot, or the result of a refresh in flight."""
     requested = time.monotonic()
-    session = get_board_manager().session()
-    with scans.refresh_lock(session.generation):
-        in_flight = scans.completed_since(session.generation, requested)
-        if in_flight:
-            return in_flight
-        with previews.scan_guard(session):
+    try:
+        session = get_board_manager().session()
+        with scans.refresh_lock(session.generation):
+            in_flight = scans.completed_since(session.generation, requested)
+            if in_flight:
+                return in_flight
             board = _board_summary(session, session.identity())
             started = time.monotonic()
-            probe = _run_probe(session)
-        scan_ms = int((time.monotonic() - started) * 1000)
-        return scans.record(session.generation, board, probe, scan_ms)
+            catalog = PeripheralClient(session).refresh()
+            check = _check_board(session, catalog)
+            scan_ms = int((time.monotonic() - started) * 1000)
+            session.require_current()
+            return scans.record(session.generation, board, catalog, check, scan_ms)
+    except BoardError as err:
+        return err.to_dict(), err.status
 
 
 # API: render an input configuration for one camera mode from the last scan.
 @peripherals_bp.post("/api/peripherals/cameras/export")
 def export_camera():
     """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
-    body = request.get_json(silent=True)
-    selection = export.parse_request(body)
-    expected_generation = _export_generation(body)
-    session = get_board_manager().session()
-    if expected_generation != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The selected board changed since this camera scan was read, so no configuration was exported.",
-            hint="Refresh the selected board, then export again.",
-            expected_generation=expected_generation,
-        )
-    snapshot = scans.snapshot(session.generation)
-    if snapshot is None:
-        raise BoardError(
-            "stale_snapshot",
-            "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
-            hint="Click Refresh, then export again.",
-        )
-    return export.render(snapshot, selection)
-
-
-def _preview_host() -> str:
-    host = browser_host(request.host)
-    if host is None:
-        raise BoardError(
-            "invalid_request",
-            "Insight cannot build a viewer link for this request's Host header.",
-            hint="Open Insight by its hostname or IP address.",
-        )
-    return host
-
-
-def _for_browser(preview_session, host: str):
-    # The session is shared, so each response builds the viewer URL from its own validated Host.
-    return {**preview_session, "viewer_url": viewer_url(host, preview_session["channel"])}
-
-
-def _camera_or_404(session, camera_id: str):
-    snapshot = scans.snapshot(session.generation)
-    if snapshot is None:
-        raise BoardError(
-            "stale_snapshot",
-            "There is no camera scan for the selected board.",
-            hint="Click Refresh, then start the preview.",
-        )
-    item = next((entry for entry in snapshot["items"] if entry["id"] == camera_id), None)
-    if item is None:
-        raise BoardError(
-            "not_found",
-            f"Camera {camera_id} is not in the last scan.",
-            hint="Refresh and pick a camera from the list.",
-        )
-    return item, ((snapshot.get("platform") or {}).get("neat") or {}).get("python")
-
-
-# API: report the preview running on the selected board, if any.
-@peripherals_bp.get("/api/peripherals/preview")
-def get_preview():
-    """Return the current preview session for the selected board, or null; never contacts the board."""
-    host = _preview_host()
-    session = get_board_manager().session()
-    previews.stop_stale()
-    current = previews.current(session.generation)
-    return {"session": current and _for_browser(current, host)}
-
-
-# API: start an explicit, temporary camera preview on the selected board.
-@peripherals_bp.post("/api/peripherals/cameras/preview")
-def start_preview():
-    """Capture and hardware-encode one camera into a reserved viewer channel until stopped or expired."""
-    body = request.get_json(silent=True)
-    body = body if isinstance(body, dict) else {}
-    host = _preview_host()
-    session = get_board_manager().session()
-    item, python = _camera_or_404(session, str(body.get("id") or ""))
-    require_camera_free(item)
-    mode = item.get("default_selection")
-    keys = ("format", "width", "height", "fps")
-    if any(key in body for key in keys):
-        mode = export.parse_request({"id": item["id"], **{key: body.get(key) for key in keys}})
-        mode = {key: mode[key] for key in keys}
-    if not mode:
-        raise BoardError(
-            "invalid_request",
-            "This camera has no mode Insight can preview.",
-            hint="Refresh; if the camera reports no usable modes, the errors on the camera say why.",
-        )
-    return {"session": _for_browser(previews.start(session, item, mode, python), host)}
-
-
-# API: keep a preview alive while a viewer is watching.
-@peripherals_bp.post("/api/peripherals/cameras/preview/<session_id>/heartbeat")
-def heartbeat_preview(session_id):
-    """Extend the preview; without heartbeats the board-side worker stops capture on its own."""
-    host = _preview_host()
-    session = get_board_manager().session()
-    return {"session": _for_browser(previews.heartbeat(session, session_id), host)}
-
-
-# API: stop a preview and release the camera and the channel.
-@peripherals_bp.post("/api/peripherals/cameras/preview/<session_id>/stop")
-def stop_preview(session_id):
-    """Stop capture on the board; an older session id cannot stop a newer session."""
-    host = _preview_host()
-    session = get_board_manager().session()
-    return {"session": _for_browser(previews.stop(session, session_id), host)}
+    try:
+        selection = export.parse_request(request.get_json(silent=True))
+        session = get_board_manager().session()
+        snapshot = scans.snapshot(session.generation)
+        if snapshot is None:
+            raise BoardError(
+                "stale_snapshot",
+                "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
+                hint="Click Refresh, then export again.",
+            )
+        return export.render(snapshot, selection)
+    except BoardError as err:
+        return err.to_dict(), err.status

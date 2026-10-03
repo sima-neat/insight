@@ -69,6 +69,43 @@ This view is useful when you need repeatable input streams for an object detecti
 
 The Streaming Sources view lets you assign media files to source slots, start or stop streams, copy the active stream URL, and preview the selected source before wiring it into an application.
 
+### Use a webcam as a source
+
+A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
+
+1. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. The browser asks for camera permission; Insight cannot grant it for you.
+2. After you allow access, your cameras appear in each source dropdown under a **Cameras** group, above your video files:
+
+   ```text
+   Not assigned
+   Cameras
+     Integrated Camera
+     USB Camera
+   Video files
+     catalog/parking_garage_cars/parking_garage_cars_1080p.mp4
+   ```
+
+3. Select a camera for a source slot, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
+4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
+
+The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
+
+The preview beside the source list shows your local camera feed while capture is active. It is not the video the board received, and it does not show the delay that a receiving application sees; if publishing fails, capture stops and the preview clears.
+
+Selecting **Stop**, unplugging the camera, or closing the browser tab ends the stream and returns the slot to `Idle`. **Stop All**, **Reset** and **Auto Assign** also release every webcam, because each of them takes those slots away: Reset and Auto Assign clear the camera selection as well, so pick the camera again afterwards. The browser tab must stay open while the webcam is publishing: it is the component sending video to Insight. For the same reason, a webcam source is never restored as `Live` after Insight restarts — reselect the camera and start it again.
+
+If starting a webcam fails, the message names the cause:
+
+| What you see | What to do |
+| --- | --- |
+| Camera permission was denied | Allow camera access for the Insight site in your browser settings, then re-enable camera access under Media Sources → Local cameras. |
+| That camera is no longer available | The camera was disconnected. Select **Refresh cameras** and reselect it. |
+| The camera could not be started | Another application is using the camera. Close it and retry. |
+| Could not reach the webcam publish endpoint | The browser could not reach the publish listener. Trust the `webrtcWhip` endpoint's certificate (open its URL once to accept it) and confirm the port is reachable (see [Ports and Network Behavior](ports-network.md)). |
+| Webcam publish was rejected | Insight could not accept the stream. Confirm the `webrtcWhip` port is reachable (see [Ports and Network Behavior](ports-network.md)) and that your browser trusts the Insight certificate. |
+
+Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
+
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.
@@ -99,11 +136,11 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Peripherals
 
-Peripherals lists the cameras connected to a board and shows the modes each camera reports.
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a camera, so cameras stay available to your applications. **Preview** is the one exception, and it only runs when you start it. The camera export API works from the last scan without touching the board.
 
 ### Selected board
 
-Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key.
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
 
 The board is chosen in this order:
 
@@ -115,29 +152,28 @@ Insight connects over SSH with the keys of the account that runs it. It never as
 
 ### Cameras and modes
 
-Select **Refresh** to scan the board. For each camera Insight shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
 
 | Level | Meaning |
 | --- | --- |
-| Verified | The mode has been validated with Core `CameraInput`. |
-| Advertised | The camera reports the mode, but it has not been validated with Core. It can still fail when capture starts. |
-| Not supported | Core `CameraInput` cannot use it. This includes USB cameras, raw sensor formats, and formats other than NV12. |
+| Verified | Neat Core's support rules on the board accept the mode for Core `CameraInput`. |
+| Not supported | Neat Core's rules reject it, for example USB cameras and formats other than NV12; the page shows the reason Sentinel reports. Without Neat Core on the board, no mode is supported. |
 
-Cameras that another application is using are skipped and keep the modes from the previous scan. Availability names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
-
-The scan also checks for PyNeat on the board; if it is missing, a warning gives the command that installs the latest Neat.
+Sentinel applies the support rules that Neat Core installs on the board. Availability comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
 ### Preview a camera
 
-Select **Start preview** to stream the selected mode into the page. A preview uses one viewer channel and holds the camera, so your application cannot open it until you stop the preview. Insight does not start a preview on a camera another process is using. The preview stops when you select **Stop preview**, leave the page, refresh, or change the board, and on its own shortly after Insight stops watching. Preview is available for MIPI cameras only and needs PyNeat on the board.
+Select **Start preview** to see what a camera sees. The board captures video, encodes it in hardware, and sends it to Insight's viewer; the preview appears in the page and reserves one viewer channel. The board captures through PyNeat, which must be installed for the account Insight connects as (`sima-cli neat install core`); if it is missing, the preview says so.
 
-### Camera configuration
+A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. It also stops by itself shortly after Insight stops watching, so a lost browser or a restarted Insight cannot leave the camera busy.
 
-Under the mode menus, pick a format and select **Copy configuration** to copy the selected mode to the clipboard in that format. The formats are the ones the export API below returns for the camera.
+Preview is available for MIPI cameras on modes Insight lists as usable. USB cameras are discovered and can be exported, but preview is not available for them yet.
 
-API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. The request must include `generation` from the same `/api/peripherals` snapshot; Insight returns `409 stale_snapshot` if the selected board has changed. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+### Camera configuration API
 
-The camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
+The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. Exports leave the capture-buffer count unset and include no Apps `config.yaml` `camera:` block, because Insight does not read the board's `libcamerasrc`. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
 
 ## Stats
 

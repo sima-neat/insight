@@ -2,7 +2,7 @@ import hashlib
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 from flask import current_app
 
@@ -23,6 +23,8 @@ def get_board_manager() -> "BoardManager":
 
 
 class _ReportingTransport:
+    """Records connection-level failures in the manager's status before re-raising them."""
+
     def __init__(self, manager: "BoardManager", generation: int, transport):
         self._manager = manager
         self._generation = generation
@@ -30,10 +32,12 @@ class _ReportingTransport:
 
     def exec(self, argv, *, timeout, stdin=None):
         try:
-            return self._transport.exec(argv, timeout=timeout, stdin=stdin)
+            result = self._transport.exec(argv, timeout=timeout, stdin=stdin)
         except BoardError as exc:
             self._manager._record(self._generation, error=exc)
             raise
+        self._manager.require_generation(self._generation)
+        return result
 
 
 class BoardSession:
@@ -43,6 +47,9 @@ class BoardSession:
         self.raw_transport = transport
         self.transport = _ReportingTransport(manager, generation, transport)
         self._manager = manager
+
+    def require_current(self) -> None:
+        self._manager.require_generation(self.generation)
 
     def identity(self) -> dict:
         # Read on every call: after a host-key change the same address can be a different board.
@@ -78,28 +85,24 @@ class BoardSession:
 
 
 class BoardManager:
+    """Owns the single selected board that every board-facing Insight feature uses."""
+
     def __init__(self, data_dir: Path, on_board: bool):
         self.data_dir = Path(data_dir)
         self.on_board = on_board
         self._store = TargetStore(self.data_dir / "board-target.json")
         self._known_hosts = self.data_dir / "known_hosts"
         self._lock = threading.RLock()
-        self._change_lock = threading.Lock()
         self._generation = 0
         self._session: Optional[BoardSession] = None
         self._status = {"state": "unknown", "checked_at": None, "error": None}
         self._board: Optional[dict] = None
-        self._before_session_close: Optional[Callable[[BoardSession], None]] = None
-
-    def set_before_session_close(self, callback: Callable[[BoardSession], None]) -> None:
-        with self._lock:
-            self._before_session_close = callback
 
     def target(self) -> Optional[BoardTarget]:
         return resolve_target(self._store.load(), self.on_board, sdk_env_target())
 
     def session(self) -> BoardSession:
-        with self._change_lock:
+        with self._lock:
             target = self.target()
             if target is None:
                 raise BoardError(
@@ -108,28 +111,25 @@ class BoardManager:
                     hint="Enter the board's address, pair the SDK with `sima-cli sdk setup --devkit <ip>`, "
                     "or run Insight on the board.",
                 )
-            self._replace_session_under_change(target)
-            with self._lock:
-                return self._session
+            self._replace_session(target)
+            return self._session
 
     def select(self, host, port, user) -> None:
-        selected = validate_ssh_target(host, port, user)
-        target = resolve_target(selected, self.on_board, sdk_env_target())
-        self._replace_session(target, before_install=lambda: self._store.save(selected))
+        with self._lock:
+            self._store.save(validate_ssh_target(host, port, user))
+            self._replace_session(self.target())
 
     def reset(self) -> None:
-        target = resolve_target(None, self.on_board, sdk_env_target())
-        self._replace_session(target, before_install=self._store.clear)
+        with self._lock:
+            self._store.clear()
+            self._replace_session(self.target())
+
+    def test(self) -> None:
+        self.session().identity()
 
     def trust_host_key(self, fingerprint: str) -> None:
-        session = self.session()
-        with self._change_lock:
-            with self._lock:
-                if self._session is not session:
-                    raise BoardError("stale_snapshot", "The selected board changed; test the connection again.")
-                transport = session.raw_transport
-                target = session.target
-                callback = self._before_session_close
+        with self._lock:
+            transport = self.session().raw_transport
             key = getattr(transport, "presented_host_key", None)
             if key is None or key_fingerprint(key) != fingerprint:
                 raise BoardError(
@@ -137,52 +137,44 @@ class BoardManager:
                     "That host key is not the one the board presented.",
                     hint="Test the connection again and confirm the fingerprint it reports.",
                 )
-            if callback is not None:
-                callback(session)
-            with self._lock:
-                if self._session is not session:
-                    raise BoardError("stale_snapshot", "The selected board changed; test the connection again.")
-                transport.replace_host_key(key)
-                # A new key may mean a different board: start a new generation.
-                transport.close()
-                self._install_session(target)
+            transport.replace_host_key(key)
+            # The trusted key may belong to a different board: start a new generation so its scans stay separate.
+            transport.close()
+            self._session = None
+            self._replace_session(self.target())
 
     def state(self) -> dict:
-        with self._change_lock:
+        with self._lock:
             target = self.target()
-            self._replace_session_under_change(target)
-            with self._lock:
-                return {
-                    "target": target.to_dict() if target else None,
-                    "saved": self._store.load(),
-                    "defaults": {"on_board": self.on_board, "sdk_env": sdk_env_target()},
-                    "generation": self._generation,
-                    "status": dict(self._status),
-                    "board": self._board,
-                }
+            self._replace_session(target)
+            sdk_env = sdk_env_target()
+            return {
+                "target": target.to_dict() if target else None,
+                "saved": self._store.load(),
+                "defaults": {"on_board": self.on_board, "sdk_env": sdk_env},
+                "generation": self._generation,
+                "status": dict(self._status),
+                "board": self._board,
+            }
 
-    def _replace_session(self, target: Optional[BoardTarget], before_install=None) -> None:
-        # The close callback runs without `_lock`, which `_record` takes on a transport error.
-        with self._change_lock:
-            self._replace_session_under_change(target, before_install)
-
-    def _replace_session_under_change(self, target: Optional[BoardTarget], before_install=None) -> None:
+    def require_generation(self, generation: int) -> None:
+        """Refuse a result read from a board that is no longer the selected one."""
         with self._lock:
-            current = self._session
-            unchanged = (current.target if current else None) == target
-            callback = self._before_session_close
-        if not unchanged and current is not None and callback is not None:
-            callback(current)
-        with self._lock:
-            if before_install is not None:
-                before_install()
-            if unchanged:
-                return
-            if current is not None:
-                current.raw_transport.close()
-            self._install_session(target)
+            self._replace_session(self.target())
+            if generation != self._generation:
+                raise BoardError(
+                    "stale_snapshot",
+                    "The selected board changed while this request was running.",
+                    hint="Retry to use the newly selected board.",
+                    expected_generation=generation,
+                    current_generation=self._generation,
+                )
 
-    def _install_session(self, target: Optional[BoardTarget]) -> None:
+    def _replace_session(self, target: Optional[BoardTarget]) -> None:
+        if (self._session.target if self._session else None) == target:
+            return
+        if self._session is not None:
+            self._session.raw_transport.close()
         self._generation += 1
         self._status = {"state": "unknown", "checked_at": None, "error": None}
         self._board = None
