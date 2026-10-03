@@ -124,9 +124,9 @@ const ONBOARDING_STEPS = [
     tab: 'peripherals',
     eyebrow: 'Step 6 of 7',
     title: 'Inspect connected peripherals',
-    summary: 'Peripherals shows the authoritative device catalog maintained by the selected board’s daemon.',
+    summary: 'Peripherals shows the device catalog that SiMa Sentinel maintains on the selected board.',
     details:
-      'Review camera modes, refresh the daemon catalog, and generate CameraInput examples. Hot-plug events update this page without making Insight scan hardware itself.'
+      'Review camera modes, ask Sentinel to rescan, and generate CameraInput examples. Hot-plug changes appear on this page within seconds without making Insight scan hardware itself.'
   },
   {
     id: 'visualizer',
