@@ -256,6 +256,10 @@ type rtpAccessUnit struct {
 	packets   [][]byte
 	ssrc      uint32
 	timestamp uint32
+	// Set when the source's sequence broke since the previous accepted unit.
+	// Loss and a same-SSRC restart look alike here, and only a restart can
+	// rewind the source clock, so the source timestamp delta is not trusted.
+	afterSequenceBreak bool
 }
 
 type rtpAccessUnitBuffer struct {
@@ -268,6 +272,7 @@ type rtpAccessUnitBuffer struct {
 	codec                      videoCodec
 	complete                   bool
 	discontinuity              bool
+	sequenceBreak              bool
 	randomAccess               bool
 	waitingForH265RandomAccess bool
 	active                     bool
@@ -293,6 +298,7 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	// interrupts belonged to the previous source.
 	sameSource := b.haveSequence && pkt.SSRC == b.sequenceSSRC
 	sequenceDiscontinuity := sameSource && pkt.SequenceNumber != b.nextSequence
+	b.sequenceBreak = b.sequenceBreak || sequenceDiscontinuity
 	b.nextSequence = pkt.SequenceNumber + 1
 	b.sequenceSSRC = pkt.SSRC
 	b.haveSequence = true
@@ -346,6 +352,8 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	if accessUnitCodec == videoCodecH265 && b.waitingForH265RandomAccess {
 		return rtpAccessUnit{}, false
 	}
+	accessUnit.afterSequenceBreak = b.sequenceBreak
+	b.sequenceBreak = false
 	return accessUnit, true
 }
 
@@ -411,7 +419,7 @@ func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet
 
 	frameAt := time.Now()
 	frameTimestamp := f.timestampRewriter.timestampForSourceFrame(
-		accessUnit.timestamp, accessUnit.ssrc, frameAt,
+		accessUnit.timestamp, accessUnit.ssrc, accessUnit.afterSequenceBreak, frameAt,
 	)
 	frameForwarded := false
 	for _, rawPacket := range accessUnit.packets {
@@ -818,16 +826,18 @@ func newRTPTimestampRewriter() rtpTimestampRewriter {
 }
 
 func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
-	return r.timestampForSourceFrame(r.lastSourceTimestamp, r.lastSourceSSRC, now)
+	return r.timestampForSourceFrame(r.lastSourceTimestamp, r.lastSourceSSRC, false, now)
 }
 
-func (r *rtpTimestampRewriter) timestampForSourceFrame(sourceTimestamp, sourceSSRC uint32, now time.Time) uint32 {
+func (r *rtpTimestampRewriter) timestampForSourceFrame(
+	sourceTimestamp, sourceSSRC uint32, afterSequenceBreak bool, now time.Time,
+) uint32 {
 	if r.haveFrame {
 		// Signed, so B-frames arriving in decode order keep their backward
 		// presentation deltas instead of reading as a huge forward jump.
 		sourceStep := int32(sourceTimestamp - r.lastSourceTimestamp)
 		step := uint32(sourceStep)
-		if sourceSSRC != r.lastSourceSSRC || sourceStep == 0 ||
+		if afterSequenceBreak || sourceSSRC != r.lastSourceSSRC || sourceStep == 0 ||
 			sourceStep > maxSourceRTPTimestampStep || sourceStep < -maxSourceRTPTimestampStep {
 			step = uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
 			if step == 0 {
