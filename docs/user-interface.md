@@ -106,16 +106,6 @@ If starting a webcam fails, the message names the cause:
 
 Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
 
-## Peripherals
-
-The Peripherals view reads the peripheral catalog that SiMa Sentinel maintains on the selected board. Insight can use the board it is running on, the DevKit configured by the SDK, or one manually entered SSH target. It does not scan hardware or keep a second catalog. If Sentinel is not installed, not running, too old to provide the catalog, or inaccessible, the page reports that failure and how to correct it; install or update Sentinel with `sima-cli neat install sentinel`.
-
-The catalog header shows Sentinel's discovery state, revision, scan sequence, last attempt, last successful scan, and which Neat Core support rules classified the camera modes. A degraded catalog can keep a provider's stale last-good records together with the provider error. While the page is visible, Insight asks Sentinel every two seconds whether the catalog revision changed and re-reads the full catalog only when it did, so hot-plug changes appear without a manual refresh.
-
-Devices are grouped by their generic `type`, so future microphone, LiDAR, and other providers can appear without a new transport. Camera details include the backend and all reported modes. Neat Core's rules decide which modes are supported; when Neat Core is not installed, the page says so and every mode is unsupported. A mode marked supported can be exported as matching C++, PyNeat, or JSON CameraInput configuration only when it has a discrete size and a `camera_name`. Insight re-reads the catalog during export and rejects a stale device, revision, or selected-board generation.
-
-Use **Refresh catalog** to ask Sentinel to rescan. The request completes only after Sentinel's returned target scan sequence has been reached; it never falls back to an Insight-side probe.
-
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.
@@ -143,6 +133,39 @@ Use the Video Viewer to confirm:
 ![Insight Video Viewer showing a four-channel WebRTC grid.](images/insight-video-viewer.png)
 
 The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
+
+## Peripherals
+
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a camera, so cameras stay available to your applications. The camera export API works from the last scan without touching the board.
+
+### Selected board
+
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
+
+The board is chosen in this order:
+
+- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
+- **Insight installed on the board**: Insight inspects the board it runs on.
+- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
+
+Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
+
+### Cameras and modes
+
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+
+| Level | Meaning |
+| --- | --- |
+| Verified | Neat Core's support rules on the board accept the mode for Core `CameraInput`. |
+| Not supported | Neat Core's rules reject it, for example USB cameras and formats other than NV12; the page shows the reason Sentinel reports. Without Neat Core on the board, no mode is supported. |
+
+Sentinel applies the support rules that Neat Core installs on the board. Availability comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Camera configuration API
+
+The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. An Apps `config.yaml` `camera:` block is included only when the installed `libcamerasrc` supports the required capture-buffer option. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
 
 ## Stats
 

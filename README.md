@@ -10,7 +10,6 @@
 It provides:
 - Multi-channel WebRTC video viewer with MetadataReceiver support
 - Codec-aware media source control with RTSP and HTTP MJPEG streaming
-- Selected-board peripheral catalog read from SiMa Sentinel
 - System and application metrics dashboard
 
 User documentation for the software docs site is maintained in
@@ -58,8 +57,7 @@ Notes:
 
 1. Open the Viewer tab to monitor active channels.
 2. Open Streaming to assign/start/stop input sources. To publish a webcam attached to your browser's computer as a live source, enable a camera under Media Sources → Local cameras and select it in a source slot.
-3. Open Peripherals to inspect the selected board's SiMa Sentinel catalog and generate CameraInput examples for supported camera modes.
-4. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
+3. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
 
 ## Viewer settings
 
