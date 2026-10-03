@@ -12,7 +12,8 @@ import {
   friendlyModelName,
   loadedChatModel,
   speechModels,
-  supportsThinking
+  supportsThinking,
+  voiceEngineWarnings
 } from './genai/backendState.js'
 import {
   GenaiError,
@@ -552,7 +553,8 @@ export default function GenAIView({ onError, onStatus }) {
     const found = engines.find((e) => e.key === engine)
     return (found && found.voices) || []
   }, [engines, engine])
-  const needsAttention = backend.state !== 'ready'
+  const voiceWarnings = usable ? voiceEngineWarnings(health) : []
+  const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0
   const canChat = usable && Boolean(chatModel)
 
   // --- render -----------------------------------------------------------------
@@ -621,8 +623,9 @@ export default function GenAIView({ onError, onStatus }) {
 
       {needsAttention && (
         <section className={`panel genai-banner genai-banner-${backend.state}`} aria-live="polite">
-          <p className="genai-banner-title">{backend.title}</p>
-          {backend.detail && <p className="section-note">{backend.detail}</p>}
+          {backend.state !== 'ready' && <p className="genai-banner-title">{backend.title}</p>}
+          {backend.state !== 'ready' && backend.detail && <p className="section-note">{backend.detail}</p>}
+          {voiceWarnings.map((w) => <p key={w.key} className="section-note genai-voice-warning">{w.message}</p>)}
           {backend.state === 'busy' && <ProgressBar pct={loadProgress ? loadProgress.pct : null} label={backend.title} />}
           <div className="genai-actions">
             {backend.action === 'start-command' && (
@@ -633,7 +636,7 @@ export default function GenAIView({ onError, onStatus }) {
             {(backend.action === 'settings' || backend.action === 'start-command') && !settingsOpen && (
               <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change board address</button>
             )}
-            {backend.action === 'reset-mla' && (
+            {(backend.action === 'reset-mla' || voiceWarnings.length > 0) && (
               <button type="button" className="btn-ghost danger" onClick={restartAccelerator}>Restart the accelerator</button>
             )}
             {lastError && <button type="button" className="btn-ghost" onClick={() => setLastError(null)}>Dismiss</button>}

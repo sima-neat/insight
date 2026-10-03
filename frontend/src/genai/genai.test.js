@@ -10,6 +10,7 @@ import {
   formatDuration,
   friendlyModelName,
   supportsThinking,
+  voiceEngineWarnings,
   loadedChatModel,
   speechModels
 } from './backendState.js'
@@ -227,4 +228,17 @@ test('the tutorial is remembered once seen, and not forced on every visit when s
   const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
   assert.equal(tutorialSeen(broken), true)
   assert.doesNotThrow(() => markTutorialSeen(broken))
+})
+
+test('voice engines that failed to load become plain warnings', () => {
+  const health = (engines) => ({ httpStatus: 200, body: { ...HEALTH_OK, tts: { engines } } })
+  const [warning] = voiceEngineWarnings(health([
+    { key: 'piper-tts', loaded: true },
+    { key: 'supertonic', loaded: false, error: 'NeatError: [infra.dispatcher_unavailable] The accelerator runtime is not available.\n\nStage: MLA_0_1' }
+  ]))
+  assert.equal(warning.key, 'supertonic')
+  assert.match(warning.message, /Supertonic voice didn't load: the accelerator was busy or unavailable/)
+  assert.match(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false, error: 'RuntimeError: model file missing' }]))[0].message, /model file missing/)
+  assert.deepEqual(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false }])), [])
+  assert.deepEqual(voiceEngineWarnings(null), [])
 })

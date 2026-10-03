@@ -167,3 +167,24 @@ export function supportsThinking(name) {
   if (/thinking|deepseek-r1|qwq/.test(n)) return true
   return /qwen3/.test(n) && !/instruct/.test(n)
 }
+
+const ENGINE_NAMES = { supertonic: 'Supertonic', 'piper-plus': 'Piper Plus', 'piper-tts': 'Piper' }
+
+// Voice engines the board reports as installed but failed to load (apps#560:
+// /health lists them with loaded:false and an error), as plain sentences.
+export function voiceEngineWarnings(health) {
+  const engines = (health && health.body && health.body.tts && health.body.tts.engines) || []
+  return engines
+    .filter((e) => e && e.loaded === false && e.error)
+    .map((e) => {
+      const name = ENGINE_NAMES[e.key] || e.key
+      const raw = String(e.error)
+      const cause = /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
+        ? 'the accelerator was busy or unavailable when it started'
+        : raw.split('\n')[0].replace(/^\w*Error:\s*/, '').replace(/^\[[^\]]+\]\s*/, '').slice(0, 160)
+      return {
+        key: e.key,
+        message: `The ${name} voice didn't load: ${cause}. Other voices still work, and the board tries ${name} again on the next spoken reply.`
+      }
+    })
+}
