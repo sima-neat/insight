@@ -2,10 +2,9 @@
 
 Stdlib only and Python 3.8 compatible. SiMa Sentinel discovers the cameras; this
 adds what Sentinel does not report and the Peripherals page shows: which
-processes hold each camera's device nodes, and the libcamerasrc properties the
-CameraInput export depends on. It never opens a camera. REQUEST is JSON
-``{"cameras": {id: [device nodes]}, "libcamerasrc": bool}``; a media device
-brings every node of its media graph. It prints one JSON document.
+processes hold each camera's device nodes. It never opens a camera. REQUEST is
+JSON ``{"cameras": {id: [device nodes]}}``; a media device brings every node of
+its media graph. It prints one JSON document.
 """
 import json
 import os
@@ -16,15 +15,12 @@ import sys
 
 PROC_ROOT = "/proc"
 COMMAND_TIMEOUT = 10
-# gst-inspect may rebuild the plugin registry.
-SLOW_COMMAND_TIMEOUT = 15
-TOOLS = ("media-ctl", "gst-inspect-1.0", "fuser", "sudo")
+TOOLS = ("media-ctl", "fuser", "sudo")
 SEARCH_PATH = os.pathsep.join(
     [os.environ.get("PATH") or "/usr/bin:/bin", "/usr/local/bin", "/usr/sbin", "/sbin"]
 )
 COMMAND_ENV = dict(os.environ, PATH=SEARCH_PATH, LC_ALL="C")
 _MEDIA_RE = re.compile(r"/dev/media[0-9]+")
-_GST_PROPERTY_RE = re.compile(r"^  ([a-z][a-z0-9-]*)\s*:")
 
 
 def which(name):
@@ -69,20 +65,6 @@ def media_graph_nodes(text):
     """The device nodes `media-ctl -p` lists for the entities of one media device."""
     prefix = "device node name "
     return [line.strip()[len(prefix):].strip() for line in text.splitlines() if line.strip().startswith(prefix)]
-
-
-def parse_gst_properties(text):
-    properties, in_properties = set(), False
-    for line in text.splitlines():
-        if line.startswith("Element Properties:"):
-            in_properties = True
-            continue
-        if in_properties and line and not line[0].isspace():
-            break
-        match = _GST_PROPERTY_RE.match(line)
-        if in_properties and match:
-            properties.add(match.group(1))
-    return properties
 
 
 def parse_fuser_pids(text):
@@ -158,21 +140,6 @@ def camera_nodes(nodes, tools, failures):
     return found
 
 
-def probe_libcamerasrc(tools, failures):
-    if not tools.get("gst-inspect-1.0"):
-        return None
-    code, out, err = run([tools["gst-inspect-1.0"], "libcamerasrc"], SLOW_COMMAND_TIMEOUT)
-    if code is None:
-        failures.append(_failure("gst-inspect-1.0", code, err))
-        return None
-    properties = parse_gst_properties(out)
-    return {
-        "present": code == 0,
-        "external_buffer_mode": "external-buffer-mode" in properties,
-        "buffer_count": "buffer-count" in properties,
-    }
-
-
 def collect(request):
     tools = {name: which(name) for name in TOOLS}
     failures = []
@@ -185,7 +152,6 @@ def collect(request):
         "tools": {name: bool(path) for name, path in tools.items() if name != "sudo"},
         "availability_method": method,
         "users": users,
-        "libcamerasrc": probe_libcamerasrc(tools, failures) if request.get("libcamerasrc") else None,
         "failures": failures,
     }
 

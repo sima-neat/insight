@@ -5,17 +5,11 @@ from typing import Optional
 
 from neat_insight.board import BoardError
 from neat_insight.peripherals import compat
-from neat_insight.peripherals.cameras import NO_LIBCAMERASRC_REASON
+from neat_insight.peripherals.cameras import USB_FORMAT_NOTES
 
 BUFFER_NAME = "camera0"
-CAPTURE_BUFFERS = 32
 QUEUE_DEPTH = 2
 MODE_HINT = "Pick a format, size, and frame rate listed for the camera in the last scan."
-USB_FORMAT_NOTES = {
-    "MJPG": "MJPG chroma subsampling cannot be read without decoding; "
-    "4:2:2 MJPEG stalls neatdecoder without an error (core#903).",
-    "YUYV": "There is no YUYV to NV12 conversion on the CVU (internals#244).",
-}
 
 
 def _invalid(message: str) -> BoardError:
@@ -62,7 +56,7 @@ def render(snapshot: dict, request: dict) -> dict:
     if item["connection"] != "usb" and choice["tier"] != "verified":
         raise _invalid(
             f"{fmt['format']} {request['width']}x{request['height']} at {request['fps']} fps cannot be exported: "
-            "Neat Core's support rules do not accept it."
+            + (choice.get("reason") or "Neat Core's support rules do not accept it.")
         )
     selection = {
         "format": fmt["format"],
@@ -103,7 +97,6 @@ def _yaml_block(rows, comment: Optional[str] = None) -> str:
 
 
 def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> dict:
-    libcamerasrc = snapshot["platform"]["libcamerasrc"]
     mode = _verified_mode(item, choice, selection)
     rate = _rate(selection["fps"])
     options = {
@@ -117,8 +110,6 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
         "queue_depth": QUEUE_DEPTH,
         "allow_cpu_fallback": True,
     }
-    # Core rejects capture_buffer_count > 0 when libcamerasrc lacks buffer-count.
-    capture_buffers = CAPTURE_BUFFERS if libcamerasrc and libcamerasrc["buffer_count"] else 0
     descriptor = {
         "kind": "neat.camera-input",
         "version": 1,
@@ -126,35 +117,23 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
         "board": {"label": snapshot["board"].get("label"), "hostname": snapshot["board"].get("hostname")},
         "scanned_at": snapshot["scanned_at"],
         "options": options,
-        "capture_buffer_count": capture_buffers,
+        # Core rejects capture_buffer_count > 0 when libcamerasrc lacks buffer-count, and Insight does not
+        # read libcamerasrc's properties on the board, so the code leaves it unset.
+        "capture_buffer_count": 0,
         "support_tier": choice["tier"],
     }
-    yaml_rows = [
-        ("name", options["camera_name"]),
-        ("width", options["width"]),
-        ("height", options["height"]),
-        ("fps_num", options["framerate_num"]),
-        ("fps_den", options["framerate_den"]),
-        ("format", options["format"]),
-        ("capture_buffers", CAPTURE_BUFFERS),
-        ("strict_zero_copy", not options["allow_cpu_fallback"]),
-        ("queue_depth", options["queue_depth"]),
-    ]
-    exports = [
-        _export("python", "Python (pyneat)", "camera_input.py", "python", _python(options, capture_buffers)),
-        _export("cpp", "C++ (Neat)", "camera_input.cpp", "cpp", _cpp(options, capture_buffers)),
-    ]
     # Apps treats capture_buffers as a positive capture-buffer request; unlike the Core APIs it
-    # has no value that means "do not set buffer-count".  Do not offer a configuration that the
-    # installed libcamerasrc is known to reject.
-    if capture_buffers:
-        exports.append(_export("yaml", "Apps config.yaml camera block", "config.yaml", "yaml", _yaml_block(yaml_rows)))
-    exports.append(_export("json", "JSON", "camera_input.json", "json", json.dumps(descriptor, indent=2) + "\n"))
+    # has no value that means "do not set buffer-count", so no Apps config.yaml block is offered.
+    exports = [
+        _export("python", "Python (pyneat)", "camera_input.py", "python", _python(options)),
+        _export("cpp", "C++ (Neat)", "camera_input.cpp", "cpp", _cpp(options)),
+        _export("json", "JSON", "camera_input.json", "json", json.dumps(descriptor, indent=2) + "\n"),
+    ]
     return {
         "camera_id": item["id"],
         "selection": selection,
         "support": _mode_support(item, choice, mode),
-        "warnings": _mipi_warnings(item, choice, mode, libcamerasrc),
+        "warnings": _mipi_warnings(item, choice, mode),
         "exports": exports,
     }
 
@@ -171,7 +150,7 @@ def _mode_support(item: dict, choice: dict, mode: Optional[dict]) -> dict:
     return {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []}
 
 
-def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc: Optional[dict]) -> list:
+def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict]) -> list:
     warnings = []
     # An advertised mode says so on its own menu entry and on the tier pill; a paragraph repeating it
     # above the code belongs to neither.
@@ -187,27 +166,9 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict], libcamerasrc:
         users = item["availability"]["users"]
         holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users) or "another process"
         warnings.append(f"The camera is in use by {holders}; CameraInput cannot acquire it until it is released.")
-    if libcamerasrc is None:
-        warnings.append(
-            "libcamerasrc could not be checked on the board (see the warnings on the Peripherals page), so the "
-            "code omits capture_buffer_count."
-        )
-        return warnings
-    if not libcamerasrc["present"]:
-        warnings.append(NO_LIBCAMERASRC_REASON)
-        return warnings
-    # Nothing is said when the board can do zero-copy: the exported code sets allow_cpu_fallback
-    # where anyone reading it will see it. Only its absence needs explaining.
-    if not libcamerasrc["external_buffer_mode"]:
-        warnings.append(
-            "The export allows CPU fallback: libcamerasrc on this board has no external-buffer-mode property, "
-            "so strict zero-copy is unavailable."
-        )
-    if not libcamerasrc["buffer_count"]:
-        warnings.append(
-            "libcamerasrc on this board has no buffer-count property, so the code omits capture_buffer_count "
-            "and the Apps example rejects its capture_buffers setting."
-        )
+    warnings.append(
+        "Insight does not read libcamerasrc's properties on the board, so the code omits capture_buffer_count."
+    )
     return warnings
 
 
@@ -228,20 +189,14 @@ def _cpp_value(value) -> str:
     return '"' + "".join(escaped) + '"'
 
 
-def _python(options: dict, capture_buffers: int) -> str:
+def _python(options: dict) -> str:
     lines = ["import pyneat", "", "camera = pyneat.CameraInputOptions()"]
     lines += [f"camera.{key} = {_py_value(value)}" for key, value in options.items()]
-    node_args = f"camera, capture_buffer_count={capture_buffers}" if capture_buffers else "camera"
-    lines += ["", 'graph = pyneat.Graph("camera_input")', f"graph.add(pyneat.nodes.camera_input({node_args}))"]
+    lines += ["", 'graph = pyneat.Graph("camera_input")', "graph.add(pyneat.nodes.camera_input(camera))"]
     return "\n".join(lines) + "\n"
 
 
-def _cpp(options: dict, capture_buffers: int) -> str:
-    node = (
-        f"neat::nodes::CameraInputWithCaptureBuffers(camera, {capture_buffers})"
-        if capture_buffers
-        else "neat::nodes::CameraInput(camera)"
-    )
+def _cpp(options: dict) -> str:
     lines = [
         "#include <neat.h>",
         "",
@@ -251,7 +206,7 @@ def _cpp(options: dict, capture_buffers: int) -> str:
         "  neat::CameraInputOptions camera;",
     ]
     lines += [f"  camera.{key} = {_cpp_value(value)};" for key, value in options.items()]
-    lines += [f"  graph.add({node});", "}"]
+    lines += ["  graph.add(neat::nodes::CameraInput(camera));", "}"]
     return "\n".join(lines) + "\n"
 
 
@@ -261,7 +216,7 @@ def _usb_export(item: dict, fmt: dict, selection: dict) -> dict:
     rate = _rate(selection["fps"])
     warnings = ["Core CameraInput does not support USB cameras (core#838); this is a V4L2 descriptor, not Neat code."]
     if fmt["format"] in USB_FORMAT_NOTES:
-        warnings.append(USB_FORMAT_NOTES[fmt["format"]])
+        warnings.append(USB_FORMAT_NOTES[fmt["format"]][0])
     if device and not item["device"].get("by_id"):
         warnings.append(f"{device} numbering is not stable across reboots or replugs; prefer a /dev/v4l/by-id path.")
     descriptor = {

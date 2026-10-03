@@ -841,7 +841,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Scan the selected board for cameras",
-        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan and waits until its target `scan_sequence` is reached, then reads the catalog. Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes and reads `libcamerasrc`'s properties; if that check cannot run, availability is `unknown`. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists cameras added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan and waits until its target `scan_sequence` is reached, then reads the catalog. Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes; if that check cannot run, availability is `unknown`. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists cameras added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, too old, malformed answer) return `503` or `502` with an install or update hint.",
         "operationId": "refreshPeripherals",
         "responses": {
           "200": {"description": "New camera snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
@@ -856,7 +856,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the last scan without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name`; an Apps `config.yaml` `camera:` block is included only when the board's `libcamerasrc` supports `buffer-count`. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "description": "Renders one mode from the last scan without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core's rules reject returns `400` with Sentinel's reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
         "operationId": "exportCameraInput",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
@@ -1409,11 +1409,11 @@
           "connection": {"type": "string", "description": "`mipi` or `usb`; a connection Insight does not group is passed through and not listed on the page."},
           "name": {"type": "string"},
           "model": {"type": ["string", "null"]},
-          "device": {"type": "object", "description": "Known identifiers from Sentinel: `camera_name`, `media_device`, and `bus_info` (MIPI); `video_node` and `usb` identity (`vendor_id`, `product_id`, `serial`, `product`, `bus_path`) for USB.", "additionalProperties": true},
+          "device": {"type": "object", "description": "Known identifiers from Sentinel: `camera_name`, `camera_name_source` (`media-graph`: the sensor entity Sentinel names the camera after), `media_device`, `bus_info`, and `csi` (CSI receiver) for MIPI; `video_node`, `by_id` (the /dev/v4l/by-id link), and `usb` identity (`vendor_id`, `product_id`, `manufacturer`, `serial`, `product`, `bus_path`, `speed_mbps`) for USB.", "additionalProperties": true},
           "availability": {"type": "object", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
           "support": {"$ref": "#/components/schemas/SupportTier"},
           "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
-          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}}}}}}}}}},
+          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}, "reason": {"type": "string", "description": "`unsupported` only: why Neat Core's rules, applied by Sentinel, reject this rate."}}}}}}}}}},
           "default_selection": {"type": ["object", "null"]},
           "notes": {"type": "array", "items": {"type": "string"}},
           "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
@@ -1427,7 +1427,7 @@
           "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
-          "platform": {"type": ["object", "null"], "description": "Tools the on-board check found, libcamerasrc properties, and how camera users were detected."},
+          "platform": {"type": ["object", "null"], "description": "Tools the on-board check found and how camera users were detected."},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
           "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous refresh of the same board."}

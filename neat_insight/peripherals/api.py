@@ -36,16 +36,13 @@ def _board_summary(session, identity=None) -> dict:
 def _check_board(session, catalog: dict):
     """Run the read-only camera check on the board in one command; None when it cannot run.
 
-    Availability and libcamerasrc facts are extras on top of Sentinel's catalog, so a failure here
-    degrades them to unknown instead of failing the scan.
+    Availability is an extra on top of Sentinel's catalog, so a failure here degrades it to unknown
+    instead of failing the scan.
     """
     cameras = cameras_of(catalog)
     if not cameras:
-        return {"tools": {}, "availability_method": None, "users": {}, "libcamerasrc": None, "failures": []}
-    payload = {
-        "cameras": {device["id"]: camera_nodes(device) for device in cameras},
-        "libcamerasrc": any(device["camera"].get("backend") == "mipi" for device in cameras),
-    }
+        return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
+    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
     try:
         result = session.transport.exec(
             ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
