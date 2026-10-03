@@ -8,9 +8,11 @@ import {
   deriveBackendState,
   formatBytes,
   formatDuration,
+  friendlyModelName,
   loadedChatModel,
   speechModels
 } from './backendState.js'
+import { speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
@@ -52,7 +54,7 @@ test('backend state: starting until the model server answers', () => {
     health: { httpStatus: 200, body: { ...HEALTH_OK, ok: false, model_server: { reachable: false, error: 'refused' } } }
   })
   assert.equal(starting.state, 'starting')
-  assert.equal(starting.detail, 'refused')
+  assert.match(starting.detail, /loading a model or restarting/)
 })
 
 test('backend state: busy while a load runs or the tab has an operation in flight', () => {
@@ -141,4 +143,32 @@ test('thinking is split from the answer, including while it streams', () => {
   assert.deepEqual(splitThinking('Hi'), { thinking: '', answer: 'Hi', thinkingDone: true })
   assert.deepEqual(splitThinking('<think>plan'), { thinking: 'plan', answer: '', thinkingDone: false })
   assert.deepEqual(splitThinking('<think>plan</think>\n\nAnswer'), { thinking: 'plan', answer: 'Answer', thinkingDone: true })
+})
+
+test('speakable text drops Markdown symbols, code and emoji the speech engines reject', () => {
+  assert.equal(
+    speakableText('## Result\n**Great** work! ✌️ 👍🏽 🇯🇵 👩‍💻\n\n```js\nx()\n```\nSee [docs](https://x) and `run.sh`.'),
+    'Result Great work! See docs and run.sh.'
+  )
+  assert.equal(speakableText(''), '')
+  assert.equal(speakableText(null), '')
+})
+
+test('an operation the tab started stays busy while the model server is too busy to answer', () => {
+  const state = deriveBackendState({
+    health: { httpStatus: 200, body: { ...HEALTH_OK, ok: false, model_server: { reachable: false, error: 'ConnectTimeout' } } },
+    status: { ...STATUS, loading: { name: 'Qwen3', remainingS: 200 } },
+    busyOp: 'Loading Qwen3'
+  })
+  assert.equal(state.state, 'busy')
+  assert.equal(state.title, 'Loading Qwen3')
+  assert.match(state.detail, /3 min 20 s left/)
+})
+
+test('friendly model names drop build and quantization words', () => {
+  assert.equal(friendlyModelName('Qwen3-VL-4B-Instruct-GPTQ-a16w4'), 'Qwen3 VL 4B')
+  assert.equal(friendlyModelName('florianvoss@whisper-small-a16w8-layered-encoder'), 'Whisper small')
+  assert.equal(friendlyModelName('Qwen3-0.6B-Autoround-a16w4'), 'Qwen3 0.6B')
+  assert.equal(friendlyModelName('gte-small'), 'Gte small')
+  assert.equal(friendlyModelName(''), '')
 })
