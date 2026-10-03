@@ -13,6 +13,7 @@ import {
   loadedChatModel,
   speechModels
 } from './backendState.js'
+import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
 import { languageNames, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
 
@@ -205,4 +206,25 @@ test('thinking is offered only for models that have a reasoning mode', () => {
   assert.equal(supportsThinking('Qwen3-4B-Instruct-2507'), false)
   assert.equal(supportsThinking('Llama-3.2-3B-Instruct'), false)
   assert.equal(supportsThinking(''), false)
+})
+
+test('the tutorial covers every feature and mentions thinking only when the model can', () => {
+  const ids = tutorialSteps().map((s) => s.id)
+  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'help'])
+  assert.deepEqual(tutorialSteps({ canThink: true }).map((s) => s.id).slice(-2), ['think', 'help'])
+  for (const step of tutorialSteps({ canThink: true })) {
+    assert.ok(step.title && step.body.length > 40, step.id)
+  }
+})
+
+test('the tutorial is remembered once seen, and not forced on every visit when storage fails', () => {
+  const store = new Map()
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) }
+  assert.equal(tutorialSeen(storage), false)
+  markTutorialSeen(storage)
+  assert.equal(store.get(TUTORIAL_STORAGE_KEY), '1')
+  assert.equal(tutorialSeen(storage), true)
+  const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
+  assert.equal(tutorialSeen(broken), true)
+  assert.doesNotThrow(() => markTutorialSeen(broken))
 })
