@@ -3354,3 +3354,491 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* GenAI Studio tab */
+.genai {
+  display: grid;
+  gap: 14px;
+}
+
+.genai-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 16px;
+}
+
+.genai-model-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-model-picker select {
+  width: auto;
+  min-width: 220px;
+}
+
+.genai-settings-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.genai-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.genai-pill {
+  flex: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+}
+
+.genai-pill-ready {
+  background: var(--ok-soft);
+  border-color: rgba(25, 113, 62, 0.35);
+  color: var(--ok);
+}
+
+.genai-pill-busy,
+.genai-pill-starting {
+  background: var(--accent-soft);
+  border-color: rgba(14, 90, 184, 0.35);
+  color: var(--accent-strong);
+}
+
+.genai-pill-failed,
+.genai-pill-unavailable,
+.genai-pill-incompatible {
+  background: var(--danger-soft);
+  border-color: #edb1be;
+  color: #8f2f45;
+}
+
+.genai-banner {
+  display: grid;
+  gap: 6px;
+}
+
+.genai-banner-title {
+  margin: 0;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-banner-failed,
+.genai-banner-incompatible,
+.genai-banner-unavailable {
+  border-color: #edb1be;
+}
+
+.genai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.genai-small {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.genai-check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.genai-check input {
+  width: auto;
+}
+
+.genai-settings-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.genai-settings-section {
+  display: grid;
+  gap: 8px;
+}
+
+.genai-settings-section + .genai-settings-section {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.genai-settings-section h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: #274155;
+}
+
+.genai-settings-section .hint {
+  margin: 0;
+}
+
+.genai-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.genai-form label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 220px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-row {
+  display: flex;
+  gap: 8px;
+}
+
+.genai-row input {
+  flex: 1;
+}
+
+.genai-model-group-title {
+  margin: 4px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #2d4f64;
+}
+
+.genai-models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.genai-models li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  background: var(--surface-soft);
+  font-size: 13px;
+}
+
+.genai-models li .hint {
+  margin: 0;
+}
+
+.genai-model-name {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.genai-badge {
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-alt-soft);
+  color: var(--accent-alt);
+}
+
+.genai-badge-on {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.genai-chat {
+  display: grid;
+  gap: 10px;
+}
+
+.genai-transcript {
+  height: min(60vh, 640px);
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.genai-welcome {
+  display: grid;
+  gap: 6px;
+  padding: 8px 4px;
+}
+
+.genai-welcome-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-msg {
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 88%;
+}
+
+.genai-msg p {
+  margin: 0;
+}
+
+.genai-msg-user {
+  justify-self: end;
+  background: var(--accent-soft);
+  border: 1px solid rgba(14, 90, 184, 0.2);
+}
+
+.genai-msg-assistant {
+  justify-self: start;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+}
+
+.genai-msg-assistant > button {
+  margin-top: 6px;
+}
+
+.genai-msg-image {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.genai-markdown > :first-child {
+  margin-top: 0;
+}
+
+.genai-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.genai-markdown pre {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.genai-markdown table {
+  border-collapse: collapse;
+}
+
+.genai-markdown th,
+.genai-markdown td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+}
+
+.genai-thinking {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.genai-thinking summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.genai-error {
+  color: var(--danger) !important;
+  font-size: 12px;
+}
+
+.genai-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.genai-composer textarea {
+  flex: 1;
+  min-height: 42px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.genai-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px;
+}
+
+.genai-new-chat {
+  justify-self: start;
+}
+
+.genai-listening {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.genai-attachment,
+.genai-camera {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.genai-attachment img {
+  max-height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.genai-camera video {
+  width: min(360px, 100%);
+  border-radius: var(--radius-sm);
+  background: #0b0f14;
+}
+
+.genai-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-accent);
+  overflow: hidden;
+}
+
+.genai-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+.genai-progress-fill.indeterminate {
+  width: 30%;
+  animation: genai-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes genai-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-progress-fill,
+  .genai-progress-fill.indeterminate {
+    transition: none;
+    animation: none;
+  }
+}
+
+.genai-tutorial {
+  display: grid;
+  gap: 6px;
+  border-color: rgba(14, 90, 184, 0.35);
+  background: var(--accent-soft);
+}
+
+.genai-tutorial-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.genai-tutorial-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.genai-tutorial-body {
+  margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  max-width: 72ch;
+}
+
+.genai-tutorial-spacer {
+  flex: 1;
+}
+
+.genai-spotlight {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.genai-spot-wrap {
+  display: inline-flex;
+}
+
+.genai-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.genai-examples .hint {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .genai-settings-btn {
+    margin-left: 0;
+  }
+
+  .genai-model-picker select {
+    min-width: 0;
+  }
+}
