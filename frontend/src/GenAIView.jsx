@@ -11,7 +11,8 @@ import {
   formatDuration,
   friendlyModelName,
   loadedChatModel,
-  speechModels
+  speechModels,
+  supportsThinking
 } from './genai/backendState.js'
 import {
   GenaiError,
@@ -133,6 +134,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [draft, setDraft] = useState('')
   const [image, setImage] = useState(null)
   const [thinking, setThinking] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(false)
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
   const transcriptBox = useRef(null)
@@ -164,6 +166,7 @@ export default function GenAIView({ onError, onStatus }) {
   const usable = canUseModels(backend.state)
   const chatModel = loadedChatModel(status)
   const sees = Boolean(chatModel && chatModel.supportsVision)
+  const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
 
   const fail = useCallback((message) => {
     setLastError(message)
@@ -211,6 +214,15 @@ export default function GenAIView({ onError, onStatus }) {
     const box = transcriptBox.current
     if (box && stickToBottom.current) box.scrollTop = box.scrollHeight
   }, [messages])
+
+  // Opening the ideas mid-chat scrolls up to them (they sit above the messages).
+  useEffect(() => {
+    const box = transcriptBox.current
+    if (showWelcome && box) {
+      stickToBottom.current = false
+      box.scrollTop = 0
+    }
+  }, [showWelcome])
 
   function onTranscriptScroll() {
     const box = transcriptBox.current
@@ -399,12 +411,13 @@ export default function GenAIView({ onError, onStatus }) {
     const outgoing = [
       { role: 'system', content: image ? WITH_IMAGE_PROMPT : WITHOUT_IMAGE_PROMPT },
       ...history,
-      { role: 'user', content: thinking ? userContent : withNoThink(userContent) }
+      { role: 'user', content: canThink && !thinking ? withNoThink(userContent) : userContent }
     ]
     const replyId = Date.now()
     setMessages((prev) => [...prev, { role: 'user', text: userText, image }, { role: 'assistant', id: replyId, content: '', pending: true }])
     setDraft('')
     setImage(null)
+    setShowWelcome(false)
     stickToBottom.current = true
     setStreaming(true)
     const controller = new AbortController()
@@ -520,6 +533,7 @@ export default function GenAIView({ onError, onStatus }) {
   // --- welcome cards ----------------------------------------------------------
 
   function tryPrompt(text) {
+    setShowWelcome(false)
     setDraft(text)
     composer.current?.focus()
   }
@@ -556,10 +570,17 @@ export default function GenAIView({ onError, onStatus }) {
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
         </label>
-        <label className="genai-check" title="Lets reasoning models think step by step before answering. Slower, sometimes better.">
-          <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} />
-          Think first
-        </label>
+        {canThink && (
+          <label className="genai-check" title="This model can reason step by step before answering: slower, sometimes better for maths and logic. The reasoning appears folded above the answer.">
+            <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} />
+            Think first
+          </label>
+        )}
+        {messages.length > 0 && (
+          <button type="button" className="btn-ghost genai-small" aria-expanded={showWelcome} onClick={() => setShowWelcome((open) => !open)}>
+            {showWelcome ? 'Hide ideas' : 'What can I do?'}
+          </button>
+        )}
         <button
           type="button"
           className={settingsOpen ? 'btn-tonal genai-settings-btn' : 'btn-ghost genai-settings-btn'}
@@ -706,7 +727,7 @@ export default function GenAIView({ onError, onStatus }) {
 
       <section className="panel genai-chat" aria-label="Chat">
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
-          {messages.length === 0 && (
+          {(messages.length === 0 || showWelcome) && (
             <div className="genai-welcome">
               <p className="genai-welcome-title">What you can do with GenAI on the board</p>
               <p className="section-note">
@@ -718,12 +739,12 @@ export default function GenAIView({ onError, onStatus }) {
                   <span className="genai-card-title">Ask a question</span>
                   <span className="genai-card-hint">Explain what an AI accelerator does</span>
                 </button>
-                <button type="button" className="genai-card" disabled={!canChat || !sees} onClick={openCamera} title={sees ? '' : 'Needs a model that sees images'}>
+                <button type="button" className="genai-card" disabled={!canChat || !sees} onClick={() => { setShowWelcome(false); openCamera() }} title={sees ? '' : 'Needs a model that sees images'}>
                   <Icon d={ICONS.camera} />
                   <span className="genai-card-title">Show it something</span>
                   <span className="genai-card-hint">{sees ? 'Use the camera or a photo' : 'Needs a model that sees images'}</span>
                 </button>
-                <button type="button" className="genai-card" disabled={!usable || !status?.asrModel} onClick={toggleRecording}>
+                <button type="button" className="genai-card" disabled={!usable || !status?.asrModel} onClick={() => { setShowWelcome(false); toggleRecording() }}>
                   <Icon d={ICONS.mic} />
                   <span className="genai-card-title">Talk to it</span>
                   <span className="genai-card-hint">Speak, then turn on Read replies aloud</span>

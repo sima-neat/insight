@@ -9,6 +9,7 @@ import {
   formatBytes,
   formatDuration,
   friendlyModelName,
+  supportsThinking,
   loadedChatModel,
   speechModels
 } from './backendState.js'
@@ -193,4 +194,15 @@ test('read aloud support says plainly when a language has no voice', () => {
   assert.deepEqual(readAloudSupport('Hello there', VOICE_LANGUAGES, 'de'), { supported: true, language: 'de' })
   assert.deepEqual(readAloudSupport('ఒక యువతి', null), { supported: true, language: 'te' })
   assert.deepEqual(languageNames(['zh', 'en', 'na']), ['Chinese', 'English'])
+})
+
+test('thinking is offered only for models that have a reasoning mode', () => {
+  assert.equal(supportsThinking('Qwen3-1.7B-GPTQ-a16w4'), true)
+  assert.equal(supportsThinking('simaai/Qwen3-0.6B-Autoround-a16w4'), true)
+  assert.equal(supportsThinking('Qwen3-VL-4B-Thinking-a16w4'), true)
+  assert.equal(supportsThinking('DeepSeek-R1-Distill-Qwen-1.5B'), true)
+  assert.equal(supportsThinking('Qwen3-VL-4B-Instruct-GPTQ-a16w4'), false)
+  assert.equal(supportsThinking('Qwen3-4B-Instruct-2507'), false)
+  assert.equal(supportsThinking('Llama-3.2-3B-Instruct'), false)
+  assert.equal(supportsThinking(''), false)
 })
