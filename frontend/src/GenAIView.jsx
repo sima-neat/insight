@@ -26,7 +26,7 @@ import {
   streamChat,
   transcribe
 } from './genai/client.js'
-import { speakableText } from './genai/speech.js'
+import { languageNames, readAloudSupport, speakableText } from './genai/speech.js'
 import { splitThinking } from './genai/streams.js'
 
 const POLL_MS = 5000
@@ -346,16 +346,25 @@ export default function GenAIView({ onError, onStatus }) {
     setSpeakingId(null)
   }
 
+  function voiceLanguageFor(text) {
+    const fallback = spokenLanguage.current || (language !== 'auto' ? language : 'en')
+    return readAloudSupport(text, voices ? voices.languages : null, fallback)
+  }
+
   async function speakText(text, id, audio = unlockPlayer()) {
     stopSpeaking()
     const words = speakableText(text)
     if (!words) return
+    const support = voiceLanguageFor(text)
+    if (!support.supported) {
+      onStatus?.(`The board's voices can't read ${support.name} aloud yet.`)
+      return
+    }
     const controller = new AbortController()
     speechAbort.current = controller
     setSpeakingId(id)
     try {
-      const lang = spokenLanguage.current || (language !== 'auto' ? language : 'en')
-      const result = await speak({ text: words, model: engine, voice: voice || undefined, language: lang, signal: controller.signal })
+      const result = await speak({ text: words, model: engine, voice: voice || undefined, language: support.language, signal: controller.signal })
       if (controller.signal.aborted) return
       const url = URL.createObjectURL(result.audio)
       const done = () => {
@@ -741,6 +750,7 @@ export default function GenAIView({ onError, onStatus }) {
             }
             const parts = splitThinking(m.content)
             const speaking = speakingId === m.id
+            const support = parts.answer && !m.pending ? voiceLanguageFor(parts.answer) : null
             return (
               <div key={index} className="genai-msg genai-msg-assistant">
                 {parts.thinking && (
@@ -756,7 +766,12 @@ export default function GenAIView({ onError, onStatus }) {
                 )}
                 {m.stopped && <p className="hint">Stopped.</p>}
                 {m.error && <p className="genai-error">{m.error}</p>}
-                {!m.pending && parts.answer && (
+                {support && !support.supported && (
+                  <p className="hint genai-no-voice" title={voices ? `The board's voices speak ${languageNames(voices.languages).join(', ')}.` : ''}>
+                    Can't read {support.name} aloud yet: the board has no {support.name} voice.
+                  </p>
+                )}
+                {support && support.supported && (
                   speaking ? (
                     <button type="button" className="btn-ghost genai-small" onClick={stopSpeaking}>Stop speaking</button>
                   ) : (
