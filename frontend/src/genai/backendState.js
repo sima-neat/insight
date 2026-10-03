@@ -66,19 +66,26 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     }
   }
 
+  // An operation this tab started (a model load, a reset) keeps the model server
+  // too busy to answer /health; report it as such rather than as a restart.
+  const loading = status && status.loading
+  if (busyOp) {
+    const remaining = loading && typeof loading.remainingS === 'number' ? ` · about ${formatDuration(loading.remainingS)} left` : ''
+    return { state: 'busy', title: busyOp, detail: `Chat and speech wait until it finishes${remaining}.`, action: null }
+  }
+
   const modelServerUp = Boolean(body.model_server && body.model_server.reachable)
   if (!body.ok || !modelServerUp) {
     return {
       state: 'starting',
       title: 'GenAI Studio is starting',
-      detail: (body.model_server && body.model_server.error) || 'The model server is not answering yet.',
+      detail: 'The model server is not answering yet; it may be loading a model or restarting.',
       action: null
     }
   }
 
-  const loading = status && status.loading
-  if (busyOp || loading) {
-    const label = busyOp || `Loading ${loading.name}`
+  if (loading) {
+    const label = `Loading ${loading.name}`
     const remaining = loading && typeof loading.remainingS === 'number' ? ` · about ${formatDuration(loading.remainingS)} left` : ''
     return { state: 'busy', title: label, detail: `Chat and speech wait until it finishes${remaining}.`, action: null }
   }
@@ -133,4 +140,21 @@ export function formatDuration(seconds) {
   const m = Math.floor(s / 60)
   const rest = s % 60
   return rest ? `${m} min ${rest} s` : `${m} min`
+}
+
+// A readable model name: "Qwen3-VL-4B-Instruct-GPTQ-a16w4" -> "Qwen3 VL 4B",
+// "florianvoss@whisper-small-a16w8-layered-encoder" -> "Whisper small".
+// The exact name stays available as a tooltip.
+const BUILD_WORDS = new Set(['instruct', 'chat', 'gptq', 'awq', 'autoround', 'layered', 'encoder', 'safetensors', 'hf', 'int8', 'int4', 'bf16', 'fp16'])
+
+export function friendlyModelName(name) {
+  if (!name) return ''
+  const base = String(name).split('@').pop()
+  const words = base
+    .split(/[-_]+/)
+    .filter((w) => w && !BUILD_WORDS.has(w.toLowerCase()) && !/^a\d+w\d+$/i.test(w))
+  if (!words.length) return base
+  const first = words[0]
+  words[0] = first.charAt(0).toUpperCase() + first.slice(1)
+  return words.join(' ')
 }
