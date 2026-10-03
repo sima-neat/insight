@@ -2,7 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
 import { boardIndicator, createBoardSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
-import { Pill } from './peripherals/ui.jsx'
 
 import {
   closeAllWebcamSessions,
@@ -18,8 +17,8 @@ import {
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
 const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
+const BoardPanel = lazy(() => import('./peripherals/BoardPanel.jsx'))
 const StatsView = lazy(() => import('./StatsView.jsx'))
-const BoardDialog = lazy(() => import('./peripherals/BoardDialog.jsx'))
 
 const SOURCE_COUNT = 48
 const WEBCAM_OPTION_PREFIX = '__webcam__:'
@@ -78,7 +77,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'intro',
     tab: null,
-    eyebrow: 'Step 1 of 7',
     title: 'What is Insight?',
     summary: 'Insight helps developers inspect a workspace, set up test streams, view inference results, and watch system performance while they test an application.',
     details:
@@ -87,7 +85,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'workspace',
     tab: 'workspace',
-    eyebrow: 'Step 2 of 7',
     title: 'Explore the Workspace',
     summary: 'Workspace is for browsing the shared files a developer works with across the SDK container, host, and paired DevKit.',
     details:
@@ -96,7 +93,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'media',
     tab: 'media',
-    eyebrow: 'Step 3 of 7',
     title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
@@ -105,7 +101,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'rtsp',
     tab: 'rtsp',
-    eyebrow: 'Step 4 of 7',
     title: 'Set up streaming sources',
     summary: 'This tab turns files from the library into live source slots such as src1, src2, and src3.',
     details:
@@ -114,7 +109,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'viewer',
     tab: 'viewer',
-    eyebrow: 'Step 5 of 7',
     title: 'Live viewer',
     summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
     details:
@@ -123,20 +117,18 @@ const ONBOARDING_STEPS = [
   {
     id: 'peripherals',
     tab: 'peripherals',
-    eyebrow: 'Step 6 of 7',
-    title: 'Inspect connected peripherals',
-    summary: 'Peripherals shows the authoritative device catalog maintained by the selected board’s daemon.',
+    title: 'See what is attached to the board',
+    summary: 'Peripherals detects devices on the selected board and shows what each one reports.',
     details:
-      'Review camera modes, refresh the daemon catalog, and generate CameraInput examples. Hot-plug events update this page without making Insight scan hardware itself.'
+      'Confirm a camera is connected and read the modes it reports. Cameras work today; other kinds appear as Insight learns to read them.'
   },
   {
     id: 'visualizer',
     tab: 'visualizer',
-    eyebrow: 'Step 7 of 7',
     title: 'Check system stats',
-    summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
+    summary: 'The Stats tab reads power, temperature, CPU, memory and storage from the Sentinel daemon on the board you have selected.',
     details:
-      'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
+      'Watch the board’s live metrics while an application runs, and record a trace around a workload to keep it on the board as a named run. Open a saved run to see each metric’s minimum, mean and maximum, or compare runs against a baseline to see what changed between them.'
   }
 ]
 
@@ -752,17 +744,21 @@ export default function App() {
   const [board, setBoard] = useState(null)
   const [boardError, setBoardError] = useState(null)
   const [boardLoading, setBoardLoading] = useState(true)
-  const [boardDialogOpen, setBoardDialogOpen] = useState(false)
-  const closeBoardDialog = useCallback(() => setBoardDialogOpen(false), [])
+  const [boardPanelOpen, setBoardPanelOpen] = useState(false)
+  // Stable, because the board panel's focus handling keys off it: a new function each render
+  // would re-run that effect and pull focus out of whatever the user is typing in.
+  const closeBoardPanel = useCallback(() => setBoardPanelOpen(false), [])
+  // Reads and board changes can answer out of order; the sync keeps an older read from undoing
+  // a newer change. It only calls state setters, which React keeps stable, so one is enough.
   const boardSyncRef = useRef(null)
   if (!boardSyncRef.current) {
     boardSyncRef.current = createBoardSync({
       fetchBoard: () => requestBoardJson('/api/board'),
-      onBoard: (next) => {
-        setBoard(next)
+      onBoard: (data) => {
+        setBoard(data)
         setBoardError(null)
       },
-      onError: (nextError) => setBoardError(normalizeBoardError(nextError)),
+      onError: (err) => setBoardError(normalizeBoardError(err)),
       onLoading: setBoardLoading
     })
   }
@@ -956,7 +952,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    boardSyncRef.current.load()
+    loadBoard()
   }, [])
 
   useEffect(() => {
@@ -2065,16 +2061,18 @@ export default function App() {
     loadSysInfo()
   }
 
+  // One board target, shared by Peripherals and (later) Stats.
   function loadBoard() {
     return boardSyncRef.current.load()
   }
 
-  function handleBoardChange(next) {
-    boardSyncRef.current.apply(next)
+  function handleBoardChange(data) {
+    boardSyncRef.current.apply(data)
+    loadDevkitShellInfo()
   }
 
-  function openBoardDialog() {
-    setBoardDialogOpen(true)
+  function openBoardPanel() {
+    setBoardPanelOpen(true)
     if (!board) loadBoard()
   }
 
@@ -2160,7 +2158,7 @@ export default function App() {
     return out
   }, [metricEvents, selectedProfileSeries])
 
-  const boardInfo = boardIndicator(board)
+  const boardIndicatorInfo = boardIndicator(boardLoading && !board ? null : board)
 
   return (
     <div className="app-shell">
@@ -2173,32 +2171,21 @@ export default function App() {
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
         <div className="masthead-actions">
+          {/* One box for the board: which one, whether it answers, and the way in to everything
+              else about it — a shell on it, or a different board. */}
           <button
             type="button"
-            className={['board-trigger', boardInfo.state.tone].filter(Boolean).join(' ')}
-            onClick={openBoardDialog}
-            title={boardInfo.title}
+            className={['board-trigger', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}
+            onClick={openBoardPanel}
+            title={boardIndicatorInfo.title}
             aria-haspopup="dialog"
-            aria-expanded={boardDialogOpen}
+            aria-expanded={boardPanelOpen}
           >
-            <span className="board-trigger-label">{boardInfo.label}</span>
-            <Pill tone={boardInfo.state.tone}>{boardInfo.state.short}</Pill>
+            <span className="board-trigger-label">{boardIndicatorInfo.label}</span>
+            <span className={['sysinfo-pill', 'periph-pill', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}>
+              {boardIndicatorInfo.state.short}
+            </span>
           </button>
-          {devkitShellInfo?.configured && (
-            <button
-              type="button"
-              className="devkit-trigger"
-              onClick={connectDevkitShell}
-              disabled={devkitShellBusy || !devkitShellInfo.available}
-              title={
-                devkitShellInfo.available
-                  ? `Open browser shell for ${devkitShellInfo.devkit_ip}`
-                  : 'webssh is not installed in this Insight environment'
-              }
-            >
-              {devkitShellBusy ? 'Opening DevKit...' : devkitShellInfo.button_label}
-            </button>
-          )}
           <button
             type="button"
             className="sysinfo-trigger"
@@ -2222,7 +2209,7 @@ export default function App() {
       {tourOpen && (
         <section className="onboarding-panel" aria-label="Insight quick tour">
           <div className="onboarding-copy">
-            <p className="onboarding-eyebrow">{activeTourStep.eyebrow}</p>
+            <p className="onboarding-eyebrow">Step {tourStep + 1} of {ONBOARDING_STEPS.length}</p>
             <h2 className="onboarding-title">{activeTourStep.title}</h2>
             <p className="onboarding-summary">{activeTourStep.summary}</p>
             <p className="onboarding-detail">{activeTourStep.details}</p>
@@ -2665,13 +2652,13 @@ export default function App() {
         )}
 
         {tab === 'peripherals' && (
-          <Suspense fallback={<section className="panel"><p className="hint">Loading peripherals…</p></section>}>
+          <Suspense fallback={<section className="panel"><p className="hint">Loading peripherals...</p></section>}>
             <PeripheralsView
               board={board}
-              boardError={boardError}
               boardLoading={boardLoading}
-              onOpenBoard={openBoardDialog}
+              boardError={boardError}
               onReloadBoard={loadBoard}
+              onOpenBoardPanel={openBoardPanel}
               onStatus={setUploadStatus}
             />
           </Suspense>
@@ -2679,11 +2666,11 @@ export default function App() {
 
         {tab === 'visualizer' && (
           <div className="visualizer-layout">
-            <Suspense fallback={<section className="panel"><p className="hint">Loading board telemetry…</p></section>}>
+            <Suspense fallback={<section className="panel"><p className="hint">Loading board telemetry...</p></section>}>
               <StatsView
                 board={board}
                 boardError={boardError}
-                onOpenBoardPanel={openBoardDialog}
+                onOpenBoardPanel={openBoardPanel}
                 onReloadBoard={loadBoard}
                 onError={setError}
                 onStatus={setUploadStatus}
@@ -3205,16 +3192,21 @@ export default function App() {
         </div>
       )}
 
-      {boardDialogOpen && (
+      {boardPanelOpen && (
         <Suspense fallback={null}>
-          <BoardDialog
+          <BoardPanel
             board={board}
-            error={boardError}
             loading={boardLoading}
-            onChange={handleBoardChange}
-            onClose={closeBoardDialog}
+            error={boardError}
+            onBoardChange={handleBoardChange}
+            onRetry={loadBoard}
             onReload={loadBoard}
             onStatus={setUploadStatus}
+            onError={setError}
+            onClose={closeBoardPanel}
+            shell={devkitShellInfo}
+            shellBusy={devkitShellBusy}
+            onOpenShell={connectDevkitShell}
           />
         </Suspense>
       )}

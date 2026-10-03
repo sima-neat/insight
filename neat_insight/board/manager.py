@@ -23,6 +23,8 @@ def get_board_manager() -> "BoardManager":
 
 
 class _ReportingTransport:
+    """Records connection-level failures in the manager's status before re-raising them."""
+
     def __init__(self, manager: "BoardManager", generation: int, transport):
         self._manager = manager
         self._generation = generation
@@ -50,6 +52,7 @@ class BoardSession:
         self._manager.require_generation(self.generation)
 
     def identity(self) -> dict:
+        # Read on every call: after a host-key change the same address can be a different board.
         result = self.transport.exec(["sh", "-c", _IDENTITY_SCRIPT], timeout=IDENTITY_TIMEOUT_SEC)
         text = result.stdout.decode("utf-8", errors="replace")
         if not text.replace("@@", "").strip():
@@ -82,6 +85,8 @@ class BoardSession:
 
 
 class BoardManager:
+    """Owns the single selected board that every board-facing Insight feature uses."""
+
     def __init__(self, data_dir: Path, on_board: bool):
         self.data_dir = Path(data_dir)
         self.on_board = on_board
@@ -103,7 +108,8 @@ class BoardManager:
                 raise BoardError(
                     "no_target",
                     "No board is selected.",
-                    hint="Enter the board's address, pair the SDK with `sima-cli sdk setup --devkit <ip>`, or run Insight on the board.",
+                    hint="Enter the board's address, pair the SDK with `sima-cli sdk setup --devkit <ip>`, "
+                    "or run Insight on the board.",
                 )
             self._replace_session(target)
             return self._session
@@ -118,6 +124,9 @@ class BoardManager:
             self._store.clear()
             self._replace_session(self.target())
 
+    def test(self) -> None:
+        self.session().identity()
+
     def trust_host_key(self, fingerprint: str) -> None:
         with self._lock:
             transport = self.session().raw_transport
@@ -129,6 +138,7 @@ class BoardManager:
                     hint="Test the connection again and confirm the fingerprint it reports.",
                 )
             transport.replace_host_key(key)
+            # The trusted key may belong to a different board: start a new generation so its scans stay separate.
             transport.close()
             self._session = None
             self._replace_session(self.target())
@@ -137,16 +147,18 @@ class BoardManager:
         with self._lock:
             target = self.target()
             self._replace_session(target)
+            sdk_env = sdk_env_target()
             return {
                 "target": target.to_dict() if target else None,
                 "saved": self._store.load(),
-                "defaults": {"on_board": self.on_board, "sdk_env": sdk_env_target()},
+                "defaults": {"on_board": self.on_board, "sdk_env": sdk_env},
                 "generation": self._generation,
                 "status": dict(self._status),
                 "board": self._board,
             }
 
     def require_generation(self, generation: int) -> None:
+        """Refuse a result read from a board that is no longer the selected one."""
         with self._lock:
             self._replace_session(self.target())
             if generation != self._generation:
@@ -168,9 +180,10 @@ class BoardManager:
         self._board = None
         self._session = None
         if target is not None:
-            transport = LocalTransport() if target.mode == "local" else SshTransport(
-                target.host, target.port, target.user, self._known_hosts
-            )
+            if target.mode == "local":
+                transport = LocalTransport()
+            else:
+                transport = SshTransport(target.host, target.port, target.user, self._known_hosts)
             self._session = BoardSession(self, target, self._generation, transport)
 
     def _record(self, generation: int, board: Optional[dict] = None, error: Optional[BoardError] = None) -> None:

@@ -6,6 +6,10 @@ import { SegmentedTabs } from './ui.jsx'
 
 const RUN_COLORS = ['var(--chart-1)', 'var(--chart-4)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-5)', 'var(--chart-8)']
 
+/**
+ * The compared runs overlaid, as Sentinel's Compare Runs tab shows them: pick a series, see every
+ * run over the time they all cover, and read each run's spread against the baseline below.
+ */
 export default function CompareOverlay({ payload }) {
   const [seriesId, setSeriesId] = useState('power')
   const overlay = compareOverlay(payload, seriesId)
@@ -49,7 +53,7 @@ export default function CompareOverlay({ payload }) {
                   {row.baseline && <span className="dash-baseline" title="Baseline">B</span>}
                   {row.name}
                 </th>
-                <td className="stats-ops-num">{row.count}</td>
+                <td className="stats-ops-num">{row.samples}</td>
                 <td className="stats-ops-num">{formatValue(row.minimum, unit)}</td>
                 <td className="stats-ops-num">{formatValue(row.mean, unit)}</td>
                 <td className="stats-ops-num">{formatValue(row.median, unit)}</td>

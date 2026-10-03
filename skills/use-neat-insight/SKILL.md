@@ -79,7 +79,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
-- Do not configure DevKit IP through neat-insight UI or API. Remote devkit configuration is environment-driven.
+- Peripherals never captures video: SiMa Sentinel on the board discovers the cameras (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog and checks which processes hold each camera. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
+- Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
@@ -394,37 +395,6 @@ rtsp://<sdk-host-ip>:<rtsp.tcp hostPortStart>/src1
 
 Use `/api/mediasrc` to confirm source assignment and playback state after starting streams.
 
-## Boards And Peripherals
-
-Peripheral discovery is owned by the board's `simaai-peripherals` daemon. Insight only selects a board and forwards the daemon's versioned Unix-socket API locally or through its SSH transport. Never add an Insight-side hardware scan, catalog cache, or fallback path.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/board` | Return the selected local, SDK, or manual board target and its generation. |
-| `POST` | `/api/board/select` | Select one manual SSH board, or pass `{"reset": true}` to use the environment default. |
-| `POST` | `/api/board/test` | Connect to the selected board and read identity. |
-| `GET` | `/api/peripherals` | Read the authoritative daemon catalog and add selected-board context. |
-| `POST` | `/api/peripherals/refresh` | Ask the daemon to reconcile and wait for its target scan sequence. |
-| `GET` | `/api/peripherals/events` | Forward the daemon's bounded event long-poll; re-read the catalog on events or `resync_required`. |
-| `POST` | `/api/peripherals/cameras/export` | Revalidate one exact supported camera mode and generate CameraInput examples. |
-
-Daemon absence, refusal, permission denial, timeout, malformed responses, and schema mismatch are errors. Clients must surface them rather than probing hardware independently.
-
-## Sentinel
-
-Stats reads board telemetry from the `simaai-sentinel` daemon on the selected board. Mutations take `?generation=N` from the payload they act on and return `409 stale_snapshot` after a board change.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/sentinel` | Whether the daemon is installed, running and answering. |
-| `POST` | `/api/sentinel/install` | Install Sentinel with `sima-cli` (needs passwordless sudo); refuses a healthy daemon with `409 already_installed`. |
-| `GET` | `/api/sentinel/metrics` | Latest value of every metric with recent history; a value the board cannot measure is `null`. |
-| `GET`, `POST` | `/api/sentinel/traces` | The active trace; `POST` JSON `{"name", "note", "tags"}` starts one. |
-| `POST` | `/api/sentinel/traces/stop` | Stop the displayed active trace and save it as a run; JSON `{"id":"<stable trace id>"}` is required. |
-| `GET` | `/api/sentinel/runs`, `/api/sentinel/runs/<id>` | Saved runs; one run with its samples. |
-| `DELETE` | `/api/sentinel/runs/<id>` | Delete a completed run. |
-| `GET` | `/api/sentinel/compare?runs=a,b` | Compare two to eight runs against the first; `raw=1` adds samples. |
-
 ## Environment And Viewer
 
 | Method | Path | Purpose |
@@ -438,6 +408,20 @@ Stats reads board telemetry from the `simaai-sentinel` daemon on the selected bo
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
 Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
+
+## Board And Peripherals
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/board` | Selected board target, its `source` (`manual`, `on-board`, `sdk-env`), defaults, `generation`, and last status. Never connects. |
+| `POST` | `/api/board/select` | JSON `{"host", "port", "user"}` saves a manual target; `{"reset": true}` restores the default. |
+| `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
+| `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
+| `GET` | `/api/peripherals` | Last camera scan for the selected board, or an empty snapshot with `scanned_at: null`. |
+| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras, wait for its target `scan_sequence`, and check which processes hold each camera. |
+| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`; return Python, C++, and JSON input configurations without `capture_buffer_count` (Insight does not read the board's `libcamerasrc`, so there is no Apps `config.yaml`). |
+
+Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` is `verified` when Neat Core's support rules, applied by Sentinel, accept a mode and `unsupported` with Sentinel's `reason` otherwise; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838), and without Neat Core no mode is supported. Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503) and `peripheral_version` or `peripheral_response` (502). An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first.
 
 ## Error Handling
 

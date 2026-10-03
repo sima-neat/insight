@@ -7,364 +7,6 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Peripheral catalog */
-.board-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  cursor: pointer;
-}
-
-.board-trigger:hover,
-.board-trigger.ok {
-  border-color: rgba(15, 122, 116, 0.45);
-}
-
-.board-trigger-label {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-.periph-page {
-  display: grid;
-  gap: 12px;
-}
-
-.periph-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.periph-heading h2,
-.periph-details h3,
-.periph-exports h3,
-.periph-empty h3 {
-  margin: 0;
-  font-family: var(--font-display);
-}
-
-.periph-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.periph-pill {
-  display: inline-flex;
-  align-items: center;
-  width: max-content;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-soft);
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: capitalize;
-}
-
-.periph-pill.ok {
-  border-color: #b8e1c6;
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.periph-pill.warn {
-  border-color: #ead39c;
-  background: #fff8e7;
-  color: #835a00;
-}
-
-.periph-pill.danger {
-  border-color: #f3c3cd;
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.periph-callout {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  padding: 10px 12px;
-  overflow-wrap: anywhere;
-}
-
-.periph-callout.warn {
-  border-color: #ead39c;
-  background: #fff8e7;
-}
-
-.periph-callout.danger {
-  border-color: #f3c3cd;
-  background: var(--danger-soft);
-}
-
-.periph-callout strong {
-  display: block;
-  margin-bottom: 4px;
-}
-
-.periph-callout p {
-  margin: 0;
-}
-
-.periph-catalog-status > div:first-child {
-  display: flex;
-  gap: 6px;
-}
-
-.periph-catalog-status dl,
-.periph-facts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 14px 0 0;
-}
-
-.periph-catalog-status dl > div,
-.periph-facts > div {
-  min-width: 0;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--surface-soft);
-}
-
-.periph-catalog-status dt,
-.periph-facts dt {
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.periph-catalog-status dd,
-.periph-facts dd {
-  margin: 4px 0 0;
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.periph-browser {
-  display: grid;
-  grid-template-columns: 150px minmax(190px, 280px) minmax(0, 1fr);
-  gap: 12px;
-  align-items: start;
-}
-
-.periph-type-tabs,
-.periph-device-list,
-.periph-mode-list {
-  display: grid;
-  gap: 6px;
-}
-
-.periph-type-tabs button,
-.periph-device-list button,
-.periph-mode {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-soft);
-  text-align: left;
-  cursor: pointer;
-}
-
-.periph-type-tabs button {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 10px;
-  font-weight: 700;
-}
-
-.periph-type-tabs button.active,
-.periph-device-list button.active,
-.periph-mode.active {
-  border-color: rgba(15, 122, 116, 0.55);
-  background: var(--accent-alt-soft);
-}
-
-.periph-device-list button {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 9px 10px;
-}
-
-.periph-device-list span,
-.periph-device-list small,
-.periph-details code {
-  overflow-wrap: anywhere;
-  color: var(--ink-soft);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.periph-details {
-  min-width: 0;
-  padding-left: 12px;
-  border-left: 1px solid var(--line);
-}
-
-.periph-details > header {
-  margin-bottom: 12px;
-}
-
-.periph-mode {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  gap: 4px 8px;
-  align-items: center;
-  padding: 9px 10px;
-}
-
-.periph-mode small {
-  grid-column: 1 / -1;
-  color: var(--ink-soft);
-}
-
-.periph-details > .periph-actions {
-  margin-top: 12px;
-}
-
-.periph-exports {
-  margin-top: 16px;
-}
-
-.periph-exports details {
-  margin-top: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.periph-exports summary {
-  padding: 9px 10px;
-  background: var(--surface-soft);
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.periph-code-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 7px 10px;
-  border-top: 1px solid var(--line);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.periph-code {
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  background: #101923;
-  color: #e6edf5;
-  font: 12px/1.55 var(--font-mono);
-  white-space: pre;
-}
-
-.periph-empty {
-  text-align: center;
-}
-
-.board-dialog-card {
-  width: min(720px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-  padding: 16px;
-}
-
-.board-dialog-head,
-.board-dialog-current {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.board-dialog-head h3 {
-  margin: 0;
-  font-family: var(--font-display);
-}
-
-.board-dialog-current,
-.board-dialog-form,
-.board-dialog-card > .periph-callout {
-  margin-top: 14px;
-}
-
-.board-dialog-form {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) 100px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.board-dialog-form label {
-  display: grid;
-  gap: 4px;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.board-dialog-form .periph-actions {
-  grid-column: 1 / -1;
-}
-
-@media (max-width: 900px) {
-  .periph-browser {
-    grid-template-columns: 140px minmax(0, 1fr);
-  }
-
-  .periph-details {
-    grid-column: 1 / -1;
-    padding: 12px 0 0;
-    border-left: 0;
-    border-top: 1px solid var(--line);
-  }
-}
-
-@media (max-width: 640px) {
-  .periph-heading,
-  .board-dialog-head {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .periph-browser,
-  .board-dialog-form,
-  .periph-catalog-status dl,
-  .periph-facts {
-    grid-template-columns: 1fr;
-  }
-
-  .periph-details {
-    grid-column: auto;
-  }
-
-  .board-trigger-label {
-    max-width: 120px;
-  }
-}
-
 @font-face {
   font-family: 'Sora';
   font-style: normal;
@@ -502,13 +144,19 @@ select:focus-visible,
 
 .masthead-actions {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  /* Every control in this row is the same height and centred on one line, so the board box sits on
+     the same axis as the round info button and the tour button rather than hanging above them. */
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.devkit-trigger,
+.masthead-actions > button {
+  height: 38px;
+}
+
+.board-trigger,
 .tour-trigger,
 .sysinfo-trigger {
   background: var(--surface-soft);
@@ -517,10 +165,35 @@ select:focus-visible,
   white-space: nowrap;
 }
 
-.devkit-trigger {
-  border-color: rgba(14, 90, 184, 0.28);
-  background: var(--accent-soft);
-  color: #184b86;
+.board-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  cursor: pointer;
+}
+
+.board-trigger-label {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-trigger:hover {
+  border-color: var(--line-strong);
+}
+
+/* A connected board tints its own box, so the masthead answers "is the board there?" at a glance
+   without reading the pill. */
+.board-trigger.ok {
+  border-color: rgba(18, 122, 84, 0.34);
+  background: #edfaf3;
+  color: #14543c;
+}
+
+.board-trigger.ok:hover {
+  border-color: rgba(18, 122, 84, 0.55);
 }
 
 .sysinfo-trigger {
@@ -2627,77 +2300,6 @@ button:disabled {
   gap: 14px;
 }
 
-.gauge-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.gauge-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-soft);
-  padding: 10px;
-  display: grid;
-  grid-template-columns: 1fr;
-  justify-items: center;
-  gap: 6px;
-}
-
-.gauge-card h3 {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #34546a;
-}
-
-.gauge-visual {
-  position: relative;
-  width: 74px;
-  height: 74px;
-}
-
-.gauge-svg {
-  width: 74px;
-  height: 74px;
-  transform: rotate(-90deg);
-}
-
-.gauge-track {
-  fill: none;
-  stroke: #dbe5ee;
-  stroke-width: 8;
-}
-
-.gauge-progress {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 8;
-  stroke-linecap: round;
-}
-
-.gauge-center {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: #284c62;
-}
-
-.metric-summary-row {
-  margin-top: 12px;
-  border-top: 1px dashed #d4dee8;
-  padding-top: 10px;
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: #486176;
-}
-
 .profile-filter-bar {
   display: flex;
   gap: 8px;
@@ -3611,10 +3213,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .gauge-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .youtube-preview-panel {
     grid-template-columns: 1fr;
     align-items: start;
@@ -3690,7 +3288,6 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .gauge-grid,
   .series-grid {
     grid-template-columns: 1fr;
   }
@@ -3713,6 +3310,657 @@ button:disabled {
   }
 }
 
+.periph-view {
+  display: grid;
+  gap: 12px;
+}
+
+.periph-view a {
+  color: var(--accent-alt);
+  font-weight: 700;
+}
+
+.periph-view code,
+.periph-camera-id,
+.periph-facts dd,
+.periph-detail-head .hint {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.periph-actions,
+.periph-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.periph-board-summary {
+  display: flex;
+  flex-wrap: wrap;
+  /* The 16px label and the 12px pills share a baseline instead of being centred against each other. */
+  align-items: baseline;
+  gap: 8px;
+}
+
+.periph-board-summary .hint,
+.periph-issues p,
+.periph-form .hint,
+.periph-form .periph-callout {
+  margin: 0;
+}
+
+.periph-board-label {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-facts {
+  /* A grid, not wrapped flex: hostname, build and machine line their values up in one column
+     instead of each pair starting wherever the previous one ended. */
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 4px 16px;
+  font-size: 12px;
+}
+
+.periph-facts > div {
+  display: contents;
+}
+
+.periph-facts dt {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.periph-facts dd {
+  margin: 0;
+}
+
+.periph-pill {
+  min-width: 0;
+  white-space: normal;
+}
+
+.sysinfo-pill.periph-danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+  color: #8f2f45;
+}
+
+.sysinfo-pill.periph-info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.periph-callout {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-callout.warn {
+  border-color: #eed39a;
+  background: #fff8e7;
+}
+
+.periph-callout.danger {
+  border-color: #f3c3cd;
+  background: var(--danger-soft);
+}
+
+.periph-callout.info {
+  border-color: #c5d8f3;
+  background: var(--accent-soft);
+}
+
+.periph-callout p,
+.periph-callout ol,
+.periph-callout ul {
+  margin: 0 0 4px;
+}
+
+.periph-callout > :last-child {
+  margin-bottom: 0;
+}
+
+.periph-callout ol {
+  padding-left: 16px;
+}
+
+.periph-callout-title {
+  font-weight: 700;
+}
+
+.periph-code {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #d9e5ee;
+  border-radius: 10px;
+  background: #f4f8fb;
+  color: #20384f;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: normal;
+}
+
+.periph-command {
+  margin-top: 4px;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.periph-command .periph-code {
+  justify-self: stretch;
+  background: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.periph-confirm,
+.periph-form {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form-fields {
+  display: grid;
+  /* host, then the short port, then user */
+  grid-template-columns: minmax(0, 2fr) 110px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.periph-mode-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.periph-form label,
+.periph-modes label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+/* A menu's title with the chosen entry's tier as a pill, so no entry needs a suffix. */
+.periph-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.periph-refresh[aria-disabled='true'] {
+  /* Dim the surface, never the label: fading both drops "Scanning… N s" below AA contrast,
+     and that state is on screen for the whole scan. */
+  background: #eef3fb;
+  border-color: rgba(23, 79, 76, 0.25);
+  cursor: progress;
+  transform: none;
+}
+
+.periph-meta {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.periph-issues {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.periph-issues li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.periph-notes,
+.periph-blocked {
+  margin: 8px 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.periph-grid {
+  margin-top: 12px;
+  display: grid;
+  /* The camera list takes only what its rows need (capped at 280px, long names wrap);
+     the detail column gets the rest. */
+  grid-template-columns: fit-content(280px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.periph-list,
+.periph-group {
+  display: grid;
+  gap: 6px;
+}
+
+.periph-list {
+  min-width: 200px;
+}
+
+.periph-group-title,
+.periph-identity summary,
+.periph-modes legend {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-camera-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 6px 8px;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.periph-camera-row:hover {
+  border-color: var(--line-strong);
+}
+
+.periph-camera-row.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+}
+
+.periph-camera-row:focus-visible,
+.periph-code:focus-visible,
+.periph-identity summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+.periph-camera-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.periph-camera-id {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.periph-camera-row .periph-pills {
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.periph-detail {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  padding: 12px;
+}
+
+.periph-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-detail h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.periph-detail-head .hint {
+  margin: 2px 0 8px;
+}
+
+.periph-identity {
+  margin: 8px 0;
+}
+
+.periph-identity summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.periph-identity table {
+  margin-top: 8px;
+}
+
+.periph-detail .sysinfo-table.key-value tbody th {
+  width: 140px;
+}
+
+.periph-modes {
+  min-width: 0;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px 12px;
+}
+
+.periph-modes legend {
+  padding: 0 4px;
+}
+
+.periph-mode-fields {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+}
+
+.periph-modes .hint {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 980px) {
+  .periph-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .periph-form-fields,
+  .periph-mode-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Board settings panel (masthead indicator opens this) */
+.board-panel-card {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 24px));
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.board-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-panel-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+
+/* The actions close the card, after what they act on, instead of floating beside the heading. */
+.periph-board-actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.board-panel-body {
+  padding: 12px 16px 16px;
+}
+
+/* One rhythm down the panel: every block the card renders is spaced the same. */
+.board-panel-body .periph-board > * + * {
+  margin-top: 12px;
+}
+
+.board-panel-body .periph-board {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+
+/* The card only takes focus as a last resort, when a collapse removed every nearer control. */
+.periph-board:focus {
+  outline: none;
+}
+
+/* Peripherals: device-kind icon rail. 56px wide: 46px buttons + 4px padding + 1px border. */
+.periph-kind-layout {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.periph-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 56px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.periph-kind {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.periph-kind:hover:not([aria-disabled='true']) {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+/* No lift on hover (the global button rule): a transform would also re-anchor the phone-width tip. */
+.periph-kinds .periph-kind:hover {
+  transform: none;
+}
+
+.periph-kind.active {
+  border-color: rgba(15, 122, 116, 0.55);
+  background: #f1fbfa;
+  color: var(--accent-alt);
+}
+
+.periph-kind:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+  border-color: var(--accent);
+}
+
+/* Greyed: not supported, or nothing detected. #7a8a99 keeps 3.39:1 on the rail and 3.55:1 on white. */
+.periph-kind[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: #7a8a99;
+}
+
+.periph-kind.active[aria-disabled='true'] {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.periph-kind-icon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.periph-kind-svg {
+  display: block;
+}
+
+/* White on --accent-alt is 5.18:1; the greyed bubble (--ink-soft on #e8edf2) is 5.49:1. */
+.periph-kind-badge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--surface-soft);
+  border-radius: 999px;
+  background: var(--accent-alt);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+
+.periph-kind[aria-disabled='true'] .periph-kind-badge {
+  background: #e8edf2;
+  color: var(--ink-soft);
+}
+
+.periph-kind-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: none;
+}
+
+.periph-kind:hover .periph-kind-tip,
+.periph-kind:focus-visible .periph-kind-tip {
+  display: block;
+}
+
+.periph-kind-panel {
+  min-width: 0;
+}
+
+.periph-kind-panel .periph-grid {
+  margin-top: 0;
+}
+
+/* Detail pane: one explanation line, progressive disclosure */
+.periph-summary-line {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.periph-summary-line .periph-links {
+  color: inherit;
+}
+
+.periph-blocked-disclosure {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.periph-blocked-disclosure > summary {
+  width: max-content;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #40596d;
+  font-weight: 700;
+}
+
+.periph-blocked-disclosure > summary:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.periph-blocked-disclosure .periph-blocked {
+  margin-top: 4px;
+}
+
+/* Phones: the rail becomes a row of icons above the panel (RAIL_ROW_QUERY in PeripheralsView.jsx).
+   The tip anchors to the whole row, so it spans the row's width and never runs off-screen. */
+@media (max-width: 640px) {
+  .periph-kind-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .periph-kinds {
+    position: relative;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+  }
+
+  .periph-kind {
+    position: static;
+  }
+
+  .periph-kind-tip {
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    transform: none;
+    width: auto;
+    max-width: none;
+  }
+}
+
+/* Stats (Sentinel) view. It reuses the Peripherals panel, callout and pill styles and
+   adds only what telemetry needs: metric cards, sparklines and the run tables. */
+/* One column that may be narrower than its widest table. The default auto column grows to
+   the smallest width every panel fits in, so a wide table widened the page instead of
+   scrolling in its own region. */
 .stats-view {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -3737,10 +3985,9 @@ button:disabled {
 
 .stats-detail summary:focus-visible,
 .stats-check input:focus-visible,
+.stats-chip:focus-visible,
 .stats-toggle input:focus-visible,
-.stats-table-scroll:focus-visible,
-#stats-runs-title:focus-visible,
-.stats-segment:focus-visible {
+.stats-table-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -3749,8 +3996,49 @@ button:disabled {
   margin-top: 10px;
 }
 
+/* The folded parts of this view are toggled with `hidden`. Several of them carry a class
+   that sets its own display, which would otherwise win over the attribute. */
 .stats-view [hidden] {
   display: none !important;
+}
+
+/* Metric groups and the comparison filter: one row of chips that wraps onto further lines
+   when space runs out, rather than scrolling sideways or shrinking its labels. */
+.stats-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stats-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #fff;
+  color: #274155;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stats-chip-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.stats-chip.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.stats-chip.active .stats-chip-count {
+  color: #fff;
 }
 
 .stats-chip-alert {
@@ -3781,6 +4069,10 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* A run is named by whoever recorded it, and Sentinel keeps names of up to 128 characters
+   with no spaces to break at. `.sysinfo-table td` already wraps anywhere; the cells that
+   carry a run's name are header cells, which do not, so they are given the same rule
+   rather than letting one long name push the table past the panel. */
 .stats-run-table tbody th,
 .stats-compare-table thead th {
   overflow-wrap: anywhere;
@@ -3800,6 +4092,7 @@ button:disabled {
   background: var(--accent-soft);
 }
 
+/* Appears above the runs once any is ticked: how many, and what can be done with them. */
 .stats-selection-bar {
   display: flex;
   flex-wrap: wrap;
@@ -3819,6 +4112,7 @@ button:disabled {
   color: var(--accent-strong);
 }
 
+/* "Delete" becomes this in place: the question, then Delete and Cancel. */
 .stats-delete-confirm {
   display: inline-flex;
   flex-wrap: wrap;
@@ -3832,8 +4126,34 @@ button:disabled {
   color: #8f2f45;
 }
 
+.stats-delete-failure {
+  margin-top: 10px;
+}
+
+.stats-delete-failure:focus {
+  outline: none;
+}
+
+.stats-delete-failure:focus-visible .periph-callout {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.stats-delete-failures {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
 #stats-runs-title:focus {
   outline: none;
+}
+
+#stats-runs-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .stats-run-detail,
@@ -3852,6 +4172,8 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* The Runs header: the title and the trace form or what is recording share one
+   line, and wrap onto further lines rather than squeeze when the page is narrow. */
 .stats-runs-head {
   display: flex;
   flex-wrap: wrap;
@@ -3884,6 +4206,10 @@ button:disabled {
   color: #2f4c61;
 }
 
+.stats-trace-name span {
+  white-space: nowrap;
+}
+
 .stats-trace-name input {
   min-width: 0;
   flex: 1 1 auto;
@@ -3905,6 +4231,7 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* A recording trace's running summary, under the header row. */
 .stats-runs-head ~ .sysinfo-table.key-value {
   margin-top: 8px;
 }
@@ -3913,8 +4240,11 @@ button:disabled {
   margin: 6px 0 10px;
 }
 
+/* Rows carry an Open button each; at the page's default button size that button, not the
+   run, set every row's height. */
 .stats-run-table td .btn-ghost {
   padding: 4px 10px;
+  /* At phone width the column is narrow enough to break "Open" one letter per line. */
   white-space: nowrap;
 }
 
@@ -3927,8 +4257,12 @@ button:disabled {
   .stats-trace-extras {
     grid-template-columns: 1fr;
   }
+
 }
 
+/* The Insight host panel: the machine Insight runs on. It is quieter than the board
+   telemetry above it - a flat tinted panel, plain readings rather than cards - so the two
+   are never read as one set of numbers. Its readings sit in one short row. */
 .stats-view .stats-host {
   padding: 10px 16px 12px;
   background: var(--surface-soft);
@@ -3955,6 +4289,7 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
+/* Each reading in its own box, as the board's metric cards are: label, value, bar, detail. */
 .stats-host-rows li {
   min-width: 0;
   display: grid;
@@ -3999,6 +4334,8 @@ button:disabled {
   margin-top: 6px;
 }
 
+/* Run comparison: the change against the baseline sits under each value, and a metric
+   with nothing to compare against shows an em dash in the same place. */
 .stats-compare-table th[scope='col'] .hint {
   display: block;
   margin: 2px 0 0;
@@ -4016,6 +4353,8 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* One line per metric: the change sits beside its value rather than under it, which halves
+   the height of a table that runs to sixty rows. */
 .stats-compare-table tbody th,
 .stats-compare-table td {
   padding-top: 6px;
@@ -4027,6 +4366,60 @@ button:disabled {
   margin: 0 0 0 10px;
 }
 
+/* The em dash of a cell with no change is a button so Tab and a tap can reach its reason,
+   but it must read as the same quiet dash: no chrome, only a dotted underline that says
+   there is more, and the reason beside it while it is hovered or focused. */
+.stats-delta-why {
+  position: relative;
+  display: inline-block;
+}
+
+.stats-delta-why-button {
+  border: 0;
+  background: none;
+  padding: 0 1px;
+  border-radius: 4px;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.stats-delta-tip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  max-width: 16rem;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink-soft);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
+.stats-delta-why:hover .stats-delta-tip,
+.stats-delta-why-button:focus + .stats-delta-tip {
+  display: block;
+}
+
+.stats-delta-tip[hidden] {
+  display: none !important;
+}
+
+/* A run's metadata can carry a multi-line value, such as the board's os-release; keep
+   its lines rather than running them together. Scoped to the key/value tables so the
+   numbers in the metric table keep their own wrapping rules. */
 .stats-run-detail .sysinfo-table.key-value td {
   white-space: pre-wrap;
 }
@@ -4035,6 +4428,7 @@ button:disabled {
   margin-left: 6px;
 }
 
+/* A comparison collapses to its header line: what is compared, Export and Collapse. */
 .stats-compare-head {
   display: flex;
   flex-wrap: wrap;
@@ -4046,12 +4440,21 @@ button:disabled {
   margin: 0;
 }
 
+.stats-compare-head .hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .stats-compare-head .periph-actions {
   margin-left: auto;
 }
 
 .stats-compare-head .btn-ghost {
   padding: 5px 10px;
+}
+
+.stats-compare-head + * {
+  margin-top: 8px;
 }
 
 #stats-compare-body {
@@ -4077,18 +4480,37 @@ button:disabled {
   cursor: pointer;
 }
 
+/* However many runs are compared, the table scrolls inside the panel instead of widening
+   the page. */
 .stats-table-scroll {
   max-width: 100%;
   overflow-x: auto;
   border-radius: var(--radius-sm);
 }
 
+/* Live metrics: the update state sits beside the title instead of on a line of its own. */
+.stats-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* DevKit | Host: the page's own sub-tabs, a segmented control above both panels. It is the
+   largest control on the page because it decides which machine every number below is from. */
 .stats-segments {
   display: flex;
   flex-wrap: wrap;
 }
 
-.stats-subtabs,
+.stats-subtabs {
+  justify-self: start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
 .stats-segment {
   display: inline-flex;
   align-items: baseline;
@@ -4108,22 +4530,53 @@ button:disabled {
   font-size: 14px;
 }
 
-.stats-subtabs .stats-segment:hover,
-.dash-subtabs .stats-segment:hover {
+.stats-subtabs .stats-segment:hover {
   background: var(--accent-soft);
 }
 
-.stats-subtabs .stats-segment.active,
-.dash-subtabs .stats-segment.active {
+.stats-subtabs .stats-segment.active {
   background: var(--accent);
   color: #fff;
 }
 
+.stats-segment:focus-visible,
+.stats-section-panel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Same single shrinkable column as .stats-view itself: an auto column here would let the
+   comparison or run table widen the page instead of scrolling in its own region. */
 .stats-tabpanel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
+}
+
+/* Overview | Power | Thermal | System: underlined tabs inside the Live metrics panel, a
+   level below the sub-tabs above. Each carries its size and any metric past a threshold. */
+.stats-sections {
+  gap: 4px 2px;
+  margin-top: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stats-sections .stats-segment {
+  margin-bottom: -1px;
+  border-bottom: 3px solid transparent;
+  padding: 8px 12px 7px;
+  font-size: 13px;
+}
+
+.stats-sections .stats-segment:hover {
+  color: var(--accent-strong);
+  border-bottom-color: var(--line-strong);
+}
+
+.stats-sections .stats-segment.active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
 }
 
 .stats-segment-count {
@@ -4133,6 +4586,18 @@ button:disabled {
   color: var(--ink-soft);
 }
 
+.stats-section-panel {
+  margin-top: 12px;
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 700px) {
+  .stats-sections .stats-segment {
+    padding-inline: 7px;
+  }
+}
+
+/* Live metrics as Sentinel's ops view lists them: one line per metric, its history across the row. */
 .stats-ops {
   width: 100%;
   border-collapse: collapse;
@@ -4221,6 +4686,7 @@ button:disabled {
   }
 }
 
+/* Sentinel dashboard: a status line and tabs, then charts laid out as Sentinel's own ops view does. */
 .dash {
   --chart-1: #0e5ab8;
   --chart-2: #0f9d8f;
@@ -4277,6 +4743,9 @@ button:disabled {
 .dash-state {
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+.dash-state {
   border-radius: 999px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
@@ -4306,7 +4775,12 @@ button:disabled {
   margin: 0;
 }
 
-.dash-panel,
+.dash-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
 .dash-grid {
   display: grid;
   gap: 14px;
@@ -4317,10 +4791,12 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/* Headline figures are narrow, so they stay in one row where charts would already wrap. */
 .dash-grid.three.dash-stats {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+/* The dashboard's tabs, underlined beneath the status line. */
 .dash-tabs {
   gap: 4px 2px;
   border-bottom: 1px solid var(--line);
@@ -4343,10 +4819,29 @@ button:disabled {
   border-bottom-color: var(--accent);
 }
 
+/* Views within one tab (System, Thermal): a small pill switch, a level below the tabs. */
+.dash-subtabs {
+  justify-self: start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
 .dash-subtabs .stats-segment {
   border-radius: 999px;
   padding: 4px 12px;
   font-size: 13px;
+}
+
+.dash-subtabs .stats-segment:hover {
+  background: var(--accent-soft);
+}
+
+.dash-subtabs .stats-segment.active {
+  background: var(--accent);
+  color: #fff;
 }
 
 .dash-subtabs .stats-segment.active .stats-segment-count {
@@ -4357,6 +4852,8 @@ button:disabled {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 10px;
 }
+
+
 
 .dash-card,
 .dash-chart {
@@ -4499,6 +4996,7 @@ button:disabled {
   color: #b7791f;
 }
 
+/* Warn is labelled on the left and critical on the right, so two close levels never collide. */
 .dash-threshold.warn span {
   left: 4px;
 }
@@ -4562,6 +5060,12 @@ button:disabled {
   color: #b8c5d4;
 }
 
+.dash-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .dash-legend {
   display: flex;
   flex-wrap: wrap;
@@ -4573,8 +5077,7 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-.dash-legend li,
-.dash-tooltip-row {
+.dash-legend li {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -4586,6 +5089,7 @@ button:disabled {
   color: var(--ink);
 }
 
+/* Fixed columns: name, then value and share at set widths, so changing numbers never reflow it. */
 .dash-legend-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -4637,6 +5141,7 @@ button:disabled {
   grid-template-columns: 26px minmax(0, 1fr);
 }
 
+/* Per-core CPU: a heatmap, a row per core and a column per slice of the window, in one blue. */
 .dash-core-meta {
   font-size: 12px;
   color: var(--ink-soft);
@@ -4685,6 +5190,7 @@ button:disabled {
   cursor: crosshair;
 }
 
+/* An explicit height: at 100% an SVG in an auto-height cell sizes by its aspect ratio instead. */
 .dash-heat-grid svg {
   display: block;
   width: 100%;
@@ -4698,6 +5204,7 @@ button:disabled {
   vector-effect: non-scaling-stroke;
 }
 
+/* The same columns as the heatmap, so the time axis runs exactly under the cells. */
 .dash-heat-foot {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 54px;
@@ -4728,6 +5235,7 @@ button:disabled {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
+/* Headline figures: a name and one number each, aligned in a row. */
 .dash-stat {
   align-content: start;
   gap: 6px;
@@ -4741,6 +5249,7 @@ button:disabled {
   color: var(--ink);
 }
 
+/* A reference level on a chart, such as the session average: neutral, not a warning. */
 .dash-threshold.reference {
   border-color: rgba(15, 29, 43, 0.45);
   color: var(--ink-soft);
@@ -4767,6 +5276,8 @@ button:disabled {
   .dash-actions {
     margin-left: 0;
   }
+
+
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4802,6 +5313,7 @@ button:disabled {
   margin-bottom: 10px;
 }
 
+/* Compare Runs: the overlay and its per-run summary. */
 .dash-compare {
   margin: 0 0 14px;
 }

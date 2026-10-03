@@ -1,5 +1,9 @@
-"""Detect Sentinel on the selected board and install it when it is missing."""
-import shlex
+"""Detect Sentinel on the selected board and install it when it is missing.
+
+`sima-cli neat install sentinel` runs on the board (it has no `--ip`) and its installer
+needs sudo. The installer always restarts the daemon, which would break a trace in
+flight, so a healthy install is never reinstalled.
+"""
 from datetime import datetime, timedelta, timezone
 
 from neat_insight.sentinel.errors import SentinelError
@@ -7,12 +11,13 @@ from neat_insight.sentinel.socket_client import SOCKET_PATH
 
 SERVICE = "simaai-sentinel"
 STATUS_TIMEOUT_SEC = 20.0
+# The installer downloads and unpacks a Vulcan artifact; on a slow link that is minutes.
 INSTALL_TIMEOUT_SEC = 900.0
 LOG_LIMIT = 4000
 FALLBACK_CLI = "$HOME/.sima-cli/.venv/bin/sima-cli"
 MANUAL_COMMAND = "sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel"
 
-# The uptime is measured on the board's monotonic clock, which is right even before time sync.
+# `sima-cli` is often absent from a non-login PATH, so the user's own copy is checked too.
 _STATUS_SCRIPT = """
 systemctl is-active {service} 2>/dev/null || true
 echo @@
@@ -22,21 +27,27 @@ systemctl cat {service}.service >/dev/null 2>&1 && echo yes || echo no
 echo @@
 command -v sima-cli 2>/dev/null || {{ [ -x "{fallback}" ] && printf '%s\\n' "{fallback}"; }} || true
 echo @@
+# systemd's ID for this run of the service: a restarted daemon is a new session with a new history.
 systemctl show {service} -p InvocationID --value 2>/dev/null || true
 echo @@
+# Seconds the service has been running, from two monotonic clocks: the board's wall clock can be
+# wrong right after a boot, before time sync, so a start timestamp read from it could be too.
 since=$(systemctl show {service} -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
 [ "${{since:-0}}" -gt 0 ] 2>/dev/null && awk -v since="$since" '{{ printf "%d\\n", $1 - since / 1000000 }}' /proc/uptime || true
 """.format(
     service=SERVICE, socket=SOCKET_PATH, fallback=FALLBACK_CLI
 )
 
-# sudo unpacks root-owned files into $dir, so it is removed with sudo; dash skips EXIT traps on signals.
+# Not a format string: it is passed as an argument, so its braces reach sh as written.
 _INSTALL_SCRIPT = """
 set -e
 sudo -n true 2>/dev/null || { echo 'sudo: a password is required' >&2; exit 77; }
 dir=$(mktemp -d /tmp/sentinel-install.XXXXXX)
+# The installer runs as root and leaves root-owned trees in $dir that this user cannot
+# remove, so the directory goes with the same passwordless sudo the install runs under.
 cleanup() { sudo -n rm -rf -- "$dir"; }
 trap cleanup EXIT
+# dash skips the EXIT trap when a signal ends the shell; exiting from each one runs it.
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -44,15 +55,23 @@ sudo -n env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 "$SIMA_CLI" neat 
 """
 
 
+def _tail(*chunks) -> str:
+    text = "\n".join(chunk.decode("utf-8", errors="replace").strip() for chunk in chunks if chunk)
+    return text.strip()[-LOG_LIMIT:]
+
+
 def status(session) -> dict:
+    """Report whether Sentinel is installed, running and reachable on the board."""
     result = session.transport.exec(["sh", "-c", _STATUS_SCRIPT], timeout=STATUS_TIMEOUT_SEC)
     parts = (result.stdout.decode("utf-8", errors="replace").split("@@") + [""] * 6)[:6]
     service, socket_present, unit_present, sima_cli, instance_id, running = (part.strip() for part in parts)
+    installed = unit_present == "yes" or socket_present == "yes"
     started_at = None
     if service == "active" and running.isdigit():
+        # On Insight's clock: the page shows it relative to the viewer's own time.
         started_at = (datetime.now(timezone.utc) - timedelta(seconds=int(running))).isoformat(timespec="seconds")
     return {
-        "installed": unit_present == "yes" or socket_present == "yes",
+        "installed": installed,
         "healthy": service == "active" and socket_present == "yes",
         "service": service or "unknown",
         "socket": socket_present == "yes",
@@ -64,6 +83,7 @@ def status(session) -> dict:
 
 
 def describe(state: dict) -> dict:
+    """Why Sentinel cannot be used, in the board error shape, or ``None`` when it can."""
     if state["healthy"]:
         return None
     if not state["installed"]:
@@ -73,31 +93,33 @@ def describe(state: dict) -> dict:
             "hint": "Install it from this page, or run `{}` on the board.".format(MANUAL_COMMAND),
         }
     return {
-        "error": "The {} service is installed but {}.".format(SERVICE, state["service"]),
+        "error": "The {} service is installed but {}.".format(SERVICE, state["service"] or "not running"),
         "code": "sentinel_stopped",
         "hint": "Start it on the board with `sudo systemctl start {}`.".format(SERVICE),
     }
 
 
 def install(session) -> dict:
+    """Install Sentinel on the board with sima-cli; refuses to reinstall a healthy daemon."""
     state = status(session)
     if state["healthy"]:
         raise SentinelError(
             "already_installed",
             "Sentinel is already installed and running on this board.",
-            hint="Reinstalling restarts the daemon and would end a trace in flight.",
+            hint="Reinstalling restarts the daemon and would end a trace in flight. Reinstall from a shell on "
+            "the board if you really need to.",
         )
     if not state["sima_cli"]:
         raise SentinelError(
             "sentinel_failed",
             "`sima-cli` was not found on the board, so Sentinel cannot be installed from here.",
-            hint="Install sima-cli on the board, or install Sentinel there with `{}`.".format(MANUAL_COMMAND),
+            hint="Install sima-cli on the board, then retry, or install Sentinel there with `{}`.".format(
+                MANUAL_COMMAND
+            ),
             tool="sima-cli",
         )
-    script = "SIMA_CLI={}\n{}".format(shlex.quote(state["sima_cli"]), _INSTALL_SCRIPT)
-    result = session.transport.exec(["sh", "-c", script], timeout=INSTALL_TIMEOUT_SEC)
-    log = "\n".join(chunk.decode("utf-8", errors="replace").strip() for chunk in (result.stdout, result.stderr) if chunk)
-    log = log.strip()[-LOG_LIMIT:]
+    result = session.transport.exec(install_command(state["sima_cli"]), timeout=INSTALL_TIMEOUT_SEC)
+    log = _tail(result.stdout, result.stderr)
     if result.exit_code == 77:
         raise SentinelError(
             "sentinel_denied",
@@ -109,7 +131,7 @@ def install(session) -> dict:
         raise SentinelError(
             "sentinel_failed",
             "`sima-cli neat install sentinel` failed on the board (exit {}).".format(result.exit_code),
-            hint="Run it in a shell on the board to see the full log.",
+            hint="The installer's output is in detail; run it in a shell on the board to see the full log.",
             detail=log,
         )
     state = status(session)
@@ -121,3 +143,12 @@ def install(session) -> dict:
             detail=log,
         )
     return {"status": state, "log": log}
+
+
+def install_command(sima_cli: str) -> list:
+    """The board command that installs Sentinel with the `sima-cli` found at ``sima_cli``."""
+    return ["sh", "-c", "SIMA_CLI={}\n{}".format(_quote(sima_cli), _INSTALL_SCRIPT)]
+
+
+def _quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"

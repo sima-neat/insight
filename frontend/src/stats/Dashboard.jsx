@@ -1,28 +1,68 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Callout } from '../peripherals/ui.jsx'
 import { CoreHeatmap, StackedChart, StatTile, TimeChart } from './Charts.jsx'
-import { hottestMetric, lastNumber, niceCeil, scaleFor, stackTotals, sumMeasured, thermalMaxSeries, thresholdLines } from './dashboard.js'
-import { formatRelativeTime, formatValue, isThermalMetric, metricAlert, sessionCsv, sessionCsvFilename, sparkline, statusInfo, thresholdText } from './model.js'
-import { FailureCallout, SegmentedTabs, downloadText, useStoredTab } from './ui.jsx'
+import {
+  DASH_TABS,
+  DASH_TAB_KEY,
+  dashTabFrom,
+  lastNumber,
+  metricByKey,
+  metricsMatching,
+  niceCeil,
+  scaleFor,
+  seriesOf,
+  stackTotals,
+  thermalGroups,
+  thermalMaxSeries,
+  thresholdLines
+} from './dashboard.js'
+import { formatValue, isThermalMetric, metricAlert, metricSection, sparkline, sparklineLabel, sessionCsv, sessionCsvFilename, statusInfo, thresholdText, timeAgo } from './model.js'
+import { FailureCallout, SegmentedTabs } from './ui.jsx'
 
-const DASH_TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'thermal', label: 'Thermal' },
-  { id: 'power', label: 'Power' },
-  { id: 'system', label: 'System' },
-  { id: 'storage', label: 'Storage & Network' },
-  { id: 'runs', label: 'Runs' }
-]
-const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
-// Colour says how a reading stands, never what it measures.
+// Colour says how a reading stands, never what it measures: blue until a threshold is passed.
 const TONE_COLORS = { warn: 'var(--chart-warn)', critical: 'var(--chart-critical)' }
+function toneColor(status) {
+  return TONE_COLORS[status] || COLORS[0]
+}
+
+const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
 const STORAGE_GROUP = /^(disk|diskio|network|storage|nvme)$/i
 const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_)/
 
+function download(filename, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.hidden = true
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function readTab() {
+  try {
+    return dashTabFrom(window.localStorage.getItem(DASH_TAB_KEY))
+  } catch {
+    return dashTabFrom(null)
+  }
+}
+
+function saveTab(tab) {
+  try {
+    window.localStorage.setItem(DASH_TAB_KEY, tab)
+  } catch {
+    // A tab that is not remembered opens on Overview next time; nothing else depends on it.
+  }
+}
+
+/** A chart for one metric, or nothing when the board does not report it. */
 function MetricChart({ model, metricKey, title, ceiling, headline, height, compact, references = [] }) {
-  const metric = model.byKey.get(metricKey)
+  const metric = metricByKey(model, metricKey)
   if (!metric) return null
-  const values = model.series[metricKey] || []
-  const color = TONE_COLORS[metric.status] || COLORS[0]
+  const values = seriesOf(model, metricKey)
+  const color = toneColor(metric.status)
   return (
     <TimeChart
       title={title || metric.label}
@@ -39,12 +79,13 @@ function MetricChart({ model, metricKey, title, ceiling, headline, height, compa
   )
 }
 
-function PairChart({ model, keys, labels, title }) {
-  const metrics = keys.map((key, index) => ({ metric: model.byKey.get(key), label: labels[index] })).filter((entry) => entry.metric)
+/** Two or more metrics of one unit on one chart: network in and out, disk reads and writes. */
+function PairChart({ model, keys, labels = [], title, height }) {
+  const metrics = keys.map((key, index) => ({ metric: metricByKey(model, key), label: labels[index] })).filter((entry) => entry.metric)
   if (!metrics.length) return null
   const unit = metrics[0].metric.unit
-  const series = metrics.map(({ metric, label }, index) => ({ key: metric.key, label: label || metric.short || metric.label, values: model.series[metric.key] || [], color: COLORS[index] }))
-  const total = sumMeasured(metrics.map(({ metric }) => metric.value))
+  const series = metrics.map(({ metric, label }, index) => ({ key: metric.key, label: label || metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index] }))
+  const total = metrics.reduce((sum, { metric }) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
   return (
     <TimeChart
       title={title}
@@ -53,6 +94,7 @@ function PairChart({ model, keys, labels, title }) {
       scale={scaleFor(unit, series.map((item) => item.values))}
       unit={unit}
       timestamps={model.timestamps}
+      height={height}
     />
   )
 }
@@ -62,16 +104,16 @@ function ThermalMaxChart({ model, height }) {
   if (!sensors.length) return null
   const values = thermalMaxSeries(model)
   const now = lastNumber(values)
-  const worst = hottestMetric(sensors)
+  const worst = sensors.reduce((hot, metric) => (typeof metric.value === 'number' && (!hot || metric.value > hot.value) ? metric : hot), null)
   return (
     <TimeChart
       title="Thermal max"
       headline={`${formatValue(now, 'C')}${worst ? ` (${worst.short || worst.label})` : ''}`}
-      series={[{ key: 'thermal-max', label: 'Hottest sensor', values, color: TONE_COLORS[worst?.status] || COLORS[0] }]}
+      series={[{ key: 'thermal-max', label: 'Hottest sensor', values, color: toneColor(worst?.status) }]}
       scale={scaleFor('C', [values])}
       unit="C"
       timestamps={model.timestamps}
-      thresholds={thresholdLines(worst)}
+      thresholds={thresholdLines(sensors[0])}
       tone={worst?.status}
       height={height}
     />
@@ -80,11 +122,15 @@ function ThermalMaxChart({ model, height }) {
 
 function powerCeiling(model) {
   const keys = ['power_current_watts', 'power_average_watts', 'power_peak_watts']
-  const values = keys.flatMap((key) => [...(model.series[key] || []), model.byKey.get(key)?.value]).filter((value) => typeof value === 'number')
+  const values = keys.flatMap((key) => [...seriesOf(model, key), metricByKey(model, key)?.value]).filter((value) => typeof value === 'number')
   return values.length ? niceCeil(Math.max(...values) * 1.1) : null
 }
 
-function OpsList({ metrics, series, caption }) {
+/**
+ * Every metric as one list in Sentinel's order: short name, group, value, a history trace across
+ * the row and a status. The long name, description and thresholds are on the name's tooltip.
+ */
+export function OpsList({ metrics, series, caption }) {
   return (
     <table className="stats-ops">
       <caption className="sr-only">{caption}</caption>
@@ -109,7 +155,7 @@ function OpsList({ metrics, series, caption }) {
               <td className="stats-ops-num">{formatValue(metric.value, metric.unit)}</td>
               <td className="stats-ops-history">
                 {spark ? (
-                  <svg className="stats-ops-spark" viewBox="0 0 400 20" preserveAspectRatio="none" role="img" aria-label={`${metric.label}: ${spark.count} recent samples, ${formatValue(spark.min, metric.unit)} to ${formatValue(spark.max, metric.unit)}`} focusable="false">
+                  <svg className="stats-ops-spark" viewBox="0 0 400 20" preserveAspectRatio="none" role="img" aria-label={sparklineLabel(metric, spark)} focusable="false">
                     <polyline points={spark.points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                   </svg>
                 ) : (
@@ -122,6 +168,20 @@ function OpsList({ metrics, series, caption }) {
         })}
       </tbody>
     </table>
+  )
+}
+
+function Card({ title, note, children, className = '' }) {
+  return (
+    <section className={`dash-card ${className}`.trim()}>
+      {title && (
+        <h3 className="dash-card-title">
+          {title}
+          {note && <span className="dash-card-note">{note}</span>}
+        </h3>
+      )}
+      {children}
+    </section>
   )
 }
 
@@ -148,12 +208,7 @@ function OverviewView({ model }) {
 }
 
 function ThermalView({ model }) {
-  const groups = []
-  for (const metric of model.metrics.filter(isThermalMetric)) {
-    const found = groups.find((entry) => entry.name === metric.group)
-    if (found) found.metrics.push(metric)
-    else groups.push({ name: metric.group, metrics: [metric] })
-  }
+  const groups = thermalGroups(model)
   const [chosen, setChosen] = useState(groups[0]?.name || '')
   const group = groups.find((entry) => entry.name === chosen) || groups[0]
   if (!groups.length) return <p className="hint">Sentinel reported no temperatures on this board.</p>
@@ -182,12 +237,12 @@ function ThermalView({ model }) {
 
 function PowerView({ model }) {
   const ceiling = powerCeiling(model)
-  const current = model.byKey.get('power_current_watts')
-  const average = model.byKey.get('power_average_watts')
-  const peak = model.byKey.get('power_peak_watts')
-  const rails = model.metrics.filter((metric) => /^power_rail_/.test(metric.key))
-  const railSeries = rails.map((metric, index) => ({ key: metric.key, label: metric.short || metric.label, values: model.series[metric.key] || [], color: COLORS[index % COLORS.length] }))
-  const railTotal = sumMeasured(rails.map((metric) => metric.value))
+  const current = metricByKey(model, 'power_current_watts')
+  const average = metricByKey(model, 'power_average_watts')
+  const peak = metricByKey(model, 'power_peak_watts')
+  const rails = metricsMatching(model, /^power_rail_/)
+  const railSeries = rails.map((metric, index) => ({ key: metric.key, label: metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index % COLORS.length] }))
+  const railTotal = rails.reduce((sum, metric) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
   const totals = stackTotals(railSeries.map((item) => item.values))
   const stats = [
     { metric: current, title: 'Current' },
@@ -213,7 +268,7 @@ function PowerView({ model }) {
       {rails.length > 0 && (
         <StackedChart
           title="Power rails"
-          headline={`${formatValue(railTotal, 'W')} across ${rails.length} rails`}
+          headline={`${railTotal.toFixed(2)} W across ${rails.length} rails`}
           series={railSeries}
           scale={scaleFor('W', [totals])}
           unit="W"
@@ -231,12 +286,13 @@ const SYSTEM_VIEWS = [
 
 function SystemView({ model }) {
   const [view, setView] = useState('summary')
-  const cores = model.metrics.filter((metric) => /^cpu_core_\d+_usage_pct$/.test(metric.key))
-  const load = model.byKey.get('cpu_load_1')
-  const memMb = model.byKey.get('linux_mem_used_mb')
-  const cmaTotal = model.byKey.get('ev74_cma_total_mb')
-  const loadPct = model.byKey.get('cpu_load_1_pct')
-  const memPct = model.byKey.get('linux_mem_used_pct')
+  const cores = metricsMatching(model, /^cpu_core_\d+_usage_pct$/)
+  const load = metricByKey(model, 'cpu_load_1')
+  const memMb = metricByKey(model, 'linux_mem_used_mb')
+  const cmaTotal = metricByKey(model, 'ev74_cma_total_mb')
+  const loadPct = metricByKey(model, 'cpu_load_1_pct')
+  const memPct = metricByKey(model, 'linux_mem_used_pct')
+  // Per-core CPU is its own view: sixteen rows beside five charts was more than one glance holds.
   const views = cores.length ? SYSTEM_VIEWS.map((entry) => (entry.id === 'cores' ? { ...entry, count: cores.length } : entry)) : SYSTEM_VIEWS.slice(0, 1)
   const shown = views.some((entry) => entry.id === view) ? view : 'summary'
   return (
@@ -292,10 +348,9 @@ function StorageView({ model }) {
         <PairChart model={model} keys={['disk_emmc_read_mbps', 'disk_emmc_write_mbps']} labels={['Read', 'Write']} title="eMMC I/O" />
       </div>
       {storage.length > 0 && (
-        <section className="dash-card">
-          <h3 className="dash-card-title">Storage and network metrics</h3>
+        <Card title="Storage and network metrics">
           <OpsList metrics={storage} series={model.series} caption="Storage and network metrics" />
-        </section>
+        </Card>
       )}
     </>
   )
@@ -304,17 +359,21 @@ function StorageView({ model }) {
 function tabAlert(model, id) {
   const metrics = model.metrics
   if (id === 'thermal') return metricAlert(metrics.filter(isThermalMetric))
-  if (id === 'power') {
-    return metricAlert(metrics.filter((metric) => !isThermalMetric(metric) && (/^power/i.test(metric.group || '') || /^[mk]?w$/i.test(metric.unit || ''))))
-  }
+  if (id === 'power') return metricAlert(metrics.filter((metric) => metricSection(metric) === 'power'))
   if (id === 'system') return metricAlert(metrics.filter((metric) => SYSTEM_KEYS.test(metric.key)))
   if (id === 'storage') return metricAlert(metrics.filter((metric) => STORAGE_GROUP.test(metric.group || '')))
   if (id === 'overview') return metricAlert(metrics)
   return null
 }
 
-export default function SentinelDashboard({ model, startedAt, now, live, polling, error, busy, onToggleLive, onRetry, runs }) {
-  const [tab, setTab] = useStoredTab('neat-insight:sentinel-tab', DASH_TABS)
+/**
+ * Sentinel on the board, as its own terminal dashboard lays it out: a status line, then
+ * Overview, Thermal, Power, System, Storage & Network and Runs. Everything is charted over the
+ * daemon's cached window, so each view opens full rather than filling while you watch.
+ */
+export default function SentinelDashboard({ model, startedAt, now, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
+  const [tab, setTab] = useState(readTab)
+  useEffect(() => saveTab(tab), [tab])
   const items = useMemo(() => DASH_TABS.map((item) => ({ ...item, alert: item.id === 'runs' ? null : tabAlert(model, item.id) })), [model])
   const state = polling ? 'LIVE' : live ? 'NOT UPDATING' : 'PAUSED'
   const hasMetrics = model.metrics.length > 0
@@ -327,14 +386,14 @@ export default function SentinelDashboard({ model, startedAt, now, live, polling
           <span className={`dash-state${polling ? ' on' : ''}`}>{state}</span>
           {startedAt && (
             <span className="dash-session" title={`Sentinel started ${new Date(startedAt).toLocaleString()}`}>
-              Session started {formatRelativeTime(startedAt, now)}
+              Session started {timeAgo(startedAt, now)}
             </span>
           )}
           <span className="dash-actions">
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => downloadText(sessionCsvFilename(), sessionCsv(model))}
+              onClick={() => download(sessionCsvFilename(), sessionCsv(model))}
               disabled={!model.timestamps.length}
               title={`Every metric at each of the ${model.timestamps.length} samples Sentinel holds for this session`}
             >
@@ -348,8 +407,14 @@ export default function SentinelDashboard({ model, startedAt, now, live, polling
         <p className="sr-only" role="status">
           {polling ? 'Metrics are updating live.' : live ? 'Metric updates are stopped.' : 'Metric updates are paused.'}
         </p>
+        {stale && (
+          <Callout tone="warn" title="These values are from the previous board">
+            <p>The selected board changed after this sample was read. Refresh to read the board that is selected now.</p>
+            <button type="button" className="btn-tonal" onClick={onRefresh}>Refresh now</button>
+          </Callout>
+        )}
         <FailureCallout notice={error}>
-          {error && error.code !== 'no_target' && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
+          {error?.retryable && <button type="button" className="btn-ghost" onClick={onRetry}>Retry</button>}
         </FailureCallout>
         <SegmentedTabs label="Sentinel views" items={items} selected={tab} onSelect={setTab} idPrefix="dash-tab" panelPrefix="dash-panel" className="dash-tabs" />
       </section>
