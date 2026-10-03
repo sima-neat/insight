@@ -101,6 +101,23 @@ export function modeLabel(mode) {
   return `${mode.format || 'Unknown'} · ${size} · ${Number.isInteger(fps) ? fps : fps.toFixed(2)} fps`
 }
 
+// A mode's identity across catalog revisions; its index can change when modes are added or removed.
+export function modeKey(mode) {
+  if (!mode) return ''
+  const size = mode.size_range ? JSON.stringify(mode.size_range) : `${mode.width}x${mode.height}`
+  return `${mode.format}|${size}|${mode.framerate_num}/${mode.framerate_den}`
+}
+
+// The chosen device and mode survive catalog revisions while both still exist;
+// otherwise the first device of the type, or the device's first mode, is shown.
+export function resolveSelection(devices, deviceId, wantedMode) {
+  const chosen = devices.find((device) => device.id === deviceId)
+  const device = chosen || devices[0] || null
+  const modes = Array.isArray(device?.camera?.modes) ? device.camera.modes : []
+  const index = chosen ? modes.findIndex((mode) => modeKey(mode) === wantedMode) : -1
+  return { device, modeIndex: Math.max(index, 0) }
+}
+
 export function isExportableMode(camera, mode) {
   return Boolean(camera?.camera_name && mode?.supported === true && Number.isInteger(mode.width) && Number.isInteger(mode.height))
 }

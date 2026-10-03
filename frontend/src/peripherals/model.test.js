@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, isExportableMode, modeLabel, validateBoardForm } from './model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, isExportableMode, modeKey, modeLabel, resolveSelection, validateBoardForm } from './model.js'
 
 test('device tabs are generic, counted, and sorted', () => {
   assert.deepEqual(deviceTypes([
@@ -83,4 +83,19 @@ test('board selection rejects unsafe or invalid endpoint fields', () => {
   })
   assert.match(validateBoardForm({ host: 'bad host', port: '22', user: 'sima' }).error, /without spaces/)
   assert.match(validateBoardForm({ host: 'board', port: '70000', user: 'sima' }).error, /1 to 65535/)
+})
+
+test('the selected device and mode survive a catalog revision while both still exist', () => {
+  const mode = (width, height) => ({ format: 'NV12', width, height, framerate_num: 30, framerate_den: 1 })
+  const camera = (id, modes) => ({ id, type: 'camera', camera: { modes } })
+  const before = [camera('camera:a', [mode(1920, 1080), mode(1280, 720)]), camera('camera:b', [mode(640, 480)])]
+  const wanted = modeKey(mode(1280, 720))
+  assert.deepEqual(resolveSelection(before, 'camera:a', wanted), { device: before[0], modeIndex: 1 })
+  // A device plugged in ahead of it and a mode added ahead of it move nothing.
+  const after = [camera('camera:0', []), camera('camera:a', [mode(3840, 2160), mode(1920, 1080), mode(1280, 720)])]
+  assert.deepEqual(resolveSelection(after, 'camera:a', wanted), { device: after[1], modeIndex: 2 })
+  // A removed mode falls back to the device's first mode; a removed device to the first device.
+  assert.deepEqual(resolveSelection([camera('camera:a', [mode(1920, 1080)])], 'camera:a', wanted).modeIndex, 0)
+  assert.deepEqual(resolveSelection(after.slice(0, 1), 'camera:a', wanted), { device: after[0], modeIndex: 0 })
+  assert.notEqual(modeKey({ ...mode(1280, 720), framerate_num: 60 }), wanted)
 })

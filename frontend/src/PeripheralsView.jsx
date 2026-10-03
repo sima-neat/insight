@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { copyText, createLatestRequest, requestJson } from './peripherals/api.js'
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, formatTime, isExportableMode, modeKey, modeLabel, normalizeError, resolveSelection, typeLabel } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
 const CATALOG_POLL_MS = 2000
@@ -63,7 +63,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   const [refreshing, setRefreshing] = useState(false)
   const [type, setType] = useState('camera')
   const [deviceId, setDeviceId] = useState('')
-  const [modeIndex, setModeIndex] = useState(0)
+  const [wantedMode, setWantedMode] = useState('')
   const [exporting, setExporting] = useState(false)
   const [exportResult, setExportResult] = useState(null)
   const [exportError, setExportError] = useState(null)
@@ -121,6 +121,8 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
     catalogPolicy.current.reset()
     refreshRequests.current.cancel()
     setCatalog(null)
+    setDeviceId('')
+    setWantedMode('')
     exportRequests.current.cancel()
     setExporting(false)
     setExportResult(null)
@@ -161,18 +163,18 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   const tabs = useMemo(() => deviceTypes(catalog?.devices), [catalog?.devices])
   const activeType = tabs.some((item) => item.id === type) ? type : tabs[0]?.id || ''
   const devices = (catalog?.devices || []).filter((device) => device.type === activeType)
-  const selectedDevice = devices.find((device) => device.id === deviceId) || devices[0] || null
+  const { device: selectedDevice, modeIndex } = resolveSelection(devices, deviceId, wantedMode)
   const camera = selectedDevice?.type === 'camera' ? selectedDevice.camera : null
-  const selectedMode = camera?.modes?.[modeIndex] || camera?.modes?.[0] || null
+  const selectedMode = camera?.modes?.[modeIndex] || null
   const canExport = isExportableMode(camera, selectedMode)
   const selectionEpoch = catalogIdentity(catalog)
   const support = catalog?.support
 
+  // Examples are bound to one catalog revision, so a new revision clears them;
+  // the selection itself survives while its device and mode still exist.
   useEffect(() => {
     exportRequests.current.cancel()
     setExporting(false)
-    setDeviceId(devices[0]?.id || '')
-    setModeIndex(0)
     setExportResult(null)
     setExportError(null)
   }, [activeType, selectionEpoch])
@@ -236,7 +238,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
     exportRequests.current.cancel()
     setExporting(false)
     setDeviceId(id)
-    setModeIndex(0)
+    setWantedMode('')
     setExportResult(null)
     setExportError(null)
   }
@@ -244,7 +246,8 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   function selectMode(index) {
     exportRequests.current.cancel()
     setExporting(false)
-    setModeIndex(index)
+    setDeviceId(selectedDevice?.id || '')
+    setWantedMode(modeKey(camera?.modes?.[index]))
     setExportResult(null)
     setExportError(null)
   }
