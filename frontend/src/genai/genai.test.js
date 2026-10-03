@@ -17,6 +17,7 @@ import {
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
 import { languageNames, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
+import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -51,6 +52,57 @@ test('backend state: unconfigured, unavailable, and other HTTP failures', () => 
   assert.equal(deriveBackendState({ health: { httpStatus: 404, body: {} } }).action, 'settings')
 })
 
+test('backend state: a board that answers with an error is running, not down', () => {
+  const studioError = deriveBackendState({ health: { httpStatus: 500, body: { error: 'Internal error in GenAI Studio' } } })
+  assert.equal(studioError.state, 'error')
+  assert.match(studioError.title, /answered with an error \(HTTP 500\)/)
+  assert.equal(studioError.detail, 'Internal error in GenAI Studio')
+  const notStudio = deriveBackendState({ health: { httpStatus: 404, body: {}, unreadable: true } })
+  assert.equal(notStudio.state, 'error')
+  assert.match(notStudio.title, /doesn't answer like GenAI Studio/)
+  assert.doesNotMatch(notStudio.detail, /<html>/)
+  assert.equal(canUseModels('error'), false)
+})
+
+test('backend state: no board selected needs no extra button, the settings open on their own', () => {
+  assert.equal(deriveBackendState({ health: { httpStatus: 503, body: { reason: 'not-configured' } } }).action, null)
+})
+
+function respondWith(status, body, contentType = 'text/plain') {
+  globalThis.fetch = async () => new Response(body, { status, headers: { 'Content-Type': contentType } })
+}
+
+test('a health answer that is not GenAI Studio JSON is flagged instead of shown raw', async () => {
+  const realFetch = globalThis.fetch
+  try {
+    respondWith(404, '<html>Not Found</html>', 'text/html')
+    assert.deepEqual(await probeHealth(), { httpStatus: 404, body: {}, unreadable: true })
+    respondWith(500, JSON.stringify({ error: 'boom' }), 'application/json')
+    assert.deepEqual(await probeHealth(), { httpStatus: 500, body: { error: 'boom' } })
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('a chat reply that ends without the done marker is reported as cut off', async () => {
+  const realFetch = globalThis.fetch
+  const sse = (...events) => events.map((e) => `data: ${e}\n\n`).join('')
+  const delta = (text) => JSON.stringify({ choices: [{ delta: { content: text } }] })
+  try {
+    let text = ''
+    respondWith(200, sse(delta('Hel'), delta('lo'), '[DONE]'), 'text/event-stream')
+    await streamChat({ model: 'm', messages: [], onDelta: (d) => { text += d } })
+    assert.equal(text, 'Hello')
+
+    text = ''
+    respondWith(200, sse(delta('Partial ans')), 'text/event-stream')
+    await assert.rejects(streamChat({ model: 'm', messages: [], onDelta: (d) => { text += d } }), { message: REPLY_CUT_OFF })
+    assert.equal(text, 'Partial ans')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
 test('backend state: starting until the model server answers', () => {
   assert.equal(deriveBackendState({ health: null }).state, 'starting')
   const starting = deriveBackendState({
@@ -66,7 +118,7 @@ test('backend state: busy while a load runs or the tab has an operation in fligh
     status: { ...STATUS, loading: { name: 'Qwen3-1.7B', remainingS: 95 } }
   })
   assert.equal(loading.state, 'busy')
-  assert.equal(loading.title, 'Loading Qwen3-1.7B')
+  assert.equal(loading.title, 'Loading Qwen3 1.7B')
   assert.match(loading.detail, /1 min 35 s left/)
   assert.equal(
     deriveBackendState({ health: { httpStatus: 200, body: HEALTH_OK }, status: STATUS, busyOp: 'Resetting the MLA' }).title,
@@ -92,6 +144,9 @@ test('api version check accepts unversioned and supported backends only', () => 
   assert.equal(checkApiVersion({ api_version: 2 }).reason, 'too-new')
   assert.equal(checkApiVersion({ api_version: 0 }).reason, 'too-old')
   assert.equal(checkApiVersion({ api_version: '1' }).reason, 'unreadable')
+  const unreadable = deriveBackendState({ health: { httpStatus: 200, body: { ...HEALTH_OK, api_version: 'one' } } })
+  assert.match(unreadable.detail, /can't read \("one"\)/)
+  assert.doesNotMatch(unreadable.detail, /older/)
   const incompatible = deriveBackendState({ health: { httpStatus: 200, body: { ...HEALTH_OK, api_version: 2 } } })
   assert.equal(incompatible.state, 'incompatible')
   assert.match(incompatible.detail, /Update Insight/)
@@ -238,7 +293,10 @@ test('voice engines that failed to load become plain warnings', () => {
   ]))
   assert.equal(warning.key, 'supertonic')
   assert.match(warning.message, /Supertonic voice didn't load: the accelerator was busy or unavailable/)
-  assert.match(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false, error: 'RuntimeError: model file missing' }]))[0].message, /model file missing/)
+  assert.equal(warning.accelerator, true)
+  const [missingFile] = voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false, error: 'RuntimeError: model file missing' }]))
+  assert.match(missingFile.message, /model file missing/)
+  assert.equal(missingFile.accelerator, false, 'restarting the accelerator would not bring back a missing file')
   assert.deepEqual(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false }])), [])
   assert.deepEqual(voiceEngineWarnings(null), [])
 })

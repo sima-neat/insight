@@ -22,7 +22,7 @@ export function checkApiVersion(health) {
 // busyOp: label of an operation this tab started and is still running, or null
 // lastError: message of the last failed operation, or null
 // Returns {state, title, detail, action} where state is one of
-// unconfigured | unavailable | incompatible | starting | busy | failed | ready.
+// unconfigured | unavailable | error | incompatible | starting | busy | failed | ready.
 export function deriveBackendState({ health, status = null, busyOp = null, lastError = null }) {
   if (!health) {
     return { state: 'starting', title: 'Connecting to the board…', detail: '', action: null }
@@ -33,7 +33,8 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
       state: 'unconfigured',
       title: 'No board selected',
       detail: 'Enter the address of the board that runs GenAI Studio.',
-      action: 'settings'
+      // The settings panel opens on its own in this state.
+      action: null
     }
   }
   if (health.networkError || health.httpStatus === 502 || health.httpStatus === 504) {
@@ -44,24 +45,35 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
       action: 'start-command'
     }
   }
+  // Something answered, so it is running; it just isn't a healthy GenAI Studio.
   if (health.httpStatus !== 200) {
+    if (health.unreadable) {
+      return {
+        state: 'error',
+        title: "This address doesn't answer like GenAI Studio",
+        detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
+        action: 'settings'
+      }
+    }
     return {
-      state: 'unavailable',
-      title: `The board answered ${health.httpStatus}`,
-      detail: body.error || 'The address may not point at GenAI Studio. Check the board address.',
+      state: 'error',
+      title: `GenAI Studio on the board answered with an error (HTTP ${health.httpStatus})`,
+      detail: body.error || 'Check the board address, or restart GenAI Studio on the board.',
       action: 'settings'
     }
   }
 
   const version = checkApiVersion(body)
   if (!version.supported) {
-    const newer = version.reason === 'too-new'
+    const details = {
+      'too-new': `The board's API version ${version.version} is newer than this Insight supports (${SUPPORTED_API_VERSIONS.max}). Update Insight.`,
+      'too-old': `The board's API version ${version.version} is older than this Insight needs (${SUPPORTED_API_VERSIONS.min}). Update Apps on the board.`,
+      unreadable: `The board reported an API version this Insight can't read (${JSON.stringify(version.version)}). Update Apps on the board.`
+    }
     return {
       state: 'incompatible',
       title: 'This board runs an unsupported GenAI Studio version',
-      detail: newer
-        ? `The board's API version ${version.version} is newer than this Insight supports (${SUPPORTED_API_VERSIONS.max}). Update Insight.`
-        : `The board's API version ${version.version} is older than this Insight needs (${SUPPORTED_API_VERSIONS.min}). Update Apps on the board.`,
+      detail: details[version.reason],
       action: null
     }
   }
@@ -85,7 +97,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
   }
 
   if (loading) {
-    const label = `Loading ${loading.name}`
+    const label = `Loading ${friendlyModelName(loading.name)}`
     const remaining = loading && typeof loading.remainingS === 'number' ? ` · about ${formatDuration(loading.remainingS)} left` : ''
     return { state: 'busy', title: label, detail: `Chat and speech wait until it finishes${remaining}.`, action: null }
   }
@@ -172,6 +184,7 @@ const ENGINE_NAMES = { supertonic: 'Supertonic', 'piper-plus': 'Piper Plus', 'pi
 
 // Voice engines the board reports as installed but failed to load (apps#560:
 // /health lists them with loaded:false and an error), as plain sentences.
+// `accelerator` is true when restarting the accelerator can help.
 export function voiceEngineWarnings(health) {
   const engines = (health && health.body && health.body.tts && health.body.tts.engines) || []
   return engines
@@ -179,11 +192,13 @@ export function voiceEngineWarnings(health) {
     .map((e) => {
       const name = ENGINE_NAMES[e.key] || e.key
       const raw = String(e.error)
-      const cause = /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
+      const accelerator = /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
+      const cause = accelerator
         ? 'the accelerator was busy or unavailable when it started'
         : raw.split('\n')[0].replace(/^\w*Error:\s*/, '').replace(/^\[[^\]]+\]\s*/, '').slice(0, 160)
       return {
         key: e.key,
+        accelerator,
         message: `The ${name} voice didn't load: ${cause}. Other voices still work, and the board tries ${name} again on the next spoken reply.`
       }
     })

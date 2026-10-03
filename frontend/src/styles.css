@@ -3426,6 +3426,7 @@ button:disabled {
 }
 
 .genai-pill-failed,
+.genai-pill-error,
 .genai-pill-unavailable,
 .genai-pill-incompatible {
   background: var(--danger-soft);
@@ -3445,6 +3446,7 @@ button:disabled {
 }
 
 .genai-banner-failed,
+.genai-banner-error,
 .genai-banner-incompatible,
 .genai-banner-unavailable {
   border-color: #edb1be;

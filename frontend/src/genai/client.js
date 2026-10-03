@@ -10,7 +10,8 @@ async function readJson(response) {
   try {
     return JSON.parse(text)
   } catch {
-    return { error: text.slice(0, 300) }
+    // Not GenAI Studio's JSON (an HTML error page, another service).
+    return { error: text.slice(0, 300), unreadable: true }
   }
 }
 
@@ -58,7 +59,9 @@ export async function postJson(path, json, options = {}) {
 export async function probeHealth(signal) {
   try {
     const response = await fetch(`${RELAY}/health`, { signal })
-    return { httpStatus: response.status, body: await readJson(response) }
+    const body = await readJson(response)
+    if (body.unreadable) return { httpStatus: response.status, body: {}, unreadable: true }
+    return { httpStatus: response.status, body }
   } catch (error) {
     if (error.name === 'AbortError') throw error
     return { networkError: error.message }
@@ -92,6 +95,8 @@ async function readStream(response, onText) {
   onText(decoder.decode())
 }
 
+export const REPLY_CUT_OFF = 'The reply stopped early: the connection to the board closed before it finished.'
+
 // Streams a chat reply; calls onDelta(text) for each piece. Resolves when done.
 export async function streamChat({ model, messages, maxTokens, signal, onDelta }) {
   const response = await request('v1/chat/completions', {
@@ -105,14 +110,21 @@ export async function streamChat({ model, messages, maxTokens, signal, onDelta }
   }
   const parser = createSseParser()
   let finished = false
-  await readStream(response, (text) => {
-    for (const event of parser.push(text)) {
-      if (finished) continue
-      const delta = chatDeltaText(event.data)
-      if (delta === null) finished = true
-      else if (delta) onDelta(delta)
-    }
-  })
+  try {
+    await readStream(response, (text) => {
+      for (const event of parser.push(text)) {
+        if (finished) continue
+        const delta = chatDeltaText(event.data)
+        if (delta === null) finished = true
+        else if (delta) onDelta(delta)
+      }
+    })
+  } catch (error) {
+    if (error.name === 'AbortError' || error instanceof GenaiError || !(error instanceof TypeError)) throw error
+    throw new GenaiError(REPLY_CUT_OFF)
+  }
+  // GenAI Studio ends every reply with [DONE]; a stream that ends without it was cut off.
+  if (!finished) throw new GenaiError(REPLY_CUT_OFF)
 }
 
 // Follows /models/logs/stream while a load runs; calls onProgress(loading) with

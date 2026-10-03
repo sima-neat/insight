@@ -17,6 +17,7 @@ import {
 } from './genai/backendState.js'
 import {
   GenaiError,
+  REPLY_CUT_OFF,
   downloadModel,
   followLoadProgress,
   getJson,
@@ -94,6 +95,7 @@ function StatusChip({ state }) {
     busy: 'Busy',
     starting: 'Starting',
     failed: 'Error',
+    error: 'Error',
     unavailable: 'Not running',
     unconfigured: 'Not set up',
     incompatible: 'Incompatible'
@@ -156,6 +158,8 @@ export default function GenAIView({ onError, onStatus }) {
   const player = useRef(null)
   const speechAbort = useRef(null)
   const [speakingId, setSpeakingId] = useState(null)
+  // {id, text}: why the last Read aloud of reply `id` failed, shown under it.
+  const [speechError, setSpeechError] = useState(null)
   const spokenLanguage = useRef(null)
 
   const [hubQuery, setHubQuery] = useState('')
@@ -361,6 +365,7 @@ export default function GenAIView({ onError, onStatus }) {
 
   async function speakText(text, id, audio = unlockPlayer()) {
     stopSpeaking()
+    setSpeechError(null)
     const words = speakableText(text)
     if (!words) return
     const support = voiceLanguageFor(text)
@@ -385,7 +390,7 @@ export default function GenAIView({ onError, onStatus }) {
       await audio.play()
     } catch (error) {
       setSpeakingId((current) => (current === id ? null : current))
-      if (error.name !== 'AbortError') onError?.(`Couldn't read the reply aloud: ${error.message}`)
+      if (error.name !== 'AbortError') setSpeechError({ id, text: `Couldn't read this reply aloud: ${error.message}` })
     }
   }
 
@@ -435,7 +440,7 @@ export default function GenAIView({ onError, onStatus }) {
     } catch (error) {
       const stopped = error.name === 'AbortError'
       update({ stopped, error: stopped ? null : error.message })
-      if (!stopped) fail(`The chat model didn't answer: ${error.message}`)
+      if (!stopped) fail(error.message === REPLY_CUT_OFF ? REPLY_CUT_OFF : `The chat model didn't answer: ${error.message}`)
     } finally {
       setStreaming(false)
       chatAbort.current = null
@@ -636,7 +641,7 @@ export default function GenAIView({ onError, onStatus }) {
             {(backend.action === 'settings' || backend.action === 'start-command') && !settingsOpen && (
               <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change board address</button>
             )}
-            {(backend.action === 'reset-mla' || voiceWarnings.length > 0) && (
+            {(backend.action === 'reset-mla' || voiceWarnings.some((w) => w.accelerator)) && (
               <button type="button" className="btn-ghost danger" onClick={restartAccelerator}>Restart the accelerator</button>
             )}
             {lastError && <button type="button" className="btn-ghost" onClick={() => setLastError(null)}>Dismiss</button>}
@@ -813,6 +818,7 @@ export default function GenAIView({ onError, onStatus }) {
                 )}
                 {m.stopped && <p className="hint">Stopped.</p>}
                 {m.error && <p className="genai-error">{m.error}</p>}
+                {speechError && speechError.id === m.id && <p className="genai-error">{speechError.text}</p>}
                 {support && !support.supported && (
                   <p className="hint genai-no-voice" title={voices ? `The board's voices speak ${languageNames(voices.languages).join(', ')}.` : ''}>
                     Can't read {support.name} aloud yet: the board has no {support.name} voice.
