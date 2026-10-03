@@ -26,8 +26,8 @@
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
-    {"name": "Board", "description": "Select the local or SSH-connected DevKit used by board-backed Insight APIs."},
-    {"name": "Peripherals", "description": "Read and refresh the selected board's peripheral catalog from SiMa Sentinel. Insight forwards Sentinel's generic records without rescanning, caching, or applying support policy."}
+    {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras SiMa Sentinel reports on the selected board and export a camera input configuration. Sentinel discovers the cameras; Insight adds which processes hold each one. Neither captures frames, changes sensor controls, or publishes streams. Each camera and mode states whether Core `CameraInput` supports it, as classified by Neat Core's support rules on the board."}
   ],
   "x-tagGroups": [
     {
@@ -35,8 +35,12 @@
       "tags": ["Service and system", "Diagnostics", "Viewer", "DevKit shell"]
     },
     {
+      "name": "Board and peripherals",
+      "tags": ["Board", "Peripherals"]
+    },
+    {
       "name": "Automate Insight",
-      "tags": ["Media library", "Media imports", "Media sources", "Workspace", "Board", "Peripherals"]
+      "tags": ["Media library", "Media imports", "Media sources", "Workspace"]
     },
     {
       "name": "API resources",
@@ -763,8 +767,103 @@
         "responses": {
           "200": {"description": "Running service status and launch metadata.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
           "404": {"$ref": "#/components/responses/NotFound"},
+          "409": {"$ref": "#/components/responses/Conflict"},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/board": {
+      "get": {
+        "tags": ["Board"],
+        "summary": "Get the selected board",
+        "description": "Returns the board target, where it came from (`manual`, `on-board`, or `sdk-env`), the available defaults, and the last connection status. This call never connects to the board; use `POST /api/board/test` for a live check. `generation` changes whenever the target changes, so clients can discard data collected from a previous board.",
+        "operationId": "getBoard",
+        "responses": {
+          "200": {"description": "Selected board and last known status.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}
+        }
+      }
+    },
+    "/api/board/select": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Select a board or restore the default",
+        "description": "Saves `{host, port, user}` as the manually selected board, or clears the saved selection when the body is `{\"reset\": true}` so the on-board or SDK default applies again. The selection holds no credentials.",
+        "operationId": "selectBoard",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardSelectRequest"}, "examples": {"manual": {"value": {"host": "192.168.2.2", "port": 22, "user": "sima"}}, "reset": {"value": {"reset": true}}}}}},
+        "responses": {
+          "200": {"description": "Updated board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/board/test": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Connect to the selected board",
+        "description": "Connects to the selected board and reads its host name, machine type, and build version. A changed SSH host key returns `409` with `host_key_changed`, both fingerprints, and a hint; trust the new key with `POST /api/board/trust-host-key` once you have confirmed the board was reflashed.",
+        "operationId": "testBoard",
+        "responses": {
+          "200": {"description": "Board state with `status.state` set to `connected`.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/board/trust-host-key": {
+      "post": {
+        "tags": ["Board"],
+        "summary": "Trust a reflashed board's new host key",
+        "description": "Replaces Insight's stored SSH host key for the selected board with the key it presented during the last failed connection. The fingerprint must match `presented_fingerprint` from that `host_key_changed` error.",
+        "operationId": "trustBoardHostKey",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TrustHostKeyRequest"}}}},
+        "responses": {
+          "200": {"description": "Updated board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Get the last camera scan",
+        "description": "Returns the snapshot from the last `POST /api/peripherals/refresh` of the selected board. Before the first scan, or after the selected board changes, `scanned_at` is `null` and `items` is empty. This call never connects to the board.",
+        "operationId": "getPeripherals",
+        "responses": {
+          "200": {"description": "Last camera snapshot, or an empty one.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/refresh": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Scan the selected board for cameras",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan and waits until its target `scan_sequence` is reached, then reads the catalog. Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes and reads `libcamerasrc`'s properties; if that check cannot run, availability is `unknown`. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists cameras added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "operationId": "refreshPeripherals",
+        "responses": {
+          "200": {"description": "New camera snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "503": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/cameras/export": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Export a camera input configuration",
+        "description": "Renders one mode from the last scan without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name`; an Apps `config.yaml` `camera:` block is included only when the board's `libcamerasrc` supports `buffer-count`. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "operationId": "exportCameraInput",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
+        "responses": {
+          "200": {"description": "Rendered configurations with the mode's support tier and warnings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExport"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
@@ -805,78 +904,6 @@
         "responses": {
           "200": {"description": "Viewer URL plus the resolved SDK or DevKit channel capacity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ViewerUrl"}}}}
         }
-      }
-    },
-    "/api/board": {
-      "get": {
-        "tags": ["Board"],
-        "summary": "Get the selected board",
-        "description": "Returns the local, manually selected, or SDK-configured board target and its generation. Reading this endpoint does not connect to the board.",
-        "operationId": "getSelectedBoard",
-        "responses": {"200": {"description": "Selected target and last connection status.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}}
-      }
-    },
-    "/api/board/select": {
-      "post": {
-        "tags": ["Board"],
-        "summary": "Select a board",
-        "description": "Saves one SSH target, or clears the manual target when `reset` is true. Changing targets advances the board generation and invalidates in-flight peripheral results.",
-        "operationId": "selectBoard",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"host": {"type": "string"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "user": {"type": "string"}, "reset": {"type": "boolean"}}}}}},
-        "responses": {"200": {"description": "Updated selected-board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}}
-      }
-    },
-    "/api/board/test": {
-      "post": {
-        "tags": ["Board"],
-        "summary": "Test the selected board connection",
-        "description": "Connects locally or over SSH and reads stable board identity and build metadata.",
-        "operationId": "testSelectedBoard",
-        "responses": {"200": {"description": "Connected board state and identity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
-      }
-    },
-    "/api/board/trust-host-key": {
-      "post": {
-        "tags": ["Board"],
-        "summary": "Trust a replacement SSH host key",
-        "description": "Trusts only the exact fingerprint presented by the currently selected board after a host-key mismatch.",
-        "operationId": "trustSelectedBoardHostKey",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["fingerprint"], "properties": {"fingerprint": {"type": "string"}}}}}},
-        "responses": {"200": {"description": "Updated selected-board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}}
-      }
-    },
-    "/api/peripherals": {
-      "get": {
-        "tags": ["Peripherals"],
-        "summary": "Get the current peripheral catalog",
-        "description": "Reads the selected board's SiMa Sentinel catalog (`/run/simaai-sentinel/api.sock`). Insight preserves the generic v1 envelope and device records and adds selected-board context; it never performs a backup scan. To poll, pass the `revision` and `instance_id` you hold: the reply is `{\"unchanged\": true, ...}` or, when anything changed or Sentinel restarted, the full catalog.",
-        "operationId": "getPeripheralCatalog",
-        "parameters": [
-          {"name": "since_revision", "in": "query", "schema": {"type": "integer", "minimum": 0}, "description": "Revision of the held catalog; requires `instance_id`."},
-          {"name": "instance_id", "in": "query", "schema": {"type": "string", "maxLength": 256}, "description": "Sentinel instance of the held catalog; requires `since_revision`."},
-          {"name": "board_generation", "in": "query", "schema": {"type": "integer", "minimum": 0}, "description": "Optional selected-board generation guard."}
-        ],
-        "responses": {"200": {"description": "Current catalog, or an unchanged reply, with the board generation.", "content": {"application/json": {"schema": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCatalog"}, {"$ref": "#/components/schemas/PeripheralCatalogUnchanged"}]}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
-      }
-    },
-    "/api/peripherals/refresh": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Refresh the peripheral catalog",
-        "description": "Asks Sentinel to rescan, then waits until `scan_sequence` reaches its returned `target_scan_sequence`. Insight does not scan hardware itself.",
-        "operationId": "refreshPeripheralCatalog",
-        "requestBody": {"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"board_generation": {"type": "integer", "minimum": 0, "description": "Generation from a previously read catalog; mismatches fail instead of refreshing another board."}}}}}},
-        "responses": {"200": {"description": "Catalog produced by or after the requested reconciliation.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralCatalog"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
-      }
-    },
-    "/api/peripherals/cameras/export": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Generate CameraInput examples",
-        "description": "Re-reads the Sentinel catalog and generates Python, C++, and JSON examples only when the selected camera and exact discrete mode still exist and are marked supported.",
-        "operationId": "exportPeripheralCameraMode",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraInputExportRequest"}}}},
-        "responses": {"200": {"description": "Examples bound to the validated catalog revision.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraInputExport"}}}}, "400": {"$ref": "#/components/responses/BadRequest"}, "404": {"$ref": "#/components/responses/NotFound"}, "409": {"$ref": "#/components/responses/Conflict"}, "502": {"$ref": "#/components/responses/BadGateway"}, "503": {"$ref": "#/components/responses/ServiceUnavailable"}, "504": {"$ref": "#/components/responses/GatewayTimeout"}}
       }
     },
     "/api/workspace/root": {
@@ -1058,7 +1085,7 @@
       "BadRequest": {"description": "Missing or invalid request data.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "Conflict": {"description": "The source exists but is not currently running.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+      "Conflict": {"description": "The resource's current state does not permit the requested operation.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "SourceChangedWhileStarting": {"description": "The slot was reassigned while Insight was confirming a webcam publisher or starting a file, so the start was not recorded (a file stream started this way is stopped again). Unlike 409, not worth retrying: reload the source list.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamStopSuperseded": {"description": "Nothing was changed, for one of two reasons: the released session no longer publishes to this slot and a different session does; or the slot changed kind (file to webcam or back) while this request was waiting on MediaMTX. Reload the source list and retry.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
@@ -1066,14 +1093,14 @@
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "GatewayTimeout": {"description": "A required backend command or media helper timed out.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "ServiceUnavailable": {"description": "The selected board's required local daemon is not installed, running, or accessible.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}
+      "BoardErrorResponse": {"description": "The board or a command on it could not be used. `code` identifies the failure and `hint` names the recovery step.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardError"}}}}
     },
     "schemas": {
       "Error": {
         "type": "object",
         "description": "Standard JSON error envelope returned by most failed API operations.",
         "required": ["error"],
-        "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}, "code": {"type": "string", "description": "Stable machine-readable error code when available."}, "hint": {"type": ["string", "null"], "description": "Actionable recovery guidance when available."}},
+        "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}},
         "example": {"error": "Missing index"}
       },
       "Success": {
@@ -1262,55 +1289,6 @@
           "sdk_channel_limited": {"type": "boolean", "description": "Whether SDK Docker port publication restricts the viewer below the 80-channel engine ceiling."}
         }
       },
-      "BoardState": {
-        "type": "object",
-        "description": "Selected-board target, source, generation, last connection status, and identity when tested.",
-        "required": ["target", "saved", "defaults", "generation", "status", "board"],
-        "additionalProperties": true
-      },
-      "PeripheralDevice": {
-        "type": "object",
-        "description": "Consumer-neutral Sentinel record. The object named by `type` holds provider-specific details; unknown types and optional fields must be preserved.",
-        "required": ["id", "type", "provider"],
-        "properties": {"id": {"type": "string"}, "type": {"type": "string"}, "provider": {"type": "string"}},
-        "additionalProperties": true
-      },
-      "PeripheralCatalog": {
-        "type": "object",
-        "description": "The Sentinel v1 catalog plus Insight's selected-board context. `support.state` is `not_installed` when Neat Core is absent and every camera mode is unsupported.",
-        "required": ["schema_version", "instance_id", "state", "ready", "stale", "revision", "sequence", "scan_sequence", "devices", "board_generation", "board"],
-        "properties": {
-          "schema_version": {"type": "integer", "const": 1}, "instance_id": {"type": "string"}, "state": {"type": "string", "enum": ["starting", "ready", "degraded"]}, "ready": {"type": "boolean"}, "stale": {"type": "boolean"},
-          "revision": {"type": "integer", "minimum": 0}, "sequence": {"type": "integer", "minimum": 0}, "scan_sequence": {"type": "integer", "minimum": 0},
-          "last_success_at": {"type": ["string", "null"], "format": "date-time"}, "last_attempt_at": {"type": ["string", "null"], "format": "date-time"}, "error": {"type": ["object", "null"], "additionalProperties": true},
-          "devices": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralDevice"}}, "board_generation": {"type": "integer", "minimum": 0}, "board": {"type": "object", "required": ["label", "source"], "properties": {"label": {"type": "string"}, "source": {"type": "string"}}}
-        },
-        "additionalProperties": true
-      },
-      "PeripheralCatalogUnchanged": {
-        "type": "object",
-        "description": "Sentinel's reply to `since_revision` when the held catalog is current, plus selected-board context.",
-        "required": ["schema_version", "instance_id", "revision", "scan_sequence", "unchanged", "board_generation", "board"],
-        "additionalProperties": true
-      },
-      "CameraInputExportRequest": {
-        "type": "object",
-        "required": ["board_generation", "instance_id", "revision", "device_id", "format", "width", "height", "framerate_num", "framerate_den"],
-        "properties": {
-          "board_generation": {"type": "integer", "minimum": 0}, "instance_id": {"type": "string", "minLength": 1}, "revision": {"type": "integer", "minimum": 0}, "device_id": {"type": "string", "minLength": 1}, "format": {"type": "string", "minLength": 1},
-          "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}, "framerate_num": {"type": "integer", "minimum": 1}, "framerate_den": {"type": "integer", "minimum": 1}
-        },
-        "additionalProperties": false
-      },
-      "CameraInputExport": {
-        "type": "object",
-        "required": ["device_id", "mode", "exports"],
-        "properties": {
-          "device_id": {"type": "string"},
-          "mode": {"type": "object", "additionalProperties": true},
-          "exports": {"type": "array", "items": {"type": "object", "required": ["id", "label", "filename", "language", "content"], "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
-        }
-      },
       "WorkspaceKind": {
         "type": "string",
         "description": "Content classification used for workspace icons, filtering, and preview selection.",
@@ -1355,6 +1333,127 @@
             }
           }
         ]
+      },
+      "BoardError": {
+        "type": "object",
+        "description": "Error envelope for board and peripheral operations.",
+        "required": ["error", "code"],
+        "properties": {
+          "error": {"type": "string", "description": "Human-readable failure reason."},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version"]},
+          "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
+          "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
+          "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
+          "detail": {"type": "string", "description": "The underlying error text, such as SiMa Sentinel's answer or the socket failure."},
+          "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
+          "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},
+          "presented_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint the board presented."}
+        },
+        "additionalProperties": true,
+        "example": {"error": "SSH key authentication as sima on 192.168.2.2 failed.", "code": "auth_failed", "hint": "Insight signs in with the SSH keys of the 'root' account on this machine. Authorize one on the board, then retry: sudo -H ssh-copy-id -p 22 sima@192.168.2.2", "command": "sudo -H ssh-copy-id -p 22 sima@192.168.2.2"}
+      },
+      "BoardTarget": {
+        "type": "object",
+        "required": ["mode", "source", "label"],
+        "properties": {
+          "mode": {"type": "string", "enum": ["local", "ssh"]},
+          "source": {"type": "string", "enum": ["manual", "on-board", "sdk-env"], "description": "`sdk-env` is the DevKit paired with `sima-cli sdk setup` (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`)."},
+          "host": {"type": ["string", "null"]},
+          "port": {"type": ["integer", "null"]},
+          "user": {"type": ["string", "null"]},
+          "label": {"type": "string", "example": "sima@192.168.2.2"}
+        }
+      },
+      "BoardState": {
+        "type": "object",
+        "required": ["target", "saved", "defaults", "generation", "status", "board"],
+        "properties": {
+          "target": {"oneOf": [{"$ref": "#/components/schemas/BoardTarget"}, {"type": "null"}]},
+          "saved": {"type": ["object", "null"], "description": "Manually selected `{host, port, user}`, if any."},
+          "defaults": {"type": "object", "properties": {"on_board": {"type": "boolean"}, "sdk_env": {"type": ["object", "null"]}}},
+          "generation": {"type": "integer", "description": "Changes whenever the selected target changes."},
+          "status": {"type": "object", "properties": {"state": {"type": "string", "enum": ["unknown", "connected", "error"]}, "checked_at": {"type": ["string", "null"], "format": "date-time"}, "error": {"oneOf": [{"$ref": "#/components/schemas/BoardError"}, {"type": "null"}]}}},
+          "board": {"type": ["object", "null"], "description": "Identity read from the board: `hostname`, `machine`, `build_version`, and a stable `fingerprint`."}
+        }
+      },
+      "BoardSelectRequest": {
+        "type": "object",
+        "properties": {
+          "host": {"type": "string", "description": "IP address or host name."},
+          "port": {"type": "integer", "default": 22},
+          "user": {"type": "string", "default": "sima"},
+          "reset": {"type": "boolean", "description": "Clear the saved selection instead of saving one."}
+        }
+      },
+      "TrustHostKeyRequest": {
+        "type": "object",
+        "required": ["fingerprint"],
+        "properties": {"fingerprint": {"type": "string", "example": "SHA256:XLLXyv0V3JYCy0LHeC0piPrwnLQBSAMIrOev/d2ZUdo"}}
+      },
+      "SupportTier": {
+        "type": "object",
+        "description": "Whether Core `CameraInput` can use a camera, format, or mode, from Neat Core's support rules as SiMa Sentinel applies them. `verified`: the rules accept it. `unsupported`: they reject it, and `reason` is Sentinel's. `advertised` is not produced from Sentinel's catalog. A frame rate the device advertises but Sentinel did not classify has tier `\"\"` (unknown).",
+        "required": ["tier", "reason"],
+        "properties": {
+          "tier": {"type": "string", "enum": ["verified", "advertised", "unsupported"]},
+          "reason": {"type": "string"},
+          "links": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "url": {"type": "string", "format": "uri"}}}}
+        }
+      },
+      "PeripheralCamera": {
+        "type": "object",
+        "required": ["id", "kind", "connection", "name", "device", "availability", "support", "modes_source", "formats"],
+        "properties": {
+          "id": {"type": "string", "description": "SiMa Sentinel's stable device id: `camera:<sensor entity name>` (MIPI) or `camera:v4l2:<hash of the USB port>` (USB).", "example": "camera:imx477 5-001a"},
+          "kind": {"type": "string", "enum": ["camera"]},
+          "connection": {"type": "string", "description": "`mipi` or `usb`; a connection Insight does not group is passed through and not listed on the page."},
+          "name": {"type": "string"},
+          "model": {"type": ["string", "null"]},
+          "device": {"type": "object", "description": "Known identifiers from Sentinel: `camera_name`, `media_device`, and `bus_info` (MIPI); `video_node` and `usb` identity (`vendor_id`, `product_id`, `serial`, `product`, `bus_path`) for USB.", "additionalProperties": true},
+          "availability": {"type": "object", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
+          "support": {"$ref": "#/components/schemas/SupportTier"},
+          "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
+          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}}}}}}}}}},
+          "default_selection": {"type": ["object", "null"]},
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
+        }
+      },
+      "PeripheralsSnapshot": {
+        "type": "object",
+        "required": ["board", "generation", "scanned_at", "items", "issues", "changes", "platform"],
+        "properties": {
+          "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
+          "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
+          "scanned_at": {"type": ["string", "null"], "format": "date-time"},
+          "scan_ms": {"type": "integer"},
+          "platform": {"type": ["object", "null"], "description": "Tools the on-board check found, libcamerasrc properties, and how camera users were detected."},
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
+          "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
+          "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous refresh of the same board."}
+        }
+      },
+      "CameraExportRequest": {
+        "type": "object",
+        "required": ["id", "format", "width", "height", "fps"],
+        "properties": {
+          "id": {"type": "string"},
+          "format": {"type": "string", "example": "NV12"},
+          "width": {"type": "integer"},
+          "height": {"type": "integer"},
+          "fps": {"type": "number"}
+        }
+      },
+      "CameraExport": {
+        "type": "object",
+        "required": ["camera_id", "selection", "support", "warnings", "exports"],
+        "properties": {
+          "camera_id": {"type": "string"},
+          "selection": {"type": "object"},
+          "support": {"$ref": "#/components/schemas/SupportTier"},
+          "warnings": {"type": "array", "items": {"type": "string"}},
+          "exports": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "enum": ["python", "cpp", "yaml", "json"]}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
+        }
       }
     }
   }

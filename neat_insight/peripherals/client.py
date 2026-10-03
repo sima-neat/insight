@@ -1,7 +1,6 @@
 """Read the peripheral catalog from SiMa Sentinel on the selected board."""
 import json
 import time
-import urllib.parse
 from http.client import HTTPException
 from pathlib import Path
 
@@ -63,20 +62,8 @@ class PeripheralClient:
         self.session = session
         self.socket_path = socket_path
 
-    def catalog(self, since_revision=None, instance_id=None) -> dict:
-        """Return the full catalog, or Sentinel's short ``unchanged`` reply when
-        ``since_revision`` and ``instance_id`` still describe the current one."""
-        path = "/v1/peripherals"
-        if since_revision is not None or instance_id is not None:
-            if not _non_negative_int(since_revision) or not isinstance(instance_id, str) or not 0 < len(instance_id) <= 256:
-                raise BoardError("invalid_request", "`since_revision` and `instance_id` must be given together, as read from one catalog.")
-            path += "?" + urllib.parse.urlencode({"since_revision": since_revision, "instance_id": instance_id})
-        payload = self._call("GET", path)
-        if since_revision is not None and payload.get("unchanged") is True:
-            self._validate_schema(payload)
-            if payload.get("instance_id") != instance_id or payload.get("revision") != since_revision or not _non_negative_int(payload.get("scan_sequence")):
-                raise self._response_error("SiMa Sentinel returned an `unchanged` reply for a different catalog.", payload)
-            return payload
+    def catalog(self) -> dict:
+        payload = self._call("GET", "/v1/peripherals")
         self._validate_catalog(payload)
         return payload
 

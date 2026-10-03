@@ -1,97 +1,113 @@
-from flask import Blueprint, jsonify, request
+import json
+import logging
+import time
+from pathlib import Path
+
+from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.board.api import no_store
 from neat_insight.peripherals import export
+from neat_insight.peripherals.cameras import ScanCache, camera_nodes, cameras_of, empty_snapshot
 from neat_insight.peripherals.client import PeripheralClient
 
 peripherals_bp = Blueprint("peripherals", __name__)
-peripherals_bp.after_request(no_store)
+
+CHECK_PATH = Path(__file__).with_name("board_check.py")
+CHECK_TIMEOUT_SEC = 45.0
+
+scans = ScanCache()
 
 
-@peripherals_bp.app_errorhandler(BoardError)
-def peripheral_error(exc: BoardError):
-    return jsonify(exc.to_dict()), exc.status
+@peripherals_bp.after_request
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
-def _integer_arg(name: str, default=None):
-    raw = request.args.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        value = -1
-    if value < 0 or str(value) != raw:
-        raise BoardError("invalid_request", f"`{name}` must be a non-negative integer.")
-    return value
-
-
-def _with_board(session, payload: dict) -> dict:
-    session.require_current()
+def _board_summary(session, identity=None) -> dict:
+    identity = identity or {}
     return {
-        **payload,
-        "board_generation": session.generation,
-        "board": {"label": session.target.label, "source": session.target.source},
+        "label": session.target.label,
+        "source": session.target.source,
+        **{key: identity.get(key) for key in ("hostname", "machine", "build_version", "fingerprint")},
     }
 
 
-def _session():
-    return get_board_manager().session()
+def _check_board(session, catalog: dict):
+    """Run the read-only camera check on the board in one command; None when it cannot run.
+
+    Availability and libcamerasrc facts are extras on top of Sentinel's catalog, so a failure here
+    degrades them to unknown instead of failing the scan.
+    """
+    cameras = cameras_of(catalog)
+    if not cameras:
+        return {"tools": {}, "availability_method": None, "users": {}, "libcamerasrc": None, "failures": []}
+    payload = {
+        "cameras": {device["id"]: camera_nodes(device) for device in cameras},
+        "libcamerasrc": any(device["camera"].get("backend") == "mipi" for device in cameras),
+    }
+    try:
+        result = session.transport.exec(
+            ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
+        )
+        check = json.loads(result.stdout.decode("utf-8", errors="replace")) if result.exit_code == 0 else None
+    except ValueError:
+        check = None
+    except BoardError as exc:
+        if exc.code == "stale_snapshot":
+            raise
+        logging.warning("The peripheral camera check failed on %s: %s", session.target.label, exc)
+        check = None
+    return check if isinstance(check, dict) else None
 
 
+# API: return the last camera scan of the selected board.
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
-    """Return the selected board's Sentinel catalog, or Sentinel's short
-    ``unchanged`` reply when ``since_revision`` and ``instance_id`` are current."""
-    session = _session()
-    expected_generation = _integer_arg("board_generation", session.generation)
-    if expected_generation != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The selected board changed since this catalog was read.",
-            hint="Read the current peripheral catalog without `since_revision`.",
-            expected_generation=expected_generation,
-            current_generation=session.generation,
-        )
-    catalog = PeripheralClient(session).catalog(_integer_arg("since_revision"), request.args.get("instance_id"))
-    return _with_board(session, catalog)
+    """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
+    try:
+        session = get_board_manager().session()
+    except BoardError as err:
+        return err.to_dict(), err.status
+    return scans.snapshot(session.generation) or empty_snapshot(_board_summary(session), session.generation)
 
 
+# API: rescan the selected board for cameras.
 @peripherals_bp.post("/api/peripherals/refresh")
 def refresh_peripherals():
-    """Ask Sentinel to rescan and wait until its target scan has completed."""
-    session = _session()
-    body = request.get_json(silent=True)
-    if isinstance(body, dict) and "board_generation" in body:
-        generation = body["board_generation"]
-        if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
-            raise BoardError("invalid_request", "`board_generation` must be a non-negative integer.")
-        if generation != session.generation:
-            raise BoardError(
-                "stale_snapshot",
-                "The selected board changed since this catalog was read.",
-                hint="Read the current peripheral catalog, then refresh again.",
-                expected_generation=generation,
-                current_generation=session.generation,
-            )
-    return _with_board(session, PeripheralClient(session).refresh())
+    """Ask SiMa Sentinel to rescan, then return a new snapshot, or the result of a refresh in flight."""
+    requested = time.monotonic()
+    try:
+        session = get_board_manager().session()
+        with scans.refresh_lock(session.generation):
+            in_flight = scans.completed_since(session.generation, requested)
+            if in_flight:
+                return in_flight
+            board = _board_summary(session, session.identity())
+            started = time.monotonic()
+            catalog = PeripheralClient(session).refresh()
+            check = _check_board(session, catalog)
+            scan_ms = int((time.monotonic() - started) * 1000)
+            session.require_current()
+            return scans.record(session.generation, board, catalog, check, scan_ms)
+    except BoardError as err:
+        return err.to_dict(), err.status
 
 
+# API: render an input configuration for one camera mode from the last scan.
 @peripherals_bp.post("/api/peripherals/cameras/export")
 def export_camera():
-    """Re-read the Sentinel catalog and render one exact supported CameraInput mode."""
-    selection = export.parse_request(request.get_json(silent=True))
-    session = _session()
-    if selection["board_generation"] != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The selected board changed since this mode was selected.",
-            hint=export.MODE_HINT,
-            expected_generation=selection["board_generation"],
-            current_generation=session.generation,
-        )
-    catalog = PeripheralClient(session).catalog()
-    result = export.render(catalog, selection)
-    session.require_current()
-    return result
+    """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
+    try:
+        selection = export.parse_request(request.get_json(silent=True))
+        session = get_board_manager().session()
+        snapshot = scans.snapshot(session.generation)
+        if snapshot is None:
+            raise BoardError(
+                "stale_snapshot",
+                "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
+                hint="Click Refresh, then export again.",
+            )
+        return export.render(snapshot, selection)
+    except BoardError as err:
+        return err.to_dict(), err.status
