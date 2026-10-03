@@ -396,19 +396,18 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 
 ## Boards And Peripherals
 
-Peripheral discovery is owned by the board's `simaai-peripherals` daemon. Insight only selects a board and forwards the daemon's versioned Unix-socket API locally or through its SSH transport. Never add an Insight-side hardware scan, catalog cache, or fallback path.
+Peripheral discovery is owned by SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`). Insight only selects a board and forwards Sentinel's versioned Unix-socket API locally or through its SSH transport. Never add an Insight-side hardware scan, catalog cache, or fallback path.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/board` | Return the selected local, SDK, or manual board target and its generation. |
 | `POST` | `/api/board/select` | Select one manual SSH board, or pass `{"reset": true}` to use the environment default. |
 | `POST` | `/api/board/test` | Connect to the selected board and read identity. |
-| `GET` | `/api/peripherals` | Read the authoritative daemon catalog and add selected-board context. |
-| `POST` | `/api/peripherals/refresh` | Ask the daemon to reconcile and wait for its target scan sequence. |
-| `GET` | `/api/peripherals/events` | Forward the daemon's bounded event long-poll; re-read the catalog on events or `resync_required`. |
+| `GET` | `/api/peripherals` | Read Sentinel's catalog and add selected-board context. Poll with `since_revision` and `instance_id`; the reply is `unchanged: true` or the full catalog. |
+| `POST` | `/api/peripherals/refresh` | Ask Sentinel to rescan and wait for its target scan sequence. |
 | `POST` | `/api/peripherals/cameras/export` | Revalidate one exact supported camera mode and generate CameraInput examples. |
 
-Daemon absence, refusal, permission denial, timeout, malformed responses, and schema mismatch are errors. Clients must surface them rather than probing hardware independently.
+A missing or stopped Sentinel, a Sentinel without the peripheral catalog (update with `sima-cli neat install sentinel`), permission denial, timeout, malformed responses, and schema mismatch are errors. `support.state == "not_installed"` means Neat Core is absent and no camera mode is supported. Clients must surface them rather than probing hardware independently.
 
 ## Environment And Viewer
 

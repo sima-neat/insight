@@ -118,21 +118,6 @@ export function canRefreshCatalog(catalog, refreshing = false) {
   return Boolean(catalog?.instance_id) && !refreshing
 }
 
-export function createEventCursor(catalog) {
-  let current = { sequence: catalog.sequence, instanceId: catalog.instance_id }
-  return {
-    current: () => current,
-    observe(response) {
-      const changed = response.resync_required || response.shutting_down || response.instance_id !== current.instanceId || response.events.length > 0
-      if (!changed) current = { sequence: response.sequence, instanceId: response.instance_id }
-      return changed
-    },
-    synchronize(nextCatalog) {
-      current = { sequence: nextCatalog.sequence, instanceId: nextCatalog.instance_id }
-    }
-  }
-}
-
 function catalogOrder(catalog) {
   return [catalog?.scan_sequence || 0, catalog?.revision || 0, catalog?.sequence || 0]
 }

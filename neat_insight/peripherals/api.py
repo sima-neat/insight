@@ -14,7 +14,7 @@ def peripheral_error(exc: BoardError):
     return jsonify(exc.to_dict()), exc.status
 
 
-def _integer_arg(name: str, default=None, maximum=None):
+def _integer_arg(name: str, default=None):
     raw = request.args.get(name)
     if raw is None:
         return default
@@ -22,8 +22,8 @@ def _integer_arg(name: str, default=None, maximum=None):
         value = int(raw)
     except ValueError:
         value = -1
-    if value < 0 or (maximum is not None and value > maximum) or str(value) != raw:
-        raise BoardError("invalid_request", f"`{name}` must be a non-negative integer" + (f" no greater than {maximum}." if maximum is not None else "."))
+    if value < 0 or str(value) != raw:
+        raise BoardError("invalid_request", f"`{name}` must be a non-negative integer.")
     return value
 
 
@@ -42,14 +42,25 @@ def _session():
 
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
-    """Return the selected board's authoritative daemon catalog."""
+    """Return the selected board's Sentinel catalog, or Sentinel's short
+    ``unchanged`` reply when ``since_revision`` and ``instance_id`` are current."""
     session = _session()
-    return _with_board(session, PeripheralClient(session).catalog())
+    expected_generation = _integer_arg("board_generation", session.generation)
+    if expected_generation != session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The selected board changed since this catalog was read.",
+            hint="Read the current peripheral catalog without `since_revision`.",
+            expected_generation=expected_generation,
+            current_generation=session.generation,
+        )
+    catalog = PeripheralClient(session).catalog(_integer_arg("since_revision"), request.args.get("instance_id"))
+    return _with_board(session, catalog)
 
 
 @peripherals_bp.post("/api/peripherals/refresh")
 def refresh_peripherals():
-    """Request daemon reconciliation and wait for its target scan to complete."""
+    """Ask Sentinel to rescan and wait until its target scan has completed."""
     session = _session()
     body = request.get_json(silent=True)
     if isinstance(body, dict) and "board_generation" in body:
@@ -69,7 +80,7 @@ def refresh_peripherals():
 
 @peripherals_bp.post("/api/peripherals/cameras/export")
 def export_camera():
-    """Re-read the daemon catalog and render one exact supported CameraInput mode."""
+    """Re-read the Sentinel catalog and render one exact supported CameraInput mode."""
     selection = export.parse_request(request.get_json(silent=True))
     session = _session()
     if selection["board_generation"] != session.generation:
@@ -84,24 +95,3 @@ def export_camera():
     result = export.render(catalog, selection)
     session.require_current()
     return result
-
-
-@peripherals_bp.get("/api/peripherals/events")
-def get_peripheral_events():
-    """Long-poll daemon events without computing or caching changes in Insight."""
-    session = _session()
-    expected_generation = _integer_arg("board_generation", session.generation)
-    if expected_generation != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The selected board changed since this event cursor was created.",
-            hint="Read the current peripheral catalog and start a new event cursor.",
-            expected_generation=expected_generation,
-            current_generation=session.generation,
-        )
-    payload = PeripheralClient(session).events(
-        _integer_arg("after_sequence", 0),
-        _integer_arg("wait_ms", 0, maximum=30000),
-        request.args.get("instance_id") or None,
-    )
-    return _with_board(session, payload)

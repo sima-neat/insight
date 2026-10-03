@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { copyText, createLatestRequest, requestJson } from './peripherals/api.js'
-import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, createEventCursor, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
+import { canRefreshCatalog, catalogIdentity, createCatalogPolicy, deviceTypes, formatTime, isExportableMode, modeLabel, normalizeError, typeLabel } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
+
+const CATALOG_POLL_MS = 2000
 
 function deviceLabel(device) {
   const details = device?.[device?.type] || {}
@@ -41,7 +43,7 @@ function ExportPanel({ result, error, onCopy }) {
   return (
     <section className="periph-exports" aria-label="CameraInput examples">
       <h3>CameraInput examples</h3>
-      <p className="section-note">Generated from the exact daemon catalog revision shown above.</p>
+      <p className="section-note">Generated from the exact catalog revision shown above.</p>
       {result.exports.map((item) => (
         <details key={item.id} open={item.id === 'python'}>
           <summary>{item.label}</summary>
@@ -56,7 +58,7 @@ function ExportPanel({ result, error, onCopy }) {
 export default function PeripheralsView({ board, boardError, boardLoading, onOpenBoard, onReloadBoard, onStatus }) {
   const [catalog, setCatalog] = useState(null)
   const [error, setError] = useState(null)
-  const [eventError, setEventError] = useState(null)
+  const [pollError, setPollError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [type, setType] = useState('camera')
@@ -95,7 +97,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
       const next = result.value
       const selected = commitCatalog(next, catalogRequest)
       setError(null)
-      setEventError(null)
+      setPollError(null)
       return selected
     } catch (nextError) {
       if (mounted.current) setError(normalizeError(nextError))
@@ -126,44 +128,35 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
     if (board?.target) load()
   }, [board?.generation, board?.target, load])
 
+  // Sentinel has no event stream: while the page is visible, poll with the held
+  // revision and instance_id. Sentinel answers `unchanged`, or the full catalog
+  // when anything changed or it restarted (a new instance_id).
   useEffect(() => {
     if (!catalog?.instance_id || !board?.target) return undefined
     const controller = new AbortController()
-    const eventCursor = createEventCursor(catalog)
-
-    async function watch() {
-      while (!controller.signal.aborted) {
-        const cursor = eventCursor.current()
-        const query = new URLSearchParams({
-          board_generation: String(catalog.board_generation),
-          instance_id: cursor.instanceId,
-          after_sequence: String(cursor.sequence),
-          wait_ms: '30000'
-        })
+    const query = new URLSearchParams({ since_revision: catalog.revision, instance_id: catalog.instance_id, board_generation: catalog.board_generation })
+    let timer
+    async function poll() {
+      if (document.visibilityState !== 'hidden') {
+        const catalogRequest = catalogPolicy.current.begin()
         try {
-          const response = await requestJson(`/api/peripherals/events?${query}`, { signal: controller.signal })
+          const reply = await requestJson(`/api/peripherals?${query}`, { signal: controller.signal })
           if (controller.signal.aborted) return
-          const changed = eventCursor.observe(response)
-          setEventError(null)
-          if (changed) {
-            const next = await load({ quiet: true })
-            if (next) {
-              eventCursor.synchronize(next)
-            } else {
-              setEventError({ message: 'A peripheral change was detected, but the updated catalog could not be loaded. Retrying…' })
-              await new Promise((resolve) => setTimeout(resolve, 1500))
-            }
-          }
+          setPollError(null)
+          if (reply.unchanged !== true) commitCatalog(reply, catalogRequest)
         } catch (nextError) {
-          if (nextError?.name === 'AbortError') return
-          setEventError(normalizeError(nextError))
-          await new Promise((resolve) => setTimeout(resolve, 1500))
+          if (controller.signal.aborted) return
+          setPollError(normalizeError(nextError))
         }
       }
+      timer = setTimeout(poll, CATALOG_POLL_MS)
     }
-    watch()
-    return () => controller.abort()
-  }, [board?.generation, board?.target, catalog?.instance_id, load])
+    timer = setTimeout(poll, CATALOG_POLL_MS)
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+    }
+  }, [board?.generation, board?.target, catalog?.instance_id, catalog?.revision, catalog?.board_generation, commitCatalog])
 
   const tabs = useMemo(() => deviceTypes(catalog?.devices), [catalog?.devices])
   const activeType = tabs.some((item) => item.id === type) ? type : tabs[0]?.id || ''
@@ -173,6 +166,7 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   const selectedMode = camera?.modes?.[modeIndex] || camera?.modes?.[0] || null
   const canExport = isExportableMode(camera, selectedMode)
   const selectionEpoch = catalogIdentity(catalog)
+  const support = catalog?.support
 
   useEffect(() => {
     exportRequests.current.cancel()
@@ -262,16 +256,16 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
   if (boardLoading && !board) return <section className="panel"><p className="hint">Loading selected board…</p></section>
   if (boardError) return <section className="panel"><ErrorNotice error={boardError}><button type="button" className="btn-ghost" onClick={onOpenBoard}>Board settings</button></ErrorNotice></section>
   if (!board?.target) return (
-    <section className="panel periph-empty"><h2>Peripherals</h2><p>Select a board before reading its peripheral daemon.</p><button type="button" className="btn-tonal" onClick={onOpenBoard}>Select board</button></section>
+    <section className="panel periph-empty"><h2>Peripherals</h2><p>Select a board before reading its peripheral catalog from SiMa Sentinel.</p><button type="button" className="btn-tonal" onClick={onOpenBoard}>Select board</button></section>
   )
 
   return (
     <div className="periph-page">
       <section className="panel periph-heading">
         <div>
-          <p className="sysinfo-eyebrow">Authoritative device catalog</p>
+          <p className="sysinfo-eyebrow">SiMa Sentinel device catalog</p>
           <h2>Peripherals</h2>
-          <p className="section-note">Read from <strong>{board.target.label}</strong> through the local peripheral daemon.</p>
+          <p className="section-note">Read from <strong>{board.target.label}</strong> through SiMa Sentinel.</p>
         </div>
         <div className="periph-actions">
           <button type="button" className="btn-ghost" onClick={onOpenBoard}>Change board</button>
@@ -282,25 +276,26 @@ export default function PeripheralsView({ board, boardError, boardLoading, onOpe
       <ErrorNotice error={error}>
         <button type="button" className="btn-ghost" onClick={() => load()}>Retry</button>
       </ErrorNotice>
-      {eventError && <Callout tone="warn" title="Live updates are temporarily unavailable"><p>{eventError.message}</p></Callout>}
-      {loading && !catalog && <section className="panel"><p className="hint">Reading the peripheral daemon…</p></section>}
+      {pollError && <Callout tone="warn" title="Live updates are temporarily unavailable"><p>{pollError.message}</p>{pollError.hint && <p>{pollError.hint}</p>}</Callout>}
+      {loading && !catalog && <section className="panel"><p className="hint">Reading the Sentinel peripheral catalog…</p></section>}
 
       {catalog && (
         <>
           <section className="panel periph-catalog-status">
-            <div><Pill tone={catalog.state === 'ready' ? 'ok' : 'warn'}>{catalog.state}</Pill>{catalog.stale && <Pill tone="warn">Stale last-good catalog</Pill>}</div>
+            <div><Pill tone={catalog.state === 'ready' ? 'ok' : 'warn'}>{catalog.state}</Pill>{catalog.stale && <Pill tone="warn">Stale last-good catalog</Pill>}{support?.state && <Pill tone={support.state === 'applied' ? 'ok' : 'warn'}>Support rules: {support.state === 'applied' ? support.source || 'applied' : support.state.replace('_', ' ')}</Pill>}</div>
             <dl>
               <div><dt>Revision</dt><dd>{catalog.revision}</dd></div>
               <div><dt>Scan</dt><dd>{catalog.scan_sequence}</dd></div>
               <div><dt>Last success</dt><dd>{formatTime(catalog.last_success_at)}</dd></div>
               <div><dt>Last attempt</dt><dd>{formatTime(catalog.last_attempt_at)}</dd></div>
             </dl>
-            {catalog.error && <Callout tone="warn" title={catalog.error.code || 'Discovery warning'}><p>{catalog.error.reason || 'The daemon retained its last successful catalog.'}</p></Callout>}
+            {support?.state === 'not_installed' && <Callout tone="warn" title="Neat Core is not installed on this board"><p>Sentinel cannot tell which camera modes CameraInput accepts, so every mode is unsupported and no CameraInput example can be generated. Install Neat Core on the board; this page updates once Sentinel applies its rules.</p></Callout>}
+            {catalog.error && <Callout tone="warn" title={catalog.error.code || 'Discovery warning'}><p>{catalog.error.reason || 'Sentinel retained its last successful catalog.'}</p></Callout>}
             {(catalog.issues || []).map((issue, index) => <Callout key={`${issue.provider || 'provider'}-${index}`} tone="warn" title={issue.provider || issue.code}><p>{issue.reason}</p></Callout>)}
           </section>
 
-          {!catalog.ready && <Callout tone="warn" title="The first scan has not completed"><p>The daemon is running, but no authoritative catalog is ready yet.</p></Callout>}
-          {catalog.ready && catalog.devices.length === 0 && <section className="panel periph-empty"><h3>No peripherals found</h3><p>The daemon completed a scan and returned an empty catalog.</p></section>}
+          {!catalog.ready && <Callout tone="warn" title="The first scan has not completed"><p>Sentinel is running, but its first peripheral scan has not finished yet.</p></Callout>}
+          {catalog.ready && catalog.devices.length === 0 && <section className="panel periph-empty"><h3>No peripherals found</h3><p>Sentinel completed a scan and found no peripherals.</p></section>}
 
           {catalog.devices.length > 0 && (
             <section className="panel periph-browser">

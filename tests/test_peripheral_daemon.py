@@ -50,10 +50,10 @@ def camera_catalog(**extra):
     return catalog(devices=[{
         "id": "camera:platform/cam0",
         "type": "camera",
-        "provider": "daemon.camera.libcamera",
+        "provider": "daemon.camera.mipi",
         "camera": {
             "camera_name": "platform/cam0",
-            "backend": "libcamera",
+            "backend": "mipi",
             "modes": [
                 {"format": "NV12", "width": 1920, "height": 1080, "framerate_num": 30, "framerate_den": 1, "supported": True, "reason": ""},
                 {"format": "NV12", "width": 1280, "height": 720, "framerate_num": 30, "framerate_den": 1, "supported": False, "reason": "ISP output size is unsupported"},
@@ -148,12 +148,21 @@ class PeripheralClientTests(unittest.TestCase):
             with self.assertRaises(BoardError) as ctx:
                 PeripheralClient(FakeSession()).catalog()
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_missing", 503))
-        self.assertIn("Install the Core peripheral daemon", ctx.exception.hint)
+        self.assertIn("/run/simaai-sentinel/api.sock", ctx.exception.message)
+        self.assertIn("sima-cli neat install sentinel", ctx.exception.hint)
+
+    def test_sentinel_without_peripheral_catalog_asks_for_an_update(self):
+        body = json.dumps({"error": "unknown Sentinel API endpoint"})
+        with mock.patch.object(socket_client, "request", return_value=(404, body)):
+            with self.assertRaises(BoardError) as ctx:
+                PeripheralClient(FakeSession()).catalog()
+        self.assertEqual(ctx.exception.code, "peripheral_version")
+        self.assertIn("sima-cli neat install sentinel", ctx.exception.hint)
 
     def test_refresh_waits_for_the_daemon_target_scan(self):
         replies = [
             (200, json.dumps(catalog(scan_sequence=3))),
-            (202, json.dumps({"accepted": True, "target_scan_sequence": 5})),
+            (200, json.dumps({"accepted": True, "target_scan_sequence": 5})),
             (200, json.dumps(catalog(scan_sequence=4))),
             (200, json.dumps(catalog(scan_sequence=5))),
         ]
@@ -162,7 +171,7 @@ class PeripheralClientTests(unittest.TestCase):
         ):
             result = PeripheralClient(FakeSession()).refresh()
         self.assertEqual(result["scan_sequence"], 5)
-        self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/v1/catalog"), ("POST", "/v1/refresh"), ("GET", "/v1/catalog"), ("GET", "/v1/catalog")])
+        self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/v1/peripherals"), ("POST", "/v1/peripherals/refresh"), ("GET", "/v1/peripherals"), ("GET", "/v1/peripherals")])
 
     def test_refresh_rejects_a_daemon_restart_before_completing_the_target(self):
         before = catalog(scan_sequence=3)
@@ -170,7 +179,7 @@ class PeripheralClientTests(unittest.TestCase):
         restarted["instance_id"] = "daemon-2"
         replies = [
             (200, json.dumps(before)),
-            (202, json.dumps({"accepted": True, "target_scan_sequence": 5})),
+            (200, json.dumps({"accepted": True, "target_scan_sequence": 5})),
             (200, json.dumps(restarted)),
         ]
         with mock.patch.object(socket_client, "request", side_effect=replies):
@@ -180,24 +189,26 @@ class PeripheralClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.extra["expected_instance_id"], before["instance_id"])
         self.assertEqual(ctx.exception.extra["observed_instance_id"], "daemon-2")
 
-    def test_events_are_forwarded_with_a_bounded_wait(self):
-        response = {
-            "schema_version": 1,
-            "instance_id": "daemon-1",
-            "revision": 2,
-            "sequence": 5,
-            "scan_sequence": 3,
-            "resync_required": False,
-            "shutting_down": False,
-            "events": [{"sequence": 5, "revision": 2, "kind": "changed", "future": True}],
-        }
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))) as request:
-            actual = PeripheralClient(FakeSession()).events(4, 30000, "daemon-1")
-        self.assertEqual(actual, response)
-        path = request.call_args.args[1]
-        self.assertIn("after_sequence=4", path)
-        self.assertIn("wait_ms=30000", path)
-        self.assertLessEqual(request.call_args.kwargs["timeout"], 35.0)
+    def test_since_revision_returns_only_an_unchanged_reply_for_the_held_catalog(self):
+        unchanged = {"schema_version": 1, "instance_id": "daemon-1", "revision": 2, "scan_sequence": 9, "unchanged": True}
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(unchanged))) as request:
+            self.assertEqual(PeripheralClient(FakeSession()).catalog(2, "daemon-1"), unchanged)
+        self.assertEqual(request.call_args.args[1], "/v1/peripherals?since_revision=2&instance_id=daemon-1")
+        for other in ({"instance_id": "daemon-2"}, {"revision": 3}):
+            with self.subTest(other=other), mock.patch.object(
+                socket_client, "request", return_value=(200, json.dumps({**unchanged, **other}))
+            ):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).catalog(2, "daemon-1")
+                self.assertEqual(ctx.exception.code, "peripheral_response")
+
+    def test_since_revision_and_instance_id_must_be_paired(self):
+        for args in ((2, None), (None, "daemon-1"), (2, "")):
+            with self.subTest(args=args), mock.patch.object(socket_client, "request") as request:
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).catalog(*args)
+                self.assertEqual(ctx.exception.code, "invalid_request")
+                request.assert_not_called()
 
     def test_remote_access_runs_only_the_stdlib_socket_helper(self):
         response = catalog()
@@ -207,7 +218,7 @@ class PeripheralClientTests(unittest.TestCase):
         session = FakeSession("ssh", transport)
         self.assertEqual(PeripheralClient(session).catalog(), response)
         argv = transport.exec.call_args.args[0]
-        self.assertEqual(argv[:4], ["python3", "-", "GET", "/v1/catalog"])
+        self.assertEqual(argv[:4], ["python3", "-", "GET", "/v1/peripherals"])
         self.assertIn(b"AF_UNIX", transport.exec.call_args.kwargs["stdin"])
 
     def test_remote_helper_malformed_envelope_is_normalized(self):
@@ -285,12 +296,13 @@ class PeripheralApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["code"], "stale_snapshot")
         refresh.assert_not_called()
 
-    def test_invalid_event_wait_is_rejected_before_daemon_access(self):
-        with mock.patch("neat_insight.peripherals.api.PeripheralClient.events") as events:
-            response = self.client.get("/api/peripherals/events?wait_ms=30001")
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()["code"], "invalid_request")
-        events.assert_not_called()
+    def test_catalog_poll_with_a_stale_board_generation_never_calls_sentinel(self):
+        generation = self.app.extensions["neat_board"].session().generation
+        with mock.patch("neat_insight.peripherals.api.PeripheralClient.catalog") as read:
+            response = self.client.get(f"/api/peripherals?since_revision=2&instance_id=daemon-1&board_generation={generation + 1}")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "stale_snapshot")
+        read.assert_not_called()
 
     def test_export_re_reads_catalog_and_checks_board_generation(self):
         generation = self.app.extensions["neat_board"].session().generation
@@ -337,14 +349,14 @@ class SocketClientTests(unittest.TestCase):
                     connection, _ = server.accept()
                     with connection:
                         request = connection.recv(4096)
-                        self.assertIn(b"GET /v1/catalog HTTP/1.1", request)
+                        self.assertIn(b"GET /v1/peripherals HTTP/1.1", request)
                         body = b'{"schema_version":1}'
                         connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n" + body)
 
             worker = threading.Thread(target=serve)
             worker.start()
             self.assertTrue(ready.wait(2))
-            status, body = socket_client.request("GET", "/v1/catalog", socket_path=path, timeout=2)
+            status, body = socket_client.request("GET", "/v1/peripherals", socket_path=path, timeout=2)
             worker.join(2)
         self.assertEqual((status, body), (200, '{"schema_version":1}'))
 

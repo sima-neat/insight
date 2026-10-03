@@ -108,13 +108,13 @@ Browsers only allow camera access on pages they consider secure. If **Enable cam
 
 ## Peripherals
 
-The Peripherals view reads the authoritative catalog maintained by the Core peripheral daemon on the selected board. Insight can use the board it is running on, the DevKit configured by the SDK, or one manually entered SSH target. It does not scan hardware or keep a second catalog; if the daemon is missing, stopped, incompatible, or inaccessible, the page reports that failure and how to correct it.
+The Peripherals view reads the peripheral catalog that SiMa Sentinel maintains on the selected board. Insight can use the board it is running on, the DevKit configured by the SDK, or one manually entered SSH target. It does not scan hardware or keep a second catalog. If Sentinel is not installed, not running, too old to provide the catalog, or inaccessible, the page reports that failure and how to correct it; install or update Sentinel with `sima-cli neat install sentinel`.
 
-The catalog header shows the daemon state, revision, scan sequence, last attempt, and last successful scan. A degraded daemon can return its stale last-good catalog together with the provider error. Hot-plug events are long-polled from the daemon and cause Insight to re-read the full catalog, so the daemon remains the only source of revisions and device changes.
+The catalog header shows Sentinel's discovery state, revision, scan sequence, last attempt, last successful scan, and which Neat Core support rules classified the camera modes. A degraded catalog can keep a provider's stale last-good records together with the provider error. While the page is visible, Insight asks Sentinel every two seconds whether the catalog revision changed and re-reads the full catalog only when it did, so hot-plug changes appear without a manual refresh.
 
-Devices are grouped by their generic `type`, so future microphone, LiDAR, and other providers can appear without a new transport. Camera details include the backend and all reported modes. A mode marked supported can be exported as matching C++, PyNeat, or JSON CameraInput configuration only when it has a discrete size and a `camera_name`. Insight re-reads the daemon catalog during export and rejects a stale device, revision, or selected-board generation.
+Devices are grouped by their generic `type`, so future microphone, LiDAR, and other providers can appear without a new transport. Camera details include the backend and all reported modes. Neat Core's rules decide which modes are supported; when Neat Core is not installed, the page says so and every mode is unsupported. A mode marked supported can be exported as matching C++, PyNeat, or JSON CameraInput configuration only when it has a discrete size and a `camera_name`. Insight re-reads the catalog during export and rejects a stale device, revision, or selected-board generation.
 
-Use **Refresh catalog** to ask the daemon for an explicit reconciliation. The request completes only after the daemon's returned target scan sequence has been reached; it never falls back to an Insight-side probe.
+Use **Refresh catalog** to ask Sentinel to rescan. The request completes only after Sentinel's returned target scan sequence has been reached; it never falls back to an Insight-side probe.
 
 ## Video Viewer
 

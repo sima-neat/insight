@@ -1,4 +1,4 @@
-"""Render CameraInput examples from one exact daemon catalog mode."""
+"""Render CameraInput examples from one exact Sentinel catalog mode."""
 import json
 
 from neat_insight.board import BoardError
@@ -52,13 +52,13 @@ def render(catalog: dict, selection: dict) -> dict:
     wanted = {key: selection[key] for key in ("format", "width", "height", "framerate_num", "framerate_den")}
     mode = next((mode for mode in camera.get("modes", []) if isinstance(mode, dict) and all(mode.get(key) == value for key, value in wanted.items())), None)
     if mode is None:
-        raise _invalid("That exact camera mode is no longer present in the daemon catalog.")
+        raise _invalid("That exact camera mode is no longer present in the peripheral catalog.")
     if mode.get("supported") is not True:
-        reason = mode.get("reason") if isinstance(mode.get("reason"), str) else "the daemon did not mark it supported"
-        raise _invalid(f"That camera mode cannot be exported: {reason}.")
+        reason = mode.get("reason") if isinstance(mode.get("reason"), str) else "Sentinel did not mark it supported"
+        raise _invalid(f"That camera mode cannot be exported: {reason.rstrip('.')}.")
 
-    # CameraInput's zero-copy default is not valid for every daemon-supported
-    # libcamera mode on Modalix. Generated examples must match the proven path.
+    # CameraInput's zero-copy default is not valid for every supported MIPI
+    # mode on Modalix. Generated examples must match the proven path.
     options = {"camera_name": camera_name, **wanted, "allow_cpu_fallback": True}
     descriptor = {
         "kind": "neat.camera-input",

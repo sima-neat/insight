@@ -1,11 +1,11 @@
-"""Bounded stdlib client for the board-local peripheral daemon."""
+"""Bounded stdlib client for the board-local SiMa Sentinel API socket."""
 import errno
 import json
 import socket
 import sys
 from http.client import HTTPConnection, HTTPException, IncompleteRead
 
-SOCKET_PATH = "/run/simaai-peripherals/api.sock"
+SOCKET_PATH = "/run/simaai-sentinel/api.sock"
 TIMEOUT_SEC = 10.0
 MAX_BODY_BYTES = 4 * 1024 * 1024
 
@@ -20,7 +20,7 @@ PROTOCOL = "protocol"
 
 class ResponseTooLarge(Exception):
     def __init__(self, limit):
-        super().__init__("The peripheral daemon response is larger than {} bytes.".format(limit))
+        super().__init__("The Sentinel response is larger than {} bytes.".format(limit))
 
 
 class _UnixHTTPConnection(HTTPConnection):
