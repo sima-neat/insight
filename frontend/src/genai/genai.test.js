@@ -12,7 +12,7 @@ import {
   loadedChatModel,
   speechModels
 } from './backendState.js'
-import { speakableText } from './speech.js'
+import { languageNames, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
@@ -171,4 +171,26 @@ test('friendly model names drop build and quantization words', () => {
   assert.equal(friendlyModelName('Qwen3-0.6B-Autoround-a16w4'), 'Qwen3 0.6B')
   assert.equal(friendlyModelName('gte-small'), 'Gte small')
   assert.equal(friendlyModelName(''), '')
+})
+
+const VOICE_LANGUAGES = ['ar', 'bg', 'de', 'en', 'hi', 'ja', 'ko', 'uk', 'zh']
+
+test('script detection names the language of non-Latin replies only', () => {
+  assert.deepEqual(scriptLanguage('ఒక యువతి, వేళ్ళతో తీసుకున్న'), { code: 'te', name: 'Telugu' })
+  assert.equal(scriptLanguage('नमस्ते, आप कैसे हैं?').code, 'hi')
+  assert.equal(scriptLanguage('今日はいい天気ですね').code, 'ja')
+  assert.equal(scriptLanguage('今天天气很好').code, 'zh')
+  assert.equal(scriptLanguage('안녕하세요').code, 'ko')
+  assert.equal(scriptLanguage('Guten Morgen, wie geht es dir heute?'), null)
+  assert.equal(scriptLanguage('The word 東京 means Tokyo in this sentence.'), null)
+  assert.equal(scriptLanguage(''), null)
+})
+
+test('read aloud support says plainly when a language has no voice', () => {
+  assert.deepEqual(readAloudSupport('ఒక యువతి', VOICE_LANGUAGES), { supported: false, language: 'te', name: 'Telugu' })
+  assert.deepEqual(readAloudSupport('नमस्ते', VOICE_LANGUAGES), { supported: true, language: 'hi' })
+  assert.deepEqual(readAloudSupport('Привет, как дела?', VOICE_LANGUAGES), { supported: true, language: 'uk' })
+  assert.deepEqual(readAloudSupport('Hello there', VOICE_LANGUAGES, 'de'), { supported: true, language: 'de' })
+  assert.deepEqual(readAloudSupport('ఒక యువతి', null), { supported: true, language: 'te' })
+  assert.deepEqual(languageNames(['zh', 'en', 'na']), ['Chinese', 'English'])
 })
