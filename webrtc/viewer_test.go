@@ -731,6 +731,39 @@ func TestRTPTimestampRewriterFallsBackOnLargeBackwardSourceJump(t *testing.T) {
 	}
 }
 
+func TestRTPTimestampRewriterSourceStepFallbacks(t *testing.T) {
+	const ssrc = 0x1234
+	const sourceTimestamp = uint32(1_000_000)
+	tests := []struct {
+		name               string
+		sourceTimestamp    uint32
+		ssrc               uint32
+		afterSequenceBreak bool
+		arrival            time.Duration
+		wantStep           uint32
+	}{
+		{name: "in-range source step", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3000},
+		{name: "ssrc change", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc + 1, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "repeated source timestamp", sourceTimestamp: sourceTimestamp, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "repeated source timestamp at the same arrival", sourceTimestamp: sourceTimestamp, ssrc: ssrc, wantStep: 1},
+		{name: "large forward source jump", sourceTimestamp: sourceTimestamp + uint32(maxSourceRTPTimestampStep) + 1, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "after a sequence break", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc, afterSequenceBreak: true, arrival: 40 * time.Millisecond, wantStep: 3600},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriter := newRTPTimestampRewriter()
+			start := time.Unix(100, 0)
+
+			first := rewriter.timestampForSourceFrame(sourceTimestamp, ssrc, false, start)
+			second := rewriter.timestampForSourceFrame(tt.sourceTimestamp, tt.ssrc, tt.afterSequenceBreak, start.Add(tt.arrival))
+
+			if got := second - first; got != tt.wantStep {
+				t.Fatalf("expected step %d, got %d", tt.wantStep, got)
+			}
+		})
+	}
+}
+
 // A sender that restarts its sequence but keeps its SSRC can rewind its source
 // clock by less than maxSourceRTPTimestampStep. The access-unit buffer drops the
 // unit that carries the sequence break, so the next accepted unit is the first
