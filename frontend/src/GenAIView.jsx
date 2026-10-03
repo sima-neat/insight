@@ -31,16 +31,17 @@ import { splitThinking } from './genai/streams.js'
 
 const POLL_MS = 5000
 const MAX_TOKENS = 512
-// The Studio's default system prompt (apps: src/common/config.yaml), plus a rule
-// against describing images that were never attached: vision models otherwise
-// answer "what do you see?" with an invented scene.
-const SYSTEM_PROMPT =
+// The Studio's default system prompt (apps: src/common/config.yaml). The tab
+// knows whether the message carries a picture, so it says so: a small vision
+// model left to judge that itself answered "no image was provided" to some
+// questions that had one, and invented a scene for others that had none.
+const BASE_PROMPT =
   'Answer clearly and concisely. Use Markdown formatting when it helps. ' +
-  'Answer the question in the language it was asked in. ' +
-  'You can only see images that are attached to the current message. ' +
-  'If the user asks about an image, photo, camera or what you see and no image is attached, ' +
-  'say that no image was provided and ask them to attach one or use the camera. ' +
-  'Never describe an image you were not given.'
+  'Answer the question in the language it was asked in.'
+const WITH_IMAGE_PROMPT = `${BASE_PROMPT} The user's current message includes an image. Answer using what you see in it.`
+const WITHOUT_IMAGE_PROMPT =
+  `${BASE_PROMPT} No image is attached to the current message. If the user asks about an image, photo, camera or ` +
+  'what you see, say that no image was provided and ask them to attach one or use the camera. Never describe an image you were not given.'
 // A short silent WAV: played on the click itself so the browser lets the same
 // element play the synthesized speech that arrives seconds later.
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='
@@ -387,7 +388,7 @@ export default function GenAIView({ onError, onStatus }) {
       : userText
     const history = messagesRef.current.map((m) => ({ role: m.role, content: m.role === 'assistant' ? splitThinking(m.content).answer : m.text }))
     const outgoing = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: image ? WITH_IMAGE_PROMPT : WITHOUT_IMAGE_PROMPT },
       ...history,
       { role: 'user', content: thinking ? userContent : withNoThink(userContent) }
     ]
