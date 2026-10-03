@@ -158,3 +158,12 @@ export function friendlyModelName(name) {
   words[0] = first.charAt(0).toUpperCase() + first.slice(1)
   return words.join(' ')
 }
+
+// Whether a chat model has a step-by-step reasoning mode the tab can turn on
+// or off. Qwen3 text models are hybrid thinkers; their Instruct (2507) and
+// VL Instruct variants answer directly and ignore the switch.
+export function supportsThinking(name) {
+  const n = String(name || '').toLowerCase()
+  if (/thinking|deepseek-r1|qwq/.test(n)) return true
+  return /qwen3/.test(n) && !/instruct/.test(n)
+}
