@@ -29,6 +29,7 @@ import {
 } from './genai/client.js'
 import { languageNames, readAloudSupport, speakableText } from './genai/speech.js'
 import { splitThinking } from './genai/streams.js'
+import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
 
 const POLL_MS = 5000
 const MAX_TOKENS = 512
@@ -83,8 +84,6 @@ const ICONS = {
   photo: 'M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4M15.5 9.5a1 1 0 1 0 0-.01',
   camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
-  chat: 'M4 5h16v11H9l-5 4z',
-  translate: 'M4 5h8M8 3v2M6 5c0 4 2 7 6 8M10 5c0 3-2 6-6 8M13 21l4-10 4 10M14.5 17h5',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12l2-1-1-3-2 .5-1.5-1.5.5-2-3-1-1 2h-2l-1-2-3 1 .5 2L5 8.5 3 8l-1 3 2 1v0l-2 1 1 3 2-.5L6.5 16 6 18l3 1 1-2h2l1 2 3-1-.5-2 1.5-1.5 2 .5 1-3z'
 }
 
@@ -134,7 +133,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [draft, setDraft] = useState('')
   const [image, setImage] = useState(null)
   const [thinking, setThinking] = useState(false)
-  const [showWelcome, setShowWelcome] = useState(false)
+  const [tutorialStep, setTutorialStep] = useState(null)
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
   const transcriptBox = useRef(null)
@@ -215,14 +214,10 @@ export default function GenAIView({ onError, onStatus }) {
     if (box && stickToBottom.current) box.scrollTop = box.scrollHeight
   }, [messages])
 
-  // Opening the ideas mid-chat scrolls up to them (they sit above the messages).
+  // First visit: start the tutorial.
   useEffect(() => {
-    const box = transcriptBox.current
-    if (showWelcome && box) {
-      stickToBottom.current = false
-      box.scrollTop = 0
-    }
-  }, [showWelcome])
+    if (!tutorialSeen(window.localStorage)) setTutorialStep(0)
+  }, [])
 
   function onTranscriptScroll() {
     const box = transcriptBox.current
@@ -417,7 +412,6 @@ export default function GenAIView({ onError, onStatus }) {
     setMessages((prev) => [...prev, { role: 'user', text: userText, image }, { role: 'assistant', id: replyId, content: '', pending: true }])
     setDraft('')
     setImage(null)
-    setShowWelcome(false)
     stickToBottom.current = true
     setStreaming(true)
     const controller = new AbortController()
@@ -533,9 +527,24 @@ export default function GenAIView({ onError, onStatus }) {
   // --- welcome cards ----------------------------------------------------------
 
   function tryPrompt(text) {
-    setShowWelcome(false)
     setDraft(text)
     composer.current?.focus()
+  }
+
+  const steps = tutorialSteps({ canThink })
+  const step = tutorialStep === null ? null : steps[Math.min(tutorialStep, steps.length - 1)]
+  const spot = (target) => (step && step.target === target ? ' genai-spotlight' : '')
+
+  function closeTutorial() {
+    markTutorialSeen(window.localStorage)
+    setTutorialStep(null)
+  }
+
+  function tryTutorialAction(action) {
+    if (action === 'example-question') tryPrompt('Explain what an AI accelerator does, in simple terms.')
+    else if (action === 'example-translate') tryPrompt("Translate 'good morning, how are you?' into Spanish.")
+    else if (action === 'camera') openCamera()
+    else if (action === 'settings') setSettingsOpen(true)
   }
 
   const engines = (voices && voices.engines) || []
@@ -551,8 +560,8 @@ export default function GenAIView({ onError, onStatus }) {
   return (
     <div className="genai">
       <section className="panel genai-header" aria-label="GenAI Studio">
-        <StatusChip state={backend.state} />
-        <label className="genai-model-picker">
+        <span className={`genai-spot-wrap${spot('status')}`}><StatusChip state={backend.state} /></span>
+        <label className={`genai-model-picker${spot('model')}`}>
           <span>Model</span>
           <select
             value={chatModel ? chatModel.name : ''}
@@ -566,21 +575,19 @@ export default function GenAIView({ onError, onStatus }) {
             ))}
           </select>
         </label>
-        <label className="genai-check" title="Read every reply aloud with the board's speech engine">
+        <label className={`genai-check${spot('read-aloud')}`} title="Read every reply aloud with the board's speech engine">
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
         </label>
         {canThink && (
-          <label className="genai-check" title="This model can reason step by step before answering: slower, sometimes better for maths and logic. The reasoning appears folded above the answer.">
+          <label className={`genai-check${spot('think')}`} title="This model can reason step by step before answering: slower, sometimes better for maths and logic. The reasoning appears folded above the answer.">
             <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} />
             Think first
           </label>
         )}
-        {messages.length > 0 && (
-          <button type="button" className="btn-ghost genai-small" aria-expanded={showWelcome} onClick={() => setShowWelcome((open) => !open)}>
-            {showWelcome ? 'Hide ideas' : 'What can I do?'}
-          </button>
-        )}
+        <button type="button" className="btn-ghost genai-small genai-tutorial-btn" onClick={() => setTutorialStep(0)} aria-pressed={step !== null}>
+          Tutorial
+        </button>
         <button
           type="button"
           className={settingsOpen ? 'btn-tonal genai-settings-btn' : 'btn-ghost genai-settings-btn'}
@@ -590,6 +597,27 @@ export default function GenAIView({ onError, onStatus }) {
           <Icon d={ICONS.settings} /> Settings
         </button>
       </section>
+
+      {step && (
+        <section className="panel genai-tutorial" aria-label="GenAI Studio tutorial" aria-live="polite">
+          <p className="genai-tutorial-eyebrow">Tutorial · step {tutorialStep + 1} of {steps.length}</p>
+          <p className="genai-tutorial-title">{step.title}</p>
+          <p className="genai-tutorial-body">{step.body}</p>
+          <div className="genai-actions">
+            {step.action && (step.action !== 'camera' || (canChat && sees)) && (
+              <button type="button" className="btn-tonal" onClick={() => tryTutorialAction(step.action)}>Try it</button>
+            )}
+            <span className="genai-tutorial-spacer" />
+            <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
+            <button type="button" className="btn-ghost" disabled={tutorialStep === 0} onClick={() => setTutorialStep((i) => Math.max(0, i - 1))}>Back</button>
+            {tutorialStep < steps.length - 1 ? (
+              <button type="button" className="btn-tonal" onClick={() => setTutorialStep((i) => i + 1)}>Next</button>
+            ) : (
+              <button type="button" className="btn-tonal" onClick={closeTutorial}>Start chatting</button>
+            )}
+          </div>
+        </section>
+      )}
 
       {needsAttention && (
         <section className={`panel genai-banner genai-banner-${backend.state}`} aria-live="polite">
@@ -727,32 +755,27 @@ export default function GenAIView({ onError, onStatus }) {
 
       <section className="panel genai-chat" aria-label="Chat">
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
-          {(messages.length === 0 || showWelcome) && (
+          {messages.length === 0 && (
             <div className="genai-welcome">
-              <p className="genai-welcome-title">What you can do with GenAI on the board</p>
+              <p className="genai-welcome-title">Chat with {chatModel ? friendlyModelName(chatModel.name) : 'a model'} on your board</p>
               <p className="section-note">
-                Everything runs on the DevKit's accelerator{chatModel ? ` with ${friendlyModelName(chatModel.name)}` : ''}. Pick one to try.
+                Type or talk, {sees ? 'add a picture, ' : ''}and hear the answer read aloud, in most languages. New here? Open the Tutorial.
               </p>
-              <div className="genai-cards">
-                <button type="button" className="genai-card" disabled={!canChat} onClick={() => tryPrompt('Explain what an AI accelerator does, in simple terms.')}>
-                  <Icon d={ICONS.chat} />
-                  <span className="genai-card-title">Ask a question</span>
-                  <span className="genai-card-hint">Explain what an AI accelerator does</span>
+              <div className="genai-examples" aria-label="Examples to try">
+                <span className="hint">Try:</span>
+                <button type="button" className="btn-ghost genai-small" disabled={!canChat} onClick={() => tryPrompt('Explain what an AI accelerator does, in simple terms.')}>
+                  Explain what an AI accelerator does
                 </button>
-                <button type="button" className="genai-card" disabled={!canChat || !sees} onClick={() => { setShowWelcome(false); openCamera() }} title={sees ? '' : 'Needs a model that sees images'}>
-                  <Icon d={ICONS.camera} />
-                  <span className="genai-card-title">Show it something</span>
-                  <span className="genai-card-hint">{sees ? 'Use the camera or a photo' : 'Needs a model that sees images'}</span>
+                {sees && (
+                  <button type="button" className="btn-ghost genai-small" disabled={!canChat} onClick={openCamera}>
+                    What's in front of my camera?
+                  </button>
+                )}
+                <button type="button" className="btn-ghost genai-small" disabled={!canChat} onClick={() => tryPrompt("Translate 'good morning, how are you?' into Spanish.")}>
+                  Translate into Spanish
                 </button>
-                <button type="button" className="genai-card" disabled={!usable || !status?.asrModel} onClick={() => { setShowWelcome(false); toggleRecording() }}>
-                  <Icon d={ICONS.mic} />
-                  <span className="genai-card-title">Talk to it</span>
-                  <span className="genai-card-hint">Speak, then turn on Read replies aloud</span>
-                </button>
-                <button type="button" className="genai-card" disabled={!canChat} onClick={() => tryPrompt('Translate into German: Good morning, how are you today?')}>
-                  <Icon d={ICONS.translate} />
-                  <span className="genai-card-title">Translate</span>
-                  <span className="genai-card-hint">Say this in German</span>
+                <button type="button" className="btn-ghost genai-small" disabled={!usable || !status?.asrModel} onClick={toggleRecording}>
+                  Ask by voice
                 </button>
               </div>
               {usable && !chatModel && chatModels(status).length > 0 && (
@@ -830,12 +853,12 @@ export default function GenAIView({ onError, onStatus }) {
           </p>
         )}
 
-        <form className="genai-composer" onSubmit={(e) => { e.preventDefault(); sendMessage() }}>
+        <form className={`genai-composer${spot('composer')}`} onSubmit={(e) => { e.preventDefault(); sendMessage() }}>
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => { attachImage(e.target.files[0]); e.target.value = '' }} />
-          <button type="button" className="btn-ghost genai-icon-btn" aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!canChat || !sees} onClick={() => fileInput.current?.click()}>
+          <button type="button" className={`btn-ghost genai-icon-btn${spot('media')}`} aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!canChat || !sees} onClick={() => fileInput.current?.click()}>
             <Icon d={ICONS.photo} />
           </button>
-          <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!canChat || !sees || cameraOpen} onClick={openCamera}>
+          <button type="button" className={`btn-ghost genai-icon-btn${spot('media')}`} aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!canChat || !sees || cameraOpen} onClick={openCamera}>
             <Icon d={ICONS.camera} />
           </button>
           <textarea
@@ -855,7 +878,7 @@ export default function GenAIView({ onError, onStatus }) {
           />
           <button
             type="button"
-            className={recording ? 'btn-ghost danger genai-icon-btn' : 'btn-ghost genai-icon-btn'}
+            className={`${recording ? 'btn-ghost danger genai-icon-btn' : 'btn-ghost genai-icon-btn'}${spot('mic')}`}
             aria-label={recording ? 'Stop recording' : 'Speak your question'}
             aria-pressed={recording}
             title={recording ? 'Stop recording' : 'Speak your question'}
