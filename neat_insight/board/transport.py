@@ -27,7 +27,15 @@ class ExecResult:
 
 
 class CommandCancelled(Exception):
-    pass
+    """Raised by exec when its cancel_event is set; the command has been stopped."""
+
+
+def _board_changed() -> BoardError:
+    return BoardError(
+        "stale_snapshot",
+        "The selected board changed while this request was running.",
+        hint="Retry to use the newly selected board.",
+    )
 
 
 def key_fingerprint(key) -> str:
@@ -55,28 +63,25 @@ def _output_too_large(argv: List[str]) -> BoardError:
 
 
 class LocalTransport:
+    """Runs commands on the machine Insight runs on (Insight installed on the board).
+
+    exec's on_stdout, when given, is called with each stdout chunk as it arrives (the microphone
+    test meters audio live); setting cancel_event stops the command and raises CommandCancelled.
+    close() kills the commands still running, so a board change ends a recording at once.
+    """
+
     def __init__(self):
         self._lock = threading.Lock()
         self._active = set()
         self._closed = False
 
     def exec(
-        self,
-        argv: List[str],
-        *,
-        timeout: float,
-        stdin: Optional[bytes] = None,
-        on_stdout=None,
-        cancel_event=None,
+        self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None, on_stdout=None, cancel_event=None
     ) -> ExecResult:
         deadline = time.monotonic() + timeout
         with self._lock:
             if self._closed:
-                raise BoardError(
-                    "stale_snapshot",
-                    "The selected board changed while this request was running.",
-                    hint="Retry to use the newly selected board.",
-                )
+                raise _board_changed()
             try:
                 proc = subprocess.Popen(
                     argv,
@@ -94,13 +99,8 @@ class LocalTransport:
             except subprocess.TimeoutExpired:
                 raise _timeout_error(argv, timeout, "this board") from None
             with self._lock:
-                closed = self._closed
-            if closed:
-                raise BoardError(
-                    "stale_snapshot",
-                    "The selected board changed while this request was running.",
-                    hint="Retry to use the newly selected board.",
-                )
+                if self._closed:
+                    raise _board_changed()
             return ExecResult(exit_code, stdout, stderr)
         finally:
             if proc.poll() is None:
@@ -117,6 +117,7 @@ class LocalTransport:
 
     @staticmethod
     def _collect(proc, argv, stdin, deadline, timeout, on_stdout=None, cancel_event=None):
+        # Read as the output arrives, so the SSH transport's output limit holds here too.
         chunks = {proc.stdout: [], proc.stderr: []}
         pending = memoryview(stdin or b"")
         size = 0
@@ -135,6 +136,7 @@ class LocalTransport:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise _timeout_error(argv, timeout, "this board")
+                # Wake up regularly when the command can be cancelled, even if it prints nothing.
                 wait = min(remaining, 0.1) if cancel_event is not None else remaining
                 for key, _ in selector.select(wait):
                     if key.fileobj is proc.stdin:
@@ -176,6 +178,12 @@ class LocalTransport:
 
 
 class SshTransport:
+    """One persistent SSH connection to a board, authenticated with the service account's SSH keys.
+
+    Host keys live in Insight's own known_hosts: the first key a board presents is trusted
+    and saved, and a different key later is refused until the user trusts it explicitly.
+    """
+
     def __init__(self, host: str, port: int, user: str, known_hosts: Path, connect_timeout: float = 8.0):
         self.host = host
         self.port = port
@@ -192,14 +200,9 @@ class SshTransport:
         return self.host if self.port == 22 else f"[{self.host}]:{self.port}"
 
     def exec(
-        self,
-        argv: List[str],
-        *,
-        timeout: float,
-        stdin: Optional[bytes] = None,
-        on_stdout=None,
-        cancel_event=None,
+        self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None, on_stdout=None, cancel_event=None
     ) -> ExecResult:
+        # on_stdout and cancel_event as for LocalTransport.exec; cancelling closes only this command's channel.
         channel = self._open_channel()
         try:
             channel.settimeout(timeout)
@@ -234,6 +237,9 @@ class SshTransport:
         self.presented_host_key = None
 
     def close(self) -> None:
+        # Not under the lock: a connect to an unreachable board may hold it for the full timeout.
+        # Set the flag before dropping the client; _open_channel stores its client before checking
+        # the flag, so one of the two always sees the other and the connection is never kept.
         self._closed = True
         self._drop()
 
@@ -256,6 +262,7 @@ class SshTransport:
                 progressed = True
             if size > MAX_OUTPUT_BYTES:
                 raise _output_too_large(argv)
+            # Exit status is sent after all output, so both buffers are complete once it arrives.
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 return ExecResult(channel.recv_exit_status(), b"".join(stdout), b"".join(stderr))
             if time.monotonic() >= deadline:
@@ -272,6 +279,8 @@ class SshTransport:
             if transport is None or not transport.is_active():
                 self._drop()
                 client = self._connect()
+                # Store first, then check: a close() that ran before the store saw no client to
+                # close, so this check has to catch it (see close()).
                 self._client = client
                 if self._closed:
                     self._drop()
@@ -289,6 +298,8 @@ class SshTransport:
         self.known_hosts.touch(exist_ok=True)
         client = paramiko.SSHClient()
         client.load_host_keys(str(self.known_hosts))
+        # With Insight's own known_hosts loaded, AutoAddPolicy only applies to unknown hosts
+        # (accept-new); a changed key still raises BadHostKeyException.
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         timeout = self.connect_timeout
         try:
@@ -308,7 +319,8 @@ class SshTransport:
             raise BoardError(
                 "host_key_changed",
                 f"{self.host} presented a different SSH host key than the one Insight trusted.",
-                hint="This is expected after the board is reflashed. If you reflashed it, trust the new key; otherwise check that the address still points to your board.",
+                hint="This is expected after the board is reflashed. If you reflashed it, trust the new key; "
+                "otherwise check that the address still points to your board.",
                 host=self.host_key_name,
                 expected_fingerprint=key_fingerprint(exc.expected_key),
                 presented_fingerprint=key_fingerprint(exc.key),
@@ -322,7 +334,8 @@ class SshTransport:
             raise BoardError(
                 "auth_failed",
                 f"SSH key authentication as {self.user} on {self.host} failed.",
-                hint=f"Insight signs in with the SSH keys of the '{account}' account on this machine. Authorize one on the board, then retry: {command}",
+                hint=f"Insight signs in with the SSH keys of the '{account}' account on this machine. "
+                f"Authorize one on the board, then retry: {command}",
                 command=command,
             ) from exc
         except socket.gaierror as exc:
@@ -339,17 +352,14 @@ class SshTransport:
         return client
 
     def _stale(self) -> BoardError:
-        return BoardError(
-            "stale_snapshot",
-            "The selected board changed while this request was running.",
-            hint="Retry to use the newly selected board.",
-        )
+        return _board_changed()
 
     def _unreachable(self, message: str) -> BoardError:
         return BoardError(
             "unreachable",
             message,
-            hint=f"Check that the board is powered on and on the network, and that `ssh -p {self.port} {self.user}@{self.host}` works from this machine.",
+            hint=f"Check that the board is powered on and on the network, and that "
+            f"`ssh -p {self.port} {self.user}@{self.host}` works from this machine.",
         )
 
     def _drop(self) -> None:

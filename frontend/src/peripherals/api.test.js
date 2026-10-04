@@ -1,89 +1,46 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createLatestRequest, pollMicrophoneTest } from './api.js'
+import { readMicrophoneTest } from './api.js'
 
-function deferred() {
-  let resolve
-  let reject
-  const promise = new Promise((yes, no) => { resolve = yes; reject = no })
-  return { promise, resolve, reject }
+function failing(code) {
+  return Object.assign(new Error(code), { code })
 }
 
-test('a late old-board response cannot replace the latest request', async () => {
-  const first = deferred()
-  const second = deferred()
-  const latest = createLatestRequest()
-  const oldRequest = latest.run(() => first.promise)
-  const newRequest = latest.run(() => second.promise)
-  second.resolve('new-board')
-  assert.deepEqual(await newRequest, { current: true, value: 'new-board' })
-  first.resolve('old-board')
-  assert.deepEqual(await oldRequest, { current: false })
+function requests(...answers) {
+  const calls = []
+  const request = async () => {
+    calls.push(calls.length)
+    const answer = answers.shift()
+    if (answer instanceof Error) throw answer
+    return answer
+  }
+  return { request, calls }
+}
+
+const noWait = async () => {}
+
+test('a transient status failure is retried instead of ending the recording', async () => {
+  const status = { test: { token: 't', state: 'recording' } }
+  const { request, calls } = requests(failing('network'), failing('peripheral_unavailable'), status)
+  assert.deepEqual(await readMicrophoneTest({ request, wait: noWait }), status)
+  assert.equal(calls.length, 3)
 })
 
-test('a late rejection from a superseded request is ignored', async () => {
-  const first = deferred()
-  const latest = createLatestRequest()
-  const oldRequest = latest.run(() => first.promise)
-  const newRequest = latest.run(() => Promise.resolve('new-board'))
-  assert.deepEqual(await newRequest, { current: true, value: 'new-board' })
-  first.reject(new Error('old board failed'))
-  assert.deepEqual(await oldRequest, { current: false })
+test('a status error that means the test is gone ends it at once', async () => {
+  for (const code of ['not_found', 'stale_snapshot']) {
+    const { request, calls } = requests(failing(code), { test: null })
+    await assert.rejects(readMicrophoneTest({ request, wait: noWait }), { code })
+    assert.equal(calls.length, 1)
+  }
 })
 
-test('cancel prevents an in-flight catalog response from being applied', async () => {
-  const pending = deferred()
-  const latest = createLatestRequest()
-  const request = latest.run(() => pending.promise)
-  latest.cancel()
-  pending.resolve('stale-catalog')
-  assert.deepEqual(await request, { current: false })
-})
+test('retrying stops after the failure limit or once the page is gone', async () => {
+  const limited = requests(...Array.from({ length: 5 }, () => failing('network')))
+  await assert.rejects(readMicrophoneTest({ request: limited.request, wait: noWait, maxFailures: 3 }), { code: 'network' })
+  assert.equal(limited.calls.length, 3)
 
-test('changing a selection invalidates a delayed export', async () => {
-  const firstSelection = deferred()
-  const exports = createLatestRequest()
-  const oldExport = exports.run(() => firstSelection.promise)
-  exports.cancel()
-  firstSelection.resolve({ device_id: 'camera:a' })
-  assert.deepEqual(await oldExport, { current: false })
-})
-
-test('microphone status polling recovers after a transient request failure', async () => {
-  const statuses = []
-  const errors = []
-  let requests = 0
-  const result = await pollMicrophoneTest('test-token', {
-    request: async () => {
-      requests += 1
-      if (requests === 1) {
-        const error = new Error('temporary failure')
-        error.code = 'network'
-        throw error
-      }
-      return { test: { state: requests === 2 ? 'recording' : 'ready' } }
-    },
-    onStatus: (status) => statuses.push(status.state),
-    onError: (error) => errors.push(error?.code || null),
-    wait: async () => {}
-  })
-  assert.equal(requests, 3)
-  assert.deepEqual(statuses, ['recording', 'ready'])
-  assert.deepEqual(errors, ['network', null, null])
-  assert.equal(result.state, 'ready')
-})
-
-test('microphone status polling does not retry an expired token', async () => {
-  let requests = 0
-  const error = new Error('expired')
-  error.code = 'not_found'
-  await assert.rejects(
-    pollMicrophoneTest('expired-token', {
-      request: async () => { requests += 1; throw error },
-      wait: async () => {}
-    }),
-    error
-  )
-  assert.equal(requests, 1)
+  const unmounted = requests(failing('network'), { test: null })
+  await assert.rejects(readMicrophoneTest({ request: unmounted.request, wait: noWait, isActive: () => false }), { code: 'network' })
+  assert.equal(unmounted.calls.length, 1)
 })

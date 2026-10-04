@@ -1,32 +1,68 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
+import { readMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './api.js'
+import {
+  MIC_TEST_IDLE,
+  apiError,
+  availabilityInfo,
+  captureModes,
+  formatClock,
+  micLevelNotice,
+  micTestBlock,
+  micTestAction,
+  micTestErrorAction,
+  meterSegments,
+  microphoneRows,
+  microphoneSubtitle,
+  microphoneSummaryLine,
+  nextMicTestState,
+  normalizeError,
+  segmentTone
+} from './model.js'
+import { ErrorNotice, Pill } from './ui.jsx'
 
-import { pollMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './api.js'
-import { microphoneAvailability, microphoneModeLabel, normalizeError } from './model.js'
-import { Callout, ErrorNotice, Pill } from './ui.jsx'
+export { microphoneSubtitle }
+
+function CaptureModes({ modes }) {
+  return (
+    <fieldset className="periph-modes periph-capture">
+      <legend>Capture</legend>
+      {modes === null ? (
+        <p className="hint">This device does not report its capture formats.</p>
+      ) : !modes.length ? (
+        <p className="hint">No capture formats listed.</p>
+      ) : (
+        modes.map((mode) => (
+          <span key={mode.key} className="periph-capture-badges" role="group" aria-label={mode.badges.join(', ')}>
+            {mode.badges.map((badge) => <span key={badge}>{badge}</span>)}
+          </span>
+        ))
+      )}
+    </fieldset>
+  )
+}
 
 const METER_SEGMENTS = 28
-const METER_FLOOR_DBFS = -50
+const POLL_MS = 100
 
 function LevelMeter({ level }) {
-  const lit = Number.isFinite(level)
-    ? Math.round(Math.max(0, Math.min(1, 1 - level / METER_FLOOR_DBFS)) * METER_SEGMENTS)
-    : 0
+  const lit = meterSegments(level, METER_SEGMENTS)
   return (
     <span className="periph-meter" aria-hidden="true">
-      {Array.from({ length: METER_SEGMENTS }, (_, index) => {
-        const tone = index < 20 ? 'low' : index < 25 ? 'mid' : 'high'
-        return <span key={index} className={index < lit ? `on ${tone}` : undefined} />
-      })}
+      {Array.from({ length: METER_SEGMENTS }, (_, index) => (
+        <span key={index} className={index < lit ? `on ${segmentTone(index, METER_SEGMENTS)}` : undefined} />
+      ))}
     </span>
   )
 }
 
-function usePlaybackMeter() {
+// Playback is routed through Web Audio so the meter can follow it. The context is created on the
+// click that starts the test: browsers only let a page start audio from a user gesture.
+function useAudioMeter() {
   const context = useRef(null)
   const analyser = useRef(null)
   const wired = useRef(null)
 
-  function prepare() {
+  const prepare = () => {
     const AudioContext = window.AudioContext || window.webkitAudioContext
     if (!AudioContext) return
     try {
@@ -37,7 +73,9 @@ function usePlaybackMeter() {
     }
   }
 
-  function attach(audio) {
+  // Only a running context may carry the audio: routed through a suspended one it would be silent.
+  // Anything Web Audio refuses leaves the element playing on its own, without the meter.
+  const attach = (audio) => {
     if (!context.current || context.current.state !== 'running' || !audio || wired.current === audio) return
     try {
       const source = context.current.createMediaElementSource(audio)
@@ -52,11 +90,11 @@ function usePlaybackMeter() {
     }
   }
 
-  function read() {
+  const read = () => {
     if (!analyser.current) return null
     const samples = new Float32Array(analyser.current.fftSize)
     analyser.current.getFloatTimeDomainData(samples)
-    const peak = samples.reduce((maximum, value) => Math.max(maximum, Math.abs(value)), 0)
+    const peak = samples.reduce((max, value) => Math.max(max, Math.abs(value)), 0)
     return peak > 0 ? 20 * Math.log10(peak) : null
   }
 
@@ -64,220 +102,189 @@ function usePlaybackMeter() {
   return { prepare, attach, read }
 }
 
-function MicrophoneTest({ device, catalog }) {
-  const [test, setTest] = useState(null)
-  const [error, setError] = useState(null)
-  const [starting, setStarting] = useState(false)
+function MicTest({ mic }) {
+  const [state, dispatch] = useReducer(nextMicTestState, MIC_TEST_IDLE)
+  const [level, setLevel] = useState(null)
+  const [elapsed, setElapsed] = useState(0)
   const [stopping, setStopping] = useState(false)
-  const [playing, setPlaying] = useState(false)
-  const [played, setPlayed] = useState(false)
-  const [playbackLevel, setPlaybackLevel] = useState(null)
-  const mounted = useRef(true)
-  const activeToken = useRef(null)
-  const recording = useRef(false)
   const audioRef = useRef(null)
-  const meter = usePlaybackMeter()
-  const availability = microphoneAvailability(device.microphone)
-  const hasCaptureTarget = Boolean(device.microphone.capture_target?.selector)
+  const mounted = useRef(true)
+  const meter = useAudioMeter()
+  useEffect(() => () => { mounted.current = false }, [])
 
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-      if (recording.current && activeToken.current) {
-        stopMicrophoneTest(activeToken.current).catch(() => {})
-      }
+  const poll = async (token) => {
+    let answer
+    try {
+      answer = (await readMicrophoneTest({ isActive: () => mounted.current })).test
+    } catch (err) {
+      if (mounted.current) dispatch({ type: 'failed', error: normalizeError(err) })
+      return
     }
-  }, [])
-
-  async function poll(token) {
-    await pollMicrophoneTest(token, {
-      isActive: () => mounted.current && activeToken.current === token,
-      onError: (nextError) => setError(normalizeError(nextError)),
-      onStatus: (answer) => {
-        setTest(answer)
-        recording.current = answer.state === 'recording'
-        if (answer.state === 'failed') setError(normalizeError(answer.error))
-      }
-    })
+    if (!mounted.current) return
+    if (!answer || answer.token !== token) {
+      dispatch({ type: 'failed', error: { message: 'The test ended before it finished.', hint: 'Test again.' } })
+    } else if (answer.state === 'recording') {
+      setLevel(answer.level_dbfs)
+      setElapsed(answer.elapsed_ms)
+      setTimeout(() => poll(token), POLL_MS)
+    } else if (answer.state === 'ready') {
+      dispatch({ type: 'recorded', test: answer })
+    } else {
+      dispatch({ type: 'failed', error: normalizeError(apiError(answer.error, 409)) })
+    }
   }
 
-  async function start() {
+  const record = async () => {
     meter.prepare()
-    audioRef.current?.pause()
-    activeToken.current = null
-    recording.current = false
-    setTest(null)
-    setStarting(true)
+    setLevel(null)
+    setElapsed(0)
     setStopping(false)
-    setPlaying(false)
-    setPlayed(false)
-    setPlaybackLevel(null)
-    setError(null)
+    dispatch({ type: 'record' })
     try {
-      const answer = await startMicrophoneTest({
-        board_generation: catalog.board_generation,
-        instance_id: catalog.instance_id,
-        revision: catalog.revision,
-        device_id: device.id
-      })
-      const next = answer.test
-      if (!mounted.current) {
-        stopMicrophoneTest(next.token).catch(() => {})
-        return
-      }
-      activeToken.current = next.token
-      recording.current = true
-      setTest(next)
-      await poll(next.token)
-    } catch (nextError) {
-      if (mounted.current) {
-        activeToken.current = null
-        recording.current = false
-        setTest(null)
-        setError(normalizeError(nextError))
-      }
-    } finally {
-      if (mounted.current) setStarting(false)
+      const { test } = await startMicrophoneTest(mic.id)
+      if (mounted.current) poll(test.token)
+    } catch (err) {
+      if (mounted.current) dispatch({ type: 'failed', error: normalizeError(err) })
     }
   }
 
-  async function stop() {
-    if (!activeToken.current) return
+  // Stop recording: the backend ends arecord and the poll picks the result up as usual.
+  const stopRecording = async () => {
     setStopping(true)
-    setError(null)
     try {
-      const answer = await stopMicrophoneTest(activeToken.current)
-      if (mounted.current) setTest(answer.test)
-    } catch (nextError) {
-      if (mounted.current) setError(normalizeError(nextError))
-    } finally {
-      if (mounted.current) setStopping(false)
+      await stopMicrophoneTest()
+    } catch (err) {
+      if (mounted.current) dispatch({ type: 'failed', error: normalizeError(err) })
     }
   }
 
-  function play() {
-    meter.prepare()
-    const audio = audioRef.current
-    if (!audio) return
-    meter.attach(audio)
-    try { audio.currentTime = 0 } catch {}
-    audio.play().then(
-      () => setPlaying(true),
-      (nextError) => {
-        setPlaying(false)
-        setPlaybackLevel(null)
-        setError(normalizeError(nextError))
-      }
-    )
-  }
-
-  function stopPlayback() {
+  const stopPlaying = () => {
     audioRef.current?.pause()
-    setPlaying(false)
-    setPlayed(true)
-    setPlaybackLevel(null)
+    dispatch({ type: 'played' })
   }
 
+  const replay = () => {
+    meter.prepare()
+    dispatch({ type: 'replay' })
+  }
+
+  // Playing: start the recording from the top and let the meter follow it.
   useEffect(() => {
-    if (!playing) return undefined
+    if (state.status !== 'playing') return undefined
+    const audio = audioRef.current
+    if (!audio) return undefined
+    meter.attach(audio)
+    try {
+      audio.currentTime = 0
+    } catch {
+      // Some browsers refuse a seek before the file has loaded; it then starts at 0 anyway.
+    }
+    audio.play().catch(() => dispatch({ type: 'played' }))
     let frame
     const tick = () => {
-      setPlaybackLevel(meter.read())
+      setLevel(meter.read())
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [playing])
+    return () => {
+      cancelAnimationFrame(frame)
+      setLevel(null)
+    }
+  }, [state.status])
 
-  const isRecording = test?.state === 'recording'
-  const isReady = test?.state === 'ready'
-  const level = playing ? playbackLevel : isRecording ? test.level_dbfs : null
-  const seconds = Math.floor((test?.elapsed_ms || 0) / 1000)
+  const status = state.status
+  const recording = status === 'recording'
+  const playing = status === 'playing'
+  const block = micTestBlock(mic, state)
+  const notice = status === 'done' ? micLevelNotice(state.test?.level) : ''
+  const button = micTestAction(status, stopping)
+  const onButton = { record, stop: stopRecording, 'stop-playing': stopPlaying }[button.action]
+  const caption = recording ? `Recording · ${formatClock(elapsed / 1000)}` : playing ? 'Recording playing' : ''
+
   return (
     <section className="periph-mic-test" aria-labelledby="periph-mic-test-title">
-      <h4 id="periph-mic-test-title">Test microphone</h4>
-      <p className="sr-only" role="status" aria-live="polite">
-        {isRecording ? 'Recording. Speak now, then press Stop recording.' : playing ? 'Playing the microphone test recording.' : isReady ? 'Microphone test recording ready.' : ''}
+      <div className="periph-mic-test-head">
+        <h4 id="periph-mic-test-title">Test Microphone</h4>
+      </div>
+      <p className="sr-only" role="status">
+        {recording ? 'Recording. Speak now, then press Stop recording.' : playing ? 'Recording playing.' : ''}
       </p>
+
       <div className="periph-mic-row">
-        {isRecording ? (
-          <button type="button" className="btn-tonal" onClick={stop} disabled={stopping}>
-            {stopping ? 'Stopping…' : 'Stop recording'}
-          </button>
-        ) : playing ? (
-          <button type="button" className="btn-tonal" onClick={stopPlayback}>Stop playing</button>
-        ) : (
-          <button type="button" className="btn-tonal" onClick={start} disabled={starting || !availability.canTest || !hasCaptureTarget}>
-            {starting ? 'Starting…' : 'Test microphone'}
-          </button>
-        )}
-        <LevelMeter level={level} />
+        <button
+          type="button"
+          className="btn-tonal periph-mic-button"
+          onClick={onButton}
+          disabled={button.disabled || (button.action === 'record' && Boolean(block))}
+          aria-describedby={block ? 'periph-mic-test-block' : undefined}
+        >
+          {button.label}
+        </button>
+        <LevelMeter level={recording || playing ? level : null} />
         <span className="periph-mic-caption">
-          {isRecording && `Recording · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`}
-          {playing && 'Playing recording'}
-          {isReady && !playing && <button type="button" className="btn-ghost" onClick={play}>{played ? 'Replay' : 'Play recording'}</button>}
+          {caption || (status === 'done' && (
+            <button type="button" className="btn-ghost" onClick={replay}>Replay</button>
+          ))}
         </span>
       </div>
-      {!availability.canTest && <p className="hint">Stop the application using this microphone before testing it.</p>}
-      {!hasCaptureTarget && <p className="hint">The daemon did not report a safe capture selector for this device. Refresh after it finishes initializing.</p>}
-      {isReady && test.level?.silent && <p className="periph-mic-warning" role="alert">Nothing was picked up. Check mute and gain, then test again.</p>}
-      {error && <ErrorNotice error={error} />}
-      {isReady && <audio ref={audioRef} src={test.audio_url} preload="auto" onEnded={() => { setPlaying(false); setPlayed(true); setPlaybackLevel(null) }} />}
+
+      {block && <p className="hint" id="periph-mic-test-block">{block}</p>}
+      {notice && <p className="hint periph-mic-warning" role="alert">{notice}</p>}
+      {status === 'error' && <ErrorNotice error={{ ...state.error, hint: micTestErrorAction(state.error) }} />}
+
+      {state.test?.audio_url && (
+        <audio ref={audioRef} src={state.test.audio_url} preload="auto" onEnded={() => dispatch({ type: 'played' })} />
+      )}
     </section>
   )
 }
 
-function Identity({ microphone }) {
-  const identity = microphone.identity || {}
-  const usb = identity.usb || {}
-  const rows = [
-    ['Connection', microphone.connection],
-    ['Backend', microphone.backend],
-    ['Card', identity.card_name || identity.card_id],
-    ['PCM', identity.pcm_name],
-    ['Driver', identity.card_driver],
-    ['Device node', identity.pcm_node],
-    ['By-path link', identity.by_path],
-    ['By-id link', identity.by_id],
-    ['USB ID', usb.vendor_id && usb.product_id ? `${usb.vendor_id}:${usb.product_id}` : null],
-    ['USB product', usb.product],
-    ['USB serial', usb.serial],
-    ['USB port', usb.bus_path]
-  ].filter(([, value]) => value)
-  if (!rows.length) return null
-  return (
-    <details className="periph-mic-identity">
-      <summary>Device details</summary>
-      <dl>{rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-    </details>
-  )
-}
+// Neat Core has no audio input node, so there is no mode to pick and nothing to export: the pane
+// shows what the board reports, whether a process holds the device, and a recording to listen to.
+export default function MicrophoneDetail({ mic }) {
+  const availability = availabilityInfo(mic.availability)
+  const summary = microphoneSummaryLine(mic)
+  const subtitle = microphoneSubtitle(mic)
 
-export default function MicrophoneDetail({ device, catalog }) {
-  const microphone = device.microphone
-  const availability = microphoneAvailability(microphone)
   return (
-    <>
-      <dl className="periph-facts">
-        <div><dt>Backend</dt><dd>{microphone.backend}</dd></div>
-        <div><dt>Connection</dt><dd>{microphone.connection}</dd></div>
-        <div><dt>Status</dt><dd><Pill tone={availability.tone}>{availability.label}</Pill></dd></div>
-        <div><dt>Modes</dt><dd>{microphone.modes.length}</dd></div>
-      </dl>
-      <Identity microphone={microphone} />
-      {(microphone.issues || []).map((issue, index) => (
-        <Callout key={`${issue.code || 'microphone'}-${index}`} title={issue.code || 'Microphone detail unavailable'}>
-          <p>{issue.reason}</p>
-        </Callout>
+    <section className="periph-detail" aria-labelledby="periph-detail-title">
+      <div className="periph-detail-head">
+        <div>
+          <h3 id="periph-detail-title">{mic.name}</h3>
+          {subtitle && <p className="hint">{subtitle}</p>}
+        </div>
+        <span className="periph-pills">
+          <Pill tone={availability.tone}>{availability.label}</Pill>
+        </span>
+      </div>
+
+      {summary && <p className="periph-summary-line">{summary}</p>}
+
+      {(mic.errors || []).map((error, index) => (
+        <ErrorNotice key={`${error.code || 'error'}-${index}`} error={error} />
       ))}
-      <section className="periph-mic-modes" aria-label="Capture modes">
-        <h4>Capture modes</h4>
-        {microphone.modes.length ? (
-          <ul>{microphone.modes.map((mode, index) => <li key={`${mode.interface}-${mode.altset}-${index}`}>{microphoneModeLabel(mode)}</li>)}</ul>
-        ) : <p className="hint">This device did not report read-only capture modes.</p>}
-      </section>
-      <MicrophoneTest device={device} catalog={catalog} />
-    </>
+
+      <details className="periph-identity">
+        <summary>Device details</summary>
+        <table className="sysinfo-table key-value">
+          <tbody>
+            {microphoneRows(mic).map(([label, value]) => (
+              <tr key={label}>
+                <th scope="row">{label}</th>
+                <td>{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {mic.notes?.length > 0 && (
+          <ul className="periph-notes">
+            {mic.notes.map((note, index) => <li key={index}>{note}</li>)}
+          </ul>
+        )}
+      </details>
+
+      <CaptureModes modes={captureModes(mic)} />
+      <MicTest key={mic.id} mic={mic} />
+    </section>
   )
 }

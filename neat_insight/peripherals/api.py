@@ -1,154 +1,148 @@
-from flask import Blueprint, Response, jsonify, request
+import json
+import logging
+import time
+from pathlib import Path
+
+from flask import Blueprint, Response, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.board.api import no_store
+from neat_insight.board.manager import board_summary
 from neat_insight.peripherals import export, mictest
+from neat_insight.peripherals.cameras import ScanCache, camera_nodes, cameras_of, empty_snapshot
 from neat_insight.peripherals.client import PeripheralClient
+from neat_insight.peripherals.microphones import check_nodes, microphones_of
 
 peripherals_bp = Blueprint("peripherals", __name__)
-peripherals_bp.after_request(no_store)
+
+CHECK_PATH = Path(__file__).with_name("board_check.py")
+CHECK_TIMEOUT_SEC = 45.0
+
+scans = ScanCache()
 
 
-@peripherals_bp.app_errorhandler(BoardError)
-def peripheral_error(exc: BoardError):
-    return jsonify(exc.to_dict()), exc.status
+@peripherals_bp.after_request
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
-def _integer_arg(name: str, default=None, maximum=None):
-    raw = request.args.get(name)
-    if raw is None:
-        return default
+def _check_board(session, catalog: dict):
+    """Run the read-only peripheral check on the board in one command; None when it cannot run.
+
+    Availability is an extra on top of Sentinel's catalog, so a failure here degrades it to unknown
+    instead of failing the scan.
+    """
+    cameras, microphones = cameras_of(catalog), microphones_of(catalog)
+    if not cameras and not microphones:
+        return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
+    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
+    if microphones:
+        payload["microphones"] = {device["id"]: check_nodes(device) for device in microphones}
+    return _run_check(session, payload)
+
+
+def _run_check(session, payload: dict):
     try:
-        value = int(raw)
+        result = session.transport.exec(
+            ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
+        )
+        check = json.loads(result.stdout.decode("utf-8", errors="replace")) if result.exit_code == 0 else None
     except ValueError:
-        value = -1
-    if value < 0 or (maximum is not None and value > maximum) or str(value) != raw:
-        raise BoardError("invalid_request", f"`{name}` must be a non-negative integer" + (f" no greater than {maximum}." if maximum is not None else "."))
-    return value
+        check = None
+    except BoardError as exc:
+        if exc.code == "stale_snapshot":
+            raise
+        logging.warning("The peripheral check failed on %s: %s", session.target.label, exc)
+        check = None
+    return check if isinstance(check, dict) else None
 
 
-def _with_board(session, payload: dict) -> dict:
-    session.require_current()
-    return {
-        **payload,
-        "board_generation": session.generation,
-        "board": {"label": session.target.label, "source": session.target.source},
-    }
-
-
-def _session():
-    return get_board_manager().session()
-
-
+# API: return the last peripheral scan of the selected board.
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
-    """Return the selected board's authoritative daemon catalog."""
-    session = _session()
-    return _with_board(session, PeripheralClient(session).catalog())
+    """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
+    session = get_board_manager().session()
+    return scans.snapshot(session.generation) or empty_snapshot(board_summary(session), session.generation)
 
 
+# API: rescan the selected board for cameras and microphones.
 @peripherals_bp.post("/api/peripherals/refresh")
 def refresh_peripherals():
-    """Request daemon reconciliation and wait for its target scan to complete."""
-    session = _session()
-    body = request.get_json(silent=True)
-    if isinstance(body, dict) and "board_generation" in body:
-        generation = body["board_generation"]
-        if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
-            raise BoardError("invalid_request", "`board_generation` must be a non-negative integer.")
-        if generation != session.generation:
-            raise BoardError(
-                "stale_snapshot",
-                "The selected board changed since this catalog was read.",
-                hint="Read the current peripheral catalog, then refresh again.",
-                expected_generation=generation,
-                current_generation=session.generation,
-            )
-    return _with_board(session, PeripheralClient(session).refresh())
+    """Ask SiMa Sentinel to rescan, then return a new snapshot, or the result of a refresh in flight."""
+    requested = time.monotonic()
+    session = get_board_manager().session()
+    with scans.refresh_lock(session.generation):
+        in_flight = scans.completed_since(session.generation, requested)
+        if in_flight:
+            session.require_current()
+            return in_flight
+        board = board_summary(session, session.identity())
+        started = time.monotonic()
+        catalog = PeripheralClient(session).refresh()
+        check = _check_board(session, catalog)
+        scan_ms = int((time.monotonic() - started) * 1000)
+        session.require_current()
+        return scans.record(session.generation, board, catalog, check, scan_ms)
 
 
+# API: render an input configuration for one camera mode from the last scan.
 @peripherals_bp.post("/api/peripherals/cameras/export")
 def export_camera():
-    """Re-read the daemon catalog and render one exact supported CameraInput mode."""
+    """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
     selection = export.parse_request(request.get_json(silent=True))
-    session = _session()
-    if selection["board_generation"] != session.generation:
+    session = get_board_manager().session()
+    snapshot = scans.snapshot(session.generation)
+    if snapshot is None:
         raise BoardError(
             "stale_snapshot",
-            "The selected board changed since this mode was selected.",
-            hint=export.MODE_HINT,
-            expected_generation=selection["board_generation"],
-            current_generation=session.generation,
+            "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
+            hint="Click Refresh, then export again.",
         )
-    catalog = PeripheralClient(session).catalog()
-    result = export.render(catalog, selection)
+    rendered = export.render(snapshot, selection)
     session.require_current()
-    return result
+    return rendered
 
 
-@peripherals_bp.get("/api/peripherals/events")
-def get_peripheral_events():
-    """Long-poll daemon events without computing or caching changes in Insight."""
-    session = _session()
-    expected_generation = _integer_arg("board_generation", session.generation)
-    if expected_generation != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The selected board changed since this event cursor was created.",
-            hint="Read the current peripheral catalog and start a new event cursor.",
-            expected_generation=expected_generation,
-            current_generation=session.generation,
-        )
-    payload = PeripheralClient(session).events(
-        _integer_arg("after_sequence", 0),
-        _integer_arg("wait_ms", 0, maximum=30000),
-        request.args.get("instance_id") or None,
-    )
-    return _with_board(session, payload)
-
-
+# API: start recording from one microphone; the page polls for the level.
 @peripherals_bp.post("/api/peripherals/microphones/test")
 def start_microphone_test():
-    """Test one microphone from an exact daemon catalog snapshot."""
-    selection = mictest.parse_request(request.get_json(silent=True))
-    session = _session()
-    if selection["board_generation"] != session.generation:
+    """Re-read Sentinel's catalog, then record from a scanned microphone until stopped or `seconds` (1-30, default 30); 202."""
+    mic_id, seconds = mictest.parse_request(request.get_json(silent=True))
+    session = get_board_manager().session()
+    snapshot, scanned = scans.snapshot(session.generation), scans.catalog_version(session.generation)
+    if snapshot is None or scanned is None:
         raise BoardError(
             "stale_snapshot",
-            "The selected board changed since this microphone was selected.",
-            hint="Read the current peripheral catalog, then select the microphone again.",
-            expected_generation=selection["board_generation"],
-            current_generation=session.generation,
+            "There is no scan for the selected board; it was never scanned or has changed since the scan.",
+            hint="Click Refresh, then test again.",
         )
-    catalog = PeripheralClient(session).catalog()
-    bound = mictest.bind_microphone(catalog, selection)
+    mictest.find_microphone(snapshot, mic_id)
+    bound = mictest.bind_microphone(PeripheralClient(session).catalog(), scanned, mic_id)
+    node = [bound["node"]] if isinstance(bound["node"], str) and bound["node"].startswith("/dev/") else []
+    mictest.refuse_if_held(_run_check(session, {"microphones": {mic_id: node}}), mic_id)
     session.require_current()
-    return {"test": mictest.tests.start(session, selection, bound)}, 202
+    return {"test": mictest.start(session, mic_id, bound, seconds)}, 202
 
 
-@peripherals_bp.get("/api/peripherals/microphones/test/<token>")
-def get_microphone_test(token):
-    """Return one token-owned microphone test."""
-    session = _session()
-    return {"test": mictest.tests.status(token, session.generation)}
+# API: end the microphone test's recording now; the page then plays what was recorded.
+@peripherals_bp.post("/api/peripherals/microphones/test/stop")
+def stop_microphone_test():
+    """Stop the recording on the selected board; its result arrives through GET as usual."""
+    return {"test": mictest.stop(get_board_manager().session().generation)}
 
 
-@peripherals_bp.post("/api/peripherals/microphones/test/<token>/stop")
-def stop_microphone_test(token):
-    """Request that one token-owned microphone test stop recording."""
-    session = _session()
-    return {"test": mictest.tests.stop(token, session.generation)}
+# API: the microphone test on the selected board: its live level, then its result.
+@peripherals_bp.get("/api/peripherals/microphones/test")
+def get_microphone_test():
+    """Return the latest microphone test for the selected board, or null; never contacts the board."""
+    return {"test": mictest.current(get_board_manager().session().generation)}
 
 
+# API: the finished test recording as a WAV file.
 @peripherals_bp.get("/api/peripherals/microphones/test/<token>.wav")
 def get_microphone_test_audio(token):
-    """Return one completed test recording while its token remains retained."""
-    session = _session()
-    audio = mictest.tests.audio(token, session.generation)
-    if audio is None:
-        raise BoardError(
-            "not_found",
-            "This microphone test has no finished recording.",
-            hint="Wait for it to finish or start a new test.",
-        )
-    return Response(audio, mimetype="audio/wav")
+    """Serve the latest finished recording; 404 once another test replaced it."""
+    wav = mictest.audio(token)
+    if wav is None:
+        raise BoardError("not_found", "This recording is gone; a newer test replaced it.", hint="Test again.")
+    return Response(wav, mimetype="audio/wav")

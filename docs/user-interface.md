@@ -106,18 +106,6 @@ If starting a webcam fails, the message names the cause:
 
 Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
 
-## Peripherals
-
-The Peripherals view reads the authoritative catalog maintained by the Core peripheral daemon on the selected board. Insight can use the board it is running on, the DevKit configured by the SDK, or one manually entered SSH target. It does not scan hardware or keep a second catalog; if the daemon is missing, stopped, incompatible, or inaccessible, the page reports that failure and how to correct it.
-
-The catalog header shows the daemon state, revision, scan sequence, last attempt, and last successful scan. A degraded daemon can return its stale last-good catalog together with the provider error. Hot-plug events are long-polled from the daemon and cause Insight to re-read the full catalog, so the daemon remains the only source of revisions and device changes.
-
-Devices are grouped by their generic `type`, so future microphone, LiDAR, and other providers can appear without a new transport. Camera details include the backend and all reported modes. A mode marked supported can be exported as matching C++, PyNeat, or JSON CameraInput configuration only when it has a discrete size and a `camera_name`. Insight re-reads the daemon catalog during export and rejects a stale device, revision, or selected-board generation.
-
-Microphone details show the daemon-reported ALSA identity, availability, and read-only capture modes. **Test microphone** re-reads the exact daemon instance and revision before it runs a bounded `arecord` capture on the selected board; it never derives a device from a card number or performs discovery. The live level and resulting WAV stay attached to an unguessable test token, so one browser tab cannot stop another tab's recording. Insight does not stop applications already using the microphone, and reports a busy device or missing `arecord` as an actionable error.
-
-Use **Refresh catalog** to ask the daemon for an explicit reconciliation. The request completes only after the daemon's returned target scan sequence has been reached; it never falls back to an Insight-side probe.
-
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.
@@ -145,6 +133,47 @@ Use the Video Viewer to confirm:
 ![Insight Video Viewer showing a four-channel WebRTC grid.](images/insight-video-viewer.png)
 
 The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
+
+## Peripherals
+
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a camera, so cameras stay available to your applications. The camera export API works from the last scan without touching the board.
+
+### Selected board
+
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
+
+The board is chosen in this order:
+
+- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
+- **Insight installed on the board**: Insight inspects the board it runs on.
+- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
+
+Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
+
+### Cameras and modes
+
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+
+| Level | Meaning |
+| --- | --- |
+| Verified | Neat Core's support rules on the board accept the mode for Core `CameraInput`. |
+| Not supported | Neat Core's rules reject it, for example USB cameras and formats other than NV12; the page shows the reason Sentinel reports. Without Neat Core on the board, no mode is supported. |
+
+Sentinel applies the support rules that Neat Core installs on the board. Availability comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Camera configuration API
+
+The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. Exports leave the capture-buffer count unset and include no Apps `config.yaml` `camera:` block, because Insight does not read the board's `libcamerasrc`. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
+
+### Microphones
+
+Refresh also lists every ALSA capture device SiMa Sentinel reports, USB or on-board. For each microphone Insight shows its name, the ALSA device name to open it with (for example `hw:CARD=Nano,DEV=0`), availability, and, for USB audio devices, the sample formats, channel counts, bit depths, and sample rates it captures. On-board sound cards do not report these, and the page says so.
+
+Discovery never opens a sound device: Sentinel reads `/proc/asound` and sysfs. A microphone is **In use** when the kernel reports its capture device open, and Insight names the process where it can see it. A sound server such as PulseAudio holding only the card's mixer does not count. A USB microphone keeps the same identity across unplugging and reconnecting, even when its card number changes.
+
+To hear a microphone, select **Test microphone** and speak; the level meter shows what the microphone hears. Select **Stop recording** when you are done (a test stops by itself after 30 seconds), and Insight plays the recording back in the page. **Stop playing** ends the playback. If the recording stays below about -60 dBFS, the page says nothing was picked up; check the microphone's mute button and gain. Only the test opens the device, and only while it records. Before recording, Insight re-reads Sentinel's catalog and records only from the device Sentinel names; if the board's devices changed since the last scan, the page asks you to refresh first. If another application has the microphone open, the test is refused and that application is left alone. Insight does not configure audio input: Core has no audio input.
 
 ## Stats
 

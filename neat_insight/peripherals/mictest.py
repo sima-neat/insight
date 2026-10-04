@@ -1,131 +1,150 @@
-"""Bounded, token-owned microphone tests against daemon-discovered devices."""
+"""Record from a microphone on the board until Stop, with a live level, to play back in the browser.
 
+The recording goes through the ALSA `plughw:` device that SiMa Sentinel names for the microphone,
+which converts whatever the hardware captures to 16-bit PCM at the requested rate and channel
+count. That makes one recording path work for every capture device, and gives the browser a WAV it
+can always play. Before recording, Insight re-reads Sentinel's catalog and records only from the
+device the scan showed; it never builds a device name from a card number.
+"""
 import array
 import io
 import math
 import re
 import sys
 import threading
-import time
 import uuid
 import wave
+from typing import Optional
 
 from neat_insight.board import BoardError
 from neat_insight.board.transport import CommandCancelled
 
+# The longest a test records when nobody presses Stop.
+DEFAULT_SECONDS = 30
 MAX_SECONDS = 30
-MAX_TESTS = 4
+# At most 48 kHz, 2 channels, 16 bits and 30 s: about 5.5 MiB, well inside the transports' output limit.
 PREFERRED_RATE = 48000
 MAX_CHANNELS = 2
 LEVEL_BARS = 96
+# A recording is "nothing picked up" when its typical (median) 1/96th-slice peak is below this. Not the
+# peak or RMS: a USB microphone can click when it is opened, and one click moves both. A quiet room
+# measured about -48 dBFS RMS on a Yeti Nano.
 SILENT_DBFS = -60.0
 DETAIL_LIMIT = 2000
+REFRESH_HINT = "Click Refresh, then test again."
 
+# The only device names arecord is given: Sentinel's selector for a card with a safe stable id.
 _SELECTOR_RE = re.compile(r"^plughw:CARD=[A-Za-z0-9_-]{1,64},DEV=(?:0|[1-9][0-9]{0,2})$")
 _BUSY_RE = re.compile(r"Device or resource busy|audio open error: Device", re.IGNORECASE)
 
+_lock = threading.Lock()
 
-def _integer(value, *, minimum=0) -> bool:
+
+def _integer(value, minimum: int = 0) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
 
 
-def parse_request(body) -> dict:
-    if not isinstance(body, dict):
-        raise BoardError("invalid_request", "The request body must be a JSON object.")
-    for key in ("instance_id", "device_id"):
-        if not isinstance(body.get(key), str) or not body[key] or len(body[key]) > 512:
-            raise BoardError("invalid_request", f"`{key}` must be a non-empty string from the catalog.")
-    if not all(_integer(body.get(key)) for key in ("board_generation", "revision")):
-        raise BoardError(
-            "invalid_request",
-            "`board_generation` and `revision` must be non-negative integers from the catalog.",
-        )
-    seconds = body.get("seconds", MAX_SECONDS)
-    if not _integer(seconds, minimum=1) or seconds > MAX_SECONDS:
+def parse_request(body) -> tuple:
+    if not isinstance(body, dict) or not isinstance(body.get("id"), str) or not body["id"]:
+        raise BoardError("invalid_request", "Name the microphone to test with `id`.", hint="Send the id from the scan.")
+    seconds = body.get("seconds", DEFAULT_SECONDS)
+    if not _integer(seconds, 1) or seconds > MAX_SECONDS:
         raise BoardError(
             "invalid_request",
             f"`seconds` must be a whole number from 1 to {MAX_SECONDS}.",
+            hint=f"Omit it to record until stopped, at most {DEFAULT_SECONDS} seconds.",
         )
-    return {
-        "board_generation": body["board_generation"],
-        "instance_id": body["instance_id"],
-        "revision": body["revision"],
-        "device_id": body["device_id"],
-        "seconds": seconds,
-    }
+    return body["id"], seconds
 
 
-def bind_microphone(catalog: dict, selection: dict) -> dict:
-    if (
-        catalog.get("instance_id") != selection["instance_id"]
-        or catalog.get("revision") != selection["revision"]
-    ):
+def find_microphone(snapshot: dict, mic_id: str) -> dict:
+    for item in snapshot.get("items") or []:
+        if item.get("id") == mic_id and item.get("kind") == "microphone":
+            return item
+    raise BoardError(
+        "not_found",
+        f"The last scan lists no microphone `{mic_id}`.",
+        hint="Click Refresh; the microphone may have been unplugged.",
+    )
+
+
+def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
+    """The selector and format to record with, from Sentinel's current catalog.
+
+    `scanned` is the `instance_id` and `revision` of the catalog the last scan showed: a restarted
+    Sentinel or a changed catalog can route the same id elsewhere, so either one means Refresh first.
+    """
+    if (catalog.get("instance_id"), catalog.get("revision")) != (scanned["instance_id"], scanned["revision"]):
         raise BoardError(
             "stale_snapshot",
-            "The peripheral catalog changed since this microphone was selected.",
-            hint="Refresh the catalog, select the microphone again, and retry.",
+            "SiMa Sentinel's peripheral catalog changed since the last scan.",
+            hint=REFRESH_HINT,
             current_instance_id=catalog.get("instance_id"),
             current_revision=catalog.get("revision"),
         )
-    device = next(
-        (item for item in catalog.get("devices", []) if item.get("id") == selection["device_id"]),
-        None,
-    )
+    device = next((item for item in catalog.get("devices", []) if item.get("id") == mic_id), None)
     microphone = device.get("microphone") if device and device.get("type") == "microphone" else None
     if not isinstance(microphone, dict):
         raise BoardError(
             "not_found",
-            "That microphone is no longer in the peripheral catalog.",
-            hint="Refresh the catalog; it may have been unplugged.",
+            "That microphone is no longer in SiMa Sentinel's catalog.",
+            hint="Click Refresh; the microphone may have been unplugged.",
         )
     retained = any(
-        issue.get("provider") == device.get("provider")
-        and issue.get("retained_last_good") is True
+        issue.get("provider") == device.get("provider") and issue.get("retained_last_good") is True
         for issue in catalog.get("issues", [])
-        if isinstance(issue, dict)
     )
     if catalog.get("error") is not None or retained:
         raise BoardError(
             "stale_snapshot",
-            "The daemon has not freshly validated this microphone's provider.",
-            hint="Resolve the provider error, refresh the catalog, and select the microphone again.",
+            "SiMa Sentinel could not freshly read this microphone; its details are from an earlier scan.",
+            hint="Resolve the problem the page reports, then click Refresh and test again.",
         )
     selector = (microphone.get("capture_target") or {}).get("selector")
     if not isinstance(selector, str) or not _SELECTOR_RE.fullmatch(selector):
         raise BoardError(
             "peripheral_response",
-            "The daemon did not provide a safe ALSA capture selector for this microphone.",
-            hint="Update the Core peripheral daemon and retry.",
+            "SiMa Sentinel did not name a safe ALSA capture device for this microphone.",
+            hint="Click Refresh once the device has finished initializing; if this persists, update SiMa Sentinel "
+            "with `sima-cli neat install sentinel`.",
         )
-    if (microphone.get("availability") or {}).get("state") == "in_use":
-        raise BoardError(
-            "microphone_in_use",
-            "Another process has the microphone open.",
-            hint="Stop the application that is recording from it, refresh the catalog, and retry. Insight never stops it for you.",
-        )
-    return {"device": device, "selector": selector, **choose_format(microphone)}
+    # Sentinel's availability is from its last scan and only shown; refuse_if_held decides from a live check.
+    node = (microphone.get("identity") or {}).get("pcm_node")
+    return {"selector": selector, "node": node, **choose_format(microphone)}
+
+
+def refuse_if_held(check: Optional[dict], mic_id: str) -> None:
+    """Refuse when the live board check finds the capture PCM open now; a check that could not run
+    leaves it to arecord, which reports a busy device itself."""
+    users = ((check or {}).get("users") or {}).get(mic_id)
+    opened = ((check or {}).get("capture_open") or {}).get(mic_id)
+    hint = "Stop the application that is recording from it, then test again. Insight never stops it for you."
+    if users:
+        holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users)
+        raise BoardError("microphone_in_use", f"The microphone is open in {holders}.", hint=hint, users=users)
+    if opened:
+        raise BoardError("microphone_in_use", "The kernel reports the capture device open in another process.", hint=hint)
 
 
 def choose_format(microphone: dict) -> dict:
-    modes = microphone.get("modes") if isinstance(microphone.get("modes"), list) else []
-    rates = []
-    channels = []
-    for mode in modes:
-        if not isinstance(mode, dict):
-            continue
-        if _integer(mode.get("channels"), minimum=1):
+    """The rate and channels to record at: 48 kHz when the hardware has it, else its nearest rate below
+    (plughw resamples a device that only offers higher rates); its most channels, at most two."""
+    rates, channels = [], []
+    for mode in microphone.get("modes") or []:
+        if _integer(mode.get("channels"), 1):
             channels.append(mode["channels"])
-        rates.extend(rate for rate in mode.get("rates_hz", []) if _integer(rate, minimum=1))
-        rate_range = mode.get("rate_range_hz")
-        if isinstance(rate_range, dict):
-            low, high = rate_range.get("min"), rate_range.get("max")
-            if _integer(low, minimum=1) and _integer(high, minimum=low):
-                rates.extend((low, min(high, PREFERRED_RATE)))
-                if low <= PREFERRED_RATE <= high:
-                    rates.append(PREFERRED_RATE)
+        rates += [rate for rate in mode.get("rates_hz") or [] if _integer(rate, 1)]
+        span = mode.get("rate_range_hz")
+        if isinstance(span, dict) and _integer(span.get("min"), 1) and _integer(span.get("max"), span["min"]):
+            rates += [span["min"], min(span["max"], PREFERRED_RATE)]
     rate = max((value for value in rates if value <= PREFERRED_RATE), default=PREFERRED_RATE)
-    channel_count = min(min(channels, default=1), MAX_CHANNELS)
-    return {"rate": rate, "channels": channel_count}
+    return {"rate": rate, "channels": min(max(channels, default=1), MAX_CHANNELS)}
+
+
+def record_command(device: str, rate: int, channels: int, seconds: int) -> list:
+    # 50 ms periods: arecord hands over audio that often, which is what the live meter shows.
+    return ["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(rate), "-c", str(channels),
+            "-d", str(seconds), "-F", "50000", "-t", "raw", "-"]
 
 
 def _samples(pcm: bytes) -> array.array:
@@ -140,176 +159,175 @@ def _dbfs(value: float):
     return round(20 * math.log10(value / 32768), 1) if value > 0 else None
 
 
-def _peak(samples) -> int:
-    return max(abs(min(samples)), max(samples))
-
-
 def measure(pcm: bytes, channels: int) -> dict:
+    """Peak and RMS in dBFS (None for digital silence), and whether anything was picked up."""
     samples = _samples(pcm)
     if not samples:
         return {"peak_dbfs": None, "rms_dbfs": None, "silent": True}
+    peak = max(abs(min(samples)), max(samples))
+    rms = math.sqrt(sum(s * s for s in samples) / len(samples))
     frames = len(samples) // channels
     bucket = max(1, math.ceil(frames / LEVEL_BARS))
     bars = sorted(
-        _peak(samples[index * channels : (index + bucket) * channels])
-        for index in range(0, frames, bucket)
+        max(abs(min(chunk)), max(chunk))
+        for chunk in (samples[i * channels:(i + bucket) * channels] for i in range(0, frames, bucket))
     )
     typical = _dbfs(bars[len(bars) // 2])
-    return {
-        "peak_dbfs": _dbfs(_peak(samples)),
-        "rms_dbfs": _dbfs(math.sqrt(sum(sample * sample for sample in samples) / len(samples))),
-        "silent": typical is None or typical < SILENT_DBFS,
-    }
+    return {"peak_dbfs": _dbfs(peak), "rms_dbfs": _dbfs(rms), "silent": typical is None or typical < SILENT_DBFS}
+
+
+def chunk_level(pcm: bytes):
+    """Peak of one chunk in dBFS, for the live meter; None for digital silence."""
+    samples = _samples(pcm)
+    return _dbfs(max(abs(min(samples)), max(samples))) if samples else None
+
+
+def wav_bytes(pcm: bytes, rate: int, channels: int) -> bytes:
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(pcm[: len(pcm) - len(pcm) % (2 * channels)])
+    return out.getvalue()
 
 
 class _Stopped(Exception):
-    pass
+    """Raised from the output callback to end a recording the user stopped."""
 
 
-class MicrophoneTest:
-    def __init__(self, session, selection: dict, bound: dict):
+class MicTest:
+    """One recording: its live level while arecord runs, then the WAV or the error."""
+
+    def __init__(self, generation: int, mic_id: str, device: str, rate: int, channels: int, seconds: int):
         self.token = uuid.uuid4().hex
-        self.created = time.monotonic()
-        self.session = session
-        self.board_generation = selection["board_generation"]
-        self.instance_id = selection["instance_id"]
-        self.revision = selection["revision"]
-        self.device_id = selection["device_id"]
-        self.selector = bound["selector"]
-        self.rate = bound["rate"]
-        self.channels = bound["channels"]
-        self.seconds = selection["seconds"]
+        self.generation = generation
+        self.mic_id = mic_id
+        self.device = device
+        self.rate, self.channels, self.seconds = rate, channels, seconds
         self.state = "recording"
         self.level_dbfs = None
+        self.received = 0
         self.level = None
         self.error = None
         self.wav = None
+        self.thread = None
         self.stop_requested = False
+        # Set on Stop: the transport then ends arecord even while it prints nothing (a stalled capture).
         self.cancel_event = threading.Event()
-        self.pcm = bytearray()
-        self.bytes_received = 0
         self.lock = threading.Lock()
-        self.thread = threading.Thread(
-            target=self._record,
-            name=f"microphone-test-{self.token[:8]}",
-            daemon=True,
-        )
-
-    def start(self) -> None:
-        self.thread.start()
-
-    def request_stop(self) -> None:
-        with self.lock:
-            if self.state != "recording":
-                raise BoardError(
-                    "test_not_recording",
-                    "This microphone test is no longer recording.",
-                    hint="Start a new test to record again.",
-                )
-            self.stop_requested = True
-            self.cancel_event.set()
+        self.pcm = bytearray()
+        self._carry = b""
 
     def on_chunk(self, chunk: bytes) -> None:
         with self.lock:
             self.pcm += chunk
-            self.bytes_received += len(chunk)
-            start = len(self.pcm) - len(chunk)
-            samples = _samples(self.pcm[start - start % 2 :])
-            self.level_dbfs = _dbfs(_peak(samples)) if samples else None
+            data = self._carry + chunk
+            whole = len(data) - len(data) % 2
+            self._carry = data[whole:]
+            self.received += len(chunk)
+            self.level_dbfs = chunk_level(data[:whole])
+            # Stopping aborts the command: the transport closes its channel or kills the process,
+            # so arecord ends within one 50 ms period, and what arrived so far is the recording.
             if self.stop_requested:
                 raise _Stopped()
 
+    def request_stop(self) -> None:
+        with self.lock:
+            if self.state == "recording":
+                self.stop_requested = True
+                self.cancel_event.set()
+
+    def finish(self, level: Optional[dict] = None, wav: Optional[bytes] = None, error: Optional[BoardError] = None):
+        with self.lock:
+            self.pcm = bytearray()
+            if error is None:
+                self.level, self.wav, self.state = level, wav, "ready"
+            else:
+                self.error, self.state = error.to_dict(), "failed"
+
     def status(self) -> dict:
         with self.lock:
-            payload = {
+            status = {
                 "token": self.token,
-                "device_id": self.device_id,
-                "board_generation": self.board_generation,
-                "instance_id": self.instance_id,
-                "revision": self.revision,
+                "id": self.mic_id,
                 "state": self.state,
-                "format": {
-                    "rate_hz": self.rate,
-                    "channels": self.channels,
-                    "sample_bits": 16,
-                    "seconds": self.seconds,
-                },
-                "elapsed_ms": int(
-                    self.bytes_received / (self.rate * self.channels * 2) * 1000
-                ),
+                "device": self.device,
+                "format": {"rate": self.rate, "channels": self.channels, "bits": 16, "seconds": self.seconds},
+                "elapsed_ms": int(self.received / (self.rate * self.channels * 2) * 1000),
                 "level_dbfs": self.level_dbfs if self.state == "recording" else None,
             }
             if self.state == "ready":
-                payload.update(
-                    level=self.level,
-                    audio_url=f"/api/peripherals/microphones/test/{self.token}.wav",
-                )
+                status["level"] = self.level
+                status["audio_url"] = f"/api/peripherals/microphones/test/{self.token}.wav"
             if self.state == "failed":
-                payload["error"] = self.error
-            return payload
+                status["error"] = self.error
+            return status
 
-    def _record(self) -> None:
-        command = [
-            "arecord",
-            "-q",
-            "-D",
-            self.selector,
-            "-f",
-            "S16_LE",
-            "-r",
-            str(self.rate),
-            "-c",
-            str(self.channels),
-            "-d",
-            str(self.seconds),
-            "-F",
-            "50000",
-            "-t",
-            "raw",
-            "-",
-        ]
+
+_current: Optional[MicTest] = None
+
+
+def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
+    """Start recording in the background and return at once; poll `current()` for the level.
+
+    One test records at a time, so the board runs at most one arecord for Insight.
+    """
+    global _current
+    with _lock:
+        if _current is not None and _current.status()["state"] == "recording":
+            raise BoardError("test_running", "A microphone test is already recording.", hint="Wait for it to finish.")
+        test = MicTest(session.generation, mic_id, bound["selector"], bound["rate"], bound["channels"], seconds)
+        test.thread = threading.Thread(target=_record, args=(session, test), name="mic-test", daemon=True)
+        _current = test
+    test.thread.start()
+    return test.status()
+
+
+def stop(generation: int) -> Optional[dict]:
+    """Ask the recording on the selected board to end now; the result follows as for a full one."""
+    test = _current
+    if test is None or test.generation != generation:
+        return None
+    test.request_stop()
+    return test.status()
+
+
+def current(generation: int) -> Optional[dict]:
+    test = _current
+    return test.status() if test is not None and test.generation == generation else None
+
+
+def audio(token: str) -> Optional[bytes]:
+    test = _current
+    if test is None or test.token != token:
+        return None
+    with test.lock:
+        return test.wav if test.state == "ready" else None
+
+
+def _record(session, test: MicTest) -> None:
+    command = record_command(test.device, test.rate, test.channels, test.seconds)
+    try:
         try:
-            try:
-                result = self.session.transport.exec(
-                    command,
-                    timeout=self.seconds + 10,
-                    on_stdout=self.on_chunk,
-                    cancel_event=self.cancel_event,
-                )
-                pcm = _checked(result)
-            except (_Stopped, CommandCancelled):
-                with self.lock:
-                    pcm = bytes(self.pcm)
-                if len(pcm) < self.rate * self.channels * 2 // 10:
-                    raise BoardError(
-                        "command_failed",
-                        "The test was stopped before enough audio was recorded.",
-                        hint="Start another test, speak, then stop it.",
-                    )
-            self.session.require_current()
-            level = measure(pcm, self.channels)
-            output = io.BytesIO()
-            with wave.open(output, "wb") as wav:
-                wav.setnchannels(self.channels)
-                wav.setsampwidth(2)
-                wav.setframerate(self.rate)
-                frame_bytes = 2 * self.channels
-                wav.writeframes(pcm[: len(pcm) - len(pcm) % frame_bytes])
-            with self.lock:
-                self.level = level
-                self.wav = output.getvalue()
-                self.pcm.clear()
-                self.state = "ready"
-        except BoardError as error:
-            self._fail(error)
-        except Exception as error:  # Keep the background worker from disappearing silently.
-            self._fail(BoardError("command_failed", f"The microphone test failed: {error}"))
-
-    def _fail(self, error: BoardError) -> None:
-        with self.lock:
-            self.error = error.to_dict()
-            self.pcm.clear()
-            self.state = "failed"
+            result = session.transport.exec(
+                command, timeout=test.seconds + 10, on_stdout=test.on_chunk, cancel_event=test.cancel_event
+            )
+            pcm = _checked(result)
+        except (_Stopped, CommandCancelled):
+            with test.lock:
+                pcm = bytes(test.pcm)
+            if len(pcm) < test.rate * test.channels * 2 // 10:
+                raise BoardError(
+                    "stopped_early", "The test was stopped before anything was recorded.", hint="Test again and speak."
+                ) from None
+        # A recording from a board that is no longer selected is not this board's result.
+        session.require_current()
+        test.finish(measure(pcm, test.channels), wav_bytes(pcm, test.rate, test.channels))
+    except BoardError as err:
+        test.finish(error=err)
+    except Exception as exc:  # the page is polling; it must learn that the recording ended
+        test.finish(error=BoardError("command_failed", f"The microphone test failed: {exc}"))
 
 
 def _checked(result) -> bytes:
@@ -332,80 +350,7 @@ def _checked(result) -> bytes:
         raise BoardError(
             "command_failed",
             "Recording from the microphone failed on the board.",
-            hint="The board's arecord output is in detail.",
+            hint="The board's output is in detail.",
             detail=detail,
         )
     return result.stdout
-
-
-class TestStore:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._tests = {}
-
-    def start(self, session, selection: dict, bound: dict) -> dict:
-        with self._lock:
-            for test in self._tests.values():
-                status = test.status()
-                if (
-                    status["state"] == "recording"
-                    and test.board_generation == session.generation
-                    and test.device_id == selection["device_id"]
-                ):
-                    raise BoardError(
-                        "test_running",
-                        "That microphone is already being tested.",
-                        hint="Stop the existing test or wait for it to finish.",
-                    )
-            self._prune()
-            if len(self._tests) >= MAX_TESTS:
-                raise BoardError(
-                    "test_running",
-                    "Too many microphone tests are still active.",
-                    hint="Wait for an active test to finish, then retry.",
-                )
-            test = MicrophoneTest(session, selection, bound)
-            self._tests[test.token] = test
-        test.start()
-        return test.status()
-
-    def status(self, token: str, generation: int) -> dict:
-        return self._get(token, generation).status()
-
-    def stop(self, token: str, generation: int) -> dict:
-        test = self._get(token, generation)
-        test.request_stop()
-        return test.status()
-
-    def audio(self, token: str, generation: int):
-        test = self._get(token, generation)
-        with test.lock:
-            return test.wav if test.state == "ready" else None
-
-    def _get(self, token: str, generation: int) -> MicrophoneTest:
-        with self._lock:
-            test = self._tests.get(token)
-        if test is None:
-            raise BoardError(
-                "not_found",
-                "This microphone test does not exist or has expired.",
-                hint="Start a new microphone test.",
-            )
-        if test.board_generation != generation:
-            raise BoardError(
-                "stale_snapshot",
-                "This microphone test belongs to a different selected board.",
-                hint="Return to that board or start a new test on the current board.",
-            )
-        return test
-
-    def _prune(self) -> None:
-        completed = sorted(
-            (test for test in self._tests.values() if test.status()["state"] != "recording"),
-            key=lambda test: test.created,
-        )
-        while len(self._tests) >= MAX_TESTS and completed:
-            del self._tests[completed.pop(0).token]
-
-
-tests = TestStore()

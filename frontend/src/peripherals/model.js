@@ -1,211 +1,695 @@
+const TIER_RANK = { verified: 0, advertised: 1, unsupported: 2 }
+
+const TIERS = {
+  verified: { label: 'Verified with Core', short: 'verified', tone: 'ok' },
+  advertised: { label: 'Advertised, unverified', short: 'advertised', tone: 'warn' },
+  unsupported: { label: 'Not supported by Core CameraInput', short: 'unsupported', tone: 'periph-danger' }
+}
+
+const CONNECTIONS = [
+  { id: 'mipi', label: 'MIPI (libcamera)' },
+  { id: 'usb', label: 'USB (V4L2)' }
+]
+
+// Microphones are ALSA capture devices; anything that is not USB audio is on the board itself.
+const MIC_CONNECTIONS = [
+  { id: 'usb', label: 'USB (ALSA)' },
+  { id: 'onboard', label: 'On-board (ALSA)' }
+]
+
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
 
-export function apiError(body, status) {
-  const data = body && typeof body === 'object' ? body : {}
-  const error = new Error(data.error || data.message || `Request failed${status ? `: ${status}` : ''}`)
-  error.code = data.code || ''
-  error.hint = data.hint || ''
-  error.details = data
-  return error
+// Device kinds Insight knows a name and an icon for. Cameras and microphones
+// have a view; the rest are listed so the shape of the page does not change when
+// the backend starts reporting them (contract: build nothing for other kinds
+// yet). A kind the backend invents gets the generic "device" icon.
+const DEVICE_KINDS = [
+  { id: 'camera', label: 'Cameras', icon: 'camera' },
+  { id: 'microphone', label: 'Microphones', icon: 'microphone' },
+  { id: 'lidar', label: 'LiDAR', icon: 'lidar' }
+]
+
+const SUPPORTED_KINDS = new Set(['camera', 'microphone'])
+
+const SEVERITY = {
+  error: { label: 'Error', tone: 'periph-danger', rank: 0 },
+  warning: { label: 'Warning', tone: 'warn', rank: 1 },
+  info: { label: 'Info', tone: 'periph-info', rank: 2 }
 }
 
-export function normalizeError(error) {
-  if (!error) return null
-  if (typeof error === 'string') return { message: error, code: '', hint: '', details: {} }
-  return {
-    message: error.message || error.error || 'Unknown error',
-    code: error.code || '',
-    hint: error.hint || '',
-    details: error.details || error
-  }
+const DEVICE_FIELDS = [
+  ['camera_name', 'Camera name'],
+  ['camera_name_source', 'Name source'],
+  ['media_device', 'Media device'],
+  ['bus_info', 'Bus info'],
+  ['csi', 'CSI receiver'],
+  ['video_node', 'Video node'],
+  ['by_id', 'Stable path']
+]
+
+const USB_FIELDS = [
+  ['manufacturer', 'Manufacturer'],
+  ['product', 'Product'],
+  ['serial', 'Serial'],
+  ['bus_path', 'USB bus path']
+]
+
+export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
+
+export function tierInfo(tier) {
+  return TIERS[tier] || { label: 'Support unknown', short: 'unknown', tone: '' }
 }
 
-export function sourceLabel(source) { return SOURCES[source] || source || '' }
+export function severityInfo(severity) {
+  return SEVERITY[severity] || SEVERITY.info
+}
+
+export function sourceLabel(source) {
+  return SOURCES[source] || ''
+}
+
+export function connectionLabel(connection) {
+  return CONNECTIONS.find((c) => c.id === connection)?.label || String(connection || 'Unknown')
+}
 
 export function connectionStateInfo(status) {
   if (status?.state === 'connected') return { label: 'Connected', short: 'Connected', tone: 'ok' }
-  if (status?.state === 'error') return { label: 'Connection failed', short: 'Error', tone: 'danger' }
+  if (status?.state === 'error') return { label: 'Connection failed', short: 'Error', tone: 'periph-danger' }
   return { label: 'Not checked', short: 'Not checked', tone: '' }
 }
 
 export function boardIndicator(board) {
-  if (!board) return { label: 'Board', state: { short: 'Loading…', tone: '' }, title: 'Loading the selected board' }
-  if (!board.target) return { label: 'No board', state: { short: 'Not selected', tone: 'warn' }, title: 'Choose a board' }
+  if (!board) return { label: 'Board', state: { label: 'Loading…', short: 'Loading…', tone: '' }, title: 'Loading the selected board' }
+  const target = board.target
+  if (!target) {
+    return {
+      label: 'No board',
+      state: { label: 'Not selected', short: 'Not selected', tone: 'warn' },
+      title: 'No board is selected. Open board settings to choose one.'
+    }
+  }
   const state = connectionStateInfo(board.status)
-  const label = board.target.mode === 'local' ? 'This board' : `${board.target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${board.target.host}`
-  return { label, state, title: `${board.target.label} — ${state.label}` }
+  // One control names the board and its state. "sima@host" is the connection string, which belongs
+  // in the panel; the masthead says which machine, in the words the rest of the SDK uses for it.
+  const label = target.mode === 'local'
+    ? 'This board'
+    : `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`
+  return { label, state, title: `${target.label} — ${state.label}. Open board settings.` }
+}
+
+export function availabilityInfo(availability) {
+  const reason = availability?.reason || ''
+  if (availability?.state === 'available') return { label: 'Available', tone: 'ok', reason }
+  if (availability?.state === 'in_use') {
+    const users = (availability.users || []).map((u) => `${u.command || 'unknown process'} (pid ${u.pid})`)
+    return { label: users.length ? `In use by ${users.join(', ')}` : 'In use', tone: 'warn', reason }
+  }
+  return { label: 'Availability unknown', tone: '', reason }
+}
+
+export function defaultTargetText(defaults) {
+  if (defaults?.on_board) return 'this board (Insight is running on it)'
+  const env = defaults?.sdk_env
+  if (env?.host) return `${env.user || 'sima'}@${env.host}:${env.port || 22} (paired SDK DevKit)`
+  return ''
+}
+
+function groupKind(items, kind, connections) {
+  const devices = (items || []).filter((item) => item?.kind === kind)
+  return connections
+    .map((c) => ({ ...c, items: devices.filter((item) => item.connection === c.id) }))
+    .filter((group) => group.items.length)
+}
+
+export function groupCameras(items) {
+  return groupKind(items, 'camera', CONNECTIONS)
+}
+
+export function groupMicrophones(items) {
+  return groupKind(items, 'microphone', MIC_CONNECTIONS)
+}
+
+function kindLabel(kind) {
+  const text = String(kind || '').replace(/[_-]+/g, ' ').trim()
+  if (!text) return 'Other'
+  return text.charAt(0).toUpperCase() + text.slice(1) + (text.endsWith('s') ? '' : 's')
+}
+
+function kindCountBadge(count) {
+  if (!count) return ''
+  return count > 99 ? '99+' : String(count)
+}
+
+// One entry per device kind for the icon rail. A kind is selectable only when
+// Insight has a view for it AND the last scan found at least one; everything
+// else is greyed, and `note` says why (it becomes the tooltip and the
+// accessible description, so a greyed icon never leaves the user guessing).
+// `scanned: false` means there is no scan yet, so no count is claimed.
+export function deviceTabs(items, { scanned = true } = {}) {
+  const counts = new Map()
+  for (const item of items || []) {
+    if (!item?.kind) continue
+    counts.set(item.kind, (counts.get(item.kind) || 0) + 1)
+  }
+  const known = DEVICE_KINDS.map((kind) => ({ ...kind, count: counts.get(kind.id) || 0 }))
+  const extra = [...counts.keys()]
+    .filter((kind) => !DEVICE_KINDS.some((known_) => known_.id === kind))
+    .sort()
+    .map((kind) => ({ id: kind, label: kindLabel(kind), icon: 'device', count: counts.get(kind) }))
+  return [...known, ...extra].map((kind) => {
+    const supported = SUPPORTED_KINDS.has(kind.id)
+    const noun = kind.label.toLowerCase()
+    let note = ''
+    if (!supported) {
+      note = kind.count
+        ? `${countLabel(kind.count, 'device')} detected; Insight cannot show ${noun} yet.`
+        : 'Not supported yet'
+    } else if (!scanned) {
+      note = 'Not scanned yet'
+    } else if (!kind.count) {
+      note = `No ${noun} detected`
+    }
+    const name = scanned || kind.count ? `${kind.label}, ${countLabel(kind.count, 'device')}` : kind.label
+    return {
+      id: kind.id,
+      label: kind.label,
+      icon: kind.icon,
+      count: kind.count,
+      supported,
+      disabled: Boolean(note),
+      note,
+      badge: kindCountBadge(kind.count),
+      name,
+      tooltip: note ? `${kind.label} — ${note}` : name
+    }
+  })
+}
+
+export function resolveDeviceKind(tabs, wanted) {
+  const list = tabs || []
+  const usable = list.filter((tab) => !tab.disabled)
+  if (wanted && usable.some((tab) => tab.id === wanted)) return wanted
+  // With nothing selectable (no scan yet, or no camera attached) the panel still
+  // shows the first kind Insight has a view for: that view explains what to do next.
+  return usable[0]?.id || list.find((tab) => tab.supported)?.id || null
+}
+
+export function cameraDeviceId(camera) {
+  const device = camera?.device || {}
+  return device.camera_name || device.by_id || device.video_node || ''
+}
+
+export function cameraSubtitle(camera) {
+  const deviceId = cameraDeviceId(camera)
+  // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
+  const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
+  return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
+}
+
+export function deviceRows(camera) {
+  const rows = [['Connection', connectionLabel(camera.connection)]]
+  if (camera.model) rows.push(['Model', camera.model])
+  const device = camera.device || {}
+  for (const [key, label] of DEVICE_FIELDS) {
+    if (device[key] !== undefined && device[key] !== null && device[key] !== '') rows.push([label, String(device[key])])
+  }
+  return [...rows, ...usbRows(device.usb)]
+}
+
+function usbRows(usb) {
+  if (!usb) return []
+  const rows = []
+  if (usb.vendor_id && usb.product_id) rows.push(['USB ID', `${usb.vendor_id}:${usb.product_id}`])
+  for (const [key, label] of USB_FIELDS) if (usb[key]) rows.push([label, String(usb[key])])
+  if (Number.isFinite(usb.speed_mbps)) rows.push(['USB speed', `${usb.speed_mbps} Mb/s`])
+  return rows
+}
+
+function present(value) {
+  return value !== undefined && value !== null && value !== ''
+}
+
+// The ALSA device name stays in Device details; the subtitle only ties a webcam's or headset's
+// microphone to the camera item the same USB device produced.
+export function microphoneSubtitle(mic) {
+  const name = mic?.device?.part_of?.name
+  return name ? `Part of ${name}` : ''
+}
+
+export function microphoneRows(mic) {
+  const device = mic?.device || {}
+  const card = present(device.card_id) || present(device.card_index)
+    ? [device.card_id, present(device.card_index) ? `card ${device.card_index}` : ''].filter(present).join(', ')
+    : ''
+  const rows = [
+    ['Connection', MIC_CONNECTIONS.find((c) => c.id === mic?.connection)?.label || String(mic?.connection || 'Unknown')],
+    ['Part of', device.part_of?.name],
+    ['ALSA device', device.alsa_name],
+    ['Card', card],
+    ['Card name', device.card_name],
+    ['Driver', device.card_driver],
+    ['Device node', device.pcm_node],
+    ['By-path link', device.by_path],
+    ['By-id link', device.by_id]
+  ].filter(([, value]) => present(value)).map(([label, value]) => [label, String(value)])
+  return [...rows, ...usbRows(device.usb)]
+}
+
+export function sampleRateLabel(hz) {
+  const khz = Number(hz) / 1000
+  return `${Number.isInteger(khz) ? khz : Number(khz.toFixed(3))} kHz`
+}
+
+function rateList(rates) {
+  const khz = rates.map((hz) => sampleRateLabel(hz).replace(' kHz', ''))
+  return khz.length ? `${khz.join(' · ')} kHz` : ''
+}
+
+// One segmented row per distinct capture combination the device reports, e.g.
+// S24_3LE | 2 ch | 24-bit | 32 · 44.1 · 48 kHz. A continuous rate range stays a range ("8–48 kHz"):
+// expanding it into a list would invent rates the device never named.
+export function captureModes(mic) {
+  if (!Array.isArray(mic?.capture)) return null
+  return mic.capture.map((mode, index) => {
+    const rates = mode.rate_range
+      ? `${sampleRateLabel(mode.rate_range.min).replace(' kHz', '')}–${sampleRateLabel(mode.rate_range.max)}`
+      : rateList(mode.rates || [])
+    const badges = [
+      mode.format || '',
+      Number.isFinite(mode.channels) ? `${mode.channels} ch` : '',
+      Number.isFinite(mode.bits) ? `${mode.bits}-bit` : '',
+      rates
+    ].filter(Boolean)
+    return { key: `${index}-${mode.format}-${mode.channels}-${mode.bits}`, badges }
+  })
+}
+
+// --- Microphone test -------------------------------------------------------
+// Like a video call's "Test microphone": record on the board until Stop (or the backend's cap) while
+// a meter shows the live level, then play it back here with the meter following the playback.
+
+export const MIC_TEST_IDLE = { status: 'idle', test: null, error: null }
+// The meter spans -50..0 dBFS: a quiet room lights a segment or two, speech most of the bar.
+export const METER_FLOOR_DBFS = -50
+
+export function nextMicTestState(current, event) {
+  const state = current || MIC_TEST_IDLE
+  switch (event?.type) {
+    case 'record':
+      return { status: 'recording', test: null, error: null }
+    case 'recorded':
+      return state.status === 'recording' ? { status: 'playing', test: event.test, error: null } : state
+    case 'failed':
+      return state.status === 'recording' ? { status: 'error', test: null, error: event.error } : state
+    case 'played': // the recording ended, or Stop playing
+      return state.status === 'playing' ? { ...state, status: 'done' } : state
+    case 'replay':
+      return state.status === 'done' ? { ...state, status: 'playing' } : state
+    case 'reset':
+      return MIC_TEST_IDLE
+    default:
+      return state
+  }
+}
+
+// How many of `count` meter segments a level lights.
+export function meterSegments(levelDbfs, count) {
+  if (levelDbfs === null || levelDbfs === undefined || !Number.isFinite(Number(levelDbfs))) return 0
+  const fraction = (Number(levelDbfs) - METER_FLOOR_DBFS) / -METER_FLOOR_DBFS
+  return Math.round(Math.max(0, Math.min(1, fraction)) * count)
+}
+
+// Green for most of the bar, amber near the top, red at the end, as a level meter reads.
+export function segmentTone(index, count) {
+  if (index < Math.round(count * 0.7)) return 'low'
+  if (index < Math.round(count * 0.9)) return 'mid'
+  return 'high'
+}
+
+// Why the Test button is disabled, or '' when it is not.
+export function micTestBlock(mic, state) {
+  if (state?.status === 'recording' || state?.status === 'playing') return ''
+  if (mic?.availability?.state === 'in_use') return availabilityInfo(mic.availability).label
+  return ''
+}
+
+// What to say about a finished recording: only when it needs attention.
+export function micLevelNotice(level) {
+  if (!level) return ''
+  if (level.silent) return 'Nothing was picked up. Check the microphone\'s mute button and gain, then test again.'
+  return ''
+}
+
+export function micTestErrorAction(error) {
+  switch (error?.code) {
+    case 'microphone_in_use':
+      return 'Stop the application that is recording from it, then test again. Insight never stops it for you.'
+    case 'not_found':
+    case 'stale_snapshot':
+      return 'Refresh, then test again.'
+    case 'tool_missing':
+      return 'Install alsa-utils on the board, then test again.'
+    default:
+      return error?.hint || ''
+  }
+}
+
+// The one button's label and what pressing it does, for each state.
+export function micTestAction(status, stopping) {
+  if (status === 'recording') return { label: stopping ? 'Stopping…' : 'Stop recording', action: 'stop', disabled: stopping }
+  if (status === 'playing') return { label: 'Stop playing', action: 'stop-playing', disabled: false }
+  return { label: 'Test microphone', action: 'record', disabled: false }
+}
+
+export function formatClock(seconds) {
+  const whole = Math.max(0, Math.floor(Number(seconds) || 0))
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}
+
+export function microphoneSummaryLine(mic) {
+  const availability = mic?.availability
+  if (availability?.state === 'in_use' && !availability.users?.length && availability.reason) return availability.reason
+  if (availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
+  return ''
+}
+
+function rank(tier) {
+  return TIER_RANK[tier] ?? 3
+}
+
+function best(list, tierOf) {
+  return (list || []).reduce((top, item) => (top === null || rank(tierOf(item)) < rank(tierOf(top)) ? item : top), null)
+}
+
+function usableSizes(format) {
+  return (format?.sizes || []).filter((size) => size.fps?.length)
+}
+
+function isSelectable(format) {
+  return Boolean(format?.exportable && usableSizes(format).length)
+}
+
+function sizeTier(size) {
+  return best(size.fps, (f) => f.tier)?.tier
+}
+
+function findFormat(camera, format) {
+  return (camera?.formats || []).find((f) => f.format === format) || null
+}
+
+function findSize(format, width, height) {
+  return usableSizes(format).find((s) => s.width === Number(width) && s.height === Number(height)) || null
+}
+
+function findFps(size, value) {
+  if (value === undefined || value === null || value === '') return null
+  return size?.fps?.find((f) => Number(f.value) === Number(value)) || null
+}
+
+export function sizeKey(width, height) {
+  return `${width}x${height}`
+}
+
+export function sizeLabel(width, height) {
+  return `${width}×${height}`
+}
+
+export function fpsLabel(value) {
+  const n = Number(value)
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
+}
+
+export function modeLabel(selection) {
+  if (!selection) return ''
+  return `${selection.format} ${sizeLabel(selection.width, selection.height)} @ ${fpsLabel(selection.fps)} fps`
+}
+
+export function formatRangeLabel(range) {
+  if (!range) return ''
+  const width = `${range.min_width}–${range.max_width}`
+  const height = `${range.min_height}–${range.max_height}`
+  const step = range.step_width || range.step_height
+    ? ` in ${range.step_width || 1}×${range.step_height || 1} steps`
+    : ''
+  return `${width}×${height}${step}`
+}
+
+export function formatOptions(camera) {
+  return (camera?.formats || []).map((f) => {
+    const selectable = isSelectable(f)
+    const range = formatRangeLabel(f.range)
+    const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
+    return {
+      value: f.format,
+      label: f.label || f.format,
+      tier: selectable ? f.support?.tier || '' : 'unsupported',
+      disabled: !selectable,
+      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
+      range: f.range || null
+    }
+  })
+}
+
+export function sizeOptions(camera, format) {
+  return usableSizes(findFormat(camera, format)).map((s) => ({
+    value: sizeKey(s.width, s.height),
+    width: s.width,
+    height: s.height,
+    label: sizeLabel(s.width, s.height),
+    tier: sizeTier(s)
+  }))
+}
+
+export function fpsOptions(camera, format, width, height) {
+  const size = findSize(findFormat(camera, format), width, height)
+  return (size?.fps || []).map((f) => ({
+    value: String(f.value),
+    label: `${fpsLabel(f.value)} fps`,
+    tier: f.tier
+  }))
+}
+
+// A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
+// pill beside the menu for the chosen entry, and the entries are grouped under their tier.
+const TIER_PILLS = {
+  verified: { label: 'Verified', tone: 'ok' },
+  advertised: { label: 'Advertised', tone: 'warn' },
+  unsupported: { label: 'Not usable', tone: 'periph-danger' }
+}
+const TIER_GROUPS = [
+  { id: 'verified', label: 'Verified with Core' },
+  { id: 'advertised', label: 'Advertised by libcamera' },
+  { id: 'unsupported', label: 'Not usable' },
+  { id: '', label: 'Support unknown' }
+]
+
+export function optionTier(options, value) {
+  const option = (options || []).find((o) => o.value === String(value))
+  return option ? TIER_PILLS[option.tier] || null : null
+}
+
+export function groupOptions(options) {
+  return TIER_GROUPS
+    .map((group) => ({ ...group, options: (options || []).filter((o) => (o.tier || '') === group.id) }))
+    .filter((group) => group.options.length)
+}
+
+// One visible explanation line per camera state, chosen by priority, so the
+// detail pane never stacks four near-identical sentences.
+export function cameraSummaryLine(camera) {
+  const availability = availabilityInfo(camera?.availability)
+  const tier = camera?.support?.tier
+  if (camera?.availability?.state === 'in_use') {
+    return `${availability.label}. Stop that process on the board before an application can open this camera.`
+  }
+  if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
+  if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
+  // A working camera gets no sentence at all. Every mode menu already labels each entry
+  // "verified" or "advertised", so a paragraph repeating that distinction only adds text.
+  return ''
+}
+
+export function blockedFormatSummary(options) {
+  const blocked = (options || []).filter((option) => option.disabled)
+  if (!blocked.length) return ''
+  return `${countLabel(blocked.length, 'format')} cannot be used (${blocked.map((option) => option.value).join(', ')})`
+}
+
+export function resolveSelection(camera, wanted) {
+  const formats = (camera?.formats || []).filter(isSelectable)
+  if (!formats.length) return null
+  const def = camera.default_selection
+  const format = formats.find((f) => f.format === wanted?.format)
+    || formats.find((f) => f.format === def?.format)
+    || best(formats, (f) => f.support?.tier)
+  const defHere = def?.format === format.format ? def : null
+  const size = findSize(format, wanted?.width, wanted?.height)
+    || (defHere && findSize(format, defHere.width, defHere.height))
+    || best(usableSizes(format), sizeTier)
+  const defSize = defHere && defHere.width === size.width && defHere.height === size.height
+  const fps = findFps(size, wanted?.fps) || (defSize && findFps(size, defHere.fps)) || best(size.fps, (f) => f.tier)
+  return { format: format.format, width: size.width, height: size.height, fps: fps.value }
+}
+
+export function sameSelection(a, b) {
+  if (!a || !b) return a === b
+  return a.format === b.format && a.width === b.width && a.height === b.height && Number(a.fps) === Number(b.fps)
+}
+
+function resolveId(groups, snapshot, previousId) {
+  const devices = groups.flatMap((group) => group.items)
+  if (previousId && devices.some((d) => d.id === previousId)) return previousId
+  if (previousId && snapshot?.changes?.removed?.some((r) => r.id === previousId)) return previousId
+  return devices[0]?.id || null
+}
+
+export function resolveCameraId(snapshot, previousId) {
+  return resolveId(groupCameras(snapshot?.items), snapshot, previousId)
+}
+
+export function resolveMicrophoneId(snapshot, previousId) {
+  return resolveId(groupMicrophones(snapshot?.items), snapshot, previousId)
+}
+
+export function isSnapshotStale(board, snapshot) {
+  if (!board || !snapshot?.scanned_at) return false
+  return Number(board.generation) !== Number(snapshot.generation)
+}
+
+export function changeSummary(changes) {
+  const names = (list) => (list || []).map((item) => item.name || item.id).join(', ')
+  const lines = []
+  if (changes?.removed?.length) lines.push(`Disconnected since last refresh: ${names(changes.removed)}`)
+  if (changes?.added?.length) lines.push(`New: ${names(changes.added)}`)
+  return lines
+}
+
+export function sortIssues(issues) {
+  return [...(issues || [])].sort((a, b) => severityInfo(a.severity).rank - severityInfo(b.severity).rank)
+}
+
+export function formatRelativeTime(iso, now = Date.now()) {
+  const time = Date.parse(iso || '')
+  if (!Number.isFinite(time)) return ''
+  const seconds = Math.round((now - time) / 1000)
+  if (seconds < 10) return 'just now'
+  if (seconds < 60) return `${seconds} s ago`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`
+  return `${Math.floor(seconds / 86400)} d ago`
+}
+
+export function formatDuration(ms) {
+  if (!Number.isFinite(ms)) return ''
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
+}
+
+export function countLabel(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+export function safeHref(url) {
+  return /^https?:\/\//i.test(String(url || '')) ? url : null
+}
+
+export function apiError(body, status) {
+  const data = body && typeof body === 'object' ? body : {}
+  const err = new Error(data.error || data.message || `Request failed${status ? `: ${status}` : ''}`)
+  err.code = data.code || ''
+  err.hint = data.hint || ''
+  err.status = status || 0
+  err.details = data
+  return err
+}
+
+export function normalizeError(err) {
+  if (!err) return null
+  if (typeof err === 'string') return { message: err, code: '', hint: '', details: {} }
+  if (err instanceof Error) return { message: err.message, code: err.code || '', hint: err.hint || '', details: err.details || {} }
+  return { message: err.error || err.message || 'Unknown error', code: err.code || '', hint: err.hint || '', details: err }
 }
 
 export function initialBoardForm(board) {
-  const target = board?.target?.mode === 'ssh' ? board.target : null
-  const source = board?.saved || target || board?.defaults?.sdk_env || {}
-  return { host: source.host || '', port: String(source.port || 22), user: source.user || 'sima' }
+  const t = board?.target?.mode === 'ssh' ? board.target : null
+  const src = board?.saved || t || board?.defaults?.sdk_env || {}
+  return { host: src.host || '', port: String(src.port || 22), user: src.user || 'sima' }
 }
 
 export function validateBoardForm(values) {
   const host = String(values.host || '').trim()
   const user = String(values.user || '').trim()
   const port = Number(values.port)
-  if (!host || /\s/.test(host)) return { error: 'Enter a host name or IP address without spaces.' }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'The SSH port must be from 1 to 65535.' }
-  if (!user) return { error: 'Enter the SSH user, usually “sima”.' }
+  if (!host) return { error: 'Enter the board host name or IP address.' }
+  if (/\s/.test(host)) return { error: 'The host cannot contain spaces.' }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'The SSH port must be a whole number from 1 to 65535.' }
+  if (!user) return { error: 'Enter the SSH user, usually "sima".' }
   return { body: { host, port, user } }
 }
 
+// The board state has several writers: reads (on load, Retry, after a scan) and the POSTs that
+// change the board and answer with the new state. Their answers can arrive out of order, so a
+// read only applies while nothing newer has been sent or applied; a superseded read resolves to
+// whatever state won instead of its own out-of-date answer.
 export function createBoardSync({ fetchBoard, onBoard, onError, onLoading }) {
   let latest = 0
   let newest = Promise.resolve(null)
-  return {
-    load() {
-      const sequence = ++latest
-      onLoading(true)
-      const current = Promise.resolve().then(fetchBoard).then(
-        (data) => {
-          if (sequence !== latest) return newest
-          onBoard(data); onLoading(false); return data
-        },
-        (error) => {
-          if (sequence !== latest) return newest
-          onError(error); onLoading(false); return null
-        }
-      )
-      newest = current
-      return current
-    },
-    apply(data) {
-      latest += 1
-      newest = Promise.resolve(data)
-      onBoard(data); onLoading(false)
-      return data
+
+  function load() {
+    const seq = ++latest
+    onLoading(true)
+    let request
+    try {
+      request = Promise.resolve(fetchBoard())
+    } catch (err) {
+      request = Promise.reject(err)
     }
-  }
-}
-
-export function deviceTypes(devices) {
-  const counts = new Map()
-  for (const device of devices || []) if (device?.type) counts.set(device.type, (counts.get(device.type) || 0) + 1)
-  return [...counts].sort(([left], [right]) => left.localeCompare(right)).map(([id, count]) => ({ id, count, label: typeLabel(id) }))
-}
-
-export function typeLabel(type) {
-  const text = String(type || 'device').replace(/[_-]+/g, ' ')
-  const title = text.charAt(0).toUpperCase() + text.slice(1)
-  return `${title}${title.endsWith('s') ? '' : 's'}`
-}
-
-export function modeLabel(mode) {
-  const size = mode.size_range
-    ? `${mode.size_range.min_width}–${mode.size_range.max_width} × ${mode.size_range.min_height}–${mode.size_range.max_height}`
-    : `${mode.width}×${mode.height}`
-  const fps = mode.framerate_den ? mode.framerate_num / mode.framerate_den : 0
-  return `${mode.format || 'Unknown'} · ${size} · ${Number.isInteger(fps) ? fps : fps.toFixed(2)} fps`
-}
-
-export function isExportableMode(camera, mode) {
-  return Boolean(camera?.camera_name && mode?.supported === true && Number.isInteger(mode.width) && Number.isInteger(mode.height))
-}
-
-export function microphoneModeLabel(mode) {
-  const rates = Array.isArray(mode?.rates_hz)
-    ? mode.rates_hz.map((rate) => `${Number((rate / 1000).toFixed(3))} kHz`).join(' · ')
-    : mode?.rate_range_hz
-      ? `${Number((mode.rate_range_hz.min / 1000).toFixed(3))}–${Number((mode.rate_range_hz.max / 1000).toFixed(3))} kHz`
-      : 'Rates unavailable'
-  return [mode?.format || 'Unknown format', `${mode?.channels || '?'} ch`, `${mode?.sample_bits || '?'}-bit`, rates].join(' · ')
-}
-
-export function microphoneAvailability(microphone) {
-  switch (microphone?.availability?.state) {
-    case 'available': return { label: 'Available', tone: 'ok', canTest: true }
-    case 'in_use': return { label: 'In use', tone: 'warn', canTest: false }
-    default: return { label: 'Availability unknown', tone: 'warn', canTest: true }
-  }
-}
-
-export function formatTime(value) {
-  const parsed = Date.parse(value || '')
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : 'Never'
-}
-
-export function catalogIdentity(catalog) {
-  return `${catalog?.instance_id || ''}:${Number.isInteger(catalog?.revision) ? catalog.revision : ''}`
-}
-
-export function createDeviceSelectionPolicy() {
-  let scope = null
-  return {
-    select(currentId, devices, nextScope) {
-      const preserve = scope === nextScope && devices.some((device) => device.id === currentId)
-      scope = nextScope
-      return preserve ? currentId : devices[0]?.id || ''
-    }
-  }
-}
-
-export function canRefreshCatalog(catalog, refreshing = false) {
-  return Boolean(catalog?.instance_id) && !refreshing
-}
-
-export function createEventCursor(catalog) {
-  let current = { sequence: catalog.sequence, instanceId: catalog.instance_id }
-  return {
-    current: () => current,
-    observe(response) {
-      const changed = response.resync_required || response.shutting_down || response.instance_id !== current.instanceId || response.events.length > 0
-      if (!changed) current = { sequence: response.sequence, instanceId: response.instance_id }
-      return changed
-    },
-    synchronize(nextCatalog) {
-      current = { sequence: nextCatalog.sequence, instanceId: nextCatalog.instance_id }
-    }
-  }
-}
-
-function catalogOrder(catalog) {
-  return [catalog?.scan_sequence || 0, catalog?.revision || 0, catalog?.sequence || 0]
-}
-
-function compareOrder(left, right) {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return left[index] - right[index]
-  }
-  return 0
-}
-
-export function createCatalogPolicy() {
-  let current = null
-  let requestSequence = 0
-  let acceptedRequest = 0
-  const retiredInstances = new Set()
-  return {
-    begin() {
-      requestSequence += 1
-      return requestSequence
-    },
-    merge(next, request = ++requestSequence) {
-      if (!next) return current
-      if (!current || next.board_generation > current.board_generation) {
-        current = next
-        acceptedRequest = request
-        retiredInstances.clear()
-        return current
+    const promise = request.then(
+      (data) => {
+        if (seq !== latest) return newest
+        onBoard(data)
+        onLoading(false)
+        return data
+      },
+      (err) => {
+        if (seq !== latest) return newest
+        onError(err)
+        onLoading(false)
+        return null
       }
-      if (next.board_generation < current.board_generation) return current
-      if (next.instance_id !== current.instance_id) {
-        if (retiredInstances.has(next.instance_id) || request < acceptedRequest) return current
-        retiredInstances.add(current.instance_id)
-        current = next
-        acceptedRequest = request
-        return current
-      }
-      acceptedRequest = Math.max(acceptedRequest, request)
-      if (compareOrder(catalogOrder(next), catalogOrder(current)) >= 0) current = next
-      return current
+    )
+    newest = promise
+    return promise
+  }
+
+  function apply(data) {
+    latest += 1
+    newest = Promise.resolve(data)
+    onBoard(data)
+    onLoading(false)
+    return data
+  }
+
+  return { load, apply }
+}
+
+// When a disclosure collapses, the control that had focus is removed, and focus would fall to the
+// page body. request() is called when it collapses; flush() runs after the next render, so the
+// candidates (usually refs) are read once the opener is back on the page. The first candidate
+// still rendered and enabled gets focus. flush() does nothing without a pending request: it runs
+// after every render, including each keystroke in a form.
+export function createFocusReturn() {
+  let pending = null
+  return {
+    request(candidates) {
+      pending = candidates
     },
-    reset() {
-      current = null
-      acceptedRequest = 0
-      retiredInstances.clear()
+    flush() {
+      if (!pending) return null
+      const candidates = pending
+      pending = null
+      const target = candidates().find((el) => el && el.isConnected !== false && !el.disabled) || null
+      target?.focus()
+      return target
     }
   }
 }

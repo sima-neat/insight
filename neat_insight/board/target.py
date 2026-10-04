@@ -25,8 +25,8 @@ def _warn_once(message: str) -> None:
 
 @dataclass(frozen=True)
 class BoardTarget:
-    mode: str
-    source: str
+    mode: str  # "local" or "ssh"
+    source: str  # "manual", "on-board", or "sdk-env"
     host: Optional[str] = None
     port: Optional[int] = None
     user: Optional[str] = None
@@ -47,8 +47,13 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
     user = str(user or DEFAULT_SSH_USER).strip()
     if not _HOST_RE.match(host):
         raise BoardError("invalid_request", "Enter the board's IP address or host name.", hint="For example 192.168.2.2")
+    if port is None or port == "":
+        port = DEFAULT_SSH_PORT
+    elif isinstance(port, bool) or (isinstance(port, float) and not port.is_integer()):
+        # int() would turn true into port 1 and 22.9 into 22.
+        port = 0
     try:
-        port = int(port if port not in (None, "") else DEFAULT_SSH_PORT)
+        port = int(port)
     except (TypeError, ValueError):
         port = 0
     if not 1 <= port <= 65535:
@@ -59,6 +64,7 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
 
 
 def sdk_env_target() -> Optional[dict]:
+    """The DevKit paired through `sima-cli sdk setup` / devkit.sh, exported as DEVKIT_SYNC_* variables."""
     try:
         host = get_devkit_sync_devkit_ip()
     except RuntimeError as exc:
@@ -89,6 +95,8 @@ def resolve_target(saved: Optional[dict], on_board: bool, sdk_env: Optional[dict
 
 
 class TargetStore:
+    """Persists the manually selected board. Holds no credentials; SSH keys authenticate."""
+
     def __init__(self, path: Path):
         self.path = Path(path)
 

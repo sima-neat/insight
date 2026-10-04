@@ -6,12 +6,13 @@ _HTTP_STATUS = {
     "no_target": 409,
     "host_key_changed": 409,
     "stale_snapshot": 409,
+    "camera_in_use": 409,
     "microphone_in_use": 409,
     "test_running": 409,
-    "test_not_recording": 409,
     "unreachable": 502,
     "auth_failed": 502,
     "tool_missing": 502,
+    "permission_denied": 502,
     "command_failed": 502,
     "peripheral_response": 502,
     "peripheral_version": 502,
@@ -24,6 +25,8 @@ _HTTP_STATUS = {
 
 
 class BoardError(Exception):
+    """A board-access failure with a stable code and a recovery hint for the UI."""
+
     def __init__(self, code: str, message: str, hint: Optional[str] = None, **extra):
         super().__init__(message)
         self.code = code

@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "build:viewer": "vite build --config viewer.vite.config.js",
-    "test:peripherals": "node --test src/peripherals/*.test.js",
     "test:viewer": "node --test src/viewer/*.test.js",
+    "test:peripherals": "node --test src/peripherals/*.test.js",
     "test:streaming": "node --test src/streaming/*.test.js",
     "preview": "vite preview"
   },

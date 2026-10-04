@@ -7,12 +7,12 @@ board_bp = Blueprint("board", __name__)
 
 
 @board_bp.app_errorhandler(BoardError)
-def board_error(exc: BoardError):
+def _board_error(exc: BoardError):
     return jsonify(exc.to_dict()), exc.status
 
 
 @board_bp.after_request
-def no_store(response):
+def _no_store(response):
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -22,15 +22,17 @@ def _json_body() -> dict:
     return body if isinstance(body, dict) else {}
 
 
+# API: report the selected board without connecting to it.
 @board_bp.get("/api/board")
 def board_state():
-    """Return the selected board and the last connection status."""
+    """Return the selected board target, where it came from, the defaults, and the last connection status."""
     return get_board_manager().state()
 
 
+# API: select a board by SSH address, or clear the selection to fall back to the default.
 @board_bp.post("/api/board/select")
 def select_board():
-    """Save a manual SSH target, or clear it to use the environment default."""
+    """Accept JSON {host, port, user} to save a manual target, or {reset: true} to clear it."""
     body = _json_body()
     if "reset" in body and not isinstance(body["reset"], bool):
         raise BoardError("invalid_request", "`reset` must be a boolean.")
@@ -42,17 +44,19 @@ def select_board():
     return manager.state()
 
 
+# API: connect to the selected board and read its identity.
 @board_bp.post("/api/board/test")
 def test_board():
-    """Connect to the selected board and read its identity."""
+    """Connect to the selected board, read its host name and build, and return the updated board state."""
     manager = get_board_manager()
-    manager.session().identity()
+    manager.test()
     return manager.state()
 
 
+# API: trust the host key a reflashed board now presents.
 @board_bp.post("/api/board/trust-host-key")
 def trust_board_host_key():
-    """Trust the exact SSH host key presented by a reflashed board."""
+    """Accept JSON {fingerprint}; replace the stored host key when it matches the key the board presented."""
     body = _json_body()
     manager = get_board_manager()
     manager.trust_host_key(str(body.get("fingerprint") or ""))
