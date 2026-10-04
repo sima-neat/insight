@@ -110,6 +110,25 @@ class PeripheralClientTests(unittest.TestCase):
                     PeripheralClient(FakeSession()).catalog()
                 self.assertEqual(ctx.exception.code, "peripheral_response")
 
+    def test_malformed_frame_intervals_are_rejected_before_the_snapshot_reads_them(self):
+        def with_intervals(value):
+            response = camera_catalog()
+            response["devices"][0]["camera"]["modes"][0]["frame_intervals"] = value
+            return response
+
+        interval = {"numerator": 1, "denominator": 30, "type": "discrete"}
+        for value in ([None], 5, {}, [{"width": 1920, "height": 1080, "intervals": 5}],
+                      [{"width": 1920, "height": 1080, "intervals": [None]}], [{"width": 1920, "height": 1080}]):
+            with self.subTest(frame_intervals=value), mock.patch.object(
+                socket_client, "request", return_value=(200, json.dumps(with_intervals(value)))
+            ):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).catalog()
+                self.assertEqual(ctx.exception.code, "peripheral_response")
+        valid = with_intervals([{"width": 1920, "height": 1080, "intervals": [interval]}])
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
+            self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
+
     def test_catalog_rejects_duplicate_identities_and_malformed_provider_issues(self):
         duplicate = camera_catalog()
         duplicate["devices"].append(dict(duplicate["devices"][0]))

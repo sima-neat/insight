@@ -253,6 +253,18 @@ class PeripheralClient:
                 raise self._response_error(
                     "A camera mode must contain exactly one discrete size or size range.", mode
                 )
+            if "frame_intervals" in mode and not self._valid_frame_intervals(mode["frame_intervals"]):
+                raise self._response_error("SiMa Sentinel returned malformed frame intervals.", mode)
+
+    @staticmethod
+    def _valid_frame_intervals(value) -> bool:
+        """Each entry is one probed size with the list of intervals the device advertises for it."""
+        return isinstance(value, list) and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("intervals"), list)
+            and all(isinstance(interval, dict) for interval in entry["intervals"])
+            for entry in value
+        )
 
     @staticmethod
     def _valid_size_range(value) -> bool:
