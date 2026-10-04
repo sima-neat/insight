@@ -59,7 +59,7 @@ const EXPORTS = {
   usb: [['yaml', 'YAML descriptor'], ['json', 'JSON descriptor']]
 }
 
-function CopyConfig({ camera, selection }) {
+function CopyConfig({ camera, selection, generation }) {
   const choices = EXPORTS[camera.connection] || EXPORTS.mipi
   const [wanted, setWanted] = useState('')
   const [state, setState] = useState('idle')
@@ -71,7 +71,7 @@ function CopyConfig({ camera, selection }) {
   const blocked = camera.connection !== 'usb' && rate?.tier !== 'verified'
     ? rate.reason || camera.formats.find((format) => format.format === selection.format)?.support?.reason || 'This mode cannot be used.'
     : ''
-  const mode = `${camera.id}|${modeLabel(selection)}`
+  const mode = `${generation}|${camera.id}|${modeLabel(selection)}`
 
   useEffect(() => {
     requestId.current += 1
@@ -91,7 +91,7 @@ function CopyConfig({ camera, selection }) {
     setError(null)
     const { format, width, height, fps } = selection
     const content = requestJson('/api/peripherals/cameras/export', {
-      method: 'POST', body: { id: camera.id, format, width, height, fps }
+      method: 'POST', body: { generation, id: camera.id, format, width, height, fps }
     }).then((data) => {
       if (current !== requestId.current) throw new Error('The selection changed; nothing was copied.')
       const item = (data.exports || []).find((entry) => entry.id === id)
@@ -182,7 +182,7 @@ function ModePicker({ camera, selection, notice, onChange, children }) {
   )
 }
 
-export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
+export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange, generation }) {
   const availability = availabilityInfo(camera.availability)
   const tier = tierInfo(camera.support?.tier)
   const summary = cameraSummaryLine(camera)
@@ -230,7 +230,7 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
       </details>
 
       <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange}>
-        {selection && <CopyConfig camera={camera} selection={selection} />}
+        {selection && <CopyConfig camera={camera} selection={selection} generation={generation} />}
       </ModePicker>
     </section>
   )

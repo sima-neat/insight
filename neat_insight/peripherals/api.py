@@ -91,6 +91,12 @@ def export_camera():
     """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
     selection = export.parse_request(request.get_json(silent=True))
     session = get_board_manager().session()
+    if selection["generation"] != session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The camera selection belongs to an earlier board scan.",
+            hint="Click Refresh, then export again.",
+        )
     snapshot = scans.snapshot(session.generation)
     if snapshot is None:
         raise BoardError(

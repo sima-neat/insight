@@ -319,6 +319,7 @@ export default function PeripheralsView({
         {camera ? (
           <CameraDetail
             camera={camera}
+            generation={snapshot.generation}
             selection={selection}
             selectionNotice={selectionNotice}
             onSelectionChange={changeSelection}

@@ -118,9 +118,11 @@ def user_checker(method, tools):
 
         def check(nodes):
             code, out, err = run([tools["sudo"], "-n", tools["fuser"]] + sorted(nodes))
-            if code is None or "sudo:" in err:
-                return None
-            return _users(parse_fuser_pids(out))
+            if code == 0:
+                return _users(parse_fuser_pids(out))
+            # fuser exits 1 when no process uses a file, but also for fatal errors. Only an
+            # otherwise empty exit proves that the nodes were successfully checked and idle.
+            return [] if code == 1 and not out.strip() and not err.strip() else None
 
         return check
     return lambda nodes: None

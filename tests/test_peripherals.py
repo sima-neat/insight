@@ -204,6 +204,20 @@ class BoardCheckTests(unittest.TestCase):
         self.assertNotIn("libcamerasrc", result)
         self.assertEqual(result["tools"], {"media-ctl": True, "fuser": True})
 
+    def test_sudo_fuser_distinguishes_idle_from_a_fatal_error(self):
+        tools = {"media-ctl": None, "fuser": "/bin/fuser", "sudo": "/usr/bin/sudo"}
+        for fuser_result, expected in (((1, "", ""), []), ((1, "", "No such file or directory"), None)):
+            def run(argv, timeout=10):
+                return (0, "", "") if argv[1:] == ["-n", "true"] else fuser_result
+
+            with self.subTest(fuser_result=fuser_result), \
+                 mock.patch.object(board_check, "which", side_effect=tools.get), \
+                 mock.patch.object(board_check, "run", side_effect=run), \
+                 mock.patch.object(board_check.os, "geteuid", return_value=1000):
+                result = board_check.collect({"cameras": {C920: ["/dev/video97"]}})
+            self.assertEqual(result["availability_method"], "sudo-fuser")
+            self.assertEqual(result["users"], {C920: expected})
+
     def test_a_media_graph_that_cannot_be_read_leaves_an_idle_camera_unknown(self):
         """Without the graph, a process holding only /dev/videoN would be missed, so idle is not proof of available."""
         for media_ctl, run_media_ctl in ((None, None), ("/usr/bin/media-ctl", (1, "", "No such device"))):
@@ -489,7 +503,15 @@ class PeripheralsApiTests(unittest.TestCase):
         return self.client.post("/api/peripherals/refresh")
 
     def export(self, **body):
-        body = {"id": IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30, **body}
+        body = {
+            "generation": self.manager.current.generation,
+            "id": IMX477,
+            "format": "NV12",
+            "width": 1920,
+            "height": 1080,
+            "fps": 30,
+            **body,
+        }
         return self.client.post("/api/peripherals/cameras/export", json=body)
 
     def test_scan_responses_are_not_cached(self):
@@ -708,6 +730,9 @@ class PeripheralsApiTests(unittest.TestCase):
         self.use()
         self.refresh()
         cases = (
+            ({"generation": None}, 400),
+            ({"generation": True}, 400),
+            ({"generation": 1.5}, 400),
             ({"fps": None}, 400),
             ({"width": True}, 400),
             ({"format": "AR24"}, 400),
@@ -720,6 +745,7 @@ class PeripheralsApiTests(unittest.TestCase):
                 response = self.export(**body)
                 self.assertEqual(response.status_code, status)
                 self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
+        self.assertEqual(self.export(generation=1.0).status_code, 200)
 
     def test_export_is_stale_after_the_board_changes(self):
         self.use()
@@ -729,6 +755,14 @@ class PeripheralsApiTests(unittest.TestCase):
         response = self.export()
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertEqual(self.client.get("/api/peripherals").get_json()["scanned_at"], None)
+
+    def test_export_rejects_an_old_tab_after_the_new_board_is_scanned(self):
+        self.use()
+        old_generation = self.refresh().get_json()["generation"]
+        self.use(generation=2)
+        self.refresh()
+        response = self.export(generation=old_generation)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
 
     def test_export_is_refused_when_the_board_changes_before_it_returns(self):
         self.use()

@@ -856,9 +856,9 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the last scan without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core's rules reject returns `400` with Sentinel's reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "description": "Renders one mode from the identified snapshot generation without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core's rules reject returns `400` with Sentinel's reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
         "operationId": "exportCameraInput",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
           "200": {"description": "Rendered configurations with the mode's support tier and warnings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExport"}}}},
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -1435,8 +1435,9 @@
       },
       "CameraExportRequest": {
         "type": "object",
-        "required": ["id", "format", "width", "height", "fps"],
+        "required": ["generation", "id", "format", "width", "height", "fps"],
         "properties": {
+          "generation": {"type": "integer", "minimum": 1, "description": "Generation from the `PeripheralsSnapshot` that supplied the camera and mode."},
           "id": {"type": "string"},
           "format": {"type": "string", "example": "NV12"},
           "width": {"type": "integer"},
