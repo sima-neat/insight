@@ -62,7 +62,9 @@ def _run_check(session, payload: dict):
 def get_peripherals():
     """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
     session = get_board_manager().session()
-    return scans.snapshot(session.generation) or empty_snapshot(board_summary(session), session.generation)
+    snapshot = scans.snapshot(session.generation) or empty_snapshot(board_summary(session), session.generation)
+    session.require_current()
+    return snapshot
 
 
 # API: rescan the selected board for cameras and microphones.
