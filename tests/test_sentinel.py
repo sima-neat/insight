@@ -138,10 +138,17 @@ class FakeSession:
         self.fingerprint = fingerprint
         self.target = SimpleNamespace(mode=mode, source="manual", label="sima@192.168.2.2")
         self.identity_calls = 0
+        self.current_checks = 0
+        self.current_error = None
 
     def identity(self):
         self.identity_calls += 1
         return {"hostname": "modalix", "machine": "modalix", "build_version": "2.1.3", "fingerprint": self.fingerprint}
+
+    def require_current(self):
+        self.current_checks += 1
+        if self.current_error:
+            raise self.current_error
 
 
 class FakeManager:
@@ -247,12 +254,22 @@ class SocketClientTests(unittest.TestCase):
 
     def test_an_on_board_client_reads_the_socket_without_the_transport(self):
         transport = FakeSentinel()
-        client = SentinelClient(FakeSession(transport, mode="local"), socket_path=self.path)
+        session = FakeSession(transport, mode="local")
+        client = SentinelClient(session, socket_path=self.path)
         self.assertEqual(client.health(), HEALTH)
         self.assertEqual(transport.calls, [])
         with self.assertRaises(SentinelError) as raised:
             client.run("nope")
         self.assertEqual((raised.exception.code, raised.exception.status), ("not_found", 404))
+        self.assertEqual(session.current_checks, 2)
+
+    def test_an_on_board_response_is_refused_when_the_selected_board_changed(self):
+        session = FakeSession(FakeSentinel(), mode="local")
+        session.current_error = BoardError("stale_snapshot", "the selected board changed")
+        client = SentinelClient(session, socket_path=self.path)
+        with self.assertRaises(BoardError) as raised:
+            client.health()
+        self.assertEqual(raised.exception.code, "stale_snapshot")
 
     def test_a_missing_socket_is_classified_and_main_reports_it_instead_of_a_traceback(self):
         with self.assertRaises(OSError) as raised:

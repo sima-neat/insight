@@ -244,6 +244,7 @@ class SentinelClient(SentinelSocket):
         """Make one request from the board and return the body of a successful, schema-1 response,
         or raise the failure it describes."""
         status, text = self.request(method, path, body, TIMEOUT_SEC)
+        self.session.require_current()
         try:
             parsed = json.loads(text) if text else None
         except ValueError:
