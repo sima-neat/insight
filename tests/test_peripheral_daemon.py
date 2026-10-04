@@ -1,3 +1,4 @@
+import copy
 import errno
 import json
 import os
@@ -128,6 +129,42 @@ class PeripheralClientTests(unittest.TestCase):
         valid = with_intervals([{"width": 1920, "height": 1080, "intervals": [interval]}])
         with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
             self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
+
+    def test_non_object_fields_the_snapshot_reads_are_rejected(self):
+        usb = {"id": "camera:v4l2:1", "type": "camera", "provider": "daemon.camera.v4l2", "camera": {
+            "backend": "v4l2", "connection": "usb", "device_path": "/dev/video0", "modes": [],
+            "identity": {"vendor_id": "046d", "speed": "480"},
+        }}
+
+        def mipi(**fields):
+            response = camera_catalog()
+            response["devices"][0]["camera"].update(modes=[], **fields)
+            return response
+
+        def usb_camera(**fields):
+            device = copy.deepcopy(usb)
+            device["camera"].update(fields)
+            return catalog(devices=[device])
+
+        malformed = {
+            "USB identity": usb_camera(identity="bad"),
+            "USB identity list": usb_camera(identity=["046d"]),
+            "MIPI isp": mipi(isp="unavailable"),
+            "availability": mipi(availability=["unknown"]),
+            "support rules": camera_catalog(support="applied"),
+            "support rules state": camera_catalog(support={"state": ["applied"]}),
+        }
+        for name, response in malformed.items():
+            with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).catalog()
+                self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
+        for response in (usb_camera(), usb_camera(identity=None), mipi(isp={"state": "unavailable", "reason": "x"}),
+                         mipi(availability=None), camera_catalog(support={"state": "applied"})):
+            with self.subTest(valid=response), mock.patch.object(
+                socket_client, "request", return_value=(200, json.dumps(response))
+            ):
+                self.assertEqual(PeripheralClient(FakeSession()).catalog(), response)
 
     def test_catalog_rejects_duplicate_identities_and_malformed_provider_issues(self):
         duplicate = camera_catalog()
