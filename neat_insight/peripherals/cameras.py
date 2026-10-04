@@ -110,6 +110,12 @@ def _fps(num: int, den: int):
     return int(value) if value.denominator == 1 else round(float(value), 3)
 
 
+def _choice(rate: Fraction, **verdict) -> dict:
+    """One frame-rate choice: a display value plus the exact rate the export requests."""
+    return {"value": _fps(rate.numerator, rate.denominator), "framerate_num": rate.numerator,
+            "framerate_den": rate.denominator, **verdict}
+
+
 def empty_snapshot(board: dict, generation: int) -> dict:
     return {
         "board": board,
@@ -311,14 +317,14 @@ def _interval_rates(entry: dict) -> list:
         if interval.get("type") == "discrete":
             num, den = interval.get("numerator"), interval.get("denominator")
             if isinstance(num, int) and isinstance(den, int) and num > 0 and den > 0:
-                rates.append(_fps(den, num))
+                rates.append(Fraction(den, num))
             continue
         low, high = interval.get("maximum") or {}, interval.get("minimum") or {}
         try:
             slowest, fastest = low["denominator"] / low["numerator"], high["denominator"] / high["numerator"]
         except (KeyError, TypeError, ZeroDivisionError):
             continue
-        rates += [fps for fps in STANDARD_FPS if slowest - 1e-3 <= fps <= fastest + 1e-3]
+        rates += [Fraction(fps) for fps in STANDARD_FPS if slowest - 1e-3 <= fps <= fastest + 1e-3]
     return rates
 
 
@@ -327,18 +333,19 @@ def _choices(modes: list) -> list:
     rates the device advertises have none, so they share an unsupported verdict and are unknown otherwise."""
     choices = {}
     for mode in modes:
-        value = _fps(mode["framerate_num"], mode["framerate_den"])
+        rate = Fraction(mode["framerate_num"], mode["framerate_den"])
+        value = _fps(rate.numerator, rate.denominator)
         if mode["supported"]:
-            choices[value] = {"value": value, "tier": "verified"}
+            choices[value] = _choice(rate, tier="verified")
         elif choices.get(value, {}).get("tier") != "verified":
-            choices[value] = {"value": value, "tier": "unsupported", "reason": mode["reason"] or _common_reason(modes)}
+            choices[value] = _choice(rate, tier="unsupported", reason=mode["reason"] or _common_reason(modes))
     supported = any(mode["supported"] for mode in modes)
     extra = {"tier": ""} if supported else {"tier": "unsupported", "reason": _common_reason(modes)}
     for mode in modes:
         for entry in mode.get("frame_intervals") or []:
             if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height")):
-                for value in _interval_rates(entry):
-                    choices.setdefault(value, {"value": value, **extra})
+                for rate in _interval_rates(entry):
+                    choices.setdefault(_fps(rate.numerator, rate.denominator), _choice(rate, **extra))
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 

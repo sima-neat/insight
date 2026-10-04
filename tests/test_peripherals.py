@@ -241,7 +241,7 @@ class SnapshotTests(unittest.TestCase):
         nv12 = fmt_of(camera, "NV12")
         self.assertEqual((nv12["label"], nv12["exportable"], nv12["support"]["tier"]), ("NV12 (YUV 4:2:0)", True, "verified"))
         self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
-        self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "tier": "verified"}])
+        self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"}])
         rgb = fmt_of(camera, "RGB3")
         self.assertEqual((rgb["exportable"], rgb["support"]["tier"], rgb["support"]["reason"]), (False, "unsupported", FORMAT_REASON))
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
@@ -256,8 +256,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["device"]["csi"], "csi2@1")
         fps = size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]
         self.assertEqual([c["value"] for c in fps], [66, 60, 30, 25, 20, 15, 10, 5])
-        self.assertEqual([c for c in fps if c["tier"] == "verified"], [{"value": 30, "tier": "verified"}])
-        self.assertEqual(fps[0], {"value": 66, "tier": "unsupported", "reason": FRAMERATE_REASON})
+        self.assertEqual([c for c in fps if c["tier"] == "verified"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"}])
+        self.assertEqual(fps[0], {"value": 66, "framerate_num": 66, "framerate_den": 1, "tier": "unsupported", "reason": FRAMERATE_REASON})
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(camera["notes"], [
             "The sensor reports 66.18 fps for its fastest mode. The delivered frame rate follows the sensor mode "
@@ -340,8 +340,8 @@ class SnapshotTests(unittest.TestCase):
         ]
         camera = item(snapshot_of(catalog(doc)), IMX477)
         self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"], [
-            {"value": 60, "tier": "unsupported", "reason": "CameraInput accepts 30 fps only."},
-            {"value": 30, "tier": "verified"},
+            {"value": 60, "framerate_num": 60, "framerate_den": 1, "tier": "unsupported", "reason": "CameraInput accepts 30 fps only."},
+            {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"},
         ])
         self.assertEqual(camera["notes"], [
             "Only sizes the ISP can output (1920x1080) are offered; libcamera also advertises sizes the ISP "
@@ -587,6 +587,20 @@ class PeripheralsApiTests(unittest.TestCase):
         body = self.export(width=2048).get_json()
         self.assertEqual(body["support"], {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []})
         self.assertEqual(body["warnings"], [NO_BUFFER_COUNT])
+
+    def test_export_keeps_a_fractional_catalog_rate_exact(self):
+        mipi = imx477()
+        for mode in mipi["camera"]["modes"]:
+            mode.update(framerate_num=30000, framerate_den=1001)
+        usb = c920()
+        usb["camera"]["modes"] = [usb_mode("YUYV", 640, 480, [(1001, 30000), (1, 15)])]
+        self.use(catalog(mipi, usb))
+        self.refresh()
+        descriptor = json.loads(self.export(fps=29.97).get_json()["exports"][2]["content"])
+        self.assertEqual((descriptor["options"]["framerate_num"], descriptor["options"]["framerate_den"]), (30000, 1001))
+        body = self.export(id=C920, format="YUYV", width=640, height=480, fps=29.97).get_json()
+        descriptor = json.loads(body["exports"][1]["content"])
+        self.assertEqual((descriptor["framerate_num"], descriptor["framerate_den"]), (30000, 1001))
 
     def test_export_escapes_device_strings(self):
         doc = imx477()
