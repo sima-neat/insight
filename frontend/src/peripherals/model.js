@@ -579,7 +579,7 @@ const PREVIEW_ERROR_ACTIONS = {
   camera_in_use: 'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
   preview_active: 'Stop the preview that is already running, then start this one.',
   no_channel: 'Every published viewer channel is taken. Stop a stream on the Streaming page, then start the preview again.',
-  invalid_request: 'Choose a mode Insight lists as verified or advertised; this one was rejected by the board.',
+  invalid_request: 'Choose a mode Insight lists as verified; this one was rejected by the board.',
   command_failed: 'The capture worker could not start on the board. The board output below says why.',
   stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.',
   no_video: 'The board captured, but its video never reached Insight. The UDP port Insight listens on has to be reachable from the board; a host firewall is the usual reason it is not.',
@@ -648,7 +648,7 @@ export function previewBlock({ camera, selection, stale = false, session = null,
   }
   if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
   if (selectionTier(camera, selection) !== 'verified') {
-    return { blocked: true, reason: `${modeLabel(selection)} is not validated on this board. Choose a verified or advertised mode.` }
+    return { blocked: true, reason: `${modeLabel(selection)} is not validated on this board. Choose a verified mode.` }
   }
   if (camera.availability?.state === 'in_use') {
     return { blocked: true, reason: `${availabilityInfo(camera.availability).label}. Stop that process on the board, then refresh.` }

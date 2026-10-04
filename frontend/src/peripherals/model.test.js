@@ -654,7 +654,8 @@ test('Start preview is blocked with the reason for every state that forbids it',
     const unjudged = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [size(1920, 1080, [30, tier])])] }
     const block = previewBlock({ camera: unjudged, selection: mipiMode, target: boardTarget })
     assert.equal(block.blocked, true, `tier ${JSON.stringify(tier)}`)
-    assert.match(block.reason, /is not validated on this board/)
+    // Only a verified mode can start, so the reason never sends the user to an advertised one.
+    assert.match(block.reason, /is not validated on this board\. Choose a verified mode\.$/)
   }
 
   assert.match(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }).reason, /In use by gst-launch-1\.0 \(pid 812\)/)
@@ -783,7 +784,7 @@ test('every preview failure carries a recovery action and nothing destructive', 
   // The two failures that come from the network between the board and Insight must say so.
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_video' }, 502))).action, /firewall/)
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'viewer_unavailable' }, 502))).action, /video viewer/)
-  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /verified or advertised/)
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /^Choose a mode Insight lists as verified; /)
 
   const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
   assert.equal(failed.detail, 'gst: no element')
