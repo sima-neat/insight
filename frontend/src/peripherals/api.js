@@ -42,3 +42,15 @@ export function downloadText(filename, content) {
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+export function startMicrophoneTest(id) {
+  return requestJson('/api/peripherals/microphones/test', { method: 'POST', body: { id } })
+}
+
+export function stopMicrophoneTest() {
+  return requestJson('/api/peripherals/microphones/test/stop', { method: 'POST' })
+}
+
+export function getMicrophoneTest() {
+  return requestJson('/api/peripherals/microphones/test')
+}

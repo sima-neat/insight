@@ -138,12 +138,16 @@ def cameras_of(catalog: dict) -> list:
 
 def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation: int, previous: Optional[dict], scan_ms: int):
     """Return the snapshot; `check` is the board_check output, or None when it could not run."""
+    # microphones.py reuses this module's availability rule, so it is imported here, not at the top.
+    from neat_insight.peripherals.microphones import microphone_items
+
     retained = {issue["provider"] for issue in catalog.get("issues", []) if issue["retained_last_good"]}
     platform = {
         "tools": (check or {}).get("tools") or {},
         "availability_method": (check or {}).get("availability_method") or "none",
     }
-    items = [_item(device, check, device["provider"] in retained) for device in cameras_of(catalog)]
+    cameras = [_item(device, check, device["provider"] in retained) for device in cameras_of(catalog)]
+    items = cameras + microphone_items(catalog, check, cameras, retained)
     return {
         "board": board,
         "generation": generation,
@@ -151,7 +155,7 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _issues(catalog, check, items),
+        "issues": _issues(catalog, check, cameras),
         "changes": _changes(previous["items"], items) if previous else None,
     }
 
@@ -462,6 +466,12 @@ class ScanCache:
             entry = self._entry
         return entry["snapshot"] if entry and entry["generation"] == generation else None
 
+    def catalog_version(self, generation: int) -> Optional[dict]:
+        """The `instance_id` and `revision` of the Sentinel catalog the last scan of this board showed."""
+        with self._lock:
+            entry = self._entry
+        return entry["catalog"] if entry and entry["generation"] == generation else None
+
     def completed_since(self, generation: int, since: float) -> Optional[dict]:
         """The snapshot of a refresh that finished after `since` (monotonic), i.e. one that was in flight."""
         with self._lock:
@@ -482,6 +492,7 @@ class ScanCache:
                     "generation": generation,
                     "fingerprint": board.get("fingerprint"),
                     "snapshot": snapshot,
+                    "catalog": {"instance_id": catalog["instance_id"], "revision": catalog["revision"]},
                     "completed": time.monotonic(),
                 }
             self._refresh_locks = {g: lock for g, lock in self._refresh_locks.items() if g >= generation}

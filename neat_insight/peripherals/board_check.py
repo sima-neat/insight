@@ -1,10 +1,11 @@
-"""Read-only camera check, executed on the board as ``python3 - REQUEST``.
+"""Read-only peripheral check, executed on the board as ``python3 - REQUEST``.
 
-Stdlib only and Python 3.8 compatible. SiMa Sentinel discovers the cameras; this
-adds what Sentinel does not report and the Peripherals page shows: which
-processes hold each camera's device nodes. It never opens a camera. REQUEST is
-JSON ``{"cameras": {id: [device nodes]}}``; a media device brings every node of
-its media graph. It prints one JSON document.
+Stdlib only and Python 3.8 compatible. SiMa Sentinel discovers the cameras and
+microphones; this adds what Sentinel does not report and the Peripherals page
+shows: which processes hold each device's nodes, and which sound servers run. It
+never opens a camera or a sound device. REQUEST is JSON
+``{"cameras": {id: [device nodes]}, "microphones": {id: [capture PCM node]}}``; a
+media device brings every node of its media graph. It prints one JSON document.
 """
 import json
 import os
@@ -21,6 +22,8 @@ SEARCH_PATH = os.pathsep.join(
 )
 COMMAND_ENV = dict(os.environ, PATH=SEARCH_PATH, LC_ALL="C")
 _MEDIA_RE = re.compile(r"/dev/media[0-9]+")
+# Process names (/proc/<pid>/comm) of sound servers that usually own the capture devices.
+SOUND_SERVERS = ("pulseaudio", "pipewire", "pipewire-pulse")
 
 
 def which(name):
@@ -126,6 +129,11 @@ def user_checker(method, tools):
     return lambda nodes: None
 
 
+def sound_servers():
+    pids = [pid for pid in (os.listdir(PROC_ROOT) if os.path.isdir(PROC_ROOT) else ()) if pid.isdigit()]
+    return sorted({name for name in (_read(os.path.join(PROC_ROOT, pid, "comm")) for pid in pids) if name in SOUND_SERVERS})
+
+
 def camera_nodes(nodes, tools, failures):
     """The camera's nodes plus its media graphs' nodes, and whether every graph could be read."""
     found = set(nodes)
@@ -150,21 +158,25 @@ def collect(request):
     method = availability_method(tools)
     check_users = user_checker(method, tools)
     users = {}
-    for camera_id, nodes in (request.get("cameras") or {}).items():
+    devices = dict(request.get("cameras") or {}, **(request.get("microphones") or {}))
+    for device_id, nodes in devices.items():
         if not nodes:
-            users[camera_id] = None
+            users[device_id] = None
             continue
         found, complete = camera_nodes(nodes, tools, failures)
         held = check_users(found)
         # Nobody holding the nodes that could be read proves nothing when the graph's video and
         # subdevice nodes could not be listed: report the camera as unchecked, not free.
-        users[camera_id] = held if held or complete else None
-    return {
+        users[device_id] = held if held or complete else None
+    result = {
         "tools": {name: bool(path) for name, path in tools.items() if name != "sudo"},
         "availability_method": method,
         "users": users,
         "failures": failures,
     }
+    if "microphones" in request:
+        result["sound_servers"] = sound_servers()
+    return result
 
 
 if __name__ == "__main__":

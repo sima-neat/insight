@@ -1,9 +1,12 @@
 import ast
 import copy
 import json
+import math
+import struct
 import subprocess
 import sys
 import threading
+import time
 import unittest
 import unittest.mock as mock
 from pathlib import Path
@@ -12,7 +15,8 @@ from types import SimpleNamespace
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult, board_bp
-from neat_insight.peripherals import api, board_check, cameras, export
+from neat_insight.board.transport import CommandCancelled, MAX_OUTPUT_BYTES
+from neat_insight.peripherals import api, board_check, cameras, export, microphones, mictest
 from neat_insight.peripherals.api import peripherals_bp
 
 IMX477 = "camera:imx477 5-001a"
@@ -105,6 +109,76 @@ def c920():
             ],
         },
     }
+
+
+YETI = "microphone:alsa:3ff3d77bf791d455"
+C920_MIC = "microphone:alsa:52b0c1e4a77f9d03"
+MONO_MIC = "microphone:alsa:0c41d6f2e8b3a915"
+ONBOARD_MIC = "microphone:alsa:7d2e9a40b6c1f358"
+MIC_PROVIDER = "daemon.audio.alsa"
+
+
+def microphone(device_id, name, card_id, card_index, modes, usb=None, free=(1, 1), issues=None, **identity):
+    """A Sentinel `daemon.audio.alsa` record, in the shape the retired Core daemon's ALSA provider emitted."""
+    record = {
+        "name": name, "backend": "alsa", "connection": "usb" if usb else "platform",
+        "capture_target": {"card_id": card_id, "device": 0, "selector": f"plughw:CARD={card_id},DEV=0"},
+        "identity": {
+            "stable_key": f"sysfs:devices/platform/{device_id}:pcm0c", "card_index": card_index, "card_id": card_id,
+            "card_name": name, "card_driver": "USB-Audio" if usb else "simaai-codec",
+            "pcm_node": f"/dev/snd/pcmC{card_index}D0c", **identity,
+        },
+        "modes": modes,
+        "availability": {"state": "available" if free[1] else "in_use", "subdevices": free[0], "subdevices_available": free[1]}
+        if free else {"state": "unknown"},
+    }
+    if usb:
+        record["identity"]["usb"] = usb
+    if issues:
+        record["issues"] = issues
+    return {"id": device_id, "type": "microphone", "provider": MIC_PROVIDER, "microphone": record}
+
+
+def yeti(**extra):
+    """Blue Yeti Nano, stereo 24-bit (the specimen the approved UI was recorded with)."""
+    return microphone(
+        YETI, "Yeti Nano", "Nano", 2,
+        [{"interface": 1, "altset": 1, "format": "S24_3LE", "channels": 2, "sample_bits": 24,
+          "rates_hz": [32000, 44100, 48000], "channel_map": ["FL", "FR"]}],
+        usb={"vendor_id": "b58e", "product_id": "0005", "bus_path": "1-3.2", "interface": "1-3.2:1.0",
+             "manufacturer": "Blue Microphones", "product": "Yeti Nano", "serial": "2042SG000B18"},
+        pcm_name="USB Audio", by_id="/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2042SG000B18-00",
+        by_path="/dev/snd/by-path/platform-xhci-hcd.1.auto-usb-0:3.2:1.0", **extra,
+    )
+
+
+def c920_mic():
+    """The C920 webcam's built-in stereo microphone: the same USB device as the c920() camera (synthetic)."""
+    return microphone(
+        C920_MIC, "HD Pro Webcam C920", "C920", 3,
+        [{"interface": 3, "altset": 1, "format": "S16_LE", "channels": 2, "sample_bits": 16,
+          "rates_hz": [16000, 24000, 32000]}],
+        usb={"vendor_id": "046d", "product_id": "08e5", "bus_path": "1-3.1", "interface": "1-3.1:1.2",
+             "product": "HD Pro Webcam C920", "serial": "BE998CAF"},
+    )
+
+
+def mono_mic():
+    """A mono 16-bit USB microphone with a continuous rate range and no USB strings (synthetic)."""
+    return microphone(
+        MONO_MIC, "USB PnP Sound Device", "Device", 4,
+        [{"interface": 1, "altset": 1, "format": "S16_LE", "channels": 1, "sample_bits": 16,
+          "rate_range_hz": {"min": 8000, "max": 48000}}],
+        usb={"vendor_id": "0d8c", "product_id": "0014", "bus_path": "1-3.3"},
+    )
+
+
+def onboard_mic():
+    """An on-board codec: ALSA publishes no read-only formats or valid counts for it (synthetic)."""
+    return microphone(ONBOARD_MIC, "simaai-codec", "sndcard", 0, [], free=None, issues=[
+        {"code": "peripherals.capabilities_unavailable", "reason": "This ALSA driver does not publish read-only capture formats."},
+        {"code": "peripherals.availability_unknown", "reason": "ALSA did not report valid capture subdevice availability."},
+    ])
 
 
 def catalog(*devices, **extra):
@@ -226,6 +300,22 @@ class BoardCheckTests(unittest.TestCase):
         result = json.loads(done.stdout)
         self.assertEqual(result["users"], {"camera:x": []})
         self.assertIn(result["availability_method"], ("proc-root", "sudo-fuser", "proc-user"))
+
+
+    def test_microphones_get_their_capture_node_checked_and_sound_servers_listed(self):
+        held = {"/dev/snd/pcmC2D0c": {4242}, "/dev/snd/controlC2": {77}}
+        comm = {"4242": "arecord", "77": "pulseaudio", "78": "pipewire-pulse", "79": "bash"}
+        with mock.patch.object(board_check, "which", return_value=None), \
+             mock.patch.object(board_check.os, "geteuid", return_value=0), \
+             mock.patch.object(board_check, "scan_proc", return_value=held), \
+             mock.patch.object(board_check.os.path, "isdir", return_value=True), \
+             mock.patch.object(board_check.os, "listdir", return_value=["self", *comm]), \
+             mock.patch.object(board_check, "_read", side_effect=lambda path: comm.get(path.split("/")[-2])):
+            result = board_check.collect({"cameras": {}, "microphones": {YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: []}})
+        self.assertEqual(result["users"], {YETI: [{"pid": 4242, "command": "arecord"}], C920_MIC: None})
+        self.assertEqual(result["sound_servers"], ["pipewire-pulse", "pulseaudio"])
+        with mock.patch.object(board_check, "which", return_value=None):
+            self.assertNotIn("sound_servers", board_check.collect({"cameras": {}}))
 
 
 class SnapshotTests(unittest.TestCase):
@@ -393,9 +483,86 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(second["changes"], {"added": [], "removed": [{"id": C920, "name": "HD Pro Webcam C920"}]})
         self.assertIsNone(first["changes"])
 
-    def test_non_camera_devices_are_not_listed(self):
+    def test_only_cameras_and_microphones_are_listed(self):
         other = {"id": "future:1", "type": "future_sensor", "provider": "future", "future_sensor": {}}
-        self.assertEqual([i["id"] for i in snapshot_of(catalog(other, imx477()))["items"]], [IMX477])
+        self.assertEqual([i["id"] for i in snapshot_of(catalog(other, yeti(), imx477()))["items"]], [IMX477, YETI])
+
+
+def mic_check(**extra):
+    """board_check output with microphones requested: root, nobody holds anything, no sound server."""
+    return check(**{"users": {}, "sound_servers": [], **extra})
+
+
+class MicrophoneSnapshotTests(unittest.TestCase):
+    def test_yeti_nano_maps_to_the_approved_page_fields(self):
+        mic = item(snapshot_of(catalog(yeti()), mic_check()), YETI)
+        self.assertEqual(mic, {
+            "id": YETI, "kind": "microphone", "connection": "usb", "name": "Yeti Nano",
+            "device": {
+                "card_index": 2, "card_id": "Nano", "card_name": "Yeti Nano", "card_driver": "USB-Audio",
+                "pcm_device": 0, "pcm_node": "/dev/snd/pcmC2D0c", "alsa_name": "hw:CARD=Nano,DEV=0",
+                "by_path": "/dev/snd/by-path/platform-xhci-hcd.1.auto-usb-0:3.2:1.0",
+                "by_id": "/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2042SG000B18-00",
+                "usb": yeti()["microphone"]["identity"]["usb"],
+            },
+            "availability": {"state": "available", "users": [], "reason": None},
+            "capture": [{"format": "S24_3LE", "channels": 2, "bits": 24, "rates": [32000, 44100, 48000],
+                         "rate_range": None, "channel_map": ["FL", "FR"]}],
+            "notes": [], "errors": [],
+        })
+
+    def test_a_webcam_microphone_is_part_of_its_camera(self):
+        snapshot = snapshot_of(catalog(c920(), c920_mic()), mic_check())
+        mic = item(snapshot, C920_MIC)
+        self.assertEqual((mic["name"], mic["device"]["part_of"]), ("HD Pro Webcam C920", {"id": C920, "name": "HD Pro Webcam C920"}))
+        self.assertEqual(mic["capture"][0]["rates"], [16000, 24000, 32000])
+        # Sentinel's real camera topology is a sysfs path; ALSA names the USB device by its last part.
+        camera = c920()
+        camera["camera"]["identity"]["topology"] = "devices/platform/xhci-hcd.1.auto/usb1/1-3/1-3.1"
+        self.assertEqual(item(snapshot_of(catalog(camera, c920_mic()), mic_check()), C920_MIC)["device"]["part_of"]["id"], C920)
+        self.assertNotIn("part_of", item(snapshot_of(catalog(c920_mic()), mic_check()), C920_MIC)["device"])
+
+    def test_a_mono_microphone_keeps_its_continuous_rate_range_and_degrades_without_usb_strings(self):
+        mic = item(snapshot_of(catalog(mono_mic()), mic_check()), MONO_MIC)
+        self.assertEqual(mic["name"], "USB PnP Sound Device")
+        self.assertEqual(mic["capture"], [{"format": "S16_LE", "channels": 1, "bits": 16, "rates": [],
+                                           "rate_range": {"min": 8000, "max": 48000}, "channel_map": None}])
+        self.assertNotIn("by_id", mic["device"])
+
+    def test_an_onboard_device_without_formats_says_so_once(self):
+        mic = item(snapshot_of(catalog(onboard_mic()), None), ONBOARD_MIC)
+        self.assertEqual((mic["connection"], mic["capture"]), ("onboard", None))
+        self.assertEqual(mic["notes"], [microphones.NO_CAPABILITIES_NOTE,
+                                        "ALSA did not report valid capture subdevice availability."])
+        self.assertEqual(mic["availability"], {"state": "unknown", "users": [], "reason": cameras.UNCHECKED_REASON})
+        self.assertNotIn("usb", mic["device"])
+
+    def test_availability_combines_the_kernel_counts_with_insight_process_check(self):
+        holder = [{"pid": 4242, "command": "arecord"}]
+        busy = yeti()
+        busy["microphone"]["availability"] = {"state": "in_use", "subdevices": 1, "subdevices_available": 0}
+        named = item(snapshot_of(catalog(busy), mic_check(users={YETI: holder})), YETI)["availability"]
+        self.assertEqual(named, {"state": "in_use", "users": holder, "reason": "Open in arecord (pid 4242)."})
+        hidden = item(snapshot_of(catalog(busy), mic_check(availability_method="proc-user", users={YETI: []})), YETI)
+        self.assertEqual(hidden["availability"], {"state": "in_use", "users": [], "reason": microphones.KERNEL_IN_USE_REASON})
+        # Free by the kernel's counts needs no process check, even when that check could not run.
+        self.assertEqual(item(snapshot_of(catalog(yeti()), None), YETI)["availability"]["state"], "available")
+
+    def test_sound_servers_and_a_failed_provider_are_noted(self):
+        snapshot = snapshot_of(
+            catalog(yeti(), issues=[{"provider": MIC_PROVIDER, "code": "peripherals.discovery_failed",
+                                     "reason": "ALSA scan failed", "retained_last_good": True}]),
+            mic_check(sound_servers=["pipewire", "pipewire-pulse", "pulseaudio"]),
+        )
+        notes = item(snapshot, YETI)["notes"]
+        self.assertIn(f"its {MIC_PROVIDER} provider failed", notes[0])
+        self.assertTrue(notes[1].startswith("PipeWire is running") and notes[2].startswith("PulseAudio is running"))
+        self.assertEqual(len(notes), 3)
+
+    def test_changes_include_microphones(self):
+        first = snapshot_of(catalog(imx477(), yeti()), mic_check())
+        second = snapshot_of(catalog(imx477()), mic_check(), previous=first)
+        self.assertEqual(second["changes"]["removed"], [{"id": YETI, "name": "Yeti Nano"}])
 
 
 class FakeSession:
@@ -730,6 +897,239 @@ class PeripheralsApiTests(unittest.TestCase):
             second.join(5)
         self.assertEqual(self.sentinel.call_count, 1)
         self.assertEqual(results[0], results[1])
+
+
+class MicrophoneApiTests(unittest.TestCase):
+    def setUp(self):
+        for target, name, value in ((api, "scans", cameras.ScanCache()), (mictest, "_current", None)):
+            patcher = mock.patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.sentinel = catalog(imx477(), yeti())
+        self.reads = {}
+        for method in ("refresh", "catalog"):
+            patcher = mock.patch.object(api.PeripheralClient, method, autospec=True,
+                                        side_effect=lambda client: copy.deepcopy(self.sentinel))
+            self.reads[method] = patcher.start()
+            self.addCleanup(patcher.stop)
+        self.manager = FakeManager()
+        self.transport = CheckTransport(mic_check(users={IMX477: []}))
+        self.manager.current = FakeSession(1, self.transport)
+        app = Flask(__name__)
+        app.register_blueprint(board_bp)
+        app.register_blueprint(peripherals_bp)
+        app.extensions["neat_board"] = self.manager
+        self.client = app.test_client()
+
+    def start(self, mic_id=YETI, **body):
+        return self.client.post("/api/peripherals/microphones/test", json={"id": mic_id, **body})
+
+    def test_refresh_checks_only_microphones_the_kernel_does_not_prove_free(self):
+        busy = yeti()
+        busy["microphone"]["availability"].update(state="in_use", subdevices_available=0)
+        self.sentinel = catalog(busy, c920_mic(), onboard_mic())
+        self.assertEqual(self.client.post("/api/peripherals/refresh").status_code, 200)
+        argv, _, _ = self.transport.calls[0]
+        self.assertEqual(json.loads(argv[2]), {"cameras": {}, "microphones": {
+            YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: [], ONBOARD_MIC: ["/dev/snd/pcmC0D0c"]}})
+
+    def test_testing_before_a_scan_or_an_unscanned_id_is_refused_without_contacting_the_board(self):
+        response = self.start()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+        self.client.post("/api/peripherals/refresh")
+        for mic_id, status, code in ((IMX477, 404, "not_found"), ("microphone:alsa:gone", 404, "not_found")):
+            response = self.start(mic_id)
+            self.assertEqual((response.status_code, response.get_json()["code"]), (status, code))
+        for body in ({"seconds": 0}, {"seconds": 31}, {"seconds": True}, {"id": ""}):
+            self.assertEqual(self.start(**body).status_code, 400)
+        self.reads["catalog"].assert_not_called()
+        self.assertEqual(len(self.transport.calls), 1)
+
+    def test_a_changed_sentinel_catalog_never_starts_arecord(self):
+        self.client.post("/api/peripherals/refresh")
+        self.sentinel = catalog(imx477(), yeti(), revision=2)
+        with mock.patch.object(mictest, "start") as start:
+            response = self.start()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+        self.reads["catalog"].assert_called_once()
+        start.assert_not_called()
+
+    def test_start_records_with_sentinel_selector_then_poll_stop_and_audio_follow_the_reference_contract(self):
+        self.client.post("/api/peripherals/refresh")
+        pcm = sine(0.5)
+        recording = threading.Event()
+
+        def exec_(argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
+            self.transport.calls.append((argv, timeout, stdin))
+            on_stdout(pcm)
+            recording.set()
+            cancel_event.wait(timeout)
+            raise CommandCancelled()
+
+        self.transport.exec = exec_
+        response = self.start()
+        self.assertEqual(response.status_code, 202)
+        test = response.get_json()["test"]
+        self.assertEqual((test["id"], test["state"], test["device"]), (YETI, "recording", "plughw:CARD=Nano,DEV=0"))
+        self.assertEqual(test["format"], {"rate": 48000, "channels": 2, "bits": 16, "seconds": 30})
+        self.assertTrue(recording.wait(2))
+        self.assertEqual(self.transport.calls[-1][0][:4], ["arecord", "-q", "-D", "plughw:CARD=Nano,DEV=0"])
+        self.assertEqual(self.start().get_json()["code"], "test_running")
+        live = self.client.get("/api/peripherals/microphones/test").get_json()["test"]
+        self.assertEqual((live["token"], live["elapsed_ms"]), (test["token"], 100))
+        self.assertIsNotNone(live["level_dbfs"])
+        self.assertEqual(self.client.post("/api/peripherals/microphones/test/stop").status_code, 200)
+        mictest._current.thread.join(2)
+        done = self.client.get("/api/peripherals/microphones/test").get_json()["test"]
+        self.assertEqual(done["state"], "ready")
+        self.assertFalse(done["level"]["silent"])
+        wav = self.client.get(done["audio_url"])
+        self.assertEqual((wav.status_code, wav.mimetype, wav.data[:4]), (200, "audio/wav", b"RIFF"))
+        self.assertEqual(self.client.get("/api/peripherals/microphones/test/other.wav").status_code, 404)
+
+    def test_another_board_sees_no_test_and_cannot_stop_it(self):
+        self.assertIsNone(self.client.get("/api/peripherals/microphones/test").get_json()["test"])
+        self.assertIsNone(self.client.post("/api/peripherals/microphones/test/stop").get_json()["test"])
+        mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
+        self.manager.current = FakeSession(2, self.transport)
+        self.assertIsNone(self.client.get("/api/peripherals/microphones/test").get_json()["test"])
+        self.assertIsNone(self.client.post("/api/peripherals/microphones/test/stop").get_json()["test"])
+        self.assertFalse(mictest._current.stop_requested)
+
+
+def sine(amplitude: float, frames: int = 4800, channels: int = 2) -> bytes:
+    values = [int(amplitude * 32767 * math.sin(2 * math.pi * 440 * i / 48000)) for i in range(frames)]
+    return struct.pack("<%dh" % (channels * frames), *[v for v in values for _ in range(channels)])
+
+
+class MicrophoneTestTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(mictest, "_current", None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def bind(self, doc, scanned=None, mic_id=YETI):
+        return mictest.bind_microphone(doc, scanned or {"instance_id": "daemon-1", "revision": 1}, mic_id)
+
+    def assert_refused(self, code, doc, **kwargs):
+        with self.assertRaises(BoardError) as ctx:
+            self.bind(doc, **kwargs)
+        self.assertEqual(ctx.exception.code, code)
+
+    def test_binding_uses_only_sentinel_selector_from_the_scanned_catalog(self):
+        self.assertEqual(self.bind(catalog(yeti())), {"selector": "plughw:CARD=Nano,DEV=0", "rate": 48000, "channels": 2})
+        self.assert_refused("stale_snapshot", catalog(yeti(), instance_id="daemon-restarted"))
+        self.assert_refused("stale_snapshot", catalog(yeti(), revision=2))
+        self.assert_refused("not_found", catalog(c920_mic()))
+        for selector in ("plughw:CARD=x;rm -rf /,DEV=0", "hw:2,0", "plughw:2,0", None):
+            hostile = yeti()
+            hostile["microphone"]["capture_target"]["selector"] = selector
+            with self.subTest(selector=selector):
+                self.assert_refused("peripheral_response", catalog(hostile))
+        busy = yeti()
+        busy["microphone"]["availability"]["state"] = "in_use"
+        self.assert_refused("microphone_in_use", catalog(busy))
+
+    def test_binding_refuses_data_sentinel_did_not_freshly_read(self):
+        retained = {"provider": MIC_PROVIDER, "code": "peripherals.discovery_failed", "reason": "x", "retained_last_good": True}
+        self.assert_refused("stale_snapshot", catalog(yeti(), issues=[retained], stale=True))
+        self.assert_refused("stale_snapshot", catalog(yeti(), error={"code": "peripherals.discovery_failed", "reason": "x"}))
+        camera_failed = dict(retained, provider="daemon.camera.mipi")
+        self.assertEqual(self.bind(catalog(yeti(), issues=[camera_failed]))["selector"], "plughw:CARD=Nano,DEV=0")
+
+    def test_format_is_bounded_to_48_khz_stereo_for_every_device(self):
+        self.assertEqual(mictest.choose_format(c920_mic()["microphone"]), {"rate": 32000, "channels": 2})
+        self.assertEqual(mictest.choose_format(mono_mic()["microphone"]), {"rate": 48000, "channels": 1})
+        self.assertEqual(mictest.choose_format(onboard_mic()["microphone"]), {"rate": 48000, "channels": 1})
+        studio = {"modes": [{"format": "S32_LE", "channels": 8, "sample_bits": 32, "rate_range_hz": {"min": 96000, "max": 384000}},
+                            {"format": "S32_LE", "channels": 4, "sample_bits": 32, "rates_hz": [192000]}]}
+        chosen = mictest.choose_format(studio)
+        self.assertEqual(chosen, {"rate": 48000, "channels": 2})
+        self.assertLess(chosen["rate"] * chosen["channels"] * 2 * mictest.MAX_SECONDS, MAX_OUTPUT_BYTES)
+
+    def test_level_measurement_ignores_one_open_click(self):
+        click = [0] * 96000
+        click[10] = 30000
+        self.assertTrue(mictest.measure(struct.pack("<96000h", *click), 2)["silent"])
+        self.assertFalse(mictest.measure(sine(0.5), 2)["silent"])
+        self.assertEqual(mictest.measure(b"", 2), {"peak_dbfs": None, "rms_dbfs": None, "silent": True})
+
+    def run_test(self, exec_, seconds=30, session=None):
+        transport = SimpleNamespace(exec=exec_)
+        session = session or FakeSession(1, transport)
+        session.transport = transport
+        status = mictest.start(session, YETI, {"selector": "plughw:CARD=Nano,DEV=0", "rate": 48000, "channels": 2}, seconds)
+        return status, mictest._current
+
+    def test_a_full_recording_becomes_a_wav_and_board_failures_become_errors(self):
+        pcm = sine(0.5)
+
+        def full(argv, *, timeout, on_stdout, cancel_event):
+            on_stdout(pcm[:999])
+            on_stdout(pcm[999:])
+            return ExecResult(0, pcm, b"")
+
+        status, test = self.run_test(full, seconds=1)
+        self.assertEqual(status["format"]["seconds"], 1)
+        test.thread.join(2)
+        self.assertEqual(test.status()["state"], "ready")
+        self.assertEqual(mictest.audio(test.token)[:4], b"RIFF")
+        self.assertEqual(len(test.pcm), 0, "the raw capture is dropped once the WAV is made")
+        for result, code in ((ExecResult(127, b"", b"arecord: not found"), "tool_missing"),
+                             (ExecResult(1, b"", b"arecord: main:831: audio open error: Device or resource busy"), "microphone_in_use"),
+                             (ExecResult(1, b"", b"arecord: bad"), "command_failed")):
+            with self.subTest(code=code):
+                _, test = self.run_test(lambda argv, **kwargs: result)
+                test.thread.join(2)
+                self.assertEqual((test.status()["state"], test.status()["error"]["code"]), ("failed", code))
+                self.assertIsNone(mictest.audio(test.token))
+
+    def test_stop_interrupts_a_stalled_capture_and_an_early_stop_is_reported(self):
+        for chunk, state in ((sine(0.5), "ready"), (b"\0" * 100, "failed")):
+            started = threading.Event()
+
+            def stalled(argv, *, timeout, on_stdout, cancel_event):
+                on_stdout(chunk)
+                started.set()
+                # A stalled arecord prints nothing more: only the cancel event can end it.
+                self.assertTrue(cancel_event.wait(timeout))
+                raise CommandCancelled()
+
+            with self.subTest(state=state):
+                _, test = self.run_test(stalled)
+                self.assertTrue(started.wait(2))
+                mictest.stop(1)
+                test.thread.join(2)
+                self.assertFalse(test.thread.is_alive())
+                status = test.status()
+                self.assertEqual(status["state"], state)
+                if state == "failed":
+                    self.assertEqual(status["error"]["code"], "stopped_early")
+
+    def test_stop_also_ends_a_recording_through_its_output_callback(self):
+        pcm = sine(0.5)
+
+        def chatty(argv, *, timeout, on_stdout, cancel_event):
+            while True:
+                on_stdout(pcm)  # raises once Stop was pressed
+                time.sleep(0.01)
+
+        _, test = self.run_test(chatty)
+        time.sleep(0.05)
+        mictest.stop(1)
+        test.thread.join(2)
+        self.assertEqual(test.status()["state"], "ready")
+
+    def test_a_recording_from_a_board_that_is_no_longer_selected_is_discarded(self):
+        session = FakeSession(1, None)
+
+        def switched(argv, *, timeout, on_stdout, cancel_event):
+            session.stale = True
+            return ExecResult(0, sine(0.5), b"")
+
+        _, test = self.run_test(switched, session=session)
+        test.thread.join(2)
+        self.assertEqual((test.status()["state"], test.status()["error"]["code"]), ("failed", "stale_snapshot"))
 
 
 class _FakePyneat:

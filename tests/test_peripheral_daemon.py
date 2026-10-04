@@ -58,6 +58,27 @@ def camera_catalog(**extra):
     }], **extra)
 
 
+def microphone_catalog():
+    """Sentinel's `daemon.audio.alsa` records: Yeti Nano (stereo 24-bit), a mono 16-bit range, a bare codec."""
+    def device(device_id, connection, modes, **identity):
+        return {"id": device_id, "type": "microphone", "provider": "daemon.audio.alsa", "microphone": {
+            "name": "Yeti Nano", "backend": "alsa", "connection": connection,
+            "capture_target": {"card_id": "Nano", "device": 0, "selector": "plughw:CARD=Nano,DEV=0"},
+            "identity": {"stable_key": f"sysfs:{device_id}", "card_index": 2, "pcm_node": "/dev/snd/pcmC2D0c", **identity},
+            "modes": modes,
+            "availability": {"state": "available", "subdevices": 1, "subdevices_available": 1},
+        }}
+
+    return catalog(devices=[
+        device("microphone:alsa:yeti", "usb", [{"interface": 1, "altset": 1, "format": "S24_3LE", "channels": 2,
+                                               "sample_bits": 24, "rates_hz": [32000, 44100, 48000], "channel_map": ["FL", "FR"]}],
+               usb={"vendor_id": "b58e", "product_id": "0005", "bus_path": "1-3.2"}, card_id="Nano", by_id="/dev/snd/by-id/x"),
+        device("microphone:alsa:mono", "usb", [{"format": "S16_LE", "channels": 1, "sample_bits": 16,
+                                               "rate_range_hz": {"min": 8000, "max": 48000}}]),
+        device("microphone:alsa:codec", "platform", [{"format": "S16_LE"}]),
+    ])
+
+
 class FakeSession:
     def __init__(self, mode="local", transport=None, generation=7):
         self.target = BoardTarget(mode, "test", "board" if mode == "ssh" else None, 22, "sima")
@@ -165,6 +186,35 @@ class PeripheralClientTests(unittest.TestCase):
                 socket_client, "request", return_value=(200, json.dumps(response))
             ):
                 self.assertEqual(PeripheralClient(FakeSession()).catalog(), response)
+
+    def test_microphone_records_are_validated_before_the_snapshot_reads_them(self):
+        valid = microphone_catalog()
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
+            self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
+        malformed = {
+            "modes": lambda mic: mic.update(modes=None),
+            "stable key": lambda mic: mic["identity"].pop("stable_key"),
+            "connection": lambda mic: mic.update(connection="bluetooth"),
+            "PCM device": lambda mic: mic["capture_target"].update(device=-1),
+            "selector": lambda mic: mic["capture_target"].update(selector=7),
+            "card index": lambda mic: mic["identity"].update(card_index="2"),
+            "USB identity": lambda mic: mic["identity"].update(usb="1-3.2"),
+            "empty rates": lambda mic: mic["modes"][0].update(rates_hz=[]),
+            "rates and range": lambda mic: mic["modes"][0].update(rate_range_hz={"min": 8000, "max": 48000}),
+            "inverted range": lambda mic: mic.update(modes=[{"format": "S16_LE", "rate_range_hz": {"min": 9, "max": 8}}]),
+            "channels": lambda mic: mic["modes"][0].update(channels=0),
+            "channel map": lambda mic: mic["modes"][0].update(channel_map="FL FR"),
+            "availability": lambda mic: mic["availability"].update(state="busy-ish"),
+            "counts": lambda mic: mic["availability"].update(subdevices=True),
+            "issues": lambda mic: mic.update(issues=[None]),
+        }
+        for name, mutate in malformed.items():
+            response = microphone_catalog()
+            mutate(response["devices"][0]["microphone"])
+            with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).catalog()
+                self.assertEqual(ctx.exception.code, "peripheral_response")
 
     def test_catalog_rejects_duplicate_identities_and_malformed_provider_issues(self):
         duplicate = camera_catalog()

@@ -7,6 +7,8 @@ _HTTP_STATUS = {
     "host_key_changed": 409,
     "stale_snapshot": 409,
     "camera_in_use": 409,
+    "microphone_in_use": 409,
+    "test_running": 409,
     "unreachable": 502,
     "auth_failed": 502,
     "tool_missing": 502,

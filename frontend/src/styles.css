@@ -3767,6 +3767,133 @@ button:disabled {
   margin: 8px 0 0;
 }
 
+/* Microphone capture: one segmented badge row per format/channels/bits/rates combination. */
+.periph-capture {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.periph-capture .hint {
+  margin: 0;
+}
+
+.periph-capture-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+}
+
+.periph-capture-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.periph-capture-badges > span + span {
+  border-left: 1px solid var(--line);
+}
+
+/* Microphone test: record on the board, play back here. */
+.periph-mic-test {
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-mic-test-head {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-mic-test-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-mic-test .hint,
+.periph-mic-test .periph-callout {
+  margin: 0;
+}
+
+.periph-mic-warning {
+  color: #8f2f45;
+}
+
+/* Button, live level meter, caption: one row, as a video call's microphone test lays it out. */
+.periph-mic-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 12px;
+}
+
+.periph-mic-button {
+  min-width: 148px;
+}
+
+.periph-meter {
+  height: 14px;
+  display: flex;
+  gap: 3px;
+}
+
+.periph-meter > span {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.periph-meter > span.on.low {
+  background: #1f9d55;
+}
+
+.periph-meter > span.on.mid {
+  background: #e0a100;
+}
+
+.periph-meter > span.on.high {
+  background: var(--danger);
+}
+
+.periph-mic-caption {
+  justify-self: end;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .periph-mic-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .periph-mic-caption {
+    justify-self: start;
+  }
+}
+
 @media (max-width: 980px) {
   .periph-grid {
     grid-template-columns: 1fr;
