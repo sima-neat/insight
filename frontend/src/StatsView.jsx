@@ -306,6 +306,8 @@ function RunsPanel({ trace, traceBusy, traceError, form, formError, onFormChange
   const [confirming, setConfirming] = useState(false)
   const [extrasOpen, setExtrasOpen] = useState(false)
   const headingRef = useRef(null)
+  const selectionKey = JSON.stringify(selected)
+  useEffect(() => setConfirming(false), [selectionKey])
   const bar = traceBar(trace, { busy: traceBusy })
   const extras = traceExtrasSummary(form)
   const extrasShown = !bar.recording && (extrasOpen || Boolean(formError && extras))
@@ -572,6 +574,13 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   function applyRuns(data) {
     const refs = new Set(runList(data).map((run) => run.ref))
     const kept = latest.current.selected.filter((ref) => refs.has(ref))
+    if (latest.current.openRef && !refs.has(latest.current.openRef)) {
+      guard.current.cancel('run')
+      setOpenRef('')
+      setDetail(null)
+      setDetailError(null)
+      setDetailBusy(false)
+    }
     if (kept.length !== latest.current.selected.length) {
       guard.current.cancel('compare')
       setCompareBusy(false)
