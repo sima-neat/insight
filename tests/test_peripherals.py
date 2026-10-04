@@ -241,7 +241,7 @@ class SnapshotTests(unittest.TestCase):
         nv12 = fmt_of(camera, "NV12")
         self.assertEqual((nv12["label"], nv12["exportable"], nv12["support"]["tier"]), ("NV12 (YUV 4:2:0)", True, "verified"))
         self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
-        self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "tier": "verified"}])
+        self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"}])
         rgb = fmt_of(camera, "RGB3")
         self.assertEqual((rgb["exportable"], rgb["support"]["tier"], rgb["support"]["reason"]), (False, "unsupported", FORMAT_REASON))
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
@@ -256,8 +256,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["device"]["csi"], "csi2@1")
         fps = size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]
         self.assertEqual([c["value"] for c in fps], [66, 60, 30, 25, 20, 15, 10, 5])
-        self.assertEqual([c for c in fps if c["tier"] == "verified"], [{"value": 30, "tier": "verified"}])
-        self.assertEqual(fps[0], {"value": 66, "tier": "unsupported", "reason": FRAMERATE_REASON})
+        self.assertEqual([c for c in fps if c["tier"] == "verified"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"}])
+        self.assertEqual(fps[0], {"value": 66, "framerate_num": 66, "framerate_den": 1, "tier": "unsupported", "reason": FRAMERATE_REASON})
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(camera["notes"], [
             "The sensor reports 66.18 fps for its fastest mode. The delivered frame rate follows the sensor mode "
@@ -340,8 +340,8 @@ class SnapshotTests(unittest.TestCase):
         ]
         camera = item(snapshot_of(catalog(doc)), IMX477)
         self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"], [
-            {"value": 60, "tier": "unsupported", "reason": "CameraInput accepts 30 fps only."},
-            {"value": 30, "tier": "verified"},
+            {"value": 60, "framerate_num": 60, "framerate_den": 1, "tier": "unsupported", "reason": "CameraInput accepts 30 fps only."},
+            {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"},
         ])
         self.assertEqual(camera["notes"], [
             "Only sizes the ISP can output (1920x1080) are offered; libcamera also advertises sizes the ISP "
@@ -588,6 +588,39 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(body["support"], {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []})
         self.assertEqual(body["warnings"], [NO_BUFFER_COUNT])
 
+    def test_a_stepwise_interval_offers_and_exports_only_rates_on_its_step(self):
+        # Exact periods, and UVC's 100 ns units, which round a 1/30 s step to 333333/10000000.
+        for unit, (first, last, step) in ((1, (1, 6, 1)), (10000000, (333333, 2000000, 333333))):
+            doc = c920()
+            doc["camera"]["modes"] = [dict(usb_mode("YUYV", 640, 480, [(1, 30)]), frame_intervals=[
+                {"width": 640, "height": 480, "intervals": [{
+                    "type": "stepwise", "minimum": {"numerator": first, "denominator": 30 if unit == 1 else unit},
+                    "maximum": {"numerator": last, "denominator": 30 if unit == 1 else unit},
+                    "step": {"numerator": step, "denominator": 30 if unit == 1 else unit}}]}])]
+            self.use(catalog(doc))
+            camera = item(self.refresh().get_json(), C920)
+            self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "YUYV"), 640, 480)["fps"]], [30, 15, 10, 5])
+            request = {"id": C920, "format": "YUYV", "width": 640, "height": 480}
+            self.assertEqual(self.export(**request, fps=15).status_code, 200)
+            for fps in (25, 20):
+                with self.subTest(unit=unit, fps=fps):
+                    response = self.export(**request, fps=fps)
+                    self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
+    def test_export_keeps_a_fractional_catalog_rate_exact(self):
+        mipi = imx477()
+        for mode in mipi["camera"]["modes"]:
+            mode.update(framerate_num=30000, framerate_den=1001)
+        usb = c920()
+        usb["camera"]["modes"] = [usb_mode("YUYV", 640, 480, [(1001, 30000), (1, 15)])]
+        self.use(catalog(mipi, usb))
+        self.refresh()
+        descriptor = json.loads(self.export(fps=29.97).get_json()["exports"][2]["content"])
+        self.assertEqual((descriptor["options"]["framerate_num"], descriptor["options"]["framerate_den"]), (30000, 1001))
+        body = self.export(id=C920, format="YUYV", width=640, height=480, fps=29.97).get_json()
+        descriptor = json.loads(body["exports"][1]["content"])
+        self.assertEqual((descriptor["framerate_num"], descriptor["framerate_den"]), (30000, 1001))
+
     def test_export_escapes_device_strings(self):
         doc = imx477()
         hostile = 'cam"\n\\ 5-001a'
@@ -675,6 +708,13 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertEqual(self.client.get("/api/peripherals").get_json()["scanned_at"], None)
 
+    def test_export_is_refused_when_the_board_changes_before_it_returns(self):
+        self.use()
+        self.refresh()
+        self.manager.current.stale = True
+        response = self.export()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+
     def test_a_board_change_during_refresh_is_refused_and_not_recorded(self):
         self.use()
         self.manager.current.stale = True
@@ -731,6 +771,46 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(self.sentinel.call_count, 1)
         self.assertEqual(results[0], results[1])
 
+
+    def test_a_shared_refresh_is_refused_when_the_board_changed_while_it_waited(self):
+        started, release = threading.Event(), threading.Event()
+        self.use()
+
+        def slow_refresh(client):
+            started.set()
+            release.wait(5)
+            return catalog(imx477(), c920())
+
+        self.sentinel.side_effect = slow_refresh
+        second_waiting = threading.Event()
+        refresh_lock, record = api.scans.refresh_lock, api.scans.record
+
+        def counting_refresh_lock(generation):
+            if started.is_set():
+                second_waiting.set()
+            return refresh_lock(generation)
+
+        def record_then_switch_board(*args):
+            snapshot = record(*args)
+            self.manager.current.stale = True  # /api/board/select lands before the waiter takes the lock
+            return snapshot
+
+        results = {}
+        with mock.patch.object(api.scans, "refresh_lock", counting_refresh_lock), \
+                mock.patch.object(api.scans, "record", record_then_switch_board):
+            first = threading.Thread(target=lambda: results.setdefault("first", self.refresh()))
+            first.start()
+            started.wait(5)
+            second = threading.Thread(target=lambda: results.setdefault("second", self.refresh()))
+            second.start()
+            second_waiting.wait(5)
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(self.sentinel.call_count, 1)
+        self.assertEqual(results["first"].status_code, 200)
+        second = results["second"]
+        self.assertEqual((second.status_code, second.get_json()["code"]), (409, "stale_snapshot"))
 
 class _FakePyneat:
     """Just enough of pyneat to execute the exported Python."""

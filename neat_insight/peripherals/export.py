@@ -1,6 +1,5 @@
 """Render camera input configurations for one mode of the cached scan."""
 import json
-from fractions import Fraction
 from typing import Optional
 
 from neat_insight.board import BoardError
@@ -65,7 +64,7 @@ def render(snapshot: dict, request: dict) -> dict:
         "fps": choice["value"],
     }
     if item["connection"] == "usb":
-        return _usb_export(item, fmt, selection)
+        return _usb_export(item, fmt, choice, selection)
     return _mipi_export(item, choice, selection, snapshot)
 
 
@@ -82,10 +81,6 @@ def _find_mode(item: dict, request: dict):
     return None, None
 
 
-def _rate(fps) -> Fraction:
-    return Fraction(str(fps)).limit_denominator(1001)
-
-
 def _export(export_id: str, label: str, filename: str, language: str, content: str) -> dict:
     return {"id": export_id, "label": label, "filename": filename, "language": language, "content": content}
 
@@ -99,13 +94,12 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
     mode = compat.verified_mode(
         item.get("model"), selection["format"], selection["width"], selection["height"], selection["fps"]
     )
-    rate = _rate(selection["fps"])
     options = {
         "camera_name": item["device"]["camera_name"],
         "width": selection["width"],
         "height": selection["height"],
-        "framerate_num": rate.numerator,
-        "framerate_den": rate.denominator,
+        "framerate_num": choice["framerate_num"],
+        "framerate_den": choice["framerate_den"],
         "format": selection["format"],
         "buffer_name": BUFFER_NAME,
         "queue_depth": QUEUE_DEPTH,
@@ -201,10 +195,9 @@ def _cpp(options: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _usb_export(item: dict, fmt: dict, selection: dict) -> dict:
+def _usb_export(item: dict, fmt: dict, choice: dict, selection: dict) -> dict:
     usb = item["device"]["usb"]
     device = item["device"].get("by_id") or item["device"].get("video_node")
-    rate = _rate(selection["fps"])
     warnings = ["Core CameraInput does not support USB cameras (core#838); this is a V4L2 descriptor, not Neat code."]
     if fmt["format"] in USB_FORMAT_NOTES:
         warnings.append(USB_FORMAT_NOTES[fmt["format"]][0])
@@ -221,8 +214,8 @@ def _usb_export(item: dict, fmt: dict, selection: dict) -> dict:
         "format": selection["format"],
         "width": selection["width"],
         "height": selection["height"],
-        "framerate_num": rate.numerator,
-        "framerate_den": rate.denominator,
+        "framerate_num": choice["framerate_num"],
+        "framerate_den": choice["framerate_den"],
     }
     comment = "V4L2 camera descriptor. Core CameraInput does not support USB cameras (core#838)."
     return {
