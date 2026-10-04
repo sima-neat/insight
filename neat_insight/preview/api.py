@@ -91,8 +91,9 @@ def previewable_mode(item: dict, body: dict) -> dict:
     if item["connection"] != "mipi" or not item["device"].get("camera_name"):
         raise _unsupported("Preview is available for MIPI cameras only in this release.",
                            "USB cameras are discovered and can be exported, but preview is not implemented for them yet.")
+    # parse_request and the scan only yield positive numbers; preview also needs a whole one.
     fps = mode["fps"]
-    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0 or fps != int(fps):
+    if fps != int(fps):
         raise _unsupported(f"{fps} fps cannot be previewed: preview needs a whole-number frame rate.",
                            "Pick one of the rates Insight lists for this size.")
     fmt = next((entry for entry in item["formats"] if entry["format"] == mode["format"]), None)

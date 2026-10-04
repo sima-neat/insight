@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Optional
 
 from neat_insight.board import BoardError
-from neat_insight.peripherals.cameras import camera_nodes
 
 DEFAULT_VIDEO_UDP_PORT = 9000
 DEFAULT_VIDEO_UI_PORT = 8081
@@ -75,6 +74,10 @@ def _now() -> datetime:
 
 def _expired(session: dict) -> bool:
     return _now() > datetime.fromisoformat(session["expires_at"])
+
+
+def _expiry() -> str:
+    return (_now() + timedelta(seconds=SESSION_TTL_SEC)).isoformat(timespec="seconds")
 
 
 def _valid_port(value) -> Optional[int]:
@@ -227,7 +230,7 @@ class PreviewManager:
             "ssrc": None,
             "generation": board_session.generation,
             "started_at": _now().isoformat(timespec="seconds"),
-            "expires_at": (_now() + timedelta(seconds=SESSION_TTL_SEC)).isoformat(timespec="seconds"),
+            "expires_at": _expiry(),
             "heartbeat_interval_ms": HEARTBEAT_INTERVAL_MS,
             "state": "live",
         }
@@ -264,11 +267,10 @@ class PreviewManager:
 
     def _require_camera_free(self, board_session, item: dict) -> None:
         """Refuse a camera another process holds now; when that cannot be read, the start reports it."""
-        nodes = [node for node in camera_nodes({"camera": {"backend": "mipi", "media_device": item["device"].get("media_device")}})
-                 if _DEVICE_NODE.fullmatch(node)]
-        if not nodes:
+        node = item["device"].get("media_device")
+        if not isinstance(node, str) or not _DEVICE_NODE.fullmatch(node):
             return
-        request = json.dumps({"cameras": {item["id"]: nodes}})
+        request = json.dumps({"cameras": {item["id"]: [node]}})
         try:
             result = board_session.transport.exec(["python3", "-", request], timeout=20, stdin=BOARD_CHECK.read_bytes())
             users = json.loads(result.stdout.decode("utf-8", errors="replace"))["users"][item["id"]]
@@ -325,7 +327,7 @@ class PreviewManager:
         if rtp and rtp["ssrc"] not in (None, session["ssrc"]):
             self._release(session_id)
             raise _channel_taken(session["channel"])
-        session["expires_at"] = (_now() + timedelta(seconds=SESSION_TTL_SEC)).isoformat(timespec="seconds")
+        session["expires_at"] = _expiry()
         with self._lock:
             # A stop that finished while this heartbeat ran wins.
             if self._session is not None and self._session["id"] == session_id:
