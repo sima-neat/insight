@@ -696,8 +696,9 @@ export function runList(payload) {
       const key = String(id || name || `run-${index}`)
       return {
         key,
-        // Sentinel accepts either a unique name or a stable id on /runs/<id>.
-        ref: String(name || id || key),
+        // Selection and actions use the stable id. Keep the name separately for display;
+        // older malformed summaries without an id can only fall back to their name.
+        ref: String(id || name || key),
         id,
         name,
         label: String(name || id || `Run ${index + 1}`),
@@ -716,8 +717,8 @@ export function runList(payload) {
 }
 
 /**
- * The reference that opens or deletes the run listed under `ref`: its stable id when Sentinel
- * reported one. `ref` remains the name that the list shows and Compare sends.
+ * The reference that opens or deletes the run listed under `ref`. Selection already keeps the
+ * stable id when Sentinel reported one; the lookup retains compatibility with name-only rows.
  */
 export function runActionRef(runs, ref) {
   const run = (runs || []).find((entry) => entry.ref === String(ref))
@@ -794,10 +795,7 @@ export function toggleSelection(selected, key, limit = MAX_COMPARE_RUNS) {
 export function missingSelection(selected, runs) {
   const list = selected || []
   if (!list.length || !Array.isArray(runs)) return []
-  const refs = new Set()
-  for (const run of runs) {
-    for (const value of [run?.ref, run?.id, run?.name]) if (value) refs.add(String(value))
-  }
+  const refs = new Set(runs.map((run) => run?.ref).filter(Boolean).map(String))
   return list.filter((ref) => !refs.has(String(ref)))
 }
 

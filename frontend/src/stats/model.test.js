@@ -201,7 +201,7 @@ test('schema-v1 run summaries carry Sentinel timing, samples and energy', () => 
     { id: 'r2', name: 'optimized', started_at: '2026-09-22T20:10:00Z', ended_at: null, duration_ms: 4500, samples: 2, energy_joules: 7.5 }, 'r3', {}
   ] } })
   assert.deepEqual(runs.map((run) => run.label), ['baseline', 'optimized'])
-  assert.deepEqual(runs.map((run) => run.ref), ['baseline', 'optimized'])
+  assert.deepEqual(runs.map((run) => run.ref), ['r1', 'r2'])
   assert.deepEqual([runs[0].state, runs[1].state, runs[0].durationSec, runs[1].durationSec], ['complete', 'recording', 120, 4.5])
   assert.deepEqual([runList({ sentinel: { runs: [] } }), runList(null)], [[], []])
   assert.match(runSubtitle(runs[0], Date.parse('2026-09-22T20:03:00Z')), /^Complete · started .* · 2 min 0 s · 60 samples$/)
@@ -534,7 +534,7 @@ test('a selected run that has left the board is named, not left stuck in the sel
   ] } })
   const selected = runs.map((run) => run.ref)
   assert.deepEqual(missingSelection(selected, runs), [])
-  assert.deepEqual(missingSelection(selected, runs.slice(0, 1)), ['insight-hw-1790177178'])
+  assert.deepEqual(missingSelection(selected, runs.slice(0, 1)), ['20260923T152624.613Z-insight-hw-1790177178'])
   const refused = failureNotice({ error: "unknown run 'insight-hw-1790177178'", code: 'not_found', hint: 'List runs and use a name or id Sentinel reports.' })
   assert.deepEqual([refused.title, refused.board, refused.daemon, refused.retryable], ['That run is not on this board', false, false, true])
   assert.deepEqual(missingSelection(['20260923T152624.613Z-insight-hw-1790177178'], runs), [])
@@ -622,11 +622,11 @@ test('a run name long enough to break the tables is carried intact and wrapped',
   const name = 'a'.repeat(NAME_LIMIT)
   const runs = runList({ sentinel: { runs: [{ id: 'id-1', name }, { id: 'id-2', name: 'short' }] } })
   assert.equal(runs[0].label, name)
-  assert.equal(runs[0].ref, name, 'the name is the reference, so it must not be shortened')
+  assert.equal(runs[0].ref, 'id-1', 'selection keeps the stable id while the label keeps the full name')
   assert.equal(validateTrace({ name }).body.name, name)
   assert.match(validateTrace({ name: `${name}a` }).error, /at most 80 UTF-8 bytes/)
-  assert.equal(compareQuery([name, 'short']), `/api/sentinel/compare?runs=${encodeURIComponent(`${name},short`)}`)
-  assert.deepEqual([missingSelection([name], runs), uncomparableRefs([name])], [[], []])
+  assert.equal(compareQuery(runs.map((run) => run.ref)), '/api/sentinel/compare?runs=id-1%2Cid-2')
+  assert.deepEqual([missingSelection(['id-1'], runs), uncomparableRefs(['id-1'])], [[], []])
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
   assert.match(css, /\.stats-run-table tbody th,\n\.stats-compare-table thead th \{\n\s*overflow-wrap: anywhere;/)
 })
@@ -657,11 +657,14 @@ test('stopping a trace names the trace on screen, so a trace that replaced it is
   assert.equal(stopTraceQuery(3, ''), '/api/sentinel/traces/stop?generation=3')
 })
 
-test('opening or deleting a run uses its stable id while the list and Compare keep its name', () => {
+test('selection, opening, deleting and comparison use a stable run id', () => {
   const rows = runList({ sentinel: { runs: [{ id: 'a1', name: 'x' }, { id: 'x', name: 'y' }, { name: 'no-id' }] } })
-  assert.deepEqual(rows.map((run) => run.ref), ['x', 'y', 'no-id'], 'the list and Compare keep the names')
-  assert.deepEqual(['x', 'y', 'no-id', 'gone'].map((ref) => runActionRef(rows, ref)), ['a1', 'x', 'no-id', 'gone'])
+  assert.deepEqual(rows.map((run) => run.ref), ['a1', 'x', 'no-id'])
+  assert.deepEqual(['a1', 'x', 'no-id', 'gone'].map((ref) => runActionRef(rows, ref)), ['a1', 'x', 'no-id', 'gone'])
   assert.equal(runActionRef(null, 'x'), 'x')
+
+  const replacement = runList({ sentinel: { runs: [{ id: 'a2', name: 'x' }] } })
+  assert.deepEqual(missingSelection(['a1'], replacement), ['a1'], 'a replacement with the same name is not selected')
 })
 
 test('a failure about the board stops the remaining deletes; one about the run does not', () => {
