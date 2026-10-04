@@ -1169,6 +1169,11 @@ test('a comparison that included a deleted run is recognised by its id or name',
   assert.equal(compareIncludes(compare, new Set()), false)
   assert.equal(compareIncludes(null, new Set(['a'])), false)
   assert.equal(compareIncludes({ sentinel: { runs: ['a'] } }, new Set(['a'])), false)
+  // The view asks for raw=1, where each run's identity is under metadata.
+  const raw = { sentinel: { runs: [{ metadata: { id: 'i-a', name: 'a' }, metrics: [], samples: [] }] } }
+  assert.equal(compareIncludes(raw, new Set(['a'])), true)
+  assert.equal(compareIncludes(raw, new Set(['i-a'])), true)
+  assert.equal(compareIncludes(raw, new Set(['c'])), false)
 })
 
 test('the session exports as CSV: a row per sample, a column per metric, empty where the board took no reading', () => {

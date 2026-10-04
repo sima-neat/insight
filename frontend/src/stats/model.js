@@ -875,7 +875,11 @@ export function deleteSummary(results) {
 export function compareIncludes(compare, gone) {
   const runs = compare?.sentinel?.runs
   if (!Array.isArray(runs) || !gone || !gone.size) return false
-  return runs.some((run) => run && typeof run === 'object' && [run.id, run.name].some((value) => value && gone.has(String(value))))
+  return runs.some((entry) => {
+    // With raw=1 each run is { metadata, metrics, samples }; without it, the metadata itself.
+    const run = entry?.metadata && typeof entry.metadata === 'object' ? entry.metadata : entry
+    return run && typeof run === 'object' && [run.id, run.name].some((value) => value && gone.has(String(value)))
+  })
 }
 
 /**
