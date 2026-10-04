@@ -957,10 +957,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const delay = pollDelay(failures)
   const generation = board?.generation ?? null
 
-  // An answer is applied only while the view is mounted and its request still belongs to
-  // the selected board and has not been superseded.
-  function fresh(ticket) {
-    return mounted.current && guard.current.current(ticket)
+  // An answer is applied only while the view is mounted, its request still belongs to the
+  // selected board and has not been superseded, and the answer was read from that board.
+  // An answer from another board means another client switched it: read the selection again.
+  function fresh(ticket, data) {
+    if (!mounted.current || !guard.current.current(ticket)) return false
+    if (guard.current.current(ticket, data)) return true
+    loadBoard()
+    return false
   }
 
   // One guarded request: nothing is sent while `name` is already out, `busy` is flagged
@@ -973,7 +977,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     try {
       const data = await call()
       // A follow-up read that `done` returns keeps the request busy until it lands.
-      const after = fresh(ticket) ? done(data, ticket) : null
+      const after = fresh(ticket, data) ? done(data, ticket) : null
       if (after) await after
     } catch (err) {
       if (fresh(ticket)) fail(failureNotice(err, ticket.generation, { action }))
@@ -1088,7 +1092,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     if (!ticket) return
     try {
       const data = await fetchMetrics()
-      if (!fresh(ticket)) return
+      if (!fresh(ticket, data)) return
       setMetrics(data)
       setMetricsError(null)
       setFailures(0)
@@ -1258,7 +1262,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     // The last successful delete answered with the list as the board holds it afterwards;
     // a read that was already out answers from before the delete and must not bring the
     // deleted runs back.
-    if (latest) {
+    if (latest && fresh(ticket, latest)) {
       guard.current.cancel('runs')
       setRuns(latest)
       setRunsError(null)

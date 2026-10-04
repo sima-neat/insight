@@ -700,6 +700,22 @@ test('every board-scoped answer is judged against the board it was asked of', ()
   assert.equal(guard.current(kept), true)
 })
 
+test('an answer read from another board is refused even while its ticket is current', () => {
+  // Another client switches Insight from board A to B while this page still shows A: the
+  // request was asked under A's generation, but the backend answered from B.
+  const guard = createRequestGuard()
+  guard.switchTo(3)
+  const runs = guard.begin('runs')
+  assert.equal(guard.current(runs, { generation: 4, board: { label: 'B' } }), false)
+  assert.equal(guard.current(runs, { generation: 3, board: { label: 'A' } }), true)
+  // An answer without a generation (an empty body) is judged by its ticket alone.
+  assert.equal(guard.current(runs, {}), true)
+  assert.equal(guard.current(runs), true)
+  // A request out before the page knew its board has nothing to compare with.
+  const early = createRequestGuard().begin('state')
+  assert.equal(createRequestGuard().current(early, { generation: 9 }), true)
+})
+
 test('requests out before the first board arrives belong to that board', () => {
   const guard = createRequestGuard()
   const early = guard.begin('state')

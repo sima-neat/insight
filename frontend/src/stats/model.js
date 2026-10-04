@@ -315,8 +315,13 @@ export function createRequestGuard() {
       active.set(key, ticket)
       return ticket
     },
-    current(ticket) {
-      return Boolean(ticket) && !ticket.cancelled && ticket.generation === generation
+    // `answer`, when given, must also have been read from that board: another client can
+    // switch Insight's board while this page still shows the previous one, and the backend
+    // then answers from the new board under its own generation.
+    current(ticket, answer) {
+      if (!ticket || ticket.cancelled || ticket.generation !== generation) return false
+      const read = answer?.generation
+      return !Number.isInteger(read) || ticket.generation === null || Number(ticket.generation) === read
     },
     cancel(key) {
       const running = active.get(key)
