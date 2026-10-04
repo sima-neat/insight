@@ -322,10 +322,21 @@ def _interval_rates(entry: dict) -> list:
         low, high = interval.get("maximum") or {}, interval.get("minimum") or {}
         try:
             slowest, fastest = low["denominator"] / low["numerator"], high["denominator"] / high["numerator"]
+            # A stepwise range allows only periods minimum + k * step; a continuous one allows any period.
+            step = interval["step"]["numerator"] / interval["step"]["denominator"] if interval.get("type") == "stepwise" else None
         except (KeyError, TypeError, ZeroDivisionError):
             continue
-        rates += [Fraction(fps) for fps in STANDARD_FPS if slowest - 1e-3 <= fps <= fastest + 1e-3]
+        rates += [
+            Fraction(fps) for fps in STANDARD_FPS
+            if slowest - 1e-3 <= fps <= fastest + 1e-3 and (step is None or _on_step(1 / fps, 1 / fastest, step))
+        ]
     return rates
+
+
+def _on_step(period: float, first: float, step: float) -> bool:
+    """Whether `period` is `first + k * step`, allowing for drivers that round periods to their own unit."""
+    k = round((period - first) / step)
+    return abs(first + k * step - period) <= period * 1e-3
 
 
 def _choices(modes: list) -> list:

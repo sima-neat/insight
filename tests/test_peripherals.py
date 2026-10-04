@@ -588,6 +588,25 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(body["support"], {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []})
         self.assertEqual(body["warnings"], [NO_BUFFER_COUNT])
 
+    def test_a_stepwise_interval_offers_and_exports_only_rates_on_its_step(self):
+        # Exact periods, and UVC's 100 ns units, which round a 1/30 s step to 333333/10000000.
+        for unit, (first, last, step) in ((1, (1, 6, 1)), (10000000, (333333, 2000000, 333333))):
+            doc = c920()
+            doc["camera"]["modes"] = [dict(usb_mode("YUYV", 640, 480, [(1, 30)]), frame_intervals=[
+                {"width": 640, "height": 480, "intervals": [{
+                    "type": "stepwise", "minimum": {"numerator": first, "denominator": 30 if unit == 1 else unit},
+                    "maximum": {"numerator": last, "denominator": 30 if unit == 1 else unit},
+                    "step": {"numerator": step, "denominator": 30 if unit == 1 else unit}}]}])]
+            self.use(catalog(doc))
+            camera = item(self.refresh().get_json(), C920)
+            self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "YUYV"), 640, 480)["fps"]], [30, 15, 10, 5])
+            request = {"id": C920, "format": "YUYV", "width": 640, "height": 480}
+            self.assertEqual(self.export(**request, fps=15).status_code, 200)
+            for fps in (25, 20):
+                with self.subTest(unit=unit, fps=fps):
+                    response = self.export(**request, fps=fps)
+                    self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
     def test_export_keeps_a_fractional_catalog_rate_exact(self):
         mipi = imx477()
         for mode in mipi["camera"]["modes"]:
