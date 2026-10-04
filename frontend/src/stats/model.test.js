@@ -428,6 +428,10 @@ test('requests out before the first board arrives belong to that board', () => {
   assert.equal(fresh.switchTo(7), false)
   assert.equal(fresh.current(early), true)
   assert.equal(fresh.begin('state'), null)
+
+  const initiallyEmpty = createRequestGuard()
+  assert.equal(initiallyEmpty.switchTo(null), false)
+  assert.equal(initiallyEmpty.switchTo(7), true, 'selecting the first board after no target is a change')
 })
 
 test('a board switch is not blocked by a request still out to the previous board', () => {

@@ -271,13 +271,15 @@ export function payloadBoardLabel(payload) {
 export function createRequestGuard() {
   const active = new Map()
   let generation = null
+  let initialized = false
   return {
     running: (key) => active.has(key),
     /** True when the selected board changed to another one, not when it first arrived. */
     switchTo(next = null) {
       const value = next ?? null
-      if (value === generation) return false
-      const first = generation === null
+      if (initialized && value === generation) return false
+      const first = !initialized
+      initialized = true
       generation = value
       if (first) {
         // Requests sent before the page knew the board went to that board.
@@ -1106,8 +1108,8 @@ export function compareGroups(table) {
  * Whether any run differs from the baseline on this row. A published change decides it.
  * Where Sentinel publishes none - a run total, or a baseline that measured 0 - the two
  * values are compared directly: a metric that went from 0 to 5.9% has changed even though
- * there is no percentage to say by how much. A run with no value at all is not a change;
- * there is nothing to say it moved.
+ * there is no percentage to say by how much. Becoming available or unavailable is also a
+ * change; two unavailable cells still agree.
  */
 export function rowChanged(row) {
   const cells = row?.cells || []
@@ -1115,7 +1117,9 @@ export function rowChanged(row) {
   return cells.some((cell) => {
     if (cell === base) return false
     if (isNumber(cell.deltaPct)) return cell.deltaPct !== 0
-    return isNumber(cell.value) && isNumber(base?.value) && cell.value !== base.value
+    const present = isNumber(cell.value)
+    const basePresent = isNumber(base?.value)
+    return present !== basePresent || (present && cell.value !== base.value)
   })
 }
 

@@ -1018,7 +1018,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     return onReloadBoard ? onReloadBoard() : null
   }
 
-  function loadState({ quiet = false, refresh = false } = {}) {
+  function loadState({ quiet = false, refresh = false, supersede = false } = {}) {
     return send('state', {
       busy: quiet ? () => {} : setStateBusy,
       call: () => fetchSentinel(refresh),
@@ -1034,7 +1034,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       fail: (notice) => {
         setState(null)
         setStateError(notice)
-      }
+      },
+      supersede
     })
   }
 
@@ -1127,13 +1128,13 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       done: async (data, ticket) => {
         setInstallResult(data)
         onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
-        await loadState({ quiet: true })
+        await loadState({ quiet: true, supersede: true })
         if (fresh(ticket)) pollMetrics({ manual: true })
       },
       fail: (notice) => {
         setInstallError(notice)
         onError?.(notice.message)
-        loadState({ quiet: true })
+        loadState({ quiet: true, supersede: true })
       },
       action: 'install'
     })

@@ -72,7 +72,9 @@ test('a row changed when any run differs from the baseline, even without a perce
   assert.equal(rowChanged(rows.cpu_core_13_usage_pct), true)
   assert.equal(rowChanged(rows.duration_ms), true)
   assert.equal(rowChanged({ cells: [{ baseline: true, value: 5, deltaPct: null }, { baseline: false, value: 5, deltaPct: 0 }] }), false)
-  assert.equal(rowChanged({ cells: [{ baseline: true, value: 5, deltaPct: null }, { baseline: false, value: null, deltaPct: null }] }), false)
+  assert.equal(rowChanged({ cells: [{ baseline: true, value: 5, deltaPct: null }, { baseline: false, value: null, deltaPct: null }] }), true)
+  assert.equal(rowChanged({ cells: [{ baseline: true, value: null, deltaPct: null }, { baseline: false, value: 5, deltaPct: null }] }), true)
+  assert.equal(rowChanged({ cells: [{ baseline: true, value: null, deltaPct: null }, { baseline: false, value: null, deltaPct: null }] }), false)
 })
 
 test('the comparison view filters by group and says how many unchanged rows it hides, never silently', () => {
