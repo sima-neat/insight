@@ -615,7 +615,7 @@ export function previewBlock({ camera, selection, stale = false, session = null,
     }
   }
   if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
-  if (selectionTier(camera, selection) === 'unsupported') {
+  if (selectionTier(camera, selection) !== 'verified') {
     return { blocked: true, reason: `${modeLabel(selection)} is not validated on this board. Choose a verified or advertised mode.` }
   }
   if (camera.availability?.state === 'in_use') {

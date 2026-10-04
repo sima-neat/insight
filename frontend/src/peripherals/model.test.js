@@ -645,6 +645,14 @@ test('Start preview is blocked with the reason for every state that forbids it',
 
   const unvalidated = { ...imx477, formats: [format('NV12', 'NV12', true, support('advertised'), [size(1920, 1080, [30, 'unsupported'])])] }
   assert.match(previewBlock({ camera: unvalidated, selection: mipiMode, target: boardTarget }).reason, /is not validated on this board/)
+  // The backend previews verified modes only: a rate Core has not judged ('' from frame_intervals) or an
+  // advertised one must not leave Start enabled.
+  for (const tier of ['', 'advertised']) {
+    const unjudged = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [size(1920, 1080, [30, tier])])] }
+    const block = previewBlock({ camera: unjudged, selection: mipiMode, target: boardTarget })
+    assert.equal(block.blocked, true, `tier ${JSON.stringify(tier)}`)
+    assert.match(block.reason, /is not validated on this board/)
+  }
 
   assert.match(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }).reason, /In use by gst-launch-1\.0 \(pid 812\)/)
 
