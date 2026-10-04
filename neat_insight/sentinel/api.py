@@ -18,8 +18,8 @@ NAME_LIMIT = 80
 NOTE_LIMIT = 512
 
 cache = BoardCache()
-# Serializes this server's trace starts and stops, so no start through Insight lands between a
-# stop's active-trace check and the stop itself.
+# Serializes trace lifecycle changes made through this server. Sentinel performs an expected-id
+# stop atomically under its cross-process run-store lock.
 _TRACE_LOCK = Lock()
 _METRICS_LOCK = Lock()
 
@@ -299,18 +299,7 @@ def stop_trace():
         "Read the active trace of the board selected now, then stop it again.",
     )
     with _TRACE_LOCK:
-        if expected_trace is not None:
-            active = context.client.active_trace().get("trace")
-            active_id = active.get("id") if isinstance(active, dict) else None
-            if active_id is None or str(active_id) != expected_trace:
-                raise SentinelError(
-                    "trace_conflict",
-                    "The active trace changed since it was read, so no trace was stopped.",
-                    hint="Read the active trace again, then stop that trace.",
-                    expected_trace_id=expected_trace,
-                    active_trace_id=active_id,
-                )
-        stopped = context.client.stop_trace()
+        stopped = context.client.stop_trace(expected_trace)
     return context.payload(sentinel=_passthrough(stopped))
 
 

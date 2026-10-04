@@ -219,7 +219,26 @@ class SentinelClient(SentinelSocket):
             body["tags"] = tags
         return self.post("/v1/traces", body)
 
-    def stop_trace(self) -> dict:
+    def stop_trace(self, trace_id: Optional[str] = None) -> dict:
+        if trace_id is None:
+            return self.post("/v1/traces/stop", None)
+        try:
+            return self.post("/v1/traces/{}/stop".format(quote(trace_id, safe="")), None)
+        except SentinelError as error:
+            if error.code != "sentinel_schema" or error.extra.get("sentinel_status") != 404:
+                raise
+        # Older schema-1 daemons have no conditional route. Preserve their previous
+        # check-and-stop behavior; updated daemons make the operation cross-process atomic.
+        active = self.active_trace().get("trace")
+        active_id = active.get("id") if isinstance(active, dict) else None
+        if active_id is None or str(active_id) != trace_id:
+            raise SentinelError(
+                "trace_conflict",
+                "The active trace changed since it was read, so no trace was stopped.",
+                hint="Read the active trace again, then stop that trace.",
+                expected_trace_id=trace_id,
+                active_trace_id=active_id,
+            )
         return self.post("/v1/traces/stop", None)
 
     def runs(self) -> dict:

@@ -1036,20 +1036,19 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(self.transport.api_paths[-1], ("POST", "/v1/traces"))
 
     def test_stop_refuses_a_trace_that_replaced_the_one_on_screen(self):
-        # Another client stopped trace-a and started trace-b on the same board: the generation is unchanged.
-        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": {"id": "trace-b"}, "summary": None})
+        # Sentinel compares and stops under one run-store lock, including against other clients.
+        self.transport.answer("POST", "/v1/traces/trace-a/stop", 409, {"error": "active checkpoint changed"})
         for path in ("/api/sentinel/traces/stop?generation=1&trace_id=trace-a", "/api/sentinel/traces/stop?trace_id=trace-a"):
             body = self.refused(self.post(path), 409, "trace_conflict")
-            self.assertEqual((body["expected_trace_id"], body["active_trace_id"]), ("trace-a", "trace-b"))
-        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": None, "summary": None})
         self.assertEqual(self.post("/api/sentinel/traces/stop?trace_id=trace-a").get_json()["code"], "trace_conflict")
+        self.assertNotIn(("GET", "/v1/traces/active"), self.transport.api_paths)
         self.assertNotIn(("POST", "/v1/traces/stop"), self.transport.api_paths)
+        self.assertEqual(self.transport.api_paths[-1], ("POST", "/v1/traces/trace-a/stop"))
         self.refused(self.post("/api/sentinel/traces/stop?trace_id=%20"), 400, "invalid_request")
 
-    def test_stop_checks_the_displayed_trace_and_stops_it_under_the_trace_lock(self):
+    def test_stop_sends_the_displayed_trace_to_sentinel_under_the_trace_lock(self):
         held = []
-        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": {"id": "trace-a"}, "summary": None})
-        self.transport.answer("POST", "/v1/traces/stop", 200, {"schema": 1, "run": {"id": "trace-a"}})
+        self.transport.answer("POST", "/v1/traces/trace%20a%2F1/stop", 200, {"schema": 1, "run": {"id": "trace a/1"}})
         self.transport.answer("POST", "/v1/traces", 200, {"schema": 1, "trace": {"id": "trace-b"}})
         answer = self.transport._api_call
 
@@ -1057,9 +1056,21 @@ class SentinelApiTests(_ApiCase):
             held.append((argv[2], argv[3], api._TRACE_LOCK.locked()))
             return answer(argv)
         with mock.patch.object(self.transport, "_api_call", side_effect=locked_call):
-            self.assertEqual(self.post("/api/sentinel/traces/stop?generation=1&trace_id=trace-a").status_code, 200)
+            self.assertEqual(self.post("/api/sentinel/traces/stop?generation=1&trace_id=trace%20a%2F1").status_code, 200)
             self.assertEqual(self.post("/api/sentinel/traces", json={"name": "next"}).status_code, 200)
-        self.assertEqual(held, [("GET", "/v1/traces/active", True), ("POST", "/v1/traces/stop", True), ("POST", "/v1/traces", True)])
+        self.assertEqual(held, [("POST", "/v1/traces/trace%20a%2F1/stop", True), ("POST", "/v1/traces", True)])
+
+    def test_stop_keeps_older_schema_one_daemons_compatible_without_stopping_a_replacement(self):
+        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": {"id": "trace-a"}})
+        self.transport.answer("POST", "/v1/traces/stop", 200, {"schema": 1, "run": {"id": "trace-a"}})
+        self.assertEqual(self.post("/api/sentinel/traces/stop?trace_id=trace-a").status_code, 200)
+        self.assertEqual(self.transport.api_paths[-3:], [
+            ("POST", "/v1/traces/trace-a/stop"), ("GET", "/v1/traces/active"), ("POST", "/v1/traces/stop")])
+
+        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": {"id": "trace-b"}})
+        body = self.refused(self.post("/api/sentinel/traces/stop?trace_id=trace-a"), 409, "trace_conflict")
+        self.assertEqual((body["expected_trace_id"], body["active_trace_id"]), ("trace-a", "trace-b"))
+        self.assertNotEqual(self.transport.api_paths[-1], ("POST", "/v1/traces/stop"))
 
     def test_a_failure_names_the_board_generation_that_answered(self):
         self.session.generation = 4
