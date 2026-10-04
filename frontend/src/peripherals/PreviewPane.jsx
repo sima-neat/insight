@@ -75,7 +75,7 @@ export default function PreviewPane({ camera, selection, stale, target, state, o
             <button
               type="button"
               className="btn-tonal"
-              onClick={onStart}
+              onClick={() => onStart()}
               disabled={block.blocked}
               aria-describedby={block.blocked ? 'periph-preview-reason' : undefined}
             >
