@@ -150,23 +150,43 @@ class SshTransport:
         return self.host if self.port == 22 else f"[{self.host}]:{self.port}"
 
     def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
-        channel = self._open_channel()
+        deadline = time.monotonic() + timeout
+        channel = None
+        channel_cancelled = threading.Event()
+
+        def cancel_channel():
+            channel_cancelled.set()
+            threading.Thread(target=channel.close, daemon=True).start()
+
         try:
-            channel.settimeout(timeout)
-            channel.exec_command(shlex.join(argv))
+            channel = self._open_channel(deadline, argv, timeout)
+            self._arm(channel, deadline, argv, timeout)
+            self._run_bounded(
+                lambda: channel.exec_command(shlex.join(argv)), cancel_channel, deadline, argv, timeout
+            )
             if stdin:
-                channel.sendall(stdin)
-            channel.shutdown_write()
-            return self._collect(channel, argv, timeout)
+                self._sendall(channel, stdin, deadline, argv, timeout)
+            self._arm(channel, deadline, argv, timeout)
+            self._run_bounded(channel.shutdown_write, cancel_channel, deadline, argv, timeout)
+            return self._collect(channel, argv, deadline, timeout)
+        except BoardError as exc:
+            if channel is not None and exc.code == "timeout" and not channel_cancelled.is_set():
+                cancel_channel()
+            raise
         except socket.timeout:
+            if channel is not None:
+                cancel_channel()
             raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
         except (paramiko.SSHException, OSError, EOFError) as exc:
             self._drop()
             if self._closed:
                 raise self._stale() from exc
+            if time.monotonic() >= deadline:
+                raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
             raise self._unreachable(f"The SSH session to {self.host} failed: {exc}") from exc
         finally:
-            channel.close()
+            if channel is not None and not channel_cancelled.is_set():
+                cancel_channel()
 
     def remote_host_key_fingerprint(self) -> Optional[str]:
         transport = self._client.get_transport() if self._client else None
@@ -190,16 +210,18 @@ class SshTransport:
         self._closed = True
         self._drop()
 
-    def _collect(self, channel, argv: List[str], timeout: float) -> ExecResult:
-        deadline = time.monotonic() + timeout
+    def _collect(self, channel, argv: List[str], deadline: float, timeout: float) -> ExecResult:
         stdout, stderr, size = [], [], 0
         while True:
+            self._remaining(deadline, argv, timeout)
             progressed = False
             while channel.recv_ready():
+                self._arm(channel, deadline, argv, timeout)
                 stdout.append(channel.recv(65536))
                 size += len(stdout[-1])
                 progressed = True
             while channel.recv_stderr_ready():
+                self._arm(channel, deadline, argv, timeout)
                 stderr.append(channel.recv_stderr(65536))
                 size += len(stderr[-1])
                 progressed = True
@@ -208,20 +230,20 @@ class SshTransport:
             # Exit status is sent after all output, so both buffers are complete once it arrives.
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 return ExecResult(channel.recv_exit_status(), b"".join(stdout), b"".join(stderr))
-            if time.monotonic() >= deadline:
-                raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
             if not progressed:
-                time.sleep(0.01)
+                time.sleep(min(0.01, self._remaining(deadline, argv, timeout)))
 
-    def _open_channel(self):
-        with self._lock:
+    def _open_channel(self, deadline, argv, timeout):
+        if not self._lock.acquire(timeout=self._remaining(deadline, argv, timeout)):
+            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+        try:
             if self._closed:
                 raise self._stale()
             client = self._client
             transport = client.get_transport() if client else None
             if transport is None or not transport.is_active():
                 self._drop()
-                client = self._connect()
+                client = self._connect(deadline, argv, timeout)
                 # Store first, then check: a close() that ran before the store saw no client to
                 # close, so this check has to catch it (see close()).
                 self._client = client
@@ -229,14 +251,19 @@ class SshTransport:
                     self._drop()
                     raise self._stale()
             try:
-                return client.get_transport().open_session(timeout=self.connect_timeout)
+                remaining = self._remaining(deadline, argv, timeout)
+                return client.get_transport().open_session(timeout=min(self.connect_timeout, remaining))
             except (paramiko.SSHException, OSError, EOFError, AttributeError) as exc:
                 self._drop()
                 if self._closed:
                     raise self._stale() from exc
+                if time.monotonic() >= deadline:
+                    raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
                 raise self._unreachable(f"Could not open an SSH session on {self.host}: {exc}") from exc
+        finally:
+            self._lock.release()
 
-    def _connect(self) -> paramiko.SSHClient:
+    def _connect(self, deadline, argv, command_timeout) -> paramiko.SSHClient:
         self.known_hosts.parent.mkdir(parents=True, exist_ok=True)
         self.known_hosts.touch(exist_ok=True)
         client = paramiko.SSHClient()
@@ -244,20 +271,37 @@ class SshTransport:
         # With Insight's own known_hosts loaded, AutoAddPolicy only applies to unknown hosts
         # (accept-new); a changed key still raises BadHostKeyException.
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        timeout = self.connect_timeout
+        raw_socket = None
+        remaining = self._remaining(deadline, argv, command_timeout)
+        timeout = min(self.connect_timeout, remaining)
         try:
-            client.connect(
-                self.host,
-                port=self.port,
-                username=self.user,
-                timeout=timeout,
-                banner_timeout=timeout,
-                auth_timeout=timeout,
-                allow_agent=True,
-                look_for_keys=True,
-            )
+            raw_socket = self._connect_socket(deadline, argv, command_timeout)
+
+            def connect():
+                client.connect(
+                    self.host,
+                    port=self.port,
+                    username=self.user,
+                    sock=raw_socket,
+                    timeout=timeout,
+                    banner_timeout=timeout,
+                    auth_timeout=timeout,
+                    allow_agent=True,
+                    look_for_keys=True,
+                )
+
+            def cancel():
+                def close():
+                    raw_socket.close()
+                    client.close()
+
+                threading.Thread(target=close, daemon=True).start()
+
+            self._run_bounded(connect, cancel, deadline, argv, command_timeout)
         except paramiko.BadHostKeyException as exc:
             client.close()
+            raw_socket.close()
+            self._check_connect_deadline(deadline, argv, command_timeout)
             self.presented_host_key = exc.key
             raise BoardError(
                 "host_key_changed",
@@ -270,6 +314,8 @@ class SshTransport:
             ) from exc
         except paramiko.AuthenticationException as exc:
             client.close()
+            raw_socket.close()
+            self._check_connect_deadline(deadline, argv, command_timeout)
             command = f"ssh-copy-id -p {self.port} {shlex.quote(self.user)}@{shlex.quote(self.host)}"
             account = _local_account()
             if account == "root":
@@ -283,6 +329,9 @@ class SshTransport:
             ) from exc
         except socket.gaierror as exc:
             client.close()
+            if raw_socket is not None:
+                raw_socket.close()
+            self._check_connect_deadline(deadline, argv, command_timeout)
             raise BoardError(
                 "unreachable",
                 f"The host name {self.host} could not be resolved.",
@@ -290,9 +339,82 @@ class SshTransport:
             ) from exc
         except (paramiko.SSHException, OSError, EOFError) as exc:
             client.close()
+            if raw_socket is not None:
+                raw_socket.close()
+            self._check_connect_deadline(deadline, argv, command_timeout)
             raise self._unreachable(f"Could not connect to {self.host}:{self.port}: {exc}") from exc
+        self._check_connect_deadline(deadline, argv, command_timeout, client)
         client.get_transport().set_keepalive(15)
         return client
+
+    def _connect_socket(self, deadline, argv, timeout):
+        addresses = self._run_bounded(
+            lambda: socket.getaddrinfo(self.host, self.port, type=socket.SOCK_STREAM),
+            lambda: None,
+            deadline,
+            argv,
+            timeout,
+        )
+
+        last_error = None
+        for family, socktype, proto, _, address in addresses:
+            connection = socket.socket(family, socktype, proto)
+            try:
+                connection.settimeout(min(self.connect_timeout, self._remaining(deadline, argv, timeout)))
+                connection.connect(address)
+                return connection
+            except OSError as exc:
+                last_error = exc
+                connection.close()
+        raise last_error or socket.gaierror(f"Could not resolve {self.host}")
+
+    def _run_bounded(self, action, cancel, deadline, argv, timeout):
+        result = []
+        done = threading.Event()
+        remaining = self._remaining(deadline, argv, timeout)
+
+        def run():
+            try:
+                result.append((True, action()))
+            except BaseException as exc:
+                result.append((False, exc))
+            finally:
+                done.set()
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        if not done.wait(remaining):
+            # Cancellation is best-effort and must return without extending the caller's deadline.
+            cancel()
+            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+        succeeded, value = result[0]
+        if not succeeded:
+            raise value
+        return value
+
+    def _remaining(self, deadline, argv, timeout) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+        return remaining
+
+    def _arm(self, channel, deadline, argv, timeout) -> None:
+        channel.settimeout(self._remaining(deadline, argv, timeout))
+
+    def _sendall(self, channel, data, deadline, argv, timeout) -> None:
+        pending = memoryview(data)
+        while pending:
+            self._arm(channel, deadline, argv, timeout)
+            sent = channel.send(pending)
+            if sent <= 0:
+                raise paramiko.SSHException("SSH channel closed while sending input")
+            pending = pending[sent:]
+
+    def _check_connect_deadline(self, deadline, argv, timeout, client=None) -> None:
+        if time.monotonic() >= deadline:
+            if client is not None:
+                client.close()
+            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
 
     def _stale(self) -> BoardError:
         return BoardError(

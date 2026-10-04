@@ -81,13 +81,15 @@ class PeripheralClient:
         self.session = session
         self.socket_path = socket_path
 
-    def catalog(self) -> dict:
-        payload = self._call("GET", "/v1/peripherals")
+    def catalog(self, *, timeout=socket_client.TIMEOUT_SEC, command_timeout=None) -> dict:
+        payload = self._call("GET", "/v1/peripherals", timeout=timeout, command_timeout=command_timeout)
         self._validate_catalog(payload)
         return payload
 
     def refresh(self) -> dict:
-        expected_instance_id = self.catalog()["instance_id"]
+        initial = self.catalog()
+        expected_instance_id = initial["instance_id"]
+        observed_scan_sequence = initial["scan_sequence"]
         accepted = self._call("POST", "/v1/peripherals/refresh")
         target = accepted.get("target_scan_sequence")
         if accepted.get("accepted") is not True or not _non_negative_int(target):
@@ -95,7 +97,16 @@ class PeripheralClient:
 
         deadline = time.monotonic() + REFRESH_TIMEOUT_SEC
         while True:
-            catalog = self.catalog()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._raise_refresh_timeout(target, observed_scan_sequence)
+            catalog = self.catalog(
+                timeout=min(socket_client.TIMEOUT_SEC, remaining),
+                command_timeout=remaining,
+            )
+            observed_scan_sequence = catalog["scan_sequence"]
+            if time.monotonic() >= deadline:
+                self._raise_refresh_timeout(target, observed_scan_sequence)
             if catalog["instance_id"] != expected_instance_id:
                 raise BoardError(
                     "stale_snapshot",
@@ -106,21 +117,23 @@ class PeripheralClient:
                 )
             if catalog["scan_sequence"] >= target:
                 return catalog
-            if time.monotonic() >= deadline:
-                raise BoardError(
-                    "timeout",
-                    "SiMa Sentinel accepted the refresh but did not finish it within 45 seconds.",
-                    hint=STATUS_HINT,
-                    target_scan_sequence=target,
-                    observed_scan_sequence=catalog["scan_sequence"],
-                )
             time.sleep(min(REFRESH_POLL_SEC, max(deadline - time.monotonic(), 0)))
 
-    def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC) -> dict:
+    @staticmethod
+    def _raise_refresh_timeout(target, observed):
+        raise BoardError(
+            "timeout",
+            "SiMa Sentinel accepted the refresh but did not finish it within 45 seconds.",
+            hint=STATUS_HINT,
+            target_scan_sequence=target,
+            observed_scan_sequence=observed,
+        )
+
+    def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC, command_timeout=None) -> dict:
         if self.session.target.mode == "local":
             status, text = self._call_local(method, path, body, timeout)
         else:
-            status, text = self._call_remote(method, path, body, timeout)
+            status, text = self._call_remote(method, path, body, timeout, command_timeout)
         self.session.require_current()
         try:
             parsed = json.loads(text) if text else None
@@ -159,7 +172,7 @@ class PeripheralClient:
         except OSError as exc:
             raise self._socket_error(socket_client.socket_failure(exc), str(exc)) from exc
 
-    def _call_remote(self, method, path, body, timeout):
+    def _call_remote(self, method, path, body, timeout, command_timeout):
         argv = [
             "python3",
             "-",
@@ -169,7 +182,11 @@ class PeripheralClient:
             self.socket_path,
             str(timeout),
         ]
-        result = self.session.transport.exec(argv, timeout=timeout + 15.0, stdin=CLIENT_PATH.read_bytes())
+        result = self.session.transport.exec(
+            argv,
+            timeout=command_timeout if command_timeout is not None else timeout + 15.0,
+            stdin=CLIENT_PATH.read_bytes(),
+        )
         if result.exit_code == 127:
             raise BoardError(
                 "tool_missing",

@@ -261,6 +261,35 @@ class PeripheralClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.extra["expected_instance_id"], before["instance_id"])
         self.assertEqual(ctx.exception.extra["observed_instance_id"], "daemon-2")
 
+    def test_refresh_does_not_accept_a_poll_that_finishes_after_its_deadline(self):
+        replies = [
+            (200, json.dumps(catalog(scan_sequence=3))),
+            (200, json.dumps({"accepted": True, "target_scan_sequence": 5})),
+            (200, json.dumps(catalog(scan_sequence=5))),
+        ]
+        with mock.patch.object(socket_client, "request", side_effect=replies) as request, mock.patch(
+            "neat_insight.peripherals.client.time.monotonic", side_effect=(0.0, 44.9, 45.1)
+        ):
+            with self.assertRaises(BoardError) as ctx:
+                PeripheralClient(FakeSession()).refresh()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertEqual(ctx.exception.extra["observed_scan_sequence"], 5)
+        self.assertAlmostEqual(request.call_args_list[-1].kwargs["timeout"], 0.1)
+
+    def test_remote_refresh_bounds_the_helper_and_ssh_command_by_the_deadline(self):
+        responses = (catalog(scan_sequence=3), {"accepted": True, "target_scan_sequence": 5}, catalog(scan_sequence=5))
+        transport = mock.Mock()
+        transport.exec.side_effect = [
+            ExecResult(0, json.dumps({"status": 200, "text": json.dumps(response)}).encode(), b"")
+            for response in responses
+        ]
+        with mock.patch("neat_insight.peripherals.client.time.monotonic", side_effect=(0.0, 44.9, 45.1)):
+            with self.assertRaises(BoardError):
+                PeripheralClient(FakeSession("ssh", transport)).refresh()
+        argv = transport.exec.call_args_list[-1].args[0]
+        self.assertAlmostEqual(float(argv[-1]), 0.1)
+        self.assertAlmostEqual(transport.exec.call_args_list[-1].kwargs["timeout"], 0.1)
+
     def test_remote_access_runs_only_the_stdlib_socket_helper(self):
         response = catalog()
         envelope = json.dumps({"status": 200, "text": json.dumps(response)}).encode()

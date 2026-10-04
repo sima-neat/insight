@@ -281,7 +281,8 @@ class SshTransportErrorTests(unittest.TestCase):
         self.transport = SshTransport("192.168.2.2", 22, "sima", Path(self.tmp.name) / "known_hosts")
 
     def _connect_raising(self, exc):
-        with mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc):
+        with mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc):
             with self.assertRaises(BoardError) as ctx:
                 self.transport.exec(["true"], timeout=1)
         return ctx.exception
@@ -298,6 +299,94 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         self.assertEqual(ctx.exception.code, "stale_snapshot")
         connect.assert_not_called()
+
+    def test_exec_timeout_includes_waiting_for_the_transport_lock(self):
+        self.transport._lock.acquire()
+        started = time.monotonic()
+        try:
+            with self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=0.05)
+        finally:
+            self.transport._lock.release()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_exec_uses_one_deadline_for_command_launch_and_output(self):
+        clock = [0.0]
+
+        class SlowChannel:
+            def settimeout(self, timeout):
+                pass
+
+            def exec_command(self, command):
+                clock[0] = 0.15
+
+            def shutdown_write(self):
+                pass
+
+            def recv_ready(self):
+                return False
+
+            def recv_stderr_ready(self):
+                return False
+
+            def exit_status_ready(self):
+                return False
+
+            def close(self):
+                pass
+
+        with mock.patch.object(self.transport, "_open_channel", return_value=SlowChannel()), \
+             mock.patch.object(transport_module.time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(
+                 transport_module.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)
+             ), \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["true"], timeout=0.2)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertAlmostEqual(clock[0], 0.2)
+
+    def test_exec_timeout_interrupts_an_unacknowledged_command(self):
+        waiting = threading.Event()
+
+        class StuckChannel:
+            def settimeout(self, timeout):
+                pass
+
+            def exec_command(self, command):
+                waiting.wait()
+
+            def shutdown_write(self):
+                pass
+
+            def close(self):
+                waiting.set()
+
+        channel = StuckChannel()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), \
+             mock.patch.object(self.transport, "_drop") as drop, \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["true"], timeout=0.05)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertTrue(waiting.wait(1))
+        drop.assert_not_called()
+
+    def test_hostname_resolution_is_bounded_by_the_exec_deadline(self):
+        release = threading.Event()
+
+        def stalled_resolution(*args, **kwargs):
+            release.wait(1)
+            return []
+
+        started = time.monotonic()
+        try:
+            with mock.patch.object(socket, "getaddrinfo", side_effect=stalled_resolution), \
+                 self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=0.05)
+        finally:
+            release.set()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertLess(time.monotonic() - started, 0.2)
 
     def test_auth_failure_suggests_ssh_copy_id(self):
         error = self._connect_raising(paramiko.AuthenticationException("denied"))
@@ -328,6 +417,7 @@ class SshTransportErrorTests(unittest.TestCase):
                 errors.append(exc.code)
 
         with mock.patch.object(paramiko.SSHClient, "connect", side_effect=slow_connect), \
+             mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
              mock.patch.object(paramiko.SSHClient, "get_transport", return_value=mock.Mock()), \
              mock.patch.object(paramiko.SSHClient, "close") as close:
             worker = threading.Thread(target=run)
