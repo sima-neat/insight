@@ -158,6 +158,15 @@ class BoardApiTests(unittest.TestCase):
                 self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
                 self.assertIsNone(self.client.get("/api/board").get_json()["saved"])
 
+    def test_a_non_string_host_or_user_is_refused_not_coerced(self):
+        # 2130706433 is 127.0.0.1 as an integer; str() would save it as a host the resolver accepts.
+        for body in ({"host": 2130706433}, {"host": True}, {"host": ["10.1.1.1"]},
+                     {"host": "10.1.1.1", "user": 123}, {"host": "10.1.1.1", "user": False}):
+            with self.subTest(body=body):
+                response = self.client.post("/api/board/select", json={"port": 22, **body})
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+                self.assertIsNone(self.client.get("/api/board").get_json()["saved"])
+
     def test_reset_must_be_a_boolean_and_leaves_the_target_alone(self):
         self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 22, "user": "sima"})
         for reset in ("false", 1, None, []):
