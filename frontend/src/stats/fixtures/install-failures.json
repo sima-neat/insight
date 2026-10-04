@@ -10,22 +10,8 @@
   "daemon_absent": {
     "body": {
       "available": false,
-      "board": {
-        "build_version": "2.1.3",
-        "fingerprint": "fp-1",
-        "hostname": "modalix",
-        "label": "sima@192.168.2.2",
-        "machine": "modalix",
-        "source": "manual"
-      },
-      "daemon": {
-        "healthy": false,
-        "installed": false,
-        "service": "inactive",
-        "sima_cli": "/usr/bin/sima-cli",
-        "socket": false,
-        "socket_path": "/run/simaai-sentinel/api.sock"
-      },
+      "board": {"build_version": "2.1.3", "fingerprint": "fp-1", "hostname": "modalix", "label": "sima@192.168.2.2", "machine": "modalix", "source": "manual"},
+      "daemon": {"healthy": false, "installed": false, "service": "inactive", "sima_cli": "/usr/bin/sima-cli", "socket": false, "socket_path": "/run/simaai-sentinel/api.sock"},
       "generation": 1,
       "health": null,
       "schema": 1,
@@ -44,31 +30,13 @@
   "daemon_stopped": {
     "body": {
       "available": false,
-      "board": {
-        "build_version": "2.1.3",
-        "fingerprint": "fp-1",
-        "hostname": "modalix",
-        "label": "sima@192.168.2.2",
-        "machine": "modalix",
-        "source": "manual"
-      },
-      "daemon": {
-        "healthy": false,
-        "installed": true,
-        "service": "inactive",
-        "sima_cli": "/usr/bin/sima-cli",
-        "socket": false,
-        "socket_path": "/run/simaai-sentinel/api.sock"
-      },
+      "board": {"build_version": "2.1.3", "fingerprint": "fp-1", "hostname": "modalix", "label": "sima@192.168.2.2", "machine": "modalix", "source": "manual"},
+      "daemon": {"healthy": false, "installed": true, "service": "inactive", "sima_cli": "/usr/bin/sima-cli", "socket": false, "socket_path": "/run/simaai-sentinel/api.sock"},
       "generation": 1,
       "health": null,
       "schema": 1,
       "status": {
-        "error": {
-          "code": "sentinel_stopped",
-          "error": "The simaai-sentinel service is installed but inactive.",
-          "hint": "Start it on the board with `sudo systemctl start simaai-sentinel`."
-        },
+        "error": {"code": "sentinel_stopped", "error": "The simaai-sentinel service is installed but inactive.", "hint": "Start it on the board with `sudo systemctl start simaai-sentinel`."},
         "state": "stopped"
       },
       "version": null
@@ -105,22 +73,8 @@
   "sima_cli_missing_state": {
     "body": {
       "available": false,
-      "board": {
-        "build_version": "2.1.3",
-        "fingerprint": "fp-1",
-        "hostname": "modalix",
-        "label": "sima@192.168.2.2",
-        "machine": "modalix",
-        "source": "manual"
-      },
-      "daemon": {
-        "healthy": false,
-        "installed": false,
-        "service": "inactive",
-        "sima_cli": null,
-        "socket": false,
-        "socket_path": "/run/simaai-sentinel/api.sock"
-      },
+      "board": {"build_version": "2.1.3", "fingerprint": "fp-1", "hostname": "modalix", "label": "sima@192.168.2.2", "machine": "modalix", "source": "manual"},
+      "daemon": {"healthy": false, "installed": false, "service": "inactive", "sima_cli": null, "socket": false, "socket_path": "/run/simaai-sentinel/api.sock"},
       "generation": 1,
       "health": null,
       "schema": 1,

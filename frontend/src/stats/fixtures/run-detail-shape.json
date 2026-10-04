@@ -36,36 +36,9 @@
       "unit": "%",
       "warn": 80.0
     },
-    {
-      "critical": 95.0,
-      "description": "Linux CPU core 0 utilization.",
-      "group": "CPU",
-      "key": "cpu_core_0_usage_pct",
-      "label": "CPU core 0 usage",
-      "short": "c0",
-      "unit": "%",
-      "warn": 80.0
-    },
-    {
-      "critical": 95.0,
-      "description": "Linux CPU core 11 utilization.",
-      "group": "CPU",
-      "key": "cpu_core_11_usage_pct",
-      "label": "CPU core 11 usage",
-      "short": "c11",
-      "unit": "%",
-      "warn": 80.0
-    },
-    {
-      "critical": null,
-      "description": "eMMC used space.",
-      "group": "Disk",
-      "key": "disk_emmc_used_mb",
-      "label": "eMMC disk used MB",
-      "short": "eMMCMB",
-      "unit": "MB",
-      "warn": null
-    },
+    {"critical": 95.0, "description": "Linux CPU core 0 utilization.", "group": "CPU", "key": "cpu_core_0_usage_pct", "label": "CPU core 0 usage", "short": "c0", "unit": "%", "warn": 80.0},
+    {"critical": 95.0, "description": "Linux CPU core 11 utilization.", "group": "CPU", "key": "cpu_core_11_usage_pct", "label": "CPU core 11 usage", "short": "c11", "unit": "%", "warn": 80.0},
+    {"critical": null, "description": "eMMC used space.", "group": "Disk", "key": "disk_emmc_used_mb", "label": "eMMC disk used MB", "short": "eMMCMB", "unit": "MB", "warn": null},
     {
       "critical": null,
       "description": "Latest valid total PMBus POUT reading across configured board rails.",

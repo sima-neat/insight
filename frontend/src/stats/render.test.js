@@ -1,7 +1,6 @@
-// The Runs panel as React renders it, for what markup alone decides: whether a keyboard
-// or touch reader can reach the reason a comparison cell shows no change, and whether a
-// trace from another board can be stopped. StatsView.jsx is bundled with the esbuild that
-// Vite already ships, and rendered to static markup.
+// The Runs panel as React renders it, for what markup alone decides: whether a keyboard or touch reader can reach the reason a
+// comparison cell shows no change, and whether a trace from another board can be stopped. StatsView.jsx is bundled with the
+// esbuild that Vite already ships, and rendered to static markup.
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import test from 'node:test'
@@ -13,26 +12,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import { DELTA_ABSENCE, runList, traceModel } from './model.js'
 
-const RECORDING = {
-  generation: 3,
-  board: { label: 'sima@192.168.2.2' },
-  sentinel: { trace: { name: 'baseline', started_at: '2026-09-24T11:59:00Z' }, summary: { samples: 4 } }
-}
-
+const RECORDING = { generation: 3, board: { label: 'sima@192.168.2.2' }, sentinel: { trace: { name: 'baseline', started_at: '2026-09-24T11:59:00Z' }, summary: { samples: 4 } } }
 const COMPARE = JSON.parse(readFileSync(new URL('./fixtures/compare-shape.json', import.meta.url), 'utf8'))
 
 async function loadStatsView() {
-  const entry = fileURLToPath(new URL('../StatsView.jsx', import.meta.url))
   const bundled = await build({
-    entryPoints: [entry],
-    bundle: true,
-    write: false,
-    format: 'esm',
-    platform: 'node',
-    jsx: 'automatic',
-    external: ['react', 'react-dom', 'react/jsx-runtime'],
-    loader: { '.svg': 'text', '.png': 'empty', '.css': 'empty' },
-    logLevel: 'silent'
+    entryPoints: [fileURLToPath(new URL('../StatsView.jsx', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node',
+    jsx: 'automatic', external: ['react', 'react-dom', 'react/jsx-runtime'], loader: { '.svg': 'text', '.png': 'empty', '.css': 'empty' }, logLevel: 'silent'
   })
   // Inside node_modules so the bundle's bare `react` imports resolve like the app's.
   const dir = fileURLToPath(new URL('../../node_modules/.cache/stats-render-test/', import.meta.url))
@@ -47,44 +33,12 @@ const noop = () => {}
 function runsPanel(RunsPanel, overrides = {}) {
   return renderToStaticMarkup(
     createElement(RunsPanel, {
-      trace: traceModel(null),
-      traceStale: false,
-      traceBusy: false,
-      traceError: null,
-      form: { name: '', note: '', tags: '' },
-      formError: '',
-      onFormChange: noop,
-      onStart: noop,
-      onStop: noop,
-      onRefreshTrace: noop,
-      runs: runList(null),
-      runsPayload: null,
-      definitions: null,
-      stale: false,
-      busy: false,
-      error: null,
-      selected: [],
-      openRef: '',
-      detail: null,
-      detailError: null,
-      detailBusy: false,
-      detailStale: false,
-      compare: { sentinel: COMPARE },
-      compareError: null,
-      compareBusy: false,
-      compareStale: false,
-      compareOpen: true,
-      deleteBusy: false,
-      deleteResult: null,
-      now: Date.parse('2026-09-24T12:00:00Z'),
-      onRefresh: noop,
-      onToggle: noop,
-      onOpen: noop,
-      onCompare: noop,
-      onDelete: noop,
-      onClearCompare: noop,
-      onDropMissing: noop,
-      onToggleCompare: noop,
+      trace: traceModel(null), traceStale: false, traceBusy: false, traceError: null, form: { name: '', note: '', tags: '' }, formError: '',
+      onFormChange: noop, onStart: noop, onStop: noop, onRefreshTrace: noop, runs: runList(null), runsPayload: null, definitions: null,
+      stale: false, busy: false, error: null, selected: [], openRef: '', detail: null, detailError: null, detailBusy: false, detailStale: false,
+      compare: { sentinel: COMPARE }, compareError: null, compareBusy: false, compareStale: false, compareOpen: true, deleteBusy: false,
+      deleteResult: null, now: Date.parse('2026-09-24T12:00:00Z'), onRefresh: noop, onToggle: noop, onOpen: noop, onCompare: noop,
+      onDelete: noop, onClearCompare: noop, onDropMissing: noop, onToggleCompare: noop,
       ...overrides
     })
   )
@@ -98,9 +52,7 @@ function compareCells(html) {
 }
 
 /** Markup with every visually hidden span removed: what a sighted reader can see. */
-function visible(html) {
-  return html.replace(/<span class="sr-only">[^<]*<\/span>/g, '')
-}
+const visible = (html) => html.replace(/<span class="sr-only">[^<]*<\/span>/g, '')
 
 const { RunsPanel } = await loadStatsView()
 
@@ -116,12 +68,9 @@ test('the reason a comparison cell shows no change can be reached without a poin
     seen.add(reason[0])
     // Something in the cell takes focus, so Tab and a tap reach it, not only a hover...
     assert.match(cell, /<button type="button"[^>]*>/, cell)
-    // ...and what it reveals is text on the page, not a title attribute a keyboard or
-    // touch reader never sees.
+    // ...and what it reveals is text on the page, not a title attribute a keyboard or touch reader never sees.
     assert.doesNotMatch(cell, /title="/, cell)
-    const shown = visible(cell)
-    const text = reason[1]
-    assert.ok(shown.toLowerCase().includes(text.slice(0, -1).toLowerCase()), `${reason[0]} is not visible: ${cell}`)
+    assert.ok(visible(cell).toLowerCase().includes(reason[1].slice(0, -1).toLowerCase()), `${reason[0]} is not visible: ${cell}`)
   }
   assert.ok(seen.has('baseline_zero'))
 })

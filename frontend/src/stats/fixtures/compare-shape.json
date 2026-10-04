@@ -60,62 +60,13 @@
       "duration_ms": 34379,
       "energy_joules": 274.91558403125,
       "metrics": {
-        "power_current_watts": {
-          "count": 17,
-          "maximum": 8.90625,
-          "mean": 8.586397058823529,
-          "median": 8.5625,
-          "minimum": 8.53125,
-          "p95": 8.8125
-        },
-        "cpu_core_0_usage_pct": {
-          "count": 17,
-          "maximum": 0.995024875621886,
-          "mean": 0.17603160667251944,
-          "median": 0.0,
-          "minimum": 0.0,
-          "p95": 0.5000000000000004
-        },
-        "cpu_core_11_usage_pct": {
-          "count": 17,
-          "maximum": 0.0,
-          "mean": 0.0,
-          "median": 0.0,
-          "minimum": 0.0,
-          "p95": 0.0
-        },
-        "linux_mem_used_pct": {
-          "count": 17,
-          "maximum": 8.777183865150413,
-          "mean": 8.615191638922903,
-          "median": 8.610158356341836,
-          "minimum": 8.392667566917824,
-          "p95": 8.768640530243074
-        },
-        "rtsn_6": {
-          "count": 17,
-          "maximum": 40.00236816406249,
-          "mean": 39.18936695772057,
-          "median": 39.319848632812466,
-          "minimum": 38.12543945312501,
-          "p95": 40.00236816406249
-        },
-        "disk_emmc_used_mb": {
-          "count": 17,
-          "maximum": 21113.60546875,
-          "mean": 21113.583869485294,
-          "median": 21113.58203125,
-          "minimum": 21113.56640625,
-          "p95": 21113.6015625
-        },
-        "cpu_core_13_usage_pct": {
-          "count": 17,
-          "maximum": 46.766169154228855,
-          "mean": 5.91190441525744,
-          "median": 0.0,
-          "minimum": 0.0,
-          "p95": 27.63819095477387
-        }
+        "power_current_watts": {"count": 17, "maximum": 8.90625, "mean": 8.586397058823529, "median": 8.5625, "minimum": 8.53125, "p95": 8.8125},
+        "cpu_core_0_usage_pct": {"count": 17, "maximum": 0.995024875621886, "mean": 0.17603160667251944, "median": 0.0, "minimum": 0.0, "p95": 0.5000000000000004},
+        "cpu_core_11_usage_pct": {"count": 17, "maximum": 0.0, "mean": 0.0, "median": 0.0, "minimum": 0.0, "p95": 0.0},
+        "linux_mem_used_pct": {"count": 17, "maximum": 8.777183865150413, "mean": 8.615191638922903, "median": 8.610158356341836, "minimum": 8.392667566917824, "p95": 8.768640530243074},
+        "rtsn_6": {"count": 17, "maximum": 40.00236816406249, "mean": 39.18936695772057, "median": 39.319848632812466, "minimum": 38.12543945312501, "p95": 40.00236816406249},
+        "disk_emmc_used_mb": {"count": 17, "maximum": 21113.60546875, "mean": 21113.583869485294, "median": 21113.58203125, "minimum": 21113.56640625, "p95": 21113.6015625},
+        "cpu_core_13_usage_pct": {"count": 17, "maximum": 46.766169154228855, "mean": 5.91190441525744, "median": 0.0, "minimum": 0.0, "p95": 27.63819095477387}
       },
       "samples": 17
     },
@@ -123,62 +74,13 @@
       "duration_ms": 6667,
       "energy_joules": 51.533604984375,
       "metrics": {
-        "power_current_watts": {
-          "count": 4,
-          "maximum": 8.875,
-          "mean": 8.6171875,
-          "median": 8.53125,
-          "minimum": 8.53125,
-          "p95": 8.875
-        },
-        "cpu_core_0_usage_pct": {
-          "count": 4,
-          "maximum": 0.990099009900991,
-          "mean": 0.3719028619279835,
-          "median": 0.497512437810943,
-          "minimum": 0.0,
-          "p95": 0.990099009900991
-        },
-        "cpu_core_11_usage_pct": {
-          "count": 4,
-          "maximum": 0.0,
-          "mean": 0.0,
-          "median": 0.0,
-          "minimum": 0.0,
-          "p95": 0.0
-        },
-        "linux_mem_used_pct": {
-          "count": 4,
-          "maximum": 8.812681752827412,
-          "mean": 8.695293682104495,
-          "median": 8.774667223859879,
-          "minimum": 8.547441006285643,
-          "p95": 8.812681752827412
-        },
-        "rtsn_6": {
-          "count": 4,
-          "maximum": 40.3436279296875,
-          "mean": 39.78908081054688,
-          "median": 39.83173828125001,
-          "minimum": 39.490478515625,
-          "p95": 40.3436279296875
-        },
-        "disk_emmc_used_mb": {
-          "count": 4,
-          "maximum": 21113.640625,
-          "mean": 21113.638671875,
-          "median": 21113.640625,
-          "minimum": 21113.63671875,
-          "p95": 21113.640625
-        },
-        "cpu_core_13_usage_pct": {
-          "count": 4,
-          "maximum": 0.0,
-          "mean": 0.0,
-          "median": 0.0,
-          "minimum": 0.0,
-          "p95": 0.0
-        }
+        "power_current_watts": {"count": 4, "maximum": 8.875, "mean": 8.6171875, "median": 8.53125, "minimum": 8.53125, "p95": 8.875},
+        "cpu_core_0_usage_pct": {"count": 4, "maximum": 0.990099009900991, "mean": 0.3719028619279835, "median": 0.497512437810943, "minimum": 0.0, "p95": 0.990099009900991},
+        "cpu_core_11_usage_pct": {"count": 4, "maximum": 0.0, "mean": 0.0, "median": 0.0, "minimum": 0.0, "p95": 0.0},
+        "linux_mem_used_pct": {"count": 4, "maximum": 8.812681752827412, "mean": 8.695293682104495, "median": 8.774667223859879, "minimum": 8.547441006285643, "p95": 8.812681752827412},
+        "rtsn_6": {"count": 4, "maximum": 40.3436279296875, "mean": 39.78908081054688, "median": 39.83173828125001, "minimum": 39.490478515625, "p95": 40.3436279296875},
+        "disk_emmc_used_mb": {"count": 4, "maximum": 21113.640625, "mean": 21113.638671875, "median": 21113.640625, "minimum": 21113.63671875, "p95": 21113.640625},
+        "cpu_core_13_usage_pct": {"count": 4, "maximum": 0.0, "mean": 0.0, "median": 0.0, "minimum": 0.0, "p95": 0.0}
       },
       "samples": 4
     }
