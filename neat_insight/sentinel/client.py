@@ -184,19 +184,6 @@ _CLIENT_ERRORS = {
 }
 
 
-class Response:
-    """One Sentinel API answer: the daemon's HTTP status and its parsed JSON body."""
-
-    def __init__(self, status: int, body, text: str):
-        self.status = status
-        self.body = body
-        self.text = text
-
-    @property
-    def ok(self) -> bool:
-        return 200 <= self.status < 300
-
-
 class SentinelClient(SentinelSocket):
     """Talks to one board's Sentinel daemon over its unix socket."""
 
@@ -243,32 +230,29 @@ class SentinelClient(SentinelSocket):
     # --- transport ---------------------------------------------------------
 
     def get(self, path: str) -> dict:
-        return self.checked(self.call("GET", path))
+        return self._json("GET", path)
 
     def post(self, path: str, body) -> dict:
-        return self.checked(self.call("POST", path, body))
+        return self._json("POST", path, body)
 
-    def call(self, method: str, path: str, body=None) -> Response:
-        """Make one request from the board and return its status and body, whatever the status."""
+    def _json(self, method: str, path: str, body=None) -> dict:
+        """Make one request from the board and return the body of a successful, schema-1 response,
+        or raise the failure it describes."""
         status, text = self.request(method, path, body, TIMEOUT_SEC)
         try:
             parsed = json.loads(text) if text else None
         except ValueError:
             parsed = None
-        return Response(status, parsed, text)
-
-    def checked(self, response: Response) -> dict:
-        """Return the body of a successful, schema-1 response, or raise the failure it describes."""
-        if not response.ok:
-            raise self._upstream_error(response)
-        if not isinstance(response.body, dict):
+        if not 200 <= status < 300:
+            raise self._upstream_error(status, parsed, text)
+        if not isinstance(parsed, dict):
             raise SentinelError(
                 "sentinel_failed",
                 "Sentinel returned a response Insight cannot read.",
                 hint="Check `systemctl status simaai-sentinel` on the board; its API should answer JSON.",
-                detail=response.text[:DETAIL_LIMIT],
+                detail=text[:DETAIL_LIMIT],
             )
-        schema = response.body.get("schema")
+        schema = parsed.get("schema")
         if schema != SCHEMA:
             raise SentinelError(
                 "sentinel_schema",
@@ -279,12 +263,12 @@ class SentinelClient(SentinelSocket):
                 schema=schema,
                 expected_schema=SCHEMA,
             )
-        return response.body
+        return parsed
 
-    def _upstream_error(self, response: Response) -> SentinelError:
-        detail = response.body.get("error") if isinstance(response.body, dict) else None
-        detail = (detail or response.text or "").strip()[:DETAIL_LIMIT]
-        code = UPSTREAM_CODES.get(response.status, "sentinel_failed")
+    def _upstream_error(self, status: int, parsed, text: str) -> SentinelError:
+        detail = parsed.get("error") if isinstance(parsed, dict) else None
+        detail = (detail or text or "").strip()[:DETAIL_LIMIT]
+        code = UPSTREAM_CODES.get(status, "sentinel_failed")
         hints = {
             "invalid_request": "Correct the request and try again.",
             "not_found": "List runs and use a name or id Sentinel reports.",
@@ -293,7 +277,7 @@ class SentinelClient(SentinelSocket):
         }
         return SentinelError(
             code,
-            detail or "Sentinel rejected the request with HTTP {}.".format(response.status),
+            detail or "Sentinel rejected the request with HTTP {}.".format(status),
             hint=hints.get(code, "Check `systemctl status simaai-sentinel` and the daemon's log on the board."),
-            sentinel_status=response.status,
+            sentinel_status=status,
         )

@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 from flask import Flask
 
-from neat_insight.board import BoardError, ExecResult
+from neat_insight.board import BoardError, ExecResult, board_bp
 from neat_insight.sentinel import api, cache_history, install, metrics, runs, socket_client, state
 from neat_insight.sentinel import client as sentinel_client
 from neat_insight.sentinel.api import sentinel_bp
@@ -921,6 +921,7 @@ class _ApiCase(unittest.TestCase):
         self.session = FakeSession(self.transport)
         self.manager = FakeManager(self.session)
         app = Flask(__name__)
+        app.register_blueprint(board_bp)
         app.register_blueprint(sentinel_bp)
         app.extensions["neat_board"] = self.manager
         self.client = app.test_client()

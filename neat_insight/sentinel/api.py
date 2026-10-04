@@ -2,6 +2,7 @@
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
+from neat_insight.board.manager import board_summary
 from neat_insight.sentinel import cache_history, install, metrics as metric_view, runs as saved_runs
 from neat_insight.sentinel.client import SCHEMA, SentinelClient
 from neat_insight.sentinel.errors import SentinelError
@@ -23,12 +24,6 @@ def _no_store(response):
     return response
 
 
-@sentinel_bp.errorhandler(BoardError)
-def _board_error(err: BoardError):
-    """Every route answers a board or Sentinel failure in the board error shape, with its status."""
-    return err.to_dict(), err.status
-
-
 class _Context:
     """The selected board, its cache key, and a client for its Sentinel daemon."""
 
@@ -38,28 +33,14 @@ class _Context:
         self.key = cache.key(self.session, self.identity)
         self.client = SentinelClient(self.session)
 
-    @property
-    def board(self) -> dict:
-        return {
-            "label": self.session.target.label,
-            "source": self.session.target.source,
-            **{key: self.identity.get(key) for key in ("hostname", "machine", "build_version", "fingerprint")},
-        }
-
     def payload(self, **extra) -> dict:
-        return dict({"board": self.board, "generation": self.session.generation}, **extra)
+        board = board_summary(self.session, self.identity)
+        return dict({"board": board, "generation": self.session.generation}, **extra)
 
-    def daemon(self) -> dict:
-        state = cache.get(self.key, "daemon")
-        if state is None:
-            state = cache.record(self.key, "daemon", install.status(self.session), STATUS_TTL_SEC)
-        return state
-
-    def definitions(self) -> dict:
-        definitions = cache.get(self.key, "definitions")
-        if definitions is None:
-            definitions = cache.record(self.key, "definitions", self.client.metrics(), DEFINITIONS_TTL_SEC)
-        return definitions
+    def cached(self, name: str, ttl: float, read):
+        """This board's cached `name`, read again once it is `ttl` seconds old."""
+        value = cache.get(self.key, name)
+        return value if value is not None else cache.record(self.key, name, read(), ttl)
 
 
 def _invalid(message: str, hint: str) -> SentinelError:
@@ -161,7 +142,7 @@ def _passthrough(body: dict) -> dict:
 def get_sentinel():
     """Return Sentinel's availability, version and daemon health for the selected board."""
     context = _Context()
-    daemon = context.daemon()
+    daemon = context.cached("daemon", STATUS_TTL_SEC, lambda: install.status(context.session))
     problem = install.describe(daemon)
     health, state, error = None, "ready", None
     if problem:
@@ -206,7 +187,8 @@ def get_metrics():
     # First read of this board, or the first after a gap in polling: take the daemon's own window.
     if cache.needs_seed(context.key):
         history = cache.seed(context.key, cache_history.read(context.session))
-    return context.payload(**metric_view.build(context.definitions(), latest, history, limit))
+    definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
+    return context.payload(**metric_view.build(definitions, latest, history, limit))
 
 
 # API: report the trace Sentinel is recording, if any.
