@@ -190,6 +190,33 @@ class BoardCheckTests(unittest.TestCase):
         self.assertNotIn("libcamerasrc", result)
         self.assertEqual(result["tools"], {"media-ctl": True, "fuser": True})
 
+    def test_a_media_graph_that_cannot_be_read_leaves_an_idle_camera_unknown(self):
+        """Without the graph, a process holding only /dev/videoN would be missed, so idle is not proof of available."""
+        for media_ctl, run_media_ctl in ((None, None), ("/usr/bin/media-ctl", (1, "", "No such device"))):
+            def run(argv, timeout=10):
+                return run_media_ctl
+
+            tools = {"media-ctl": media_ctl}
+            with self.subTest(media_ctl=media_ctl), \
+                 mock.patch.object(board_check, "which", side_effect=tools.get), \
+                 mock.patch.object(board_check, "run", side_effect=run), \
+                 mock.patch.object(board_check.os, "geteuid", return_value=0), \
+                 mock.patch.object(board_check, "scan_proc", return_value={}):
+                result = board_check.collect({"cameras": {IMX477: ["/dev/media0"], C920: ["/dev/video97"]}})
+            self.assertEqual(result["availability_method"], "proc-root")
+            self.assertEqual(result["users"], {IMX477: None, C920: []})
+            availability = item(snapshot_of(catalog(imx477(), c920()), result), IMX477)["availability"]
+            self.assertEqual(availability["state"], "unknown")
+
+    def test_a_holder_of_the_media_device_is_reported_even_without_the_graph(self):
+        held = {"/dev/media0": {4242}}
+        with mock.patch.object(board_check, "which", return_value=None), \
+             mock.patch.object(board_check.os, "geteuid", return_value=0), \
+             mock.patch.object(board_check, "scan_proc", return_value=held), \
+             mock.patch.object(board_check, "_read", return_value="neat-app"):
+            result = board_check.collect({"cameras": {IMX477: ["/dev/media0"]}})
+        self.assertEqual(result["users"], {IMX477: [{"pid": 4242, "command": "neat-app"}]})
+
     def test_runs_as_a_program_and_prints_json(self):
         request = json.dumps({"cameras": {"camera:x": ["/dev/no-such-node"]}})
         done = subprocess.run(
