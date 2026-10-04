@@ -3691,6 +3691,14 @@ button:disabled {
   margin: 8px 0 0;
 }
 
+.periph-copy {
+  margin-top: 8px;
+}
+
+.periph-copy select {
+  width: auto;
+}
+
 @media (max-width: 980px) {
   .periph-grid {
     grid-template-columns: 1fr;

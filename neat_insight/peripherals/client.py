@@ -81,6 +81,22 @@ def _object_or_none(value) -> bool:
     return value is None or isinstance(value, dict)
 
 
+def _fraction(value) -> bool:
+    return isinstance(value, dict) and _positive_int(value.get("numerator")) and _positive_int(value.get("denominator"))
+
+
+# The fractions of each interval type that the snapshot divides by; Sentinel reports none of them as zero.
+INTERVAL_FRACTIONS = {"stepwise": ("minimum", "maximum", "step"), "continuous": ("minimum", "maximum")}
+
+
+def _valid_interval(interval) -> bool:
+    if not isinstance(interval, dict):
+        return False
+    if interval.get("type") == "discrete":
+        return _fraction(interval)
+    return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS.get(interval.get("type"), ()))
+
+
 class PeripheralClient(SentinelSocket):
     socket_errors = _SOCKET_ERRORS
     client_errors = _CLIENT_ERRORS
@@ -235,11 +251,12 @@ class PeripheralClient(SentinelSocket):
 
     @staticmethod
     def _valid_frame_intervals(value) -> bool:
-        """Each entry is one probed size with the list of intervals the device advertises for it."""
+        """Each entry is one probed size with the list of intervals the device advertises for it; every
+        fraction the snapshot divides by must be positive."""
         return isinstance(value, list) and all(
             isinstance(entry, dict)
             and isinstance(entry.get("intervals"), list)
-            and all(isinstance(interval, dict) for interval in entry["intervals"])
+            and all(_valid_interval(interval) for interval in entry["intervals"])
             for entry in value
         )
 

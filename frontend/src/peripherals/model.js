@@ -304,6 +304,30 @@ export function fpsOptions(camera, format, width, height) {
   }))
 }
 
+// The formats POST /api/peripherals/cameras/export returns, by connection, with its labels.
+const MIPI_EXPORTS = [
+  { id: 'python', label: 'Python (pyneat)' },
+  { id: 'cpp', label: 'C++ (Neat)' },
+  { id: 'json', label: 'JSON' }
+]
+const USB_EXPORTS = [
+  { id: 'yaml', label: 'YAML descriptor' },
+  { id: 'json', label: 'JSON descriptor' }
+]
+
+export function exportChoices(camera) {
+  return camera?.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS
+}
+
+// Why the export refuses the selected mode, or '' when it accepts it: a USB mode always exports as a
+// descriptor; a MIPI mode needs a frame rate Neat Core's rules verified.
+export function exportBlockReason(camera, selection) {
+  if (!selection || camera?.connection === 'usb') return ''
+  const rate = findFps(findSize(findFormat(camera, selection.format), selection.width, selection.height), selection.fps)
+  if (rate?.tier === 'verified') return ''
+  return rate?.reason || "Neat Core's support rules do not accept this mode."
+}
+
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
 // pill beside the menu for the chosen entry, and the entries are grouped under their tier.
 const TIER_PILLS = {
