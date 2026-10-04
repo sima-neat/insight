@@ -81,6 +81,8 @@ class TargetResolutionTests(unittest.TestCase):
             (True, 22, "sima"),
             ("board", True, "sima"),
             ("board", 22.9, "sima"),
+            ("board", float("inf"), "sima"),
+            ("board", float("nan"), "sima"),
             ("board", 70000, "sima"),
             ("board", 22, True),
             ("board", 22, "a b"),
@@ -90,6 +92,7 @@ class TargetResolutionTests(unittest.TestCase):
             self.assertEqual(ctx.exception.status, 400)
         self.assertEqual(target_module.validate_ssh_target("board", "2222", None),
                          {"host": "board", "port": 2222, "user": "sima"})
+        self.assertEqual(target_module.validate_ssh_target("board", 22.0, None)["port"], 22)
 
     def test_store_round_trips_and_ignores_corrupt_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -143,7 +146,7 @@ class BoardApiTests(unittest.TestCase):
 
     def test_select_and_reset_bump_generation_and_close_old_connection(self):
         first = self.client.get("/api/board").get_json()["generation"]
-        body = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 2222, "user": "dev"}).get_json()
+        body = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 2222.0, "user": "dev"}).get_json()
         self.assertEqual(body["target"]["source"], "manual")
         self.assertEqual(body["saved"], {"host": "10.1.1.1", "port": 2222, "user": "dev"})
         self.assertGreater(body["generation"], first)
