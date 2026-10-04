@@ -1,8 +1,4 @@
-/**
- * The arithmetic behind the Sentinel dashboard: tabs, chart scales, derived series and SVG
- * paths. It mirrors what Sentinel's own terminal `ops` view charts (fixed scales, an eight-
- * minute window of the daemon's 240 cached samples) and holds no React, so it can be tested.
- */
+/** Pure dashboard arithmetic matching Sentinel's fixed-scale, 240-sample ops view. */
 import { durationWords, isThermalMetric, unitSuffix } from './model.js'
 
 export const DASH_TABS = [
@@ -35,11 +31,7 @@ export function niceCeil(value) {
   return Number((step * power).toPrecision(6))
 }
 
-/**
- * The fixed scale a chart draws on. Percentages are 0-100 and temperatures 40-90 (widened
- * when a reading leaves that band); anything else runs from 0 to a round number above the
- * largest value seen, so the line never touches the top and the axis stays still between polls.
- */
+/** Fixed percent/temperature scales; other units get a rounded ceiling above their peak. */
 export function scaleFor(unit, valueLists, ceiling = null) {
   const values = valueLists.flat().filter(isNumber)
   const key = String(unit ?? '').trim().toLowerCase()
@@ -99,10 +91,7 @@ function yOf(value, scale, height) {
   return height - ((clamped - scale.min) / span) * height
 }
 
-/**
- * The SVG line and filled area for one series on a fixed scale. A missing sample breaks the
- * line and the area instead of being drawn as zero; `last` is where the newest reading sits.
- */
+/** SVG line and area; missing samples break the path rather than becoming zero. */
 export function linePath(values, scale, width, height) {
   const list = values || []
   const steps = Math.max(1, list.length - 1)
@@ -129,10 +118,7 @@ export function linePath(values, scale, width, height) {
   return { line, area, last: lastPoint ? { x: lastPoint[0], y: lastPoint[1] } : null }
 }
 
-/**
- * Stacked areas, bottom band first: each series is drawn on top of the ones before it, so the
- * top edge is the total. A missing reading counts as zero inside the stack.
- */
+/** Stacked areas, bottom band first; missing readings count as zero within the stack. */
 export function stackedPaths(lists, scale, width, height) {
   const length = Math.max(0, ...lists.map((list) => (list || []).length))
   const steps = Math.max(1, length - 1)
@@ -272,10 +258,7 @@ function toneOf(value, warn, critical) {
   return 'ok'
 }
 
-/**
- * The per-core heatmap's rows: each core's column means across the window and its one-minute
- * average, plus the average and busiest core for the header, both on one-minute averages.
- */
+/** Heatmap rows plus one-minute average and busiest-core summaries. */
 export function coreSummary(cores, series) {
   const rows = (cores || []).map((core) => {
     const values = series?.[core.key] || []
@@ -295,10 +278,7 @@ export function coreSummary(cores, series) {
   return { rows, average, busiest }
 }
 
-/**
- * The series Compare Runs can overlay, as Sentinel's own Compare Runs tab offers them. Thermal
- * maximum is derived per sample from every temperature sensor the runs recorded.
- */
+/** Series offered by Sentinel Compare Runs; thermal maximum is derived per sample. */
 export const COMPARE_SERIES = [
   { id: 'power', label: 'Total power', key: 'power_current_watts' },
   { id: 'thermal', label: 'Thermal maximum', thermal: true },
@@ -336,11 +316,7 @@ export function compareSeriesAvailable(payload) {
   return COMPARE_SERIES.filter((spec) => (spec.thermal ? defs.some(isThermalMetric) : keys.has(spec.key)))
 }
 
-/**
- * Every compared run's samples of one series against elapsed time, as Sentinel's Compare Runs
- * overlays them, with a summary row per run. The baseline comes first. `overlap` is the time all
- * runs cover; the chart draws that window, where the runs can be compared side by side.
- */
+/** Compared samples and summaries, baseline first, over the runs' common time window. */
 export function compareOverlay(payload, seriesId) {
   const body = payload?.sentinel || payload || {}
   const available = compareSeriesAvailable(payload)
@@ -394,11 +370,7 @@ export function compareOverlay(payload, seriesId) {
   return { spec, available, unit, lines, overlap: overlap > 0 ? overlap : Math.max(0, ...ends), rows }
 }
 
-/**
- * A scale fitted to the readings, for comparing runs: differences of a few percent are the
- * point of a comparison, and a scale from zero would draw them as one flat line. Padded by a
- * sixth of the spread (or 5% of the value when all runs read the same) and rounded outwards.
- */
+/** A padded, outward-rounded comparison scale that keeps small differences visible. */
 export function tightScale(valueLists) {
   const values = valueLists.flat().filter(isNumber)
   if (!values.length) return { min: 0, max: 1 }
@@ -411,10 +383,7 @@ export function tightScale(valueLists) {
   return { min: clean(Math.floor((low - pad) / step) * step), max: clean(Math.ceil((high + pad) / step) * step) }
 }
 
-/**
- * One run's points in the window, as an SVG line on a fixed scale. The first point past the
- * window is kept too, so the line runs to the edge (the plot clips it) instead of stopping short.
- */
+/** One run as an SVG line, retaining the first clipped point beyond the window. */
 export function elapsedPath(points, window, scale, width, height) {
   const list = points || []
   const past = list.findIndex((point) => point.t > window + 1e-9)

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Callout, Pill } from './peripherals/ui.jsx'
+import { downloadText } from './peripherals/api.js'
 import {
   compareRuns,
   deleteRun,
@@ -74,21 +75,7 @@ import CompareOverlay from './stats/CompareOverlay.jsx'
 import SentinelDashboard from './stats/Dashboard.jsx'
 import { ChipTabs, DeltaReason, Facts, FailureCallout, KeyValueTable, OutputDetails, SegmentedTabs } from './stats/ui.jsx'
 
-// How often the saved-runs list is re-read while the Stats tab is visible.
 const RUNS_POLL_MS = 30000
-
-/** Hands the browser a file to save. The object URL is released once the click has used it. */
-function downloadText(filename, text, type) {
-  const url = URL.createObjectURL(new Blob([text], { type }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.hidden = true
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
 
 /** Calls `run` now and every `ms` after, only while the browser tab is visible; returns the cleanup. */
 function pollWhileVisible(run, ms) {
@@ -251,7 +238,6 @@ function TraceBar({ bar, busy, stale = false, form, extras, extrasShown, onToggl
   )
 }
 
-/** What sits under the header row: the unfolded note and tags, or a recording trace's note and summary. */
 function TraceDetails({ bar, trace, form, formError, extrasShown, onFormChange }) {
   if (bar.recording) {
     return (
@@ -343,31 +329,21 @@ export function RunsPanel({
   const groups = useMemo(() => compareGroups(table), [table])
   const view = useMemo(() => compareView(table, { group: compareGroup, changesOnly }), [table, compareGroup, changesOnly])
 
-  // Everything the table holds, not what the filter shows: a filter is how it is being read.
   function exportCsv() {
     downloadText(compareCsvFilename(table), compareCsv(table), 'text/csv;charset=utf-8')
   }
-  // Runs that were selected and are no longer on the board: their checkbox is gone.
-  // Until a list has been read there is nothing to judge the selection against.
   const missing = useMemo(() => missingSelection(selected, runsPayload ? runs : null), [selected, runs, runsPayload])
-  // Runs whose own name breaks the comma-separated compare query.
   const uncomparable = useMemo(() => uncomparableRefs(selected), [selected])
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
   const run = useMemo(() => runDetail(detail), [detail])
-  // Only reached when the body is not the metadata/metrics/samples one the daemon sends.
   const detailRows = useMemo(() => (detail && !run ? factRows(detail.sentinel, ['samples']) : []), [detail, run])
 
   const bar = traceBar(trace, { busy: traceBusy, now })
   const [extrasOpen, setExtrasOpen] = useState(false)
-  // Text left in the folded note and tags fields is still sent, so it is still said.
   const extras = traceExtrasSummary(form)
-  // A refused note or tag list is shown where it can be fixed, not behind the fold.
   const extrasShown = extrasOpen || Boolean(formError && extras)
 
-  // Deleting is irreversible, so Delete first turns into an inline confirmation.
   const [confirming, setConfirming] = useState(false)
-  // Where focus goes once the confirmation or the delete has rendered: the control that
-  // replaced the one that had it, never the page body.
   const focusNext = useRef('')
   const headingRef = useRef(null)
   const deleteRef = useRef(null)
@@ -386,7 +362,6 @@ export function RunsPanel({
     }[target]
     element?.focus()
   })
-  // Nothing selected (or a board switch) leaves nothing to confirm.
   useEffect(() => {
     if (confirming && deleteDisabled) setConfirming(false)
   }, [confirming, deleteDisabled])
@@ -405,9 +380,7 @@ export function RunsPanel({
     setConfirming(false)
     focusNext.current = 'heading'
     const summary = await onDelete()
-    // The heading keeps focus while the list is rewritten; a failure takes it to its report.
     if (summary?.title) {
-      // The report may already be on the page, or arrive with the next render.
       if (deleteFailureRef.current) {
         focusNext.current = ''
         deleteFailureRef.current.focus()
@@ -523,8 +496,6 @@ export function RunsPanel({
                   </td>
                   <th scope="row">
                     {run.label}
-                    {run.note && <span className="hint">{run.note}</span>}
-                    <TagPills tags={run.tags} />
                   </th>
                   <td>{runSubtitle(run, now) || '—'}</td>
                   <td>
@@ -747,7 +718,6 @@ export function RunsPanel({
                     idPrefix="stats-compare-tab"
                     panelId="stats-compare-panel"
                     noun="row"
-                    automatic
                   />
                   <label className="stats-toggle">
                     <input type="checkbox" checked={changesOnly} onChange={(event) => setChangesOnly(event.target.checked)} />
@@ -819,13 +789,8 @@ export function RunsPanel({
   )
 }
 
-/**
- * The machine Insight runs on, from /api/metrics. It lives on its own Host sub-tab: it
- * answers "is my SDK container out of disk", which is a different question from what the
- * board is doing, and the two must not be read as one set of numbers.
- */
+/** The machine running Insight, kept separate from selected-board telemetry. */
 function HostPanel({ model, error, updatedAt, busy, now }) {
-  // An endpoint that answered with nothing has no rows worth drawing; it has a sentence.
   const notice = hostNotice(model, updatedAt > 0)
   return (
     <section className="panel stats-host" aria-labelledby="stats-host-title" aria-busy={busy}>
@@ -894,7 +859,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [compare, setCompare] = useState(null)
   const [compareError, setCompareError] = useState(null)
   const [compareBusy, setCompareBusy] = useState(false)
-  // Collapsing keeps the comparison; only Compare reads the board again.
   const [compareOpen, setCompareOpen] = useState(true)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteResult, setDeleteResult] = useState(null)

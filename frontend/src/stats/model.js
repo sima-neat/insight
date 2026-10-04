@@ -115,28 +115,6 @@ const INSTALL_HINTS = {
   sentinel_failed: 'Check the installer output below, or run the install in a shell on the board.'
 }
 
-const RUN_FIELDS = {
-  id: ['id', 'run_id', 'uid'],
-  name: ['name', 'label', 'title'],
-  state: ['state', 'status'],
-  startedAt: ['started_at', 'start_time', 'start', 'created_at'],
-  endedAt: ['ended_at', 'stopped_at', 'end_time', 'finished_at', 'end'],
-  note: ['note', 'description', 'comment'],
-  tags: ['tags', 'labels'],
-  samples: ['samples', 'sample_count', 'sample_counts', 'count'],
-  durationSec: ['duration_sec', 'duration_s', 'duration_seconds', 'elapsed_sec', 'elapsed_s'],
-  durationMs: ['duration_ms', 'elapsed_ms'],
-  energyJoules: ['energy_joules', 'energy_j']
-}
-
-function pick(source, keys) {
-  for (const key of keys) {
-    const value = source?.[key]
-    if (value !== undefined && value !== null && value !== '') return value
-  }
-  return null
-}
-
 function isNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
@@ -601,7 +579,6 @@ export function thresholdText(metric) {
 export function traceModel(payload) {
   const body = payload?.sentinel || {}
   const trace = body.trace || null
-  const tags = trace ? pick(trace, RUN_FIELDS.tags) : null
   return {
     // Kept so a trace read before a board switch can be labelled with the board it came from.
     payload: payload || null,
@@ -609,11 +586,11 @@ export function traceModel(payload) {
     trace,
     // Sent with Stop, so the stop ends this trace and no other.
     id: trace?.id !== undefined && trace?.id !== null ? String(trace.id) : '',
-    name: trace ? String(pick(trace, RUN_FIELDS.name) || pick(trace, RUN_FIELDS.id) || 'trace') : '',
-    startedAt: trace ? pick(trace, RUN_FIELDS.startedAt) : null,
+    name: trace ? String(trace.name || trace.id || 'trace') : '',
+    startedAt: trace?.started_at || null,
     // What the trace was started with, shown while it records.
-    note: trace ? String(pick(trace, RUN_FIELDS.note) || '') : '',
-    tags: Array.isArray(tags) ? tags.map(String) : [],
+    note: trace ? String(trace.note || '') : '',
+    tags: Array.isArray(trace?.tags) ? trace.tags.map(String) : [],
     summary: body.summary || null,
     facts: factRows(body.summary, [])
   }
@@ -689,49 +666,35 @@ export function traceBar(trace, { busy = false, now = Date.now() } = {}) {
   }
 }
 
-function durationOf(source) {
-  const seconds = pick(source, RUN_FIELDS.durationSec)
-  if (isNumber(seconds)) return seconds
-  const ms = pick(source, RUN_FIELDS.durationMs)
-  if (isNumber(ms)) return ms / 1000
-  const start = Date.parse(pick(source, RUN_FIELDS.startedAt) || '')
-  const end = Date.parse(pick(source, RUN_FIELDS.endedAt) || '')
-  return Number.isFinite(start) && Number.isFinite(end) && end >= start ? (end - start) / 1000 : null
-}
-
-/** Sentinel's run summaries, read defensively: the daemon names these fields, not Insight. */
+/** Sentinel schema-v1 run summaries, with malformed entries ignored. */
 export function runList(payload) {
   const runs = payload?.sentinel?.runs
   if (!Array.isArray(runs)) return []
   return runs
     .map((run, index) => {
-      const source = run && typeof run === 'object' ? run : { name: String(run ?? '') }
-      const id = pick(source, RUN_FIELDS.id)
-      const name = pick(source, RUN_FIELDS.name)
+      if (!run || typeof run !== 'object') return null
+      const id = run.id !== undefined && run.id !== null ? String(run.id) : ''
+      const name = run.name !== undefined && run.name !== null ? String(run.name) : ''
       const key = String(id || name || `run-${index}`)
-      const tags = pick(source, RUN_FIELDS.tags)
       return {
         key,
         // Sentinel accepts either a unique name or a stable id on /runs/<id>.
         ref: String(name || id || key),
-        id: id ? String(id) : '',
-        name: name ? String(name) : '',
+        id,
+        name,
         label: String(name || id || `Run ${index + 1}`),
-        state: String(pick(source, RUN_FIELDS.state) || ''),
-        startedAt: pick(source, RUN_FIELDS.startedAt),
-        endedAt: pick(source, RUN_FIELDS.endedAt),
-        durationSec: durationOf(source),
+        state: run.ended_at === null ? 'recording' : run.ended_at ? 'complete' : '',
+        startedAt: run.started_at || null,
+        endedAt: run.ended_at || null,
+        durationSec: isNumber(run.duration_ms) ? run.duration_ms / 1000 : null,
         // Sentinel is power telemetry, and this is the number a run is judged on. It is
         // in every /runs entry, so it belongs in the list, not only in a comparison.
-        energyJoules: pick(source, RUN_FIELDS.energyJoules),
-        samples: pick(source, RUN_FIELDS.samples),
-        note: pick(source, RUN_FIELDS.note),
-        tags: Array.isArray(tags) ? tags.map(String) : [],
-        source
+        energyJoules: run.energy_joules ?? null,
+        samples: run.samples ?? null
       }
     })
     // A run Sentinel does not name or identify cannot be opened or compared; drop it.
-    .filter((run) => run.id || run.name)
+    .filter((run) => run && (run.id || run.name))
 }
 
 /**

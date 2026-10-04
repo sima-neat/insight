@@ -1,16 +1,9 @@
-// Small presentational pieces shared by the Stats panels. They reuse the Peripherals
-// callout and pill so both views keep one visual language.
+// Presentational pieces shared by the Stats panels.
 import { useRef, useState } from 'react'
 import { Callout } from '../peripherals/ui.jsx'
 import { chipKeyTarget } from './model.js'
 
-/**
- * The em dash of a comparison cell that has no change, and why. The reason used to sit in a
- * `title`, which only a mouse can raise; the dash is now a quiet button, so Tab, a tap or
- * a hover shows the reason beside it, and Escape puts it away again without moving focus.
- * Screen readers read the reason as the button's own name, so the visible copy is hidden
- * from them rather than read twice.
- */
+/** An accessible no-change reason shown by focus, tap or hover and dismissed with Escape. */
 export function DeltaReason({ reason }) {
   const [dismissed, setDismissed] = useState(false)
   const sentence = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : ''
@@ -103,11 +96,7 @@ export function KeyValueTable({ rows, caption }) {
   )
 }
 
-/**
- * One backend failure, in the words the backend chose: its sentence as the title, its
- * hint below it, and any command output it attached behind a disclosure. A bare code or
- * a stack trace is never shown.
- */
+/** A backend failure with its hint and optional command output disclosure. */
 export function FailureCallout({ notice, detailLabel = 'Output from the board', children }) {
   if (!notice) return null
   return (
@@ -123,7 +112,7 @@ export function FailureCallout({ notice, detailLabel = 'Output from the board', 
   )
 }
 
-export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, noun = '', automatic = false, collapsible = false }) {
+export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, noun = '' }) {
   const refs = useRef([])
   const [focused, setFocused] = useState(null)
   const selectedIndex = items.findIndex((item) => item.id === selected)
@@ -135,7 +124,7 @@ export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, 
     event.preventDefault()
     setFocused(next)
     refs.current[next]?.focus()
-    if (automatic) onSelect(items[next].id)
+    onSelect(items[next].id)
   }
 
   return (
@@ -156,7 +145,7 @@ export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, 
             tabIndex={index === current ? 0 : -1}
             className={active ? 'stats-chip active' : 'stats-chip'}
             onFocus={() => setFocused(index)}
-            onClick={() => onSelect(collapsible && active ? null : item.id)}
+            onClick={() => onSelect(item.id)}
           >
             <span className="stats-chip-label">{item.label}</span>
             <CountBadge className="stats-chip-count" count={item.count} noun={noun} />
@@ -168,12 +157,7 @@ export function ChipTabs({ label, items, selected, onSelect, idPrefix, panelId, 
   )
 }
 
-/**
- * A short row of tabs, each owning its own panel (`${panelPrefix}-${id}`). Selection follows
- * focus: the arrow keys, Home and End move to a tab and show its panel at once, since every
- * panel here is already in memory. Only the selected tab is in the Tab order. An item may
- * carry a count and a threshold alert, which are drawn after its label.
- */
+/** Keyboard-navigable tabs whose selection follows focus. */
 export function SegmentedTabs({ label, items, selected, onSelect, idPrefix, panelPrefix, className = '', noun = '' }) {
   const refs = useRef([])
   const index = Math.max(0, items.findIndex((item) => item.id === selected))
@@ -206,7 +190,6 @@ export function SegmentedTabs({ label, items, selected, onSelect, idPrefix, pane
             onClick={() => onSelect(item.id)}
           >
             <span className="stats-segment-label">{item.label}</span>
-            {item.hint && <span className="stats-segment-hint">{item.hint}</span>}
             {item.count !== undefined && <CountBadge className="stats-segment-count" count={item.count} noun={noun} />}
             <AlertBadge alert={item.alert} />
           </button>

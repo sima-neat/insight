@@ -44,14 +44,12 @@ function runsPanel(RunsPanel, overrides = {}) {
   )
 }
 
-/** The body cells of the comparison table, as markup. */
 function compareCells(html) {
   const table = html.slice(html.indexOf('stats-compare-table'))
   const body = table.slice(table.indexOf('<tbody>'), table.indexOf('</tbody>'))
   return [...body.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((match) => match[1])
 }
 
-/** Markup with every visually hidden span removed: what a sighted reader can see. */
 const visible = (html) => html.replace(/<span class="sr-only">[^<]*<\/span>/g, '')
 
 const { RunsPanel } = await loadStatsView()
@@ -60,15 +58,12 @@ test('the reason a comparison cell shows no change can be reached without a poin
   const cells = compareCells(runsPanel(RunsPanel))
   const withoutChange = cells.filter((cell) => cell.includes('—') && !visible(cell).includes('%'))
   assert.ok(withoutChange.length > 0)
-  // Every reason the fixture exercises is checked; 0 against 5.9% must be among them.
   const seen = new Set()
   for (const cell of withoutChange) {
     const reason = Object.entries(DELTA_ABSENCE).find(([, text]) => cell.includes(text))
     if (!reason) continue
     seen.add(reason[0])
-    // Something in the cell takes focus, so Tab and a tap reach it, not only a hover...
     assert.match(cell, /<button type="button"[^>]*>/, cell)
-    // ...and what it reveals is text on the page, not a title attribute a keyboard or touch reader never sees.
     assert.doesNotMatch(cell, /title="/, cell)
     assert.ok(visible(cell).toLowerCase().includes(reason[1].slice(0, -1).toLowerCase()), `${reason[0]} is not visible: ${cell}`)
   }
@@ -79,7 +74,6 @@ test('the table stays as calm as it was: no legend, and changes still read as nu
   const html = runsPanel(RunsPanel)
   assert.doesNotMatch(html, /stats-compare-legend/)
   const cells = compareCells(html)
-  // A published change is plain text beside its value, not a control.
   const changed = cells.filter((cell) => /[+−-]\d/.test(visible(cell)) && cell.includes('stats-delta'))
   assert.ok(changed.length > 0)
   for (const cell of changed) assert.doesNotMatch(cell, /<button/)
@@ -90,7 +84,6 @@ test('a trace read from a board no longer selected cannot be stopped from here',
   const current = stopOf(runsPanel(RunsPanel, { trace: traceModel(RECORDING), compare: null }))
   assert.ok(current, 'no Stop button for a recording trace')
   assert.doesNotMatch(current, /disabled/)
-  // Stop acts on the board selected now, which is not the one this trace was read from.
   const stale = stopOf(runsPanel(RunsPanel, { trace: traceModel(RECORDING), traceStale: true, compare: null }))
   assert.match(stale, /disabled/)
 })

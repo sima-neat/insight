@@ -18,8 +18,7 @@ import {
 } from './dashboard.js'
 import { formatValue } from './model.js'
 
-// The plot is drawn in a 600 x 100 box and stretched to the card; labels and markers are HTML
-// on top of it, so they keep their shape at any width.
+// SVG plots stretch; overlaid HTML labels retain their shape.
 const WIDTH = 600
 const HEIGHT = 100
 
@@ -28,8 +27,7 @@ function percentOf(value, scale) {
   return ((Math.min(scale.max, Math.max(scale.min, value)) - scale.min) / span) * 100
 }
 
-// The pointer's position across the plot is what is remembered, not the sample under it: new
-// samples shift the data every poll, and the readout must follow what is under a still cursor.
+// Remember pointer position so the readout follows data that shifts on each poll.
 function useHover(length) {
   const plot = useRef(null)
   const [fraction, setFraction] = useState(null)
@@ -41,8 +39,7 @@ function useHover(length) {
   return { plot, index, onPointerMove, onPointerLeave: () => setFraction(null) }
 }
 
-// Legends show the current reading and never follow the pointer: a hovered value would change
-// their width on every move and reflow the card. The tooltip carries the hovered moment.
+// Stable legends show current readings; tooltips carry hovered readings without reflow.
 function Legend({ series, unit }) {
   return (
     <ul className="dash-legend">
@@ -98,11 +95,7 @@ function Frame({ title, headline, scale, timestamps, compact, tone, label, child
 
 const THRESHOLD_NAMES = { warn: 'Warning', critical: 'Critical' }
 
-/**
- * A time chart on a fixed scale, the way Sentinel's ops view draws one: an area under each line,
- * the metric's warn and critical levels, the newest reading marked, and a crosshair on hover
- * that reads every series at that moment.
- */
+/** Sentinel-style fixed-scale time chart with thresholds and hover readout. */
 export function TimeChart({ title, headline, series, scale, unit, timestamps, thresholds = [], height = 96, compact = false, tone }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, '')
   const length = Math.max(0, ...series.map((item) => item.values.length))
@@ -223,11 +216,7 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
   )
 }
 
-/**
- * Per-core CPU as a heatmap, the way Grafana and Netdata show many cores: a row per core, a column
- * per slice of the window, one blue for load. Only the newest column changes as samples arrive, so
- * the view stays still; the figure beside each core is its one-minute average.
- */
+/** Per-core CPU heatmap with time slices and one-minute averages. */
 export function CoreHeatmap({ cores, series, timestamps }) {
   const { rows, average, busiest } = coreSummary(cores, series)
   const [pointer, setPointer] = useState(null)
@@ -308,10 +297,7 @@ export function StatTile({ title, value, unit, digits = 1, tone }) {
   )
 }
 
-/**
- * Compared runs of one series over elapsed time, as Sentinel's Compare Runs overlays them: the
- * window every run covers, the baseline drawn heavier, and a readout of each run on hover.
- */
+/** Compared runs over their common elapsed-time window, baseline emphasized. */
 export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }) {
   const hover = useHover(101)
   const at = hover.index >= 0 ? (hover.index / 100) * window : null

@@ -50,7 +50,6 @@ function parseCsv(text) {
 }
 
 test('arrow keys walk the chips in reading order and wrap at both ends', () => {
-  // A focus index that no longer exists starts from the first chip.
   const cases = [['ArrowRight', 0, 3, 1], ['ArrowRight', 2, 3, 0], ['ArrowLeft', 0, 3, 2], ['Home', 2, 3, 0], ['End', 0, 3, 2],
     ['ArrowRight', 7, 3, 1], ['Enter', 0, 3, null], ['ArrowDown', 0, 3, null], ['ArrowRight', 0, 0, null]]
   for (const [key, index, count, target] of cases) assert.equal(chipKeyTarget(key, index, count), target, `${key} ${index}/${count}`)
@@ -59,7 +58,6 @@ test('arrow keys walk the chips in reading order and wrap at both ends', () => {
 test('comparison rows are grouped by the board definitions, with run totals apart', () => {
   const rows = table().rows
   const group = (key) => compareRowGroup(rows.find((row) => row.key === key))
-  // A key no definition names is not dropped from the filter; it is "Other".
   assert.deepEqual(['energy_joules', 'power_current_watts', 'disk_emmc_used_mb'].map(group), ['Run totals', 'Power', 'Other'])
   assert.deepEqual(compareGroups(table()).map((item) => [item.label, item.count]), [
     [ALL_GROUPS, 10], ['Run totals', 3], ['APU', 1], ['CPU', 3], ['Power', 1], ['Other', 2]
@@ -69,14 +67,10 @@ test('comparison rows are grouped by the board definitions, with run totals apar
 
 test('a row changed when any run differs from the baseline, even without a percentage', () => {
   const rows = Object.fromEntries(table().rows.map((row) => [row.key, row]))
-  // A change too small to print is still a change; 0 against 0 is not.
   assert.deepEqual([rows.power_current_watts, rows.disk_emmc_used_mb, rows.cpu_core_11_usage_pct].map(rowChanged), [true, true, false])
-  // 0 against 5.9% has no percentage, and hiding it would hide the one metric that went from nothing to something.
   assert.equal(rows.cpu_core_13_usage_pct.cells[1].deltaAbsence, 'baseline_zero')
   assert.equal(rowChanged(rows.cpu_core_13_usage_pct), true)
-  // Run totals have no published change; their values differ, so they changed.
   assert.equal(rowChanged(rows.duration_ms), true)
-  // A published change of exactly zero is no change, and a run with no value has not been shown to move.
   assert.equal(rowChanged({ cells: [{ baseline: true, value: 5, deltaPct: null }, { baseline: false, value: 5, deltaPct: 0 }] }), false)
   assert.equal(rowChanged({ cells: [{ baseline: true, value: 5, deltaPct: null }, { baseline: false, value: null, deltaPct: null }] }), false)
 })
@@ -91,7 +85,6 @@ test('the comparison view filters by group and says how many unchanged rows it h
   assert.deepEqual(changed.rows.map((row) => row.key), ['cpu_core_0_usage_pct', 'cpu_core_13_usage_pct'])
   assert.equal(changed.unchanged, 1)
   assert.equal(compareView(table(), { changesOnly: true }).unchanged, 1)
-  // A filter left over from an earlier comparison that lacks the group falls back to All.
   const stale = compareView(table(), { group: 'PowerRail' })
   assert.deepEqual([stale.group, stale.rows.length], [ALL_GROUPS, 10])
   assert.deepEqual(compareView(null).rows, [])
@@ -105,7 +98,6 @@ test('the comparison view filters by group and says how many unchanged rows it h
 })
 
 test('a CSV field is quoted and escaped only when it has to be', () => {
-  // A run name a spreadsheet would execute is written as text.
   const cases = [['plain', 'plain'], ['before, after', '"before, after"'], ['say "hi"', '"say ""hi"""'], ['two\nlines', '"two\nlines"'],
     [' padded', '" padded"'], [-0.35731427657192105, '-0.35731427657192105'], [0, '0'], [null, ''], [Number.NaN, ''],
     ['=HYPERLINK("x")', '"\'=HYPERLINK(""x"")"'], ['@sum', "'@sum"]]
@@ -120,18 +112,14 @@ test('the comparison exports every row as CSV, with empty fields where the table
     ...run('insight-hw-1790177227', 'baseline; Insight hardware validation'), ...run('insight-hw-1790177178', 'Insight hardware validation')].join(','))
   assert.equal(text.split('\r\n')[1], 'duration_ms,Duration,Run totals,s,6.667,,34.379,')
   const rows = parseCsv(text)
-  // Every row of the table, whatever a filter shows on screen, plus the header.
   assert.equal(rows.length, table().rows.length + 1)
   const byKey = Object.fromEntries(rows.slice(1).map((row) => [row[0], row]))
-  // Numbers are unformatted, a unit stays in its column, and the baseline has no change.
   assert.deepEqual(byKey.power_current_watts, ['power_current_watts', 'Current board power', 'Power', 'W', '8.6171875', '', '8.586397058823529', '-0.35731427657192105'])
   assert.deepEqual(byKey.rtsn_6.slice(3, 4), ['°C'])
-  // A withheld change is an empty field, never a dash or a zero.
   assert.deepEqual(byKey.cpu_core_13_usage_pct.slice(4), ['0', '', '5.91190441525744', ''])
   assert.ok(!text.includes('—'))
   assert.ok(!/\d%/.test(text))
   assert.equal(compareCsv(null), '')
-  // Run names and notes with commas, quotes and line breaks survive the CSV.
   const tricky = JSON.parse(JSON.stringify(COMPARE))
   tricky.runs[0].name = 'before, after'
   tricky.runs[1].note = 'line one\nline "two"'
@@ -161,10 +149,8 @@ test('the Runs header row is the trace form until a trace records, then says wha
   assert.deepEqual([bar.recording, bar.name, bar.startedAt, bar.started, bar.tags, bar.note, bar.stopLabel],
     [true, 'baseline', '2026-09-24T12:00:00Z', '5 minutes ago', ['yolo26'], 'before NMS', 'Stop trace'])
   assert.equal(traceBar(trace, { busy: true, now }).stopLabel, 'Stopping…')
-  // A trace the daemon reports without a start time is still named, and nothing is invented.
   const bare = traceBar(traceModel({ sentinel: { trace: { name: 'x' } } }), { now })
   assert.deepEqual([bare.started, bare.startedAt], ['', null])
-  // The Runs panel keeps one sentence of note that still says what both panels said.
   assert.equal(RUNS_NOTE.match(/[.!?](\s|$)/g).length, 1)
   for (const fact of ['trace', 'saved on the board', 'reopen and compare']) assert.ok(RUNS_NOTE.includes(fact), fact)
 })

@@ -59,7 +59,6 @@ test('the daemon section appears only when it has something to say, and is busy 
 test('values, changes, durations, sizes, time ranges and statuses read as a developer expects; polling backs off', () => {
   assert.deepEqual([[72, 'C'], [95.456, '%'], [7.126, 'W'], [1234.5, 'MB'], [null, 'W'], [undefined, 'W'], ['72', 'C'], [800, null]].map(([v, u]) => formatValue(v, u)),
     ['72 °C', '95.5%', '7.13 W', '1235 MB', '—', '—', '—', '800'])
-  // A change too small to print must not round to 0%, which would read as no change.
   assert.deepEqual([-1.507232237109984, 12.753877670471164, 0, -0.0002595591909001994, null].map(formatPercentDelta), ['−1.51%', '+12.8%', '±0%', '−<0.01%', '—'])
   assert.deepEqual([4.25, 45.6, 90, 7500, null, -1].map(formatSeconds), ['4.3 s', '46 s', '1 min 30 s', '2 h 5 min', '', ''])
   assert.deepEqual([0, 2048, 8 * 1024 ** 3, 1536 * 1024 ** 2, null, -1].map(formatBytes), ['0 B', '2 kB', '8 GB', '1.5 GB', '', ''])
@@ -70,7 +69,6 @@ test('values, changes, durations, sizes, time ranges and statuses read as a deve
   assert.deepEqual(['ok', 'unavailable', 'nonsense'].map((status) => statusInfo(status).label), ['Normal', 'Not measured', 'Not measured'])
   assert.equal(thresholdText({ warn: 70, critical: 85, unit: 'C' }), 'warn at 70 °C, critical at 85 °C')
   assert.equal(thresholdText({ warn: null, critical: null }), '')
-  // Polling backs off while the board keeps failing and never runs away.
   assert.deepEqual([0, 1, 3, 99, undefined].map(pollDelay), [POLL_MS, 4000, 16000, MAX_POLL_MS, POLL_MS])
 })
 
@@ -80,7 +78,6 @@ test('the metrics payload becomes highlights, groups and a summary line, and sti
   assert.deepEqual(model.highlights.map((metric) => metric.key), ['power_current_watts', 'rtsn_0'])
   assert.equal(model.sampledAt, '2026-09-22T20:55:47Z')
   assert.deepEqual(model.series.rtsn_0, [70, 72])
-  // The counts still reach the group chips, which carry the warnings and criticals.
   assert.deepEqual([model.counts.total, model.counts.warn, model.counts.unavailable], [4, 1, 1])
   assert.deepEqual(metricsModel({ ...METRICS, highlights: ['unknown_key'] }).highlights.map((metric) => metric.key), ['rtsn_0'])
   assert.deepEqual([metricsModel(null).groups, metricsModel(null).highlights], [[], []])
@@ -128,12 +125,10 @@ test('every backend failure becomes a title, a sentence and a place to fix it', 
   assert.deepEqual([schema.title, schema.board], ['Sentinel and Insight speak different API versions', false])
   assert.equal(failureNotice({ error: 'socket cannot be opened', code: 'sentinel_denied' }).daemon, true)
   assert.equal(failureNotice({ error: 'installer failed', code: 'sentinel_failed', detail: 'exit 1\nlog tail' }).detail, 'exit 1\nlog tail')
-  // A run too long to read is named as that, not as Sentinel failing to answer.
   const tooLarge = failureNotice({ error: 'larger than the 12 MiB Insight reads', code: 'response_too_large', limit_bytes: 12582912 })
   assert.deepEqual([tooLarge.title, tooLarge.board, tooLarge.daemon], ['Sentinel answered with more than Insight reads', false, false])
   assert.equal(failureNotice({ error: 'boom', code: 'unheard_of' }).title, 'Something went wrong')
   assert.equal(failureNotice(null), null)
-  // A failure carries the generation of the board that answered it, not the one it was sent to.
   assert.equal(failureNotice(apiError({ error: 'no active trace', code: 'trace_conflict', generation: 4 }, 409), 3).generation, 4)
   assert.equal(failureNotice(apiError({ error: 'no board', code: 'no_target' }, 409), 3).generation, 3)
   for (const code of ['no_target', 'unreachable', 'auth_failed', 'host_key_changed', 'timeout']) assert.ok(BOARD_PROBLEM_CODES.has(code))
@@ -148,7 +143,6 @@ test('a failure that lands after a board switch carries the generation it was is
   const notice = failureNotice({ error: 'ssh: connect failed', code: 'unreachable' }, 3)
   assert.equal(notice.generation, 3)
   assert.deepEqual([isStale({ generation: 4 }, notice), isStale({ generation: 3 }, notice)], [true, false])
-  // Without a generation - no board state yet - a failure is never labelled stale.
   assert.equal(isStale({ generation: 4 }, failureNotice({ error: 'boom', code: 'timeout' })), false)
 })
 
@@ -161,7 +155,6 @@ test('every payload is judged stale on its own generation, not just the metrics'
     detail: onA({ sentinel: { run: { id: 'r1' } } }), compare: onA({ sentinel: { runs: ['baseline'] } }), install: onB({ log: 'installed' })
   })
   assert.deepEqual(flags, { metrics: true, traces: true, runs: true, detail: true, compare: true, install: false })
-  // Nothing is dropped: the caller still has the values to render under the label.
   assert.deepEqual(staleFlags(board, {}), {})
   assert.deepEqual(staleFlags(null, { compare: onA() }), { compare: false })
   assert.deepEqual([payloadBoardLabel(onA()), payloadBoardLabel({})], ['sima@192.168.2.2', ''])
@@ -191,7 +184,6 @@ test('a trace request is checked here before it reaches the board', () => {
 })
 
 test('a run whose name holds a comma is named, not sent into a 404', () => {
-  // /api/sentinel/compare splits its runs on commas after decoding, so `before, after` reads as two runs (a 404).
   const selected = ['before, after', 'insight-hw-1790177227']
   assert.deepEqual(uncomparableRefs(selected), ['before, after'])
   assert.equal(compareReady(selected), false, 'Compare must not be offered for a query that cannot say what it means')
@@ -202,25 +194,24 @@ test('a run whose name holds a comma is named, not sent into a 404', () => {
   assert.deepEqual(validateTrace({ name: 'before-after' }).body, { name: 'before-after' })
 })
 
-test('run summaries survive the daemon field names and carry the energy Sentinel measured', () => {
+test('schema-v1 run summaries carry Sentinel timing, samples and energy', () => {
   const runs = runList({ sentinel: { runs: [
-    { id: 'r1', name: 'baseline', state: 'complete', started_at: '2026-09-22T20:00:00Z', ended_at: '2026-09-22T20:02:00Z', samples: 60, tags: ['v1'], note: 'before' },
-    { run_id: 'r2', label: 'optimized', status: 'recording', start_time: '2026-09-22T20:10:00Z', duration_ms: 4500 }, 'r3', {}
+    { id: 'r1', name: 'baseline', started_at: '2026-09-22T20:00:00Z', ended_at: '2026-09-22T20:02:00Z', duration_ms: 120000, samples: 60, energy_joules: null },
+    { id: 'r2', name: 'optimized', started_at: '2026-09-22T20:10:00Z', ended_at: null, duration_ms: 4500, samples: 2, energy_joules: 7.5 }, 'r3', {}
   ] } })
-  assert.deepEqual(runs.map((run) => run.label), ['baseline', 'optimized', 'r3'])
-  assert.deepEqual(runs.map((run) => run.ref), ['baseline', 'optimized', 'r3'])
-  assert.deepEqual([runs[0].durationSec, runs[1].durationSec, runs[0].tags], [120, 4.5, ['v1']])
+  assert.deepEqual(runs.map((run) => run.label), ['baseline', 'optimized'])
+  assert.deepEqual(runs.map((run) => run.ref), ['baseline', 'optimized'])
+  assert.deepEqual([runs[0].state, runs[1].state, runs[0].durationSec, runs[1].durationSec], ['complete', 'recording', 120, 4.5])
   assert.deepEqual([runList({ sentinel: { runs: [] } }), runList(null)], [[], []])
   assert.match(runSubtitle(runs[0], Date.parse('2026-09-22T20:03:00Z')), /^Complete · started .* · 2 min 0 s · 60 samples$/)
+  assert.match(runSubtitle(runs[1], Date.parse('2026-09-22T20:11:00Z')), /^Recording · started /)
   assert.equal(runSubtitle({ label: 'x' }, Date.now()), '')
-  // /api/sentinel/runs on the DevKit, verbatim: energy is the number a run is judged on.
   const measured = runList({ sentinel: { runs: [
     { id: '20260923T152712.952Z-insight-hw-1790177227', name: 'insight-hw-1790177227', started_at: '2026-09-23T15:27:12.952702307Z', ended_at: '2026-09-23T15:27:19.620064802Z', duration_ms: 6667, energy_joules: 51.533604984375, samples: 4 },
     { id: 'r2', name: 'no-energy', duration_ms: 1000, samples: 2 }
   ] } })
   assert.equal(measured[0].energyJoules, 51.533604984375)
-  assert.match(runSubtitle(measured[0], Date.parse('2026-09-23T15:28:00Z')), / · 6.7 s · 51.5 J · 4 samples$/)
-  // A daemon that reports no energy says nothing about it rather than reading as 0 J.
+  assert.match(runSubtitle(measured[0], Date.parse('2026-09-23T15:28:00Z')), /^Complete · .* · 6.7 s · 51.5 J · 4 samples$/)
   assert.equal(measured[1].energyJoules, null)
   assert.equal(runSubtitle(measured[1], Date.now()), '1 s · 2 samples')
 })
@@ -245,12 +236,10 @@ test('compare selection is bounded and the query keeps the baseline first', () =
 test('the captured comparison is read as a table of metrics against the baseline', () => {
   const table = compareTable({ sentinel: COMPARE })
   assert.deepEqual(table.columns.map((column) => [column.label, column.baseline]), [['insight-hw-1790177227', true], ['insight-hw-1790177178', false]])
-  // The note tells two runs of the same workload apart, and /compare sends one per run.
   assert.deepEqual(table.columns.map((column) => column.note), ['Insight hardware validation', 'Insight hardware validation'])
   assert.deepEqual(compareTable({ sentinel: { ...COMPARE, runs: COMPARE.runs.map(({ note, ...rest }) => rest) } }).columns.map((column) => column.note), ['', ''])
   assert.deepEqual([table.baselineId, table.baselineLabel, table.generatedAt, table.statistic],
     [COMPARE.baseline_id, 'insight-hw-1790177227', '2026-09-23T15:27:56.138344320Z', 'mean'])
-  // Run scalars carry no delta; a duration arrives in milliseconds and is read in seconds.
   const duration = rowOf(table, 'duration_ms')
   assert.deepEqual([duration.label, duration.unit], ['Duration', 's'])
   assert.deepEqual(duration.cells.map((cell) => [cell.value, cell.deltaPct]), [[6.667, null], [34.379, null]])
@@ -258,11 +247,9 @@ test('the captured comparison is read as a table of metrics against the baseline
   const energy = rowOf(table, 'energy_joules')
   assert.equal(energy.label, 'Energy')
   assert.equal(formatValue(energy.cells[1].value, energy.unit), '275 J')
-  // A metric cell carries the mean, the statistic the delta is measured on; the baseline shows no change of its own.
   const power = rowOf(table, 'power_current_watts')
   assert.equal(power.cells[0].value, COMPARE.summaries[COMPARE.baseline_id].metrics.power_current_watts.mean)
   assert.deepEqual([power.cells[0].baseline, power.cells[0].deltaPct, power.cells[1].deltaPct], [true, null, -0.35731427657192105])
-  // A baseline mean of 0: Sentinel sends no delta, but the metric was measured.
   const idle = rowOf(table, 'cpu_core_11_usage_pct')
   assert.deepEqual(idle.cells.map((cell) => cell.value), [0, 0])
   assert.equal(idle.cells[1].deltaPct, null)
@@ -271,16 +258,13 @@ test('the captured comparison is read as a table of metrics against the baseline
 
 test('a change Sentinel withholds says which of its four reasons applies', () => {
   const table = compareTable({ sentinel: COMPARE })
-  // cpu_core_13: the baseline measured it four times at a mean of 0 and the other run averaged 5.9%.
   const busy = rowOf(table, 'cpu_core_13_usage_pct')
   assert.equal(COMPARE.summaries[COMPARE.baseline_id].metrics.cpu_core_13_usage_pct.count, 4)
   assert.deepEqual(busy.cells.map((cell) => cell.value), [0, 5.91190441525744])
   assert.deepEqual([busy.cells[1].deltaPct, busy.cells[1].deltaAbsence], [null, 'baseline_zero'])
   assert.match(deltaAbsenceText('baseline_zero'), /no percentage change from 0/)
-  // A run scalar has no delta because none is published; the baseline never claims a reason of its own.
   assert.equal(rowOf(table, 'energy_joules').cells[1].deltaAbsence, 'not_published')
   assert.deepEqual(rowOf(table, 'power_current_watts').cells.map((cell) => cell.deltaAbsence), [null, null])
-  // A metric this comparison's baseline has no value for at all.
   const partial = copy(COMPARE)
   const others = Object.keys(partial.summaries).filter((id) => id !== partial.baseline_id)
   delete partial.summaries[partial.baseline_id].metrics.rtsn_6
@@ -291,7 +275,6 @@ test('a change Sentinel withholds says which of its four reasons applies', () =>
 })
 
 test('a metric only one run of a comparison measured is placed on the right side', () => {
-  // Two runs where each measured something the other did not: both directions are told apart.
   const sided = compareTable({
     sentinel: {
       baseline_id: 'base',
@@ -315,7 +298,6 @@ test('a run the daemon listed but summarised nothing for is marked, not read as 
   assert.deepEqual(table.columns.map((column) => column.summarised), [true, false])
   const power = rowOf(table, 'power_current_watts')
   assert.deepEqual([power.cells[1].value, power.cells[1].deltaAbsence], [null, 'no_value'])
-  // The daemon still published a change; printed beside an em dash it would describe a number not shown.
   assert.equal(partial.baseline_deltas_pct[other].power_current_watts, -0.35731427657192105)
   assert.equal(power.cells[1].deltaPct, null)
 })
@@ -325,10 +307,8 @@ test('a comparison is labelled from the board definitions only, and an unknown s
   const table = compareTable({ sentinel: COMPARE }, definitions)
   const power = rowOf(table, 'power_current_watts')
   assert.deepEqual([power.label, power.unit, formatValue(power.cells[0].value, power.unit)], ['Current board power', 'W', '8.62 W'])
-  // A key no definition names keeps its key, with no unit invented for it.
   assert.deepEqual([rowOf(table, 'rtsn_6').label, rowOf(table, 'rtsn_6').unit], ['Rtsn 6', null])
   assert.equal(rowOf(compareTable({ sentinel: COMPARE }), 'power_current_watts').unit, null)
-  // null here means "list the values as they came".
   for (const sentinel of [{ runs: [{ name: 'a' }, { name: 'b' }], series: {} }, { runs: [COMPARE.runs[0]], summaries: COMPARE.summaries },
     { ...COMPARE, summaries: {} }, { ...COMPARE, runs: [] }, {}]) {
     assert.equal(compareTable({ sentinel }), null)
@@ -341,17 +321,14 @@ test('the captured run is read from its own metadata, definitions and samples, w
   assert.deepEqual([run.sampleCount, run.metricCount, run.firstSampleAt, run.lastSampleAt, run.metadata.id],
     [4, 6, '2026-09-23T15:27:13.270295197Z', '2026-09-23T15:27:19.270569777Z', '20260923T152712.952Z-insight-hw-1790177227'])
   assert.deepEqual([run.undefinedKeys, run.extras], [[], []])
-  // Every metadata field the daemon sent, including the nested system block.
   const facts = Object.fromEntries(run.facts)
   assert.deepEqual([facts.Name, facts['Sample interval ms'], facts['Sentinel version'], facts['System hostname']],
     ['insight-hw-1790177227', '1989', 'main:80ab7de4da31', 'modalix'])
-  // Labels, units and groups come from the definitions the run itself carries.
   assert.deepEqual(run.metrics.map((metric) => metric.group), ['CPU', 'CPU', 'Disk', 'Memory', 'Power', 'TOP'])
   const power = run.metrics.find((metric) => metric.key === 'power_current_watts')
   assert.deepEqual([power.label, power.unit, formatValue(power.maximum, power.unit), power.count], ['Current board power', 'W', '8.88 W', 4])
   const cpu = run.metrics.find((metric) => metric.key === 'cpu_core_0_usage_pct')
   assert.deepEqual([cpu.warn, cpu.critical, cpu.status, run.crossed], [80, 95, 'ok', 0])
-  // The captured run is the comparison's baseline: the statistics computed here must be Sentinel's own.
   assert.equal(run.metadata.id, COMPARE.baseline_id)
   const daemonStats = COMPARE.summaries[COMPARE.baseline_id].metrics
   for (const metric of run.metrics) {
@@ -362,7 +339,6 @@ test('the captured run is read from its own metadata, definitions and samples, w
 test('a run ranks its metrics against the thresholds it recorded, not today\'s', () => {
   assert.deepEqual([[90, 80, 95], [95, 80, 95], [12, 80, 95], [null, 80, 95], [1e6, null, null]].map((args) => statusOf(...args)),
     ['warn', 'critical', 'ok', 'unavailable', 'ok'])
-  // Thresholds and values here are not from the board; they exercise the ranking.
   const hot = runDetail({
     sentinel: {
       metadata: { id: 'r1' },
@@ -375,17 +351,14 @@ test('a run ranks its metrics against the thresholds it recorded, not today\'s',
   })
   const [ghost, rtsn] = hot.metrics
   assert.deepEqual([rtsn.status, rtsn.maximum, rtsn.mean], ['critical', 88, 64])
-  // A metric the run defined but never measured stays empty, never zero.
   assert.deepEqual([ghost.status, ghost.count, ghost.mean, ghost.maximum, formatValue(ghost.mean, ghost.unit)], ['unavailable', 0, null, null, '—'])
   assert.equal(hot.crossed, 1)
 })
 
 test('a run body without the three documented keys falls back instead of guessing', () => {
   for (const payload of [{ sentinel: { run: { id: 'r1' } } }, { sentinel: {} }, null]) assert.equal(runDetail(payload), null)
-  // Metrics as a map, samples absent, and a field beyond the three: all still reported.
   const odd = runDetail({ sentinel: { metadata: null, metrics: { power_current_watts: { unit: 'W' } }, retention: 'kept' } })
   assert.deepEqual([odd.metricCount, odd.sampleCount, odd.metrics, odd.facts, odd.extras], [1, 0, [], [], [['Retention', 'kept']]])
-  // A value with no definition of its own is counted rather than passed over silently.
   const extra = runDetail({ sentinel: { metadata: {}, metrics: [{ key: 'rtsn_6' }], samples: [{ timestamp: 't', values: { rtsn_6: 1, mystery_metric: 2 } }] } })
   assert.deepEqual(extra.undefinedKeys, ['mystery_metric'])
 })
@@ -398,9 +371,7 @@ test('a run of one sample is a moment, not a range of no length', () => {
   assert.deepEqual([run.sampleCount, run.single, run.sampledAt], [1, true, '2026-09-23T15:27:12.952702307Z'])
   const [metric] = run.metrics
   assert.deepEqual([metric.mean, metric.minimum, metric.maximum, metric.status], [7.7, 7.7, 7.7, 'ok'])
-  // One point draws no sparkline rather than a flat line implying a measured trend.
   assert.equal(sparkline([7.7]), null)
-  // The real four-sample run is a range and keeps both ends; a run with no samples is neither.
   const many = runDetail({ sentinel: RUN })
   assert.deepEqual([many.single, many.sampledAt], [false, null])
   assert.ok(many.firstSampleAt && many.lastSampleAt && many.firstSampleAt !== many.lastSampleAt)
@@ -423,7 +394,6 @@ test('the request guard admits one call per key until it ends', () => {
 })
 
 test('requests out before the first board arrives belong to that board', () => {
-  // The board state loading is not a switch: the check already out went to this board.
   const fresh = createRequestGuard()
   const early = fresh.begin('state')
   assert.equal(early.generation, null)
@@ -433,14 +403,12 @@ test('requests out before the first board arrives belong to that board', () => {
 })
 
 test('a board switch is not blocked by a request still out to the previous board', () => {
-  // Board A's /api/sentinel is slow; the masthead selects board B meanwhile.
   const guard = createRequestGuard()
   guard.switchTo(3)
   const onA = guard.begin('state')
   assert.equal(guard.switchTo(4), true)
   const onB = guard.begin('state')
   assert.equal(onB.generation, 4)
-  // When A finally answers, its state is dropped, not applied as B's; A's request ending does not end B's.
   assert.deepEqual([guard.current(onA), guard.current(onB)], [false, true])
   guard.end(onA)
   assert.equal(guard.running('state'), true)
@@ -448,29 +416,24 @@ test('a board switch is not blocked by a request still out to the previous board
 })
 
 test('every board-scoped answer is judged against the board it was asked of', () => {
-  // An active-trace read for A landing after the reset for B must not bring back A's trace, whose Stop would stop B's.
   const guard = createRequestGuard()
   guard.switchTo(3)
   const tickets = ['traces', 'runs', 'metrics', 'compare', 'trace-action', 'install', 'delete'].map((key) => guard.begin(key))
   guard.switchTo(4)
   for (const ticket of tickets) assert.equal(guard.current(ticket), false, ticket.key)
   for (const ticket of tickets) assert.ok(guard.begin(ticket.key), ticket.key)
-  // Selecting the same board again is not a switch and cancels nothing.
   const kept = guard.begin('host')
   assert.equal(guard.switchTo(4), false)
   assert.equal(guard.current(kept), true)
 })
 
 test('an answer read from another board is refused even while its ticket is current', () => {
-  // Another client switched Insight from A to B: asked under A's generation, answered from B.
   const guard = createRequestGuard()
   guard.switchTo(3)
   const runs = guard.begin('runs')
   assert.equal(guard.current(runs, { generation: 4, board: { label: 'B' } }), false)
   assert.equal(guard.current(runs, { generation: 3, board: { label: 'A' } }), true)
-  // An answer without a generation (an empty body) is judged by its ticket alone.
   assert.deepEqual([guard.current(runs, {}), guard.current(runs)], [true, true])
-  // A request out before the page knew its board has nothing to compare with.
   assert.equal(createRequestGuard().current(createRequestGuard().begin('state'), { generation: 9 }), true)
 })
 
@@ -483,7 +446,6 @@ test('opening another run supersedes the read of the one opened before it', () =
   assert.deepEqual([guard.current(runA), guard.current(runB)], [false, true])
   guard.end(runA)
   assert.equal(guard.running('run'), true)
-  // Closing the run, or deleting it, cancels its read outright.
   guard.cancel('run')
   assert.deepEqual([guard.current(runB), guard.running('run')], [false, false])
   guard.cancel('never-started')
@@ -493,14 +455,12 @@ test('a selection change cancels the comparison still out for the previous selec
   const guard = createRequestGuard()
   guard.switchTo(3)
   const asked = guard.begin('compare')
-  // A/B is being compared; the user unticks B and ticks C.
   let change = selectionChange(guard, ['a', 'b'], (current) => toggleSelection(current, 'b'))
   assert.deepEqual(change, { next: ['a'], changed: true, cancelled: true })
   change = selectionChange(guard, change.next, (current) => toggleSelection(current, 'c'))
   assert.deepEqual(change, { next: ['a', 'c'], changed: true, cancelled: false })
   assert.equal(guard.current(asked, { generation: 3 }), false, "A/B's answer is not applied")
   assert.ok(guard.begin('compare'), 'A/C can be compared at once')
-  // Clearing, and dropping runs that left the list, are changes too; an unchanged selection is not.
   assert.equal(selectionChange(guard, ['a', 'c'], []).cancelled, true)
   const kept = guard.begin('compare')
   assert.deepEqual(selectionChange(guard, ['a', 'c'], (current) => current.filter((ref) => ref !== 'z')), { next: ['a', 'c'], changed: false, cancelled: false })
@@ -531,7 +491,6 @@ test('a host snapshot with no readings says so instead of showing three em dashe
   const empty = hostMetricsModel({ REMOTE: false })
   assert.equal(empty.empty, true)
   assert.match(hostNotice(empty, true), /no CPU, memory or disk reading/)
-  // Before the first answer the same model means "not read yet", not "measured nothing".
   assert.equal(hostNotice(hostMetricsModel(null), false), 'Reading this machine…')
   assert.match(hostNotice(hostMetricsModel({ REMOTE: true, memory: {}, disk: {} }), true), /not connected/)
   assert.equal(hostNotice(hostMetricsModel({ REMOTE: false, cpu_load: 2.9, memory: { percent: 37.3 }, disk: { percent: 3.4 } }), true), '')
@@ -544,10 +503,8 @@ test('a selected run that has left the board is named, not left stuck in the sel
   const selected = runs.map((run) => run.ref)
   assert.deepEqual(missingSelection(selected, runs), [])
   assert.deepEqual(missingSelection(selected, runs.slice(0, 1)), ['insight-hw-1790177178'])
-  // What the daemon answers for that selection, captured from the DevKit.
   const refused = failureNotice({ error: "unknown run 'insight-hw-1790177178'", code: 'not_found', hint: 'List runs and use a name or id Sentinel reports.' })
   assert.deepEqual([refused.title, refused.board, refused.daemon, refused.retryable], ['That run is not on this board', false, false, true])
-  // A run is selectable by name or by id; runs not read yet is not every run having gone, but an empty list is.
   assert.deepEqual(missingSelection(['20260923T152624.613Z-insight-hw-1790177178'], runs), [])
   assert.deepEqual([missingSelection(selected, null), missingSelection(selected, undefined)], [[], []])
   assert.deepEqual(missingSelection(selected, []), selected)
@@ -556,10 +513,8 @@ test('a selected run that has left the board is named, not left stuck in the sel
 
 test('the empty and refused states Sentinel actually returns are read as such', () => {
   assert.deepEqual(runList({ generation: 1, sentinel: { runs: [] } }), [])
-  // Comparing one run, verbatim from the DevKit: a 400 the page must not read as a comparison.
   const single = failureNotice({ error: 'Comparing needs at least two runs.', code: 'invalid_request', hint: 'Pass `runs=<baseline>,<other>`; the first run is the baseline.' })
   assert.deepEqual([single.title, single.board, compareReady(['only-one'])], ['The request was rejected', false, false])
-  // A board that has been left: /api/sentinel answers 502 with the board's own hint, which the Board panel owns.
   const gone = failureNotice({ error: 'The board could not be reached.', code: 'unreachable',
     hint: 'Check that the board is powered on and on the network, and that `ssh -p 22 sima@192.168.2.254` works from this machine.' })
   assert.deepEqual([gone.board, gone.daemon], [true, false])
@@ -577,14 +532,11 @@ test('a daemon that is not there offers the one install that fixes it, and an in
   assert.deepEqual([info.state, info.label, info.available, info.canInstall, info.installBlocked], ['missing', 'Not installed', false, true, ''])
   assert.equal(failureNotice(info.error).title, 'Sentinel is not running on this board')
   assert.match(failureNotice(info.error).hint, /sima-cli neat install sentinel/)
-  // An installed unit that is not running is a different sentence and a different fix.
   const stopped = daemonInfo(INSTALL.daemon_stopped.body)
   assert.deepEqual([stopped.state, stopped.label, failureNotice(stopped.error).title], ['stopped', 'Installed but stopped', 'The Sentinel service is stopped'])
-  // Without sima-cli the button is dead, and the reason is on the page rather than in a tooltip.
   const noCli = daemonInfo(INSTALL.sima_cli_missing_state.body)
   assert.deepEqual([noCli.simaCli, noCli.canInstall], [null, false])
   assert.match(noCli.installBlocked, /sima-cli was not found on the board/)
-  // A healthy daemon is never reinstalled from here: the installer restarts it.
   const healthy = daemonInfo({ available: true, status: { state: 'ready' }, daemon: daemon() })
   assert.equal(healthy.canInstall, false)
   assert.match(healthy.installBlocked, /would restart it and end a trace in flight/)
@@ -602,7 +554,6 @@ test('an install that is refused or fails is titled as an install, not as a read
   assert.deepEqual([noCli.code, noCli.title], ['sentinel_failed', 'Sentinel could not be installed'])
   assert.match(noCli.message, /`sima-cli` was not found on the board/)
   assert.match(noCli.hint, /Install sima-cli on the board/)
-  // The board refusing sudo is not Sentinel refusing this user.
   const sudo = notice('sudo_denied')
   assert.deepEqual([sudo.code, sudo.title, sudo.detail], ['sentinel_denied', 'Installing Sentinel needs sudo on the board', 'sudo: a password is required'])
   assert.match(sudo.hint, /in a shell on the board/)
@@ -610,7 +561,6 @@ test('an install that is refused or fails is titled as an install, not as a read
   assert.equal(failed.title, 'Sentinel could not be installed')
   assert.match(failed.message, /failed on the board \(exit 1\)/)
   assert.match(failed.detail, /vulcan: not found/)
-  // Finishing with the service still down is a failure too.
   const down = notice('installer_left_it_down')
   assert.equal(down.title, 'Sentinel could not be installed')
   assert.match(down.message, /the simaai-sentinel service is inactive/)
@@ -618,7 +568,6 @@ test('an install that is refused or fails is titled as an install, not as a read
   for (const name of ['already_installed', 'sima_cli_missing', 'sudo_denied', 'installer_failed']) {
     assert.deepEqual([notice(name).board, notice(name).retryable, notice(name).action, notice(name).generation], [false, true, 'install', 7], name)
   }
-  // An installer past its 15-minute budget is not an unresponsive board; read from the board, the code keeps its reading title.
   const slow = failureNotice({ code: 'timeout', error: 'The board took too long to answer.' }, null, { action: 'install' })
   assert.equal(slow.title, 'The installer did not finish in time')
   assert.match(slow.hint, /as long as it needs/)
@@ -632,7 +581,6 @@ test('a board that goes away mid-view keeps what it already gave, and says why',
   for (const read of [{ metrics: METRICS, traces: null, runs: null }, { metrics: null, traces: { sentinel: {} }, runs: null }, { metrics: null, traces: null, runs: { sentinel: { runs: [] } } }]) {
     assert.equal(telemetryVisible(info, read), true)
   }
-  // Nothing read yet and nothing answering: there is nothing to keep. A working daemon shows the panels regardless.
   assert.deepEqual([telemetryVisible(info, { metrics: null, traces: null, runs: null }), telemetryVisible(info, {}), telemetryVisible({ available: true }, {})], [false, false, true])
   const gone = failureNotice({ code: 'unreachable', error: 'The board could not be reached.' })
   assert.deepEqual([gone.board, gone.retryable], [true, true])
@@ -647,7 +595,6 @@ test('a run name long enough to break the tables is carried intact and wrapped',
   assert.match(validateTrace({ name: `${name}a` }).error, /at most 128 characters/)
   assert.equal(compareQuery([name, 'short']), `/api/sentinel/compare?runs=${encodeURIComponent(`${name},short`)}`)
   assert.deepEqual([missingSelection([name], runs), uncomparableRefs([name])], [[], []])
-  // The cells that carry it are header cells, which do not wrap the way `td` already does.
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
   assert.match(css, /\.stats-run-table tbody th,\n\.stats-compare-table thead th \{\n\s*overflow-wrap: anywhere;/)
 })
@@ -655,7 +602,6 @@ test('a run name long enough to break the tables is carried intact and wrapped',
 test('a delete names one run and the board generation its list came from', () => {
   assert.equal(deleteRunQuery('baseline', 3), '/api/sentinel/runs/baseline?generation=3')
   assert.equal(deleteRunQuery("x'; rm -rf /?a=b#c", 0), "/api/sentinel/runs/x'%3B%20rm%20-rf%20%2F%3Fa%3Db%23c?generation=0")
-  // Without a generation the backend acts on whatever board is selected, so none is invented.
   assert.deepEqual([deleteRunQuery('a/b'), deleteRunQuery('a', '3')], ['/api/sentinel/runs/a%2Fb', '/api/sentinel/runs/a'])
   assert.deepEqual([deletePrompt(1), deletePrompt(3)], ['Delete 1 run?', 'Delete 3 runs?'])
 })
@@ -666,7 +612,6 @@ test('stopping a trace names the board generation the trace was read under', () 
 })
 
 test('installing and starting a trace name the board generation they were offered under', () => {
-  // Without a generation the backend acts on whatever board is selected, so none is invented.
   assert.deepEqual([3, 0, undefined].map((generation) => installQuery(generation)), ['/api/sentinel/install?generation=3', '/api/sentinel/install?generation=0', '/api/sentinel/install'])
   assert.deepEqual([3, 0, '3'].map((generation) => startTraceQuery(generation)), ['/api/sentinel/traces?generation=3', '/api/sentinel/traces?generation=0', '/api/sentinel/traces'])
 })
@@ -676,13 +621,11 @@ test('stopping a trace names the trace on screen, so a trace that replaced it is
   assert.equal(shown.id, 'trace a/1')
   assert.equal(stopTraceQuery(3, shown.id), '/api/sentinel/traces/stop?generation=3&trace_id=trace%20a%2F1')
   assert.equal(stopTraceQuery(null, 'trace-a'), '/api/sentinel/traces/stop?trace_id=trace-a')
-  // A trace without an id stops as before, without trace_id.
   assert.equal(traceModel({ sentinel: { trace: { name: 'baseline' } } }).id, '')
   assert.equal(stopTraceQuery(3, ''), '/api/sentinel/traces/stop?generation=3')
 })
 
 test('opening or deleting a run uses its stable id, not a name another run has as its id', () => {
-  // Run A is named "x"; run B's id is "x". The backend resolves "x" by id first, to B.
   const rows = runList({ sentinel: { runs: [{ id: 'a1', name: 'x' }, { id: 'x', name: 'y' }, { name: 'no-id' }] } })
   assert.deepEqual(rows.map((run) => run.ref), ['x', 'y', 'no-id'], 'the list and Compare keep the names')
   assert.deepEqual(['x', 'y', 'no-id', 'gone'].map((ref) => runActionRef(rows, ref)), ['a1', 'x', 'no-id', 'gone'])
@@ -700,7 +643,6 @@ test('delete failures are titled for deleting, not for reading or starting a tra
   const notice = (code) => failureNotice({ code, error: 'x' }, 1, { action: 'delete' })
   assert.deepEqual(['trace_conflict', 'stale_snapshot', 'sentinel_failed', 'unreachable'].map((code) => notice(code).title),
     ['That run is still recording', 'The selected board changed', 'Sentinel did not delete the run', 'The board could not be reached'])
-  // Reading keeps its own wording.
   assert.equal(failureNotice({ code: 'trace_conflict', error: 'x' }).title, 'That trace cannot start')
 })
 
@@ -724,7 +666,6 @@ test('a comparison that included a deleted run is recognised by its id or name',
   assert.deepEqual([['a'], ['i-b'], ['c'], []].map((gone) => compareIncludes(compare, new Set(gone))), [true, true, false, false])
   assert.equal(compareIncludes(null, new Set(['a'])), false)
   assert.equal(compareIncludes({ sentinel: { runs: ['a'] } }, new Set(['a'])), false)
-  // The view asks for raw=1, where each run's identity is under metadata.
   const raw = { sentinel: { runs: [{ metadata: { id: 'i-a', name: 'a' }, metrics: [], samples: [] }] } }
   assert.deepEqual([['a'], ['i-a'], ['c']].map((gone) => compareIncludes(raw, new Set(gone))), [true, true, false])
 })

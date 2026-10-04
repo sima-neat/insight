@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Callout } from '../peripherals/ui.jsx'
+import { downloadText } from '../peripherals/api.js'
 import { CoreHeatmap, StackedChart, StatTile, TimeChart } from './Charts.jsx'
 import {
   DASH_TABS,
@@ -28,18 +29,6 @@ function toneColor(status) {
 const COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)']
 const STORAGE_GROUP = /^(disk|diskio|network|storage|nvme)$/i
 const SYSTEM_KEYS = /^(cpu_|linux_mem|mla_mem|ev74_)/
-
-function download(filename, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.hidden = true
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
 
 function readTab() {
   try {
@@ -126,10 +115,7 @@ function powerCeiling(model) {
   return values.length ? niceCeil(Math.max(...values) * 1.1) : null
 }
 
-/**
- * Every metric as one list in Sentinel's order: short name, group, value, a history trace across
- * the row and a status. The long name, description and thresholds are on the name's tooltip.
- */
+/** Every metric in Sentinel order with value, history and status. */
 export function OpsList({ metrics, series, caption }) {
   return (
     <table className="stats-ops">
@@ -366,11 +352,7 @@ function tabAlert(model, id) {
   return null
 }
 
-/**
- * Sentinel on the board, as its own terminal dashboard lays it out: a status line, then
- * Overview, Thermal, Power, System, Storage & Network and Runs. Everything is charted over the
- * daemon's cached window, so each view opens full rather than filling while you watch.
- */
+/** The board's Sentinel dashboard over the daemon's cached window. */
 export default function SentinelDashboard({ model, startedAt, now, live, polling, stale, error, busy, onToggleLive, onRefresh, onRetry, runs }) {
   const [tab, setTab] = useState(readTab)
   useEffect(() => saveTab(tab), [tab])
@@ -393,7 +375,7 @@ export default function SentinelDashboard({ model, startedAt, now, live, polling
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => download(sessionCsvFilename(), sessionCsv(model))}
+              onClick={() => downloadText(sessionCsvFilename(), sessionCsv(model), 'text/csv;charset=utf-8')}
               disabled={!model.timestamps.length}
               title={`Every metric at each of the ${model.timestamps.length} samples Sentinel holds for this session`}
             >
