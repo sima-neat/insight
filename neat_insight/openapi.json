@@ -1509,6 +1509,7 @@
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
           "detail": {"type": "string", "description": "The underlying error text, such as SiMa Sentinel's answer or the socket failure."},
+          "generation": {"type": "integer", "description": "Sentinel endpoints only: the board `generation` that answered with the failure, present once the selected board is known, so a client can discard a failure from a board other than the one it asked."},
           "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
           "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},
           "presented_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint the board presented."}

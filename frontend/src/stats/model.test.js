@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
+import { apiError } from '../peripherals/model.js'
+
 import {
   BOARD_PROBLEM_CODES,
   HOST_POLL_MS,
@@ -271,6 +273,9 @@ test('every backend failure becomes a title, a sentence and a place to fix it', 
 
   assert.equal(failureNotice({ error: 'boom', code: 'unheard_of' }).title, 'Something went wrong')
   assert.equal(failureNotice(null), null)
+  // A failure carries the generation of the board that answered it, not the one it was sent to.
+  assert.equal(failureNotice(apiError({ error: 'no active trace', code: 'trace_conflict', generation: 4 }, 409), 3).generation, 4)
+  assert.equal(failureNotice(apiError({ error: 'no board', code: 'no_target' }, 409), 3).generation, 3)
   for (const code of ['no_target', 'unreachable', 'auth_failed', 'host_key_changed', 'timeout']) {
     assert.ok(BOARD_PROBLEM_CODES.has(code))
   }

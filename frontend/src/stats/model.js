@@ -442,9 +442,12 @@ export function failureNotice(error, generation = null, { action = 'read' } = {}
   const code = normalized.code || ''
   const installing = action === 'install'
   const deleting = action === 'delete'
+  const answered = normalized.details?.generation
   return {
     code,
-    generation,
+    // The board generation that answered with the failure when the backend names it, else the
+    // one the request was sent to: a failure from another board must not pass as this board's.
+    generation: Number.isInteger(answered) ? answered : generation,
     // What the failure came out of, so the view can label its attached output.
     action,
     title:

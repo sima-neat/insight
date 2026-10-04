@@ -1,7 +1,7 @@
 """HTTP API for Sentinel telemetry on the selected board."""
 from threading import Lock
 
-from flask import Blueprint, request
+from flask import Blueprint, g, jsonify, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.manager import board_summary
@@ -29,11 +29,23 @@ def _no_store(response):
     return response
 
 
+@sentinel_bp.errorhandler(BoardError)
+def _sentinel_error(exc: BoardError):
+    """The board error shape, plus the `generation` of the board that answered once it is known,
+    so a client can tell a failure from another board from one of the board it asked."""
+    payload = exc.to_dict()
+    generation = g.get("sentinel_generation")
+    if generation is not None:
+        payload.setdefault("generation", generation)
+    return jsonify(payload), exc.status
+
+
 class _Context:
     """The selected board, its cache key, and a client for its Sentinel daemon."""
 
     def __init__(self):
         self.session = get_board_manager().session()
+        g.sentinel_generation = self.session.generation
         self.identity = cache.identity(self.session)
         self.key = cache.key(self.session, self.identity)
         self.client = SentinelClient(self.session)

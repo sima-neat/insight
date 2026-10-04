@@ -984,7 +984,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       const after = fresh(ticket, data) ? done(data, ticket) : null
       if (after) await after
     } catch (err) {
-      if (fresh(ticket)) fail(failureNotice(err, ticket.generation, { action }))
+      // A failure is judged like an answer: one from another board is not this board's.
+      if (fresh(ticket, err?.details)) fail(failureNotice(err, ticket.generation, { action }))
     } finally {
       guard.current.end(ticket)
       if (fresh(ticket)) busy(false)
@@ -1113,7 +1114,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       setHalted(false)
       if (trace.active) loadTraces({ quiet: true })
     } catch (err) {
-      if (!fresh(ticket)) return
+      if (!fresh(ticket, err?.details)) return
       const notice = failureNotice(err, ticket.generation)
       setMetricsError(notice)
       setFailures((count) => count + 1)
@@ -1249,16 +1250,20 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
           results.push({ ref, skipped: true })
           continue
         }
+        let answer = null
         try {
           const data = await deleteRun(runActionRef(listed, ref), listGeneration)
+          answer = data
           latest = data
           results.push({ ref, deleted: data?.deleted || { id: null, name: null } })
         } catch (err) {
+          answer = err?.details
           const notice = failureNotice(err, ticket.generation, { action: 'delete' })
           results.push({ ref, notice, stop: deleteStops(notice) })
         }
-        // A board switch ends the batch: the rest were chosen from the previous board's list.
-        if (!fresh(ticket)) return null
+        // A board switch ends the batch, as does an answer or failure from another board: the
+        // rest were chosen from the previous board's list.
+        if (!fresh(ticket, answer)) return null
       }
     } finally {
       guard.current.end(ticket)

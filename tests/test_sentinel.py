@@ -1197,6 +1197,16 @@ class SentinelApiTests(_ApiCase):
         blank = self.post("/api/sentinel/traces/stop?trace_id=%20")
         self.assertEqual((blank.status_code, blank.get_json()["code"]), (400, "invalid_request"))
 
+    def test_a_failure_names_the_board_generation_that_answered(self):
+        self.session.generation = 4
+        self.transport.answer("POST", "/v1/traces/stop", 409, {"error": "no active trace"})
+        body = self.post("/api/sentinel/traces/stop").get_json()
+        self.assertEqual((body["code"], body["generation"]), ("trace_conflict", 4))
+        stale = self.post("/api/sentinel/traces/stop?generation=3").get_json()
+        self.assertEqual((stale["code"], stale["expected_generation"], stale["generation"]), ("stale_snapshot", 3, 4))
+        # Refused before the board is known: there is no generation to name.
+        self.assertNotIn("generation", self.post("/api/sentinel/traces", json={"name": "a,b"}).get_json())
+
     def test_runs_are_listed_and_read_by_name(self):
         self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [{"id": "r1", "name": "baseline"}]})
         self.transport.answer("GET", "/v1/runs/baseline", 200, {"schema": 1, "run": {"id": "r1"}})
