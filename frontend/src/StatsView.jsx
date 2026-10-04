@@ -1339,14 +1339,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   // Refresh daemon state, runs and the active trace together. This catches restarts, collector
   // health changes and lifecycle changes made elsewhere. Paused while the tab is hidden: each
   // read runs on the board.
-  const sentinelAvailable = Boolean(state?.available)
+  const boardSelected = Boolean(board?.target)
   useEffect(() => {
-    if (!sentinelAvailable) return undefined
+    if (!boardSelected) return undefined
     const timer = setInterval(() => {
       if (!document.hidden) loadState({ quiet: true })
     }, RUNS_POLL_MS)
     return () => clearInterval(timer)
-  }, [sentinelAvailable, generation])
+  }, [boardSelected, generation])
 
 
   const boardProblem = boardError || (stateError?.board ? stateError : null)
