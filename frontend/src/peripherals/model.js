@@ -582,6 +582,14 @@ export function heartbeatFailureEvent(error, sessionId) {
   return null
 }
 
+// What the menus show for a preview the page adopts (reload, another tab): its camera and the mode
+// it streams, so they agree with the video. Null when the session names no camera.
+export function adoptedSelection(session) {
+  if (!session?.camera_id) return null
+  const mode = session.mode || {}
+  return { id: session.camera_id, format: mode.format, width: mode.width, height: mode.height, fps: mode.fps }
+}
+
 export function sessionMatches(session, cameraId, generation, selection = null) {
   if (!session || !cameraId) return false
   if (session.camera_id !== cameraId) return false

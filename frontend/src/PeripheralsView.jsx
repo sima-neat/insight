@@ -5,6 +5,7 @@ import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
   PREVIEW_IDLE,
+  adoptedSelection,
   availabilityInfo,
   changeSummary,
   countLabel,
@@ -345,8 +346,12 @@ export default function PeripheralsView({
     setLoading(false)
     if (existing) {
       dispatchPreview({ type: 'adopt', session: existing })
-      // Follow the running preview, so opening the page does not stop it.
-      if (existing.camera_id) setSelectedId(existing.camera_id)
+      // Follow the running preview, so opening the page does not stop it, and its mode, so the menus match the video.
+      const adopted = adoptedSelection(existing)
+      if (adopted) {
+        setSelectedId(adopted.id)
+        setWanted(adopted)
+      }
     }
     if (snap && !snap.scanned_at && boardData?.target && !autoRefreshed.current) {
       autoRefreshed.current = true

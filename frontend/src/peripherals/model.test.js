@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   PREVIEW_IDLE,
+  adoptedSelection,
   apiError,
   heartbeatFailureEvent,
   availabilityInfo,
@@ -809,4 +810,12 @@ test('preview heartbeat: a taken channel ends the preview with the backend reaso
   assert.equal(nextPreviewState(live, heartbeatFailureEvent(error, 'old-id')), live)
   assert.deepEqual(heartbeatFailureEvent({ code: 'not_found' }, 'abc'), { type: 'expired', for: 'abc' })
   assert.equal(heartbeatFailureEvent({ code: 'timeout' }, 'abc'), null)
+})
+
+test('an adopted preview selects the camera and the mode it streams, not the defaults', () => {
+  const session = { id: 's1', camera_id: imx477.id, mode: { format: 'NV12', width: 1920, height: 1080, fps: 60 }, state: 'live' }
+  const wanted = adoptedSelection(session)
+  assert.deepEqual(wanted, { id: imx477.id, format: 'NV12', width: 1920, height: 1080, fps: 60 })
+  assert.deepEqual(resolveSelection(imx477, wanted), session.mode)
+  assert.equal(adoptedSelection({ id: 's2', mode: session.mode }), null)
 })
