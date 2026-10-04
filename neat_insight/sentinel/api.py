@@ -45,7 +45,15 @@ class _Context:
     """The selected board, its cache key, and a client for its Sentinel daemon."""
 
     def __init__(self):
-        self.session = get_board_manager().session()
+        manager = get_board_manager()
+        try:
+            self.session = manager.session()
+        except BoardError as exc:
+            # session() can discover that another client cleared the target. Refreshing
+            # manager state advances that change's generation before the error is returned.
+            if exc.code == "no_target":
+                g.sentinel_generation = manager.state()["generation"]
+            raise
         g.sentinel_generation = self.session.generation
         self.identity = cache.identity(self.session)
         self.key = cache.key(self.session, self.identity)

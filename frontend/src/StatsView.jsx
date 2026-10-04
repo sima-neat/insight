@@ -352,6 +352,7 @@ export function RunsPanel({
   }
   const missing = useMemo(() => missingSelection(selected, runsPayload ? runs : null), [selected, runs, runsPayload])
   const uncomparable = useMemo(() => uncomparableRefs(selected), [selected])
+  const openLabel = runs.find((item) => item.ref === openRef)?.label || openRef
   const fallbackRows = useMemo(() => (compare && !table ? factRows(compare.sentinel, []) : []), [compare, table])
   const run = useMemo(() => runDetail(detail), [detail])
   const detailRows = useMemo(() => (detail && !run ? factRows(detail.sentinel, ['samples']) : []), [detail, run])
@@ -594,8 +595,8 @@ export function RunsPanel({
       )}
 
       {openRef && (
-        <section className="stats-run-detail" aria-label={`Run ${openRef}`} aria-busy={detailBusy}>
-          <h3>{openRef}</h3>
+        <section className="stats-run-detail" aria-label={`Run ${openLabel}`} aria-busy={detailBusy}>
+          <h3>{openLabel}</h3>
           <FailureCallout notice={detailError} />
           {detailStale && <StaleBanner what="This run" payload={detail} onRefresh={() => onOpen(openRef)} refreshLabel="Read it again" />}
           {detailBusy && <p className="hint" role="status">Reading the run from the board…</p>}
@@ -609,7 +610,7 @@ export function RunsPanel({
               </p>
               {run.metrics.length > 0 && (
                 <>
-                  <div className="stats-table-scroll" role="region" aria-label={`Metrics of run ${openRef}`} tabIndex={0}>
+                  <div className="stats-table-scroll" role="region" aria-label={`Metrics of run ${openLabel}`} tabIndex={0}>
                     <table className="sysinfo-table stats-table stats-run-metrics">
                       <thead>
                         <tr>
@@ -651,7 +652,7 @@ export function RunsPanel({
               {run.facts.length > 0 && (
                 <details className="stats-detail">
                   <summary>Run metadata</summary>
-                  <KeyValueTable rows={run.facts} caption={`Run ${openRef}`} />
+                  <KeyValueTable rows={run.facts} caption={`Run ${openLabel}`} />
                 </details>
               )}
               {run.facts.length === 0 && <p className="hint">Sentinel recorded no metadata for this run.</p>}
@@ -670,7 +671,7 @@ export function RunsPanel({
                   This Sentinel build answered with a run body Insight does not know; its values are listed as they came
                   from the board.
                 </p>
-                <KeyValueTable rows={detailRows} caption={`Run ${openRef}`} />
+                <KeyValueTable rows={detailRows} caption={`Run ${openLabel}`} />
               </>
             ) : (
               <p className="hint">Sentinel returned no detail for this run.</p>

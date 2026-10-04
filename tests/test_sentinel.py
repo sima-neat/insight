@@ -155,11 +155,15 @@ class FakeManager:
     def __init__(self, session=None):
         self.current = session
         self.error = None
+        self.generation = session.generation if session else 0
 
     def session(self):
         if self.error:
             raise self.error
         return self.current
+
+    def state(self):
+        return {"generation": self.generation}
 
 
 class StaticBoard:
@@ -883,7 +887,9 @@ class SentinelApiTests(_ApiCase):
 
     def test_board_errors_pass_through_with_their_status(self):
         self.manager.error = BoardError("no_target", "No board is selected.", hint="Select one.")
-        self.refused(self.get("/api/sentinel"), 409, "no_target")
+        self.manager.generation = 2
+        missing = self.refused(self.get("/api/sentinel"), 409, "no_target")
+        self.assertEqual(missing["generation"], 2)
         self.manager.error = None
         self.transport.exec_error = BoardError("timeout", "too slow")
         self.refused(self.get("/api/sentinel/metrics"), 504, "timeout")

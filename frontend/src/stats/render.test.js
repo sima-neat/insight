@@ -87,3 +87,11 @@ test('a trace read from a board no longer selected cannot be stopped from here',
   const stale = stopOf(runsPanel(RunsPanel, { trace: traceModel(RECORDING), traceStale: true, compare: null }))
   assert.match(stale, /disabled/)
 })
+
+test('an opened run keeps its display name while actions use its stable id', () => {
+  const runs = runList({ sentinel: { runs: [{ id: '20261004T160000.000Z-baseline', name: 'baseline' }] } })
+  const html = runsPanel(RunsPanel, { runs, runsPayload: { sentinel: { runs: [] } }, openRef: runs[0].ref, compare: null })
+  assert.match(html, /<h3>baseline<\/h3>/)
+  assert.match(html, /aria-label="Run baseline"/)
+  assert.doesNotMatch(html, /20261004T160000\.000Z-baseline/)
+})
