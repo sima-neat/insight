@@ -1876,6 +1876,16 @@ class WebcamNormalizationTests(unittest.TestCase):
         self.assertIn("-g 30", text)
         self.assertIn("-keyint_min 30", text)
 
+        # FFmpeg must not accumulate its normal RTSP probe/input buffer before
+        # decoding the live webcam. These are input options, so ordering them
+        # before -i is part of the contract.
+        low_latency_input = (
+            "-fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32"
+        )
+        input_url = "-i rtsp://127.0.0.1:8554/$MTX_PATH"
+        self.assertIn(low_latency_input, text)
+        self.assertLess(text.index(low_latency_input), text.index(input_url))
+
 
 if __name__ == "__main__":
     unittest.main()
