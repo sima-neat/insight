@@ -138,6 +138,28 @@ class PeripheralClientTests(unittest.TestCase):
         with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
             self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
 
+    def test_frame_intervals_of_an_unknown_kind_are_rejected(self):
+        def with_interval(interval):
+            response = camera_catalog()
+            response["devices"][0]["camera"]["modes"][0]["frame_intervals"] = [
+                {"width": 1920, "height": 1080, "intervals": [interval]}
+            ]
+            return response
+
+        fraction = {"numerator": 1, "denominator": 30}
+        continuous = {"type": "continuous", "minimum": fraction, "maximum": {"numerator": 1, "denominator": 5}}
+        for kind in (None, "", "Discrete", "range", 1, ["stepwise"]):
+            interval = {key: value for key, value in dict(continuous, type=kind).items() if value is not None}
+            with self.subTest(type=kind), mock.patch.object(
+                socket_client, "request", return_value=(200, json.dumps(with_interval(interval)))
+            ):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).catalog()
+                self.assertEqual(ctx.exception.code, "peripheral_response")
+        valid = with_interval(continuous)
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
+            self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
+
     def test_non_object_fields_the_snapshot_reads_are_rejected(self):
         usb = {"id": "camera:v4l2:1", "type": "camera", "provider": "daemon.camera.v4l2", "camera": {
             "backend": "v4l2", "connection": "usb", "device_path": "/dev/video0", "modes": [],

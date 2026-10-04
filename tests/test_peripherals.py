@@ -722,6 +722,19 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertIsNone(api.scans.snapshot(1))
 
+    def test_a_board_change_while_the_snapshot_is_built_is_refused(self):
+        self.use()
+        record = api.scans.record
+
+        def record_then_switch_board(*args):
+            snapshot = record(*args)
+            self.manager.current.stale = True  # /api/board/select lands while the snapshot is built
+            return snapshot
+
+        with mock.patch.object(api.scans, "record", record_then_switch_board):
+            response = self.refresh()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+
     def test_board_and_sentinel_errors_pass_through(self):
         self.use(BoardError("unreachable", "Cannot reach sima@192.168.2.2.", hint="Check the cable."))
         response = self.refresh()
@@ -783,21 +796,22 @@ class PeripheralsApiTests(unittest.TestCase):
 
         self.sentinel.side_effect = slow_refresh
         second_waiting = threading.Event()
-        refresh_lock, record = api.scans.refresh_lock, api.scans.record
+        refresh_lock, completed_since = api.scans.refresh_lock, api.scans.completed_since
 
         def counting_refresh_lock(generation):
             if started.is_set():
                 second_waiting.set()
             return refresh_lock(generation)
 
-        def record_then_switch_board(*args):
-            snapshot = record(*args)
-            self.manager.current.stale = True  # /api/board/select lands before the waiter takes the lock
-            return snapshot
+        def switch_board_once_shared(*args):
+            shared = completed_since(*args)
+            if shared:
+                self.manager.current.stale = True  # /api/board/select lands after the first refresh returned
+            return shared
 
         results = {}
         with mock.patch.object(api.scans, "refresh_lock", counting_refresh_lock), \
-                mock.patch.object(api.scans, "record", record_then_switch_board):
+                mock.patch.object(api.scans, "completed_since", switch_board_once_shared):
             first = threading.Thread(target=lambda: results.setdefault("first", self.refresh()))
             first.start()
             started.wait(5)
