@@ -6,12 +6,14 @@ import unittest
 import unittest.mock as mock
 from types import SimpleNamespace
 
+import paramiko
 from flask import Flask
 
 from neat_insight import board, preview as preview_pkg
 from neat_insight.board import BoardError, ExecResult
 from neat_insight.board import manager as manager_module
 from neat_insight.board.target import BoardTarget
+from neat_insight.board.transport import key_fingerprint
 from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
 from neat_insight.preview import api, manager as preview
@@ -341,6 +343,20 @@ class BoardChangeTests(unittest.TestCase):
         self.assertEqual(changed, [200])
         self.assertEqual([call for call in old.calls[calls_after_cleanup:] if "setsid nohup" in call], [])
         self.assertEqual(started, [409])
+        self.assertIsNone(self.previews._session)
+
+    def test_a_rejected_host_key_trust_leaves_the_preview_running(self):
+        for body in ({}, {"fingerprint": "SHA256:stale"}):
+            with self.subTest(body=body):
+                response = self.client.post("/api/board/trust-host-key", json=body)
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+        self.assertEqual(self.transports[0].kills(), [])
+        self.assertIsNotNone(self.previews._session)
+        old = self.transports[0]
+        old.presented_host_key, old.replace_host_key = paramiko.RSAKey.generate(1024), mock.Mock()
+        response = self.client.post("/api/board/trust-host-key", json={"fingerprint": key_fingerprint(old.presented_host_key)})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(old.kills())
         self.assertIsNone(self.previews._session)
 
     def test_an_unreachable_old_board_does_not_block_the_board_change(self):

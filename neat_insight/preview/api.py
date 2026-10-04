@@ -7,6 +7,7 @@ from flask import Blueprint, current_app, g, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.target import resolve_target, sdk_env_target, validate_ssh_target
+from neat_insight.board.transport import key_fingerprint
 from neat_insight.peripherals import export
 from neat_insight.peripherals import api as peripherals_api
 
@@ -139,7 +140,16 @@ def stop_before_board_change_or_scan():
             return  # The board route rejects the request and keeps the board.
         if resolve_target(saved, manager.on_board, sdk_env_target()) == manager.target():
             return
-    elif request.endpoint not in ("board.trust_board_host_key", "peripherals.refresh_peripherals"):
+    elif request.endpoint == "board.trust_board_host_key":
+        body = request.get_json(silent=True)
+        fingerprint = str((body if isinstance(body, dict) else {}).get("fingerprint") or "")
+        try:
+            key = getattr(get_board_manager().session().raw_transport, "presented_host_key", None)
+        except BoardError:
+            return  # The board route reports it and keeps the board.
+        if key is None or key_fingerprint(key) != fingerprint:
+            return  # The board route rejects a key the board did not present and keeps the board.
+    elif request.endpoint != "peripherals.refresh_peripherals":
         return
     previews().stop_for_board_change()
 
