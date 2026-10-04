@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { compareOverlay, completeTotal, lastNumber, stackedPaths, stackTotals, tightScale } from './dashboard.js'
+import { compareOverlay, completeTotal, lastNumber, stackedPaths, stackTotals, tightScale, valueNear } from './dashboard.js'
 import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, runDetail, runList, traceBar, traceModel } from './model.js'
 
 test('keyboard-only Stats controls keep a visible focus indicator', () => {
@@ -52,6 +52,11 @@ test('charts keep missing readings missing and compare each run with its own def
     }
   }
   assert.deepEqual(compareOverlay(payload, 'thermal').lines.map((line) => line.points[0].v), [70, 80])
+  assert.equal(valueNear([{ t: 0, v: 1 }, { t: 1, v: null }, { t: 2, v: 3 }], 1), null)
+  assert.equal(compareOverlay({ sentinel: { runs: [
+    { metadata: { id: 'a' }, metrics: [{ key: 'power_current_watts', unit: 'W' }], samples: [{ timestamp: '2026-01-01T00:00:00Z', values: { power_current_watts: 1 } }] },
+    { metadata: { id: 'b' }, metrics: [{ key: 'power_current_watts', unit: 'mW' }], samples: [{ timestamp: '2026-01-01T00:00:00Z', values: { power_current_watts: 1000 } }] }
+  ] } }, 'power'), null)
 })
 
 test('long runs do not spread every sample onto the JavaScript call stack', () => {

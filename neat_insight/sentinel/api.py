@@ -1,4 +1,6 @@
 """HTTP API for Sentinel telemetry on the selected board."""
+from threading import Lock
+
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
@@ -16,6 +18,7 @@ NAME_LIMIT = 128
 NOTE_LIMIT = 512
 
 cache = BoardCache()
+_TRACE_LOCK = Lock()
 
 
 @sentinel_bp.after_request
@@ -229,7 +232,8 @@ def start_trace():
         "The selected board changed since its active trace was read, so no trace was started.",
         "Read the active trace of the board selected now, then start again.",
     )
-    started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
+    with _TRACE_LOCK:
+        started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
     return context.payload(sentinel=_passthrough(started))
 
 
@@ -246,17 +250,19 @@ def stop_trace():
         "The selected board changed since this trace was read, so no trace was stopped.",
         "Read the active trace of the board selected now, then stop it again.",
     )
-    active = context.client.active_trace().get("trace")
-    active_id = active.get("id") if isinstance(active, dict) else None
-    if not active_id or str(active_id) != expected_trace:
-        raise SentinelError(
-            "trace_conflict",
-            "The active trace changed since it was read, so no trace was stopped.",
-            hint="Read the active trace again, then stop that trace.",
-            expected_trace_id=expected_trace,
-            active_trace_id=active_id,
-        )
-    return context.payload(sentinel=_passthrough(context.client.stop_trace()))
+    with _TRACE_LOCK:
+        active = context.client.active_trace().get("trace")
+        active_id = active.get("id") if isinstance(active, dict) else None
+        if not active_id or str(active_id) != expected_trace:
+            raise SentinelError(
+                "trace_conflict",
+                "The active trace changed since it was read, so no trace was stopped.",
+                hint="Read the active trace again, then stop that trace.",
+                expected_trace_id=expected_trace,
+                active_trace_id=active_id,
+            )
+        stopped = context.client.stop_trace()
+    return context.payload(sentinel=_passthrough(stopped))
 
 
 # API: list the runs saved on the selected board.

@@ -229,10 +229,12 @@ export function compareOverlay(payload, seriesId) {
   const body = payload?.sentinel || {}
   const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples) && run.samples.length)
   const definitions = runs.flatMap((run) => run.metrics || [])
-  const available = COMPARE_SERIES.filter((spec) => (spec.thermal ? definitions.some(isThermalMetric) : definitions.some((d) => d.key === spec.key)))
+  const definitionsFor = (entry) => definitions.filter((definition) => (entry.thermal ? isThermalMetric(definition) : definition.key === entry.key))
+  const unitsFor = (entry) => new Set(definitionsFor(entry).map((definition) => definition.unit === 'celsius' ? 'C' : definition.unit ?? ''))
+  const available = COMPARE_SERIES.filter((entry) => definitionsFor(entry).length && unitsFor(entry).size === 1)
   const spec = available.find((entry) => entry.id === seriesId) || available[0]
   if (!spec) return null
-  const unit = spec.thermal ? 'C' : definitions.find((entry) => entry.key === spec.key)?.unit ?? ''
+  const unit = spec.thermal ? 'C' : [...unitsFor(spec)][0]
 
   const lines = runs.map((run) => {
     const thermalKeys = (run.metrics || []).filter(isThermalMetric).map((definition) => definition.key)
@@ -300,7 +302,7 @@ export function elapsedPath(points, window, scale, width, height) {
 export function valueNear(points, t) {
   let best = null
   for (const point of points) {
-    if (isNumber(point.v) && (!best || Math.abs(point.t - t) < Math.abs(best.t - t))) best = point
+    if (isNumber(point.t) && (!best || Math.abs(point.t - t) < Math.abs(best.t - t))) best = point
   }
-  return best
+  return best && isNumber(best.v) ? best : null
 }
