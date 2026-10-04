@@ -690,6 +690,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       busy: setTraceBusy,
       call: () => startTrace(result.body, traces?.generation),
       done: (data) => {
+        guard.current.cancel('traces')
         setTraces(data)
         setForm(EMPTY_FORM)
         onStatus?.(`Recording trace “${result.body.name}”.`)
@@ -705,6 +706,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       busy: setTraceBusy,
       call: () => stopTrace(traces?.generation, trace.id),
       done: async () => {
+        guard.current.cancel('traces')
         onStatus?.('Trace stopped and saved as a run.')
         await loadTraces({ quiet: true })
         loadRuns()
