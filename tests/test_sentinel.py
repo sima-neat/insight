@@ -1322,6 +1322,30 @@ class DeleteRunTests(_ApiCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("still lists run 'baseline'", response.get_json()["error"])
 
+    def test_a_deleted_id_that_another_run_uses_as_its_name_is_not_still_listed(self):
+        namesake = {"id": "20260924T180000.000Z-other", "name": RUN_A["id"], "samples": 4}
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [RUN_A, namesake]})
+        delete = self.transport._delete
+
+        def delete_by_id_only(target):
+            self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [namesake]})
+            return ExecResult(0, "Deleted run {}\n".format(target).encode(), b"")
+
+        self.transport._delete = delete_by_id_only
+        self.addCleanup(setattr, self.transport, "_delete", delete)
+        response = self.delete("/api/sentinel/runs/" + RUN_A["id"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["deleted"], {"id": RUN_A["id"], "name": "baseline"})
+
+        # A run without an id is deleted by name, and its name is what must disappear.
+        nameless = {"name": "legacy", "samples": 1}
+        self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [nameless]})
+        self.transport._delete = delete
+        self.transport.delete_result = ExecResult(0, b"", b"")
+        response = self.delete("/api/sentinel/runs/legacy")
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("still lists run 'legacy'", response.get_json()["error"])
+
     def test_another_board_generation_is_refused_before_anything_runs(self):
         response = self.delete("/api/sentinel/runs/baseline?generation=7")
         self.assertEqual(response.status_code, 409)
