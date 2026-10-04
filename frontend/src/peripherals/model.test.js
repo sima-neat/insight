@@ -33,6 +33,8 @@ import {
   microphoneSubtitle,
   micLevelNotice,
   micTestBlock,
+  micStartMayHaveRun,
+  micTestAfterFailedStart,
   micTestToResume,
   micTestAction,
   micTestErrorAction,
@@ -785,6 +787,21 @@ test('microphone test: a detail mounted mid-test takes up the board\'s test for 
   assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: ready }), { status: 'done', test: ready, error: null })
   const started = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
   assert.equal(nextMicTestState(started, { type: 'resume', test: ready }), started, 'a test started here is not replaced')
+})
+
+test('microphone test: a start whose answer was lost takes up the recording it began', () => {
+  const recording = { token: 'new', id: yeti.id, state: 'recording', elapsed_ms: 400, level_dbfs: -30 }
+  const ready = { ...recording, state: 'ready', audio_url: '/new.wav' }
+  const lost = { code: 'network', message: 'Could not reach the Insight server.' }
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, recording, null), recording)
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: 'test_running' }, recording, 'old'), recording, 'a retry refused by its own recording')
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: '', message: 'Request failed: 504' }, ready, null), ready, 'a gateway error without an API body')
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, { ...ready, token: 'old' }, 'old'), null, 'the recording shown before Test is not new')
+  assert.equal(micTestAfterFailedStart(onboardMic.id, { code: 'test_running' }, recording, null), null, 'another microphone is recording')
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, { ...recording, state: 'failed' }, null), null)
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, null, null), null)
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: 'microphone_in_use' }, recording, null), null, 'the backend answered: its error stands')
+  assert.deepEqual([lost, { code: 'test_running' }, { code: '' }, { code: 'not_found' }].map(micStartMayHaveRun), [true, true, true, false], 'only these read the current test')
 })
 
 test('microphone test: the scan\'s in-use state is advisory and the start request rechecks the board', () => {

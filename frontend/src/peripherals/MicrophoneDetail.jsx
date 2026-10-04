@@ -9,6 +9,8 @@ import {
   micLevelNotice,
   micTestBlock,
   micTestAction,
+  micStartMayHaveRun,
+  micTestAfterFailedStart,
   micTestErrorAction,
   micTestToResume,
   meterSegments,
@@ -112,6 +114,8 @@ function MicTest({ mic }) {
   const mounted = useRef(true)
   // Set once a test is started or taken up here, so the backend's test is resumed at most once.
   const engaged = useRef(false)
+  // The token of the test last started or taken up here.
+  const heldToken = useRef(null)
   const meter = useAudioMeter()
 
   const poll = async (token) => {
@@ -136,22 +140,29 @@ function MicTest({ mic }) {
     }
   }
 
-  // Switching microphones unmounts this detail but not the board's recording: take up a test
-  // still recording for this microphone, or its finished recording, instead of looking idle.
-  const resume = async () => {
-    let answer
-    try {
-      answer = micTestToResume(mic.id, (await readMicrophoneTest({ isActive: () => mounted.current })).test)
-    } catch {
-      return
-    }
-    if (!answer || !mounted.current || engaged.current) return
-    engaged.current = true
+  const currentTest = async () => (await readMicrophoneTest({ isActive: () => mounted.current })).test
+
+  const adopt = (answer) => {
+    heldToken.current = answer.token
     dispatch({ type: 'resume', test: answer })
     if (answer.state !== 'recording') return
     setLevel(answer.level_dbfs)
     setElapsed(answer.elapsed_ms)
     poll(answer.token)
+  }
+
+  // Switching microphones unmounts this detail but not the board's recording: take up a test
+  // still recording for this microphone, or its finished recording, instead of looking idle.
+  const resume = async () => {
+    let answer
+    try {
+      answer = micTestToResume(mic.id, await currentTest())
+    } catch {
+      return
+    }
+    if (!answer || !mounted.current || engaged.current) return
+    engaged.current = true
+    adopt(answer)
   }
 
   useEffect(() => {
@@ -169,9 +180,25 @@ function MicTest({ mic }) {
     dispatch({ type: 'record' })
     try {
       const { test } = await startMicrophoneTest(mic.id)
+      heldToken.current = test.token
       if (mounted.current) poll(test.token)
     } catch (err) {
-      if (mounted.current) dispatch({ type: 'failed', error: normalizeError(err) })
+      const error = normalizeError(err)
+      let answer = null
+      try {
+        if (mounted.current && micStartMayHaveRun(error)) {
+          answer = micTestAfterFailedStart(mic.id, error, await currentTest(), heldToken.current)
+        }
+      } catch {
+        // The current test could not be read either: report the start's own error.
+      }
+      if (!mounted.current) return
+      if (!answer) {
+        dispatch({ type: 'failed', error })
+        return
+      }
+      dispatch({ type: 'reset' })
+      adopt(answer)
     }
   }
 
