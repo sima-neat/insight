@@ -30,6 +30,7 @@ class FakeTransport:
     def __init__(self):
         self.api = {("GET", "/v1/runs"): (200, {"schema": 1, "runs": [RUN_A, RUN_B]})}
         self.calls = []
+        self.status_instances = []
 
     def exec(self, argv, *, timeout, stdin=None):
         self.calls.append(argv)
@@ -41,7 +42,8 @@ class FakeTransport:
             listing["runs"] = [run for run in listing["runs"] if run.get("id") != argv[4]]
             self.api[("GET", "/v1/runs")] = (status, listing)
             return ExecResult(0, b"", b"")
-        return ExecResult(0, b"active@@yes@@yes@@/usr/bin/sima-cli@@inv-1@@10", b"")
+        instance = self.status_instances.pop(0) if self.status_instances else "inv-1"
+        return ExecResult(0, "active@@yes@@yes@@/usr/bin/sima-cli@@{}@@10".format(instance).encode(), b"")
 
     @property
     def deletes(self):
@@ -122,6 +124,21 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/api/sentinel/traces/stop?generation=1&trace_id=trace-a")
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "trace_conflict"))
         self.assertEqual([(call[2], call[3]) for call in self.transport.api_calls], [("GET", "/v1/traces/active")])
+
+    def test_a_sample_read_across_a_daemon_restart_is_discarded(self):
+        self.transport.status_instances = ["inv-1", "inv-2"]
+        self.transport.api[("GET", "/v1/samples/latest")] = (
+            200,
+            {"schema": 1, "version": "v2", "sample": {"timestamp": "2026-10-04T06:48:00Z", "values": {"power": 8}}},
+        )
+        self.transport.api[("GET", "/v1/metrics")] = (
+            200,
+            {"schema": 1, "metrics": [{"key": "power", "label": "Power", "unit": "W"}]},
+        )
+        with mock.patch.object(api.cache_history, "read", side_effect=AssertionError("unstable sample must not seed")):
+            payload = self.client.get("/api/sentinel/metrics?history=10").get_json()
+        self.assertIsNone(payload["sampled_at"])
+        self.assertEqual(payload["history"]["timestamps"], [])
 
 
 class ResponseLimitTests(unittest.TestCase):

@@ -198,14 +198,18 @@ def get_metrics():
     """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
     limit = _history_limit(request.args.get("history"))
     context = _Context()
-    # Read fresh, not from the status cache: a sample from a restarted daemon must not be
-    # appended to the previous daemon's history before the restart is noticed.
+    # Bracket the sample read: a restart between the two status calls makes that sample
+    # ambiguous, so discard it and let the next poll seed the new daemon's history.
+    before = install.status(context.session)
+    latest = context.client.latest()
     daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
     cache.observe_daemon(context.key, daemon.get("instance_id"))
-    latest = context.client.latest()
+    stable = before.get("instance_id") == daemon.get("instance_id")
+    if not stable:
+        latest = dict(latest, sample=None)
     history = cache.add_sample(context.key, latest.get("sample"))
     # First read of this board, or the first after a gap in polling: take the daemon's own window.
-    if cache.needs_seed(context.key):
+    if stable and cache.needs_seed(context.key):
         history = cache.seed(context.key, cache_history.read(context.session))
     definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
     return context.payload(**metric_view.build(definitions, latest, history, limit))
