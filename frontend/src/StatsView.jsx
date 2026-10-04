@@ -54,6 +54,7 @@ import {
   missingSelection,
   payloadBoardLabel,
   pollDelay,
+  remainingPollDelay,
   runDetail,
   runList,
   runSubtitle,
@@ -83,17 +84,18 @@ function pollWhileVisible(run, ms) {
   let running = false
   let active = true
   const delay = () => (typeof ms === 'function' ? ms() : ms)
-  const next = () => {
+  const next = (startedAt) => {
     if (!active || document.visibilityState === 'hidden') return
-    timer = setTimeout(tick, delay())
+    timer = setTimeout(tick, remainingPollDelay(delay(), Date.now() - startedAt))
   }
   const tick = () => {
     timer = null
     if (!active || running || document.visibilityState === 'hidden') return
     running = true
+    const startedAt = Date.now()
     Promise.resolve().then(run).finally(() => {
       running = false
-      next()
+      next(startedAt)
     }).catch(() => {})
   }
   const start = () => {
@@ -1016,10 +1018,10 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     return onReloadBoard ? onReloadBoard() : null
   }
 
-  function loadState({ quiet = false } = {}) {
+  function loadState({ quiet = false, refresh = false } = {}) {
     return send('state', {
       busy: quiet ? () => {} : setStateBusy,
-      call: fetchSentinel,
+      call: () => fetchSentinel(refresh),
       done: (data) => {
         setState(data)
         setStateError(null)
@@ -1398,7 +1400,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
               error={installError || sentinelProblem}
               blocked={Boolean(boardProblem)}
               onInstall={install}
-              onRetry={() => loadState()}
+              onRetry={() => loadState({ refresh: true })}
             />
             )}
 

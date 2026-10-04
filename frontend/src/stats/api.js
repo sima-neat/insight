@@ -9,8 +9,8 @@ export function fetchHostMetrics() {
   return requestJson('/api/metrics')
 }
 
-export function fetchSentinel() {
-  return requestJson('/api/sentinel')
+export function fetchSentinel(refresh = false) {
+  return requestJson(refresh ? '/api/sentinel?refresh=1' : '/api/sentinel')
 }
 
 // `generation` is the one the Sentinel state offering installation was read under: a board

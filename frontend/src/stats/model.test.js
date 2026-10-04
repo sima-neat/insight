@@ -8,7 +8,7 @@ import {
   compareReady, compareTable, createRequestGuard, daemonBusy, daemonFacts, daemonInfo, daemonNoticeNeeded, definitionsByKey,
   deletePrompt, deleteRunQuery, deleteStops, deleteSummary, deltaAbsenceText, factRows, failureNotice, formatBytes,
   formatPercentDelta, formatSeconds, formatTimeRange, formatValue, healthFacts, healthProblems, hostMetricsModel, hostNotice,
-  installQuery, isStale, metricsModel, missingSelection, parseTags, payloadBoardLabel, pollDelay, runActionRef, runDetail,
+  installQuery, isStale, metricsModel, missingSelection, parseTags, payloadBoardLabel, pollDelay, remainingPollDelay, runActionRef, runDetail,
   runList, runSubtitle, selectionChange, sessionCsv, sessionCsvFilename, sparkline, sparklineLabel, staleFlags, staleNote,
   startTraceQuery, statusInfo, statusOf, stopTraceQuery, telemetryVisible, thresholdText, toggleSelection, traceModel,
   uncomparableRefs, validateTrace
@@ -70,6 +70,7 @@ test('values, changes, durations, sizes, time ranges and statuses read as a deve
   assert.equal(thresholdText({ warn: 70, critical: 85, unit: 'C' }), 'warn at 70 °C, critical at 85 °C')
   assert.equal(thresholdText({ warn: null, critical: null }), '')
   assert.deepEqual([0, 1, 3, 99, undefined].map(pollDelay), [POLL_MS, 4000, 16000, MAX_POLL_MS, POLL_MS])
+  assert.deepEqual([[2000, 250], [2000, 2000], [2000, 3000], [2000, -1]].map((args) => remainingPollDelay(...args)), [1750, 0, 0, 2000])
 })
 
 test('the metrics payload becomes highlights, groups and a summary line, and still leads with something', () => {

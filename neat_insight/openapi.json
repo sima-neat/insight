@@ -911,8 +911,11 @@
       "get": {
         "tags": ["Sentinel"],
         "summary": "Get Sentinel availability on the selected board",
-        "description": "Reports whether the `simaai-sentinel` daemon is installed, running and answering on its unix socket, together with its version and the board it belongs to. A daemon that is missing, stopped or unreadable is reported as `available: false` with `status.state` and `status.error`, not as an HTTP failure; only board-level failures (no board selected, unreachable, timeout) use an error status. The daemon state is cached briefly per board, so polling this endpoint does not run a command on the board for every call.",
+        "description": "Reports whether the `simaai-sentinel` daemon is installed, running and answering on its unix socket, together with its version and the board it belongs to. A daemon that is missing, stopped or unreadable is reported as `available: false` with `status.state` and `status.error`, not as an HTTP failure; only board-level failures (no board selected, unreachable, timeout) use an error status. The daemon state is cached briefly per board, so polling this endpoint does not run a command on the board for every call. Pass `refresh=1` for an explicit re-check that bypasses this cache.",
         "operationId": "getSentinel",
+        "parameters": [
+          {"name": "refresh", "in": "query", "description": "Set to `1` to bypass the short-lived daemon-status cache.", "schema": {"type": "string", "enum": ["1"]}}
+        ],
         "responses": {
           "200": {"description": "Sentinel availability for the selected board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelState"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},

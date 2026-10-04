@@ -181,7 +181,11 @@ def _passthrough(body: dict) -> dict:
 def get_sentinel():
     """Return Sentinel's availability, version and daemon health for the selected board."""
     context = _Context()
-    daemon = context.cached("daemon", STATUS_TTL_SEC, lambda: install.status(context.session))
+    daemon = (
+        cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
+        if request.args.get("refresh") == "1"
+        else context.cached("daemon", STATUS_TTL_SEC, lambda: install.status(context.session))
+    )
     problem = install.describe(daemon)
     health, state, error = None, "ready", None
     if problem:

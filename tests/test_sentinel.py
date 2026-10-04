@@ -869,6 +869,18 @@ class SentinelApiTests(_ApiCase):
         body = self.get("/api/sentinel").get_json()
         self.assertEqual((body["status"]["state"], body["status"]["error"]["code"], body["available"]), ("error", "sentinel_schema", False))
 
+    def test_explicit_refresh_bypasses_the_cached_daemon_status(self):
+        self.transport.status_fields = list(DOWN)
+        self.assertEqual(self.get("/api/sentinel").get_json()["status"]["state"], "missing")
+        self.transport.status_fields = list(STATUS_FIELDS)
+        self.assertEqual(self.get("/api/sentinel").get_json()["status"]["state"], "missing")
+
+        body = self.get("/api/sentinel?refresh=1").get_json()
+
+        self.assertTrue(body["available"])
+        self.assertEqual(body["status"], {"state": "ready", "error": None})
+        self.assertEqual(len(self.transport.scripts), 2)
+
     def test_board_errors_pass_through_with_their_status(self):
         self.manager.error = BoardError("no_target", "No board is selected.", hint="Select one.")
         self.refused(self.get("/api/sentinel"), 409, "no_target")

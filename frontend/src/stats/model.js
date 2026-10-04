@@ -130,6 +130,11 @@ export function pollDelay(failures = 0) {
   return Math.min(MAX_POLL_MS, POLL_MS * 2 ** Math.min(count, 8))
 }
 
+/** Keep polls on their requested cadence without overlapping a request still in flight. */
+export function remainingPollDelay(interval, elapsed) {
+  return Math.max(0, interval - Math.max(0, elapsed))
+}
+
 export function statusInfo(status) {
   return STATUS_TONES[status] || STATUS_TONES.unavailable
 }
