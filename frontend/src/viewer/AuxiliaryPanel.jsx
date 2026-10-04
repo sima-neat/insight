@@ -76,15 +76,9 @@ function resolveRendererSettings(channelIndex, renderer) {
 }
 
 function hasExplicitRendererSettings(channelIndex, renderer) {
-  if (!renderer) return false;
-  try {
-    return ["global", `channel_${channelIndex}`].some((scope) => {
-      const raw = JSON.parse(window.localStorage.getItem(`viewerSettings_${scope}`) || "null");
-      return raw?.auxiliary?.[renderer] && typeof raw.auxiliary[renderer] === "object";
-    });
-  } catch (_err) {
-    return false;
-  }
+  const hasScope = window.viewerSettingsApi?.hasScopeAuxiliarySettings;
+  return Boolean(renderer && hasScope
+    && (hasScope("global", renderer) || hasScope(`channel_${channelIndex}`, renderer)));
 }
 
 function displayMode(settings) {
@@ -177,14 +171,7 @@ function RendererControls({ controls, onControl }) {
 
 const AuxiliaryPanel = forwardRef(function AuxiliaryPanel({ channelIndex }, ref) {
   const initialPreference = useRef(loadPreference(channelIndex));
-  const initialRendererSettings = useRef(resolveRendererSettings(channelIndex, null));
-  const [mode, setMode] = useState(() => {
-    const resolvedMode = displayMode(initialRendererSettings.current);
-    const stored = initialPreference.current.mode;
-    return resolvedMode === "compact" && stored !== "compact"
-      ? stored
-      : resolvedMode;
-  });
+  const [mode, setMode] = useState(initialPreference.current.mode);
   const [knownViews, setKnownViews] = useState([]);
   const [selectedId, setSelectedId] = useState(initialPreference.current.selectedId);
   const [rendererControls, setRendererControls] = useState([]);

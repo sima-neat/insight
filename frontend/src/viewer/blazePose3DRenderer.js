@@ -284,21 +284,14 @@ function drawBlazePose3D(ctx, viewport, payload, frame = {}) {
   }
 
   const camera = projectionCamera(frame.camera);
-  const projectedPoses = poses.map((pose) => ({
-    ...pose,
-    points: new Map([...pose.points].map(([name, point]) => [
-      name,
-      { ...projectNormalizedPoint(point, camera), confidence: point.confidence },
-    ])),
-  }));
   const projectedCube = referenceCube(referenceFrame(payload))
     .map((point) => projectNormalizedPoint(point, camera));
   const projection = fitProjection(projectedCube, width, height);
-  const screenPoses = projectedPoses.map((pose) => ({
+  const screenPoses = poses.map((pose) => ({
     ...pose,
     points: new Map([...pose.points].map(([name, point]) => [
       name,
-      { ...projection.point(point), confidence: point.confidence },
+      { ...projection.point(projectNormalizedPoint(point, camera)), confidence: point.confidence },
     ])),
   }));
 

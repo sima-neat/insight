@@ -6,28 +6,25 @@ const MAX_ID_LENGTH = 128;
 const MAX_TITLE_LENGTH = 80;
 const VIEW_PREFERENCE_VERSION = 1;
 
-function createAuxiliaryRendererRegistry() {
-  const renderers = new Map();
-  return {
-    register(name, renderer) {
-      if (typeof name !== "string" || !name.trim()) {
-        throw new TypeError("auxiliary renderer name must be a non-empty string");
-      }
-      if (!renderer || typeof renderer.draw !== "function") {
-        throw new TypeError(`auxiliary renderer ${name} must provide draw()`);
-      }
-      if (renderers.has(name)) {
-        throw new Error(`auxiliary renderer ${name} is already registered`);
-      }
-      renderers.set(name, Object.freeze({ ...renderer }));
-    },
-    get(name) {
-      return renderers.get(name) ?? null;
-    },
-  };
-}
+const auxiliaryRenderers = new Map();
 
-export const auxiliaryRendererRegistry = createAuxiliaryRendererRegistry();
+export const auxiliaryRendererRegistry = {
+  register(name, renderer) {
+    if (typeof name !== "string" || !name.trim()) {
+      throw new TypeError("auxiliary renderer name must be a non-empty string");
+    }
+    if (!renderer || typeof renderer.draw !== "function") {
+      throw new TypeError(`auxiliary renderer ${name} must provide draw()`);
+    }
+    if (auxiliaryRenderers.has(name)) {
+      throw new Error(`auxiliary renderer ${name} is already registered`);
+    }
+    auxiliaryRenderers.set(name, Object.freeze({ ...renderer }));
+  },
+  get(name) {
+    return auxiliaryRenderers.get(name) ?? null;
+  },
+};
 
 function mergeAuxiliarySessionSettings(configured, stored) {
   return {
@@ -114,28 +111,12 @@ export function initialAuxiliarySessionSettings(
     : savedSettings;
 }
 
-// Keep only previously correlated data across a brief video/metadata delivery gap.
-function shouldHoldLastAuxiliaryFrame(
-  hasCurrentViews,
-  lastViewAtMs,
-  nowMs,
-  graceMs = AUXILIARY_DROPOUT_GRACE_MS,
-) {
-  return hasCurrentViews
-    && Number.isFinite(lastViewAtMs)
-    && Number.isFinite(nowMs)
-    && nowMs >= lastViewAtMs
-    && nowMs - lastViewAtMs <= graceMs;
-}
-
 export function retainAuxiliaryViews(currentViews, incomingViews, lastSeenById, nowMs) {
   const nextViews = new Map();
   const nextLastSeen = new Map();
   const incomingById = new Map();
   for (const view of incomingViews) {
-    if (incomingById.has(view.id)) {
-      incomingById.set(view.id, view);
-    } else if (incomingById.size < MAX_AUXILIARY_VIEWS_PER_PANEL) {
+    if (incomingById.has(view.id) || incomingById.size < MAX_AUXILIARY_VIEWS_PER_PANEL) {
       incomingById.set(view.id, view);
     }
   }
@@ -147,13 +128,15 @@ export function retainAuxiliaryViews(currentViews, incomingViews, lastSeenById, 
       nextViews.set(id, incomingById.get(id));
       nextLastSeen.set(id, nowMs);
       incomingById.delete(id);
-    } else if (
-      retainedCount < retainedCapacity
-      && shouldHoldLastAuxiliaryFrame(true, lastSeenById.get(id), nowMs)
-    ) {
-      nextViews.set(id, view);
-      nextLastSeen.set(id, lastSeenById.get(id));
-      retainedCount += 1;
+    } else if (retainedCount < retainedCapacity) {
+      // Keep only previously correlated data across a brief video/metadata delivery gap.
+      const lastSeenMs = lastSeenById.get(id);
+      if (Number.isFinite(lastSeenMs) && Number.isFinite(nowMs) && nowMs >= lastSeenMs
+        && nowMs - lastSeenMs <= AUXILIARY_DROPOUT_GRACE_MS) {
+        nextViews.set(id, view);
+        nextLastSeen.set(id, lastSeenMs);
+        retainedCount += 1;
+      }
     }
   }
   for (const [id, view] of incomingById) {

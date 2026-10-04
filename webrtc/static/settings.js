@@ -128,19 +128,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   blazePose3DPanelMode.addEventListener("change", previewBlazePose3DSettings);
 
-  blazePose3DYawSlider.addEventListener("input", () => {
-    updateBlazePose3DDisplays();
-    previewBlazePose3DSettings();
-  });
-
-  blazePose3DPitchSlider.addEventListener("input", () => {
-    updateBlazePose3DDisplays();
-    previewBlazePose3DSettings();
-  });
-
-  blazePose3DTransparencySlider.addEventListener("input", () => {
-    updateBlazePose3DDisplays();
-    previewBlazePose3DSettings();
+  [blazePose3DYawSlider, blazePose3DPitchSlider, blazePose3DTransparencySlider].forEach((slider) => {
+    slider.addEventListener("input", () => {
+      updateBlazePose3DDisplays();
+      previewBlazePose3DSettings();
+    });
   });
 
   blazePose3DReferenceBoxToggle.addEventListener("change", previewBlazePose3DSettings);
@@ -249,7 +241,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const index = scopeToIndex(scope);
     connectToStream(index.toString());
     updateViewerTitle(scope);
-    updateBlazePose3DScopeNote(scope, index);
     loadSettings();
     viewerSettingsOverlay.classList.remove("hidden");
     loadPolygons(index);
@@ -560,7 +551,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById(initialTab).style.display = "flex";
   }
 
-  updateBlazePose3DScopeNote(scope, scopeToIndex(scope));
   loadSettings();
   window.openSettingsForScope = openSettingsForScope;
   window.loadPolygons = loadPolygons;
