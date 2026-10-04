@@ -314,8 +314,11 @@ function stats(values) {
 export function compareSeriesAvailable(payload) {
   const runs = (payload?.sentinel || payload || {}).runs || []
   const defs = runs.flatMap((run) => (Array.isArray(run?.metrics) ? run.metrics : []))
-  const keys = new Set(defs.map((definition) => definition.key))
-  return COMPARE_SERIES.filter((spec) => (spec.thermal ? defs.some(isThermalMetric) : keys.has(spec.key)))
+  return COMPARE_SERIES.filter((spec) => {
+    if (spec.thermal) return defs.some(isThermalMetric)
+    const matching = defs.filter((definition) => definition.key === spec.key)
+    return matching.length > 0 && new Set(matching.map((definition) => definition.unit ?? '')).size === 1
+  })
 }
 
 /** Compared samples and summaries, baseline first, over the runs' common time window. */

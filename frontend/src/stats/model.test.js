@@ -328,6 +328,13 @@ test('a comparison prefers recorded metric definitions and exposes conflicts bet
   const row = table.rows.find((item) => item.key === 'm')
   assert.deepEqual([row.label, row.unit, row.group, row.definitionConflict],
     ['Recorded power (recorded definitions differ)', null, 'Power', true])
+
+  const partial = compareTable({ sentinel: {
+    baseline_id: 'a',
+    runs: [{ metadata: { id: 'a' }, metrics: {} }, { metadata: { id: 'b' } }],
+    summaries: { a: { metrics: { m: { mean: 1 } } }, b: { metrics: { m: { mean: 2 } } } }
+  } }, new Map([['m', { label: 'Live power', unit: 'W', group: 'Power' }]]))
+  assert.deepEqual([partial.rows[0].label, partial.rows[0].unit], ['Live power', 'W'])
 })
 
 test('the captured run is read from its own metadata, definitions and samples, with the daemon\'s own statistics', () => {

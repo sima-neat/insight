@@ -184,4 +184,7 @@ test('compare runs offers a series recorded only by a later run', () => {
   assert.ok(compareSeriesAvailable(payload).some((series) => series.id === 'cpu'))
   const overlay = compareOverlay(payload, 'cpu')
   assert.deepEqual([overlay.unit, overlay.lines.map((line) => line.points.map((point) => point.v))], ['%', [[null, null], [50, 50]]])
+
+  payload.sentinel.runs.push(run('new-units', [{ key: 'cpu_usage_pct', unit: 'ratio' }], { cpu_usage_pct: 0.5 }))
+  assert.equal(compareSeriesAvailable(payload).some((series) => series.id === 'cpu'), false, 'values with different units are not combined')
 })

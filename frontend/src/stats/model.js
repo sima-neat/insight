@@ -1029,7 +1029,7 @@ export function compareTable(payload, definitions = null) {
   const metricRows = metricKeysOf(summaries, columns).map((key) => {
     const recorded = body.runs.map((entry, index) => ({
       baseline: columns[index].baseline,
-      definition: (entry?.metrics || []).find((item) => item?.key === key)
+      definition: (Array.isArray(entry?.metrics) ? entry.metrics : []).find((item) => item?.key === key)
     })).filter((entry) => entry.definition)
     const definition = recorded.find((entry) => entry.baseline)?.definition || recorded[0]?.definition || define(key)
     const signatures = new Set(recorded.map(({ definition: item }) => JSON.stringify([item.label || '', item.unit ?? null, item.group || ''])))

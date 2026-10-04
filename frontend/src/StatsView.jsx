@@ -858,6 +858,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [metricsBusy, setMetricsBusy] = useState(false)
   const [live, setLive] = useState(true)
   const [halted, setHalted] = useState(false)
+  const [pollEpoch, setPollEpoch] = useState(0)
   const [traces, setTraces] = useState(null)
   const [traceError, setTraceError] = useState(null)
   const [traceBusy, setTraceBusy] = useState(false)
@@ -1307,7 +1308,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     if (!polling) return undefined
     // A hidden tab must not keep running commands on the board.
     return pollWhileVisible(() => tick.current(), () => pollDelay(failures.current))
-  }, [polling])
+  }, [polling, pollEpoch])
 
   useEffect(() => {
     try {
@@ -1418,6 +1419,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                   onRetry={() => {
                     setHalted(false)
                     failures.current = 0
+                    setPollEpoch((value) => value + 1)
                     pollMetrics({ manual: true })
                   }}
                   runs={(
