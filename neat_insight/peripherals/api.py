@@ -75,7 +75,9 @@ def refresh_peripherals():
         check = _check_board(session, catalog)
         scan_ms = int((time.monotonic() - started) * 1000)
         session.require_current()
-        return scans.record(session.generation, board, catalog, check, scan_ms)
+        snapshot = scans.record(session.generation, board, catalog, check, scan_ms)
+        session.require_current()
+        return snapshot
 
 
 # API: render an input configuration for one camera mode from the last scan.
