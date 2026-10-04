@@ -717,10 +717,27 @@ class BoardCacheTests(unittest.TestCase):
         for stamp in ("2026-09-23T19:40:00.301197766Z", "2026-09-23T19:40:30.301197766Z"):
             self.cache.add_sample(self.KEY, {"timestamp": stamp, "values": {}})
         self.assertEqual(len(self.cache.history(self.KEY)), 3)
-        # A concurrent older poll cannot append after the newer history tail.
-        before = self.cache.history(self.KEY)
-        self.assertIsNone(self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T18:00:00Z", "values": {}}))
-        self.assertEqual(self.cache.history(self.KEY), before)
+        # A board clock correction starts another history epoch.
+        corrected = self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T18:00:00Z", "values": {}})
+        self.assertEqual(self.stamps(corrected), ["2026-09-23T18:00:00Z"])
+
+    def test_a_confirmed_backward_clock_correction_starts_the_history_again(self):
+        self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T19:40:30Z", "values": {}})
+        corrected = {"timestamp": "2026-09-23T19:40:00Z", "values": {}}
+        self.assertEqual(self.cache.add_sample(self.KEY, corrected), [corrected])
+        self.assertFalse(self.cache.needs_seed(self.KEY))
+        later = {"timestamp": "2026-09-23T19:41:02Z", "values": {}}
+        self.assertEqual(self.cache.add_sample(self.KEY, later), [later])
+        self.assertTrue(self.cache.needs_seed(self.KEY))
+        mixed = [
+            {"timestamp": "2026-09-23T19:40:28Z", "values": {"epoch": "old"}},
+            {"timestamp": "2026-09-23T19:40:30Z", "values": {"epoch": "old"}},
+            corrected,
+            {"timestamp": "2026-09-23T19:40:02Z", "values": {"epoch": "new"}},
+        ]
+        seeded = self.cache.seed(self.KEY, mixed)
+        self.assertNotIn("old", [sample.get("values", {}).get("epoch") for sample in seeded])
+        self.assertEqual(self.stamps(seeded), ["2026-09-23T19:40:00Z", "2026-09-23T19:40:02Z", "2026-09-23T19:41:02Z"])
 
     def test_history_is_bounded_ignores_a_repeated_sample_and_keeps_unreadable_timestamps(self):
         for stamp in ("2026-09-23T19:40:00Z", "not-a-timestamp", "2026-09-23T19:40:02Z"):
@@ -897,18 +914,30 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(self.transport.api_paths.count(("GET", "/v1/samples/latest")), 2)
         self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 2)
 
-    def test_telemetry_retries_when_a_concurrent_poll_recorded_a_newer_sample(self):
+    def test_telemetry_reads_hold_the_metrics_lock(self):
+        held = []
+
+        def latest(client):
+            held.append(api._METRICS_LOCK.locked())
+            return client.get("/v1/samples/latest")
+
+        with mock.patch.object(api.SentinelClient, "latest", latest):
+            self.get("/api/sentinel/metrics")
+        self.assertEqual(held, [True])
+
+    def test_telemetry_recovers_after_the_board_clock_moves_backward(self):
         key = (1, "fp-1")
         api.cache.observe_daemon(key, "inv-1")
-        api.cache.add_sample(key, sample("2026-09-22T20:55:49Z")["sample"])
+        api.cache.add_sample(key, sample("2026-09-22T20:56:19Z")["sample"])
         api.cache.seed(key, [])
-        readings = [sample("2026-09-22T20:55:47Z"), sample("2026-09-22T20:55:51Z")]
+        corrected = sample("2026-09-22T20:55:49Z")
         with mock.patch.object(api.install, "status", return_value={"instance_id": "inv-1"}), mock.patch.object(
-            api.SentinelClient, "latest", side_effect=readings
-        ):
-            body = self.get("/api/sentinel/metrics?history=5").get_json()
-        self.assertEqual(body["sampled_at"], "2026-09-22T20:55:51Z")
-        self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:49Z", "2026-09-22T20:55:51Z"])
+            api.SentinelClient, "latest", return_value=corrected
+        ), mock.patch.object(api.cache_history, "read", return_value=[]) as read_history:
+            response = self.get("/api/sentinel/metrics?history=5")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["history"]["timestamps"], ["2026-09-22T20:55:49Z"])
+        read_history.assert_not_called()
 
     def test_history_never_mixes_two_boards(self):
         self.get("/api/sentinel/metrics")

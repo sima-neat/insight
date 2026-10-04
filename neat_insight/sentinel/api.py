@@ -21,6 +21,7 @@ cache = BoardCache()
 # Serializes this server's trace starts and stops, so no start through Insight lands between a
 # stop's active-trace check and the stop itself.
 _TRACE_LOCK = Lock()
+_METRICS_LOCK = Lock()
 
 
 @sentinel_bp.after_request
@@ -215,16 +216,20 @@ def get_metrics():
     """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
     limit = _history_limit(request.args.get("history"))
     context = _Context()
+    with _METRICS_LOCK:
+        return _get_metrics(context, limit)
+
+
+def _get_metrics(context, limit):
+    """Read and cache one internally consistent telemetry response."""
     # A restart invalidates every value read from Sentinel. Retry once so the response
-    # always contains one daemon invocation and a concurrent older poll cannot win.
+    # always contains one daemon invocation.
     for _ in range(2):
         before = install.status(context.session)
         cache.observe_daemon(context.key, before.get("instance_id"))
         latest = context.client.latest()
         definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
         history = cache.add_sample(context.key, latest.get("sample"))
-        if history is None:
-            continue
         seed = cache_history.read(context.session) if cache.needs_seed(context.key) else None
         daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
         if before.get("instance_id") == daemon.get("instance_id"):

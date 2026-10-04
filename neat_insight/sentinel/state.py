@@ -55,6 +55,7 @@ class BoardCache:
         self._values = {}
         self._history = deque(maxlen=history_limit)
         self._seeded = False
+        self._seed_quarantined = False
         self._daemon_instance = None
         self._identity = {}
 
@@ -97,11 +98,12 @@ class BoardCache:
             if instance_id != self._daemon_instance:
                 self._history = deque(maxlen=self.history_limit)
                 self._seeded = False
+                self._seed_quarantined = False
                 self._daemon_instance = instance_id
                 self._values.pop("definitions", None)
 
-    def add_sample(self, key, sample: Optional[dict]) -> Optional[list]:
-        """Append one sample and return history, or None when a newer sample won.
+    def add_sample(self, key, sample: Optional[dict]) -> list:
+        """Append one sample and return its history.
 
         A sample far enough from the last one that nothing was watching in between starts
         the history again, so a sparkline never draws a gap of hours as one step.
@@ -112,15 +114,19 @@ class BoardCache:
             if not sample or not timestamp or (self._history and self._history[-1]["timestamp"] == timestamp):
                 return list(self._history)
             if self._history:
-                previous, current = moment(self._history[-1].get("timestamp")), moment(timestamp)
+                previous_timestamp = self._history[-1].get("timestamp")
+                previous, current = moment(previous_timestamp), moment(timestamp)
                 if previous is not None and current is not None:
                     if current < previous:
-                        return None
+                        self._history.clear()
+                        # Sentinel's ring still contains samples from before the clock step.
+                        self._seeded = True
+                        self._seed_quarantined = True
                     if current == previous:
                         return list(self._history)
             if self._interrupted_unlocked(timestamp):
                 self._history.clear()
-                # The daemon kept sampling while nobody polled; read its cache again.
+                # The seed path trims a clock-corrected ring to its current epoch.
                 self._seeded = False
             self._history.append(sample)
             return list(self._history)
@@ -138,6 +144,21 @@ class BoardCache:
         with self._lock:
             self._reset_unlocked(key)
             self._seeded = True
+            if self._seed_quarantined:
+                cut, previous = None, None
+                for index, sample in enumerate(samples):
+                    current = moment(sample.get("timestamp"))
+                    if previous is not None and current is not None and current < previous:
+                        cut = index
+                    if current is not None:
+                        previous = current
+                current_timestamp = self._history[-1].get("timestamp") if self._history else None
+                if cut is not None:
+                    samples = samples[cut:]
+                elif current_timestamp not in {sample.get("timestamp") for sample in samples}:
+                    samples = []
+                else:
+                    self._seed_quarantined = False
             oldest = moment(self._history[0]["timestamp"]) if self._history else None
             earlier = []
             for sample in samples:
@@ -171,4 +192,5 @@ class BoardCache:
             self._values = {}
             self._history = deque(maxlen=self.history_limit)
             self._seeded = False
+            self._seed_quarantined = False
             self._daemon_instance = None
