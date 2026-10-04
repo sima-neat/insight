@@ -160,6 +160,8 @@ class PreviewManager:
         self._format_url = format_url
         self._lock = threading.Lock()
         self._idle = threading.Condition(self._lock)
+        # Held by a preview start and by a board change for its whole request (see api).
+        self.board_lock = threading.Lock()
         self._session: Optional[dict] = None
         self._owner = None
         self._starting: Optional[str] = None

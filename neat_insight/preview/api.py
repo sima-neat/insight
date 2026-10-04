@@ -2,7 +2,7 @@ import ipaddress
 import re
 from typing import Optional
 
-from flask import Blueprint, current_app, request
+from flask import Blueprint, current_app, g, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.target import resolve_target, sdk_env_target, validate_ssh_target
@@ -119,7 +119,13 @@ def previewable_mode(item: dict, body: dict) -> dict:
 @preview_bp.before_app_request
 def stop_before_board_change_or_scan():
     """Stop a preview on its board before a board change closes the connection to it, and before a
-    refresh, so the scan sees the camera as applications will find it."""
+    refresh, so the scan sees the camera as applications will find it.
+
+    A board change holds the preview lock until its request ends, so no start can launch capture on
+    the board between this cleanup and the change of target."""
+    if request.endpoint in ("board.select_board", "board.trust_board_host_key"):
+        previews().board_lock.acquire()
+        g.preview_board_lock = True
     if request.endpoint == "board.select_board":
         body = request.get_json(silent=True)
         body = body if isinstance(body, dict) else {}
@@ -133,6 +139,12 @@ def stop_before_board_change_or_scan():
     elif request.endpoint not in ("board.trust_board_host_key", "peripherals.refresh_peripherals"):
         return
     previews().stop_for_board_change()
+
+
+@preview_bp.teardown_app_request
+def release_board_lock(_exc):
+    if g.pop("preview_board_lock", False):
+        previews().board_lock.release()
 
 
 # API: report the preview running on the selected board, if any.
@@ -150,10 +162,11 @@ def start_preview():
     body = request.get_json(silent=True)
     body = body if isinstance(body, dict) else {}
     host = _host()  # Refuse a bad Host before any board work.
-    session = get_board_manager().session()
-    item = scanned_camera(session.generation, str(body.get("id") or ""))
-    require_camera_free(item)
-    return _respond(previews().start(session, item, previewable_mode(item, body)), host)
+    with previews().board_lock:
+        session = get_board_manager().session()
+        item = scanned_camera(session.generation, str(body.get("id") or ""))
+        require_camera_free(item)
+        return _respond(previews().start(session, item, previewable_mode(item, body)), host)
 
 
 # API: keep a preview alive while a viewer is watching.

@@ -283,6 +283,7 @@ class BoardChangeTests(unittest.TestCase):
         app.register_blueprint(peripherals_bp)
         preview_pkg.init_app(app, exposed_ports=lambda: [{"name": "videoUDP", "hostPortStart": 9000}], channel_capacity=lambda: 80,
                              format_url=lambda *args: "https://x")
+        self.app = app
         self.previews = app.extensions["neat_preview"]
         self.client = app.test_client()
         item = item_of(scanned(imx477()), IMX477)
@@ -299,6 +300,36 @@ class BoardChangeTests(unittest.TestCase):
         old.exec = lambda argv, **kw: closed_at_stop.append(old.closed) or exec_(argv, **kw)
         self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
         self.assertEqual((closed_at_stop, old.closed), ([False], True))
+        self.assertIsNone(self.previews._session)
+
+    def test_a_start_cannot_slip_between_the_cleanup_and_the_board_change(self):
+        """A start racing a board change must not launch capture on the board being deselected."""
+        old = self.transports[0]
+        in_window, release, changed, started = threading.Event(), threading.Event(), [], []
+        select = manager_module.BoardManager.select
+
+        def paused_select(manager, *args):
+            in_window.set()
+            release.wait(5)
+            return select(manager, *args)
+
+        def post(results, *args, **kwargs):
+            results.append(self.app.test_client().post(*args, **kwargs).status_code)
+
+        with mock.patch.object(manager_module.BoardManager, "select", paused_select):
+            changer = threading.Thread(target=post, args=(changed, "/api/board/select"), kwargs={"json": {"host": "10.1.1.9"}})
+            changer.start()
+            self.assertTrue(in_window.wait(5))
+            calls_after_cleanup = len(old.calls)
+            starter = threading.Thread(target=post, args=(started, PREVIEW), kwargs={"json": {"id": IMX477}})
+            starter.start()
+            starter.join(1.0)
+            release.set()
+            changer.join(5)
+            starter.join(5)
+        self.assertEqual(changed, [200])
+        self.assertEqual([call for call in old.calls[calls_after_cleanup:] if "setsid nohup" in call], [])
+        self.assertEqual(started, [409])
         self.assertIsNone(self.previews._session)
 
     def test_an_unreachable_old_board_does_not_block_the_board_change(self):
