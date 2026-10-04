@@ -25,6 +25,7 @@ import {
   deletePrompt,
   deleteRunQuery,
   stopTraceQuery,
+  runActionRef,
   deleteStops,
   deleteSummary,
   deltaAbsenceText,
@@ -1113,6 +1114,17 @@ test('stopping a trace names the board generation the trace was read under', () 
   assert.equal(stopTraceQuery(0), '/api/sentinel/traces/stop?generation=0')
   assert.equal(stopTraceQuery(), '/api/sentinel/traces/stop')
   assert.equal(stopTraceQuery('3'), '/api/sentinel/traces/stop')
+})
+
+test('opening or deleting a run uses its stable id, not a name another run has as its id', () => {
+  // Run A is named "x"; run B's id is "x". The backend resolves "x" by id first, to B.
+  const rows = runList({ sentinel: { runs: [{ id: 'a1', name: 'x' }, { id: 'x', name: 'y' }, { name: 'no-id' }] } })
+  assert.deepEqual(rows.map((run) => run.ref), ['x', 'y', 'no-id'], 'the list and Compare keep the names')
+  assert.equal(runActionRef(rows, 'x'), 'a1')
+  assert.equal(runActionRef(rows, 'y'), 'x')
+  assert.equal(runActionRef(rows, 'no-id'), 'no-id')
+  assert.equal(runActionRef(rows, 'gone'), 'gone')
+  assert.equal(runActionRef(null, 'x'), 'x')
 })
 
 test('stopping a trace names the trace on screen, so a trace that replaced it is not stopped', () => {

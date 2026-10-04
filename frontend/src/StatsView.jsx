@@ -61,6 +61,7 @@ import {
   statsTabFrom,
   statusInfo,
   telemetryVisible,
+  runActionRef,
   toggleSelection,
   traceBar,
   traceExtrasSummary,
@@ -1190,7 +1191,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     }
     await send('run', {
       busy: setDetailBusy,
-      call: () => fetchRun(ref),
+      call: () => fetchRun(runActionRef(runRows, ref)),
       done: (data) => setDetail(data),
       fail: setDetailError,
       supersede: true
@@ -1226,6 +1227,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setDeleteBusy(true)
     setDeleteResult(null)
     const listGeneration = Number.isInteger(runs?.generation) ? runs.generation : generation
+    const listed = runRows
     const results = []
     let latest = null
     try {
@@ -1235,7 +1237,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
           continue
         }
         try {
-          const data = await deleteRun(ref, listGeneration)
+          const data = await deleteRun(runActionRef(listed, ref), listGeneration)
           latest = data
           results.push({ ref, deleted: data?.deleted || { id: null, name: null } })
         } catch (err) {
