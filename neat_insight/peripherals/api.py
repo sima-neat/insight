@@ -6,6 +6,7 @@ from pathlib import Path
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
+from neat_insight.board.manager import board_summary
 from neat_insight.peripherals import export
 from neat_insight.peripherals.cameras import ScanCache, camera_nodes, cameras_of, empty_snapshot
 from neat_insight.peripherals.client import PeripheralClient
@@ -22,15 +23,6 @@ scans = ScanCache()
 def _no_store(response):
     response.headers["Cache-Control"] = "no-store"
     return response
-
-
-def _board_summary(session, identity=None) -> dict:
-    identity = identity or {}
-    return {
-        "label": session.target.label,
-        "source": session.target.source,
-        **{key: identity.get(key) for key in ("hostname", "machine", "build_version", "fingerprint")},
-    }
 
 
 def _check_board(session, catalog: dict):
@@ -62,11 +54,8 @@ def _check_board(session, catalog: dict):
 @peripherals_bp.get("/api/peripherals")
 def get_peripherals():
     """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
-    try:
-        session = get_board_manager().session()
-    except BoardError as err:
-        return err.to_dict(), err.status
-    return scans.snapshot(session.generation) or empty_snapshot(_board_summary(session), session.generation)
+    session = get_board_manager().session()
+    return scans.snapshot(session.generation) or empty_snapshot(board_summary(session), session.generation)
 
 
 # API: rescan the selected board for cameras.
@@ -74,37 +63,31 @@ def get_peripherals():
 def refresh_peripherals():
     """Ask SiMa Sentinel to rescan, then return a new snapshot, or the result of a refresh in flight."""
     requested = time.monotonic()
-    try:
-        session = get_board_manager().session()
-        with scans.refresh_lock(session.generation):
-            in_flight = scans.completed_since(session.generation, requested)
-            if in_flight:
-                return in_flight
-            board = _board_summary(session, session.identity())
-            started = time.monotonic()
-            catalog = PeripheralClient(session).refresh()
-            check = _check_board(session, catalog)
-            scan_ms = int((time.monotonic() - started) * 1000)
-            session.require_current()
-            return scans.record(session.generation, board, catalog, check, scan_ms)
-    except BoardError as err:
-        return err.to_dict(), err.status
+    session = get_board_manager().session()
+    with scans.refresh_lock(session.generation):
+        in_flight = scans.completed_since(session.generation, requested)
+        if in_flight:
+            return in_flight
+        board = board_summary(session, session.identity())
+        started = time.monotonic()
+        catalog = PeripheralClient(session).refresh()
+        check = _check_board(session, catalog)
+        scan_ms = int((time.monotonic() - started) * 1000)
+        session.require_current()
+        return scans.record(session.generation, board, catalog, check, scan_ms)
 
 
 # API: render an input configuration for one camera mode from the last scan.
 @peripherals_bp.post("/api/peripherals/cameras/export")
 def export_camera():
     """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
-    try:
-        selection = export.parse_request(request.get_json(silent=True))
-        session = get_board_manager().session()
-        snapshot = scans.snapshot(session.generation)
-        if snapshot is None:
-            raise BoardError(
-                "stale_snapshot",
-                "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
-                hint="Click Refresh, then export again.",
-            )
-        return export.render(snapshot, selection)
-    except BoardError as err:
-        return err.to_dict(), err.status
+    selection = export.parse_request(request.get_json(silent=True))
+    session = get_board_manager().session()
+    snapshot = scans.snapshot(session.generation)
+    if snapshot is None:
+        raise BoardError(
+            "stale_snapshot",
+            "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
+            hint="Click Refresh, then export again.",
+        )
+    return export.render(snapshot, selection)
