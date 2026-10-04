@@ -153,6 +153,11 @@ _FAILURE_ERRORS = {
         "The socket is normally mode 0666. Check its permissions on the board, or connect as a user that may "
         "read it.",
     ),
+    socket_client.TIMED_OUT: (
+        "timeout",
+        "Sentinel's API socket {socket} on {label} did not answer before the request timed out.",
+        "Check `systemctl status simaai-sentinel` on the board.",
+    ),
     socket_client.FAILED: (
         "sentinel_failed",
         "Sentinel's API socket {socket} on {label} could not be used.",

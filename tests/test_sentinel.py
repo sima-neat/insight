@@ -375,6 +375,7 @@ class ClientTests(unittest.TestCase):
             socket_client.MISSING: ("sentinel_missing", "sima-cli neat install sentinel"),
             socket_client.REFUSED: ("sentinel_missing", "systemctl start"),
             socket_client.DENIED: ("sentinel_denied", "0666"),
+            socket_client.TIMED_OUT: ("timeout", "systemctl status"),
             socket_client.FAILED: ("sentinel_failed", "systemctl status"),
         }
         for failure, (code, hint) in cases.items():
@@ -383,6 +384,8 @@ class ClientTests(unittest.TestCase):
                 self.transport.exec = lambda *a, **k: ExecResult(3, envelope, b"")
                 error = self.raised()
                 self.assertEqual(error.code, code)
+                if failure == socket_client.TIMED_OUT:
+                    self.assertEqual(error.status, 504)
                 self.assertIn(hint, error.hint)
                 self.assertIn(socket_client.SOCKET_PATH, error.message)
 
@@ -659,6 +662,7 @@ class BoardCacheTests(unittest.TestCase):
 
     def test_a_new_daemon_run_starts_the_history_again_and_reseeds_it(self):
         self.cache.observe_daemon(self.KEY, "inv-1")
+        self.cache.record(self.KEY, "definitions", DEFINITIONS, 60)
         self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T17:54:21Z", "values": {"load": 1}})
         self.cache.seed(self.KEY, [{"timestamp": "2026-09-23T17:54:20Z", "values": {"load": 0}}])
         self.cache.observe_daemon(self.KEY, "inv-1")
@@ -666,6 +670,7 @@ class BoardCacheTests(unittest.TestCase):
         self.assertEqual(len(self.cache.history(self.KEY)), 2)
         self.cache.observe_daemon(self.KEY, "inv-2")
         self.assertTrue(self.cache.needs_seed(self.KEY))
+        self.assertIsNone(self.cache.get(self.KEY, "definitions"))
         after = self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T17:54:22Z", "values": {"load": 2}})
         self.assertEqual(after, [{"timestamp": "2026-09-23T17:54:22Z", "values": {"load": 2}}])
 
@@ -712,8 +717,10 @@ class BoardCacheTests(unittest.TestCase):
         for stamp in ("2026-09-23T19:40:00.301197766Z", "2026-09-23T19:40:30.301197766Z"):
             self.cache.add_sample(self.KEY, {"timestamp": stamp, "values": {}})
         self.assertEqual(len(self.cache.history(self.KEY)), 3)
-        # A board whose clock jumped backwards is just as much a break as one that jumped on.
-        self.assertEqual(self.stamps(self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T18:00:00Z", "values": {}})), ["2026-09-23T18:00:00Z"])
+        # A concurrent older poll cannot append after the newer history tail.
+        before = self.cache.history(self.KEY)
+        self.assertIsNone(self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T18:00:00Z", "values": {}}))
+        self.assertEqual(self.cache.history(self.KEY), before)
 
     def test_history_is_bounded_ignores_a_repeated_sample_and_keeps_unreadable_timestamps(self):
         for stamp in ("2026-09-23T19:40:00Z", "not-a-timestamp", "2026-09-23T19:40:02Z"):
@@ -874,6 +881,34 @@ class SentinelApiTests(_ApiCase):
         body = self.get("/api/sentinel/metrics?history=5").get_json()
         self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:49Z"])
         self.assertEqual(len(self.transport.exports), 2, "the new daemon's own window is read again")
+
+    def test_telemetry_retries_when_the_daemon_restarts_mid_read(self):
+        statuses = [
+            {"instance_id": "inv-1"},
+            {"instance_id": "inv-2"},
+            {"instance_id": "inv-2"},
+            {"instance_id": "inv-2"},
+        ]
+        with mock.patch.object(api.install, "status", side_effect=statuses), mock.patch.object(
+            api.cache_history, "read", return_value=[]
+        ):
+            response = self.get("/api/sentinel/metrics?history=5")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/samples/latest")), 2)
+        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 2)
+
+    def test_telemetry_retries_when_a_concurrent_poll_recorded_a_newer_sample(self):
+        key = (1, "fp-1")
+        api.cache.observe_daemon(key, "inv-1")
+        api.cache.add_sample(key, sample("2026-09-22T20:55:49Z")["sample"])
+        api.cache.seed(key, [])
+        readings = [sample("2026-09-22T20:55:47Z"), sample("2026-09-22T20:55:51Z")]
+        with mock.patch.object(api.install, "status", return_value={"instance_id": "inv-1"}), mock.patch.object(
+            api.SentinelClient, "latest", side_effect=readings
+        ):
+            body = self.get("/api/sentinel/metrics?history=5").get_json()
+        self.assertEqual(body["sampled_at"], "2026-09-22T20:55:51Z")
+        self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:49Z", "2026-09-22T20:55:51Z"])
 
     def test_history_never_mixes_two_boards(self):
         self.get("/api/sentinel/metrics")

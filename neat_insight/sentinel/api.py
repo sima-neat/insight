@@ -215,17 +215,28 @@ def get_metrics():
     """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
     limit = _history_limit(request.args.get("history"))
     context = _Context()
-    # Read fresh, not from the status cache: a sample from a restarted daemon must not be
-    # appended to the previous daemon's history before the restart is noticed.
-    daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
-    cache.observe_daemon(context.key, daemon.get("instance_id"))
-    latest = context.client.latest()
-    history = cache.add_sample(context.key, latest.get("sample"))
-    # First read of this board, or the first after a gap in polling: take the daemon's own window.
-    if cache.needs_seed(context.key):
-        history = cache.seed(context.key, cache_history.read(context.session))
-    definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
-    return context.payload(**metric_view.build(definitions, latest, history, limit))
+    # A restart invalidates every value read from Sentinel. Retry once so the response
+    # always contains one daemon invocation and a concurrent older poll cannot win.
+    for _ in range(2):
+        before = install.status(context.session)
+        cache.observe_daemon(context.key, before.get("instance_id"))
+        latest = context.client.latest()
+        definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
+        history = cache.add_sample(context.key, latest.get("sample"))
+        if history is None:
+            continue
+        seed = cache_history.read(context.session) if cache.needs_seed(context.key) else None
+        daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
+        if before.get("instance_id") == daemon.get("instance_id"):
+            if seed is not None:
+                history = cache.seed(context.key, seed)
+            return context.payload(**metric_view.build(definitions, latest, history, limit))
+        cache.observe_daemon(context.key, daemon.get("instance_id"))
+    raise SentinelError(
+        "sentinel_failed",
+        "Sentinel telemetry changed repeatedly while it was being read.",
+        hint="Wait a moment, then retry.",
+    )
 
 
 # API: report the trace Sentinel is recording, if any.

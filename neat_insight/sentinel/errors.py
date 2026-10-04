@@ -8,6 +8,7 @@ _HTTP_STATUS = {
     "trace_conflict": 409,
     "already_installed": 409,
     "request_too_large": 413,
+    "timeout": 504,
     "sentinel_missing": 502,
     "sentinel_denied": 502,
     "sentinel_schema": 502,

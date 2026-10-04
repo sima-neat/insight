@@ -1134,9 +1134,11 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       start: () => setTraceError(null),
       call: () => startTrace(result.body, traceGeneration),
       done: (data) => {
+        guard.current.cancel('traces')
         setTraces(data)
         setForm({ name: '', note: '', tags: '' })
         onStatus?.(`Recording trace “${result.body.name}”.`)
+        guard.current.cancel('runs')
         loadRuns()
       },
       fail: setTraceError
@@ -1152,6 +1154,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       start: () => setTraceError(null),
       call: () => stopTrace(traceGeneration, trace.id),
       done: async () => {
+        guard.current.cancel('traces')
+        guard.current.cancel('runs')
         onStatus?.('Trace stopped and saved as a run.')
         await loadTraces({ quiet: true })
         loadRuns()

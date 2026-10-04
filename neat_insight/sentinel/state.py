@@ -98,9 +98,10 @@ class BoardCache:
                 self._history = deque(maxlen=self.history_limit)
                 self._seeded = False
                 self._daemon_instance = instance_id
+                self._values.pop("definitions", None)
 
-    def add_sample(self, key, sample: Optional[dict]) -> list:
-        """Append one Sentinel sample to this board's bounded history and return the history.
+    def add_sample(self, key, sample: Optional[dict]) -> Optional[list]:
+        """Append one sample and return history, or None when a newer sample won.
 
         A sample far enough from the last one that nothing was watching in between starts
         the history again, so a sparkline never draws a gap of hours as one step.
@@ -110,6 +111,13 @@ class BoardCache:
             timestamp = (sample or {}).get("timestamp")
             if not sample or not timestamp or (self._history and self._history[-1]["timestamp"] == timestamp):
                 return list(self._history)
+            if self._history:
+                previous, current = moment(self._history[-1].get("timestamp")), moment(timestamp)
+                if previous is not None and current is not None:
+                    if current < previous:
+                        return None
+                    if current == previous:
+                        return list(self._history)
             if self._interrupted_unlocked(timestamp):
                 self._history.clear()
                 # The daemon kept sampling while nobody polled; read its cache again.
