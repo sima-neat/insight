@@ -11,14 +11,15 @@ import {
   parseChannelIndices,
 } from "./viewerLayout.js";
 
-test("viewer exposes 48 as the largest simultaneous page size", () => {
+test("viewer exposes all 80 channels as the largest simultaneous page size", () => {
   assert.equal(MAX_CHANNELS, 80);
-  assert.deepEqual(PAGE_SIZE_PRESETS, [1, 4, 9, 16, 24, 36, 48]);
+  assert.deepEqual(PAGE_SIZE_PRESETS, [1, 4, 9, 16, 24, 36, 48, 60, 72, 80]);
 });
 
 test("persisted page sizes normalize to a supported option", () => {
   assert.equal(normalizeVisiblePerPage("40"), 36);
-  assert.equal(normalizeVisiblePerPage("80"), 48);
+  assert.equal(normalizeVisiblePerPage("80"), 80);
+  assert.equal(normalizeVisiblePerPage("100"), 80);
   assert.equal(normalizeVisiblePerPage("invalid"), 4);
 });
 
@@ -45,4 +46,10 @@ test("24 visible streams use four rows and six columns", () => {
 
 test("48 visible streams use six rows and eight columns", () => {
   assert.deepEqual(gridDimensions(48), { columns: 8, rows: 6 });
+});
+
+test("60, 72, and 80 visible streams use six columns", () => {
+  assert.deepEqual(gridDimensions(60), { columns: 6, rows: 10 });
+  assert.deepEqual(gridDimensions(72), { columns: 6, rows: 12 });
+  assert.deepEqual(gridDimensions(80), { columns: 6, rows: 14 });
 });
