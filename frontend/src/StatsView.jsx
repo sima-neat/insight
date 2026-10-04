@@ -678,12 +678,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       done: async (data, ticket) => {
         setInstallResult(data)
         onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
+        guard.current.cancel('state')
         await loadState({ quiet: true })
         if (fresh(ticket)) pollMetrics({ manual: true })
       },
       fail: (notice) => {
         setInstallError({ ...notice, install: true })
         onError?.(notice.message)
+        guard.current.cancel('state')
         loadState({ quiet: true })
       }
     })
