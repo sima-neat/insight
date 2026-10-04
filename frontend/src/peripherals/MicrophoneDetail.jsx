@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { getMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './api.js'
+import { readMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './api.js'
 import {
   MIC_TEST_IDLE,
   apiError,
@@ -115,7 +115,7 @@ function MicTest({ mic }) {
   const poll = async (token) => {
     let answer
     try {
-      answer = (await getMicrophoneTest()).test
+      answer = (await readMicrophoneTest({ isActive: () => mounted.current })).test
     } catch (err) {
       if (mounted.current) dispatch({ type: 'failed', error: normalizeError(err) })
       return

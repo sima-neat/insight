@@ -119,7 +119,7 @@ def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
 
 def choose_format(microphone: dict) -> dict:
     """The rate and channels to record at: 48 kHz when the hardware has it, else its nearest rate below
-    (plughw resamples a device that only offers higher rates); at most two channels."""
+    (plughw resamples a device that only offers higher rates); its most channels, at most two."""
     rates, channels = [], []
     for mode in microphone.get("modes") or []:
         if _integer(mode.get("channels"), 1):
@@ -129,7 +129,7 @@ def choose_format(microphone: dict) -> dict:
         if isinstance(span, dict) and _integer(span.get("min"), 1) and _integer(span.get("max"), span["min"]):
             rates += [span["min"], min(span["max"], PREFERRED_RATE)]
     rate = max((value for value in rates if value <= PREFERRED_RATE), default=PREFERRED_RATE)
-    return {"rate": rate, "channels": min(min(channels, default=1), MAX_CHANNELS)}
+    return {"rate": rate, "channels": min(max(channels, default=1), MAX_CHANNELS)}
 
 
 def record_command(device: str, rate: int, channels: int, seconds: int) -> list:

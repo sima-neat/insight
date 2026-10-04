@@ -1122,6 +1122,10 @@ class MicrophoneTestTests(unittest.TestCase):
         self.assertEqual(mictest.choose_format(c920_mic()["microphone"]), {"rate": 32000, "channels": 2})
         self.assertEqual(mictest.choose_format(mono_mic()["microphone"]), {"rate": 48000, "channels": 1})
         self.assertEqual(mictest.choose_format(onboard_mic()["microphone"]), {"rate": 48000, "channels": 1})
+        # A device that offers mono and stereo records stereo, as the approved build did.
+        both = {"modes": [{"format": "S16_LE", "channels": 1, "rates_hz": [48000]},
+                          {"format": "S16_LE", "channels": 2, "rates_hz": [44100]}]}
+        self.assertEqual(mictest.choose_format(both), {"rate": 48000, "channels": 2})
         studio = {"modes": [{"format": "S32_LE", "channels": 8, "sample_bits": 32, "rate_range_hz": {"min": 96000, "max": 384000}},
                             {"format": "S32_LE", "channels": 4, "sample_bits": 32, "rates_hz": [192000]}]}
         chosen = mictest.choose_format(studio)
