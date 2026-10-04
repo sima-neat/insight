@@ -62,6 +62,7 @@ import {
   statusInfo,
   telemetryVisible,
   runActionRef,
+  selectionChange,
   toggleSelection,
   traceBar,
   traceExtrasSummary,
@@ -927,6 +928,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   openRefNow.current = openRef
   const compareNow = useRef(compare)
   compareNow.current = compare
+  const selectedNow = useRef(selected)
+  selectedNow.current = selected
 
   const info = useMemo(() => daemonInfo(state), [state])
   const model = useMemo(() => metricsModel(metrics), [metrics])
@@ -1016,6 +1019,16 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setInstallError(null)
     setFailures(0)
     setHalted(false)
+  }
+
+  // Every change of the selection goes through here, so a comparison still out for the
+  // previous selection is cancelled instead of being shown under the new one.
+  function changeSelection(update) {
+    const { next, changed, cancelled } = selectionChange(guard.current, selectedNow.current, update)
+    if (!changed) return
+    selectedNow.current = next
+    if (cancelled) setCompareBusy(false)
+    setSelected(next)
   }
 
   function loadBoard() {
@@ -1254,7 +1267,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     const summary = deleteSummary(results)
     const { gone } = summary
     if (gone.size) {
-      setSelected((current) => current.filter((ref) => !gone.has(String(ref))))
+      changeSelection((current) => current.filter((ref) => !gone.has(String(ref))))
       if (openRefNow.current && gone.has(openRefNow.current)) openRun('')
       if (compareIncludes(compareNow.current, gone)) {
         setCompare(null)
@@ -1448,16 +1461,16 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                       deleteResult={deleteResult}
                       now={now}
                       onRefresh={() => loadRuns()}
-                      onToggle={(ref) => setSelected((current) => toggleSelection(current, ref))}
+                      onToggle={(ref) => changeSelection((current) => toggleSelection(current, ref))}
                       onOpen={openRun}
                       onCompare={runCompare}
                       onDelete={deleteSelected}
                       onClearCompare={() => {
-                        setSelected([])
+                        changeSelection([])
                         setCompare(null)
                         setCompareError(null)
                       }}
-                      onDropMissing={(gone) => setSelected((current) => current.filter((ref) => !gone.includes(ref)))}
+                      onDropMissing={(gone) => changeSelection((current) => current.filter((ref) => !gone.includes(ref)))}
                       onToggleCompare={() => setCompareOpen((open) => !open)}
                     />
                   )}

@@ -26,6 +26,7 @@ import {
   deleteRunQuery,
   stopTraceQuery,
   runActionRef,
+  selectionChange,
   deleteStops,
   deleteSummary,
   deltaAbsenceText,
@@ -1114,6 +1115,24 @@ test('stopping a trace names the board generation the trace was read under', () 
   assert.equal(stopTraceQuery(0), '/api/sentinel/traces/stop?generation=0')
   assert.equal(stopTraceQuery(), '/api/sentinel/traces/stop')
   assert.equal(stopTraceQuery('3'), '/api/sentinel/traces/stop')
+})
+
+test('a selection change cancels the comparison still out for the previous selection', () => {
+  const guard = createRequestGuard()
+  guard.switchTo(3)
+  const asked = guard.begin('compare')
+  // A/B is being compared; the user unticks B and ticks C.
+  let change = selectionChange(guard, ['a', 'b'], (current) => toggleSelection(current, 'b'))
+  assert.deepEqual(change, { next: ['a'], changed: true, cancelled: true })
+  change = selectionChange(guard, change.next, (current) => toggleSelection(current, 'c'))
+  assert.deepEqual(change, { next: ['a', 'c'], changed: true, cancelled: false })
+  assert.equal(guard.current(asked, { generation: 3 }), false, "A/B's answer is not applied")
+  assert.ok(guard.begin('compare'), 'A/C can be compared at once')
+  // Clearing, and dropping runs that left the list, are changes too; an unchanged selection is not.
+  assert.equal(selectionChange(guard, ['a', 'c'], []).cancelled, true)
+  const kept = guard.begin('compare')
+  assert.deepEqual(selectionChange(guard, ['a', 'c'], (current) => current.filter((ref) => ref !== 'z')), { next: ['a', 'c'], changed: false, cancelled: false })
+  assert.equal(guard.current(kept), true)
 })
 
 test('opening or deleting a run uses its stable id, not a name another run has as its id', () => {

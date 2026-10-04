@@ -780,6 +780,21 @@ export function factRows(value, skip = [], prefix = '', depth = 0, rows = []) {
   return rows
 }
 
+/**
+ * A change of the compare selection. A comparison still out was asked for the previous
+ * selection, so any change cancels it: its answer must never land under checkboxes it was
+ * not asked for. Returns the new selection, whether it changed, and whether a comparison
+ * was cancelled (whose busy flag the page then clears, as the cancelled request will not).
+ */
+export function selectionChange(guard, current, update) {
+  const before = current || []
+  const next = typeof update === 'function' ? update(before) : update
+  const changed = next.length !== before.length || next.some((ref, index) => ref !== before[index])
+  const cancelled = changed && guard.running('compare')
+  if (changed) guard.cancel('compare')
+  return { next, changed, cancelled }
+}
+
 export function toggleSelection(selected, key, limit = MAX_COMPARE_RUNS) {
   const list = selected || []
   if (list.includes(key)) return list.filter((item) => item !== key)
