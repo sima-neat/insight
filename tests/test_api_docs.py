@@ -129,6 +129,24 @@ class ApiDocumentationTests(unittest.TestCase):
             responses["504"]["$ref"], "#/components/responses/GatewayTimeout"
         )
 
+    def test_board_change_and_preview_operations_document_propagated_errors(self):
+        expected = {
+            ("/api/board/select", "post"): {"400", "409", "502", "504"},
+            ("/api/board/trust-host-key", "post"): {"400", "409", "502", "504"},
+            ("/api/peripherals/cameras/preview/{session_id}/heartbeat", "post"): {"404", "409", "502", "504"},
+            ("/api/peripherals/cameras/preview/{session_id}/stop", "post"): {"404", "409", "502", "504"},
+        }
+
+        for (path, method), statuses in expected.items():
+            responses = self.spec["paths"][path][method]["responses"]
+            with self.subTest(path=path, method=method):
+                self.assertTrue(statuses.issubset(responses))
+                for status in statuses:
+                    self.assertEqual(
+                        responses[status]["$ref"],
+                        "#/components/responses/BoardErrorResponse",
+                    )
+
     def test_workspace_contract_matches_index_and_raw_preview_behavior(self):
         search_description = self.spec["paths"]["/api/workspace/search"]["get"][
             "description"
