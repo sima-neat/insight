@@ -1033,7 +1033,9 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         }
       },
       fail: (notice) => {
-        setState(null)
+        // A quiet lifecycle check is recoverable only while the last healthy state keeps
+        // both polling loops alive. An explicit/initial check still replaces stale state.
+        if (!quiet) setState(null)
         setStateError(notice)
       },
       supersede
