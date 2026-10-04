@@ -3767,6 +3767,14 @@ button:disabled {
   margin: 8px 0 0;
 }
 
+.periph-copy {
+  margin-top: 8px;
+}
+
+.periph-copy select {
+  width: auto;
+}
+
 /* Microphone capture: one segmented badge row per format/channels/bits/rates combination. */
 .periph-capture {
   display: grid;

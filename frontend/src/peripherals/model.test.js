@@ -16,6 +16,8 @@ import {
   defaultTargetText,
   deviceRows,
   deviceTabs,
+  exportBlockReason,
+  exportChoices,
   formatDuration,
   formatOptions,
   formatRangeLabel,
@@ -802,4 +804,15 @@ test('microphone test: one button records, stops the recording, then stops the p
   assert.deepEqual(micTestAction('playing', false), { label: 'Stop playing', action: 'stop-playing', disabled: false })
   assert.equal(micTestAction('done', false).action, 'record')
   assert.equal(micTestAction('error', false).action, 'record')
+})
+
+test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {
+  assert.deepEqual(exportChoices(imx477).map((c) => c.id), ['python', 'cpp', 'json'])
+  assert.deepEqual(exportChoices(usb).map((c) => c.id), ['yaml', 'json'])
+  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), '')
+  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 60 }), "Neat Core's support rules do not accept this mode.")
+  const refused = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [{ width: 640, height: 480, fps: [{ value: 90, tier: 'unsupported', reason: 'The sensor has no 90 fps mode.' }] }])] }
+  assert.equal(exportBlockReason(refused, { format: 'NV12', width: 640, height: 480, fps: 90 }), 'The sensor has no 90 fps mode.')
+  assert.equal(exportBlockReason(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), '', 'a USB mode exports as a descriptor')
+  assert.equal(exportBlockReason(imx477, null), '')
 })
