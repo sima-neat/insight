@@ -111,6 +111,10 @@ class BoardCache:
             timestamp = (sample or {}).get("timestamp")
             if not sample or not timestamp or (self._history and self._history[-1]["timestamp"] == timestamp):
                 return list(self._history)
+            if self._history:
+                previous, current = moment(self._history[-1].get("timestamp")), moment(timestamp)
+                if previous is not None and current is not None and current <= previous:
+                    return list(self._history)
             if self._interrupted_unlocked(timestamp):
                 self._history.clear()
                 # The daemon kept sampling while nobody polled; read its cache again.

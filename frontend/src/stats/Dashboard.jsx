@@ -109,7 +109,9 @@ function OpsList({ metrics, series, caption }) {
               <td className="stats-ops-history">
                 {spark ? (
                   <svg className="stats-ops-spark" viewBox="0 0 400 20" preserveAspectRatio="none" role="img" aria-label={`${metric.label}: ${spark.count} recent samples, ${formatValue(spark.min, metric.unit)} to ${formatValue(spark.max, metric.unit)}`} focusable="false">
-                    <polyline points={spark.points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                    {spark.segments.map((points, index) => (
+                      <polyline key={index} points={points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                    ))}
                   </svg>
                 ) : (
                   <span className="stats-ops-spark empty" aria-hidden="true" />

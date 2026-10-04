@@ -703,6 +703,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         setTraces(data)
         setForm(EMPTY_FORM)
         onStatus?.(`Recording trace “${result.body.name}”.`)
+        guard.current.cancel('runs')
         loadRuns()
       },
       fail: setTraceError
@@ -718,6 +719,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
         guard.current.cancel('traces')
         onStatus?.('Trace stopped and saved as a run.')
         await loadTraces({ quiet: true })
+        guard.current.cancel('runs')
         loadRuns()
       },
       fail: setTraceError

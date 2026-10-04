@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { compareOverlay, completeTotal, lastNumber, stackedPaths, stackTotals, tightScale, valueNear } from './dashboard.js'
-import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, runDetail, runList, traceBar, traceModel } from './model.js'
+import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, runDetail, runList, sparkline, traceBar, traceModel } from './model.js'
 
 test('keyboard-only Stats controls keep a visible focus indicator', () => {
   const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
@@ -34,6 +34,11 @@ test('the request guard admits one call per key and drops answers from a board l
   const second = guard.begin('run', { supersede: true })
   assert.equal(guard.current(first), false)
   assert.ok(guard.current(second))
+  const oldRuns = guard.begin('runs')
+  guard.cancel('runs')
+  const freshRuns = guard.begin('runs')
+  assert.equal(guard.current(oldRuns), false)
+  assert.ok(guard.current(freshRuns))
 })
 
 test('charts keep missing readings missing and compare each run with its own definitions', () => {
@@ -42,6 +47,7 @@ test('charts keep missing readings missing and compare each run with its own def
   assert.equal(completeTotal([2, 3]), 5)
   assert.deepEqual(stackTotals([[1, null, 3], [2, 4, 5]]), [3, null, 8])
   assert.ok(stackedPaths([[1, null, 3], [2, 4, 5]], { min: 0, max: 10 }, 100, 100).every((path) => !path.includes('50 ')))
+  assert.equal(sparkline([1, 2, null, 3, 4], 40, 20).segments.length, 2)
   const payload = {
     sentinel: {
       baseline_id: 'a',

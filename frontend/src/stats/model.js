@@ -237,19 +237,27 @@ export function chipKeyTarget(key, index, length) {
 }
 
 export function sparkline(values, width, height) {
-  const points = (values || []).map((value, index) => ({ index, value })).filter((point) => isNumber(point.value))
-  if (points.length < 2) return null
-  const numbers = points.map((point) => point.value)
+  const list = values || []
+  const numbers = list.filter(isNumber)
+  if (numbers.length < 2) return null
   const min = Math.min(...numbers)
   const max = Math.max(...numbers)
   const span = max - min || 1
-  const steps = Math.max(1, values.length - 1)
-  const scaled = points.map((point) => {
-    const x = (point.index / steps) * width
-    const y = height - ((point.value - min) / span) * (height - 2) - 1
-    return `${Number(x.toFixed(1))},${Number(y.toFixed(1))}`
+  const steps = Math.max(1, list.length - 1)
+  const segments = []
+  let current = []
+  list.forEach((value, index) => {
+    if (!isNumber(value)) {
+      if (current.length > 1) segments.push(current.join(' '))
+      current = []
+      return
+    }
+    const x = (index / steps) * width
+    const y = height - ((value - min) / span) * (height - 2) - 1
+    current.push(`${Number(x.toFixed(1))},${Number(y.toFixed(1))}`)
   })
-  return { points: scaled.join(' '), min, max, count: points.length }
+  if (current.length > 1) segments.push(current.join(' '))
+  return segments.length ? { segments, min, max, count: numbers.length } : null
 }
 
 export function thresholdText(metric) {

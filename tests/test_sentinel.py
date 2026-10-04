@@ -251,10 +251,12 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(cache.history(key), [])
         self.assertIsNone(cache.get(key, "definitions"))
 
-    def test_a_break_in_the_polling_starts_the_history_again(self):
+    def test_history_stays_chronological_and_restarts_after_a_gap(self):
         cache, key = state.BoardCache(), (1, "fp-1")
         for stamp in ("2026-09-23T17:54:19.918200185Z", "2026-09-23T17:54:21.908397571Z"):
             cache.add_sample(key, {"timestamp": stamp, "values": {}})
+        older = cache.add_sample(key, {"timestamp": "2026-09-23T17:54:20Z", "values": {}})
+        self.assertEqual([s["timestamp"] for s in older], ["2026-09-23T17:54:19.918200185Z", "2026-09-23T17:54:21.908397571Z"])
         after = cache.add_sample(key, {"timestamp": "2026-09-23T19:39:58.301197766Z", "values": {}})
         self.assertEqual([s["timestamp"] for s in after], ["2026-09-23T19:39:58.301197766Z"])
         self.assertEqual(len(cache.add_sample(key, {"timestamp": "2026-09-23T19:40:28.3Z", "values": {}})), 2)
