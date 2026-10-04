@@ -18,17 +18,10 @@ def microphones_of(catalog: dict) -> list:
     return [device for device in catalog["devices"] if device["type"] == "microphone"]
 
 
-def free_by_kernel(device: dict) -> bool:
-    """Every capture substream is free, so nobody holds the device and the process check can be skipped."""
-    availability = device["microphone"]["availability"]
-    count, free = availability.get("subdevices"), availability.get("subdevices_available")
-    return isinstance(count, int) and count > 0 and count == free
-
-
 def check_nodes(device: dict) -> list:
-    """The capture PCM node whose holders the board check looks up; none when the kernel proves it free."""
+    """The capture PCM node the board check reads live: its open substreams and the processes holding it."""
     node = device["microphone"]["identity"].get("pcm_node")
-    return [node] if isinstance(node, str) and node.startswith("/dev/") and not free_by_kernel(device) else []
+    return [node] if isinstance(node, str) and node.startswith("/dev/") else []
 
 
 def microphone_items(catalog: dict, check: Optional[dict], cameras: list, retained: set) -> list:
@@ -45,10 +38,13 @@ def microphone_items(catalog: dict, check: Optional[dict], cameras: list, retain
     ]
 
 
-def _availability_of(mic: dict, users: Optional[list], method: Optional[str]) -> dict:
+def _availability_of(mic: dict, users: Optional[list], method: Optional[str], live: Optional[int]) -> dict:
+    """`live` is the board check's count of open capture substreams; Sentinel's counts are from its last
+    scan, which a sound server's brief open after hot-plug can leave reading "in use", so they are only
+    the fallback."""
     counts = mic["availability"]
     count, free = counts.get("subdevices"), counts.get("subdevices_available")
-    opened = count - free if isinstance(count, int) and isinstance(free, int) else None
+    opened = live if live is not None else count - free if isinstance(count, int) and isinstance(free, int) else None
     if not users and opened:
         # The kernel counts open capture substreams for every process, including ones Insight cannot inspect.
         return {"state": "in_use", "users": [], "reason": KERNEL_IN_USE_REASON}
@@ -102,7 +98,9 @@ def _item(device: dict, check: Optional[dict], servers: list, usb_cameras: dict,
         "connection": "usb" if mic["connection"] == "usb" else "onboard",
         "name": (usb or {}).get("product") or mic["name"],
         "device": info,
-        "availability": _availability_of(mic, users, (check or {}).get("availability_method")),
+        "availability": _availability_of(
+            mic, users, (check or {}).get("availability_method"), ((check or {}).get("capture_open") or {}).get(device["id"])
+        ),
         "capture": [_capture(mode) for mode in modes] if modes else None,
         "notes": notes,
         "errors": [],

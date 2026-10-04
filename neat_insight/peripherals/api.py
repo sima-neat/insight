@@ -38,6 +38,10 @@ def _check_board(session, catalog: dict):
     payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
     if microphones:
         payload["microphones"] = {device["id"]: check_nodes(device) for device in microphones}
+    return _run_check(session, payload)
+
+
+def _run_check(session, payload: dict):
     try:
         result = session.transport.exec(
             ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
@@ -48,7 +52,7 @@ def _check_board(session, catalog: dict):
     except BoardError as exc:
         if exc.code == "stale_snapshot":
             raise
-        logging.warning("The peripheral camera check failed on %s: %s", session.target.label, exc)
+        logging.warning("The peripheral check failed on %s: %s", session.target.label, exc)
         check = None
     return check if isinstance(check, dict) else None
 
@@ -114,6 +118,8 @@ def start_microphone_test():
         )
     mictest.find_microphone(snapshot, mic_id)
     bound = mictest.bind_microphone(PeripheralClient(session).catalog(), scanned, mic_id)
+    node = [bound["node"]] if isinstance(bound["node"], str) and bound["node"].startswith("/dev/") else []
+    mictest.refuse_if_held(_run_check(session, {"microphones": {mic_id: node}}), mic_id)
     session.require_current()
     return {"test": mictest.start(session, mic_id, bound, seconds)}, 202
 

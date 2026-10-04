@@ -108,13 +108,22 @@ def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
             hint="Click Refresh once the device has finished initializing; if this persists, update SiMa Sentinel "
             "with `sima-cli neat install sentinel`.",
         )
-    if (microphone.get("availability") or {}).get("state") == "in_use":
-        raise BoardError(
-            "microphone_in_use",
-            "Another process has the microphone open.",
-            hint="Stop the application that is recording from it, then test again. Insight never stops it for you.",
-        )
-    return {"selector": selector, **choose_format(microphone)}
+    # Sentinel's availability is from its last scan and only shown; refuse_if_held decides from a live check.
+    node = (microphone.get("identity") or {}).get("pcm_node")
+    return {"selector": selector, "node": node, **choose_format(microphone)}
+
+
+def refuse_if_held(check: Optional[dict], mic_id: str) -> None:
+    """Refuse when the live board check finds the capture PCM open now; a check that could not run
+    leaves it to arecord, which reports a busy device itself."""
+    users = ((check or {}).get("users") or {}).get(mic_id)
+    opened = ((check or {}).get("capture_open") or {}).get(mic_id)
+    hint = "Stop the application that is recording from it, then test again. Insight never stops it for you."
+    if users:
+        holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users)
+        raise BoardError("microphone_in_use", f"The microphone is open in {holders}.", hint=hint, users=users)
+    if opened:
+        raise BoardError("microphone_in_use", "The kernel reports the capture device open in another process.", hint=hint)
 
 
 def choose_format(microphone: dict) -> dict:

@@ -5,6 +5,7 @@ import math
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -318,6 +319,29 @@ class BoardCheckTests(unittest.TestCase):
             self.assertNotIn("sound_servers", board_check.collect({"cameras": {}}))
 
 
+    def test_a_capture_pcm_is_read_live_and_only_an_open_one_is_looked_up(self):
+        with tempfile.TemporaryDirectory() as proc:
+            for card, status in ((2, "closed"), (3, "state: RUNNING\nowner_pid   : 812")):
+                sub = Path(proc, "asound", f"card{card}", "pcm0c", "sub0")
+                sub.mkdir(parents=True)
+                (sub / "status").write_text(status + "\n")
+            looked_up = []
+
+            def checker(method, tools):
+                return lambda nodes: looked_up.append(sorted(nodes)) or [{"pid": 812, "command": "pulseaudio"}]
+
+            with mock.patch.object(board_check, "PROC_ROOT", proc), \
+                 mock.patch.object(board_check, "which", return_value=None), \
+                 mock.patch.object(board_check.os, "geteuid", return_value=0), \
+                 mock.patch.object(board_check, "user_checker", checker):
+                result = board_check.collect({"microphones": {
+                    YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: ["/dev/snd/pcmC3D0c"], MONO_MIC: ["/dev/snd/pcmC9D0c"]}})
+        self.assertEqual(result["capture_open"], {YETI: 0, C920_MIC: 1, MONO_MIC: None})
+        self.assertEqual(result["users"][YETI], [])
+        self.assertEqual(result["users"][C920_MIC], [{"pid": 812, "command": "pulseaudio"}])
+        self.assertEqual(looked_up, [["/dev/snd/pcmC3D0c"], ["/dev/snd/pcmC9D0c"]])
+
+
 class SnapshotTests(unittest.TestCase):
     def test_imx477_tiers_formats_and_default_come_from_sentinel(self):
         camera = item(snapshot_of(catalog(imx477())), IMX477)
@@ -545,6 +569,9 @@ class MicrophoneSnapshotTests(unittest.TestCase):
         self.assertEqual(named, {"state": "in_use", "users": holder, "reason": "Open in arecord (pid 4242)."})
         hidden = item(snapshot_of(catalog(busy), mic_check(availability_method="proc-user", users={YETI: []})), YETI)
         self.assertEqual(hidden["availability"], {"state": "in_use", "users": [], "reason": microphones.KERNEL_IN_USE_REASON})
+        # The live substream count wins over Sentinel's counts from its last scan.
+        live_free = item(snapshot_of(catalog(busy), mic_check(users={YETI: []}, capture_open={YETI: 0})), YETI)
+        self.assertEqual(live_free["availability"], {"state": "available", "users": [], "reason": None})
         # Free by the kernel's counts needs no process check, even when that check could not run.
         self.assertEqual(item(snapshot_of(catalog(yeti()), None), YETI)["availability"]["state"], "available")
 
@@ -1005,14 +1032,53 @@ class MicrophoneApiTests(unittest.TestCase):
     def start(self, mic_id=YETI, **body):
         return self.client.post("/api/peripherals/microphones/test", json={"id": mic_id, **body})
 
-    def test_refresh_checks_only_microphones_the_kernel_does_not_prove_free(self):
-        busy = yeti()
-        busy["microphone"]["availability"].update(state="in_use", subdevices_available=0)
-        self.sentinel = catalog(busy, c920_mic(), onboard_mic())
+    def test_refresh_checks_every_microphone_live(self):
+        self.sentinel = catalog(yeti(), c920_mic(), onboard_mic())
         self.assertEqual(self.client.post("/api/peripherals/refresh").status_code, 200)
         argv, _, _ = self.transport.calls[0]
         self.assertEqual(json.loads(argv[2]), {"cameras": {}, "microphones": {
-            YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: [], ONBOARD_MIC: ["/dev/snd/pcmC0D0c"]}})
+            YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: ["/dev/snd/pcmC3D0c"], ONBOARD_MIC: ["/dev/snd/pcmC0D0c"]}})
+
+    def answer_checks(self, live, record=None):
+        """Board check calls get `live`; arecord goes to `record`."""
+        def exec_(argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
+            self.transport.calls.append((argv, timeout, stdin))
+            if argv[0] == "python3":
+                return ExecResult(0, json.dumps(live).encode(), b"")
+            return record(argv, on_stdout, cancel_event)
+        self.transport.exec = exec_
+
+    def test_a_stale_in_use_catalog_does_not_block_a_test_the_live_check_finds_free(self):
+        """On hot-plug PulseAudio holds a new microphone for a few seconds; Sentinel's catalog keeps saying
+        in use after the release, because no event marks it. The live check decides."""
+        self.client.post("/api/peripherals/refresh")
+        busy = yeti()
+        busy["microphone"]["availability"].update(state="in_use", subdevices_available=0)
+        self.sentinel = catalog(imx477(), busy)
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}),
+                           lambda argv, on_stdout, cancel: ExecResult(0, sine(0.5), b""))
+        response = self.start()
+        self.assertEqual(response.status_code, 202)
+        argv, _, _ = self.transport.calls[-2]
+        self.assertEqual(json.loads(argv[2]), {"microphones": {YETI: ["/dev/snd/pcmC2D0c"]}})
+        mictest._current.thread.join(2)
+        self.assertEqual(self.transport.calls[-1][0][0], "arecord")
+
+    def test_a_live_holder_refuses_the_test_and_is_named(self):
+        self.client.post("/api/peripherals/refresh")
+        started = []
+        for live, message in (
+            (mic_check(users={YETI: [{"pid": 812, "command": "pulseaudio"}]}, capture_open={YETI: 1}),
+             "The microphone is open in pulseaudio (pid 812)."),
+            (mic_check(availability_method="proc-user", users={YETI: []}, capture_open={YETI: 1}),
+             "The kernel reports the capture device open in another process."),
+        ):
+            with self.subTest(message=message):
+                self.answer_checks(live, lambda argv, on_stdout, cancel: started.append(argv))
+                response = self.start()
+                body = response.get_json()
+                self.assertEqual((response.status_code, body["code"], body["error"]), (409, "microphone_in_use", message))
+        self.assertEqual(started, [])
 
     def test_testing_before_a_scan_or_an_unscanned_id_is_refused_without_contacting_the_board(self):
         response = self.start()
@@ -1040,14 +1106,13 @@ class MicrophoneApiTests(unittest.TestCase):
         pcm = sine(0.5)
         recording = threading.Event()
 
-        def exec_(argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
-            self.transport.calls.append((argv, timeout, stdin))
+        def record(argv, on_stdout, cancel_event):
             on_stdout(pcm)
             recording.set()
-            cancel_event.wait(timeout)
+            cancel_event.wait(30)
             raise CommandCancelled()
 
-        self.transport.exec = exec_
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record)
         response = self.start()
         self.assertEqual(response.status_code, 202)
         test = response.get_json()["test"]
@@ -1098,7 +1163,8 @@ class MicrophoneTestTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, code)
 
     def test_binding_uses_only_sentinel_selector_from_the_scanned_catalog(self):
-        self.assertEqual(self.bind(catalog(yeti())), {"selector": "plughw:CARD=Nano,DEV=0", "rate": 48000, "channels": 2})
+        self.assertEqual(self.bind(catalog(yeti())),
+                         {"selector": "plughw:CARD=Nano,DEV=0", "node": "/dev/snd/pcmC2D0c", "rate": 48000, "channels": 2})
         self.assert_refused("stale_snapshot", catalog(yeti(), instance_id="daemon-restarted"))
         self.assert_refused("stale_snapshot", catalog(yeti(), revision=2))
         self.assert_refused("not_found", catalog(c920_mic()))
@@ -1107,9 +1173,10 @@ class MicrophoneTestTests(unittest.TestCase):
             hostile["microphone"]["capture_target"]["selector"] = selector
             with self.subTest(selector=selector):
                 self.assert_refused("peripheral_response", catalog(hostile))
+        # Sentinel's availability is only shown: the live check at test start decides (refuse_if_held).
         busy = yeti()
-        busy["microphone"]["availability"]["state"] = "in_use"
-        self.assert_refused("microphone_in_use", catalog(busy))
+        busy["microphone"]["availability"].update(state="in_use", subdevices_available=0)
+        self.assertEqual(self.bind(catalog(busy))["selector"], "plughw:CARD=Nano,DEV=0")
 
     def test_binding_refuses_data_sentinel_did_not_freshly_read(self):
         retained = {"provider": MIC_PROVIDER, "code": "peripherals.discovery_failed", "reason": "x", "retained_last_good": True}
