@@ -18,6 +18,8 @@ Insight використовує кілька портів під час нор�
 | `videoUDP` | `9000-9079` | UDP | Завантаження відео для каналів перегляду `0-79` RTP. |
 | `metadataUDP` | `9100-9179` | UDP | Метадані JSON для каналів перегляду `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC передавання медіаданих і метаданих через канал DataChannel від віртуальної функції до браузера. |
+| `webrtcWhip` | `8889` | HTTPS/TCP | Публікація вебкамери браузера в MediaMTX через WHIP із повторною публікацією як джерела RTSP. |
+| `webrtcWhipIce` | `8189` | UDP | Медіа ICE для публікації вебкамери браузера. Сигналізація використовує `webrtcWhip`; саме відео надходить сюди, тож обидва порти мають бути доступними. |
 | `webSSH` | `8022` | HTTPS/TCP | Якщо можливо, під’єднайте веббраузер до парного DevKit. |
 
 ## Знайдіть актуальну схему розташування портів SDK.
@@ -39,6 +41,8 @@ neat --json
     {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
     {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
   ],
   "insight": {
