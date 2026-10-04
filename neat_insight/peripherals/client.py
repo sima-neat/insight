@@ -263,6 +263,7 @@ class PeripheralClient:
 
     def _validate_camera(self, device: dict) -> None:
         camera = device["camera"]
+        identity = camera.get("identity")
         if (
             not isinstance(camera.get("backend"), str)
             or not camera["backend"]
@@ -277,6 +278,25 @@ class PeripheralClient:
             or any(
                 camera.get(key) is not None and not isinstance(camera.get(key), dict)
                 for key in ("identity", "availability", "isp")
+            )
+            or (
+                isinstance(identity, dict)
+                and (
+                    any(
+                        identity.get(key) is not None and not isinstance(identity.get(key), str)
+                        for key in (
+                            "stable_key", "topology", "interface", "vendor_id", "product_id",
+                            "serial", "manufacturer", "speed",
+                        )
+                    )
+                    or (
+                        identity.get("node_index") is not None
+                        and not (
+                            isinstance(identity["node_index"], str)
+                            or _non_negative_int(identity["node_index"])
+                        )
+                    )
+                )
             )
         ):
             raise self._response_error("SiMa Sentinel returned malformed camera details.", device)

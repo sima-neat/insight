@@ -189,12 +189,19 @@ class PeripheralClientTests(unittest.TestCase):
             "support rules": camera_catalog(support="applied"),
             "support rules state": camera_catalog(support={"state": ["applied"]}),
         }
+        for key in (
+            "stable_key", "topology", "interface", "vendor_id", "product_id",
+            "serial", "manufacturer", "speed",
+        ):
+            malformed[f"USB identity {key}"] = usb_camera(identity={key: {}})
+        malformed["USB identity node_index"] = usb_camera(identity={"node_index": -1})
         for name, response in malformed.items():
             with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
                 with self.assertRaises(BoardError) as ctx:
                     PeripheralClient(FakeSession()).catalog()
                 self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
-        for response in (usb_camera(), usb_camera(identity=None, by_id_path=None),
+        for response in (usb_camera(), usb_camera(identity={"node_index": 0}),
+                         usb_camera(identity=None, by_id_path=None),
                          mipi(isp={"state": "unavailable", "reason": "x"}),
                          mipi(availability=None), camera_catalog(support={"state": "applied"})):
             with self.subTest(valid=response), mock.patch.object(
