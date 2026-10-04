@@ -27,6 +27,8 @@ def parse_request(body) -> dict:
         generation = int(generation)
     if not _positive_int(generation):
         raise _invalid("generation must be a positive integer from the last scan.")
+    if not isinstance(body.get("scan_id"), str) or not body["scan_id"]:
+        raise _invalid("scan_id must be the identifier from the last scan.")
     if not isinstance(body.get("id"), str) or not body["id"]:
         raise _invalid("id must be a camera id from the last scan.")
     if not isinstance(body.get("format"), str) or not body["format"]:
@@ -36,7 +38,10 @@ def parse_request(body) -> dict:
     fps = body.get("fps")
     if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0:
         raise _invalid("fps must be a positive number.")
-    return {"generation": generation, **{key: body[key] for key in ("id", "format", "width", "height", "fps")}}
+    return {
+        "generation": generation,
+        **{key: body[key] for key in ("scan_id", "id", "format", "width", "height", "fps")},
+    }
 
 
 def render(snapshot: dict, request: dict) -> dict:

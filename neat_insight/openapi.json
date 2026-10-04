@@ -856,9 +856,9 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the identified snapshot generation without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core's rules reject returns `400` with Sentinel's reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "description": "Renders one mode from the identified peripheral scan without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core's rules reject returns `400` with Sentinel's reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board or peripheral scan changed since the selection was read.",
         "operationId": "exportCameraInput",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "scan_id": "daemon-1:42", "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
           "200": {"description": "Rendered configurations with the mode's support tier and warnings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExport"}}}},
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -1421,10 +1421,11 @@
       },
       "PeripheralsSnapshot": {
         "type": "object",
-        "required": ["board", "generation", "scanned_at", "items", "issues", "changes", "platform"],
+        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "platform"],
         "properties": {
           "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
           "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
+          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan. Send it back when exporting a camera mode."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
           "platform": {"type": ["object", "null"], "description": "Tools the on-board check found and how camera users were detected."},
@@ -1435,9 +1436,10 @@
       },
       "CameraExportRequest": {
         "type": "object",
-        "required": ["generation", "id", "format", "width", "height", "fps"],
+        "required": ["generation", "scan_id", "id", "format", "width", "height", "fps"],
         "properties": {
           "generation": {"type": "integer", "minimum": 1, "description": "Generation from the `PeripheralsSnapshot` that supplied the camera and mode."},
+          "scan_id": {"type": "string", "minLength": 1, "description": "Opaque scan identifier from the `PeripheralsSnapshot` that supplied the camera and mode."},
           "id": {"type": "string"},
           "format": {"type": "string", "example": "NV12"},
           "width": {"type": "integer"},

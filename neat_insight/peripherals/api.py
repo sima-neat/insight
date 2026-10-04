@@ -104,6 +104,12 @@ def export_camera():
             "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
             hint="Click Refresh, then export again.",
         )
+    if selection["scan_id"] != snapshot["scan_id"]:
+        raise BoardError(
+            "stale_snapshot",
+            "The camera selection belongs to an earlier peripheral scan.",
+            hint="Click Refresh, then export again.",
+        )
     rendered = export.render(snapshot, selection)
     session.require_current()
     return rendered

@@ -481,6 +481,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.sentinel = sentinel.start()
         self.addCleanup(sentinel.stop)
         self.manager = FakeManager()
+        self.scan_id = "unscanned"
         app = Flask(__name__)
         app.register_blueprint(board_bp)
         app.register_blueprint(peripherals_bp)
@@ -500,11 +501,15 @@ class PeripheralsApiTests(unittest.TestCase):
         return transport
 
     def refresh(self):
-        return self.client.post("/api/peripherals/refresh")
+        response = self.client.post("/api/peripherals/refresh")
+        if response.status_code == 200:
+            self.scan_id = response.get_json()["scan_id"]
+        return response
 
     def export(self, **body):
         body = {
             "generation": self.manager.current.generation,
+            "scan_id": self.scan_id,
             "id": IMX477,
             "format": "NV12",
             "width": 1920,
@@ -523,7 +528,10 @@ class PeripheralsApiTests(unittest.TestCase):
         response = self.client.get("/api/peripherals")
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual((body["scanned_at"], body["items"], body["changes"], body["platform"]), (None, [], None, None))
+        self.assertEqual(
+            (body["scan_id"], body["scanned_at"], body["items"], body["changes"], body["platform"]),
+            (None, None, [], None, None),
+        )
         self.assertEqual(body["board"]["label"], "sima@192.168.2.2")
         self.assertEqual(transport.calls, [])
         self.sentinel.assert_not_called()
@@ -731,6 +739,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.refresh()
         cases = (
             ({"generation": None}, 400),
+            ({"scan_id": None}, 400),
             ({"generation": True}, 400),
             ({"generation": 1.5}, 400),
             ({"fps": None}, 400),
@@ -746,6 +755,14 @@ class PeripheralsApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
         self.assertEqual(self.export(generation=1.0).status_code, 200)
+
+    def test_export_is_stale_after_another_scan_of_the_same_board(self):
+        self.use(catalog(imx477()), catalog(imx477(), scan_sequence=3))
+        first = self.refresh().get_json()
+        old_scan_id = first["scan_id"]
+        self.refresh()
+        response = self.export(scan_id=old_scan_id)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
 
     def test_export_is_stale_after_the_board_changes(self):
         self.use()

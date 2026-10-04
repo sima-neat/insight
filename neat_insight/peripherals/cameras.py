@@ -120,6 +120,7 @@ def empty_snapshot(board: dict, generation: int) -> dict:
     return {
         "board": board,
         "generation": generation,
+        "scan_id": None,
         "scanned_at": None,
         "items": [],
         "issues": [],
@@ -156,6 +157,7 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
     return {
         "board": board,
         "generation": generation,
+        "scan_id": f"{catalog['instance_id']}:{catalog['scan_sequence']}",
         "scanned_at": now_iso(),
         "scan_ms": scan_ms,
         "platform": platform,
