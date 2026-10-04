@@ -526,7 +526,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const tick = useRef(() => {})
   const failuresRef = useRef(0)
   const latest = useRef({})
-  latest.current = { openRef, compare }
+  latest.current = { openRef, compare, selected }
 
   const info = useMemo(() => daemonInfo(state), [state])
   const model = useMemo(() => metricsModel(metrics), [metrics])
@@ -571,9 +571,16 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   // A run deleted elsewhere leaves the selection with the list.
   function applyRuns(data) {
     const refs = new Set(runList(data).map((run) => run.ref))
+    const kept = latest.current.selected.filter((ref) => refs.has(ref))
+    if (kept.length !== latest.current.selected.length) {
+      guard.current.cancel('compare')
+      setCompareBusy(false)
+      setCompare(null)
+      setCompareError(null)
+    }
     setRuns(data)
     setRunsError(null)
-    setSelected((current) => current.filter((ref) => refs.has(ref)))
+    setSelected(kept)
   }
 
   function loadState({ quiet = false } = {}) {
@@ -696,7 +703,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setTraceError(null)
     await send('trace-action', {
       busy: setTraceBusy,
-      call: () => stopTrace(traces?.generation),
+      call: () => stopTrace(traces?.generation, trace.id),
       done: async () => {
         onStatus?.('Trace stopped and saved as a run.')
         await loadTraces({ quiet: true })

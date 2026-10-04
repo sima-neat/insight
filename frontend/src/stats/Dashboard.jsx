@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { CoreHeatmap, StackedChart, StatTile, TimeChart } from './Charts.jsx'
-import { lastNumber, niceCeil, scaleFor, stackTotals, thermalMaxSeries, thresholdLines } from './dashboard.js'
+import { completeTotal, lastNumber, niceCeil, scaleFor, stackTotals, thermalMaxSeries, thresholdLines } from './dashboard.js'
 import { formatRelativeTime, formatValue, isThermalMetric, metricAlert, sessionCsv, sessionCsvFilename, sparkline, statusInfo, thresholdText } from './model.js'
 import { FailureCallout, SegmentedTabs, downloadText, useStoredTab } from './ui.jsx'
 
@@ -44,7 +44,7 @@ function PairChart({ model, keys, labels, title }) {
   if (!metrics.length) return null
   const unit = metrics[0].metric.unit
   const series = metrics.map(({ metric, label }, index) => ({ key: metric.key, label: label || metric.short || metric.label, values: model.series[metric.key] || [], color: COLORS[index] }))
-  const total = metrics.reduce((sum, { metric }) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
+  const total = metrics.length === keys.length ? completeTotal(metrics.map(({ metric }) => metric.value)) : null
   return (
     <TimeChart
       title={title}
@@ -187,7 +187,7 @@ function PowerView({ model }) {
   const peak = model.byKey.get('power_peak_watts')
   const rails = model.metrics.filter((metric) => /^power_rail_/.test(metric.key))
   const railSeries = rails.map((metric, index) => ({ key: metric.key, label: metric.short || metric.label, values: model.series[metric.key] || [], color: COLORS[index % COLORS.length] }))
-  const railTotal = rails.reduce((sum, metric) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
+  const railTotal = completeTotal(rails.map((metric) => metric.value))
   const totals = stackTotals(railSeries.map((item) => item.values))
   const stats = [
     { metric: current, title: 'Current' },
@@ -213,7 +213,7 @@ function PowerView({ model }) {
       {rails.length > 0 && (
         <StackedChart
           title="Power rails"
-          headline={`${railTotal.toFixed(2)} W across ${rails.length} rails`}
+          headline={`${railTotal === null ? '—' : `${railTotal.toFixed(2)} W`} across ${rails.length} rails`}
           series={railSeries}
           scale={scaleFor('W', [totals])}
           unit="W"

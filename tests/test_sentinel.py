@@ -105,7 +105,9 @@ class ApiTests(unittest.TestCase):
     def test_invalid_or_stale_mutations_are_refused_before_the_board_api_is_called(self):
         cases = (
             ("post", "/api/sentinel/traces", {"name": "before,after"}, 400, "invalid_request"),
-            ("post", "/api/sentinel/traces/stop?generation=7", None, 409, "stale_snapshot"),
+            ("post", "/api/sentinel/install?generation=7", None, 409, "stale_snapshot"),
+            ("post", "/api/sentinel/traces?generation=7", {"name": "baseline"}, 409, "stale_snapshot"),
+            ("post", "/api/sentinel/traces/stop?generation=7&trace_id=trace-a", None, 409, "stale_snapshot"),
             ("delete", "/api/sentinel/runs/baseline?generation=7", None, 409, "stale_snapshot"),
         )
         for method, path, body, status, code in cases:
@@ -114,6 +116,12 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual((response.status_code, response.get_json()["code"]), (status, code))
         self.assertEqual(self.transport.api_calls, [])
         self.assertEqual(self.transport.deletes, [])
+
+    def test_stop_refuses_a_trace_that_replaced_the_one_on_screen(self):
+        self.transport.api[("GET", "/v1/traces/active")] = (200, {"schema": 1, "trace": {"id": "trace-b"}})
+        response = self.client.post("/api/sentinel/traces/stop?generation=1&trace_id=trace-a")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "trace_conflict"))
+        self.assertEqual([(call[2], call[3]) for call in self.transport.api_calls], [("GET", "/v1/traces/active")])
 
 
 class ResponseLimitTests(unittest.TestCase):

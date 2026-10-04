@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { compareOverlay, lastNumber, tightScale } from './dashboard.js'
+import { compareOverlay, completeTotal, lastNumber, tightScale } from './dashboard.js'
 import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, runDetail, runList, traceBar, traceModel } from './model.js'
 
 test('keyboard-only Stats controls keep a visible focus indicator', () => {
@@ -38,6 +38,8 @@ test('the request guard admits one call per key and drops answers from a board l
 
 test('charts keep missing readings missing and compare each run with its own definitions', () => {
   assert.equal(lastNumber([2, 4, null]), null)
+  assert.equal(completeTotal([2, null]), null)
+  assert.equal(completeTotal([2, 3]), 5)
   const payload = {
     sentinel: {
       baseline_id: 'a',
@@ -60,6 +62,8 @@ test('long runs do not spread every sample onto the JavaScript call stack', () =
 test('a trace cannot start before the active trace of its board has been read', () => {
   assert.equal(traceBar(traceModel(null)).disabled, true)
   assert.equal(traceBar(traceModel({ generation: 3, sentinel: { trace: null } })).disabled, false)
+  assert.equal(traceBar(traceModel({ generation: 3, sentinel: { trace: { name: 'old' } } })).disabled, true)
+  assert.equal(traceBar(traceModel({ generation: 3, sentinel: { trace: { id: 'trace-a', name: 'old' } } })).disabled, false)
 })
 
 test('run actions use the stable id when another run is named after it', () => {

@@ -6,6 +6,10 @@ function isNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
+export function completeTotal(values) {
+  return values.length && values.every(isNumber) ? values.reduce((sum, value) => sum + value, 0) : null
+}
+
 function plural(count, unit) {
   return `${count} ${unit}${count === 1 ? '' : 's'}`
 }

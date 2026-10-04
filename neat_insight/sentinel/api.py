@@ -131,6 +131,16 @@ def _same_board(
         raise BoardError("stale_snapshot", message, hint=hint, expected_generation=expected)
 
 
+def _expected_trace(raw) -> str:
+    """Stable id of the trace the caller intends to stop."""
+    if not isinstance(raw, str) or not raw.strip():
+        raise _invalid(
+            "`trace_id` must name the active trace being stopped.",
+            "Read the active trace again, then send its stable `id`.",
+        )
+    return raw.strip()
+
+
 def _passthrough(body: dict) -> dict:
     """Sentinel's own response body, minus its schema marker; it is nested so no field of a
     run or comparison can shadow Insight's `board` and `generation`."""
@@ -166,7 +176,14 @@ def get_sentinel():
 @sentinel_bp.post("/api/sentinel/install")
 def install_sentinel():
     """Run `sima-cli neat install sentinel` on the board; refuses when Sentinel is already healthy."""
+    expected = _expected_generation(request.args.get("generation"), read="the Sentinel state")
     context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since its Sentinel state was read, so nothing was installed.",
+        "Read Sentinel state for the board selected now, then install again.",
+    )
     result = install.install(context.session)
     cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
     return context.payload(daemon=result["status"], log=result["log"])
@@ -204,7 +221,14 @@ def get_traces():
 def start_trace():
     """Start recording a named trace; 409 when another trace is active or the name is taken."""
     wanted = _trace_request(request.get_json(silent=True))
+    expected = _expected_generation(request.args.get("generation"), read="the active trace")
     context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since its active trace was read, so no trace was started.",
+        "Read the active trace of the board selected now, then start again.",
+    )
     started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
     return context.payload(sentinel=_passthrough(started))
 
@@ -214,6 +238,7 @@ def start_trace():
 def stop_trace():
     """Stop and persist the active trace; 409 when no trace is active or the board changed since `generation`."""
     expected = _expected_generation(request.args.get("generation"), read="the active trace")
+    expected_trace = _expected_trace(request.args.get("trace_id"))
     context = _Context()
     _same_board(
         context,
@@ -221,6 +246,16 @@ def stop_trace():
         "The selected board changed since this trace was read, so no trace was stopped.",
         "Read the active trace of the board selected now, then stop it again.",
     )
+    active = context.client.active_trace().get("trace")
+    active_id = active.get("id") if isinstance(active, dict) else None
+    if not active_id or str(active_id) != expected_trace:
+        raise SentinelError(
+            "trace_conflict",
+            "The active trace changed since it was read, so no trace was stopped.",
+            hint="Read the active trace again, then stop that trace.",
+            expected_trace_id=expected_trace,
+            active_trace_id=active_id,
+        )
     return context.payload(sentinel=_passthrough(context.client.stop_trace()))
 
 

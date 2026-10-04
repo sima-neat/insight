@@ -264,6 +264,7 @@ export function traceModel(payload) {
   return {
     payload: payload || null,
     active: Boolean(trace),
+    id: trace?.id ? String(trace.id) : '',
     name: trace ? String(trace.name || trace.id || 'trace') : '',
     startedAt: trace?.started_at || null,
     note: trace?.note || '',
@@ -305,7 +306,7 @@ export function traceBar(trace, { busy = false } = {}) {
   if (!trace?.active) {
     return { recording: false, disabled: busy || !trace?.payload, submitLabel: busy ? 'Starting…' : 'Start trace' }
   }
-  return { recording: true, disabled: busy, stopLabel: busy ? 'Stopping…' : 'Stop trace' }
+  return { recording: true, disabled: busy || !trace.id, stopLabel: busy ? 'Stopping…' : 'Stop trace' }
 }
 
 export function runList(payload) {
