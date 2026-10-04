@@ -4,6 +4,7 @@
 needs sudo. The installer always restarts the daemon, which would break a trace in
 flight, so a healthy install is never reinstalled.
 """
+import threading
 from datetime import datetime, timedelta, timezone
 
 from neat_insight.sentinel.errors import SentinelError
@@ -99,8 +100,17 @@ def describe(state: dict) -> dict:
     }
 
 
+# One installation at a time: a second request waits, then finds the daemon healthy and refuses.
+_INSTALL_LOCK = threading.Lock()
+
+
 def install(session) -> dict:
     """Install Sentinel on the board with sima-cli; refuses to reinstall a healthy daemon."""
+    with _INSTALL_LOCK:
+        return _install(session)
+
+
+def _install(session) -> dict:
     state = status(session)
     if state["healthy"]:
         raise SentinelError(

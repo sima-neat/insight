@@ -590,6 +590,39 @@ class InstallTests(unittest.TestCase):
             install.install(self.session)
         self.assertIn("is inactive", raised.exception.message)
 
+    def test_concurrent_installs_run_the_installer_once(self):
+        self.transport.status_fields = ["inactive", "no", "no", "/usr/bin/sima-cli"]
+        installing, release, installers = threading.Event(), threading.Event(), []
+
+        def slow_installer(argv, *, timeout, stdin=None):
+            if argv[0] == "sh" and "neat install sentinel" in argv[2]:
+                installers.append(argv)
+                installing.set()
+                release.wait(5)
+                self.transport.status_fields = list(STATUS_FIELDS)
+            return FakeSentinel.exec(self.transport, argv, timeout=timeout, stdin=stdin)
+
+        self.transport.exec = slow_installer
+        outcomes = []
+
+        def run():
+            try:
+                outcomes.append(install.install(self.session)["status"]["healthy"])
+            except SentinelError as exc:
+                outcomes.append(exc.code)
+
+        first = threading.Thread(target=run)
+        first.start()
+        self.assertTrue(installing.wait(5))
+        second = threading.Thread(target=run)
+        second.start()
+        second.join(0.3)
+        release.set()
+        first.join(5)
+        second.join(5)
+        self.assertEqual(len(installers), 1)
+        self.assertEqual(sorted(map(str, outcomes)), ["True", "already_installed"])
+
 
 _FAKE_SUDO = """#!/bin/sh
 echo "$*" >> "$FAKE_SUDO_LOG"
