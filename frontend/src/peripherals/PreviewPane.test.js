@@ -53,3 +53,20 @@ test('Start preview passes no click event, so the request carries the selected m
   start.props.onClick({ type: 'click' })
   assert.deepEqual(calls, [[]])
 })
+
+test("another camera's retained preview is not shown as this camera's video", () => {
+  const session = { id: 's1', camera_id: 'camera:a', mode, viewer_url: 'https://insight.local:8081/static/viewer.html?src=3' }
+  const failed = { status: 'live', session, error: { message: 'Could not stop the preview.', code: 'unreachable', details: {} } }
+  const props = { selection: { id: 'camera:b', ...mode }, target: { label: 'board' }, state: failed, onStart() {}, onStop() {} }
+  const other = PreviewPane({ ...props, camera: camera('camera:b') })
+  assert.equal(find(other, (node) => node.type === 'iframe'), null)
+  assert.equal(find(other, (node) => node.type === 'button' && node.props.children === 'Stop preview'), null)
+  const start = find(other, (node) => node.type === 'button' && node.props.children === 'Start preview')
+  assert.equal(start.props.disabled, true)
+  const reason = find(other, (node) => node.props?.id === 'periph-preview-reason')
+  assert.match(reason.props.children, /already running on camera:a/)
+  // The camera that owns it still shows its video and the Stop button to retry.
+  const owner = PreviewPane({ ...props, camera: camera('camera:a'), selection: { id: 'camera:a', ...mode } })
+  assert.ok(find(owner, (node) => node.type === 'iframe'))
+  assert.ok(find(owner, (node) => node.type === 'button' && node.props.children === 'Stop preview'))
+})

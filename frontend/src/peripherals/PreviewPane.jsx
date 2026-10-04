@@ -41,7 +41,11 @@ function ModeBadges({ mode, label }) {
   )
 }
 
-export default function PreviewPane({ camera, selection, stale, target, state, onStart, onStop, onOpenBoardPanel }) {
+export default function PreviewPane({ camera, selection, stale, target, state: paneState, onStart, onStop, onOpenBoardPanel }) {
+  // A session kept for another camera (its stop failed when the user switched) is not this camera's
+  // video: this camera reads as idle, blocked by that preview, with the failure; the owner's pane keeps Stop.
+  const foreign = Boolean(paneState?.session?.camera_id) && paneState.session.camera_id !== camera?.id && paneState.status !== 'stopping'
+  const state = foreign ? { ...paneState, status: 'idle' } : paneState
   const block = previewBlock({ camera, selection, stale, target, session: state?.session })
   const status = previewStatusInfo(state)
   const session = state?.session || null
