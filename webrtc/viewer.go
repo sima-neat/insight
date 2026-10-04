@@ -210,6 +210,9 @@ const (
 	minValidEphemeralUDPPort     = 1
 	maxValidEphemeralUDPPort     = 65535
 	initialRTPTimestamp          = uint32(1110000000)
+	// Larger deltas are treated as sender discontinuities so one bad source
+	// cannot move the browser's presentation clock several seconds at once.
+	maxSourceRTPTimestampStep    = int32(5 * videoRTPClockRate)
 	rtpReceiveBufferBytes        = 2 * 1024 * 1024
 	metadataCorrelationCapacity  = 256
 	metadataForwardQueueCapacity = 16
@@ -230,8 +233,15 @@ type udpPortRangeConfig struct {
 
 type rtpTimestampRewriter struct {
 	nextTimestamp uint32
-	lastFrameAt   time.Time
-	haveFrameTime bool
+	// Highest timestamp sent. After a discontinuity fallback re-anchors the
+	// source mapping, holdingMax keeps backward deltas (B-frames measured from
+	// the new anchor) from landing on or behind frames already sent.
+	maxTimestamp        uint32
+	holdingMax          bool
+	lastSourceTimestamp uint32
+	lastSourceSSRC      uint32
+	lastFrameAt         time.Time
+	haveFrame           bool
 }
 
 type rtpPacketRewriter struct {
@@ -251,6 +261,10 @@ type rtpAccessUnit struct {
 	packets   [][]byte
 	ssrc      uint32
 	timestamp uint32
+	// Set when the source's sequence broke since the previous accepted unit.
+	// Loss and a same-SSRC restart look alike here, and only a restart can
+	// rewind the source clock, so the source timestamp delta is not trusted.
+	afterSequenceBreak bool
 }
 
 type rtpAccessUnitBuffer struct {
@@ -263,6 +277,7 @@ type rtpAccessUnitBuffer struct {
 	codec                      videoCodec
 	complete                   bool
 	discontinuity              bool
+	sequenceBreak              bool
 	randomAccess               bool
 	waitingForH265RandomAccess bool
 	active                     bool
@@ -288,6 +303,7 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	// interrupts belonged to the previous source.
 	sameSource := b.haveSequence && pkt.SSRC == b.sequenceSSRC
 	sequenceDiscontinuity := sameSource && pkt.SequenceNumber != b.nextSequence
+	b.sequenceBreak = b.sequenceBreak || sequenceDiscontinuity
 	b.nextSequence = pkt.SequenceNumber + 1
 	b.sequenceSSRC = pkt.SSRC
 	b.haveSequence = true
@@ -341,6 +357,8 @@ func (b *rtpAccessUnitBuffer) accept(pkt *rtp.Packet, raw []byte) (rtpAccessUnit
 	if accessUnitCodec == videoCodecH265 && b.waitingForH265RandomAccess {
 		return rtpAccessUnit{}, false
 	}
+	accessUnit.afterSequenceBreak = b.sequenceBreak
+	b.sequenceBreak = false
 	return accessUnit, true
 }
 
@@ -405,7 +423,9 @@ func (f *rtpForwarder) forward(ch *Channel, media *channelMedia, pkt *rtp.Packet
 	}
 
 	frameAt := time.Now()
-	frameTimestamp := f.timestampRewriter.timestampForFrame(frameAt)
+	frameTimestamp := f.timestampRewriter.timestampForSourceFrame(
+		accessUnit.timestamp, accessUnit.ssrc, accessUnit.afterSequenceBreak, frameAt,
+	)
 	frameForwarded := false
 	for _, rawPacket := range accessUnit.packets {
 		packetToWrite, err := f.packetRewriter.rewrite(rawPacket, frameTimestamp)
@@ -811,15 +831,42 @@ func newRTPTimestampRewriter() rtpTimestampRewriter {
 }
 
 func (r *rtpTimestampRewriter) timestampForFrame(now time.Time) uint32 {
-	if r.haveFrameTime {
-		step := uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
-		if step == 0 {
-			step = 1
+	return r.timestampForSourceFrame(r.lastSourceTimestamp, r.lastSourceSSRC, false, now)
+}
+
+func (r *rtpTimestampRewriter) timestampForSourceFrame(
+	sourceTimestamp, sourceSSRC uint32, afterSequenceBreak bool, now time.Time,
+) uint32 {
+	if r.haveFrame {
+		// Signed, so B-frames arriving in decode order keep their backward
+		// presentation deltas instead of reading as a huge forward jump.
+		sourceStep := int32(sourceTimestamp - r.lastSourceTimestamp)
+		discontinuity := afterSequenceBreak || sourceSSRC != r.lastSourceSSRC ||
+			sourceStep > maxSourceRTPTimestampStep || sourceStep < -maxSourceRTPTimestampStep
+		r.holdingMax = r.holdingMax || discontinuity
+		next := r.nextTimestamp + uint32(sourceStep)
+		if discontinuity || sourceStep == 0 || (r.holdingMax && int32(next-r.maxTimestamp) <= 0) {
+			base := r.nextTimestamp
+			if r.holdingMax {
+				base = r.maxTimestamp
+			}
+			step := uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
+			if step == 0 {
+				step = 1
+			}
+			next = base + step
+		} else {
+			r.holdingMax = false
 		}
-		r.nextTimestamp += step
+		r.nextTimestamp = next
 	}
+	if !r.haveFrame || int32(r.nextTimestamp-r.maxTimestamp) > 0 {
+		r.maxTimestamp = r.nextTimestamp
+	}
+	r.lastSourceTimestamp = sourceTimestamp
+	r.lastSourceSSRC = sourceSSRC
 	r.lastFrameAt = now
-	r.haveFrameTime = true
+	r.haveFrame = true
 	return r.nextTimestamp
 }
 
