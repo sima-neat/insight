@@ -18,6 +18,8 @@ from typing import Optional
 
 from neat_insight.board import BoardError
 from neat_insight.board.transport import CommandCancelled
+from neat_insight.peripherals.cameras import _availability
+from neat_insight.peripherals.microphones import KERNEL_IN_USE_REASON
 
 # The longest a test records when nobody presses Stop.
 DEFAULT_SECONDS = 30
@@ -32,6 +34,8 @@ LEVEL_BARS = 96
 SILENT_DBFS = -60.0
 DETAIL_LIMIT = 2000
 REFRESH_HINT = "Click Refresh, then test again."
+UNPLUGGED_HINT = "Click Refresh; the microphone may have been unplugged."
+IN_USE_HINT = "Stop the application that is recording from it, then test again. Insight never stops it for you."
 
 # The only device names arecord is given: Sentinel's selector for a card with a safe stable id.
 _SELECTOR_RE = re.compile(r"^plughw:CARD=[A-Za-z0-9_-]{1,64},DEV=(?:0|[1-9][0-9]{0,2})$")
@@ -61,11 +65,7 @@ def find_microphone(snapshot: dict, mic_id: str) -> dict:
     for item in snapshot.get("items") or []:
         if item.get("id") == mic_id and item.get("kind") == "microphone":
             return item
-    raise BoardError(
-        "not_found",
-        f"The last scan lists no microphone `{mic_id}`.",
-        hint="Click Refresh; the microphone may have been unplugged.",
-    )
+    raise BoardError("not_found", f"The last scan lists no microphone `{mic_id}`.", hint=UNPLUGGED_HINT)
 
 
 def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
@@ -85,11 +85,7 @@ def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
     device = next((item for item in catalog.get("devices", []) if item.get("id") == mic_id), None)
     microphone = device.get("microphone") if device and device.get("type") == "microphone" else None
     if not isinstance(microphone, dict):
-        raise BoardError(
-            "not_found",
-            "That microphone is no longer in SiMa Sentinel's catalog.",
-            hint="Click Refresh; the microphone may have been unplugged.",
-        )
+        raise BoardError("not_found", "That microphone is no longer in SiMa Sentinel's catalog.", hint=UNPLUGGED_HINT)
     retained = any(
         issue.get("provider") == device.get("provider") and issue.get("retained_last_good") is True
         for issue in catalog.get("issues", [])
@@ -118,12 +114,10 @@ def refuse_if_held(check: Optional[dict], mic_id: str) -> None:
     leaves it to arecord, which reports a busy device itself."""
     users = ((check or {}).get("users") or {}).get(mic_id)
     opened = ((check or {}).get("capture_open") or {}).get(mic_id)
-    hint = "Stop the application that is recording from it, then test again. Insight never stops it for you."
-    if users:
-        holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users)
-        raise BoardError("microphone_in_use", f"The microphone is open in {holders}.", hint=hint, users=users)
-    if opened:
-        raise BoardError("microphone_in_use", "The kernel reports the capture device open in another process.", hint=hint)
+    if users or opened:
+        # The same words the page shows for an in-use microphone.
+        reason = _availability(users, None, None)["reason"] if users else KERNEL_IN_USE_REASON
+        raise BoardError("microphone_in_use", reason, hint=IN_USE_HINT, users=users or [])
 
 
 def choose_format(microphone: dict) -> dict:
@@ -159,27 +153,28 @@ def _dbfs(value: float):
     return round(20 * math.log10(value / 32768), 1) if value > 0 else None
 
 
+def _peak(samples) -> int:
+    return max(abs(min(samples)), max(samples))
+
+
 def measure(pcm: bytes, channels: int) -> dict:
     """Peak and RMS in dBFS (None for digital silence), and whether anything was picked up."""
     samples = _samples(pcm)
     if not samples:
         return {"peak_dbfs": None, "rms_dbfs": None, "silent": True}
-    peak = max(abs(min(samples)), max(samples))
     rms = math.sqrt(sum(s * s for s in samples) / len(samples))
     frames = len(samples) // channels
     bucket = max(1, math.ceil(frames / LEVEL_BARS))
-    bars = sorted(
-        max(abs(min(chunk)), max(chunk))
-        for chunk in (samples[i * channels:(i + bucket) * channels] for i in range(0, frames, bucket))
-    )
+    bars = sorted(_peak(samples[i * channels:(i + bucket) * channels]) for i in range(0, frames, bucket))
     typical = _dbfs(bars[len(bars) // 2])
-    return {"peak_dbfs": _dbfs(peak), "rms_dbfs": _dbfs(rms), "silent": typical is None or typical < SILENT_DBFS}
+    silent = typical is None or typical < SILENT_DBFS
+    return {"peak_dbfs": _dbfs(_peak(samples)), "rms_dbfs": _dbfs(rms), "silent": silent}
 
 
 def chunk_level(pcm: bytes):
     """Peak of one chunk in dBFS, for the live meter; None for digital silence."""
     samples = _samples(pcm)
-    return _dbfs(max(abs(min(samples)), max(samples))) if samples else None
+    return _dbfs(_peak(samples)) if samples else None
 
 
 def wav_bytes(pcm: bytes, rate: int, channels: int) -> bytes:
@@ -340,12 +335,7 @@ def _checked(result) -> bytes:
             tool="arecord",
         )
     if _BUSY_RE.search(detail):
-        raise BoardError(
-            "microphone_in_use",
-            "Another process has the microphone open.",
-            hint="Stop the application that is recording from it, then test again. Insight never stops it for you.",
-            detail=detail,
-        )
+        raise BoardError("microphone_in_use", "Another process has the microphone open.", hint=IN_USE_HINT, detail=detail)
     if result.exit_code != 0 or not result.stdout:
         raise BoardError(
             "command_failed",

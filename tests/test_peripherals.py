@@ -19,6 +19,7 @@ from neat_insight.board import BoardError, ExecResult, board_bp
 from neat_insight.board.transport import CommandCancelled, MAX_OUTPUT_BYTES
 from neat_insight.peripherals import api, board_check, cameras, export, microphones, mictest
 from neat_insight.peripherals.api import peripherals_bp
+from neat_insight.peripherals.client import PeripheralClient
 
 IMX477 = "camera:imx477 5-001a"
 C920 = "camera:v4l2:421bbe426738013b"
@@ -586,6 +587,36 @@ class MicrophoneSnapshotTests(unittest.TestCase):
         self.assertTrue(notes[1].startswith("PipeWire is running") and notes[2].startswith("PulseAudio is running"))
         self.assertEqual(len(notes), 3)
 
+    def test_sentinel_microphone_records_are_validated_before_they_are_mapped(self):
+        def validate(doc):
+            PeripheralClient(None)._validate_catalog(doc)
+
+        validate(catalog(yeti(), c920_mic(), mono_mic(), onboard_mic(), microphone(
+            "microphone:alsa:bare", "Codec", "Codec", 1, [{"format": "S16_LE"}])))
+        malformed = {
+            "modes": lambda mic: mic.update(modes=None),
+            "stable key": lambda mic: mic["identity"].pop("stable_key"),
+            "connection": lambda mic: mic.update(connection="bluetooth"),
+            "PCM device": lambda mic: mic["capture_target"].update(device=-1),
+            "selector": lambda mic: mic["capture_target"].update(selector=7),
+            "card index": lambda mic: mic["identity"].update(card_index="2"),
+            "USB identity": lambda mic: mic["identity"].update(usb="1-3.2"),
+            "empty rates": lambda mic: mic["modes"][0].update(rates_hz=[]),
+            "rates and range": lambda mic: mic["modes"][0].update(rate_range_hz={"min": 8000, "max": 48000}),
+            "inverted range": lambda mic: mic.update(modes=[{"format": "S16_LE", "rate_range_hz": {"min": 9, "max": 8}}]),
+            "channels": lambda mic: mic["modes"][0].update(channels=0),
+            "channel map": lambda mic: mic["modes"][0].update(channel_map="FL FR"),
+            "availability": lambda mic: mic["availability"].update(state="busy-ish"),
+            "counts": lambda mic: mic["availability"].update(subdevices=True),
+            "issues": lambda mic: mic.update(issues=[None]),
+        }
+        for name, mutate in malformed.items():
+            doc = catalog(yeti())
+            mutate(doc["devices"][0]["microphone"])
+            with self.subTest(name), self.assertRaises(BoardError) as ctx:
+                validate(doc)
+            self.assertEqual(ctx.exception.code, "peripheral_response")
+
     def test_changes_include_microphones(self):
         first = snapshot_of(catalog(imx477(), yeti()), mic_check())
         second = snapshot_of(catalog(imx477()), mic_check(), previous=first)
@@ -1090,7 +1121,7 @@ class MicrophoneApiTests(unittest.TestCase):
         started = []
         for live, message in (
             (mic_check(users={YETI: [{"pid": 812, "command": "pulseaudio"}]}, capture_open={YETI: 1}),
-             "The microphone is open in pulseaudio (pid 812)."),
+             "Open in pulseaudio (pid 812)."),
             (mic_check(availability_method="proc-user", users={YETI: []}, capture_open={YETI: 1}),
              "The kernel reports the capture device open in another process."),
         ):
