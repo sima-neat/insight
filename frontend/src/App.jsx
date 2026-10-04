@@ -2061,7 +2061,7 @@ export default function App() {
     loadSysInfo()
   }
 
-  // One board target, shared by Peripherals and (later) Stats.
+  // One board target, shared by Peripherals and Stats.
   function loadBoard() {
     return boardSyncRef.current.load()
   }

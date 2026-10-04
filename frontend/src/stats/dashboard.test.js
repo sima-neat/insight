@@ -171,3 +171,17 @@ test('compare runs takes each run\'s own temperature sensors for the thermal max
   const instant = compareOverlay({ sentinel: { baseline_id: 'old', runs: [run('old', 'rtsn_0', [50]), run('new', 'soc_temp', [61, 63])] } }, 'thermal')
   assert.equal(instant.overlap, 0)
 })
+
+test('compare runs offers a series recorded only by a later run', () => {
+  const run = (id, metrics, values) => ({
+    metadata: { id, name: id }, metrics,
+    samples: [{ timestamp: '2026-09-25T00:00:00Z', values }, { timestamp: '2026-09-25T00:00:01Z', values }]
+  })
+  const payload = { sentinel: { baseline_id: 'old', runs: [
+    run('old', [{ key: 'power_current_watts', unit: 'W' }], { power_current_watts: 9 }),
+    run('new', [{ key: 'cpu_usage_pct', unit: '%' }], { cpu_usage_pct: 50 })
+  ] } }
+  assert.ok(compareSeriesAvailable(payload).some((series) => series.id === 'cpu'))
+  const overlay = compareOverlay(payload, 'cpu')
+  assert.deepEqual([overlay.unit, overlay.lines.map((line) => line.points.map((point) => point.v))], ['%', [[null, null], [50, 50]]])
+})

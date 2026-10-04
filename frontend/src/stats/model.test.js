@@ -316,6 +316,20 @@ test('a comparison is labelled from the board definitions only, and an unknown s
   assert.equal(compareTable(null), null)
 })
 
+test('a comparison prefers recorded metric definitions and exposes conflicts between runs', () => {
+  const table = compareTable({ sentinel: {
+    baseline_id: 'a',
+    runs: [
+      { metadata: { id: 'a' }, metrics: [{ key: 'm', label: 'Recorded power', unit: 'W', group: 'Power' }] },
+      { metadata: { id: 'b' }, metrics: [{ key: 'm', label: 'Recorded power', unit: 'mW', group: 'Power' }] }
+    ],
+    summaries: { a: { metrics: { m: { mean: 1 } } }, b: { metrics: { m: { mean: 2 } } } }
+  } }, new Map([['m', { label: 'Live voltage', unit: 'V', group: 'Other' }]]))
+  const row = table.rows.find((item) => item.key === 'm')
+  assert.deepEqual([row.label, row.unit, row.group, row.definitionConflict],
+    ['Recorded power (recorded definitions differ)', null, 'Power', true])
+})
+
 test('the captured run is read from its own metadata, definitions and samples, with the daemon\'s own statistics', () => {
   const run = runDetail({ generation: 4, sentinel: RUN })
   assert.deepEqual([run.sampleCount, run.metricCount, run.firstSampleAt, run.lastSampleAt, run.metadata.id],

@@ -249,7 +249,7 @@ class SentinelClient(SentinelSocket):
         except ValueError:
             parsed = None
         if not 200 <= status < 300:
-            raise self._upstream_error(status, parsed, text)
+            raise self._upstream_error(status, parsed, text, path)
         if not isinstance(parsed, dict):
             raise SentinelError(
                 "sentinel_failed",
@@ -270,13 +270,16 @@ class SentinelClient(SentinelSocket):
             )
         return parsed
 
-    def _upstream_error(self, status: int, parsed, text: str) -> SentinelError:
+    def _upstream_error(self, status: int, parsed, text: str, path: str) -> SentinelError:
         detail = parsed.get("error") if isinstance(parsed, dict) else None
         detail = (detail or text or "").strip()[:DETAIL_LIMIT]
         code = UPSTREAM_CODES.get(status, "sentinel_failed")
+        if code == "not_found" and not (path.startswith("/v1/runs/") or path.startswith("/v1/compare?")):
+            code = "sentinel_schema"
         hints = {
             "invalid_request": "Correct the request and try again.",
             "not_found": "List runs and use a name or id Sentinel reports.",
+            "sentinel_schema": "Update Sentinel on the board to a version that provides the Stats API.",
             "trace_conflict": "Only one trace can be active. Stop the active trace, or use a different name.",
             "request_too_large": "Send a smaller request.",
         }

@@ -1027,15 +1027,24 @@ export function compareTable(payload, definitions = null) {
     })
 
   const metricRows = metricKeysOf(summaries, columns).map((key) => {
-    const definition = define(key)
+    const recorded = body.runs.map((entry, index) => ({
+      baseline: columns[index].baseline,
+      definition: (entry?.metrics || []).find((item) => item?.key === key)
+    })).filter((entry) => entry.definition)
+    const definition = recorded.find((entry) => entry.baseline)?.definition || recorded[0]?.definition || define(key)
+    const signatures = new Set(recorded.map(({ definition: item }) => JSON.stringify([item.label || '', item.unit ?? null, item.group || ''])))
+    const unitConflict = new Set(recorded.map(({ definition: item }) => item.unit ?? null)).size > 1
+    const definitionConflict = signatures.size > 1
     const meanOf = (column) => summaries[column.key]?.metrics?.[key]?.[COMPARE_STATISTIC]
     const baselineValue = meanOf(baselineColumn)
+    const label = definition?.label || titleCase(key)
     return {
       key,
       kind: 'metric',
-      label: definition?.label || titleCase(key),
-      unit: definition?.unit || null,
+      label: definitionConflict ? `${label} (recorded definitions differ)` : label,
+      unit: unitConflict ? null : definition?.unit || null,
       group: definition?.group || null,
+      definitionConflict,
       cells: columns.map((column) => compareCell(column, meanOf(column), deltas[column.key]?.[key], baselineValue))
     }
   })

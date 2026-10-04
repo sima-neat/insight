@@ -361,7 +361,7 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls, [])
 
     def test_daemon_statuses_survive_with_their_meaning(self):
-        cases = {400: ("invalid_request", 400), 404: ("not_found", 404), 409: ("trace_conflict", 409),
+        cases = {400: ("invalid_request", 400), 404: ("sentinel_schema", 502), 409: ("trace_conflict", 409),
                  413: ("request_too_large", 413), 500: ("sentinel_failed", 502)}
         for status, expected in cases.items():
             with self.subTest(status=status):
@@ -369,6 +369,15 @@ class ClientTests(unittest.TestCase):
                 error = self.raised()
                 self.assertEqual((error.code, error.status), expected)
                 self.assertEqual((error.to_dict()["error"], error.to_dict()["sentinel_status"]), ("no", status))
+
+    def test_only_missing_run_resources_keep_not_found(self):
+        for path, call in (("/v1/runs/nope", lambda: self.client.run("nope")),
+                           ("/v1/compare?runs=nope", lambda: self.client.compare(["nope"]))):
+            with self.subTest(path=path):
+                self.transport.answer("GET", path, 404, {"error": "unknown run 'nope'"})
+                error = self.raised(call)
+                self.assertEqual((error.code, error.status), ("not_found", 404))
+                self.assertIn("List runs", error.hint)
 
     def test_socket_failures_name_the_cause_and_the_fix(self):
         cases = {

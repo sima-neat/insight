@@ -313,7 +313,7 @@ function stats(values) {
 /** The series in COMPARE_SERIES that these runs actually recorded. */
 export function compareSeriesAvailable(payload) {
   const runs = (payload?.sentinel || payload || {}).runs || []
-  const defs = runs[0]?.metrics || []
+  const defs = runs.flatMap((run) => (Array.isArray(run?.metrics) ? run.metrics : []))
   const keys = new Set(defs.map((definition) => definition.key))
   return COMPARE_SERIES.filter((spec) => (spec.thermal ? defs.some(isThermalMetric) : keys.has(spec.key)))
 }
@@ -325,7 +325,7 @@ export function compareOverlay(payload, seriesId) {
   const spec = available.find((entry) => entry.id === seriesId) || available[0]
   const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples) && run.samples.length)
   if (!spec || !runs.length) return null
-  const defs = runs[0].metrics || []
+  const defs = runs.flatMap((run) => (Array.isArray(run.metrics) ? run.metrics : []))
   const definition = spec.thermal ? null : defs.find((entry) => entry.key === spec.key)
   const unit = spec.thermal ? 'C' : definition?.unit ?? ''
   const baselineId = body.baseline_id

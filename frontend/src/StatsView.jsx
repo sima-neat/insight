@@ -80,20 +80,36 @@ const RUNS_POLL_MS = 30000
 /** Calls `run` now and every `ms` after, only while the browser tab is visible; returns the cleanup. */
 function pollWhileVisible(run, ms) {
   let timer = null
+  let running = false
+  let active = true
+  const delay = () => (typeof ms === 'function' ? ms() : ms)
+  const next = () => {
+    if (!active || document.visibilityState === 'hidden') return
+    timer = setTimeout(tick, delay())
+  }
+  const tick = () => {
+    timer = null
+    if (!active || running || document.visibilityState === 'hidden') return
+    running = true
+    Promise.resolve().then(run).finally(() => {
+      running = false
+      next()
+    }).catch(() => {})
+  }
   const start = () => {
-    if (timer !== null) return
-    run()
-    timer = setInterval(run, ms)
+    if (timer !== null || running) return
+    tick()
   }
   const stop = () => {
     if (timer === null) return
-    clearInterval(timer)
+    clearTimeout(timer)
     timer = null
   }
   const onVisibility = () => (document.visibilityState === 'hidden' ? stop() : start())
   onVisibility()
   document.addEventListener('visibilitychange', onVisibility)
   return () => {
+    active = false
     stop()
     document.removeEventListener('visibilitychange', onVisibility)
   }
@@ -840,7 +856,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const [metrics, setMetrics] = useState(null)
   const [metricsError, setMetricsError] = useState(null)
   const [metricsBusy, setMetricsBusy] = useState(false)
-  const [failures, setFailures] = useState(0)
   const [live, setLive] = useState(true)
   const [halted, setHalted] = useState(false)
   const [traces, setTraces] = useState(null)
@@ -886,6 +901,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const guard = useRef(createRequestGuard())
   // The Insight host is not the board, so its reads never follow a board switch.
   const hostGuard = useRef(createRequestGuard())
+  const failures = useRef(0)
   const tick = useRef(() => {})
   // The open run and comparison as they are now, not as they were when a delete started.
   const openRefNow = useRef(openRef)
@@ -922,7 +938,6 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   })
   const stale = stalePayloads.metrics || stalePayloads.state
   const polling = info.available && live && !halted && !stale
-  const delay = pollDelay(failures)
   const generation = board?.generation ?? null
 
   // An answer is applied only while the view is mounted, its request still belongs to the
@@ -982,7 +997,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     setDeleteResult(null)
     setInstallResult(null)
     setInstallError(null)
-    setFailures(0)
+    failures.current = 0
     setHalted(false)
   }
 
@@ -1074,14 +1089,14 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       if (!fresh(ticket, data)) return
       setMetrics(data)
       setMetricsError(null)
-      setFailures(0)
+      failures.current = 0
       setHalted(false)
       if (trace.active) loadTraces({ quiet: true })
     } catch (err) {
       if (!fresh(ticket, err?.details)) return
       const notice = failureNotice(err, ticket.generation)
       setMetricsError(notice)
-      setFailures((count) => count + 1)
+      failures.current += 1
       // A missing board or a stopped daemon will not answer the next tick either:
       // stop polling it and re-read the daemon state so the page says why.
       if (notice.board || notice.daemon) {
@@ -1291,8 +1306,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   useEffect(() => {
     if (!polling) return undefined
     // A hidden tab must not keep running commands on the board.
-    return pollWhileVisible(() => tick.current(), delay)
-  }, [polling, delay])
+    return pollWhileVisible(() => tick.current(), () => pollDelay(failures.current))
+  }, [polling])
 
   useEffect(() => {
     try {
@@ -1402,7 +1417,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
                   }}
                   onRetry={() => {
                     setHalted(false)
-                    setFailures(0)
+                    failures.current = 0
                     pollMetrics({ manual: true })
                   }}
                   runs={(
