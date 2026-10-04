@@ -1,17 +1,37 @@
+import json
 import logging
 import os
 import subprocess
 import threading
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
+# Loopback-only control API (webrtc/mediamtx.yml apiAddress); never published.
+MEDIAMTX_API_PORT = 9997
+MEDIAMTX_API_BASE_URL = f"http://127.0.0.1:{MEDIAMTX_API_PORT}"
+WEBCAM_WHIP_PORT = 8889
+# Key that the SDK port map uses for the WHIP listener above. The SDK may
+# republish 8889 on a different host port, so the browser-facing URL is
+# resolved through this name (see app._resolve_webcam_whip_port) rather than
+# assuming the container-internal port is reachable.
+WEBCAM_WHIP_PORT_MAP_NAME = "webrtcWhip"
+# ICE media port for the WHIP listener. Insight never builds a URL from it,
+# but it must be published alongside 8889 or the browser completes
+# signalling and then fails to connect.
+WEBCAM_WHIP_ICE_PORT = 8189
+WEBCAM_WHIP_ICE_PORT_MAP_NAME = "webrtcWhipIce"
 MAX_GOP_FRAMES = "30"
 KEYFRAME_INTERVAL_SECONDS = "1"
 DEFAULT_TRANSPORT = "rtsp"
 DEFAULT_CODEC = "h264"
 SUPPORTED_TRANSPORTS = {"rtsp", "http"}
 SUPPORTED_CODECS = {"h264", "h265", "mjpeg"}
+SOURCE_TYPE_FILE = "file"
+SOURCE_TYPE_WEBCAM = "webcam"
+SUPPORTED_SOURCE_TYPES = {SOURCE_TYPE_FILE, SOURCE_TYPE_WEBCAM}
 
 
 def normalize_transport(value: Optional[str]) -> str:
@@ -225,9 +245,16 @@ def start_media_stream(
     transport: str = DEFAULT_TRANSPORT,
     codec: str = DEFAULT_CODEC,
     source_codec: Optional[str] = None,
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], Optional[int]]:
+    """Returns (ok, error, identity).
+
+    `identity` is the id of the stream this call registered, captured under the
+    same lock that created it. A caller keeps it so a later cleanup can stop
+    *this* stream and only this one: re-reading the registry afterwards would
+    return whatever another request has since put on the slot instead.
+    """
     if not file_path:
-        return False, "No file assigned"
+        return False, "No file assigned", None
 
     slot = index - 1
     rtsp_url = f"{RTSP_PUBLISH_BASE_URL}/src{index}"
@@ -237,9 +264,9 @@ def start_media_stream(
     with registry_lock:
         existing = pipeline_registry.get(slot)
         if existing and existing.process and existing.process.poll() is None:
-            return False, "Already running"
+            return False, "Already running", None
         if existing and existing.transport == "http":
-            return False, "Already running"
+            return False, "Already running", None
 
         stream = MediaStream(
             index=slot,
@@ -251,11 +278,11 @@ def start_media_stream(
         )
         ok, err = stream.start()
         if not ok:
-            return False, err
+            return False, err, None
 
         pipeline_registry[slot] = stream
         logging.info("Started media source %s transport=%s codec=%s", index, transport, codec)
-        return True, None
+        return True, None, id(stream)
 
 
 def stop_media_stream(index: int) -> None:
@@ -285,3 +312,212 @@ def media_stream_identity(index: int) -> Optional[int]:
     with registry_lock:
         stream = pipeline_registry.get(slot)
         return id(stream) if stream else None
+
+
+def stop_media_stream_if(index: int, identity: Optional[int]) -> bool:
+    """Stop the slot's stream only if it is still the one `identity` names.
+
+    A route that started a stream and then finds the slot reassigned must not
+    stop whatever is there now: an assign that ran in between replaced the
+    process with its own. Compared and stopped under one lock so the answer
+    cannot change in the gap. Returns True when something was stopped.
+    """
+    slot = index - 1
+    with registry_lock:
+        stream = pipeline_registry.get(slot)
+        if not stream or identity is None or id(stream) != identity:
+            return False
+        stream.stop()
+        pipeline_registry.pop(slot, None)
+        logging.info("Stopped media source %s", index)
+        return True
+
+
+def webcam_ingest_path_name(index: int) -> str:
+    """The MediaMTX path a browser WHIP-publishes its camera to.
+
+    This is the *ingest* path (``cam{index}``), deliberately distinct from the
+    *consumer* path (``src{index}``, see webcam_output_path_name) that the viewer
+    and detection apps read. A browser's WebRTC stream is encoded for a video
+    call — sparse keyframes, and whatever H.264 profile it negotiates — which
+    the board's hardware decoder and rtspsrc cannot consume. So MediaMTX runs a
+    normalizer (runOnReady in webrtc/mediamtx.yml) that transcodes ``cam{index}``
+    to baseline H.264 with a keyframe every second and republishes it on
+    ``src{index}``, exactly the shape a file source's ffmpeg already produces.
+    File sources push straight to ``src{index}`` and never touch the ingest path.
+
+    The publishing *session's* identity — what a stop/kick must name — lives on
+    this ingest path, because that is where the WebRTC session is. Ongoing
+    liveness (app._sync_source_runtime_states) also tracks this path: whether the
+    camera is still connected. Whether the normalizer has actually produced the
+    ``src{index}`` output is confirmed separately, once, at start (see
+    webcam_output_path_name and webcam_is_publishing).
+    """
+    return f"cam{index}"
+
+
+def webcam_output_path_name(index: int) -> str:
+    """The MediaMTX path the viewer and detection apps read for a webcam slot.
+
+    This is the *consumer* path (``src{index}``): the normalized, decoder-ready
+    stream the ingest-path normalizer produces (see webcam_ingest_path_name). It
+    is what app._source_url advertises, and what /api/mediasrc/start confirms via
+    webcam_is_publishing before marking a slot playing — so a normalizer that
+    cannot produce it at all (e.g. ffmpeg missing) surfaces as "not publishing
+    yet" rather than a slot marked live over a source nothing can read. Ongoing
+    liveness does NOT poll this path: it blinks not-ready on each runOnReadyRestart
+    of the normalizer, and demoting on that would strand a live camera stopped.
+    """
+    return f"src{index}"
+
+
+# A 404 from MediaMTX is an answer, not a failure: the path or session is not
+# there. Collapsing it into "no answer" would make callers treat a definite
+# "nothing is publishing" as "cannot tell".
+_MEDIAMTX_NOT_FOUND = object()
+
+
+class WebcamPublisherUnconfirmed(RuntimeError):
+    """Nothing is known about a slot's publisher (base for the two ways that happens)."""
+
+
+class MediaServerUnreachable(WebcamPublisherUnconfirmed):
+    """MediaMTX's control API could not be reached, so nothing is known.
+
+    Raised rather than returned deliberately. Insight has no handle on a browser
+    publishing a webcam, so every question about one is answered by MediaMTX;
+    when it cannot answer, the honest result is "unknown", and a caller that
+    quietly reads that as "nothing is publishing" marks a live camera stopped or
+    erases the record needed to stop it later. Both have happened here. An
+    exception makes the unknown case impossible to ignore by accident: a caller
+    that does not handle it aborts before changing anything, which is the safe
+    default, and the API layer turns it into a 502.
+    """
+
+
+def _mediamtx_request(path: str, method: str = "GET"):
+    """Call the MediaMTX control API.
+
+    Returns the decoded body, or _MEDIAMTX_NOT_FOUND when MediaMTX answered 404.
+    Raises MediaServerUnreachable for anything else.
+    """
+    request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=1.0) as response:
+            body = response.read()
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return _MEDIAMTX_NOT_FOUND
+        raise MediaServerUnreachable(f"MediaMTX answered {exc.code} for {path}") from exc
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        raise MediaServerUnreachable(f"MediaMTX did not answer {path}") from exc
+
+
+def webcam_is_publishing(index: int) -> bool:
+    """Whether this webcam slot's consumable stream is ready (start confirmation).
+
+    Deliberately checks the *output* path (webcam_output_path_name / src{index}),
+    not the ingest path the browser publishes to. Used by /api/mediasrc/start to
+    confirm the whole chain — browser -> ingest -> normalizer -> output — before
+    marking a slot playing, so a normalizer that cannot produce src{index} at all
+    (e.g. ffmpeg missing) is caught here rather than leaving apps pointed at a
+    dead source. Ongoing liveness is a separate question tracked against the
+    ingest path (see webcam_ingest_path_name), because the output blinks on every
+    normalizer restart.
+
+    A webcam source has no Python-managed process to poll (unlike a file
+    source's ffmpeg push), so this comes from MediaMTX's own path state rather
+    than pipeline_registry. Raises MediaServerUnreachable when that cannot be
+    established.
+    """
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_output_path_name(index)}")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return False
+    return bool(data.get("ready"))
+
+
+def webcam_ready_paths() -> set:
+    """Names of every path MediaMTX currently reports ready, from one request.
+
+    Source listing checks every playing webcam slot. Asking about each one
+    separately costs one control-API timeout per slot when MediaMTX accepts
+    connections but stops answering — up to 48 seconds for a routine listing,
+    during the very outage the per-slot fallback exists to tolerate. Raises
+    MediaServerUnreachable.
+    """
+    data = _mediamtx_request("/v3/paths/list?itemsPerPage=1000")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return set()
+    return {item.get("name") for item in (data.get("items") or []) if item.get("ready")}
+
+
+def webcam_publisher_session(index: int) -> Optional[str]:
+    """The id of the WebRTC session currently publishing to this slot, or None.
+
+    This is the identity a stop has to be bound to. Two browsers can hold the
+    same slot in quick succession — one reassigns it, the other's connection
+    drops a few seconds later — and a stop that only names the slot would act
+    on whichever session is there by then. Asked of the *ingest* path, where the
+    WebRTC session lives (the output path's publisher is the normalizer's rtsp
+    session, not the browser). Raises MediaServerUnreachable when MediaMTX cannot
+    say.
+    """
+    data = _mediamtx_request(f"/v3/paths/get/{webcam_ingest_path_name(index)}")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return None
+    source = data.get("source") or {}
+    if source.get("type") != "webRTCSession":
+        return None
+    return source.get("id") or None
+
+
+def webcam_publisher_sessions() -> Dict[str, str]:
+    """Path name -> id of the WebRTC session publishing to it, from one request.
+
+    The bulk routes release a publisher per slot and only then write; a camera
+    re-published on one of those slots in the meantime has the same slot
+    identity as the one released, so it can only be told apart by session id.
+    One request for every path, for the reason webcam_ready_paths() gives.
+    Raises MediaServerUnreachable.
+    """
+    data = _mediamtx_request("/v3/paths/list?itemsPerPage=1000")
+    if data is _MEDIAMTX_NOT_FOUND:
+        return {}
+    sessions = {}
+    for item in data.get("items") or []:
+        source = item.get("source") or {}
+        if source.get("type") == "webRTCSession" and source.get("id") and item.get("name"):
+            sessions[item["name"]] = source["id"]
+    return sessions
+
+
+def kick_webcam_publisher(index: int) -> Optional[str]:
+    """Drop whatever browser is publishing to this slot; returns its session id.
+
+    Stopping a file source kills an ffmpeg process Insight owns. A webcam is
+    published by a browser Insight has no handle on, so the only way to make
+    /api/mediasrc/stop mean the same thing for both is to have MediaMTX close
+    the session. Without this, a caller in another tab — or any API client —
+    gets a success response while the camera keeps streaming.
+
+    Returns None when there was nothing to kick, and raises
+    MediaServerUnreachable when that could not be established. The id is what
+    a caller compares against afterwards to tell a replacement publisher from
+    the one it released.
+    """
+    # The session ending between the lookup and the kick is the common case,
+    # not an edge one: the owning tab closes its peer connection and deletes the
+    # WHIP resource before asking Insight to stop. But another browser can take
+    # the path in that same gap, so a vanished target is not "idle" until a
+    # fresh lookup says so — each 404 re-reads the path and kicks whoever is
+    # there now. A path that keeps changing hands is reported as unconfirmed
+    # rather than guessed at.
+    for _ in range(3):
+        session_id = webcam_publisher_session(index)
+        if not session_id:
+            return None
+        kicked = _mediamtx_request(f"/v3/webrtcsessions/kick/{session_id}", method="POST")
+        if kicked is not _MEDIAMTX_NOT_FOUND:
+            return session_id
+    raise WebcamPublisherUnconfirmed(f"src{index}: the publisher kept changing while being stopped")

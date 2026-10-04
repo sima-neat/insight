@@ -4,8 +4,88 @@ rtmp: no
 rtspAddress: :8554
 logLevel: info
 
+# Lets browsers publish a webcam straight into MediaMTX over WHIP; the
+# resulting stream is then available as RTSP on the same path, same as an
+# ffmpeg-pushed video file. webrtcServerCert/webrtcServerKey are supplied at
+# launch (see neat_insight/utils.py start_processes) via the MTX_WEBRTC*
+# environment overrides, so the WHIP endpoint reuses Insight's own trusted
+# mkcert/SDK certificate instead of shipping a second one here.
+#
+# webrtcEncryption stays `no` here only so MediaMTX still starts if this config
+# is ever launched without Insight. start_processes() always overrides it to
+# `yes` together with the cert pair, and the frontend only ever posts its WHIP
+# offer to https://, so the listener is TLS in every supported deployment.
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+# The WHIP POST is cross-origin by construction: the page is served by Flask
+# on its own port and posts to this listener on 8889. There is nothing to
+# protect with a tighter origin — publishing needs no credentials and the
+# listener is only reachable where Insight itself is.
+webrtcAllowOrigin: '*'
+# Signalling happens on 8889, but the media arrives here. Pinned rather
+# than left to the default so the port published by the container and the
+# ICE candidate MediaMTX advertises cannot drift apart.
+webrtcLocalUDPAddress: :8189
+# How long MediaMTX waits, once the peer connection is up, for the first
+# video frame before dropping the session. Its default of 2s is shorter than
+# some cameras take to start — an iPhone over Continuity Camera waking up,
+# for one. Seen on a DevKit: the first attempt connected and was closed with
+# "deadline exceeded while waiting tracks"; the retry published at once.
+# Insight's own confirmation window (confirmWebcamPublishing) must be longer
+# than this, or it gives up on a camera MediaMTX would still have accepted.
+webrtcTrackGatherTimeout: 10s
 
+# Backs the "is this webcam actually publishing" status Insight polls per
+# source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,
+# never exposed outside the container/host.
+api: yes
+apiAddress: 127.0.0.1:9997
+
+
+# Webcam ingest + normalization. A browser WHIP-publishes its camera to
+# cam{N} (see neat_insight/mediasrc.py webcam_ingest_path_name), NOT to src{N}. A
+# browser's WebRTC stream is encoded for a video call: sparse keyframes and
+# whatever H.264 profile it negotiates, which the board's hardware decoder and
+# GStreamer rtspsrc cannot consume (rtspsrc fails waiting for a keyframe; the
+# decoder rejects a non-baseline profile). runOnReady transcodes cam{N} to
+# baseline H.264 with a keyframe every second and republishes it on src{N} —
+# the same normalized shape a file source's ffmpeg already produces
+# (neat_insight/mediasrc.py _codec_args) — so a webcam is directly consumable
+# by the viewer and by detection apps with no manual ffmpeg hop. MediaMTX owns
+# this process: it starts when the browser publishes, restarts on failure, and
+# is killed when the browser leaves. The pattern is bounded to 1..48 to match
+# the src{N} slots below, so a stray publish cannot restart-loop against an
+# undefined output path. src{N} stays the only path anything reads.
 paths:
+  # This command normalizes the browser stream to what the board's hardware
+  # decoder accepts (proven end-to-end on the DevKit: webcam -> decode ->
+  # detector). It is kept free of shell metacharacters (no quotes, parens or
+  # globs) on purpose: MediaMTX substitutes $MTX_PATH/$G1 and runs the command
+  # without a full shell, so `-g 30 -keyint_min 30` forces a keyframe every second
+  # rather than `-force_key_frames "expr:..."`. -profile:v baseline matches what
+  # the browser emits and what the decoder accepts.
+  #
+  # -r 30 is required, not cosmetic: a WebRTC webcam has no fixed framerate, so
+  # libx264 cannot compute an H.264 level and emits the maximum (6.2), which the
+  # hardware decoder rejects with a media-caps mismatch. Forcing a constant 30fps
+  # output gives a defined framerate and a decoder-friendly level (3.0 at VGA),
+  # and matches the detector's expected input rate. It must come before -g 30 so
+  # the GOP is 30 frames = 1s at the forced rate.
+  #
+  # The 127.0.0.1:8554 in the command is the container-internal rtspAddress (fixed
+  # above), reached over loopback from inside the container — not a browser-facing
+  # URL, so it is deliberately NOT resolved through the SDK host port map (which
+  # remaps only the published host port, not this internal bind).
+  "~^cam([1-9]|[1-3][0-9]|4[0-8])$":
+    runOnReady: >
+      ffmpeg -nostdin -hide_banner -loglevel error
+      -rtsp_transport tcp -i rtsp://127.0.0.1:8554/$MTX_PATH -an
+      -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
+      -pix_fmt yuv420p -r 30 -g 30 -keyint_min 30
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1
+    runOnReadyRestart: yes
+
   src1: {}
 
   src2: {}

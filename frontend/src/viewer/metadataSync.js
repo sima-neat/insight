@@ -1,4 +1,9 @@
 const METADATA_QUEUE_LIMIT = 300;
+const UNTYPED = "";
+
+function metadataTypeOf(data) {
+  return typeof data?.type === "string" ? data.type : UNTYPED;
+}
 
 export function applyVideoSyncBuffer(receiver, targetMs) {
   if (!receiver || !("jitterBufferTarget" in receiver)) {
@@ -19,6 +24,7 @@ export function applyVideoSyncBuffer(receiver, targetMs) {
 export function createMetadataQueue() {
   return {
     timestamped: new Map(),
+    timestampedEntries: 0,
     arrival: [],
     stats: {
       timestampMatches: 0,
@@ -36,11 +42,21 @@ export function enqueueMetadata(queue, data, receivedAt) {
   const item = { receivedAt, data };
   if (Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0) {
     const key = rtpTimestamp >>> 0;
+    // A producer may describe one frame with several metadata types, so a frame
+    // holds one entry per type. A repeat of the same type replaces it.
+    const byType = queue.timestamped.get(key) ?? new Map();
+    const type = metadataTypeOf(data);
+    if (!byType.has(type)) queue.timestampedEntries += 1;
     queue.timestamped.delete(key);
-    queue.timestamped.set(key, item);
-    while (queue.timestamped.size > METADATA_QUEUE_LIMIT) {
-      queue.timestamped.delete(queue.timestamped.keys().next().value);
-      queue.stats.evicted += 1;
+    byType.delete(type);
+    byType.set(type, item);
+    queue.timestamped.set(key, byType);
+    while (queue.timestampedEntries > METADATA_QUEUE_LIMIT) {
+      const oldest = queue.timestamped.keys().next().value;
+      const evicted = queue.timestamped.get(oldest).size;
+      queue.timestampedEntries -= evicted;
+      queue.stats.evicted += evicted;
+      queue.timestamped.delete(oldest);
     }
     return;
   }
@@ -59,51 +75,73 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
   const hasFrameTimestamp = Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0;
   if (hasFrameTimestamp) {
     const key = rtpTimestamp >>> 0;
-    const item = queue.timestamped.get(key) ?? null;
-    if (item) {
+    const byType = queue.timestamped.get(key) ?? null;
+    if (byType && byType.size > 0) {
       queue.timestamped.delete(key);
+      queue.timestampedEntries -= byType.size;
       queue.stats.timestampMatches += 1;
-      return item;
+      return [...byType.values()];
     }
   }
 
   if (!hasFrameTimestamp) {
-    let item = queue.arrival.at(-1) ?? null;
-    for (const timestamped of queue.timestamped.values()) {
-      if (!item || timestamped.receivedAt >= item.receivedAt) item = timestamped;
+    let latest = null;
+    let latestFrame = null;
+    // Arrival time selects a frame; only its shared timestamp can group types.
+    for (const byType of queue.timestamped.values()) {
+      for (const item of byType.values()) {
+        if (!latest || item.receivedAt >= latest.receivedAt) {
+          latest = item;
+          latestFrame = byType;
+        }
+      }
+    }
+    for (const item of queue.arrival) {
+      if (!latest || item.receivedAt >= latest.receivedAt) {
+        latest = item;
+        latestFrame = null;
+      }
     }
     queue.timestamped.clear();
+    queue.timestampedEntries = 0;
     queue.arrival.length = 0;
-    if (item) {
+    if (latest) {
       queue.stats.arrivalFallbacks += 1;
-      return item;
+      return latestFrame ? [...latestFrame.values()] : [latest];
     }
   }
 
   if (queue.arrival.length > 0) {
-    const item = queue.arrival[queue.arrival.length - 1];
+    const latest = queue.arrival[queue.arrival.length - 1];
     queue.arrival.length = 0;
     queue.stats.arrivalFallbacks += 1;
-    return item;
+    return [latest];
   }
   queue.stats.frameMisses += 1;
-  return null;
+  return [];
 }
 
 export function metadataQueueSnapshot(queue) {
   return {
     ...queue.stats,
-    timestampedPending: queue.timestamped.size,
+    timestampedPending: queue.timestampedEntries,
     arrivalPending: queue.arrival.length,
   };
 }
 
 function pruneMetadataQueue(queue, metadataRetentionMs, now) {
   if (metadataRetentionMs <= 0) return;
-  for (const [timestamp, item] of queue.timestamped) {
-    if (now - item.receivedAt <= metadataRetentionMs) break;
-    queue.timestamped.delete(timestamp);
-    queue.stats.expired += 1;
+  // Types for one frame arrive at different times, and a frame moves to the
+  // end of the map on each arrival, so neither frames nor entries sit in age
+  // order. Every entry is checked; a frame goes only once it holds none.
+  for (const [timestamp, byType] of queue.timestamped) {
+    for (const [type, item] of byType) {
+      if (now - item.receivedAt <= metadataRetentionMs) continue;
+      byType.delete(type);
+      queue.timestampedEntries -= 1;
+      queue.stats.expired += 1;
+    }
+    if (byType.size === 0) queue.timestamped.delete(timestamp);
   }
   while (queue.arrival.length && now - queue.arrival[0].receivedAt > metadataRetentionMs) {
     queue.arrival.shift();
