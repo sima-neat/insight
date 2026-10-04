@@ -232,7 +232,12 @@ type udpPortRangeConfig struct {
 }
 
 type rtpTimestampRewriter struct {
-	nextTimestamp       uint32
+	nextTimestamp uint32
+	// Highest timestamp sent. After a discontinuity fallback re-anchors the
+	// source mapping, holdingMax keeps backward deltas (B-frames measured from
+	// the new anchor) from landing on or behind frames already sent.
+	maxTimestamp        uint32
+	holdingMax          bool
 	lastSourceTimestamp uint32
 	lastSourceSSRC      uint32
 	lastFrameAt         time.Time
@@ -836,15 +841,27 @@ func (r *rtpTimestampRewriter) timestampForSourceFrame(
 		// Signed, so B-frames arriving in decode order keep their backward
 		// presentation deltas instead of reading as a huge forward jump.
 		sourceStep := int32(sourceTimestamp - r.lastSourceTimestamp)
-		step := uint32(sourceStep)
-		if afterSequenceBreak || sourceSSRC != r.lastSourceSSRC || sourceStep == 0 ||
-			sourceStep > maxSourceRTPTimestampStep || sourceStep < -maxSourceRTPTimestampStep {
-			step = uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
+		discontinuity := afterSequenceBreak || sourceSSRC != r.lastSourceSSRC ||
+			sourceStep > maxSourceRTPTimestampStep || sourceStep < -maxSourceRTPTimestampStep
+		r.holdingMax = r.holdingMax || discontinuity
+		next := r.nextTimestamp + uint32(sourceStep)
+		if discontinuity || sourceStep == 0 || (r.holdingMax && int32(next-r.maxTimestamp) <= 0) {
+			base := r.nextTimestamp
+			if r.holdingMax {
+				base = r.maxTimestamp
+			}
+			step := uint32(float64(videoRTPClockRate) * now.Sub(r.lastFrameAt).Seconds())
 			if step == 0 {
 				step = 1
 			}
+			next = base + step
+		} else {
+			r.holdingMax = false
 		}
-		r.nextTimestamp += step
+		r.nextTimestamp = next
+	}
+	if !r.haveFrame || int32(r.nextTimestamp-r.maxTimestamp) > 0 {
+		r.maxTimestamp = r.nextTimestamp
 	}
 	r.lastSourceTimestamp = sourceTimestamp
 	r.lastSourceSSRC = sourceSSRC
