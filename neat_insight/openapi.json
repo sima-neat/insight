@@ -1511,7 +1511,7 @@
         "required": ["error", "code"],
         "properties": {
           "error": {"type": "string", "description": "Human-readable failure reason."},
-          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version"]},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large"]},
           "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},

@@ -119,6 +119,13 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertTrue(ref.startswith("#/"))
                 self.assertIsNotNone(_follow_json_pointer(self.spec, ref))
 
+    def test_board_error_schema_includes_sentinel_runtime_codes(self):
+        codes = set(self.spec["components"]["schemas"]["BoardError"]["properties"]["code"]["enum"])
+        self.assertTrue({
+            "already_installed", "request_too_large", "response_too_large", "sentinel_denied",
+            "sentinel_failed", "sentinel_missing", "sentinel_schema", "sentinel_stopped", "trace_conflict",
+        } <= codes)
+
     def test_sysinfo_documents_command_failure_statuses(self):
         responses = self.spec["paths"]["/api/sysinfo"]["get"]["responses"]
 

@@ -54,6 +54,16 @@ export function seriesOf(model, key) {
   return model?.series?.[key] || []
 }
 
+/** A current aggregate exists only when every constituent reading is available. */
+export function currentTotal(values) {
+  return values.length && values.every(isNumber) ? values.reduce((sum, value) => sum + value, 0) : null
+}
+
+export function currentValue(values) {
+  const value = values?.[values.length - 1]
+  return isNumber(value) ? value : null
+}
+
 /** Per sample, the highest reading among the board's temperature sensors (null where none reported). */
 export function thermalMaxSeries(model) {
   const lists = (model?.metrics || []).filter(isThermalMetric).map((metric) => seriesOf(model, metric.key))
@@ -72,13 +82,6 @@ export function sumSeries(model, keys) {
     const values = lists.map((list) => list[index]).filter(isNumber)
     return values.length ? values.reduce((sum, value) => sum + value, 0) : null
   })
-}
-
-export function lastNumber(values) {
-  for (let index = (values || []).length - 1; index >= 0; index -= 1) {
-    if (isNumber(values[index])) return values[index]
-  }
-  return null
 }
 
 function round(value) {

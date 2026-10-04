@@ -5,8 +5,9 @@ import { CoreHeatmap, StackedChart, StatTile, TimeChart } from './Charts.jsx'
 import {
   DASH_TABS,
   DASH_TAB_KEY,
+  currentTotal,
+  currentValue,
   dashTabFrom,
-  lastNumber,
   metricByKey,
   metricsMatching,
   niceCeil,
@@ -70,11 +71,12 @@ function MetricChart({ model, metricKey, title, ceiling, headline, height, compa
 
 /** Two or more metrics of one unit on one chart: network in and out, disk reads and writes. */
 function PairChart({ model, keys, labels = [], title, height }) {
-  const metrics = keys.map((key, index) => ({ metric: metricByKey(model, key), label: labels[index] })).filter((entry) => entry.metric)
+  const requested = keys.map((key, index) => ({ metric: metricByKey(model, key), label: labels[index] }))
+  const metrics = requested.filter((entry) => entry.metric)
   if (!metrics.length) return null
   const unit = metrics[0].metric.unit
   const series = metrics.map(({ metric, label }, index) => ({ key: metric.key, label: label || metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index] }))
-  const total = metrics.reduce((sum, { metric }) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
+  const total = currentTotal(requested.map(({ metric }) => metric?.value))
   return (
     <TimeChart
       title={title}
@@ -92,7 +94,7 @@ function ThermalMaxChart({ model, height }) {
   const sensors = model.metrics.filter(isThermalMetric)
   if (!sensors.length) return null
   const values = thermalMaxSeries(model)
-  const now = lastNumber(values)
+  const now = currentValue(values)
   const worst = sensors.reduce((hot, metric) => (typeof metric.value === 'number' && (!hot || metric.value > hot.value) ? metric : hot), null)
   return (
     <TimeChart
@@ -228,7 +230,7 @@ function PowerView({ model }) {
   const peak = metricByKey(model, 'power_peak_watts')
   const rails = metricsMatching(model, /^power_rail_/)
   const railSeries = rails.map((metric, index) => ({ key: metric.key, label: metric.short || metric.label, values: seriesOf(model, metric.key), color: COLORS[index % COLORS.length] }))
-  const railTotal = rails.reduce((sum, metric) => sum + (typeof metric.value === 'number' ? metric.value : 0), 0)
+  const railTotal = currentTotal(rails.map((metric) => metric.value))
   const totals = stackTotals(railSeries.map((item) => item.values))
   const stats = [
     { metric: current, title: 'Current' },
@@ -254,7 +256,7 @@ function PowerView({ model }) {
       {rails.length > 0 && (
         <StackedChart
           title="Power rails"
-          headline={`${railTotal.toFixed(2)} W across ${rails.length} rails`}
+          headline={`${railTotal === null ? '—' : `${railTotal.toFixed(2)} W`} across ${rails.length} rails`}
           series={railSeries}
           scale={scaleFor('W', [totals])}
           unit="W"

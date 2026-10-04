@@ -3,11 +3,11 @@ import {
   agoLabel,
   axisLabel,
   coreSummary,
+  currentValue,
   fixedValue,
   loadColor,
   elapsedPath,
   indexAt,
-  lastNumber,
   linePath,
   scaleText,
   spanLabel,
@@ -44,7 +44,7 @@ function Legend({ series, unit }) {
   return (
     <ul className="dash-legend">
       {series.map((item) => {
-        const value = lastNumber(item.values)
+        const value = currentValue(item.values)
         return (
           <li key={item.key} style={{ '--series': item.color }}>
             <span className="dash-swatch" aria-hidden="true" />

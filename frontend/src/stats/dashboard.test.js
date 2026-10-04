@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
-  DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, dashTabFrom,
-  elapsedPath, fixedValue, indexAt, lastNumber, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
+  DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
+  elapsedPath, fixedValue, indexAt, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
   stackTotals, stackedPaths, sumSeries, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear
 } from './dashboard.js'
 import { STATS_TABS, compareTable, isThermalMetric, metricSection, metricsModel, statsTabFrom } from './model.js'
@@ -91,7 +91,8 @@ test('a missing sample breaks the line instead of dropping to zero; stacked area
   }
   assert.deepEqual(thermalMaxSeries(model), [65, null, 70])
   assert.deepEqual(sumSeries(model, ['rx', 'tx']), [1.5, 2, null])
-  assert.deepEqual([lastNumber([1, 2, null]), lastNumber([])], [2, null])
+  assert.deepEqual([currentTotal([1, 2]), currentTotal([1, null]), currentTotal([])], [3, null, null])
+  assert.deepEqual([currentValue([1, 2]), currentValue([1, 2, null]), currentValue([])], [2, null, null])
 })
 
 test('time labels use board timestamps only, in whole words; figures in a row share their decimals', () => {
