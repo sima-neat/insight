@@ -5,6 +5,7 @@ import os
 import socket
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock as mock
 
@@ -322,6 +323,44 @@ class SocketClientTests(unittest.TestCase):
             worker.join(2)
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
         self.assertIn("malformed or incomplete", ctx.exception.message)
+
+    def test_trickled_response_is_bounded_by_one_wall_clock_deadline(self):
+        # Each byte arrives well inside the per-operation timeout, so only a total deadline stops it.
+        cases = {
+            "headers": (b"HTTP/1.1 200 OK\r\n", b"X-Slow: " + b"a" * 400),
+            "body": (b"HTTP/1.1 200 OK\r\nContent-Length: 400\r\n\r\n", b"a" * 400),
+        }
+        for name, (prefix, trickle) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "api.sock")
+                ready = threading.Event()
+
+                def serve():
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                        server.bind(path)
+                        server.listen(1)
+                        ready.set()
+                        connection, _ = server.accept()
+                        with connection:
+                            connection.recv(4096)
+                            try:
+                                connection.sendall(prefix)
+                                for index in range(len(trickle)):
+                                    connection.sendall(trickle[index : index + 1])
+                                    time.sleep(0.05)
+                            except OSError:
+                                pass
+
+                worker = threading.Thread(target=serve)
+                worker.start()
+                self.assertTrue(ready.wait(2))
+                started = time.monotonic()
+                with self.assertRaises(OSError) as ctx:
+                    socket_client.request("GET", "/v1/peripherals", socket_path=path, timeout=0.3)
+                elapsed = time.monotonic() - started
+                worker.join(30)
+                self.assertEqual(socket_client.socket_failure(ctx.exception), socket_client.TIMED_OUT)
+                self.assertLess(elapsed, 0.8)
 
 
 if __name__ == "__main__":

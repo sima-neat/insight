@@ -3,6 +3,7 @@ import errno
 import json
 import socket
 import sys
+import time
 from http.client import HTTPConnection, HTTPException, IncompleteRead
 
 SOCKET_PATH = "/run/simaai-sentinel/api.sock"
@@ -24,14 +25,52 @@ class ResponseTooLarge(Exception):
         super().__init__("The Sentinel response is larger than {} bytes.".format(limit))
 
 
+class _DeadlineSocket(socket.socket):
+    """Unix socket whose every blocking operation shares one wall-clock deadline.
+
+    A plain socket timeout bounds each call, so a peer that trickles bytes could
+    hold a request open indefinitely; re-arming with the remaining time bounds
+    connect, send, headers and body together.
+    """
+
+    deadline = 0.0
+
+    def _arm(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise socket.timeout("timed out")
+        self.settimeout(remaining)
+
+    def connect(self, address):
+        self._arm()
+        return super().connect(address)
+
+    def sendall(self, *args, **kwargs):
+        self._arm()
+        return super().sendall(*args, **kwargs)
+
+    def send(self, *args, **kwargs):
+        self._arm()
+        return super().send(*args, **kwargs)
+
+    def recv(self, *args, **kwargs):
+        self._arm()
+        return super().recv(*args, **kwargs)
+
+    def recv_into(self, *args, **kwargs):
+        self._arm()
+        return super().recv_into(*args, **kwargs)
+
+
 class _UnixHTTPConnection(HTTPConnection):
     def __init__(self, path, timeout):
         super().__init__("localhost", timeout=timeout)
         self.path = path
+        self.deadline = time.monotonic() + timeout
 
     def connect(self):
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
+        sock = _DeadlineSocket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.deadline = self.deadline
         try:
             sock.connect(self.path)
         except OSError:
