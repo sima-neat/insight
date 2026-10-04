@@ -62,7 +62,9 @@ def _run_check(session, payload: dict):
 def get_peripherals():
     """Return the cached snapshot for the current board generation, or an empty one before any Refresh."""
     session = get_board_manager().session()
-    return scans.snapshot(session.generation) or empty_snapshot(board_summary(session), session.generation)
+    snapshot = scans.snapshot(session.generation) or empty_snapshot(board_summary(session), session.generation)
+    session.require_current()
+    return snapshot
 
 
 # API: rescan the selected board for cameras and microphones.
@@ -143,8 +145,8 @@ def get_microphone_test():
 # API: the finished test recording as a WAV file.
 @peripherals_bp.get("/api/peripherals/microphones/test/<token>.wav")
 def get_microphone_test_audio(token):
-    """Serve the latest finished recording; 404 once another test replaced it."""
-    wav = mictest.audio(token)
+    """Serve the latest finished recording of the selected board; 404 once another test or board replaced it."""
+    wav = mictest.audio(token, get_board_manager().session().generation)
     if wav is None:
         raise BoardError("not_found", "This recording is gone; a newer test replaced it.", hint="Test again.")
     return Response(wav, mimetype="audio/wav")

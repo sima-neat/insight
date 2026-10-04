@@ -298,9 +298,9 @@ def current(generation: int) -> Optional[dict]:
     return test.status() if test is not None and test.generation == generation else None
 
 
-def audio(token: str) -> Optional[bytes]:
+def audio(token: str, generation: int) -> Optional[bytes]:
     test = _current
-    if test is None or test.token != token:
+    if test is None or test.token != token or test.generation != generation:
         return None
     with test.lock:
         return test.wav if test.state == "ready" else None
