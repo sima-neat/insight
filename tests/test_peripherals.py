@@ -689,6 +689,13 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         self.assertEqual(self.client.get("/api/peripherals").get_json()["scanned_at"], None)
 
+    def test_export_is_refused_when_the_board_changes_before_it_returns(self):
+        self.use()
+        self.refresh()
+        self.manager.current.stale = True
+        response = self.export()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+
     def test_a_board_change_during_refresh_is_refused_and_not_recorded(self):
         self.use()
         self.manager.current.stale = True

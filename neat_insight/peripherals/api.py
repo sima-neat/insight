@@ -91,4 +91,6 @@ def export_camera():
             "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
             hint="Click Refresh, then export again.",
         )
-    return export.render(snapshot, selection)
+    rendered = export.render(snapshot, selection)
+    session.require_current()
+    return rendered
