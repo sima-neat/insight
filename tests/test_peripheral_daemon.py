@@ -12,7 +12,7 @@ from neat_insight.board.errors import BoardError
 from neat_insight.board.target import BoardTarget
 from neat_insight.board.transport import ExecResult
 from neat_insight.peripherals.client import PeripheralClient
-from neat_insight.peripherals import socket_client
+from neat_insight.sentinel import socket_client
 
 
 def catalog(scan_sequence=3, **extra):

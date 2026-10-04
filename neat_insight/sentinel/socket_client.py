@@ -7,7 +7,8 @@ from http.client import HTTPConnection, HTTPException, IncompleteRead
 
 SOCKET_PATH = "/run/simaai-sentinel/api.sock"
 TIMEOUT_SEC = 10.0
-MAX_BODY_BYTES = 4 * 1024 * 1024
+# Leaves room for the JSON-escaped envelope under the board transport's 16 MiB output cap.
+MAX_BODY_BYTES = 12 * 1024 * 1024
 
 MISSING = "missing"
 REFUSED = "refused"
@@ -52,7 +53,8 @@ def socket_failure(exc):
     return FAILED
 
 
-def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SEC):
+def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SEC, max_bytes=None):
+    limit = MAX_BODY_BYTES if max_bytes is None else max_bytes
     connection = _UnixHTTPConnection(socket_path, timeout)
     try:
         headers = {"Host": "localhost", "Accept": "application/json"}
@@ -64,11 +66,11 @@ def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SE
         connection.request(method, path, body=payload, headers=headers)
         response = connection.getresponse()
         declared = response.getheader("Content-Length")
-        if declared and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
-            raise ResponseTooLarge(MAX_BODY_BYTES)
-        data = response.read(MAX_BODY_BYTES + 1)
-        if len(data) > MAX_BODY_BYTES:
-            raise ResponseTooLarge(MAX_BODY_BYTES)
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise ResponseTooLarge(limit)
+        data = response.read(limit + 1)
+        if len(data) > limit:
+            raise ResponseTooLarge(limit)
         if declared and declared.isdigit() and len(data) != int(declared):
             raise IncompleteRead(data, int(declared) - len(data))
         return response.status, data.decode("utf-8", errors="replace")
@@ -77,13 +79,14 @@ def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SE
 
 
 def main(argv):
-    """``python3 - METHOD PATH [BODY] [SOCKET] [TIMEOUT]`` prints one JSON envelope."""
+    """``python3 - METHOD PATH [BODY] [SOCKET] [TIMEOUT] [MAX_BYTES]`` prints one JSON envelope."""
     method, path = argv[0], argv[1]
     body = json.loads(argv[2]) if len(argv) > 2 and argv[2] else None
     socket_path = argv[3] if len(argv) > 3 and argv[3] else SOCKET_PATH
     timeout = float(argv[4]) if len(argv) > 4 and argv[4] else TIMEOUT_SEC
+    max_bytes = int(argv[5]) if len(argv) > 5 and argv[5] else None
     try:
-        status, response = request(method, path, body, socket_path=socket_path, timeout=timeout)
+        status, response = request(method, path, body, socket_path=socket_path, timeout=timeout, max_bytes=max_bytes)
     except (OSError, socket.timeout) as exc:
         sys.stdout.write(json.dumps({"failure": socket_failure(exc), "detail": "{}: {}".format(socket_path, exc)}))
         return 3
