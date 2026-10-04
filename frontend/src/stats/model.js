@@ -1242,8 +1242,8 @@ function seriesStats(values) {
   if (!numbers.length) return { count: 0, minimum: null, maximum: null, mean: null, last: null }
   return {
     count: numbers.length,
-    minimum: Math.min(...numbers),
-    maximum: Math.max(...numbers),
+    minimum: numbers.reduce((minimum, value) => Math.min(minimum, value)),
+    maximum: numbers.reduce((maximum, value) => Math.max(maximum, value)),
     mean: numbers.reduce((total, value) => total + value, 0) / numbers.length,
     last: numbers[numbers.length - 1]
   }

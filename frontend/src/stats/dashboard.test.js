@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
   elapsedPath, fixedValue, indexAt, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
-  stackTotals, stackedPaths, sumSeries, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
+  stackTotals, stackedPaths, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
 } from './dashboard.js'
 import { STATS_TABS, compareTable, isThermalMetric, metricSection, metricsModel, statsTabFrom } from './model.js'
 
@@ -72,6 +72,7 @@ test('scales stay fixed: percentages 0-100, temperatures 40-90, the rest a round
   assert.deepEqual(scaleFor('MB/s', [[null, null]]), { min: 0, max: 1 })
   assert.deepEqual([0.37, 18.36, 816, 3.4, 0].map(niceCeil), [0.4, 20, 1000, 4, 1])
   assert.deepEqual(tightScale([[8.53, 8.88], [9.03]]), { min: 8.4, max: 9.2 })
+  assert.deepEqual(tightScale([Array.from({ length: 150000 }, (_, index) => index % 2)]), { min: -1, max: 2 })
   assert.deepEqual(tightScale([[3, 3], [3]]), { min: 2.8, max: 3.2 }, 'equal readings still get a band around them')
   assert.deepEqual(tightScale([[null]]), { min: 0, max: 1 })
 })
@@ -83,14 +84,15 @@ test('a missing sample breaks the line instead of dropping to zero; stacked area
   assert.deepEqual(path.last, { x: 300, y: 0 })
   assert.equal(linePath([1, null], { min: 0, max: 1 }, 10, 10).last, null, 'no newest point when the newest sample is missing')
   assert.equal(linePath([150], { min: 0, max: 100 }, 10, 10).line, 'M0 0', 'values beyond the scale are clamped to it')
-  assert.deepEqual(stackTotals([[1, 1], [2, null]]), [3, 1])
-  assert.deepEqual(stackedPaths([[1, 1], [2, null]], { min: 0, max: 4 }, 10, 4), ['M0 3 L10 3 L10 4 L0 4 Z', 'M0 1 L10 3 L10 3 L0 3 Z'])
+  const stacks = [[1, 1, 1, 1, 1], [2, 2, null, 2, 2]]
+  assert.deepEqual(stackTotals(stacks), [3, 3, null, 3, 3])
+  assert.deepEqual(stackedPaths(stacks, { min: 0, max: 4 }, 40, 4),
+    ['M0 3 L10 3 L10 4 L0 4 Z M30 3 L40 3 L40 4 L30 4 Z', 'M0 1 L10 1 L10 3 L0 3 Z M30 1 L40 1 L40 3 L30 3 Z'])
   const model = {
     metrics: [{ key: 'a', unit: 'C', group: 'MLA' }, { key: 'b', unit: 'C', group: 'Board' }, { key: 'rx', unit: 'MB/s', group: 'Network' }, { key: 'tx', unit: 'MB/s', group: 'Network' }],
     series: { a: [60, null, 70], b: [65, null, 62], rx: [1, 2, null], tx: [0.5, null, null] }
   }
   assert.deepEqual(thermalMaxSeries(model), [65, null, 70])
-  assert.deepEqual(sumSeries(model, ['rx', 'tx']), [1.5, 2, null])
   assert.deepEqual([currentTotal([1, 2]), currentTotal([1, null]), currentTotal([])], [3, null, null])
   assert.deepEqual([currentValue([1, 2]), currentValue([1, 2, null]), currentValue([])], [2, null, null])
 })

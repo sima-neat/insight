@@ -379,6 +379,12 @@ test('a run of one sample is a moment, not a range of no length', () => {
   assert.deepEqual([none.sampleCount, none.single, none.sampledAt], [0, false, null])
 })
 
+test('an accepted long run computes extrema without spreading its samples as arguments', () => {
+  const samples = Array.from({ length: 150000 }, (_, value) => ({ values: { x: value } }))
+  const metric = runDetail({ sentinel: { metadata: { id: 'long' }, metrics: [{ key: 'x' }], samples } }).metrics[0]
+  assert.deepEqual([metric.count, metric.minimum, metric.maximum], [150000, 0, 149999])
+})
+
 test('the request guard admits one call per key until it ends', () => {
   const guard = createRequestGuard()
   guard.switchTo(1)

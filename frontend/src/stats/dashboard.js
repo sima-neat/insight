@@ -74,16 +74,6 @@ export function thermalMaxSeries(model) {
   })
 }
 
-/** Per sample, the sum of the given series; null only where none of them reported. */
-export function sumSeries(model, keys) {
-  const lists = keys.map((key) => seriesOf(model, key))
-  const length = Math.max(0, ...lists.map((list) => list.length))
-  return Array.from({ length }, (_, index) => {
-    const values = lists.map((list) => list[index]).filter(isNumber)
-    return values.length ? values.reduce((sum, value) => sum + value, 0) : null
-  })
-}
-
 function round(value) {
   return Number(value.toFixed(2))
 }
@@ -121,30 +111,39 @@ export function linePath(values, scale, width, height) {
   return { line, area, last: lastPoint ? { x: lastPoint[0], y: lastPoint[1] } : null }
 }
 
-/** Stacked areas, bottom band first; missing readings count as zero within the stack. */
+/** Stacked areas, bottom band first; a missing constituent breaks the whole stack. */
 export function stackedPaths(lists, scale, width, height) {
   const length = Math.max(0, ...lists.map((list) => (list || []).length))
   const steps = Math.max(1, length - 1)
+  const complete = Array.from({ length }, (_, index) => lists.every((list) => isNumber((list || [])[index])))
   const base = new Array(length).fill(0)
+  const x = (index) => round((index / steps) * width)
   return lists.map((list) => {
     const lower = base.slice()
-    for (let index = 0; index < length; index += 1) {
-      const value = (list || [])[index]
-      base[index] += isNumber(value) ? value : 0
+    for (let index = 0; index < length; index += 1) if (complete[index]) base[index] += list[index]
+    const paths = []
+    for (let start = 0; start < length;) {
+      while (start < length && !complete[start]) start += 1
+      let end = start
+      while (end + 1 < length && complete[end + 1]) end += 1
+      if (start < length && end > start) {
+        const top = base.slice(start, end + 1).map((value, offset) => `${offset ? 'L' : 'M'}${x(start + offset)} ${round(yOf(value, scale, height))}`).join(' ')
+        const bottom = lower.slice(start, end + 1).map((value, offset) => `L${x(start + offset)} ${round(yOf(value, scale, height))}`).reverse().join(' ')
+        paths.push(`${top} ${bottom} Z`)
+      }
+      start = end + 1
     }
-    if (!length) return ''
-    const x = (index) => round((index / steps) * width)
-    const top = base.map((value, index) => `${index ? 'L' : 'M'}${x(index)} ${round(yOf(value, scale, height))}`).join(' ')
-    const bottom = lower.map((value, index) => `L${x(index)} ${round(yOf(value, scale, height))}`).reverse().join(' ')
-    return `${top} ${bottom} Z`
+    return paths.join(' ')
   })
 }
 
-/** The totals a stack reaches, for choosing its scale. */
+/** The totals a complete stack reaches, for its scale and tooltip. */
 export function stackTotals(lists) {
   const length = Math.max(0, ...lists.map((list) => (list || []).length))
-  return Array.from({ length }, (_, index) =>
-    lists.reduce((sum, list) => sum + (isNumber((list || [])[index]) ? list[index] : 0), 0))
+  return Array.from({ length }, (_, index) => {
+    const values = lists.map((list) => (list || [])[index])
+    return values.every(isNumber) ? values.reduce((sum, value) => sum + value, 0) : null
+  })
 }
 
 function seconds(timestamp) {
@@ -377,8 +376,8 @@ export function compareOverlay(payload, seriesId) {
 export function tightScale(valueLists) {
   const values = valueLists.flat().filter(isNumber)
   if (!values.length) return { min: 0, max: 1 }
-  const low = Math.min(...values)
-  const high = Math.max(...values)
+  const low = values.reduce((minimum, value) => Math.min(minimum, value))
+  const high = values.reduce((maximum, value) => Math.max(maximum, value))
   const pad = (high - low) / 6 || Math.abs(high) * 0.05 || 1
   // Round to a tenth of the padded spread's order of magnitude: 8.44-9.11 W becomes 8.4-9.2.
   const step = 10 ** Math.floor(Math.log10(high - low + 2 * pad))

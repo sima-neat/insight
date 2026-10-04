@@ -140,7 +140,7 @@ Peripherals lists the cameras connected to a board and shows the modes each came
 
 ### Selected board
 
-Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals and Stats use this selection.
 
 The board is chosen in this order:
 
