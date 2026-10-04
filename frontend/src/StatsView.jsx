@@ -1329,14 +1329,17 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
     return () => clearInterval(timer)
   }, [])
 
-  // The run list keeps itself current, so the panel needs no Refresh button. Insight's own traces
-  // already re-read it when they start and stop; this catches runs recorded or deleted elsewhere
-  // (another Insight, the Sentinel CLI). Paused while the tab is hidden: each read runs on the board.
+  // Runs and the active trace keep themselves current, so the panel needs no Refresh button.
+  // This catches traces started, stopped, recorded or deleted elsewhere (another Insight or the
+  // Sentinel CLI). Paused while the tab is hidden: each read runs on the board.
   const sentinelAvailable = Boolean(state?.available)
   useEffect(() => {
     if (!sentinelAvailable) return undefined
     const timer = setInterval(() => {
-      if (!document.hidden) loadRuns()
+      if (!document.hidden) {
+        loadRuns()
+        loadTraces({ quiet: true })
+      }
     }, RUNS_POLL_MS)
     return () => clearInterval(timer)
   }, [sentinelAvailable, generation])

@@ -480,11 +480,13 @@ class InstallTests(unittest.TestCase):
         error = self.install_error()
         self.assertEqual(error.to_dict()["tool"], "sima-cli")
         self.assertIn(install.MANUAL_COMMAND, error.hint)
-        self.transport.status_fields = DOWN
+        fallback_cli = "/home/sima/.sima-cli/.venv/bin/sima-cli"
+        self.transport.status_fields = ["inactive", "no", "no", fallback_cli]
         self.transport.install_result = ExecResult(77, b"", b"sudo: a password is required")
         error = self.install_error()
         self.assertEqual(error.code, "sentinel_denied")
-        self.assertIn(install.MANUAL_COMMAND, error.hint)
+        self.assertIn(fallback_cli, error.hint)
+        self.assertNotIn(" sima-cli neat install", error.hint)
         # A failed installer keeps its output.
         self.transport.install_result = ExecResult(1, b"downloading", b"vulcan: not found")
         error = self.install_error()

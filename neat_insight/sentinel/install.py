@@ -4,6 +4,7 @@
 needs sudo. The installer always restarts the daemon, which would break a trace in
 flight, so a healthy install is never reinstalled.
 """
+import shlex
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -17,6 +18,13 @@ INSTALL_TIMEOUT_SEC = 900.0
 LOG_LIMIT = 4000
 FALLBACK_CLI = "$HOME/.sima-cli/.venv/bin/sima-cli"
 MANUAL_COMMAND = "sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel"
+
+
+def _manual_command(sima_cli: str) -> str:
+    return "sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 {} neat install sentinel".format(
+        shlex.quote(sima_cli)
+    )
+
 
 # `sima-cli` is often absent from a non-login PATH, so the user's own copy is checked too.
 _STATUS_SCRIPT = """
@@ -134,7 +142,9 @@ def _install(session) -> dict:
         raise SentinelError(
             "sentinel_denied",
             "Installing Sentinel needs sudo on the board, and this user cannot use sudo without a password.",
-            hint="Run `{}` in a shell on the board, then reload this page.".format(MANUAL_COMMAND),
+            hint="Run `{}` in a shell on the board, then reload this page.".format(
+                _manual_command(state["sima_cli"])
+            ),
             detail=log,
         )
     if result.exit_code != 0:

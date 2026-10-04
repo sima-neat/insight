@@ -95,7 +95,7 @@
       "code": "sentinel_denied",
       "detail": "sudo: a password is required",
       "error": "Installing Sentinel needs sudo on the board, and this user cannot use sudo without a password.",
-      "hint": "Run `sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel` in a shell on the board, then reload this page."
+      "hint": "Run `sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 /home/sima/.sima-cli/.venv/bin/sima-cli neat install sentinel` in a shell on the board, then reload this page."
     },
     "status": 502
   }
