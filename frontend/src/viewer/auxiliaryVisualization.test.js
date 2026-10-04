@@ -166,6 +166,11 @@ test("invalid RTP timestamps cannot infer or alias an exact frame", () => {
     const candidates = [{ data: message({ rtp }) }];
     assert.equal(partitionFrameMetadata(candidates, frameRtp, registry).auxiliaryViews.length, views);
   }
+  const queue = createMetadataQueue();
+  enqueueMetadata(queue, message({ rtp: 0 }), 10);
+  enqueueMetadata(queue, message({ rtp: 0x100000000 }), 11);
+  const candidates = takeMetadataForFrame(queue, 0, 0, 12);
+  assert.equal(partitionFrameMetadata(candidates, 0, registry).auxiliaryViews.length, 1);
 });
 
 test("timestamped auxiliary data uses the selected frame in the video callback fallback", () => {

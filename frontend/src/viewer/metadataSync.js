@@ -44,8 +44,10 @@ export function createMetadataQueue() {
 export function enqueueMetadata(queue, data, receivedAt) {
   const rtpTimestamp = data?._insight?.rtp_timestamp;
   const item = { receivedAt, data };
-  if (Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0) {
-    const key = rtpTimestamp >>> 0;
+  // Only a valid unsigned 32-bit RTP timestamp keys a frame; larger values would
+  // alias another frame's entry and replace it.
+  if (Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0 && rtpTimestamp <= 0xffffffff) {
+    const key = rtpTimestamp;
     // A producer may describe one frame with several metadata types, so a frame
     // holds one entry per type. A repeat of the same type replaces it.
     const byType = queue.timestamped.get(key) ?? new Map();
