@@ -80,6 +80,15 @@ class TargetResolutionTests(unittest.TestCase):
                 target_module.validate_ssh_target(host, port, user)
             self.assertEqual(ctx.exception.status, 400)
 
+    def test_ports_that_are_not_integers_are_rejected_not_coerced(self):
+        for port in (True, False, 22.9, 1.5, float("inf"), float("nan"), "22.9", [22]):
+            with self.subTest(port=port), self.assertRaises(BoardError) as ctx:
+                target_module.validate_ssh_target("board", port, "sima")
+            self.assertEqual((ctx.exception.code, ctx.exception.status), ("invalid_request", 400))
+        for port, expected in ((2222, 2222), (22.0, 22), ("2222", 2222), (None, 22), ("", 22)):
+            with self.subTest(port=port):
+                self.assertEqual(target_module.validate_ssh_target("board", port, "sima")["port"], expected)
+
     def test_store_round_trips_and_ignores_corrupt_files(self):
         with tempfile.TemporaryDirectory() as directory:
             store = target_module.TargetStore(Path(directory) / "board-target.json")
@@ -141,6 +150,13 @@ class BoardApiTests(unittest.TestCase):
         body = self.client.post("/api/board/select", json={"reset": True}).get_json()
         self.assertEqual(body["target"]["source"], "sdk-env")
         self.assertIsNone(body["saved"])
+
+    def test_a_non_integer_port_is_refused_and_not_saved(self):
+        for port in (True, 22.9):
+            with self.subTest(port=port):
+                response = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": port, "user": "sima"})
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+                self.assertIsNone(self.client.get("/api/board").get_json()["saved"])
 
     def test_reset_must_be_a_boolean_and_leaves_the_target_alone(self):
         self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 22, "user": "sima"})
