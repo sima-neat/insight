@@ -13,7 +13,7 @@ import {
 
 test("viewer exposes all 80 channels as the largest simultaneous page size", () => {
   assert.equal(MAX_CHANNELS, 80);
-  assert.deepEqual(PAGE_SIZE_PRESETS, [1, 4, 9, 16, 24, 36, 48, 60, 72, 80]);
+  assert.deepEqual(PAGE_SIZE_PRESETS, [1, 4, 9, 16, 24, 36, 48, 64, 72, 80]);
 });
 
 test("persisted page sizes normalize to a supported option", () => {
@@ -48,8 +48,8 @@ test("48 visible streams use six rows and eight columns", () => {
   assert.deepEqual(gridDimensions(48), { columns: 8, rows: 6 });
 });
 
-test("60, 72, and 80 visible streams use six columns", () => {
-  assert.deepEqual(gridDimensions(60), { columns: 6, rows: 10 });
-  assert.deepEqual(gridDimensions(72), { columns: 6, rows: 12 });
-  assert.deepEqual(gridDimensions(80), { columns: 6, rows: 14 });
+test("64, 72, and 80 visible streams use eight columns", () => {
+  assert.deepEqual(gridDimensions(64), { columns: 8, rows: 8 });
+  assert.deepEqual(gridDimensions(72), { columns: 8, rows: 9 });
+  assert.deepEqual(gridDimensions(80), { columns: 8, rows: 10 });
 });
