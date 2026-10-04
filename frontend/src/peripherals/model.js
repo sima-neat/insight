@@ -339,6 +339,19 @@ export function micTestToResume(micId, test) {
   return test.state === 'recording' || test.state === 'ready' ? test : null
 }
 
+// A start that failed without the backend's answer (the connection dropped, or a gateway replied
+// without an API body) may still have started recording, and a retry is then refused with
+// `test_running`. The backend's current test for this microphone is taken up when it is not the
+// one this detail already held (`heldToken`); otherwise the start's error stands.
+export function micStartMayHaveRun(error) {
+  return ['network', 'test_running', ''].includes(error?.code ?? '')
+}
+
+export function micTestAfterFailedStart(micId, error, test, heldToken) {
+  if (!micStartMayHaveRun(error)) return null
+  return test?.token === heldToken ? null : micTestToResume(micId, test)
+}
+
 // What the last scan says holds the microphone, shown beside the Test button, or ''. Advisory
 // only: the button stays enabled because the start request checks the board now and answers
 // `microphone_in_use` when the device really is held.
