@@ -95,21 +95,32 @@ export function linePath(values, scale, width, height) {
 
 export function stackTotals(lists) {
   const length = Math.max(0, ...lists.map((list) => list.length))
-  return Array.from({ length }, (_, index) => lists.reduce((sum, list) => sum + (isNumber(list[index]) ? list[index] : 0), 0))
+  return Array.from({ length }, (_, index) => completeTotal(lists.map((list) => list[index])))
 }
 
 export function stackedPaths(lists, scale, width, height) {
   const length = Math.max(0, ...lists.map((list) => list.length))
   const steps = Math.max(1, length - 1)
-  const base = new Array(length).fill(0)
   const x = (index) => round((index / steps) * width)
-  return lists.map((list) => {
-    const lower = base.slice()
-    for (let index = 0; index < length; index += 1) base[index] += isNumber(list[index]) ? list[index] : 0
-    if (!length) return ''
-    const top = base.map((value, index) => `${index ? 'L' : 'M'}${x(index)} ${round(yOf(value, scale, height))}`).join(' ')
-    const bottom = lower.map((value, index) => `L${x(index)} ${round(yOf(value, scale, height))}`).reverse().join(' ')
-    return `${top} ${bottom} Z`
+  const available = Array.from({ length }, (_, index) => lists.every((list) => isNumber(list[index])))
+  return lists.map((list, layer) => {
+    const segments = []
+    let current = []
+    for (let index = 0; index < length; index += 1) {
+      if (!available[index]) {
+        if (current.length) segments.push(current)
+        current = []
+        continue
+      }
+      const lower = lists.slice(0, layer).reduce((sum, values) => sum + values[index], 0)
+      current.push({ x: x(index), lower, upper: lower + list[index] })
+    }
+    if (current.length) segments.push(current)
+    return segments.map((segment) => {
+      const top = segment.map((point, index) => `${index ? 'L' : 'M'}${point.x} ${round(yOf(point.upper, scale, height))}`).join(' ')
+      const bottom = segment.map((point) => `L${point.x} ${round(yOf(point.lower, scale, height))}`).reverse().join(' ')
+      return `${top} ${bottom} Z`
+    }).join(' ')
   })
 }
 

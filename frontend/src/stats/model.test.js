@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { compareOverlay, completeTotal, lastNumber, tightScale } from './dashboard.js'
+import { compareOverlay, completeTotal, lastNumber, stackedPaths, stackTotals, tightScale } from './dashboard.js'
 import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, runDetail, runList, traceBar, traceModel } from './model.js'
 
 test('keyboard-only Stats controls keep a visible focus indicator', () => {
@@ -40,6 +40,8 @@ test('charts keep missing readings missing and compare each run with its own def
   assert.equal(lastNumber([2, 4, null]), null)
   assert.equal(completeTotal([2, null]), null)
   assert.equal(completeTotal([2, 3]), 5)
+  assert.deepEqual(stackTotals([[1, null, 3], [2, 4, 5]]), [3, null, 8])
+  assert.ok(stackedPaths([[1, null, 3], [2, 4, 5]], { min: 0, max: 10 }, 100, 100).every((path) => !path.includes('50 ')))
   const payload = {
     sentinel: {
       baseline_id: 'a',
@@ -85,4 +87,22 @@ test('run names cannot inject spreadsheet formulas or escape the download filena
   assert.doesNotMatch(header, /(^|,)[=+]/)
   const name = compareCsvFilename({ baselineLabel: '../../etc/passwd' }, new Date(2026, 8, 24))
   assert.equal(name, 'sentinel-compare-etc-passwd-2026-09-24.csv')
+})
+
+test('comparisons use recorded metric definitions and expose conflicts', () => {
+  const table = compareTable({
+    sentinel: {
+      baseline_id: 'a',
+      runs: [
+        { metadata: { id: 'a' }, metrics: [{ key: 'm', label: 'Recorded power', unit: 'W', group: 'Power' }] },
+        { metadata: { id: 'b' }, metrics: [{ key: 'm', label: 'Recorded power', unit: 'mW', group: 'Power' }] }
+      ],
+      summaries: { a: { metrics: { m: { mean: 1 } } }, b: { metrics: { m: { mean: 2 } } } }
+    }
+  }, new Map([['m', { label: 'Live voltage', unit: 'V', group: 'Other' }]]))
+  const row = table.rows.find((item) => item.key === 'm')
+  assert.equal(row.label, 'Recorded power (recorded definitions differ)')
+  assert.equal(row.unit, null)
+  assert.equal(row.group, 'Power')
+  assert.equal(row.definitionConflict, true)
 })
