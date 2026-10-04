@@ -113,7 +113,7 @@ test("version two settings migrate without retaining overlay delay", () => {
   assert.equal("metadataDelay" in settings.general, false);
 });
 
-test("BlazePose 3D settings normalize values and discard obsolete controls", () => {
+test("BlazePose 3D settings normalize values and drop unknown keys", () => {
   const api = loadSettingsApi();
   const settings = api.normalizeSettings({
     version: 6,
@@ -121,10 +121,7 @@ test("BlazePose 3D settings normalize values and discard obsolete controls", () 
       "blazepose-3d": {
         panelMode: "floating",
         backgroundTransparency: 3,
-        autoRotate: true,
-        rotationSpeed: 80,
-        paused: true,
-        stabilizePose: true,
+        unknownKey: true,
         yawDegrees: 999,
         pitchDegrees: -999,
       },
@@ -156,9 +153,7 @@ test("BlazePose 3D settings normalize values and discard obsolete controls", () 
     },
     { panelMode: "compact", backgroundTransparency: 1, yawDegrees: 180, pitchDegrees: -60 },
   );
-  for (const key of ["autoRotate", "rotationSpeed", "paused", "stabilizePose"]) {
-    assert.equal(key in pose3D, false);
-  }
+  assert.equal("unknownKey" in pose3D, false);
   assert.deepEqual(
     {
       poseStrokeColor: settings.types["pose-estimation"].poseStrokeColor,

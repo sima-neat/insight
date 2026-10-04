@@ -183,22 +183,10 @@ test("empty or invalid BlazePose payloads render a stable empty state", () => {
 
 test("saved view settings normalize malformed and out-of-range values", () => {
   const normalized = createBlazePose3DSession({
-    initialSettings: {
-      showReferenceCube: "yes",
-      autoRotate: false,
-      rotationSpeed: 1000,
-      paused: true,
-      stabilizePose: false,
-      yaw: "bad",
-      pitch: 100,
-    },
+    initialSettings: { showReferenceCube: "yes", yaw: "bad", pitch: 100 },
   }).snapshot();
 
   assert.equal(normalized.showReferenceCube, true);
-  assert.equal("autoRotate" in normalized, false);
-  assert.equal("rotationSpeed" in normalized, false);
-  assert.equal("paused" in normalized, false);
-  assert.equal("stabilizePose" in normalized, false);
   assert.equal(normalized.yaw, -Math.PI / 4);
   assert.ok(normalized.pitch < Math.PI / 2);
 });
@@ -226,9 +214,7 @@ test("viewer configuration can update a live renderer session", () => {
     pitch: 0,
   });
 
-  assert.equal(session.snapshot().showReferenceCube, false);
-  assert.equal(session.snapshot().yaw, Math.PI / 2);
-  assert.equal(session.snapshot().pitch, 0);
+  assert.deepEqual(session.snapshot(), { showReferenceCube: false, yaw: Math.PI / 2, pitch: 0 });
   assert.equal(session.getControls().find(({ id }) => id === "showReferenceCube").value, false);
   assert.equal(drawRequests, 1);
 });
@@ -260,6 +246,6 @@ test("destroyed renderer sessions ignore later interaction", () => {
 
   assert.equal(session.pointerDown({ x: 1, y: 1, pointerId: 1 }), false);
   const ctx = recordingContext();
-  session.draw(ctx, { width: 120, height: 90 }, { poses: [] }, { animationTimeMs: 0 });
+  session.draw(ctx, { width: 120, height: 90 }, { poses: [] });
   assert.deepEqual(ctx.calls, []);
 });

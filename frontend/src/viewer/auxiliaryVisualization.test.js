@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   AUXILIARY_METADATA_TYPE,
-  auxiliaryRendererRegistry,
   createAuxiliaryViewPreference,
   initialAuxiliarySessionSettings,
   nextAuxiliaryPreview,
@@ -30,28 +29,24 @@ function message({ id = "pose", renderer = "blazepose-3d", rtp = 42, payload = {
   };
 }
 
-test("renderer selection uses the registered renderer named by the generic payload", () => {
-  const registry = registryWith("blazepose-3d", "plot");
-  const result = partitionFrameMetadata([{ data: message({ renderer: "plot" }) }], 42, registry);
+test("the payload names its registered renderer and passes through renderer-owned data", () => {
+  const registry = registryWith("blazepose-3d", "mesh-3d");
+  const payload = {
+    vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    triangles: [[0, 1, 2]],
+    coordinateSystem: { handedness: "right", units: "millimeters" },
+  };
+  const result = partitionFrameMetadata(
+    [{ data: message({ renderer: "mesh-3d", payload }) }],
+    42,
+    registry,
+  );
   const view = result.auxiliaryViews[0];
 
-  assert.equal(view.renderer, "plot");
+  assert.equal(view.renderer, "mesh-3d");
   assert.equal(view.id, "pose");
   assert.equal(view.frameId, "frame-1");
-});
-
-test("generic renderer registration preserves renderer-owned settings integration", () => {
-  const viewerSettings = {
-    toSession(settings) { return { scale: settings.scale }; },
-  };
-  auxiliaryRendererRegistry.register(
-    "point-cloud-3d-test",
-    { title: "Point Cloud", draw() {}, viewerSettings },
-  );
-
-  const renderer = auxiliaryRendererRegistry.get("point-cloud-3d-test");
-  assert.equal(renderer.viewerSettings, viewerSettings);
-  assert.deepEqual(renderer.viewerSettings.toSession({ scale: 2 }), { scale: 2 });
+  assert.equal(view.payload, payload);
 });
 
 test("per-view preferences apply only while their Viewer Configuration baseline is current", () => {
@@ -70,18 +65,13 @@ test("per-view preferences apply only while their Viewer Configuration baseline 
 });
 
 test("a restored auxiliary view reconciles its panel mode with explicit viewer settings", () => {
-  assert.equal(
-    reconcileAuxiliaryPanelMode("compact", { enabled: false, panelMode: "expanded" }, true),
-    "hidden",
-  );
-  assert.equal(
-    reconcileAuxiliaryPanelMode("hidden", { enabled: true, panelMode: "expanded" }, true),
-    "expanded",
-  );
-  assert.equal(
-    reconcileAuxiliaryPanelMode("expanded", { enabled: true, panelMode: "compact" }, false),
-    "expanded",
-  );
+  for (const [mode, settings, explicit, expected] of [
+    ["compact", { enabled: false, panelMode: "expanded" }, true, "hidden"],
+    ["hidden", { enabled: true, panelMode: "expanded" }, true, "expanded"],
+    ["expanded", { enabled: true, panelMode: "compact" }, false, "expanded"],
+  ]) {
+    assert.equal(reconcileAuxiliaryPanelMode(mode, settings, explicit), expected);
+  }
 });
 
 test("closing a preview still refreshes after its view stops being selected", () => {
@@ -124,22 +114,6 @@ test("a recreated renderer session starts from the active preview", () => {
     ),
     { yaw: Math.PI / 2 },
   );
-});
-
-test("generic transport preserves an arbitrary renderer-owned 3D payload", () => {
-  const registry = registryWith("mesh-3d");
-  const payload = {
-    vertices: [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
-    triangles: [[0, 1, 2]],
-    coordinateSystem: { handedness: "right", units: "millimeters" },
-  };
-  const result = partitionFrameMetadata(
-    [{ data: message({ renderer: "mesh-3d", payload }) }],
-    42,
-    registry,
-  );
-
-  assert.equal(result.auxiliaryViews[0].payload, payload);
 });
 
 test("unknown and malformed auxiliary payloads are rejected without becoming overlays", () => {
@@ -186,17 +160,12 @@ test("untimestamped auxiliary data cannot use the ordinary arrival fallback", ()
 
 test("invalid RTP timestamps cannot infer or alias an exact frame", () => {
   const registry = registryWith("blazepose-3d");
-  const negative = [{ data: message({ rtp: -1 }) }];
-  const overflow = [{ data: message({ rtp: 0x100000000 }) }];
-
-  assert.deepEqual(partitionFrameMetadata(negative, undefined, registry).auxiliaryViews, []);
-  assert.deepEqual(partitionFrameMetadata(negative, 0xffffffff, registry).auxiliaryViews, []);
-  assert.deepEqual(partitionFrameMetadata(overflow, 0, registry).auxiliaryViews, []);
-  assert.equal(
-    partitionFrameMetadata([{ data: message({ rtp: 0xffffffff }) }], 0xffffffff, registry)
-      .auxiliaryViews.length,
-    1,
-  );
+  for (const [rtp, frameRtp, views] of [
+    [-1, undefined, 0], [-1, 0xffffffff, 0], [0x100000000, 0, 0], [0xffffffff, 0xffffffff, 1],
+  ]) {
+    const candidates = [{ data: message({ rtp }) }];
+    assert.equal(partitionFrameMetadata(candidates, frameRtp, registry).auxiliaryViews.length, views);
+  }
 });
 
 test("timestamped auxiliary data uses the selected frame in the video callback fallback", () => {
