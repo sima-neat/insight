@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -32,6 +33,7 @@ import {
   microphoneSubtitle,
   micLevelNotice,
   micTestBlock,
+  micTestToResume,
   micTestAction,
   micTestErrorAction,
   MIC_TEST_IDLE,
@@ -769,6 +771,28 @@ test('microphone test: record, play back, replay, and never a late answer out of
   assert.equal(nextMicTestState(done, { type: 'record' }).status, 'recording', 'test again from a finished test')
   assert.deepEqual(nextMicTestState(failed, { type: 'reset' }), MIC_TEST_IDLE)
   assert.equal(nextMicTestState(undefined, { type: 'nonsense' }), MIC_TEST_IDLE)
+})
+
+test('microphone test: a detail mounted mid-test takes up the board\'s test for its own microphone', () => {
+  const recording = { token: 't', id: yeti.id, state: 'recording', elapsed_ms: 1200, level_dbfs: -20 }
+  const ready = { token: 't', id: yeti.id, state: 'ready', audio_url: '/t.wav', level: { silent: false } }
+  assert.equal(micTestToResume(yeti.id, recording), recording)
+  assert.equal(micTestToResume(yeti.id, ready), ready, 'a recording finished while another mic was shown is kept')
+  assert.equal(micTestToResume(onboardMic.id, recording), null, 'another microphone\'s test is not shown here')
+  assert.equal(micTestToResume(yeti.id, { ...recording, state: 'failed' }), null)
+  assert.equal(micTestToResume(yeti.id, null), null)
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: recording }), { status: 'recording', test: null, error: null })
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: ready }), { status: 'done', test: ready, error: null })
+  const started = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  assert.equal(nextMicTestState(started, { type: 'resume', test: ready }), started, 'a test started here is not replaced')
+})
+
+test('microphone test: the scan\'s in-use state is advisory and the start request rechecks the board', () => {
+  const held = { ...yeti, availability: { state: 'in_use', users: [{ pid: 4242, command: 'arecord' }] } }
+  assert.equal(micTestBlock(held, MIC_TEST_IDLE), 'In use by arecord (pid 4242)', 'still shown beside the button')
+  assert.equal(micTestAction('idle', false).disabled, false)
+  const source = readFileSync(new URL('./MicrophoneDetail.jsx', import.meta.url), 'utf8')
+  assert.match(source, /disabled=\{button\.disabled\}/, 'only the button state disables Test, not the scan')
 })
 
 test('the level meter lights green, then amber, then red, from -50 dBFS to full scale', () => {
