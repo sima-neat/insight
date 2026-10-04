@@ -372,6 +372,26 @@ class BoardChangeTests(unittest.TestCase):
         self.assertIsNone(self.previews._session)
         self.assertTrue(self.transports[0].kills())
 
+    def test_a_refresh_that_cannot_stop_the_preview_keeps_it_and_does_not_scan(self):
+        board_transport, exec_ = self.transports[0], self.transports[0].exec
+        failing = [True]
+
+        def flaky_exec(argv, **kwargs):
+            if failing[0] and "kill $pid" in argv[-1]:
+                raise BoardError("unreachable", "Could not connect to sima@192.168.2.2.")
+            return exec_(argv, **kwargs)
+
+        board_transport.exec = flaky_exec
+        sentinel, identity = self.scan(return_value=catalog(imx477()))
+        with sentinel as sentinel_refresh, identity:
+            response = self.client.post("/api/peripherals/refresh")
+            self.assertEqual((response.status_code, response.get_json()["code"]), (502, "unreachable"))
+            self.assertIn("Stop", response.get_json()["hint"])
+            sentinel_refresh.assert_not_called()
+            self.assertIsNotNone(self.previews._session)
+            failing[0] = False
+            self.assertEqual(self.client.post("/api/peripherals/refresh").status_code, 200)
+        self.assertIsNone(self.previews._session)
 
     def scan(self, *args, **kwargs):
         sentinel = mock.patch.object(peripherals_api.PeripheralClient, "refresh", *args, **kwargs)

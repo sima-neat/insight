@@ -349,12 +349,33 @@ class PreviewManager:
 
     def stop_for_board_change(self) -> None:
         """Stop the preview on its board before Insight closes that board's connection."""
-        with self._idle:
-            self._idle.wait_for(lambda: not self._starting, timeout=START_TIMEOUT_SEC * 2)
-        with self._lock:
-            session = self._session
+        session = self._settled_session()
         if session is not None:
             self._release(session["id"])
+
+    def stop_for_refresh(self, generation: int) -> None:
+        """Stop the preview before a refresh scans its board; refuse the scan when it cannot be stopped.
+
+        Forgetting it instead would let the scan record the camera as held by a preview nobody can stop."""
+        session = self._settled_session()
+        if session is None:
+            return
+        if session["generation"] != generation:
+            self._release(session["id"])  # Another board's preview; the scan does not look at that board.
+            return
+        try:
+            self._stop_current(session["id"])
+        except BoardError as exc:
+            raise BoardError(
+                exc.code,
+                f"Could not stop the camera preview before the scan: {exc.message}",
+                hint="The preview is still running. Stop it, or click Refresh again once the board responds.",
+            ) from exc
+
+    def _settled_session(self) -> Optional[dict]:
+        with self._idle:
+            self._idle.wait_for(lambda: not self._starting, timeout=START_TIMEOUT_SEC * 2)
+            return self._session
 
     def _release(self, session_id: str) -> None:
         try:

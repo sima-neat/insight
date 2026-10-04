@@ -121,7 +121,8 @@ def previewable_mode(item: dict, body: dict) -> dict:
 @preview_bp.before_app_request
 def stop_before_board_change_or_scan():
     """Stop a preview on its board before a board change closes the connection to it, and before a
-    refresh, so the scan sees the camera as applications will find it.
+    refresh, so the scan sees the camera as applications will find it. A refresh that cannot stop the
+    preview on the board it scans is refused, and the preview is kept so it can still be stopped.
 
     A board change or refresh holds the preview lock until its request ends, so no start can launch
     capture on the board between this cleanup and the change of target or the end of the scan."""
@@ -149,7 +150,10 @@ def stop_before_board_change_or_scan():
             return  # The board route reports it and keeps the board.
         if key is None or key_fingerprint(key) != fingerprint:
             return  # The board route rejects a key the board did not present and keeps the board.
-    elif request.endpoint != "peripherals.refresh_peripherals":
+    elif request.endpoint == "peripherals.refresh_peripherals":
+        previews().stop_for_refresh(get_board_manager().session().generation)
+        return
+    else:
         return
     previews().stop_for_board_change()
 
