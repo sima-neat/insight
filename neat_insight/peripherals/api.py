@@ -67,6 +67,7 @@ def refresh_peripherals():
     with scans.refresh_lock(session.generation):
         in_flight = scans.completed_since(session.generation, requested)
         if in_flight:
+            session.require_current()
             return in_flight
         board = board_summary(session, session.identity())
         started = time.monotonic()

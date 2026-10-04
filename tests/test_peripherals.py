@@ -746,6 +746,46 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(results[0], results[1])
 
 
+    def test_a_shared_refresh_is_refused_when_the_board_changed_while_it_waited(self):
+        started, release = threading.Event(), threading.Event()
+        self.use()
+
+        def slow_refresh(client):
+            started.set()
+            release.wait(5)
+            return catalog(imx477(), c920())
+
+        self.sentinel.side_effect = slow_refresh
+        second_waiting = threading.Event()
+        refresh_lock, record = api.scans.refresh_lock, api.scans.record
+
+        def counting_refresh_lock(generation):
+            if started.is_set():
+                second_waiting.set()
+            return refresh_lock(generation)
+
+        def record_then_switch_board(*args):
+            snapshot = record(*args)
+            self.manager.current.stale = True  # /api/board/select lands before the waiter takes the lock
+            return snapshot
+
+        results = {}
+        with mock.patch.object(api.scans, "refresh_lock", counting_refresh_lock), \
+                mock.patch.object(api.scans, "record", record_then_switch_board):
+            first = threading.Thread(target=lambda: results.setdefault("first", self.refresh()))
+            first.start()
+            started.wait(5)
+            second = threading.Thread(target=lambda: results.setdefault("second", self.refresh()))
+            second.start()
+            second_waiting.wait(5)
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(self.sentinel.call_count, 1)
+        self.assertEqual(results["first"].status_code, 200)
+        second = results["second"]
+        self.assertEqual((second.status_code, second.get_json()["code"]), (409, "stale_snapshot"))
+
 class _FakePyneat:
     """Just enough of pyneat to execute the exported Python."""
 
