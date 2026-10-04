@@ -927,8 +927,12 @@
         "summary": "Install Sentinel on the selected board",
         "description": "Runs `sima-cli neat install sentinel` on the board itself (the installer has no `--ip`) with `SIMA_INSTALL_CONTEXT=1`, `SIMA_CLI_CHECK_FOR_UPDATE=0` and a temporary download directory, using passwordless sudo. An installed and healthy daemon is never reinstalled: the installer restarts the daemon and would end a trace in flight, so that case returns `409 already_installed`. Without passwordless sudo the response names the exact command to run on the board.",
         "operationId": "installSentinel",
+        "parameters": [
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the Sentinel state that offered installation. Recommended: a request that outlives a board switch returns `409 stale_snapshot` instead of installing on the board selected now."}
+        ],
         "responses": {
           "200": {"description": "Sentinel installed; the new daemon state and the installer's output.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelInstallResult"}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
           "504": {"$ref": "#/components/responses/BoardErrorResponse"}
@@ -971,6 +975,9 @@
         "summary": "Start a named trace",
         "description": "Starts recording a named trace around a workload. Only one trace can be active and names must be unique, so a second start returns `409 trace_conflict` with Sentinel's own message. The request is validated before it reaches the board: a missing or empty name, a name containing a comma, an over-long note, or tags that are not a list of non-empty strings return `400 invalid_request` without touching it.",
         "operationId": "startSentinelTrace",
+        "parameters": [
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload the form was shown with. Recommended: a request that outlives a board switch returns `409 stale_snapshot` instead of starting a trace on the board selected now."}
+        ],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceRequest"}, "example": {"name": "baseline", "note": "before optimization", "tags": ["compiler-v1"]}}}},
         "responses": {
           "200": {"description": "The trace Sentinel started.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},

@@ -26,6 +26,8 @@ import {
   definitionsByKey,
   deletePrompt,
   deleteRunQuery,
+  installQuery,
+  startTraceQuery,
   stopTraceQuery,
   runActionRef,
   selectionChange,
@@ -1120,6 +1122,16 @@ test('stopping a trace names the board generation the trace was read under', () 
   assert.equal(stopTraceQuery(0), '/api/sentinel/traces/stop?generation=0')
   assert.equal(stopTraceQuery(), '/api/sentinel/traces/stop')
   assert.equal(stopTraceQuery('3'), '/api/sentinel/traces/stop')
+})
+
+test('installing and starting a trace name the board generation they were offered under', () => {
+  assert.equal(installQuery(3), '/api/sentinel/install?generation=3')
+  assert.equal(installQuery(0), '/api/sentinel/install?generation=0')
+  assert.equal(startTraceQuery(3), '/api/sentinel/traces?generation=3')
+  assert.equal(startTraceQuery(0), '/api/sentinel/traces?generation=0')
+  // Without a generation the backend acts on whatever board is selected, so none is invented.
+  assert.equal(installQuery(), '/api/sentinel/install')
+  assert.equal(startTraceQuery('3'), '/api/sentinel/traces')
 })
 
 test('a selection change cancels the comparison still out for the previous selection', () => {

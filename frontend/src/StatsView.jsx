@@ -1131,13 +1131,16 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   }
 
   function install() {
+    // Install on the board whose Sentinel state offered it: a board switched since is refused
+    // with 409 stale_snapshot instead of installing on the board selected now.
+    const stateGeneration = Number.isInteger(state?.generation) ? state.generation : generation
     return send('install', {
       busy: setInstallBusy,
       start: () => {
         setInstallError(null)
         setInstallResult(null)
       },
-      call: installSentinel,
+      call: () => installSentinel(stateGeneration),
       done: async (data, ticket) => {
         setInstallResult(data)
         onStatus?.(`Sentinel installed on ${data.board?.label || 'the board'}.`)
@@ -1161,10 +1164,11 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
       return
     }
     setFormError('')
+    const traceGeneration = Number.isInteger(traces?.generation) ? traces.generation : generation
     await send('trace-action', {
       busy: setTraceBusy,
       start: () => setTraceError(null),
-      call: () => startTrace(result.body),
+      call: () => startTrace(result.body, traceGeneration),
       done: (data) => {
         setTraces(data)
         setForm({ name: '', note: '', tags: '' })

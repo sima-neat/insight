@@ -194,8 +194,16 @@ def get_sentinel():
 # API: install Sentinel on the selected board.
 @sentinel_bp.post("/api/sentinel/install")
 def install_sentinel():
-    """Run `sima-cli neat install sentinel` on the board; refuses when Sentinel is already healthy."""
+    """Run `sima-cli neat install sentinel` on the board; refuses when Sentinel is already healthy
+    or the board changed since `generation`."""
+    expected = _expected_generation(request.args.get("generation"), read="the Sentinel state")
     context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since its Sentinel state was read, so nothing was installed.",
+        "Read Sentinel state for the board selected now, then install again.",
+    )
     result = install.install(context.session)
     cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
     return context.payload(daemon=result["status"], log=result["log"])
@@ -231,9 +239,17 @@ def get_traces():
 # API: start a named trace on the selected board.
 @sentinel_bp.post("/api/sentinel/traces")
 def start_trace():
-    """Start recording a named trace; 409 when another trace is active or the name is taken."""
+    """Start recording a named trace; 409 when another trace is active, the name is taken, or the
+    board changed since `generation`."""
     wanted = _trace_request(request.get_json(silent=True))
+    expected = _expected_generation(request.args.get("generation"), read="the active trace")
     context = _Context()
+    _same_board(
+        context,
+        expected,
+        "The selected board changed since its active trace was read, so no trace was started.",
+        "Read the active trace of the board selected now, then start again.",
+    )
     with _TRACE_LOCK:
         started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
     return context.payload(sentinel=_passthrough(started))

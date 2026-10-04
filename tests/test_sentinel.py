@@ -1252,6 +1252,29 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(body["log"], "Sentinel installed")
         self.assertTrue(self.get("/api/sentinel").get_json()["available"])
 
+    def test_install_offered_for_another_board_is_refused_before_anything_runs(self):
+        # The page showed board A as needing Sentinel; another client selected generation 1 since.
+        response = self.post("/api/sentinel/install?generation=7")
+        body = response.get_json()
+        self.assertEqual((response.status_code, body["code"], body["expected_generation"]), (409, "stale_snapshot", 7))
+        self.assertIn("nothing was installed", body["error"])
+        self.assertEqual(self.transport.calls, [])
+        malformed = self.post("/api/sentinel/install?generation=latest").get_json()
+        self.assertEqual((malformed["code"], self.transport.calls), ("invalid_request", []))
+        self.assertIn("the Sentinel state", malformed["hint"])
+        # The displayed board is still the selected one: the request reaches the installer.
+        self.assertEqual(self.post("/api/sentinel/install?generation=1").get_json()["code"], "already_installed")
+
+    def test_a_trace_started_from_another_boards_form_is_refused_before_anything_runs(self):
+        response = self.post("/api/sentinel/traces?generation=7", json={"name": "baseline"})
+        body = response.get_json()
+        self.assertEqual((response.status_code, body["code"], body["expected_generation"]), (409, "stale_snapshot", 7))
+        self.assertIn("no trace was started", body["error"])
+        self.assertEqual(self.transport.api_paths, [])
+        self.transport.answer("POST", "/v1/traces", 200, {"schema": 1, "trace": {"id": "t1"}})
+        self.assertEqual(self.post("/api/sentinel/traces?generation=1", json={"name": "baseline"}).status_code, 200)
+        self.assertEqual(self.transport.api_paths[-1], ("POST", "/v1/traces"))
+
 
 RUN_A = {"id": "20260924T175231.958Z-baseline", "name": "baseline", "samples": 4}
 RUN_B = {"id": "20260924T174111.540Z-optimized", "name": "optimized", "samples": 4}

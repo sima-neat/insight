@@ -849,6 +849,19 @@ function withGeneration(path, generation) {
   return Number.isInteger(generation) ? `${path}?generation=${generation}` : path
 }
 
+/**
+ * The requests that install Sentinel and start a trace, bound to the board generation of the
+ * Sentinel state and active trace they were offered from: a board another client selected since
+ * is refused with 409 stale_snapshot instead of being installed on or traced.
+ */
+export function installQuery(generation = null) {
+  return withGeneration('/api/sentinel/install', generation)
+}
+
+export function startTraceQuery(generation = null) {
+  return withGeneration('/api/sentinel/traces', generation)
+}
+
 /** The request that deletes one run, bound to the board generation its run list came from. */
 export function deleteRunQuery(ref, generation = null) {
   return withGeneration(`/api/sentinel/runs/${encodeURIComponent(String(ref))}`, generation)
