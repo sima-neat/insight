@@ -45,6 +45,7 @@ import {
   sameSelection,
   selectionTier,
   sessionMatches,
+  sessionToAdopt,
   sizeOptions,
   sortIssues,
   sourceLabel,
@@ -821,6 +822,18 @@ test('an adopted preview selects the camera and the mode it streams, not the def
   assert.deepEqual(wanted, { id: imx477.id, format: 'NV12', width: 1920, height: 1080, fps: 60 })
   assert.deepEqual(resolveSelection(imx477, wanted), session.mode)
   assert.equal(adoptedSelection({ id: 's2', mode: session.mode }), null)
+})
+
+test('a start refused because another tab started a preview adopts that preview', () => {
+  const session = { id: 's1', camera_id: imx477.id, mode: { format: 'NV12', width: 1920, height: 1080, fps: 60 }, state: 'live' }
+  const active = { code: 'preview_active', message: 'A preview is already running.' }
+  assert.equal(sessionToAdopt(active, session), session)
+  const adopted = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'adopt', session: sessionToAdopt(active, session) })
+  assert.deepEqual(adopted, { status: 'live', session, error: null }, 'the pane shows its video and Stop')
+  // Nothing to adopt: the other preview already stopped, or the start failed for another reason.
+  assert.equal(sessionToAdopt(active, null), null)
+  assert.equal(sessionToAdopt(active, { ...session, state: 'stopped' }), null)
+  assert.equal(sessionToAdopt({ code: 'camera_in_use' }, session), null)
 })
 
 test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {

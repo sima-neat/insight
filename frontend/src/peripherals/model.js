@@ -614,6 +614,13 @@ export function adoptedSelection(session) {
   return { id: session.camera_id, format: mode.format, width: mode.width, height: mode.height, fps: mode.fps }
 }
 
+// The running preview a refused start should adopt: another tab started one between this page's
+// load and its start, so the pane shows that preview and its Stop instead of an error. Null otherwise.
+export function sessionToAdopt(error, session) {
+  if (error?.code !== 'preview_active' || !session || session.state === 'stopped') return null
+  return session
+}
+
 export function sessionMatches(session, cameraId, generation, selection = null) {
   if (!session || !cameraId) return false
   if (session.camera_id !== cameraId) return false

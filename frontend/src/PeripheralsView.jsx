@@ -23,6 +23,7 @@ import {
   resolveSelection,
   sameSelection,
   sessionMatches,
+  sessionToAdopt,
   severityInfo,
   sortIssues,
   tierInfo
@@ -287,7 +288,24 @@ export default function PeripheralsView({
         }
       }
     } catch (err) {
-      dispatchPreview({ type: 'failed', error: normalizeError(err) })
+      const error = normalizeError(err)
+      // Another tab started a preview after this page loaded: show that one, with its Stop.
+      const running = error.code === 'preview_active'
+        ? await requestJson('/api/peripherals/preview').then((data) => data.session, () => null)
+        : null
+      const existing = sessionToAdopt(error, running)
+      if (existing) adoptPreview(existing)
+      else dispatchPreview({ type: 'failed', error })
+    }
+  }
+
+  function adoptPreview(session) {
+    dispatchPreview({ type: 'adopt', session })
+    // Follow the running preview, so opening the page does not stop it, and its mode, so the menus match the video.
+    const adopted = adoptedSelection(session)
+    if (adopted) {
+      setSelectedId(adopted.id)
+      setWanted(adopted)
     }
   }
 
@@ -344,15 +362,7 @@ export default function PeripheralsView({
     if (!mounted.current) return
     setSnapshot((prev) => snap || prev)
     setLoading(false)
-    if (existing) {
-      dispatchPreview({ type: 'adopt', session: existing })
-      // Follow the running preview, so opening the page does not stop it, and its mode, so the menus match the video.
-      const adopted = adoptedSelection(existing)
-      if (adopted) {
-        setSelectedId(adopted.id)
-        setWanted(adopted)
-      }
-    }
+    if (existing) adoptPreview(existing)
     if (snap && !snap.scanned_at && boardData?.target && !autoRefreshed.current) {
       autoRefreshed.current = true
       refresh()
