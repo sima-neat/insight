@@ -699,9 +699,7 @@ export function runList(payload) {
 
 /**
  * The reference that opens or deletes the run listed under `ref`: its stable id when Sentinel
- * reported one. `ref` is the run's name, which the list shows and Compare sends, but the
- * backend resolves a reference by id first, so a run named after another run's id would
- * otherwise open or delete that other run.
+ * reported one. `ref` remains the name that the list shows and Compare sends.
  */
 export function runActionRef(runs, ref) {
   const run = (runs || []).find((entry) => entry.ref === String(ref))

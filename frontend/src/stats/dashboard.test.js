@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
   elapsedPath, fixedValue, indexAt, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
-  stackTotals, stackedPaths, sumSeries, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear
+  stackTotals, stackedPaths, sumSeries, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
 } from './dashboard.js'
 import { STATS_TABS, compareTable, isThermalMetric, metricSection, metricsModel, statsTabFrom } from './model.js'
 
@@ -139,6 +139,8 @@ test('compare runs overlays one series per run over elapsed time, baseline first
   const points = [{ t: 0, v: 1 }, { t: 1, v: null }, { t: 2, v: 3 }, { t: 9, v: 5 }]
   assert.equal(elapsedPath(points, 4, { min: 0, max: 4 }, 100, 4), 'M0 3 M50 1 L225 0', 'the first point past the window carries the line to the edge')
   assert.equal(elapsedPath([{ t: 0, v: 1 }, { t: 9, v: 2 }, { t: 12, v: 3 }], 4, { min: 0, max: 4 }, 100, 4), 'M0 3 L225 2', 'and only the first')
+  assert.equal(elapsedPath([{ t: 0, v: 1 }, { t: 2, v: 3 }], 0, { min: 0, max: 4 }, 100, 4), 'M49 3 L51 3', 'a zero common window shows its initial sample as a point')
+  assert.deepEqual(windowPoints([{ t: 0, v: null }, { t: 2, v: 3 }], 0), [{ t: 0, v: null }], 'scale and tooltip see only that same window')
   assert.deepEqual([valueNear(points, 1.2), valueNear([], 1)], [{ t: 2, v: 3 }, null])
 })
 
@@ -164,4 +166,6 @@ test('compare runs takes each run\'s own temperature sensors for the thermal max
   const own = compareOverlay({ sentinel: { baseline_id: 'old', runs: [run('old', 'rtsn_0', [50, 52]), run('new', 'soc_temp', [61, 63])] } }, 'thermal')
   assert.deepEqual(own.lines.map((line) => line.points.map((point) => point.v)), [[50, 52], [61, 63]])
   assert.deepEqual(own.rows.map((row) => row.maximum), [52, 63])
+  const instant = compareOverlay({ sentinel: { baseline_id: 'old', runs: [run('old', 'rtsn_0', [50]), run('new', 'soc_temp', [61, 63])] } }, 'thermal')
+  assert.equal(instant.overlap, 0)
 })

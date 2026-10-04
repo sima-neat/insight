@@ -51,11 +51,9 @@ def _text(value) -> str:
 
 
 def resolve(listing, ref: str) -> dict:
-    """The one run in Sentinel's list that `ref` names, by id first and then by name."""
+    """The one run in Sentinel's list that `ref` names unambiguously by id or name."""
     runs = _runs_of(listing)
-    matches = [run for run in runs if _text(run.get("id")) == ref]
-    if not matches:
-        matches = [run for run in runs if _text(run.get("name")) == ref]
+    matches = [run for run in runs if ref in {_text(run.get("id")), _text(run.get("name"))}]
     if not matches:
         raise SentinelError(
             "not_found",
@@ -67,7 +65,7 @@ def resolve(listing, ref: str) -> dict:
         raise SentinelError(
             "not_found",
             "'{}' names {} runs, so Insight cannot tell which one to delete.".format(ref, len(matches)),
-            hint="Delete the run by its id instead.",
+            hint="Use a reference unique across run ids and names, or delete the intended run in a shell on the board.",
             run=ref,
         )
     return matches[0]

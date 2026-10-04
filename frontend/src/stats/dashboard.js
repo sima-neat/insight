@@ -370,7 +370,7 @@ export function compareOverlay(payload, seriesId) {
       energy: isNumber(body.summaries?.[line.id]?.energy_joules) ? body.summaries[line.id].energy_joules : null
     }
   })
-  return { spec, available, unit, lines, overlap: overlap > 0 ? overlap : Math.max(0, ...ends), rows }
+  return { spec, available, unit, lines, overlap, rows }
 }
 
 /** A padded, outward-rounded comparison scale that keeps small differences visible. */
@@ -387,10 +387,22 @@ export function tightScale(valueLists) {
 }
 
 /** One run as an SVG line, retaining the first clipped point beyond the window. */
-export function elapsedPath(points, window, scale, width, height) {
+export function windowPoints(points, window) {
   const list = points || []
+  if (window <= 0) return list.filter((point) => Math.abs(point.t) <= 1e-9)
   const past = list.findIndex((point) => point.t > window + 1e-9)
-  const inside = past < 0 ? list : list.slice(0, past + 1)
+  return past < 0 ? list : list.slice(0, past + 1)
+}
+
+export function elapsedPath(points, window, scale, width, height) {
+  const inside = windowPoints(points, window)
+  if (window <= 0) {
+    const value = inside.find((point) => isNumber(point.v))?.v
+    if (!isNumber(value)) return ''
+    const middle = round(width / 2)
+    const y = round(yOf(value, scale, height))
+    return `M${middle - 1} ${y} L${middle + 1} ${y}`
+  }
   const segments = []
   let current = []
   for (const point of inside) {

@@ -1088,9 +1088,11 @@ class DeleteRunTests(_ApiCase):
         self.assertEqual(self.listed(), [RUN_A, RUN_B])
         self.runs({"id": "--all", "name": "sneaky"})
         self.refused(self.delete("/api/sentinel/runs/sneaky"), 400, "invalid_request")
-        # A name two runs share is refused in favour of the id.
+        # A reference shared by two runs is refused, whether it appears in names or ids.
         self.runs(RUN_A, dict(RUN_B, name="baseline"))
-        self.assertIn("by its id", self.delete("/api/sentinel/runs/baseline").get_json()["hint"])
+        self.assertIn("unique", self.delete("/api/sentinel/runs/baseline").get_json()["hint"])
+        self.runs(RUN_A, {"name": RUN_A["id"], "samples": 1})
+        self.assertIn("unique", self.delete("/api/sentinel/runs/" + RUN_A["id"]).get_json()["hint"])
         self.runs(dict(RUN_A, state="recording"))
         self.assertIn("Stop the trace", self.refused(self.delete("/api/sentinel/runs/baseline"), 409, "trace_conflict")["hint"])
         self.assertEqual(self.transport.deletes, [])
@@ -1132,21 +1134,9 @@ class DeleteRunTests(_ApiCase):
                 for key, part in contains.items():
                     self.assertIn(part, body[key])
 
-    def test_a_deleted_id_that_another_run_uses_as_its_name_is_not_still_listed(self):
-        namesake = {"id": "20260924T180000.000Z-other", "name": RUN_A["id"], "samples": 4}
-        self.runs(RUN_A, namesake)
-        delete = self.transport._delete
-
-        def delete_by_id_only(target):
-            self.runs(namesake)
-            return ExecResult(0, "Deleted run {}\n".format(target).encode(), b"")
-        self.transport._delete = delete_by_id_only
-        self.addCleanup(setattr, self.transport, "_delete", delete)
-        response = self.delete("/api/sentinel/runs/" + RUN_A["id"])
-        self.assertEqual((response.status_code, response.get_json()["deleted"]), (200, {"id": RUN_A["id"], "name": "baseline"}))
+    def test_an_idless_run_is_confirmed_gone_by_its_name(self):
         # A run without an id is deleted by name, and its name is what must disappear.
         self.runs({"name": "legacy", "samples": 1})
-        self.transport._delete = delete
         self.transport.delete_result = ExecResult(0, b"", b"")
         self.assertIn("still lists run 'legacy'", self.refused(self.delete("/api/sentinel/runs/legacy"), 502, "sentinel_failed")["error"])
 

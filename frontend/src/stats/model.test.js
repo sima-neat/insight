@@ -625,7 +625,7 @@ test('stopping a trace names the trace on screen, so a trace that replaced it is
   assert.equal(stopTraceQuery(3, ''), '/api/sentinel/traces/stop?generation=3')
 })
 
-test('opening or deleting a run uses its stable id, not a name another run has as its id', () => {
+test('opening or deleting a run uses its stable id while the list and Compare keep its name', () => {
   const rows = runList({ sentinel: { runs: [{ id: 'a1', name: 'x' }, { id: 'x', name: 'y' }, { name: 'no-id' }] } })
   assert.deepEqual(rows.map((run) => run.ref), ['x', 'y', 'no-id'], 'the list and Compare keep the names')
   assert.deepEqual(['x', 'y', 'no-id', 'gone'].map((ref) => runActionRef(rows, ref)), ['a1', 'x', 'no-id', 'gone'])
