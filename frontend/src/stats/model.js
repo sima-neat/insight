@@ -548,8 +548,8 @@ export function chipKeyTarget(key, index, length) {
 }
 
 /**
- * An SVG polyline for one metric's recent values, scaled to the card.
- * Gaps (nulls) are dropped rather than drawn as zero, and a flat series stays centred.
+ * SVG polyline segments for one metric's recent values, scaled to the card.
+ * Gaps (nulls) split the line rather than joining readings across an outage.
  */
 export function sparkline(values, width = 120, height = 28) {
   const points = (values || []).map((value, index) => ({ index, value })).filter((point) => isNumber(point.value))
@@ -559,12 +559,22 @@ export function sparkline(values, width = 120, height = 28) {
   const max = Math.max(...numbers)
   const span = max - min || 1
   const steps = Math.max(1, (values.length || 1) - 1)
-  const scaled = points.map((point) => {
+  const scaled = new Map(points.map((point) => {
     const x = (point.index / steps) * width
     const y = height - ((point.value - min) / span) * (height - 2) - 1
-    return `${Number(x.toFixed(1))},${Number(y.toFixed(1))}`
-  })
-  return { points: scaled.join(' '), min, max, count: points.length }
+    return [point.index, `${Number(x.toFixed(1))},${Number(y.toFixed(1))}`]
+  }))
+  const segments = []
+  let segment = []
+  for (let index = 0; index < (values || []).length; index += 1) {
+    if (scaled.has(index)) segment.push(scaled.get(index))
+    else if (segment.length) {
+      segments.push(segment.join(' '))
+      segment = []
+    }
+  }
+  if (segment.length) segments.push(segment.join(' '))
+  return { segments, min, max, count: points.length }
 }
 
 export function sparklineLabel(metric, spark) {

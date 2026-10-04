@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
   elapsedPath, fixedValue, indexAt, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
-  stackTotals, stackedPaths, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
+  sharedThresholdLines, stackTotals, stackedPaths, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
 } from './dashboard.js'
 import { STATS_TABS, compareTable, isThermalMetric, metricSection, metricsModel, statsTabFrom } from './model.js'
 
@@ -59,6 +59,8 @@ test('the live board: thermal groups in Sentinel order, cores and rails by key, 
   assert.equal(metricsMatching(model, /^power_rail_/).length, 8)
   assert.deepEqual(thresholdLines({ warn: 70, critical: 85 }), [{ value: 70, tone: 'warn' }, { value: 85, tone: 'critical' }])
   assert.deepEqual(thresholdLines({ warn: null }), [])
+  assert.deepEqual(sharedThresholdLines([{ warn: 70, critical: 85 }, { warn: 70, critical: 85 }]), thresholdLines({ warn: 70, critical: 85 }))
+  assert.deepEqual(sharedThresholdLines([{ warn: 70, critical: 85 }, { warn: 80, critical: 95 }]), [])
   assert.deepEqual([100, 2.5, 1788, null].map(axisLabel), ['100', '2.5', '1,788', ''])
 })
 
@@ -143,7 +145,7 @@ test('compare runs overlays one series per run over elapsed time, baseline first
   assert.equal(elapsedPath([{ t: 0, v: 1 }, { t: 9, v: 2 }, { t: 12, v: 3 }], 4, { min: 0, max: 4 }, 100, 4), 'M0 3 L225 2', 'and only the first')
   assert.equal(elapsedPath([{ t: 0, v: 1 }, { t: 2, v: 3 }], 0, { min: 0, max: 4 }, 100, 4), 'M49 3 L51 3', 'a zero common window shows its initial sample as a point')
   assert.deepEqual(windowPoints([{ t: 0, v: null }, { t: 2, v: 3 }], 0), [{ t: 0, v: null }], 'scale and tooltip see only that same window')
-  assert.deepEqual([valueNear(points, 1.2), valueNear([], 1)], [{ t: 2, v: 3 }, null])
+  assert.deepEqual([valueNear(points, 1.2), valueNear(points, 1), valueNear([], 1)], [{ t: 1, v: null }, { t: 1, v: null }, null])
 })
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {

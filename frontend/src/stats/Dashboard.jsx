@@ -13,6 +13,7 @@ import {
   niceCeil,
   scaleFor,
   seriesOf,
+  sharedThresholdLines,
   stackTotals,
   thermalGroups,
   thermalMaxSeries,
@@ -104,7 +105,7 @@ function ThermalMaxChart({ model, height }) {
       scale={scaleFor('C', [values])}
       unit="C"
       timestamps={model.timestamps}
-      thresholds={thresholdLines(sensors[0])}
+      thresholds={sharedThresholdLines(sensors)}
       tone={worst?.status}
       height={height}
     />
@@ -144,7 +145,9 @@ export function OpsList({ metrics, series, caption }) {
               <td className="stats-ops-history">
                 {spark ? (
                   <svg className="stats-ops-spark" viewBox="0 0 400 20" preserveAspectRatio="none" role="img" aria-label={sparklineLabel(metric, spark)} focusable="false">
-                    <polyline points={spark.points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                    {spark.segments.map((points) => (
+                      <polyline key={points} points={points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                    ))}
                   </svg>
                 ) : (
                   <span className="stats-ops-spark empty" aria-hidden="true" />

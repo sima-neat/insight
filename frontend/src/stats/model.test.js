@@ -84,11 +84,11 @@ test('the metrics payload becomes highlights, groups and a summary line, and sti
   assert.deepEqual([metricsModel(null).groups, metricsModel(null).highlights], [[], []])
 })
 
-test('sparklines skip gaps, need two points, and describe themselves', () => {
+test('sparklines preserve gaps, need two points, and describe themselves', () => {
   const spark = sparkline([70, null, 72], 100, 20)
-  assert.deepEqual([spark.count, spark.min, spark.max, spark.points], [2, 70, 72, '0,19 100,1'])
+  assert.deepEqual([spark.count, spark.min, spark.max, spark.segments], [2, 70, 72, ['0,19', '100,1']])
   for (const values of [[70], [null, null], []]) assert.equal(sparkline(values, 100, 20), null)
-  assert.equal(sparkline([5, 5], 100, 20).points, '0,19 100,19')
+  assert.deepEqual(sparkline([5, 5], 100, 20).segments, ['0,19 100,19'])
   assert.equal(sparklineLabel({ label: 'MLA RTSN-0', unit: 'C' }, spark), 'MLA RTSN-0: 2 recent samples, 70 °C to 72 °C')
   assert.equal(sparklineLabel({ label: 'x' }, null), '')
 })

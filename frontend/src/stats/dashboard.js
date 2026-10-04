@@ -201,6 +201,12 @@ export function thresholdLines(metric) {
   return lines
 }
 
+/** Thresholds that apply to every metric in a derived mixed-sensor series. */
+export function sharedThresholdLines(metrics) {
+  const first = thresholdLines((metrics || [])[0])
+  return (metrics || []).every((metric) => JSON.stringify(thresholdLines(metric)) === JSON.stringify(first)) ? first : []
+}
+
 /** An axis label: few digits, thousands separated, no unit. */
 export function axisLabel(value) {
   if (!isNumber(value)) return ''
@@ -423,7 +429,7 @@ export function elapsedPath(points, window, scale, width, height) {
 export function valueNear(points, t) {
   let best = null
   for (const point of points || []) {
-    if (!isNumber(point.v)) continue
+    if (!isNumber(point.t)) continue
     if (!best || Math.abs(point.t - t) < Math.abs(best.t - t)) best = point
   }
   return best
