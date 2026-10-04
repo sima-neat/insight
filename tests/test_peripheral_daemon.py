@@ -139,15 +139,23 @@ class PeripheralClientTests(unittest.TestCase):
             return response
 
         interval = {"numerator": 1, "denominator": 30, "type": "discrete"}
+        fraction = {"numerator": 1, "denominator": 30}
+        stepwise = {"type": "stepwise", "minimum": fraction, "maximum": {"numerator": 1, "denominator": 5}, "step": fraction}
+        zeroed = [dict(interval, numerator=0), dict(interval, denominator=0)] + [
+            dict(stepwise, **{key: dict(fraction, **{part: 0})})
+            for key in ("minimum", "maximum", "step") for part in ("numerator", "denominator")
+        ] + [dict(stepwise, step=None), dict(stepwise, step={"numerator": 0.0, "denominator": 30}),
+             {"type": "continuous", "minimum": fraction, "maximum": {"numerator": 0, "denominator": 5}}]
         for value in ([None], 5, {}, [{"width": 1920, "height": 1080, "intervals": 5}],
-                      [{"width": 1920, "height": 1080, "intervals": [None]}], [{"width": 1920, "height": 1080}]):
+                      [{"width": 1920, "height": 1080, "intervals": [None]}], [{"width": 1920, "height": 1080}],
+                      *([{"width": 1920, "height": 1080, "intervals": [bad]}] for bad in zeroed)):
             with self.subTest(frame_intervals=value), mock.patch.object(
                 socket_client, "request", return_value=(200, json.dumps(with_intervals(value)))
             ):
                 with self.assertRaises(BoardError) as ctx:
                     PeripheralClient(FakeSession()).catalog()
                 self.assertEqual(ctx.exception.code, "peripheral_response")
-        valid = with_intervals([{"width": 1920, "height": 1080, "intervals": [interval]}])
+        valid = with_intervals([{"width": 1920, "height": 1080, "intervals": [interval, stepwise]}])
         with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
             self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
 

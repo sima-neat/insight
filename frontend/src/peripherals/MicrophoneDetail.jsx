@@ -10,6 +10,7 @@ import {
   micTestBlock,
   micTestAction,
   micTestErrorAction,
+  micTestToResume,
   meterSegments,
   microphoneRows,
   microphoneSubtitle,
@@ -109,8 +110,9 @@ function MicTest({ mic }) {
   const [stopping, setStopping] = useState(false)
   const audioRef = useRef(null)
   const mounted = useRef(true)
+  // Set once a test is started or taken up here, so the backend's test is resumed at most once.
+  const engaged = useRef(false)
   const meter = useAudioMeter()
-  useEffect(() => () => { mounted.current = false }, [])
 
   const poll = async (token) => {
     let answer
@@ -134,7 +136,32 @@ function MicTest({ mic }) {
     }
   }
 
+  // Switching microphones unmounts this detail but not the board's recording: take up a test
+  // still recording for this microphone, or its finished recording, instead of looking idle.
+  const resume = async () => {
+    let answer
+    try {
+      answer = micTestToResume(mic.id, (await readMicrophoneTest({ isActive: () => mounted.current })).test)
+    } catch {
+      return
+    }
+    if (!answer || !mounted.current || engaged.current) return
+    engaged.current = true
+    dispatch({ type: 'resume', test: answer })
+    if (answer.state !== 'recording') return
+    setLevel(answer.level_dbfs)
+    setElapsed(answer.elapsed_ms)
+    poll(answer.token)
+  }
+
+  useEffect(() => {
+    mounted.current = true
+    resume()
+    return () => { mounted.current = false }
+  }, [])
+
   const record = async () => {
+    engaged.current = true
     meter.prepare()
     setLevel(null)
     setElapsed(0)
@@ -215,7 +242,7 @@ function MicTest({ mic }) {
           type="button"
           className="btn-tonal periph-mic-button"
           onClick={onButton}
-          disabled={button.disabled || (button.action === 'record' && Boolean(block))}
+          disabled={button.disabled}
           aria-describedby={block ? 'periph-mic-test-block' : undefined}
         >
           {button.label}

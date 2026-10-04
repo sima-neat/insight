@@ -305,6 +305,11 @@ export function nextMicTestState(current, event) {
       return state.status === 'playing' ? { ...state, status: 'done' } : state
     case 'replay':
       return state.status === 'done' ? { ...state, status: 'playing' } : state
+    case 'resume': // a test the backend was already running or finished for this microphone
+      if (state.status !== 'idle' || !event.test) return state
+      return event.test.state === 'recording'
+        ? { status: 'recording', test: null, error: null }
+        : { status: 'done', test: event.test, error: null }
     case 'reset':
       return MIC_TEST_IDLE
     default:
@@ -326,7 +331,17 @@ export function segmentTone(index, count) {
   return 'high'
 }
 
-// Why the Test button is disabled, or '' when it is not.
+// The backend's current test when it belongs to this microphone and is still recording or has a
+// recording to replay. A detail mounted after it started (another microphone was selected in
+// between) takes it up instead of looking idle while the board records.
+export function micTestToResume(micId, test) {
+  if (!test || test.id !== micId) return null
+  return test.state === 'recording' || test.state === 'ready' ? test : null
+}
+
+// What the last scan says holds the microphone, shown beside the Test button, or ''. Advisory
+// only: the button stays enabled because the start request checks the board now and answers
+// `microphone_in_use` when the device really is held.
 export function micTestBlock(mic, state) {
   if (state?.status === 'recording' || state?.status === 'playing') return ''
   if (mic?.availability?.state === 'in_use') return availabilityInfo(mic.availability).label
@@ -467,6 +482,30 @@ export function fpsOptions(camera, format, width, height) {
     label: `${fpsLabel(f.value)} fps`,
     tier: f.tier
   }))
+}
+
+// The formats POST /api/peripherals/cameras/export returns, by connection, with its labels.
+const MIPI_EXPORTS = [
+  { id: 'python', label: 'Python (pyneat)' },
+  { id: 'cpp', label: 'C++ (Neat)' },
+  { id: 'json', label: 'JSON' }
+]
+const USB_EXPORTS = [
+  { id: 'yaml', label: 'YAML descriptor' },
+  { id: 'json', label: 'JSON descriptor' }
+]
+
+export function exportChoices(camera) {
+  return camera?.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS
+}
+
+// Why the export refuses the selected mode, or '' when it accepts it: a USB mode always exports as a
+// descriptor; a MIPI mode needs a frame rate Neat Core's rules verified.
+export function exportBlockReason(camera, selection) {
+  if (!selection || camera?.connection === 'usb') return ''
+  const rate = findFps(findSize(findFormat(camera, selection.format), selection.width, selection.height), selection.fps)
+  if (rate?.tier === 'verified') return ''
+  return rate?.reason || "Neat Core's support rules do not accept this mode."
 }
 
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a

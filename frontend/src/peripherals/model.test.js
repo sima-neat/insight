@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -16,6 +17,8 @@ import {
   defaultTargetText,
   deviceRows,
   deviceTabs,
+  exportBlockReason,
+  exportChoices,
   formatDuration,
   formatOptions,
   formatRangeLabel,
@@ -30,6 +33,7 @@ import {
   microphoneSubtitle,
   micLevelNotice,
   micTestBlock,
+  micTestToResume,
   micTestAction,
   micTestErrorAction,
   MIC_TEST_IDLE,
@@ -769,6 +773,28 @@ test('microphone test: record, play back, replay, and never a late answer out of
   assert.equal(nextMicTestState(undefined, { type: 'nonsense' }), MIC_TEST_IDLE)
 })
 
+test('microphone test: a detail mounted mid-test takes up the board\'s test for its own microphone', () => {
+  const recording = { token: 't', id: yeti.id, state: 'recording', elapsed_ms: 1200, level_dbfs: -20 }
+  const ready = { token: 't', id: yeti.id, state: 'ready', audio_url: '/t.wav', level: { silent: false } }
+  assert.equal(micTestToResume(yeti.id, recording), recording)
+  assert.equal(micTestToResume(yeti.id, ready), ready, 'a recording finished while another mic was shown is kept')
+  assert.equal(micTestToResume(onboardMic.id, recording), null, 'another microphone\'s test is not shown here')
+  assert.equal(micTestToResume(yeti.id, { ...recording, state: 'failed' }), null)
+  assert.equal(micTestToResume(yeti.id, null), null)
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: recording }), { status: 'recording', test: null, error: null })
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: ready }), { status: 'done', test: ready, error: null })
+  const started = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  assert.equal(nextMicTestState(started, { type: 'resume', test: ready }), started, 'a test started here is not replaced')
+})
+
+test('microphone test: the scan\'s in-use state is advisory and the start request rechecks the board', () => {
+  const held = { ...yeti, availability: { state: 'in_use', users: [{ pid: 4242, command: 'arecord' }] } }
+  assert.equal(micTestBlock(held, MIC_TEST_IDLE), 'In use by arecord (pid 4242)', 'still shown beside the button')
+  assert.equal(micTestAction('idle', false).disabled, false)
+  const source = readFileSync(new URL('./MicrophoneDetail.jsx', import.meta.url), 'utf8')
+  assert.match(source, /disabled=\{button\.disabled\}/, 'only the button state disables Test, not the scan')
+})
+
 test('the level meter lights green, then amber, then red, from -50 dBFS to full scale', () => {
   assert.equal(meterSegments(null, 20), 0)
   assert.equal(meterSegments(-80, 20), 0)
@@ -802,4 +828,15 @@ test('microphone test: one button records, stops the recording, then stops the p
   assert.deepEqual(micTestAction('playing', false), { label: 'Stop playing', action: 'stop-playing', disabled: false })
   assert.equal(micTestAction('done', false).action, 'record')
   assert.equal(micTestAction('error', false).action, 'record')
+})
+
+test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {
+  assert.deepEqual(exportChoices(imx477).map((c) => c.id), ['python', 'cpp', 'json'])
+  assert.deepEqual(exportChoices(usb).map((c) => c.id), ['yaml', 'json'])
+  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), '')
+  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 60 }), "Neat Core's support rules do not accept this mode.")
+  const refused = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [{ width: 640, height: 480, fps: [{ value: 90, tier: 'unsupported', reason: 'The sensor has no 90 fps mode.' }] }])] }
+  assert.equal(exportBlockReason(refused, { format: 'NV12', width: 640, height: 480, fps: 90 }), 'The sensor has no 90 fps mode.')
+  assert.equal(exportBlockReason(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), '', 'a USB mode exports as a descriptor')
+  assert.equal(exportBlockReason(imx477, null), '')
 })
