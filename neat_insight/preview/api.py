@@ -1,5 +1,6 @@
 import ipaddress
 import re
+import time
 from typing import Optional
 
 from flask import Blueprint, current_app, g, request
@@ -121,9 +122,11 @@ def stop_before_board_change_or_scan():
     """Stop a preview on its board before a board change closes the connection to it, and before a
     refresh, so the scan sees the camera as applications will find it.
 
-    A board change holds the preview lock until its request ends, so no start can launch capture on
-    the board between this cleanup and the change of target."""
-    if request.endpoint in ("board.select_board", "board.trust_board_host_key"):
+    A board change or refresh holds the preview lock until its request ends, so no start can launch
+    capture on the board between this cleanup and the change of target or the end of the scan."""
+    if request.endpoint in ("board.select_board", "board.trust_board_host_key", "peripherals.refresh_peripherals"):
+        # A refresh queued here behind another one still shares that refresh's result.
+        g.refresh_requested_at = time.monotonic()
         previews().board_lock.acquire()
         g.preview_board_lock = True
     if request.endpoint == "board.select_board":

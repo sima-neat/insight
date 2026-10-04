@@ -357,5 +357,69 @@ class BoardChangeTests(unittest.TestCase):
         self.assertTrue(self.transports[0].kills())
 
 
+    def scan(self, *args, **kwargs):
+        sentinel = mock.patch.object(peripherals_api.PeripheralClient, "refresh", *args, **kwargs)
+        identity = mock.patch.object(manager_module.BoardSession, "identity", return_value={"fingerprint": "fp"})
+        return sentinel, identity
+
+    def test_a_refresh_waits_for_a_slow_start_to_finish_and_then_stops_it(self):
+        self.previews.stop_for_board_change()
+        entered, release, scanned_while_starting, results = threading.Event(), threading.Event(), [], []
+        start_worker = preview.PreviewManager._start_worker
+
+        def slow_start_worker(manager, *args):
+            entered.set()
+            release.wait(5)
+            return start_worker(manager, *args)
+
+        def sentinel_refresh(client):
+            scanned_while_starting.append(not release.is_set())
+            return catalog(imx477())
+
+        def post(path, **kwargs):
+            results.append((path, self.app.test_client().post(path, **kwargs).status_code))
+
+        sentinel, identity = self.scan(side_effect=sentinel_refresh, autospec=True)
+        # Longer than the start-wait timeout, as a slow board makes a real start.
+        with sentinel, identity, mock.patch.object(preview, "START_TIMEOUT_SEC", 0.01), \
+                mock.patch.object(preview.PreviewManager, "_start_worker", slow_start_worker):
+            starter = threading.Thread(target=post, args=(PREVIEW,), kwargs={"json": {"id": IMX477}})
+            starter.start()
+            self.assertTrue(entered.wait(5))
+            refresher = threading.Thread(target=post, args=("/api/peripherals/refresh",))
+            refresher.start()
+            refresher.join(0.5)
+            release.set()
+            starter.join(5)
+            refresher.join(5)
+        self.assertEqual(sorted(results), [("/api/peripherals/cameras/preview", 200), ("/api/peripherals/refresh", 200)])
+        self.assertEqual(scanned_while_starting, [False])
+        self.assertIsNone(self.previews._session)
+
+    def test_refreshes_queued_behind_the_preview_lock_still_share_one_scan(self):
+        entered, release, results = threading.Event(), threading.Event(), []
+
+        def slow_refresh(client):
+            entered.set()
+            release.wait(5)
+            return catalog(imx477())
+
+        def post():
+            results.append(self.app.test_client().post("/api/peripherals/refresh").get_json())
+
+        sentinel, identity = self.scan(side_effect=slow_refresh, autospec=True)
+        with sentinel as refresh, identity:
+            first = threading.Thread(target=post)
+            first.start()
+            self.assertTrue(entered.wait(5))
+            second = threading.Thread(target=post)
+            second.start()
+            second.join(0.3)
+            release.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(refresh.call_count, 1)
+        self.assertEqual(results[0], results[1])
+
 if __name__ == "__main__":
     unittest.main()

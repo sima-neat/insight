@@ -3,7 +3,7 @@ import logging
 import time
 from pathlib import Path
 
-from flask import Blueprint, request
+from flask import Blueprint, g, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.manager import board_summary
@@ -62,7 +62,8 @@ def get_peripherals():
 @peripherals_bp.post("/api/peripherals/refresh")
 def refresh_peripherals():
     """Ask SiMa Sentinel to rescan, then return a new snapshot, or the result of a refresh in flight."""
-    requested = time.monotonic()
+    # The preview's board lock can queue this request; a refresh in flight when it arrived still counts.
+    requested = g.get("refresh_requested_at") or time.monotonic()
     session = get_board_manager().session()
     with scans.refresh_lock(session.generation):
         in_flight = scans.completed_since(session.generation, requested)
