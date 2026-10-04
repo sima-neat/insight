@@ -76,7 +76,11 @@ def _trace_request(body) -> dict:
             "Send a unique name; Sentinel rejects a name another run already uses.",
         )
     name = name.strip()
-    if len(name.encode("utf-8")) > NAME_LIMIT:
+    try:
+        name_bytes = len(name.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise _invalid("A trace name must be valid Unicode text.", "Remove invalid Unicode characters.") from None
+    if name_bytes > NAME_LIMIT:
         raise _invalid("A trace name can be at most {} UTF-8 bytes.".format(NAME_LIMIT), "Shorten the name.")
     if any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in name):
         raise _invalid("A trace name cannot contain control characters.", "Remove line breaks and control characters.")

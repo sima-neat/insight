@@ -983,7 +983,7 @@ class SentinelApiTests(_ApiCase):
         for name in ("before,after", "a, b", ","):
             with self.subTest(name=name):
                 self.assertIn("comma", self.refused(self.post("/api/sentinel/traces", json={"name": name}), 400, "invalid_request")["error"])
-        for name, reason in (("a" * 81, "80 UTF-8 bytes"), ("é" * 41, "80 UTF-8 bytes"), ("a\nb", "control characters")):
+        for name, reason in (("a" * 81, "80 UTF-8 bytes"), ("é" * 41, "80 UTF-8 bytes"), ("a\nb", "control characters"), ("\ud800", "valid Unicode")):
             with self.subTest(name=name):
                 self.assertIn(reason, self.refused(self.post("/api/sentinel/traces", json={"name": name}), 400, "invalid_request")["error"])
         self.assertIn("baseline", self.refused(self.get("/api/sentinel/compare?runs=baseline"), 400, "invalid_request")["hint"])
