@@ -125,8 +125,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "trace_conflict"))
         self.assertEqual([(call[2], call[3]) for call in self.transport.api_calls], [("GET", "/v1/traces/active")])
 
-    def test_a_sample_read_across_a_daemon_restart_is_discarded(self):
-        self.transport.status_instances = ["inv-1", "inv-2"]
+    def test_telemetry_retries_when_the_daemon_restarts_mid_read(self):
+        self.transport.status_instances = ["inv-1", "inv-2", "inv-2", "inv-2"]
         self.transport.api[("GET", "/v1/samples/latest")] = (
             200,
             {"schema": 1, "version": "v2", "sample": {"timestamp": "2026-10-04T06:48:00Z", "values": {"power": 8}}},
@@ -135,10 +135,13 @@ class ApiTests(unittest.TestCase):
             200,
             {"schema": 1, "metrics": [{"key": "power", "label": "Power", "unit": "W"}]},
         )
-        with mock.patch.object(api.cache_history, "read", side_effect=AssertionError("unstable sample must not seed")):
+        with mock.patch.object(api.cache_history, "read", return_value=[]):
             payload = self.client.get("/api/sentinel/metrics?history=10").get_json()
-        self.assertIsNone(payload["sampled_at"])
-        self.assertEqual(payload["history"]["timestamps"], [])
+        self.assertEqual(payload["sampled_at"], "2026-10-04T06:48:00Z")
+        self.assertEqual(
+            [call[3] for call in self.transport.api_calls],
+            ["/v1/samples/latest", "/v1/metrics", "/v1/samples/latest", "/v1/metrics"],
+        )
 
 
 class ResponseLimitTests(unittest.TestCase):
