@@ -1164,6 +1164,15 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertFalse(mictest._current.stop_requested)
 
 
+    def test_another_board_cannot_download_the_recording(self):
+        test = mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
+        test.finish(wav=b"RIFF....")
+        url = f"/api/peripherals/microphones/test/{test.token}.wav"
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.manager.current = FakeSession(2, self.transport)  # /api/board/select picked another board
+        response = self.client.get(url)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (404, "not_found"))
+
 def sine(amplitude: float, frames: int = 4800, channels: int = 2) -> bytes:
     values = [int(amplitude * 32767 * math.sin(2 * math.pi * 440 * i / 48000)) for i in range(frames)]
     return struct.pack("<%dh" % (channels * frames), *[v for v in values for _ in range(channels)])
@@ -1246,7 +1255,7 @@ class MicrophoneTestTests(unittest.TestCase):
         self.assertEqual(status["format"]["seconds"], 1)
         test.thread.join(2)
         self.assertEqual(test.status()["state"], "ready")
-        self.assertEqual(mictest.audio(test.token)[:4], b"RIFF")
+        self.assertEqual(mictest.audio(test.token, 1)[:4], b"RIFF")
         self.assertEqual(len(test.pcm), 0, "the raw capture is dropped once the WAV is made")
         for result, code in ((ExecResult(127, b"", b"arecord: not found"), "tool_missing"),
                              (ExecResult(1, b"", b"arecord: main:831: audio open error: Device or resource busy"), "microphone_in_use"),
@@ -1255,7 +1264,7 @@ class MicrophoneTestTests(unittest.TestCase):
                 _, test = self.run_test(lambda argv, **kwargs: result)
                 test.thread.join(2)
                 self.assertEqual((test.status()["state"], test.status()["error"]["code"]), ("failed", code))
-                self.assertIsNone(mictest.audio(test.token))
+                self.assertIsNone(mictest.audio(test.token, 1))
 
     def test_stop_interrupts_a_stalled_capture_and_an_early_stop_is_reported(self):
         for chunk, state in ((sine(0.5), "ready"), (b"\0" * 100, "failed")):

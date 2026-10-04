@@ -911,12 +911,13 @@
       "get": {
         "tags": ["Peripherals"],
         "summary": "Download the test recording",
-        "description": "The finished recording as 16-bit PCM WAV. `404` once a newer test replaced it.",
+        "description": "The finished recording of the selected board as 16-bit PCM WAV. `404` once a newer test replaced it or another board was selected.",
         "operationId": "getMicrophoneTestAudio",
         "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {
           "200": {"description": "The recording.", "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}}},
-          "404": {"$ref": "#/components/responses/BoardErrorResponse"}
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
