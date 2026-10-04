@@ -348,12 +348,13 @@ export function compareOverlay(payload, seriesId) {
   const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples) && run.samples.length)
   if (!spec || !runs.length) return null
   const defs = runs[0].metrics || []
-  const thermalKeys = defs.filter(isThermalMetric).map((definition) => definition.key)
   const definition = spec.thermal ? null : defs.find((entry) => entry.key === spec.key)
   const unit = spec.thermal ? 'C' : definition?.unit ?? ''
   const baselineId = body.baseline_id
 
   const lines = runs.map((run) => {
+    // Each run's own sensors: a run recorded on another build can name its temperatures differently.
+    const thermalKeys = (Array.isArray(run.metrics) ? run.metrics : defs).filter(isThermalMetric).map((entry) => entry.key)
     const start = seconds(run.samples[0].timestamp)
     const points = run.samples.map((sample) => {
       const values = sample?.values || {}

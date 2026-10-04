@@ -139,6 +139,18 @@ test('compare runs offers only the series the runs recorded, and derives the the
   assert.equal(compareOverlay({ sentinel: { runs: [] } }, 'power'), null)
 })
 
+test('compare runs takes each run\'s own temperature sensors for the thermal maximum', () => {
+  const run = (id, key, values) => ({
+    metadata: { id, name: id },
+    metrics: [{ key, label: `${key} temperature`, unit: 'C' }, { key: 'power_current_watts', unit: 'W' }],
+    samples: values.map((value, index) => ({ timestamp: `2026-09-25T00:00:0${index}Z`, values: { [key]: value, power_current_watts: 9 } }))
+  })
+  const payload = { sentinel: { baseline_id: 'old', runs: [run('old', 'rtsn_0', [50, 52]), run('new', 'soc_temp', [61, 63])] } }
+  const thermal = compareOverlay(payload, 'thermal')
+  assert.deepEqual(thermal.lines.map((line) => line.points.map((point) => point.v)), [[50, 52], [61, 63]])
+  assert.deepEqual(thermal.rows.map((row) => row.maximum), [52, 63])
+})
+
 test('the overlay path stays inside the common window and breaks on missing samples', () => {
   const points = [{ t: 0, v: 1 }, { t: 1, v: null }, { t: 2, v: 3 }, { t: 9, v: 5 }]
   assert.equal(elapsedPath(points, 4, { min: 0, max: 4 }, 100, 4), 'M0 3 M50 1 L225 0', 'the first point past the window carries the line to the edge')
