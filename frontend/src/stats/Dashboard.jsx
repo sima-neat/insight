@@ -71,7 +71,6 @@ function ThermalMaxChart({ model, height }) {
       scale={scaleFor('C', [values])}
       unit="C"
       timestamps={model.timestamps}
-      thresholds={thresholdLines(worst)}
       tone={worst?.status}
       height={height}
     />

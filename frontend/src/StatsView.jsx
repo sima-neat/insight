@@ -822,7 +822,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const sentinelAvailable = Boolean(state?.available)
   useEffect(() => {
     if (!sentinelAvailable) return undefined
-    return pollWhileVisible(loadRuns, RUNS_POLL_MS)
+    return pollWhileVisible(() => loadState({ quiet: true }), RUNS_POLL_MS)
   }, [sentinelAvailable, generation])
 
   const boardProblem = boardError || (stateError?.board ? stateError : null)
