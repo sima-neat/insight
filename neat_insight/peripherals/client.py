@@ -72,9 +72,13 @@ INTERVAL_FRACTIONS = {"stepwise": ("minimum", "maximum", "step"), "continuous": 
 def _valid_interval(interval) -> bool:
     if not isinstance(interval, dict):
         return False
-    if interval.get("type") == "discrete":
+    kind = interval.get("type")
+    if kind == "discrete":
         return _fraction(interval)
-    return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS.get(interval.get("type"), ()))
+    # The snapshot reads any other kind as a range, so an unknown or missing kind must not pass.
+    if not isinstance(kind, str) or kind not in INTERVAL_FRACTIONS:
+        return False
+    return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind])
 
 
 class PeripheralClient:

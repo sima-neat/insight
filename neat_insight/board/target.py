@@ -43,6 +43,11 @@ class BoardTarget:
 
 
 def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> dict:
+    # Text only: str() would save the JSON number 2130706433 as a host that resolves to 127.0.0.1.
+    if host is not None and not isinstance(host, str):
+        raise BoardError("invalid_request", "Enter the board's IP address or host name.", hint="For example 192.168.2.2")
+    if user is not None and not isinstance(user, str):
+        raise BoardError("invalid_request", "Enter a valid SSH user name.", hint="DevKits use the 'sima' account.")
     host = str(host or "").strip()
     user = str(user or DEFAULT_SSH_USER).strip()
     if not _HOST_RE.match(host):
