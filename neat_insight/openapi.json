@@ -1739,7 +1739,7 @@
         "type": "object",
         "required": ["name"],
         "properties": {
-          "name": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^,]*$", "description": "Unique trace name, without a comma (`/api/sentinel/compare` separates runs with commas); Sentinel rejects a name a run already uses."},
+          "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^,]*$", "description": "Unique trace name of at most 80 UTF-8 bytes, without control characters or a comma (`/api/sentinel/compare` separates runs with commas); Sentinel rejects a name a run already uses."},
           "note": {"type": ["string", "null"], "maxLength": 512},
           "tags": {"type": ["array", "null"], "maxItems": 16, "items": {"type": "string", "minLength": 1}}
         }

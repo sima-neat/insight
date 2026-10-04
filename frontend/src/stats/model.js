@@ -9,7 +9,7 @@ export const POLL_MS = 2000
 export const MAX_POLL_MS = 30000
 // The whole window Sentinel caches and its ops view charts: 240 samples, about eight minutes.
 export const HISTORY_SAMPLES = 240
-export const NAME_LIMIT = 128
+export const NAME_LIMIT = 80
 export const NOTE_LIMIT = 512
 export const MAX_TAGS = 16
 export const MIN_COMPARE_RUNS = 2
@@ -607,7 +607,8 @@ export function parseTags(text) {
 export function validateTrace({ name, note, tags }) {
   const trimmed = String(name || '').trim()
   if (!trimmed) return { error: 'Name the trace so you can find its run later.' }
-  if (trimmed.length > NAME_LIMIT) return { error: `The name can be at most ${NAME_LIMIT} characters.` }
+  if (new TextEncoder().encode(trimmed).length > NAME_LIMIT) return { error: `The name can be at most ${NAME_LIMIT} UTF-8 bytes.` }
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) return { error: 'The name cannot contain control characters.' }
   const text = String(note || '').trim()
   if (text.length > NOTE_LIMIT) return { error: `The note can be at most ${NOTE_LIMIT} characters.` }
   // /api/sentinel/compare carries its runs as one comma-separated list, so a comma in a

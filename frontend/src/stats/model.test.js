@@ -177,7 +177,7 @@ test('a trace request is checked here before it reaches the board', () => {
     body: { name: 'baseline', note: 'before', tags: ['compiler-v1', 'nms'] }
   })
   assert.deepEqual(validateTrace({ name: 'bare' }), { body: { name: 'bare' } })
-  for (const form of [{ name: '   ' }, { name: 'x'.repeat(129) }, { name: 'x', note: 'n'.repeat(513) }, { name: 'x', tags: Array.from({ length: 17 }, (_, i) => `t${i}`) }]) {
+  for (const form of [{ name: '   ' }, { name: 'x'.repeat(81) }, { name: 'é'.repeat(41) }, { name: 'a\nb' }, { name: 'x', note: 'n'.repeat(513) }, { name: 'x', tags: Array.from({ length: 17 }, (_, i) => `t${i}`) }]) {
     assert.ok(validateTrace(form).error)
   }
   assert.deepEqual([parseTags(' a , ,b '), parseTags('')], [['a', 'b'], []])
@@ -619,7 +619,7 @@ test('a run name long enough to break the tables is carried intact and wrapped',
   assert.equal(runs[0].label, name)
   assert.equal(runs[0].ref, name, 'the name is the reference, so it must not be shortened')
   assert.equal(validateTrace({ name }).body.name, name)
-  assert.match(validateTrace({ name: `${name}a` }).error, /at most 128 characters/)
+  assert.match(validateTrace({ name: `${name}a` }).error, /at most 80 UTF-8 bytes/)
   assert.equal(compareQuery([name, 'short']), `/api/sentinel/compare?runs=${encodeURIComponent(`${name},short`)}`)
   assert.deepEqual([missingSelection([name], runs), uncomparableRefs([name])], [[], []])
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')

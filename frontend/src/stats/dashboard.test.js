@@ -172,6 +172,15 @@ test('compare runs takes each run\'s own temperature sensors for the thermal max
   assert.equal(instant.overlap, 0)
 })
 
+test('compare runs keeps an immediately stopped run with no samples', () => {
+  const run = (id, samples) => ({
+    metadata: { id, name: id }, metrics: [{ key: 'power_current_watts', unit: 'W' }], samples
+  })
+  const samples = [{ timestamp: '2026-09-25T00:00:00Z', values: { power_current_watts: 9 } }]
+  const overlay = compareOverlay({ sentinel: { baseline_id: 'empty', runs: [run('empty', []), run('full', samples)] } }, 'power')
+  assert.deepEqual([overlay.overlap, overlay.lines.map((line) => line.points.length), overlay.rows.map((row) => row.samples)], [0, [0, 1], [0, 1]])
+})
+
 test('compare runs offers a series recorded only by a later run', () => {
   const run = (id, metrics, values) => ({
     metadata: { id, name: id }, metrics,

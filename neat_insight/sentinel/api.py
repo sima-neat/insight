@@ -14,7 +14,7 @@ sentinel_bp = Blueprint("sentinel", __name__)
 
 MAX_COMPARE_RUNS = 8
 MAX_TAGS = 16
-NAME_LIMIT = 128
+NAME_LIMIT = 80
 NOTE_LIMIT = 512
 
 cache = BoardCache()
@@ -70,11 +70,16 @@ def _trace_request(body) -> dict:
     if not isinstance(body, dict):
         raise _invalid("The request body must be a JSON object.", 'Send {"name": "<trace name>"}.')
     name = body.get("name")
-    if not isinstance(name, str) or not name.strip() or len(name) > NAME_LIMIT:
+    if not isinstance(name, str) or not name.strip():
         raise _invalid(
-            "A trace needs a name of 1 to {} characters.".format(NAME_LIMIT),
+            "A trace needs a name.",
             "Send a unique name; Sentinel rejects a name another run already uses.",
         )
+    name = name.strip()
+    if len(name.encode("utf-8")) > NAME_LIMIT:
+        raise _invalid("A trace name can be at most {} UTF-8 bytes.".format(NAME_LIMIT), "Shorten the name.")
+    if any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in name):
+        raise _invalid("A trace name cannot contain control characters.", "Remove line breaks and control characters.")
     # /api/sentinel/compare takes its runs as one comma-separated list, so a run named
     # "before,after" could be recorded but never compared: it always reads as two runs.
     if "," in name:
@@ -95,7 +100,7 @@ def _trace_request(body) -> dict:
             "`tags` must be a list of at most {} non-empty strings.".format(MAX_TAGS),
             'Send tags like ["compiler-v2"], or omit them.',
         )
-    return {"name": name.strip(), "note": note, "tags": tags}
+    return {"name": name, "note": note, "tags": tags}
 
 
 def _history_limit(raw) -> int:

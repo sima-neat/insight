@@ -326,7 +326,7 @@ export function compareOverlay(payload, seriesId) {
   const body = payload?.sentinel || payload || {}
   const available = compareSeriesAvailable(payload)
   const spec = available.find((entry) => entry.id === seriesId) || available[0]
-  const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples) && run.samples.length)
+  const runs = (body.runs || []).filter((run) => run?.metadata?.id && Array.isArray(run.samples))
   if (!spec || !runs.length) return null
   const defs = runs.flatMap((run) => (Array.isArray(run.metrics) ? run.metrics : []))
   const definition = spec.thermal ? null : defs.find((entry) => entry.key === spec.key)
@@ -336,7 +336,7 @@ export function compareOverlay(payload, seriesId) {
   const lines = runs.map((run) => {
     // Each run's own sensors: a run recorded on another build can name its temperatures differently.
     const thermalKeys = (Array.isArray(run.metrics) ? run.metrics : defs).filter(isThermalMetric).map((entry) => entry.key)
-    const start = seconds(run.samples[0].timestamp)
+    const start = seconds(run.samples[0]?.timestamp)
     const points = run.samples.map((sample) => {
       const values = sample?.values || {}
       const value = spec.thermal
