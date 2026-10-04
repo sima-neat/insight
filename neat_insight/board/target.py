@@ -47,8 +47,13 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
     user = str(user or DEFAULT_SSH_USER).strip()
     if not _HOST_RE.match(host):
         raise BoardError("invalid_request", "Enter the board's IP address or host name.", hint="For example 192.168.2.2")
+    if port is None or port == "":
+        port = DEFAULT_SSH_PORT
+    elif isinstance(port, bool) or (isinstance(port, float) and not port.is_integer()):
+        # int() would turn true into port 1 and 22.9 into 22.
+        port = 0
     try:
-        port = int(port if port not in (None, "") else DEFAULT_SSH_PORT)
+        port = int(port)
     except (TypeError, ValueError):
         port = 0
     if not 1 <= port <= 65535:

@@ -1,6 +1,4 @@
 """HTTP API for Sentinel telemetry on the selected board."""
-from threading import Lock
-
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
@@ -18,7 +16,6 @@ NAME_LIMIT = 128
 NOTE_LIMIT = 512
 
 cache = BoardCache()
-_TRACE_LOCK = Lock()
 
 
 @sentinel_bp.after_request
@@ -134,16 +131,6 @@ def _same_board(
         raise BoardError("stale_snapshot", message, hint=hint, expected_generation=expected)
 
 
-def _expected_trace(raw) -> str:
-    """Stable id of the trace the caller intends to stop."""
-    if not isinstance(raw, str) or not raw.strip():
-        raise _invalid(
-            "`trace_id` must name the active trace being stopped.",
-            "Read the active trace again, then send its stable `id`.",
-        )
-    return raw.strip()
-
-
 def _passthrough(body: dict) -> dict:
     """Sentinel's own response body, minus its schema marker; it is nested so no field of a
     run or comparison can shadow Insight's `board` and `generation`."""
@@ -179,14 +166,7 @@ def get_sentinel():
 @sentinel_bp.post("/api/sentinel/install")
 def install_sentinel():
     """Run `sima-cli neat install sentinel` on the board; refuses when Sentinel is already healthy."""
-    expected = _expected_generation(request.args.get("generation"), read="the Sentinel state")
     context = _Context()
-    _same_board(
-        context,
-        expected,
-        "The selected board changed since its Sentinel state was read, so nothing was installed.",
-        "Read Sentinel state for the board selected now, then install again.",
-    )
     result = install.install(context.session)
     cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
     return context.payload(daemon=result["status"], log=result["log"])
@@ -198,28 +178,17 @@ def get_metrics():
     """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
     limit = _history_limit(request.args.get("history"))
     context = _Context()
-    # A restart invalidates every value read from Sentinel, not only the latest sample.
-    # Retry once so one response always belongs to one daemon invocation.
-    for _ in range(2):
-        before = install.status(context.session)
-        cache.observe_daemon(context.key, before.get("instance_id"))
-        latest = context.client.latest()
-        definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
-        seed = cache_history.read(context.session) if cache.needs_seed(context.key) else None
-        daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
-        if before.get("instance_id") == daemon.get("instance_id"):
-            history = cache.add_sample(context.key, latest.get("sample"))
-            if history is None:
-                continue
-            if seed is not None:
-                history = cache.seed(context.key, seed)
-            return context.payload(**metric_view.build(definitions, latest, history, limit))
-        cache.observe_daemon(context.key, daemon.get("instance_id"))
-    raise SentinelError(
-        "sentinel_failed",
-        "Sentinel telemetry changed repeatedly while it was being read.",
-        hint="Wait a moment, then retry.",
-    )
+    # Read fresh, not from the status cache: a sample from a restarted daemon must not be
+    # appended to the previous daemon's history before the restart is noticed.
+    daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
+    cache.observe_daemon(context.key, daemon.get("instance_id"))
+    latest = context.client.latest()
+    history = cache.add_sample(context.key, latest.get("sample"))
+    # First read of this board, or the first after a gap in polling: take the daemon's own window.
+    if cache.needs_seed(context.key):
+        history = cache.seed(context.key, cache_history.read(context.session))
+    definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
+    return context.payload(**metric_view.build(definitions, latest, history, limit))
 
 
 # API: report the trace Sentinel is recording, if any.
@@ -235,16 +204,8 @@ def get_traces():
 def start_trace():
     """Start recording a named trace; 409 when another trace is active or the name is taken."""
     wanted = _trace_request(request.get_json(silent=True))
-    expected = _expected_generation(request.args.get("generation"), read="the active trace")
     context = _Context()
-    _same_board(
-        context,
-        expected,
-        "The selected board changed since its active trace was read, so no trace was started.",
-        "Read the active trace of the board selected now, then start again.",
-    )
-    with _TRACE_LOCK:
-        started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
+    started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
     return context.payload(sentinel=_passthrough(started))
 
 
@@ -253,7 +214,6 @@ def start_trace():
 def stop_trace():
     """Stop and persist the active trace; 409 when no trace is active or the board changed since `generation`."""
     expected = _expected_generation(request.args.get("generation"), read="the active trace")
-    expected_trace = _expected_trace(request.args.get("trace_id"))
     context = _Context()
     _same_board(
         context,
@@ -261,19 +221,7 @@ def stop_trace():
         "The selected board changed since this trace was read, so no trace was stopped.",
         "Read the active trace of the board selected now, then stop it again.",
     )
-    with _TRACE_LOCK:
-        active = context.client.active_trace().get("trace")
-        active_id = active.get("id") if isinstance(active, dict) else None
-        if not active_id or str(active_id) != expected_trace:
-            raise SentinelError(
-                "trace_conflict",
-                "The active trace changed since it was read, so no trace was stopped.",
-                hint="Read the active trace again, then stop that trace.",
-                expected_trace_id=expected_trace,
-                active_trace_id=active_id,
-            )
-        stopped = context.client.stop_trace()
-    return context.payload(sentinel=_passthrough(stopped))
+    return context.payload(sentinel=_passthrough(context.client.stop_trace()))
 
 
 # API: list the runs saved on the selected board.

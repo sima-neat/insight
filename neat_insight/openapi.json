@@ -927,9 +927,6 @@
         "summary": "Install Sentinel on the selected board",
         "description": "Runs `sima-cli neat install sentinel` on the board itself (the installer has no `--ip`) with `SIMA_INSTALL_CONTEXT=1`, `SIMA_CLI_CHECK_FOR_UPDATE=0` and a temporary download directory, using passwordless sudo. An installed and healthy daemon is never reinstalled: the installer restarts the daemon and would end a trace in flight, so that case returns `409 already_installed`. Without passwordless sudo the response names the exact command to run on the board.",
         "operationId": "installSentinel",
-        "parameters": [
-          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the Sentinel state that offered installation. A stale value returns `409 stale_snapshot` before installation."}
-        ],
         "responses": {
           "200": {"description": "Sentinel installed; the new daemon state and the installer's output.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelInstallResult"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -974,9 +971,6 @@
         "summary": "Start a named trace",
         "description": "Starts recording a named trace around a workload. Only one trace can be active and names must be unique, so a second start returns `409 trace_conflict` with Sentinel's own message. The request is validated before it reaches the board: a missing or empty name, a name containing a comma, an over-long note, or tags that are not a list of non-empty strings return `400 invalid_request` without touching it.",
         "operationId": "startSentinelTrace",
-        "parameters": [
-          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload used by the form. A stale value returns `409 stale_snapshot` before starting."}
-        ],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TraceRequest"}, "example": {"name": "baseline", "note": "before optimization", "tags": ["compiler-v1"]}}}},
         "responses": {
           "200": {"description": "The trace Sentinel started.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SentinelPassthrough"}}}},
@@ -991,11 +985,10 @@
       "post": {
         "tags": ["Sentinel"],
         "summary": "Stop the active trace",
-        "description": "Stops the named active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active or its stable id differs, and `409 stale_snapshot` without touching the board when `generation` names a board that is no longer selected.",
+        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active, and `409 stale_snapshot` without touching the board when `generation` names a board that is no longer selected.",
         "operationId": "stopSentinelTrace",
         "parameters": [
-          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped. Recommended: a request that outlives a board switch is refused instead of stopping a trace on another board."},
-          {"name": "trace_id", "in": "query", "required": true, "schema": {"type": "string"}, "description": "Stable `id` from the active-trace payload. A replacement trace is never stopped accidentally."}
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped. Recommended: a request that outlives a board switch is refused instead of stopping a trace on another board."}
         ],
         "responses": {
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -1506,11 +1499,11 @@
       },
       "BoardError": {
         "type": "object",
-        "description": "Error envelope for board, peripheral, and Sentinel operations.",
+        "description": "Error envelope for board and peripheral operations.",
         "required": ["error", "code"],
         "properties": {
           "error": {"type": "string", "description": "Human-readable failure reason."},
-          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large"]},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "unreachable", "auth_failed", "tool_missing", "permission_denied", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version"]},
           "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},

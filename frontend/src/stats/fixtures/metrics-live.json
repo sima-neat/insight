@@ -1,0 +1,986 @@
+{
+  "board": {
+    "build_version": "2.1.3_master_B4837",
+    "fingerprint": "89925fc8f0800d17",
+    "hostname": "modalix",
+    "label": "sima@192.168.2.2",
+    "machine": "modalix",
+    "source": "sdk-env"
+  },
+  "counts": {
+    "critical": 0,
+    "total": 59,
+    "unavailable": 0,
+    "warn": 0
+  },
+  "generation": 1,
+  "groups": [
+    {
+      "metrics": [
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the APU site; feeds DTS Hub Alert channel 4.",
+          "group": "APU",
+          "key": "rtsn_4",
+          "label": "APU RTSN-4",
+          "short": "APU-4",
+          "status": "ok",
+          "unit": "C",
+          "value": 65.25559082031248,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the APU site; feeds DTS Hub Trip channel 11.",
+          "group": "APU",
+          "key": "rtsn_11",
+          "label": "APU RTSN-11",
+          "short": "APU-11",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.57307128906251,
+          "warn": 70.0
+        }
+      ],
+      "name": "APU"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 85.0,
+          "description": "SOM top-side board temperature from the LM96063 hardware-monitoring IC's internal sensor.",
+          "group": "Board",
+          "key": "lm96163_temp1",
+          "label": "LM96163 temp1",
+          "short": "LM96-1",
+          "status": "ok",
+          "unit": "C",
+          "value": 63.0,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "SOM bottom-side board temperature from a diode on the bottom side of the SOM, read through the LM96063 IC.",
+          "group": "Board",
+          "key": "lm96163_temp2",
+          "label": "LM96163 temp2",
+          "short": "LM96-2",
+          "status": "ok",
+          "unit": "C",
+          "value": 66.25,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "Ethernet/MDIO temperature reported through the ETH hwmon device.",
+          "group": "Board",
+          "key": "eth_mdio_temp1",
+          "label": "ETH/MDIO temp1",
+          "short": "ETH-1",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.0,
+          "warn": 70.0
+        }
+      ],
+      "name": "Board"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 95.0,
+          "description": "Aggregate Linux CPU utilization.",
+          "group": "CPU",
+          "key": "cpu_usage_pct",
+          "label": "CPU usage",
+          "short": "CPU%",
+          "status": "ok",
+          "unit": "%",
+          "value": 37.48816661407383,
+          "warn": 80.0
+        },
+        {
+          "critical": null,
+          "description": "Linux 1-minute load average.",
+          "group": "CPU",
+          "key": "cpu_load_1",
+          "label": "CPU load 1m",
+          "short": "Load1",
+          "status": "ok",
+          "unit": "load",
+          "value": 6.0,
+          "warn": null
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux 1-minute load average normalized by logical CPU core count.",
+          "group": "CPU",
+          "key": "cpu_load_1_pct",
+          "label": "CPU load 1m percentage",
+          "short": "Load%",
+          "status": "ok",
+          "unit": "%",
+          "value": 37.5,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 0 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_0_usage_pct",
+          "label": "CPU core 0 usage",
+          "short": "c0",
+          "status": "ok",
+          "unit": "%",
+          "value": 33.333333333333336,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 1 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_1_usage_pct",
+          "label": "CPU core 1 usage",
+          "short": "c1",
+          "status": "ok",
+          "unit": "%",
+          "value": 23.469387755102044,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 2 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_2_usage_pct",
+          "label": "CPU core 2 usage",
+          "short": "c2",
+          "status": "ok",
+          "unit": "%",
+          "value": 60.0,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 3 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_3_usage_pct",
+          "label": "CPU core 3 usage",
+          "short": "c3",
+          "status": "ok",
+          "unit": "%",
+          "value": 17.17171717171717,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 4 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_4_usage_pct",
+          "label": "CPU core 4 usage",
+          "short": "c4",
+          "status": "ok",
+          "unit": "%",
+          "value": 48.94736842105263,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 5 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_5_usage_pct",
+          "label": "CPU core 5 usage",
+          "short": "c5",
+          "status": "ok",
+          "unit": "%",
+          "value": 22.27722772277227,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 6 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_6_usage_pct",
+          "label": "CPU core 6 usage",
+          "short": "c6",
+          "status": "ok",
+          "unit": "%",
+          "value": 43.58974358974359,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 7 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_7_usage_pct",
+          "label": "CPU core 7 usage",
+          "short": "c7",
+          "status": "ok",
+          "unit": "%",
+          "value": 17.647058823529417,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 8 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_8_usage_pct",
+          "label": "CPU core 8 usage",
+          "short": "c8",
+          "status": "ok",
+          "unit": "%",
+          "value": 50.5,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 9 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_9_usage_pct",
+          "label": "CPU core 9 usage",
+          "short": "c9",
+          "status": "ok",
+          "unit": "%",
+          "value": 25.125628140703515,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 10 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_10_usage_pct",
+          "label": "CPU core 10 usage",
+          "short": "c10",
+          "status": "ok",
+          "unit": "%",
+          "value": 47.76119402985075,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 11 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_11_usage_pct",
+          "label": "CPU core 11 usage",
+          "short": "c11",
+          "status": "ok",
+          "unit": "%",
+          "value": 57.2139303482587,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 12 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_12_usage_pct",
+          "label": "CPU core 12 usage",
+          "short": "c12",
+          "status": "ok",
+          "unit": "%",
+          "value": 37.878787878787875,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 13 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_13_usage_pct",
+          "label": "CPU core 13 usage",
+          "short": "c13",
+          "status": "ok",
+          "unit": "%",
+          "value": 15.57788944723618,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 14 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_14_usage_pct",
+          "label": "CPU core 14 usage",
+          "short": "c14",
+          "status": "ok",
+          "unit": "%",
+          "value": 47.02970297029702,
+          "warn": 80.0
+        },
+        {
+          "critical": 95.0,
+          "description": "Linux CPU core 15 utilization.",
+          "group": "CPU",
+          "key": "cpu_core_15_usage_pct",
+          "label": "CPU core 15 usage",
+          "short": "c15",
+          "status": "ok",
+          "unit": "%",
+          "value": 55.05050505050505,
+          "warn": 80.0
+        }
+      ],
+      "name": "CPU"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the CVU site; feeds DTS Hub Alert channel 5.",
+          "group": "CVU",
+          "key": "rtsn_5",
+          "label": "CVU RTSN-5",
+          "short": "CVU-5",
+          "status": "ok",
+          "unit": "C",
+          "value": 63.71992187500001,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the CVU site; feeds DTS Hub Trip channel 12.",
+          "group": "CVU",
+          "key": "rtsn_12",
+          "label": "CVU RTSN-12",
+          "short": "CVU-12",
+          "status": "ok",
+          "unit": "C",
+          "value": 63.89055175781249,
+          "warn": 70.0
+        }
+      ],
+      "name": "CVU"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 90.0,
+          "description": "eMMC filesystem usage.",
+          "group": "Disk",
+          "key": "disk_emmc_used_pct",
+          "label": "eMMC disk used",
+          "short": "eMMC%",
+          "status": "ok",
+          "unit": "%",
+          "value": 72.3531464967201,
+          "warn": 80.0
+        },
+        {
+          "critical": null,
+          "description": "eMMC used space.",
+          "group": "Disk",
+          "key": "disk_emmc_used_mb",
+          "label": "eMMC disk used MB",
+          "short": "eMMCMB",
+          "status": "ok",
+          "unit": "MB",
+          "value": 21182.3671875,
+          "warn": null
+        }
+      ],
+      "name": "Disk"
+    },
+    {
+      "metrics": [
+        {
+          "critical": null,
+          "description": "eMMC block-device read rate.",
+          "group": "DiskIO",
+          "key": "disk_emmc_read_mbps",
+          "label": "eMMC read",
+          "short": "eMMCR",
+          "status": "ok",
+          "unit": "MB/s",
+          "value": 0.0,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "eMMC block-device write rate.",
+          "group": "DiskIO",
+          "key": "disk_emmc_write_mbps",
+          "label": "eMMC write",
+          "short": "eMMCW",
+          "status": "ok",
+          "unit": "MB/s",
+          "value": 0.013671016439661066,
+          "warn": null
+        }
+      ],
+      "name": "DiskIO"
+    },
+    {
+      "metrics": [
+        {
+          "critical": null,
+          "description": "Boot-time contiguous memory reservation reported by CmaTotal in /proc/meminfo.",
+          "group": "EV74",
+          "key": "ev74_cma_total_mb",
+          "label": "EV74 CMA reserved",
+          "short": "CMATotal",
+          "status": "ok",
+          "unit": "MB",
+          "value": 1788.0,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Currently free contiguous memory reported by CmaFree in /proc/meminfo.",
+          "group": "EV74",
+          "key": "ev74_cma_free_mb",
+          "label": "EV74 CMA free",
+          "short": "CMAFree",
+          "status": "ok",
+          "unit": "MB",
+          "value": 1267.3046875,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "CmaTotal minus CmaFree; a proxy for EV74 memory consumption when EV74 owns the CMA pool.",
+          "group": "EV74",
+          "key": "ev74_cma_used_mb",
+          "label": "EV74 CMA used",
+          "short": "CMAUsed",
+          "status": "ok",
+          "unit": "MB",
+          "value": 520.6953125,
+          "warn": null
+        }
+      ],
+      "name": "EV74"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q0 site; feeds DTS Hub Alert channel 0.",
+          "group": "MLA",
+          "key": "rtsn_0",
+          "label": "MLA RTSN-0",
+          "short": "MLA-0",
+          "status": "ok",
+          "unit": "C",
+          "value": 65.25559082031248,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q1 site; feeds DTS Hub Alert channel 1.",
+          "group": "MLA",
+          "key": "rtsn_1",
+          "label": "MLA RTSN-1",
+          "short": "MLA-1",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.06118164062497,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q2 site; feeds DTS Hub Alert channel 2.",
+          "group": "MLA",
+          "key": "rtsn_2",
+          "label": "MLA RTSN-2",
+          "short": "MLA-2",
+          "status": "ok",
+          "unit": "C",
+          "value": 63.71992187500001,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q3 site; feeds DTS Hub Alert channel 3.",
+          "group": "MLA",
+          "key": "rtsn_3",
+          "label": "MLA RTSN-3",
+          "short": "MLA-3",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.40244140624998,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q0 site; feeds DTS Hub Trip channel 7.",
+          "group": "MLA",
+          "key": "rtsn_7",
+          "label": "MLA RTSN-7",
+          "short": "MLA-7",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.91433105468747,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q1 site; feeds DTS Hub Trip channel 8.",
+          "group": "MLA",
+          "key": "rtsn_8",
+          "label": "MLA RTSN-8",
+          "short": "MLA-8",
+          "status": "ok",
+          "unit": "C",
+          "value": 65.0849609375,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q2 site; feeds DTS Hub Trip channel 9.",
+          "group": "MLA",
+          "key": "rtsn_9",
+          "label": "MLA RTSN-9",
+          "short": "MLA-9",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.40244140624998,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the MLA Q3 site; feeds DTS Hub Trip channel 10.",
+          "group": "MLA",
+          "key": "rtsn_10",
+          "label": "MLA RTSN-10",
+          "short": "MLA-10",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.74370117187499,
+          "warn": 70.0
+        },
+        {
+          "critical": null,
+          "description": "MLA allocator total allocated size parsed from /dev/simaai-mem.",
+          "group": "MLA",
+          "key": "mla_mem_allocated_mb",
+          "label": "MLA memory allocated",
+          "short": "MLAMB",
+          "status": "ok",
+          "unit": "MB",
+          "value": 742.3338813781738,
+          "warn": null
+        }
+      ],
+      "name": "MLA"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 90.0,
+          "description": "Linux memory usage based on MemTotal and MemAvailable.",
+          "group": "Memory",
+          "key": "linux_mem_used_pct",
+          "label": "Linux memory used",
+          "short": "Mem%",
+          "status": "ok",
+          "unit": "%",
+          "value": 21.291911183755214,
+          "warn": 80.0
+        },
+        {
+          "critical": null,
+          "description": "Linux memory in active use.",
+          "group": "Memory",
+          "key": "linux_mem_used_mb",
+          "label": "Linux memory used MB",
+          "short": "MemMB",
+          "status": "ok",
+          "unit": "MB",
+          "value": 1255.84765625,
+          "warn": null
+        }
+      ],
+      "name": "Memory"
+    },
+    {
+      "metrics": [
+        {
+          "critical": null,
+          "description": "Aggregate non-loopback network receive rate.",
+          "group": "Network",
+          "key": "net_rx_mbps",
+          "label": "Network RX",
+          "short": "NetRX",
+          "status": "ok",
+          "unit": "MB/s",
+          "value": 1.141349162777595,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Aggregate non-loopback network transmit rate.",
+          "group": "Network",
+          "key": "net_tx_mbps",
+          "label": "Network TX",
+          "short": "NetTX",
+          "status": "ok",
+          "unit": "MB/s",
+          "value": 1.6793846215431942,
+          "warn": null
+        }
+      ],
+      "name": "Network"
+    },
+    {
+      "metrics": [
+        {
+          "critical": null,
+          "description": "Latest valid total PMBus POUT reading across configured board rails.",
+          "group": "Power",
+          "key": "power_current_watts",
+          "label": "Current board power",
+          "short": "Current",
+          "status": "ok",
+          "unit": "W",
+          "value": 11.625,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Average valid total board power since the Sentinel daemon started.",
+          "group": "Power",
+          "key": "power_average_watts",
+          "label": "Average board power",
+          "short": "Average",
+          "status": "ok",
+          "unit": "W",
+          "value": 11.154253915959291,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Peak valid total board power since the Sentinel daemon started.",
+          "group": "Power",
+          "key": "power_peak_watts",
+          "label": "Peak board power",
+          "short": "Peak",
+          "status": "ok",
+          "unit": "W",
+          "value": 16.09375,
+          "warn": null
+        }
+      ],
+      "name": "Power"
+    },
+    {
+      "metrics": [
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_soc_ddr_vdd_watts",
+          "label": "SoC and DDR VDD",
+          "short": "SoC and DDR VDD",
+          "status": "ok",
+          "unit": "W",
+          "value": 4.75,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_hdmi_watts",
+          "label": "HDMI 1.2V",
+          "short": "HDMI 1.2V",
+          "status": "ok",
+          "unit": "W",
+          "value": 0.59375,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_soc_ddr_vddq_watts",
+          "label": "SoC and DDR VDDQ",
+          "short": "SoC and DDR VDDQ",
+          "status": "ok",
+          "unit": "W",
+          "value": 0.09375,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_soc_ddr_vdd2h_watts",
+          "label": "SoC and DDR VDD2H",
+          "short": "SoC and DDR VDD2H",
+          "status": "ok",
+          "unit": "W",
+          "value": 0.96875,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_mla_watts",
+          "label": "MLA 0.68V",
+          "short": "MLA 0.68V",
+          "status": "ok",
+          "unit": "W",
+          "value": 1.5,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_pcie_eth_watts",
+          "label": "PCIe and ETH VP",
+          "short": "PCIe and ETH VP",
+          "status": "ok",
+          "unit": "W",
+          "value": 0.65625,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_platform_1v8_watts",
+          "label": "SOM Platform 1.8V",
+          "short": "SOM Platform 1.8V",
+          "status": "ok",
+          "unit": "W",
+          "value": 1.28125,
+          "warn": null
+        },
+        {
+          "critical": null,
+          "description": "Latest valid POUT reading for this PMBus rail.",
+          "group": "PowerRail",
+          "key": "power_rail_platform_3v3_watts",
+          "label": "SOM Platform 3.3V",
+          "short": "SOM Platform 3.3V",
+          "status": "ok",
+          "unit": "W",
+          "value": 1.78125,
+          "warn": null
+        }
+      ],
+      "name": "PowerRail"
+    },
+    {
+      "metrics": [
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the TOP (near PCIE/ETH area) site; feeds DTS Hub Alert channel 6.",
+          "group": "TOP",
+          "key": "rtsn_6",
+          "label": "TOP RTSN-6",
+          "short": "TOP-6",
+          "status": "ok",
+          "unit": "C",
+          "value": 64.74370117187499,
+          "warn": 70.0
+        },
+        {
+          "critical": 85.0,
+          "description": "On-die RTSN at the TOP (near PCIE/ETH area) site; feeds DTS Hub Trip channel 13.",
+          "group": "TOP",
+          "key": "rtsn_13",
+          "label": "TOP RTSN-13",
+          "short": "TOP-13",
+          "status": "ok",
+          "unit": "C",
+          "value": 65.25559082031248,
+          "warn": 70.0
+        }
+      ],
+      "name": "TOP"
+    }
+  ],
+  "highlights": [
+    "power_current_watts",
+    "cpu_usage_pct",
+    "linux_mem_used_pct",
+    "mla_mem_allocated_mb",
+    "ev74_cma_used_mb",
+    "lm96163_temp2"
+  ],
+  "history": {
+    "series": {
+      "cpu_core_0_usage_pct": [
+        33.333333333333336
+      ],
+      "cpu_core_10_usage_pct": [
+        47.76119402985075
+      ],
+      "cpu_core_11_usage_pct": [
+        57.2139303482587
+      ],
+      "cpu_core_12_usage_pct": [
+        37.878787878787875
+      ],
+      "cpu_core_13_usage_pct": [
+        15.57788944723618
+      ],
+      "cpu_core_14_usage_pct": [
+        47.02970297029702
+      ],
+      "cpu_core_15_usage_pct": [
+        55.05050505050505
+      ],
+      "cpu_core_1_usage_pct": [
+        23.469387755102044
+      ],
+      "cpu_core_2_usage_pct": [
+        60.0
+      ],
+      "cpu_core_3_usage_pct": [
+        17.17171717171717
+      ],
+      "cpu_core_4_usage_pct": [
+        48.94736842105263
+      ],
+      "cpu_core_5_usage_pct": [
+        22.27722772277227
+      ],
+      "cpu_core_6_usage_pct": [
+        43.58974358974359
+      ],
+      "cpu_core_7_usage_pct": [
+        17.647058823529417
+      ],
+      "cpu_core_8_usage_pct": [
+        50.5
+      ],
+      "cpu_core_9_usage_pct": [
+        25.125628140703515
+      ],
+      "cpu_load_1": [
+        6.0
+      ],
+      "cpu_load_1_pct": [
+        37.5
+      ],
+      "cpu_usage_pct": [
+        37.48816661407383
+      ],
+      "disk_emmc_read_mbps": [
+        0.0
+      ],
+      "disk_emmc_used_mb": [
+        21182.3671875
+      ],
+      "disk_emmc_used_pct": [
+        72.3531464967201
+      ],
+      "disk_emmc_write_mbps": [
+        0.013671016439661066
+      ],
+      "eth_mdio_temp1": [
+        64.0
+      ],
+      "ev74_cma_free_mb": [
+        1267.3046875
+      ],
+      "ev74_cma_total_mb": [
+        1788.0
+      ],
+      "ev74_cma_used_mb": [
+        520.6953125
+      ],
+      "linux_mem_used_mb": [
+        1255.84765625
+      ],
+      "linux_mem_used_pct": [
+        21.291911183755214
+      ],
+      "lm96163_temp1": [
+        63.0
+      ],
+      "lm96163_temp2": [
+        66.25
+      ],
+      "mla_mem_allocated_mb": [
+        742.3338813781738
+      ],
+      "net_rx_mbps": [
+        1.141349162777595
+      ],
+      "net_tx_mbps": [
+        1.6793846215431942
+      ],
+      "power_average_watts": [
+        11.154253915959291
+      ],
+      "power_current_watts": [
+        11.625
+      ],
+      "power_peak_watts": [
+        16.09375
+      ],
+      "power_rail_hdmi_watts": [
+        0.59375
+      ],
+      "power_rail_mla_watts": [
+        1.5
+      ],
+      "power_rail_pcie_eth_watts": [
+        0.65625
+      ],
+      "power_rail_platform_1v8_watts": [
+        1.28125
+      ],
+      "power_rail_platform_3v3_watts": [
+        1.78125
+      ],
+      "power_rail_soc_ddr_vdd2h_watts": [
+        0.96875
+      ],
+      "power_rail_soc_ddr_vdd_watts": [
+        4.75
+      ],
+      "power_rail_soc_ddr_vddq_watts": [
+        0.09375
+      ],
+      "rtsn_0": [
+        65.25559082031248
+      ],
+      "rtsn_1": [
+        64.06118164062497
+      ],
+      "rtsn_10": [
+        64.74370117187499
+      ],
+      "rtsn_11": [
+        64.57307128906251
+      ],
+      "rtsn_12": [
+        63.89055175781249
+      ],
+      "rtsn_13": [
+        65.25559082031248
+      ],
+      "rtsn_2": [
+        63.71992187500001
+      ],
+      "rtsn_3": [
+        64.40244140624998
+      ],
+      "rtsn_4": [
+        65.25559082031248
+      ],
+      "rtsn_5": [
+        63.71992187500001
+      ],
+      "rtsn_6": [
+        64.74370117187499
+      ],
+      "rtsn_7": [
+        64.91433105468747
+      ],
+      "rtsn_8": [
+        65.0849609375
+      ],
+      "rtsn_9": [
+        64.40244140624998
+      ]
+    },
+    "timestamps": [
+      "2026-09-24T18:57:50.098080504Z"
+    ]
+  },
+  "sampled_at": "2026-09-24T18:57:50.098080504Z",
+  "version": "main:80ab7de4da31"
+}

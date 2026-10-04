@@ -77,6 +77,10 @@ def _positive_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _object_or_none(value) -> bool:
+    return value is None or isinstance(value, dict)
+
+
 class PeripheralClient(SentinelSocket):
     socket_errors = _SOCKET_ERRORS
     client_errors = _CLIENT_ERRORS
@@ -171,6 +175,7 @@ class PeripheralClient(SentinelSocket):
             or not isinstance(payload.get("devices"), list)
             or not (payload.get("error") is None or isinstance(payload.get("error"), dict))
             or not isinstance(payload.get("issues", []), list)
+            or not self._valid_support(payload.get("support"))
         ):
             raise self._response_error("The Sentinel peripheral catalog does not match the v1 schema.", payload)
         device_ids = set()
@@ -202,6 +207,8 @@ class PeripheralClient(SentinelSocket):
             or not isinstance(camera.get("modes"), list)
             or not (camera.get("camera_name") is None or isinstance(camera.get("camera_name"), str))
             or not (camera.get("model") is None or isinstance(camera.get("model"), str))
+            # The snapshot reads fields of these objects, so a non-object would fail outside this check.
+            or not all(_object_or_none(camera.get(key)) for key in ("identity", "availability", "isp"))
         ):
             raise self._response_error("SiMa Sentinel returned malformed camera details.", device)
         for mode in camera["modes"]:
@@ -235,6 +242,11 @@ class PeripheralClient(SentinelSocket):
             and all(isinstance(interval, dict) for interval in entry["intervals"])
             for entry in value
         )
+
+    @staticmethod
+    def _valid_support(value) -> bool:
+        """The snapshot looks up the support rules' state in a table, so it must be a string when present."""
+        return value is None or (isinstance(value, dict) and (value.get("state") is None or isinstance(value["state"], str)))
 
     @staticmethod
     def _valid_size_range(value) -> bool:

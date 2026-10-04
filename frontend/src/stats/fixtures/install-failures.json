@@ -1,0 +1,148 @@
+{
+  "already_installed": {
+    "body": {
+      "code": "already_installed",
+      "error": "Sentinel is already installed and running on this board.",
+      "hint": "Reinstalling restarts the daemon and would end a trace in flight. Reinstall from a shell on the board if you really need to."
+    },
+    "status": 409
+  },
+  "daemon_absent": {
+    "body": {
+      "available": false,
+      "board": {
+        "build_version": "2.1.3",
+        "fingerprint": "fp-1",
+        "hostname": "modalix",
+        "label": "sima@192.168.2.2",
+        "machine": "modalix",
+        "source": "manual"
+      },
+      "daemon": {
+        "healthy": false,
+        "installed": false,
+        "service": "inactive",
+        "sima_cli": "/usr/bin/sima-cli",
+        "socket": false,
+        "socket_path": "/run/simaai-sentinel/api.sock"
+      },
+      "generation": 1,
+      "health": null,
+      "schema": 1,
+      "status": {
+        "error": {
+          "code": "sentinel_missing",
+          "error": "Sentinel is not installed on this board.",
+          "hint": "Install it from this page, or run `sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel` on the board."
+        },
+        "state": "missing"
+      },
+      "version": null
+    },
+    "status": 200
+  },
+  "daemon_stopped": {
+    "body": {
+      "available": false,
+      "board": {
+        "build_version": "2.1.3",
+        "fingerprint": "fp-1",
+        "hostname": "modalix",
+        "label": "sima@192.168.2.2",
+        "machine": "modalix",
+        "source": "manual"
+      },
+      "daemon": {
+        "healthy": false,
+        "installed": true,
+        "service": "inactive",
+        "sima_cli": "/usr/bin/sima-cli",
+        "socket": false,
+        "socket_path": "/run/simaai-sentinel/api.sock"
+      },
+      "generation": 1,
+      "health": null,
+      "schema": 1,
+      "status": {
+        "error": {
+          "code": "sentinel_stopped",
+          "error": "The simaai-sentinel service is installed but inactive.",
+          "hint": "Start it on the board with `sudo systemctl start simaai-sentinel`."
+        },
+        "state": "stopped"
+      },
+      "version": null
+    },
+    "status": 200
+  },
+  "installer_failed": {
+    "body": {
+      "code": "sentinel_failed",
+      "detail": "downloading vulcan artifact\nvulcan: not found",
+      "error": "`sima-cli neat install sentinel` failed on the board (exit 1).",
+      "hint": "The installer's output is in detail; run it in a shell on the board to see the full log."
+    },
+    "status": 502
+  },
+  "installer_left_it_down": {
+    "body": {
+      "code": "sentinel_failed",
+      "detail": "Sentinel installed",
+      "error": "The installer finished but the simaai-sentinel service is inactive.",
+      "hint": "Check `systemctl status simaai-sentinel` on the board."
+    },
+    "status": 502
+  },
+  "sima_cli_missing": {
+    "body": {
+      "code": "sentinel_failed",
+      "error": "`sima-cli` was not found on the board, so Sentinel cannot be installed from here.",
+      "hint": "Install sima-cli on the board, then retry, or install Sentinel there with `sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel`.",
+      "tool": "sima-cli"
+    },
+    "status": 502
+  },
+  "sima_cli_missing_state": {
+    "body": {
+      "available": false,
+      "board": {
+        "build_version": "2.1.3",
+        "fingerprint": "fp-1",
+        "hostname": "modalix",
+        "label": "sima@192.168.2.2",
+        "machine": "modalix",
+        "source": "manual"
+      },
+      "daemon": {
+        "healthy": false,
+        "installed": false,
+        "service": "inactive",
+        "sima_cli": null,
+        "socket": false,
+        "socket_path": "/run/simaai-sentinel/api.sock"
+      },
+      "generation": 1,
+      "health": null,
+      "schema": 1,
+      "status": {
+        "error": {
+          "code": "sentinel_missing",
+          "error": "Sentinel is not installed on this board.",
+          "hint": "Install it from this page, or run `sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel` on the board."
+        },
+        "state": "missing"
+      },
+      "version": null
+    },
+    "status": 200
+  },
+  "sudo_denied": {
+    "body": {
+      "code": "sentinel_denied",
+      "detail": "sudo: a password is required",
+      "error": "Installing Sentinel needs sudo on the board, and this user cannot use sudo without a password.",
+      "hint": "Run `sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel` in a shell on the board, then reload this page."
+    },
+    "status": 502
+  }
+}
