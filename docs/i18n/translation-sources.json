@@ -1,6 +1,6 @@
 {
   "ja": {
-    "docs/api-reference.md": "5b5636eb81a5d06f917252d347983fa823161495899b368ed7691bc41955d779",
+    "docs/api-reference.md": "f1aeaa6f027be0dedf327344898bd46362cf75bea18a6b06d61d23c8fbfebd84",
     "docs/concepts.md": "4c2460218176ba00287a2984257cf1074f3c00473a3a910c32595d632dcfdef4",
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
@@ -9,7 +9,7 @@
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   },
   "ko": {
-    "docs/api-reference.md": "5b5636eb81a5d06f917252d347983fa823161495899b368ed7691bc41955d779",
+    "docs/api-reference.md": "f1aeaa6f027be0dedf327344898bd46362cf75bea18a6b06d61d23c8fbfebd84",
     "docs/concepts.md": "4c2460218176ba00287a2984257cf1074f3c00473a3a910c32595d632dcfdef4",
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
@@ -18,7 +18,7 @@
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   },
   "uk": {
-    "docs/api-reference.md": "5b5636eb81a5d06f917252d347983fa823161495899b368ed7691bc41955d779",
+    "docs/api-reference.md": "f1aeaa6f027be0dedf327344898bd46362cf75bea18a6b06d61d23c8fbfebd84",
     "docs/concepts.md": "4c2460218176ba00287a2984257cf1074f3c00473a3a910c32595d632dcfdef4",
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
@@ -27,7 +27,7 @@
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   },
   "zh-Hant": {
-    "docs/api-reference.md": "5b5636eb81a5d06f917252d347983fa823161495899b368ed7691bc41955d779",
+    "docs/api-reference.md": "f1aeaa6f027be0dedf327344898bd46362cf75bea18a6b06d61d23c8fbfebd84",
     "docs/concepts.md": "4c2460218176ba00287a2984257cf1074f3c00473a3a910c32595d632dcfdef4",
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
