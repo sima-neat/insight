@@ -143,6 +143,24 @@ class ApiTests(unittest.TestCase):
             ["/v1/samples/latest", "/v1/metrics", "/v1/samples/latest", "/v1/metrics"],
         )
 
+    def test_telemetry_retries_when_a_concurrent_poll_already_recorded_a_newer_sample(self):
+        key = (1, "fp-1")
+        api.cache.observe_daemon(key, "inv-1")
+        api.cache.add_sample(key, {"timestamp": "2026-10-04T06:48:02Z", "values": {"power": 9}})
+        api.cache.seed(key, [])
+        self.transport.api[("GET", "/v1/metrics")] = (
+            200,
+            {"schema": 1, "metrics": [{"key": "power", "label": "Power", "unit": "W"}]},
+        )
+        samples = [
+            {"schema": 1, "version": "v2", "sample": {"timestamp": "2026-10-04T06:48:00Z", "values": {"power": 8}}},
+            {"schema": 1, "version": "v2", "sample": {"timestamp": "2026-10-04T06:48:04Z", "values": {"power": 10}}},
+        ]
+        with mock.patch.object(api.SentinelClient, "latest", side_effect=samples):
+            payload = self.client.get("/api/sentinel/metrics?history=10").get_json()
+        self.assertEqual(payload["sampled_at"], "2026-10-04T06:48:04Z")
+        self.assertEqual(payload["history"]["timestamps"], ["2026-10-04T06:48:02Z", "2026-10-04T06:48:04Z"])
+
 
 class ResponseLimitTests(unittest.TestCase):
     def test_an_answer_over_the_limit_is_refused_not_truncated(self):
@@ -256,7 +274,7 @@ class HistoryTests(unittest.TestCase):
         for stamp in ("2026-09-23T17:54:19.918200185Z", "2026-09-23T17:54:21.908397571Z"):
             cache.add_sample(key, {"timestamp": stamp, "values": {}})
         older = cache.add_sample(key, {"timestamp": "2026-09-23T17:54:20Z", "values": {}})
-        self.assertEqual([s["timestamp"] for s in older], ["2026-09-23T17:54:19.918200185Z", "2026-09-23T17:54:21.908397571Z"])
+        self.assertIsNone(older)
         after = cache.add_sample(key, {"timestamp": "2026-09-23T19:39:58.301197766Z", "values": {}})
         self.assertEqual([s["timestamp"] for s in after], ["2026-09-23T19:39:58.301197766Z"])
         self.assertEqual(len(cache.add_sample(key, {"timestamp": "2026-09-23T19:40:28.3Z", "values": {}})), 2)

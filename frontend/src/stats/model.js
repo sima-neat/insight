@@ -454,7 +454,9 @@ function rowChanged(row) {
   return row.cells.some((cell) => {
     if (cell === base) return false
     if (isNumber(cell.deltaPct)) return cell.deltaPct !== 0
-    return isNumber(cell.value) && isNumber(base.value) && cell.value !== base.value
+    const present = isNumber(cell.value)
+    const basePresent = isNumber(base.value)
+    return present !== basePresent || (present && cell.value !== base.value)
   })
 }
 

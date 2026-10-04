@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { compareOverlay, completeTotal, lastNumber, stackedPaths, stackTotals, tightScale, valueNear } from './dashboard.js'
-import { compareCsv, compareCsvFilename, compareTable, createRequestGuard, runDetail, runList, sparkline, traceBar, traceModel } from './model.js'
+import { compareCsv, compareCsvFilename, compareTable, compareView, createRequestGuard, runDetail, runList, sparkline, traceBar, traceModel } from './model.js'
 
 test('keyboard-only Stats controls keep a visible focus indicator', () => {
   const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
@@ -116,4 +116,5 @@ test('comparisons use recorded metric definitions and expose conflicts', () => {
   assert.equal(row.unit, null)
   assert.equal(row.group, 'Power')
   assert.equal(row.definitionConflict, true)
+  assert.equal(compareView({ rows: [{ kind: 'metric', group: 'Power', cells: [{ baseline: true, value: 1 }, { baseline: false, value: null }] }] }, { changesOnly: true }).rows.length, 1)
 })

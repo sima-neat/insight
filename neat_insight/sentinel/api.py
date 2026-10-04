@@ -209,14 +209,16 @@ def get_metrics():
         daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
         if before.get("instance_id") == daemon.get("instance_id"):
             history = cache.add_sample(context.key, latest.get("sample"))
+            if history is None:
+                continue
             if seed is not None:
                 history = cache.seed(context.key, seed)
             return context.payload(**metric_view.build(definitions, latest, history, limit))
         cache.observe_daemon(context.key, daemon.get("instance_id"))
     raise SentinelError(
         "sentinel_failed",
-        "Sentinel restarted repeatedly while telemetry was being read.",
-        hint="Wait for Sentinel to finish restarting, then retry.",
+        "Sentinel telemetry changed repeatedly while it was being read.",
+        hint="Wait a moment, then retry.",
     )
 
 
