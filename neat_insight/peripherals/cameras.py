@@ -251,7 +251,7 @@ def _item(device: dict, check: Optional[dict], retained: bool) -> dict:
         "model": camera.get("model") or None,
         "device": info,
         "availability": _availability(users, (check or {}).get("availability_method"), camera.get("availability")),
-        "support": _camera_support(modes, usb),
+        "support": _verdict(modes, usb, fallback=NO_MODES_REASON),
         "modes_source": "unavailable" if not modes else "previous-scan" if retained else "live",
         "formats": formats,
         "default_selection": default,
@@ -290,20 +290,14 @@ def _common_reason(modes: list) -> str:
     return Counter(reasons).most_common(1)[0][0] if reasons else ""
 
 
-def _camera_support(modes: list, usb: bool) -> dict:
+def _verdict(modes: list, usb: bool, fmt: Optional[str] = None, fallback: str = "") -> dict:
+    """The verdict on a camera (`fmt` None) or one of its formats, from Sentinel's per-mode verdicts."""
     if any(mode["supported"] for mode in modes):
         return _support("verified", VERIFIED_REASON, () if usb else (CORE_883,))
-    reason = _common_reason(modes) or NO_MODES_REASON
-    return _support("unsupported", f"{reason} {USB_TRACKED}", (CORE_838,)) if usb else _support("unsupported", reason)
-
-
-def _format_support(name: str, entries: list, usb: bool) -> dict:
-    if any(mode["supported"] for mode in entries):
-        return _support("verified", VERIFIED_REASON, () if usb else (CORE_883,))
-    reason = _common_reason(entries)
+    reason = _common_reason(modes) or fallback
     if not usb:
         return _support("unsupported", reason)
-    note, link = USB_FORMAT_NOTES.get(name, (None, None))
+    note, link = USB_FORMAT_NOTES.get(fmt, (None, None))
     text = " ".join(part for part in (reason, USB_TRACKED, note) if part)
     return _support("unsupported", text, (CORE_838, link) if link else (CORE_838,))
 
@@ -367,7 +361,7 @@ def _formats(modes: list, usb: bool) -> list:
             "label": f"{name} ({description})" if usb and description else FORMAT_LABELS.get(name, name),
             # A USB format exports as a V4L2 descriptor, not CameraInput code, so it is exportable regardless.
             "exportable": usb or supported,
-            "support": _format_support(name, entries, usb),
+            "support": _verdict(entries, usb, name),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
             "sizes": [{"width": w, "height": h, "fps": _choices(group)} for (w, h), group in sizes.items()],

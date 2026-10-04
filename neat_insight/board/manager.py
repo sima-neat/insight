@@ -22,6 +22,16 @@ def get_board_manager() -> "BoardManager":
     return current_app.extensions["neat_board"]
 
 
+def board_summary(session, identity=None) -> dict:
+    """The board a response describes: the selected target and, once read, its identity."""
+    identity = identity or {}
+    return {
+        "label": session.target.label,
+        "source": session.target.source,
+        **{key: identity.get(key) for key in ("hostname", "machine", "build_version", "fingerprint")},
+    }
+
+
 class _ReportingTransport:
     """Records connection-level failures in the manager's status before re-raising them."""
 

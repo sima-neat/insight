@@ -127,17 +127,21 @@ def user_checker(method, tools):
 
 
 def camera_nodes(nodes, tools, failures):
+    """The camera's nodes plus its media graphs' nodes, and whether every graph could be read."""
     found = set(nodes)
+    complete = True
     for media in [node for node in nodes if _MEDIA_RE.fullmatch(node)]:
         if not tools.get("media-ctl"):
+            complete = False
             continue
         code, out, err = run([tools["media-ctl"], "-d", media, "-p"])
         if code == 0:
             found.update(media_graph_nodes(out))
         else:
+            complete = False
             failures.append(_failure("media-ctl", code, err))
     found.discard("")
-    return found
+    return found, complete
 
 
 def collect(request):
@@ -147,7 +151,14 @@ def collect(request):
     check_users = user_checker(method, tools)
     users = {}
     for camera_id, nodes in (request.get("cameras") or {}).items():
-        users[camera_id] = check_users(camera_nodes(nodes, tools, failures)) if nodes else None
+        if not nodes:
+            users[camera_id] = None
+            continue
+        found, complete = camera_nodes(nodes, tools, failures)
+        held = check_users(found)
+        # Nobody holding the nodes that could be read proves nothing when the graph's video and
+        # subdevice nodes could not be listed: report the camera as unchecked, not free.
+        users[camera_id] = held if held or complete else None
     return {
         "tools": {name: bool(path) for name, path in tools.items() if name != "sudo"},
         "availability_method": method,
