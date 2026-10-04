@@ -171,7 +171,7 @@ Preview is available for MIPI cameras on modes Insight lists as usable. USB came
 
 ### Camera configuration API
 
-The page lets you inspect formats, resolutions, and frame rates. It does not currently include a copy or download action. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. Exports leave the capture-buffer count unset and include no Apps `config.yaml` `camera:` block, because Insight does not read the board's `libcamerasrc`. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+Under the mode menus, pick a format and select **Copy configuration** to copy the selected mode's export, described below, to the clipboard. For a MIPI camera the button is disabled unless Neat Core verified the selected mode; its tooltip gives the reason. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. Exports leave the capture-buffer count unset and include no Apps `config.yaml` `camera:` block, because Insight does not read the board's `libcamerasrc`. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
 
 Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
 

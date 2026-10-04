@@ -134,7 +134,7 @@ Sentinel は、Neat Core がボードにインストールするサポートル�
 
 ### カメラ設定 API
 
-ページでは、形式、解像度、およびフレームレートを確認できます。現在、コピーまたはダウンロード操作はありません。API クライアントは選択したモードを `/api/peripherals/cameras/export` に POST し、Python（`pyneat.CameraInputOptions`）、C++、および JSON 表現を受け取れます。Insight はボード上の `libcamerasrc` を読み取らないため、エクスポートはキャプチャバッファー数を設定せず、Apps の `config.yaml` の `camera:` ブロックも含みません。エクスポートは常にカメラを明示的に指定します。USB カメラの場合、API は `CameraInput` 設定ではなくデバイス記述子を返します。
+モードメニューの下で形式を選び、**Copy configuration** を選択すると、選択したモードのエクスポート（以下で説明）がクリップボードにコピーされます。MIPI カメラでは、選択したモードを Neat Core が検証していない限りボタンは無効になり、その理由がツールチップに表示されます。API クライアントは選択したモードを `/api/peripherals/cameras/export` に POST し、Python（`pyneat.CameraInputOptions`）、C++、および JSON 表現を受け取れます。Insight はボード上の `libcamerasrc` を読み取らないため、エクスポートはキャプチャバッファー数を設定せず、Apps の `config.yaml` の `camera:` ブロックも含みません。エクスポートは常にカメラを明示的に指定します。USB カメラの場合、API は `CameraInput` 設定ではなくデバイス記述子を返します。
 
 Modalix DevKit で測定された2つの動作がエクスポートに反映されます。厳密なゼロコピーでは起動しなかったため、CPU フォールバック（`allow_cpu_fallback = True`）を許可します。また、カメラは要求されたレートではなく、libcamera が選択したセンサーモードのフレームレートで配信します。1920×1080 の IMX477 は、15 fps または 30 fps を要求した場合でも約 66 fps を配信しました。より少ないフレームが必要な場合は、アプリケーションでフレームをドロップしてください。
 

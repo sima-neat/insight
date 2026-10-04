@@ -134,7 +134,7 @@ Sentinel 會套用 Neat Core 安裝在開發板上的支援規則。可用性由
 
 ### 相機設定 API
 
-此頁面可讓您檢查格式、解析度和畫面播放速率。目前不包含複製或下載動作。API 用戶端可將選取的模式 POST 至 `/api/peripherals/cameras/export`，並接收 Python（`pyneat.CameraInputOptions`）、C++ 和 JSON 表示法。由於 Insight 不會讀取開發板上的 `libcamerasrc`，匯出不會設定擷取緩衝區數量，也不包含 Apps `config.yaml` 的 `camera:` 區塊。匯出一律明確指定相機。對於 USB 相機，API 會傳回裝置描述元，而不是 `CameraInput` 設定。
+在模式選單下方選擇格式，然後選取 **Copy configuration**，即可將所選模式的匯出內容（如下所述）複製到剪貼簿。對於 MIPI 相機，除非 Neat Core 已驗證所選模式，否則按鈕會停用，並在工具提示中說明原因。API 用戶端可將選取的模式 POST 至 `/api/peripherals/cameras/export`，並接收 Python（`pyneat.CameraInputOptions`）、C++ 和 JSON 表示法。由於 Insight 不會讀取開發板上的 `libcamerasrc`，匯出不會設定擷取緩衝區數量，也不包含 Apps `config.yaml` 的 `camera:` 區塊。匯出一律明確指定相機。對於 USB 相機，API 會傳回裝置描述元，而不是 `CameraInput` 設定。
 
 在 Modalix DevKit 上測得的兩種行為會影響匯出。它允許 CPU 後援（`allow_cpu_fallback = True`），因為嚴格的零複製無法在該裝置上啟動。此外，相機會以 libcamera 所選感測器模式的畫面播放速率傳送，而不是要求的速率：當要求 15 或 30 fps 時，1920×1080 的 IMX477 傳送速率約為 66 fps。如果需要較少的畫面，請在應用程式中捨棄畫面。
 

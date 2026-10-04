@@ -134,7 +134,7 @@ Sentinel은 Neat Core가 보드에 설치하는 지원 규칙을 적용합니다
 
 ### 카메라 구성 API
 
-페이지에서는 형식, 해상도 및 프레임 속도를 검사할 수 있습니다. 현재 복사 또는 다운로드 작업은 제공하지 않습니다. API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. Insight는 보드의 `libcamerasrc`를 읽지 않으므로 내보내기는 캡처 버퍼 수를 설정하지 않으며 Apps `config.yaml`의 `camera:` 블록을 포함하지 않습니다. 내보내기에는 항상 카메라 이름이 명시됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
+모드 메뉴 아래에서 형식을 고르고 **Copy configuration**을 선택하면 선택한 모드의 내보내기(아래 설명)가 클립보드에 복사됩니다. MIPI 카메라의 경우 선택한 모드를 Neat Core가 검증하지 않았다면 버튼이 비활성화되며, 그 이유가 도구 설명에 표시됩니다. API 클라이언트는 선택한 모드를 `/api/peripherals/cameras/export`에 POST하고 Python(`pyneat.CameraInputOptions`), C++ 및 JSON 표현을 받을 수 있습니다. Insight는 보드의 `libcamerasrc`를 읽지 않으므로 내보내기는 캡처 버퍼 수를 설정하지 않으며 Apps `config.yaml`의 `camera:` 블록을 포함하지 않습니다. 내보내기에는 항상 카메라 이름이 명시됩니다. USB 카메라의 경우 API는 `CameraInput` 구성이 아니라 장치 설명자를 반환합니다.
 
 Modalix DevKit에서 측정된 두 가지 동작이 내보내기에 반영됩니다. 엄격한 제로 카피로 시작되지 않았기 때문에 CPU 폴백(`allow_cpu_fallback = True`)을 허용합니다. 또한 카메라는 요청한 속도가 아니라 libcamera가 선택한 센서 모드의 프레임 속도로 전달합니다. 1920×1080의 IMX477은 15 또는 30 fps를 요청했을 때 약 66 fps를 전달했습니다. 더 적은 프레임이 필요하면 애플리케이션에서 프레임을 삭제하십시오.
 
