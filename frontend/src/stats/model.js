@@ -604,6 +604,8 @@ export function traceModel(payload) {
     payload: payload || null,
     active: Boolean(trace),
     trace,
+    // Sent with Stop, so the stop ends this trace and no other.
+    id: trace?.id !== undefined && trace?.id !== null ? String(trace.id) : '',
     name: trace ? String(pick(trace, RUN_FIELDS.name) || pick(trace, RUN_FIELDS.id) || 'trace') : '',
     startedAt: trace ? pick(trace, RUN_FIELDS.startedAt) : null,
     // What the trace was started with, shown while it records.
@@ -823,9 +825,14 @@ export function deleteRunQuery(ref, generation = null) {
   return withGeneration(`/api/sentinel/runs/${encodeURIComponent(String(ref))}`, generation)
 }
 
-/** The request that stops the active trace, bound to the board generation it was read under. */
-export function stopTraceQuery(generation = null) {
-  return withGeneration('/api/sentinel/traces/stop', generation)
+/**
+ * The request that stops the active trace, bound to the board generation it was read under and
+ * to the trace's stable id: a trace another client started in its place on the same board is
+ * refused with 409 trace_conflict instead of being stopped.
+ */
+export function stopTraceQuery(generation = null, traceId = '') {
+  const path = withGeneration('/api/sentinel/traces/stop', generation)
+  return traceId ? `${path}${path.includes('?') ? '&' : '?'}trace_id=${encodeURIComponent(traceId)}` : path
 }
 
 export function deletePrompt(count) {

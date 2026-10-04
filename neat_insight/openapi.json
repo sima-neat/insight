@@ -985,10 +985,11 @@
       "post": {
         "tags": ["Sentinel"],
         "summary": "Stop the active trace",
-        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active, and `409 stale_snapshot` without touching the board when `generation` names a board that is no longer selected.",
+        "description": "Stops the active trace and persists it as a run, returning Sentinel's answer in `sentinel`. Returns `409 trace_conflict` when no trace is active or, when `trace_id` is sent, when the active trace is another one, and `409 stale_snapshot` without touching the board when `generation` names a board that is no longer selected. Insight serializes its trace starts and stops, so no start through Insight lands between the `trace_id` check and the stop.",
         "operationId": "stopSentinelTrace",
         "parameters": [
-          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped. Recommended: a request that outlives a board switch is refused instead of stopping a trace on another board."}
+          {"name": "generation", "in": "query", "required": false, "schema": {"type": "integer"}, "description": "The board `generation` of the active-trace payload being stopped. Recommended: a request that outlives a board switch is refused instead of stopping a trace on another board."},
+          {"name": "trace_id", "in": "query", "required": false, "schema": {"type": "string"}, "description": "The `id` of the trace being stopped, from `/api/sentinel/traces`. Recommended: a trace that replaced it on the same board returns `409 trace_conflict` with `expected_trace_id` and `active_trace_id` instead of being stopped. Without it, whichever trace is active is stopped."}
         ],
         "responses": {
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},

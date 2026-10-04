@@ -1115,6 +1115,16 @@ test('stopping a trace names the board generation the trace was read under', () 
   assert.equal(stopTraceQuery('3'), '/api/sentinel/traces/stop')
 })
 
+test('stopping a trace names the trace on screen, so a trace that replaced it is not stopped', () => {
+  const shown = traceModel({ generation: 3, sentinel: { trace: { id: 'trace a/1', name: 'baseline' } } })
+  assert.equal(shown.id, 'trace a/1')
+  assert.equal(stopTraceQuery(3, shown.id), '/api/sentinel/traces/stop?generation=3&trace_id=trace%20a%2F1')
+  assert.equal(stopTraceQuery(null, 'trace-a'), '/api/sentinel/traces/stop?trace_id=trace-a')
+  // A trace without an id stops as before, without trace_id.
+  assert.equal(traceModel({ sentinel: { trace: { name: 'baseline' } } }).id, '')
+  assert.equal(stopTraceQuery(3, ''), '/api/sentinel/traces/stop?generation=3')
+})
+
 test('a failure about the board stops the remaining deletes; one about the run does not', () => {
   const notice = (code) => failureNotice({ code, error: 'x' }, 1, { action: 'delete' })
   for (const code of ['unreachable', 'timeout', 'tool_missing', 'sentinel_denied', 'stale_snapshot', 'network']) {

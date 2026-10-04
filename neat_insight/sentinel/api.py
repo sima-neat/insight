@@ -1,4 +1,6 @@
 """HTTP API for Sentinel telemetry on the selected board."""
+from threading import Lock
+
 from flask import Blueprint, request
 
 from neat_insight.board import BoardError, get_board_manager
@@ -16,6 +18,9 @@ NAME_LIMIT = 128
 NOTE_LIMIT = 512
 
 cache = BoardCache()
+# Serializes this server's trace starts and stops, so no start through Insight lands between a
+# stop's active-trace check and the stop itself.
+_TRACE_LOCK = Lock()
 
 
 @sentinel_bp.after_request
@@ -131,6 +136,18 @@ def _same_board(
         raise BoardError("stale_snapshot", message, hint=hint, expected_generation=expected)
 
 
+def _expected_trace(raw):
+    """The stable id of the trace the caller displays, or None when it names none."""
+    if raw is None:
+        return None
+    if not raw.strip():
+        raise _invalid(
+            "`trace_id` must be the `id` of the active trace being stopped.",
+            "Send the `id` of the trace from /api/sentinel/traces, or omit it.",
+        )
+    return raw.strip()
+
+
 def _passthrough(body: dict) -> dict:
     """Sentinel's own response body, minus its schema marker; it is nested so no field of a
     run or comparison can shadow Insight's `board` and `generation`."""
@@ -205,15 +222,18 @@ def start_trace():
     """Start recording a named trace; 409 when another trace is active or the name is taken."""
     wanted = _trace_request(request.get_json(silent=True))
     context = _Context()
-    started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
+    with _TRACE_LOCK:
+        started = context.client.start_trace(wanted["name"], wanted["note"], wanted["tags"])
     return context.payload(sentinel=_passthrough(started))
 
 
 # API: stop the active trace on the selected board.
 @sentinel_bp.post("/api/sentinel/traces/stop")
 def stop_trace():
-    """Stop and persist the active trace; 409 when no trace is active or the board changed since `generation`."""
+    """Stop and persist the active trace; 409 when no trace is active, it is not `trace_id`, or the
+    board changed since `generation`. Without `trace_id` it stops whichever trace is active."""
     expected = _expected_generation(request.args.get("generation"), read="the active trace")
+    expected_trace = _expected_trace(request.args.get("trace_id"))
     context = _Context()
     _same_board(
         context,
@@ -221,7 +241,20 @@ def stop_trace():
         "The selected board changed since this trace was read, so no trace was stopped.",
         "Read the active trace of the board selected now, then stop it again.",
     )
-    return context.payload(sentinel=_passthrough(context.client.stop_trace()))
+    with _TRACE_LOCK:
+        if expected_trace is not None:
+            active = context.client.active_trace().get("trace")
+            active_id = active.get("id") if isinstance(active, dict) else None
+            if active_id is None or str(active_id) != expected_trace:
+                raise SentinelError(
+                    "trace_conflict",
+                    "The active trace changed since it was read, so no trace was stopped.",
+                    hint="Read the active trace again, then stop that trace.",
+                    expected_trace_id=expected_trace,
+                    active_trace_id=active_id,
+                )
+        stopped = context.client.stop_trace()
+    return context.payload(sentinel=_passthrough(stopped))
 
 
 # API: list the runs saved on the selected board.

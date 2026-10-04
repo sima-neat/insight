@@ -36,9 +36,10 @@ export function startTrace(body) {
 }
 
 // `generation` is the one the shown trace was read under, so a board switched in between is
-// refused with 409 stale_snapshot instead of stopping a trace on the board selected now.
-export function stopTrace(generation = null) {
-  return requestJson(stopTraceQuery(generation), { method: 'POST' })
+// refused with 409 stale_snapshot instead of stopping a trace on the board selected now;
+// `traceId` is the shown trace's, so a trace that replaced it is refused with 409 trace_conflict.
+export function stopTrace(generation = null, traceId = '') {
+  return requestJson(stopTraceQuery(generation, traceId), { method: 'POST' })
 }
 
 export function fetchRuns() {

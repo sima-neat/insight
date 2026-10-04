@@ -1164,6 +1164,39 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual((malformed.status_code, malformed.get_json()["code"]), (400, "invalid_request"))
         self.assertIn("the active trace", malformed.get_json()["hint"])
 
+    def test_stop_refuses_a_trace_that_replaced_the_one_on_screen(self):
+        # Another client stopped trace-a and started trace-b on the same board: the generation is unchanged.
+        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": {"id": "trace-b"}, "summary": None})
+        for path in ("/api/sentinel/traces/stop?generation=1&trace_id=trace-a", "/api/sentinel/traces/stop?trace_id=trace-a"):
+            response = self.post(path)
+            body = response.get_json()
+            self.assertEqual((response.status_code, body["code"]), (409, "trace_conflict"))
+            self.assertEqual((body["expected_trace_id"], body["active_trace_id"]), ("trace-a", "trace-b"))
+        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": None, "summary": None})
+        self.assertEqual(self.post("/api/sentinel/traces/stop?trace_id=trace-a").get_json()["code"], "trace_conflict")
+        self.assertNotIn(("POST", "/v1/traces/stop"), self.transport.api_paths)
+
+    def test_stop_checks_the_displayed_trace_and_stops_it_under_the_trace_lock(self):
+        held = []
+        self.transport.answer("GET", "/v1/traces/active", 200, {"schema": 1, "trace": {"id": "trace-a"}, "summary": None})
+        self.transport.answer("POST", "/v1/traces/stop", 200, {"schema": 1, "run": {"id": "trace-a"}})
+        self.transport.answer("POST", "/v1/traces", 200, {"schema": 1, "trace": {"id": "trace-b"}})
+        answer = self.transport._api_call
+
+        def locked_call(argv):
+            held.append((argv[2], argv[3], api._TRACE_LOCK.locked()))
+            return answer(argv)
+
+        with unittest.mock.patch.object(self.transport, "_api_call", side_effect=locked_call):
+            response = self.post("/api/sentinel/traces/stop?generation=1&trace_id=trace-a")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(self.post("/api/sentinel/traces", json={"name": "next"}).status_code, 200)
+        self.assertEqual(held, [
+            ("GET", "/v1/traces/active", True), ("POST", "/v1/traces/stop", True), ("POST", "/v1/traces", True),
+        ])
+        blank = self.post("/api/sentinel/traces/stop?trace_id=%20")
+        self.assertEqual((blank.status_code, blank.get_json()["code"]), (400, "invalid_request"))
+
     def test_runs_are_listed_and_read_by_name(self):
         self.transport.answer("GET", "/v1/runs", 200, {"schema": 1, "runs": [{"id": "r1", "name": "baseline"}]})
         self.transport.answer("GET", "/v1/runs/baseline", 200, {"schema": 1, "run": {"id": "r1"}})
