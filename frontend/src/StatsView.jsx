@@ -507,7 +507,7 @@ export function RunsPanel({
                         type="checkbox"
                         checked={selected.includes(run.ref)}
                         onChange={() => onToggle(run.ref)}
-                        disabled={deleteBusy || (!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS)}
+                        disabled={confirming || deleteBusy || (!selected.includes(run.ref) && selected.length >= MAX_COMPARE_RUNS)}
                       />
                       <span className="sr-only">Select {run.label}</span>
                     </label>
@@ -540,7 +540,7 @@ export function RunsPanel({
                 selected. Clear {uncomparable.length === 1 ? 'it' : 'them'}, or read{' '}
                 {uncomparable.length === 1 ? 'that run' : 'those runs'} one at a time with Open.
               </p>
-              <button type="button" className="btn-tonal" onClick={() => onDropMissing(uncomparable)}>
+              <button type="button" className="btn-tonal" onClick={() => onDropMissing(uncomparable)} disabled={confirming}>
                 {uncomparable.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
               </button>
             </Callout>
@@ -557,7 +557,7 @@ export function RunsPanel({
             no longer a checkbox to clear {missing.length === 1 ? 'it' : 'them'} with, and comparing will fail on{' '}
             {missing.length === 1 ? 'it' : 'them'}.
           </p>
-          <button type="button" className="btn-tonal" onClick={() => onDropMissing(missing)}>
+          <button type="button" className="btn-tonal" onClick={() => onDropMissing(missing)} disabled={confirming}>
             {missing.length === 1 ? 'Drop that run' : 'Drop those runs'} from the selection
           </button>
         </Callout>
