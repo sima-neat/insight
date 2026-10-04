@@ -70,7 +70,7 @@ class PeripheralClient:
     def refresh(self) -> dict:
         expected_instance_id = self.catalog()["instance_id"]
         accepted = self._call("POST", "/v1/peripherals/refresh")
-        target = accepted.get("target_scan_sequence") if isinstance(accepted, dict) else None
+        target = accepted.get("target_scan_sequence")
         if accepted.get("accepted") is not True or not _non_negative_int(target):
             raise self._response_error("SiMa Sentinel returned an invalid refresh acknowledgement.", accepted)
 
@@ -245,19 +245,11 @@ class PeripheralClient:
                 or not isinstance(mode.get("reason"), str)
             ):
                 raise self._response_error("SiMa Sentinel returned a malformed camera mode.", mode)
-            has_discrete = "width" in mode or "height" in mode
-            has_range = "size_range" in mode
-            discrete = (
-                has_discrete
-                and _positive_int(mode.get("width"))
-                and _positive_int(mode.get("height"))
-            )
-            ranged = has_range and self._valid_size_range(mode.get("size_range"))
-            if (
-                has_discrete == has_range
-                or (has_discrete and not discrete)
-                or (has_range and not ranged)
-            ):
+            if "width" in mode or "height" in mode:
+                valid = "size_range" not in mode and all(_positive_int(mode.get(key)) for key in ("width", "height"))
+            else:
+                valid = self._valid_size_range(mode.get("size_range"))
+            if not valid:
                 raise self._response_error(
                     "A camera mode must contain exactly one discrete size or size range.", mode
                 )

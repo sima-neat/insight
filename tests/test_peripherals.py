@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from flask import Flask
 
-from neat_insight.board import BoardError, ExecResult
+from neat_insight.board import BoardError, ExecResult, board_bp
 from neat_insight.peripherals import api, board_check, cameras, export
 from neat_insight.peripherals.api import peripherals_bp
 
@@ -426,6 +426,7 @@ class PeripheralsApiTests(unittest.TestCase):
         self.addCleanup(sentinel.stop)
         self.manager = FakeManager()
         app = Flask(__name__)
+        app.register_blueprint(board_bp)
         app.register_blueprint(peripherals_bp)
         app.extensions["neat_board"] = self.manager
         self.client = app.test_client()

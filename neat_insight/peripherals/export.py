@@ -90,14 +90,15 @@ def _export(export_id: str, label: str, filename: str, language: str, content: s
     return {"id": export_id, "label": label, "filename": filename, "language": language, "content": content}
 
 
-def _yaml_block(rows, comment: Optional[str] = None) -> str:
+def _yaml_block(rows, comment: str) -> str:
     # JSON scalars are valid YAML flow scalars, which keeps device-reported strings quoted and escaped.
-    header = f"# {comment}\n" if comment else ""
-    return header + "camera:\n" + "".join(f"  {key}: {json.dumps(value)}\n" for key, value in rows)
+    return f"# {comment}\ncamera:\n" + "".join(f"  {key}: {json.dumps(value)}\n" for key, value in rows)
 
 
 def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> dict:
-    mode = _verified_mode(item, choice, selection)
+    mode = compat.verified_mode(
+        item.get("model"), selection["format"], selection["width"], selection["height"], selection["fps"]
+    )
     rate = _rate(selection["fps"])
     options = {
         "camera_name": item["device"]["camera_name"],
@@ -132,19 +133,13 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
     return {
         "camera_id": item["id"],
         "selection": selection,
-        "support": _mode_support(item, choice, mode),
+        "support": _mode_support(mode),
         "warnings": _mipi_warnings(item, choice, mode),
         "exports": exports,
     }
 
 
-def _verified_mode(item: dict, choice: dict, selection: dict) -> Optional[dict]:
-    return compat.verified_mode(
-        item.get("model"), selection["format"], selection["width"], selection["height"], selection["fps"]
-    )
-
-
-def _mode_support(item: dict, choice: dict, mode: Optional[dict]) -> dict:
+def _mode_support(mode: Optional[dict]) -> dict:
     if mode:
         return {"tier": "verified", "reason": f"Validated with Core CameraInput: {mode['evidence']}.", "links": []}
     return {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []}
@@ -172,10 +167,6 @@ def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict]) -> list:
     return warnings
 
 
-def _py_value(value) -> str:
-    return repr(value)
-
-
 def _cpp_value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -191,7 +182,7 @@ def _cpp_value(value) -> str:
 
 def _python(options: dict) -> str:
     lines = ["import pyneat", "", "camera = pyneat.CameraInputOptions()"]
-    lines += [f"camera.{key} = {_py_value(value)}" for key, value in options.items()]
+    lines += [f"camera.{key} = {value!r}" for key, value in options.items()]
     lines += ["", 'graph = pyneat.Graph("camera_input")', "graph.add(pyneat.nodes.camera_input(camera))"]
     return "\n".join(lines) + "\n"
 
