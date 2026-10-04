@@ -1,5 +1,6 @@
 """Render camera input configurations for one mode of the cached scan."""
 import json
+import math
 from fractions import Fraction
 from typing import Optional
 
@@ -30,7 +31,8 @@ def parse_request(body) -> dict:
     if not (_positive_int(body.get("width")) and _positive_int(body.get("height"))):
         raise _invalid("width and height must be positive integers.")
     fps = body.get("fps")
-    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0:
+    # JSON numbers such as 1e309 parse as inf and NaN is accepted too; neither has an integer value.
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or (isinstance(fps, float) and not math.isfinite(fps)) or fps <= 0:
         raise _invalid("fps must be a positive number.")
     return {key: body[key] for key in ("id", "format", "width", "height", "fps")}
 

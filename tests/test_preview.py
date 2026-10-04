@@ -103,6 +103,17 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "invalid_request")
             self.assertIn(reason, ctx.exception.message + (ctx.exception.hint or ""))
 
+    def test_a_non_finite_frame_rate_is_an_invalid_request(self):
+        client = self.client()
+        for fps in ("1e309", "-1e309", "Infinity", "NaN"):
+            with self.subTest(fps=fps):
+                body = '{"id": "%s", "format": "NV12", "width": 1920, "height": 1080, "fps": %s}' % (IMX477, fps)
+                response = client.post(PREVIEW, data=body, content_type="application/json", headers={"Host": "insight.local"})
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+                self.assertIn("fps must be a positive number", response.get_json()["error"])
+        self.assertEqual(self.session.transport.calls, [])
+        self.assertEqual(api.previewable_mode(self.imx477, {**MODE, "fps": 30.0}), MODE)
+
     def test_a_rate_neat_core_rejects_is_not_previewed(self):
         doc = imx477()
         doc["camera"]["modes"] = [dict(mipi_mode("NV12", 1920, 1080, True), framerate_source="isp"),
