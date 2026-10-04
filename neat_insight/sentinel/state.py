@@ -98,6 +98,7 @@ class BoardCache:
                 self._history = deque(maxlen=self.history_limit)
                 self._seeded = False
                 self._daemon_instance = instance_id
+                self._values.pop("definitions", None)
 
     def add_sample(self, key, sample: Optional[dict]) -> list:
         """Append one Sentinel sample to this board's bounded history and return the history.

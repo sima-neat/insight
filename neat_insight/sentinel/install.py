@@ -5,6 +5,7 @@ needs sudo. The installer always restarts the daemon, which would break a trace 
 flight, so a healthy install is never reinstalled.
 """
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 from neat_insight.sentinel.errors import SentinelError
 from neat_insight.sentinel.socket_client import SOCKET_PATH
@@ -16,6 +17,7 @@ INSTALL_TIMEOUT_SEC = 900.0
 LOG_LIMIT = 4000
 FALLBACK_CLI = "$HOME/.sima-cli/.venv/bin/sima-cli"
 MANUAL_COMMAND = "sudo env SIMA_INSTALL_CONTEXT=1 SIMA_CLI_CHECK_FOR_UPDATE=0 sima-cli neat install sentinel"
+_INSTALL_LOCK = Lock()
 
 # `sima-cli` is often absent from a non-login PATH, so the user's own copy is checked too.
 _STATUS_SCRIPT = """
@@ -101,6 +103,11 @@ def describe(state: dict) -> dict:
 
 def install(session) -> dict:
     """Install Sentinel on the board with sima-cli; refuses to reinstall a healthy daemon."""
+    with _INSTALL_LOCK:
+        return _install(session)
+
+
+def _install(session) -> dict:
     state = status(session)
     if state["healthy"]:
         raise SentinelError(

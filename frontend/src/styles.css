@@ -3956,11 +3956,6 @@ button:disabled {
   }
 }
 
-/* Stats (Sentinel) view. It reuses the Peripherals panel, callout and pill styles and
-   adds only what telemetry needs: metric cards, sparklines and the run tables. */
-/* One column that may be narrower than its widest table. The default auto column grows to
-   the smallest width every panel fits in, so a wide table widened the page instead of
-   scrolling in its own region. */
 .stats-view {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -3985,9 +3980,10 @@ button:disabled {
 
 .stats-detail summary:focus-visible,
 .stats-check input:focus-visible,
-.stats-chip:focus-visible,
 .stats-toggle input:focus-visible,
-.stats-table-scroll:focus-visible {
+.stats-table-scroll:focus-visible,
+#stats-runs-title:focus-visible,
+.stats-segment:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -3996,49 +3992,8 @@ button:disabled {
   margin-top: 10px;
 }
 
-/* The folded parts of this view are toggled with `hidden`. Several of them carry a class
-   that sets its own display, which would otherwise win over the attribute. */
 .stats-view [hidden] {
   display: none !important;
-}
-
-/* Metric groups and the comparison filter: one row of chips that wraps onto further lines
-   when space runs out, rather than scrolling sideways or shrinking its labels. */
-.stats-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.stats-chip {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 4px 10px;
-  background: #fff;
-  color: #274155;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.stats-chip-count {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--ink-soft);
-}
-
-.stats-chip.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-
-.stats-chip.active .stats-chip-count {
-  color: #fff;
 }
 
 .stats-chip-alert {
@@ -4069,10 +4024,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* A run is named by whoever recorded it, and Sentinel keeps names of up to 128 characters
-   with no spaces to break at. `.sysinfo-table td` already wraps anywhere; the cells that
-   carry a run's name are header cells, which do not, so they are given the same rule
-   rather than letting one long name push the table past the panel. */
 .stats-run-table tbody th,
 .stats-compare-table thead th {
   overflow-wrap: anywhere;
@@ -4092,7 +4043,6 @@ button:disabled {
   background: var(--accent-soft);
 }
 
-/* Appears above the runs once any is ticked: how many, and what can be done with them. */
 .stats-selection-bar {
   display: flex;
   flex-wrap: wrap;
@@ -4112,7 +4062,6 @@ button:disabled {
   color: var(--accent-strong);
 }
 
-/* "Delete" becomes this in place: the question, then Delete and Cancel. */
 .stats-delete-confirm {
   display: inline-flex;
   flex-wrap: wrap;
@@ -4126,34 +4075,8 @@ button:disabled {
   color: #8f2f45;
 }
 
-.stats-delete-failure {
-  margin-top: 10px;
-}
-
-.stats-delete-failure:focus {
-  outline: none;
-}
-
-.stats-delete-failure:focus-visible .periph-callout {
-  outline: 2px solid var(--danger);
-  outline-offset: 2px;
-}
-
-.stats-delete-failures {
-  margin: 0;
-  padding-left: 18px;
-  display: grid;
-  gap: 6px;
-  overflow-wrap: anywhere;
-}
-
 #stats-runs-title:focus {
   outline: none;
-}
-
-#stats-runs-title:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .stats-run-detail,
@@ -4172,8 +4095,6 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-/* The Runs header: the title and the trace form or what is recording share one
-   line, and wrap onto further lines rather than squeeze when the page is narrow. */
 .stats-runs-head {
   display: flex;
   flex-wrap: wrap;
@@ -4206,10 +4127,6 @@ button:disabled {
   color: #2f4c61;
 }
 
-.stats-trace-name span {
-  white-space: nowrap;
-}
-
 .stats-trace-name input {
   min-width: 0;
   flex: 1 1 auto;
@@ -4231,7 +4148,6 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-/* A recording trace's running summary, under the header row. */
 .stats-runs-head ~ .sysinfo-table.key-value {
   margin-top: 8px;
 }
@@ -4240,11 +4156,8 @@ button:disabled {
   margin: 6px 0 10px;
 }
 
-/* Rows carry an Open button each; at the page's default button size that button, not the
-   run, set every row's height. */
 .stats-run-table td .btn-ghost {
   padding: 4px 10px;
-  /* At phone width the column is narrow enough to break "Open" one letter per line. */
   white-space: nowrap;
 }
 
@@ -4257,12 +4170,8 @@ button:disabled {
   .stats-trace-extras {
     grid-template-columns: 1fr;
   }
-
 }
 
-/* The Insight host panel: the machine Insight runs on. It is quieter than the board
-   telemetry above it - a flat tinted panel, plain readings rather than cards - so the two
-   are never read as one set of numbers. Its readings sit in one short row. */
 .stats-view .stats-host {
   padding: 10px 16px 12px;
   background: var(--surface-soft);
@@ -4289,7 +4198,6 @@ button:disabled {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
-/* Each reading in its own box, as the board's metric cards are: label, value, bar, detail. */
 .stats-host-rows li {
   min-width: 0;
   display: grid;
@@ -4334,8 +4242,6 @@ button:disabled {
   margin-top: 6px;
 }
 
-/* Run comparison: the change against the baseline sits under each value, and a metric
-   with nothing to compare against shows an em dash in the same place. */
 .stats-compare-table th[scope='col'] .hint {
   display: block;
   margin: 2px 0 0;
@@ -4353,8 +4259,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* One line per metric: the change sits beside its value rather than under it, which halves
-   the height of a table that runs to sixty rows. */
 .stats-compare-table tbody th,
 .stats-compare-table td {
   padding-top: 6px;
@@ -4366,60 +4270,6 @@ button:disabled {
   margin: 0 0 0 10px;
 }
 
-/* The em dash of a cell with no change is a button so Tab and a tap can reach its reason,
-   but it must read as the same quiet dash: no chrome, only a dotted underline that says
-   there is more, and the reason beside it while it is hovered or focused. */
-.stats-delta-why {
-  position: relative;
-  display: inline-block;
-}
-
-.stats-delta-why-button {
-  border: 0;
-  background: none;
-  padding: 0 1px;
-  border-radius: 4px;
-  font: inherit;
-  color: inherit;
-  cursor: help;
-  text-decoration: underline dotted;
-  text-decoration-color: var(--line-strong);
-  text-underline-offset: 3px;
-}
-
-.stats-delta-tip {
-  display: none;
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 4px);
-  right: 0;
-  width: max-content;
-  max-width: 16rem;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-  color: var(--ink-soft);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: left;
-  white-space: normal;
-}
-
-.stats-delta-why:hover .stats-delta-tip,
-.stats-delta-why-button:focus + .stats-delta-tip {
-  display: block;
-}
-
-.stats-delta-tip[hidden] {
-  display: none !important;
-}
-
-/* A run's metadata can carry a multi-line value, such as the board's os-release; keep
-   its lines rather than running them together. Scoped to the key/value tables so the
-   numbers in the metric table keep their own wrapping rules. */
 .stats-run-detail .sysinfo-table.key-value td {
   white-space: pre-wrap;
 }
@@ -4428,7 +4278,6 @@ button:disabled {
   margin-left: 6px;
 }
 
-/* A comparison collapses to its header line: what is compared, Export and Collapse. */
 .stats-compare-head {
   display: flex;
   flex-wrap: wrap;
@@ -4440,21 +4289,12 @@ button:disabled {
   margin: 0;
 }
 
-.stats-compare-head .hint {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .stats-compare-head .periph-actions {
   margin-left: auto;
 }
 
 .stats-compare-head .btn-ghost {
   padding: 5px 10px;
-}
-
-.stats-compare-head + * {
-  margin-top: 8px;
 }
 
 #stats-compare-body {
@@ -4480,37 +4320,18 @@ button:disabled {
   cursor: pointer;
 }
 
-/* However many runs are compared, the table scrolls inside the panel instead of widening
-   the page. */
 .stats-table-scroll {
   max-width: 100%;
   overflow-x: auto;
   border-radius: var(--radius-sm);
 }
 
-/* Live metrics: the update state sits beside the title instead of on a line of its own. */
-.stats-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* DevKit | Host: the page's own sub-tabs, a segmented control above both panels. It is the
-   largest control on the page because it decides which machine every number below is from. */
 .stats-segments {
   display: flex;
   flex-wrap: wrap;
 }
 
-.stats-subtabs {
-  justify-self: start;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-}
-
+.stats-subtabs,
 .stats-segment {
   display: inline-flex;
   align-items: baseline;
@@ -4530,53 +4351,22 @@ button:disabled {
   font-size: 14px;
 }
 
-.stats-subtabs .stats-segment:hover {
+.stats-subtabs .stats-segment:hover,
+.dash-subtabs .stats-segment:hover {
   background: var(--accent-soft);
 }
 
-.stats-subtabs .stats-segment.active {
+.stats-subtabs .stats-segment.active,
+.dash-subtabs .stats-segment.active {
   background: var(--accent);
   color: #fff;
 }
 
-.stats-segment:focus-visible,
-.stats-section-panel:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Same single shrinkable column as .stats-view itself: an auto column here would let the
-   comparison or run table widen the page instead of scrolling in its own region. */
 .stats-tabpanel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
-}
-
-/* Overview | Power | Thermal | System: underlined tabs inside the Live metrics panel, a
-   level below the sub-tabs above. Each carries its size and any metric past a threshold. */
-.stats-sections {
-  gap: 4px 2px;
-  margin-top: 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.stats-sections .stats-segment {
-  margin-bottom: -1px;
-  border-bottom: 3px solid transparent;
-  padding: 8px 12px 7px;
-  font-size: 13px;
-}
-
-.stats-sections .stats-segment:hover {
-  color: var(--accent-strong);
-  border-bottom-color: var(--line-strong);
-}
-
-.stats-sections .stats-segment.active {
-  color: var(--accent-strong);
-  border-bottom-color: var(--accent);
 }
 
 .stats-segment-count {
@@ -4586,18 +4376,6 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-.stats-section-panel {
-  margin-top: 12px;
-  border-radius: var(--radius-sm);
-}
-
-@media (max-width: 700px) {
-  .stats-sections .stats-segment {
-    padding-inline: 7px;
-  }
-}
-
-/* Live metrics as Sentinel's ops view lists them: one line per metric, its history across the row. */
 .stats-ops {
   width: 100%;
   border-collapse: collapse;
@@ -4686,7 +4464,6 @@ button:disabled {
   }
 }
 
-/* Sentinel dashboard: a status line and tabs, then charts laid out as Sentinel's own ops view does. */
 .dash {
   --chart-1: #0e5ab8;
   --chart-2: #0f9d8f;
@@ -4743,9 +4520,6 @@ button:disabled {
 .dash-state {
   font-family: var(--font-mono);
   font-size: 12px;
-}
-
-.dash-state {
   border-radius: 999px;
   background: var(--surface-soft);
   border: 1px solid var(--line);
@@ -4775,12 +4549,7 @@ button:disabled {
   margin: 0;
 }
 
-.dash-panel {
-  display: grid;
-  gap: 14px;
-  min-width: 0;
-}
-
+.dash-panel,
 .dash-grid {
   display: grid;
   gap: 14px;
@@ -4791,12 +4560,10 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* Headline figures are narrow, so they stay in one row where charts would already wrap. */
 .dash-grid.three.dash-stats {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-/* The dashboard's tabs, underlined beneath the status line. */
 .dash-tabs {
   gap: 4px 2px;
   border-bottom: 1px solid var(--line);
@@ -4819,29 +4586,10 @@ button:disabled {
   border-bottom-color: var(--accent);
 }
 
-/* Views within one tab (System, Thermal): a small pill switch, a level below the tabs. */
-.dash-subtabs {
-  justify-self: start;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-}
-
 .dash-subtabs .stats-segment {
   border-radius: 999px;
   padding: 4px 12px;
   font-size: 13px;
-}
-
-.dash-subtabs .stats-segment:hover {
-  background: var(--accent-soft);
-}
-
-.dash-subtabs .stats-segment.active {
-  background: var(--accent);
-  color: #fff;
 }
 
 .dash-subtabs .stats-segment.active .stats-segment-count {
@@ -4852,8 +4600,6 @@ button:disabled {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 10px;
 }
-
-
 
 .dash-card,
 .dash-chart {
@@ -4996,7 +4742,6 @@ button:disabled {
   color: #b7791f;
 }
 
-/* Warn is labelled on the left and critical on the right, so two close levels never collide. */
 .dash-threshold.warn span {
   left: 4px;
 }
@@ -5060,12 +4805,6 @@ button:disabled {
   color: #b8c5d4;
 }
 
-.dash-tooltip-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .dash-legend {
   display: flex;
   flex-wrap: wrap;
@@ -5077,7 +4816,8 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-.dash-legend li {
+.dash-legend li,
+.dash-tooltip-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5089,7 +4829,6 @@ button:disabled {
   color: var(--ink);
 }
 
-/* Fixed columns: name, then value and share at set widths, so changing numbers never reflow it. */
 .dash-legend-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -5141,7 +4880,6 @@ button:disabled {
   grid-template-columns: 26px minmax(0, 1fr);
 }
 
-/* Per-core CPU: a heatmap, a row per core and a column per slice of the window, in one blue. */
 .dash-core-meta {
   font-size: 12px;
   color: var(--ink-soft);
@@ -5190,7 +4928,6 @@ button:disabled {
   cursor: crosshair;
 }
 
-/* An explicit height: at 100% an SVG in an auto-height cell sizes by its aspect ratio instead. */
 .dash-heat-grid svg {
   display: block;
   width: 100%;
@@ -5204,7 +4941,6 @@ button:disabled {
   vector-effect: non-scaling-stroke;
 }
 
-/* The same columns as the heatmap, so the time axis runs exactly under the cells. */
 .dash-heat-foot {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 54px;
@@ -5235,7 +4971,6 @@ button:disabled {
   box-shadow: inset 0 0 0 1px var(--line);
 }
 
-/* Headline figures: a name and one number each, aligned in a row. */
 .dash-stat {
   align-content: start;
   gap: 6px;
@@ -5249,7 +4984,6 @@ button:disabled {
   color: var(--ink);
 }
 
-/* A reference level on a chart, such as the session average: neutral, not a warning. */
 .dash-threshold.reference {
   border-color: rgba(15, 29, 43, 0.45);
   color: var(--ink-soft);
@@ -5276,8 +5010,6 @@ button:disabled {
   .dash-actions {
     margin-left: 0;
   }
-
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -5313,7 +5045,6 @@ button:disabled {
   margin-bottom: 10px;
 }
 
-/* Compare Runs: the overlay and its per-run summary. */
 .dash-compare {
   margin: 0 0 14px;
 }

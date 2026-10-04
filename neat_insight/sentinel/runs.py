@@ -160,7 +160,8 @@ def delete(session, client, ref: str, timeout: float = DELETE_TIMEOUT_SEC) -> Tu
     if failure is not None:
         raise failure
     listing = client.runs()
-    if any(_text(other.get("id")) == target or _text(other.get("name")) == target for other in _runs_of(listing)):
+    key = "id" if _text(run.get("id")) else "name"
+    if any(_text(other.get(key)) == target for other in _runs_of(listing)):
         raise SentinelError(
             "sentinel_failed",
             "`{} runs delete` reported no error, but Sentinel still lists run '{}'.".format(CLI, ref),

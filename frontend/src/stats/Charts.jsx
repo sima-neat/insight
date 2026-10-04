@@ -9,7 +9,6 @@ import {
   indexAt,
   lastNumber,
   linePath,
-  scaleText,
   spanLabel,
   stackTotals,
   stackedPaths,
@@ -18,8 +17,6 @@ import {
 } from './dashboard.js'
 import { formatValue } from './model.js'
 
-// The plot is drawn in a 600 x 100 box and stretched to the card; labels and markers are HTML
-// on top of it, so they keep their shape at any width.
 const WIDTH = 600
 const HEIGHT = 100
 
@@ -28,8 +25,6 @@ function percentOf(value, scale) {
   return ((Math.min(scale.max, Math.max(scale.min, value)) - scale.min) / span) * 100
 }
 
-// The pointer's position across the plot is what is remembered, not the sample under it: new
-// samples shift the data every poll, and the readout must follow what is under a still cursor.
 function useHover(length) {
   const plot = useRef(null)
   const [fraction, setFraction] = useState(null)
@@ -41,8 +36,6 @@ function useHover(length) {
   return { plot, index, onPointerMove, onPointerLeave: () => setFraction(null) }
 }
 
-// Legends show the current reading and never follow the pointer: a hovered value would change
-// their width on every move and reflow the card. The tooltip carries the hovered moment.
 function Legend({ series, unit }) {
   return (
     <ul className="dash-legend">
@@ -61,6 +54,7 @@ function Legend({ series, unit }) {
 }
 
 function Frame({ title, headline, scale, timestamps, compact, tone, label, children, legend, hover, tooltip }) {
+  const left = `${(hover.index / Math.max(1, (timestamps?.length || 1) - 1)) * 100}%`
   return (
     <figure className={`dash-chart tone-${tone || 'ok'}${compact ? ' compact' : ''}`} aria-label={label}>
       <figcaption className="dash-chart-head">
@@ -77,8 +71,8 @@ function Frame({ title, headline, scale, timestamps, compact, tone, label, child
           {children}
           {hover.index >= 0 && (
             <>
-              <span className="dash-crosshair" style={{ left: `${(hover.index / Math.max(1, (timestamps?.length || 1) - 1)) * 100}%` }} aria-hidden="true" />
-              <span className={`dash-tooltip${hover.index > (timestamps?.length || 0) / 2 ? ' flip' : ''}`} style={{ left: `${(hover.index / Math.max(1, (timestamps?.length || 1) - 1)) * 100}%` }} aria-hidden="true">
+              <span className="dash-crosshair" style={{ left }} aria-hidden="true" />
+              <span className={`dash-tooltip${hover.index > (timestamps?.length || 0) / 2 ? ' flip' : ''}`} style={{ left }} aria-hidden="true">
                 <span className="dash-tooltip-time">{agoLabel(timestamps, hover.index)}</span>
                 {tooltip}
               </span>
@@ -98,11 +92,6 @@ function Frame({ title, headline, scale, timestamps, compact, tone, label, child
 
 const THRESHOLD_NAMES = { warn: 'Warning', critical: 'Critical' }
 
-/**
- * A time chart on a fixed scale, the way Sentinel's ops view draws one: an area under each line,
- * the metric's warn and critical levels, the newest reading marked, and a crosshair on hover
- * that reads every series at that moment.
- */
 export function TimeChart({ title, headline, series, scale, unit, timestamps, thresholds = [], height = 96, compact = false, tone }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, '')
   const length = Math.max(0, ...series.map((item) => item.values.length))
@@ -114,7 +103,6 @@ export function TimeChart({ title, headline, series, scale, unit, timestamps, th
       title={title}
       headline={headline}
       scale={scale}
-      unit={unit}
       timestamps={timestamps}
       compact={compact}
       tone={tone}
@@ -166,9 +154,7 @@ export function TimeChart({ title, headline, series, scale, unit, timestamps, th
   )
 }
 
-/** Series stacked into one total, each band its own colour: where the board's power goes. */
 export function StackedChart({ title, headline, series, scale, unit, timestamps, height = 150 }) {
-  const id = useId().replace(/[^a-zA-Z0-9]/g, '')
   const lists = series.map((item) => item.values)
   const length = Math.max(0, ...lists.map((list) => list.length))
   const hover = useHover(length)
@@ -181,7 +167,6 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
       title={title}
       headline={headline}
       scale={scale}
-      unit={unit}
       timestamps={timestamps}
       label={`${title}: ${headline ?? ''}`}
       hover={hover}
@@ -216,18 +201,13 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
     >
       <svg className="dash-chart-svg" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" style={{ height }} aria-hidden="true" focusable="false">
         {areas.map((d, index) => (
-          <path key={series[index].key} id={`${id}-${index}`} d={d} fill={series[index].color} fillOpacity="0.78" stroke="var(--surface)" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+          <path key={series[index].key} d={d} fill={series[index].color} fillOpacity="0.78" stroke="var(--surface)" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
         ))}
       </svg>
     </Frame>
   )
 }
 
-/**
- * Per-core CPU as a heatmap, the way Grafana and Netdata show many cores: a row per core, a column
- * per slice of the window, one blue for load. Only the newest column changes as samples arrive, so
- * the view stays still; the figure beside each core is its one-minute average.
- */
 export function CoreHeatmap({ cores, series, timestamps }) {
   const { rows, average, busiest } = coreSummary(cores, series)
   const [pointer, setPointer] = useState(null)
@@ -239,13 +219,11 @@ export function CoreHeatmap({ cores, series, timestamps }) {
     const rect = event.currentTarget.getBoundingClientRect()
     if (rect.width && rect.height) setPointer({ x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height })
   }
-  // Worked out on every render from where the pointer is, so it follows new columns as they arrive.
   const cell = (at) => Math.min(at.count - 1, Math.max(0, Math.floor(at.fraction * at.count)))
   const hover = pointer && rows.length && columns
     ? { row: cell({ fraction: pointer.y, count: rows.length }), column: cell({ fraction: pointer.x, count: columns }) }
     : null
   const hovered = hover && rows[hover.row]
-  // The newest sample in the hovered column, to say how long ago that slice of the window was.
   const sampleOf = (column) => Math.min(sampleCount - 1, Math.floor(((column + 1) / Math.max(1, columns)) * sampleCount) - 1)
   return (
     <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load over the last ${windowText || 'samples'}; one-minute average ${formatValue(average, '%')}`}>
@@ -297,29 +275,24 @@ export function CoreHeatmap({ cores, series, timestamps }) {
   )
 }
 
-/** One figure with its name: a headline number for a dashboard's top row. */
-export function StatTile({ title, value, unit, digits = 1, tone }) {
-  const text = fixedValue(value, unit, digits)
+export function StatTile({ title, value, unit }) {
+  const text = fixedValue(value, unit, 1)
   return (
-    <figure className={`dash-chart dash-stat tone-${tone || 'ok'}`} aria-label={`${title}: ${text}`}>
+    <figure className="dash-chart dash-stat" aria-label={`${title}: ${text}`}>
       <figcaption className="dash-chart-title">{title}</figcaption>
       <strong className="dash-stat-value">{text}</strong>
     </figure>
   )
 }
 
-/**
- * Compared runs of one series over elapsed time, as Sentinel's Compare Runs overlays them: the
- * window every run covers, the baseline drawn heavier, and a readout of each run on hover.
- */
 export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }) {
   const hover = useHover(101)
   const at = hover.index >= 0 ? (hover.index / 100) * window : null
   return (
-    <figure className="dash-chart dash-elapsed" aria-label={`${title} for ${lines.length} runs over their common ${window.toFixed(1)} s`}>
+    <figure className="dash-chart dash-elapsed" aria-label={`${title} for ${lines.length} runs over their common ${window.toFixed(1)} seconds`}>
       <figcaption className="dash-chart-head">
         <span className="dash-chart-title">{title}</span>
-        <span className="dash-chart-scale">Common window · Scale {scaleText(scale, unit)}, fitted to the runs</span>
+        <span className="dash-chart-scale">Common window · Scale {axisLabel(scale.min)}–{axisLabel(scale.max)}{unitAfter(unit)}, fitted to the runs</span>
       </figcaption>
       <ul className="dash-legend">
         {lines.map((line) => (
@@ -369,8 +342,8 @@ export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }
         </div>
       </div>
       <div className="dash-chart-x" aria-hidden="true">
-        <span>0 s</span>
-        <span>{window.toFixed(1)} s</span>
+        <span>0 seconds</span>
+        <span>{window.toFixed(1)} seconds</span>
       </div>
     </figure>
   )
