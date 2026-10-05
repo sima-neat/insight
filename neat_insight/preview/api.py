@@ -82,7 +82,7 @@ def require_camera_free(item: dict) -> None:
 
 def previewable_mode(item: dict, body: dict) -> dict:
     """The mode to preview: the one requested, or the camera's default; refused unless the scan
-    lists it and Neat Core's rules accept it."""
+    lists it and Neat Core verified it."""
     mode = item.get("default_selection")
     if any(key in body for key in MODE_KEYS):
         parsed = export.parse_request({"id": item["id"], **{key: body.get(key) for key in MODE_KEYS}})
@@ -114,7 +114,7 @@ def previewable_mode(item: dict, body: dict) -> dict:
                            f"Pick one of: {listed}.")
     if choice["tier"] != "verified":
         raise _unsupported(f"{mode['format']} {mode['width']}x{mode['height']} at {fps} fps cannot be previewed: "
-                           "Neat Core's support rules do not accept it.", "Pick a mode marked Verified.")
+                           + (choice.get("reason") or "Neat Core has not verified it."), "Pick a mode marked Verified.")
     return {"format": mode["format"], "width": mode["width"], "height": mode["height"], "fps": int(fps)}
 
 

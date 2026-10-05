@@ -17,7 +17,7 @@ from neat_insight.board.transport import key_fingerprint
 from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
 from neat_insight.preview import api, manager as preview
-from test_peripherals import C920, IMX477, c920, catalog, check, imx477, mipi_mode
+from test_peripherals import C920, IMX477, NOT_INSTALLED, c920, catalog, check, core_of, imx477, mipi_mode
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
 PREVIEW = "/api/peripherals/cameras/preview"
@@ -27,7 +27,7 @@ BOARD = {"label": "sima@board", "source": "test", "fingerprint": "fp"}
 
 def scanned(*devices, board_facts=None, generation=1):
     """Record a scan of the given Sentinel devices and return its snapshot."""
-    facts = check() if board_facts is None else board_facts
+    facts = check(support=core_of(catalog(*devices))) if board_facts is None else board_facts
     return peripherals_api.scans.record(generation, BOARD, catalog(*devices), facts, 5)
 
 
@@ -116,14 +116,21 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(self.session.transport.calls, [])
         self.assertEqual(api.previewable_mode(self.imx477, {**MODE, "fps": 30.0}), MODE)
 
-    def test_a_rate_neat_core_rejects_is_not_previewed(self):
+    def test_a_rate_neat_core_did_not_verify_is_not_previewed(self):
         doc = imx477()
-        doc["camera"]["modes"] = [dict(mipi_mode("NV12", 1920, 1080, True), framerate_source="isp"),
-                                  dict(mipi_mode("NV12", 1920, 1080, False, "30 fps only"), framerate_num=60, framerate_source="isp")]
+        doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), frame_intervals=[{"width": 1920, "height": 1080, "intervals": [
+            {"type": "discrete", "numerator": 1, "denominator": 60}, {"type": "discrete", "numerator": 1, "denominator": 30}]}])]
         item = item_of(scanned(doc), IMX477)
+        # Neat Core classified the fastest rate, 60 fps; 30 fps is advertised but has no verdict.
+        self.assertEqual(api.previewable_mode(item, {**MODE, "fps": 60}), {**MODE, "fps": 60})
         with self.assertRaises(BoardError) as ctx:
-            api.previewable_mode(item, {**MODE, "fps": 60})
-        self.assertIn("support rules do not accept it", ctx.exception.message)
+            api.previewable_mode(item, MODE)
+        self.assertIn("at 30 fps cannot be previewed: Neat Core has not verified it.", ctx.exception.message)
+
+        unknown = item_of(scanned(imx477(), board_facts=check(support={"state": "not_installed", "reason": "x"})), IMX477)
+        with self.assertRaises(BoardError) as ctx:
+            api.previewable_mode(unknown, MODE)
+        self.assertIn(f"cannot be previewed: {NOT_INSTALLED}", ctx.exception.message)
 
     def test_each_browser_gets_a_viewer_url_for_its_own_validated_host(self):
         client = self.client()

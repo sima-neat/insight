@@ -43,24 +43,23 @@ class BoardTarget:
 
 
 def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> dict:
-    # Text only: str() would save the JSON number 2130706433 as a host that resolves to 127.0.0.1.
-    if host is not None and not isinstance(host, str):
-        raise BoardError("invalid_request", "Enter the board's IP address or host name.", hint="For example 192.168.2.2")
-    if user is not None and not isinstance(user, str):
-        raise BoardError("invalid_request", "Enter a valid SSH user name.", hint="DevKits use the 'sima' account.")
-    host = str(host or "").strip()
-    user = str(user or DEFAULT_SSH_USER).strip()
+    host = host.strip() if isinstance(host, str) else ""
+    if user in (None, ""):
+        user = DEFAULT_SSH_USER
+    user = user.strip() if isinstance(user, str) else ""
     if not _HOST_RE.match(host):
         raise BoardError("invalid_request", "Enter the board's IP address or host name.", hint="For example 192.168.2.2")
-    if port is None or port == "":
+    if port in (None, ""):
         port = DEFAULT_SSH_PORT
-    elif isinstance(port, bool) or (isinstance(port, float) and not port.is_integer()):
-        # int() would turn true into port 1 and 22.9 into 22.
+    elif isinstance(port, bool):
         port = 0
-    try:
-        port = int(port)
-    except (TypeError, ValueError):
+    elif isinstance(port, float):
+        port = int(port) if port.is_integer() else 0
+    elif not isinstance(port, (int, str)):
         port = 0
+    elif isinstance(port, str):
+        port = port.strip()
+        port = int(port) if port.isdecimal() else 0
     if not 1 <= port <= 65535:
         raise BoardError("invalid_request", "The SSH port must be between 1 and 65535.", hint="DevKits use port 22.")
     if not _USER_RE.match(user):

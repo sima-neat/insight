@@ -63,6 +63,7 @@ from neat_insight.mediasrc import (
 )
 from neat_insight import board
 from neat_insight.api_docs import api_docs_bp
+from neat_insight.board.target import sdk_env_target
 from neat_insight.peripherals import peripherals_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
@@ -78,7 +79,6 @@ from neat_insight.utils import (
     cleanup_processes,
     ensure_webssh_started,
     get_certificate_access_url,
-    get_devkit_sync_devkit_ip,
     get_lan_ip,
     get_webssh_port,
     init_environment,
@@ -243,8 +243,11 @@ def _shell_target():
             ssh_user,
             target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
         )
-    devkit_ip = get_devkit_sync_devkit_ip()
-    return devkit_ip or None, 22, DEFAULT_DEVKIT_SSH_USERNAME, bool(devkit_ip)
+    paired = sdk_env_target()
+    if not paired:
+        return None, 22, DEFAULT_DEVKIT_SSH_USERNAME, False
+    ssh_user = paired["user"]
+    return paired["host"], paired["port"], ssh_user, ssh_user == DEFAULT_DEVKIT_SSH_USERNAME
 
 
 def _build_devkit_shell_payload():
