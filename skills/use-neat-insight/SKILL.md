@@ -419,7 +419,7 @@ Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge netw
 | `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
 | `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
 | `GET` | `/api/peripherals` | Last camera scan for the selected board, or an empty snapshot with `scanned_at: null`. |
-| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras, wait on the board until the catalog's `observed_at` is at or after the request, check which processes hold each camera, and ask PyNeat which modes Core `CameraInput` supports. |
+| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras, use the catalog of the scan Sentinel runs for that refresh, check which processes hold each camera, and ask PyNeat which modes Core `CameraInput` supports. |
 | `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`, optionally with `"generation"` and `"scan_id"` from `GET /api/peripherals` to refuse a stale selection (409); return Python, C++, and JSON input configurations without `capture_buffer_count` (Insight does not read the board's `libcamerasrc`, so there is no Apps `config.yaml`). |
 | `GET` | `/api/peripherals/preview` | The running preview session, or `null`. |
 | `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional `{"format", "width", "height", "fps"}`; start capture on the board and return the session with its reserved `channel` and `viewer_url`. Refuses a busy camera (`409 camera_in_use`) and never stops the process holding it. |

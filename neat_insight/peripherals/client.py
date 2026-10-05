@@ -1,5 +1,6 @@
 """Read the peripheral catalog from SiMa Sentinel on the selected board."""
 import json
+import re
 from http.client import HTTPException
 from pathlib import Path
 
@@ -8,6 +9,10 @@ from neat_insight.peripherals import socket_client
 
 CLIENT_PATH = Path(socket_client.__file__)
 DETAIL_LIMIT = 2000
+# Sentinel's refresh waits up to 10 s for its scan; the socket gets more so Sentinel's own 504 arrives.
+REFRESH_TIMEOUT_SEC = 20.0
+# RFC 3339 in UTC, as Sentinel serializes `observed_at`.
+_OBSERVED_AT = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z")
 INSTALL_HINT = "Install or update it with `sima-cli neat install sentinel`, then check `systemctl status simaai-sentinel`."
 STATUS_HINT = "Check `systemctl status simaai-sentinel` and `journalctl -u simaai-sentinel` on the board."
 
@@ -40,11 +45,6 @@ _SOCKET_ERRORS = {
     socket_client.PROTOCOL: (
         "peripheral_response",
         "SiMa Sentinel on {label} returned a malformed or incomplete HTTP response.",
-        STATUS_HINT,
-    ),
-    socket_client.REFRESH_TIMED_OUT: (
-        "timeout",
-        "SiMa Sentinel on {label} accepted the refresh but did not finish it within 45 seconds.",
         STATUS_HINT,
     ),
 }
@@ -88,8 +88,8 @@ class PeripheralClient:
         return payload
 
     def refresh(self) -> dict:
-        """Rescan, waiting on the board until a scan that started after the request has finished."""
-        payload = self._call("REFRESH", "", timeout=socket_client.REFRESH_TIMEOUT_SEC)
+        """Rescan: Sentinel answers with the catalog of a scan that started after the request."""
+        payload = self._call("POST", "/v1/peripherals/refresh", timeout=REFRESH_TIMEOUT_SEC)
         self._validate_catalog(payload)
         return payload
 
@@ -115,11 +115,16 @@ class PeripheralClient:
                     detail=detail,
                     daemon_status=status,
                 )
-            code = "invalid_request" if status == 400 else "peripheral_unavailable"
+            # 504: the refresh's scan did not finish within Sentinel's limit; 429: too many refreshes wait.
+            code = {400: "invalid_request", 504: "timeout"}.get(status, "peripheral_unavailable")
+            hint = {
+                400: "Correct the request and retry.",
+                429: "Other refreshes are waiting on the board; retry in a moment.",
+            }.get(status, STATUS_HINT)
             raise BoardError(
                 code,
                 detail or f"SiMa Sentinel rejected the request with HTTP {status}.",
-                hint="Correct the request and retry." if status == 400 else STATUS_HINT,
+                hint=hint,
                 daemon_status=status,
             )
         if not isinstance(parsed, dict):
@@ -128,11 +133,7 @@ class PeripheralClient:
 
     def _call_local(self, method, path, body, timeout):
         try:
-            if method == "REFRESH":
-                return socket_client.refresh(socket_path=self.socket_path, timeout=timeout)
             return socket_client.request(method, path, body, socket_path=self.socket_path, timeout=timeout)
-        except socket_client.RefreshTimedOut as exc:
-            raise self._socket_error(socket_client.REFRESH_TIMED_OUT, "") from exc
         except socket_client.ResponseTooLarge as exc:
             raise self._too_large(str(exc)) from exc
         except HTTPException as exc:
@@ -183,15 +184,12 @@ class PeripheralClient:
         return status, text
 
     def _validate_catalog(self, payload: dict) -> None:
-        try:
-            socket_client.observed_ns(payload)
-        except ValueError:
-            valid = False
-        else:
-            valid = _non_negative_int(payload.get("revision")) and all(
-                isinstance(payload.get(key), list) for key in ("devices", "errors")
-            )
-        if not valid:
+        observed_at = payload.get("observed_at", "")
+        if (
+            not _non_negative_int(payload.get("revision"))
+            or not (observed_at is None or (isinstance(observed_at, str) and _OBSERVED_AT.fullmatch(observed_at)))
+            or not all(isinstance(payload.get(key), list) for key in ("devices", "errors"))
+        ):
             raise self._response_error("The Sentinel peripheral catalog does not match the v1 API.", payload)
         device_ids = set()
         for device in payload["devices"]:

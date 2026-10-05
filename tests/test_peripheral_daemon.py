@@ -1,23 +1,20 @@
-import contextlib
 import copy
 import errno
 import json
 import os
 import socket
-import subprocess
-import sys
 import tempfile
 import threading
 import time
 import unittest
 import unittest.mock as mock
-from pathlib import Path
 
 from neat_insight.board.errors import BoardError
 from neat_insight.board.target import BoardTarget
 from neat_insight.board.transport import ExecResult
+from neat_insight.peripherals import client as client_module, socket_client
 from neat_insight.peripherals.client import PeripheralClient
-from neat_insight.peripherals import socket_client
+from test_peripherals import contract_catalog
 
 
 OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
@@ -41,21 +38,8 @@ def catalog(observed_at=OBSERVED_AT, **extra):
 
 
 def camera_catalog(**extra):
-    return catalog(devices=[{
-        "id": "camera:platform/cam0",
-        "type": "camera",
-        "backend": "mipi",
-        "camera_name": "platform/cam0",
-        "modes": [
-            {"format": "NV12", "width": 1920, "height": 1080, "isp_output": True},
-            {"format": "NV12", "width": 1280, "height": 720, "isp_output": True},
-        ],
-    }], **extra)
-
-
-def at(seconds):
-    """A catalog observed `seconds` after 2026-10-05T01:48:33Z, and that instant in epoch nanoseconds."""
-    return catalog(observed_at=f"2026-10-05T01:48:{33 + seconds:02d}Z"), (1791164913 + seconds) * 10**9
+    """Sentinel's published contract example (its first device is the IMX477 MIPI camera)."""
+    return {**contract_catalog(), **extra}
 
 
 class FakeSession:
@@ -70,6 +54,12 @@ class FakeSession:
 
 
 class PeripheralClientTests(unittest.TestCase):
+    def test_sentinels_contract_example_is_accepted_unchanged(self):
+        example = contract_catalog()
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(example))):
+            self.assertEqual(PeripheralClient(FakeSession()).catalog(), example)
+        self.assertEqual({d["type"] for d in example["devices"]}, {"camera", "microphone"})
+
     def test_catalog_preserves_unknown_devices_and_optional_fields(self):
         expected = catalog(new_optional={"value": 1})
         session = FakeSession()
@@ -264,30 +254,34 @@ class PeripheralClientTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "peripheral_version")
         self.assertIn("sima-cli neat install sentinel", ctx.exception.hint)
 
-    def test_local_refresh_runs_the_board_side_wait_and_validates_its_catalog(self):
-        with mock.patch.object(socket_client, "refresh", return_value=(200, json.dumps(camera_catalog()))) as refresh:
-            self.assertEqual(PeripheralClient(FakeSession(), socket_path="/tmp/s.sock").refresh(), camera_catalog())
-        refresh.assert_called_once_with(socket_path="/tmp/s.sock", timeout=socket_client.REFRESH_TIMEOUT_SEC)
-        with mock.patch.object(socket_client, "refresh", side_effect=socket_client.RefreshTimedOut()):
-            with self.assertRaises(BoardError) as ctx:
-                PeripheralClient(FakeSession()).refresh()
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("timeout", 504))
-        self.assertIn("did not finish it within 45 seconds", ctx.exception.message)
+    def test_refresh_is_one_post_answered_with_the_new_catalog(self):
+        example = contract_catalog()
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(example))) as request:
+            self.assertEqual(PeripheralClient(FakeSession(), socket_path="/tmp/s.sock").refresh(), example)
+        request.assert_called_once_with("POST", "/v1/peripherals/refresh", None, socket_path="/tmp/s.sock",
+                                        timeout=client_module.REFRESH_TIMEOUT_SEC)
+        # Sentinel waits up to 10 s for the scan; Insight waits longer, so Sentinel's own 504 arrives.
+        self.assertGreater(client_module.REFRESH_TIMEOUT_SEC, 10)
 
-    def test_remote_refresh_waits_on_the_board_in_one_bounded_command(self):
+    def test_remote_refresh_is_one_bounded_command(self):
         transport = mock.Mock()
         transport.exec.return_value = ExecResult(0, json.dumps({"status": 200, "text": json.dumps(catalog())}).encode(), b"")
         self.assertEqual(PeripheralClient(FakeSession("ssh", transport)).refresh(), catalog())
         argv = transport.exec.call_args.args[0]
-        self.assertEqual(argv[:3], ["python3", "-", "REFRESH"])
-        self.assertEqual(float(argv[-1]), socket_client.REFRESH_TIMEOUT_SEC)
-        self.assertEqual(transport.exec.call_args.kwargs["timeout"], socket_client.REFRESH_TIMEOUT_SEC + 15.0)
+        self.assertEqual(argv[:4], ["python3", "-", "POST", "/v1/peripherals/refresh"])
+        self.assertEqual(float(argv[-1]), client_module.REFRESH_TIMEOUT_SEC)
+        self.assertEqual(transport.exec.call_args.kwargs["timeout"], client_module.REFRESH_TIMEOUT_SEC + 15.0)
 
-        transport.exec.return_value = ExecResult(3, json.dumps({"failure": socket_client.REFRESH_TIMED_OUT, "detail": ""}).encode(), b"")
-        with self.assertRaises(BoardError) as ctx:
-            PeripheralClient(FakeSession("ssh", transport)).refresh()
-        self.assertEqual(ctx.exception.code, "timeout")
-        self.assertIn("did not finish it within 45 seconds", ctx.exception.message)
+    def test_a_refresh_sentinel_could_not_finish_or_queue_is_reported(self):
+        for status, body, code, words in (
+            (504, '{"error":"the peripheral scan did not finish within 10 seconds"}', "timeout", "within 10 seconds"),
+            (429, '{"error":"8 refresh requests are already waiting; retry later"}', "peripheral_unavailable", "already waiting"),
+        ):
+            with self.subTest(status=status), mock.patch.object(socket_client, "request", return_value=(status, body)):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(FakeSession()).refresh()
+                self.assertEqual((ctx.exception.code, ctx.exception.extra["daemon_status"]), (code, status))
+                self.assertIn(words, ctx.exception.message)
 
     def test_remote_access_runs_only_the_stdlib_socket_helper(self):
         response = catalog()
@@ -308,60 +302,6 @@ class PeripheralClientTests(unittest.TestCase):
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
 
 
-class RefreshTests(unittest.TestCase):
-    """socket_client.refresh, which runs on the board next to Sentinel."""
-
-    def run_refresh(self, replies, requested_ns, monotonic=None):
-        with contextlib.ExitStack() as stack:
-            request = stack.enter_context(mock.patch.object(socket_client, "request", side_effect=replies))
-            stack.enter_context(mock.patch.object(socket_client.time, "time_ns", return_value=requested_ns))
-            stack.enter_context(mock.patch.object(socket_client.time, "sleep"))
-            if monotonic is not None:
-                stack.enter_context(mock.patch.object(socket_client.time, "monotonic", side_effect=monotonic))
-            result = socket_client.refresh(socket_path="/tmp/s.sock", timeout=45)
-        return result, [call.args[:2] for call in request.call_args_list]
-
-    def test_waits_until_a_scan_started_at_or_after_the_request(self):
-        before, _ = at(0)
-        after, requested = at(2)
-        replies = [(202, '{"accepted":true}'), (200, json.dumps(catalog(observed_at=None))),
-                   (200, json.dumps(before)), (200, json.dumps(after))]
-        result, calls = self.run_refresh(replies, requested)
-        self.assertEqual(result, (200, json.dumps(after)))
-        self.assertEqual(calls, [("POST", "/v1/peripherals/refresh")] + [("GET", "/v1/peripherals")] * 3)
-
-    def test_sub_second_precision_decides_whether_the_scan_is_new(self):
-        observed = catalog(observed_at="2026-10-05T01:48:33.5Z")
-        requested = 1791164913 * 10**9 + 500_000_001
-        newer = catalog(observed_at="2026-10-05T01:48:33.500000001Z")
-        result, _ = self.run_refresh([(202, "{}"), (200, json.dumps(observed)), (200, json.dumps(newer))], requested)
-        self.assertEqual(result[1], json.dumps(newer))
-
-    def test_errors_and_unreadable_catalogs_return_at_once_for_the_caller_to_report(self):
-        _, requested = at(0)
-        for replies in (
-            [(503, '{"error":"peripheral discovery is not running"}')],
-            [(202, "{}"), (503, '{"error":"stopped"}')],
-            [(202, "{}"), (200, json.dumps(catalog(observed_at="soon")))],
-            [(202, "{}"), (200, "not json")],
-        ):
-            with self.subTest(replies=replies):
-                result, _ = self.run_refresh(replies, requested)
-                self.assertEqual(result, replies[-1])
-
-    def test_a_scan_that_never_finishes_times_out(self):
-        before, _ = at(0)
-        _, requested = at(1)
-        with self.assertRaises(socket_client.RefreshTimedOut):
-            self.run_refresh([(202, "{}"), (200, json.dumps(before))], requested, monotonic=(0.0, 1.0, 1.0, 46.0))
-
-    def test_runs_as_a_program_and_reports_a_refresh_timeout(self):
-        with mock.patch.object(socket_client, "refresh", side_effect=socket_client.RefreshTimedOut()), \
-                mock.patch.object(socket_client.sys, "stdout") as stdout:
-            self.assertEqual(socket_client.main(["REFRESH", "", "", "/tmp/s.sock", "45"]), 3)
-        self.assertEqual(json.loads(stdout.write.call_args.args[0])["failure"], socket_client.REFRESH_TIMED_OUT)
-
-
 class SocketClientTests(unittest.TestCase):
     def test_real_unix_socket_request_reads_http_json(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -377,54 +317,15 @@ class SocketClientTests(unittest.TestCase):
                     with connection:
                         request = connection.recv(4096)
                         self.assertIn(b"GET /v1/peripherals HTTP/1.1", request)
-                        body = b'{"schema_version":1}'
-                        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n" + body)
+                        body = b'{"revision":12345}'
+                        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 18\r\n\r\n" + body)
 
             worker = threading.Thread(target=serve)
             worker.start()
             self.assertTrue(ready.wait(2))
             status, body = socket_client.request("GET", "/v1/peripherals", socket_path=path, timeout=2)
             worker.join(2)
-        self.assertEqual((status, body), (200, '{"schema_version":1}'))
-
-    def test_refresh_program_waits_for_a_scan_newer_than_its_request_over_a_real_socket(self):
-        """Run the helper as the board runs it; the fake Sentinel finishes its scan on the second read."""
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "api.sock")
-            ready = threading.Event()
-            seen = []
-
-            def serve():
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-                    server.bind(path)
-                    server.listen(4)
-                    ready.set()
-                    for answer in range(3):
-                        connection, _ = server.accept()
-                        with connection:
-                            seen.append(connection.recv(4096).split(b" ", 2)[:2])
-                            if answer == 0:
-                                status, body = b"202 Accepted", b'{"accepted":true}'
-                            else:
-                                observed = "2001-01-01T00:00:00Z" if answer == 1 else time.strftime(
-                                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 1))
-                                status, body = b"200 OK", json.dumps(catalog(observed_at=observed)).encode()
-                            connection.sendall(b"HTTP/1.1 " + status + b"\r\nContent-Length: "
-                                               + str(len(body)).encode() + b"\r\n\r\n" + body)
-
-            worker = threading.Thread(target=serve)
-            worker.start()
-            self.assertTrue(ready.wait(2))
-            done = subprocess.run(
-                [sys.executable, "-", "REFRESH", "", "", path, "10"],
-                input=Path(socket_client.__file__).read_bytes(), capture_output=True, timeout=30,
-            )
-            worker.join(5)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        envelope = json.loads(done.stdout)
-        self.assertEqual(envelope["status"], 200)
-        self.assertNotEqual(json.loads(envelope["text"])["observed_at"], "2001-01-01T00:00:00Z")
-        self.assertEqual(seen, [[b"POST", b"/v1/peripherals/refresh"], [b"GET", b"/v1/peripherals"], [b"GET", b"/v1/peripherals"]])
+        self.assertEqual((status, body), (200, '{"revision":12345}'))
 
     def test_truncated_http_response_is_a_stable_api_error(self):
         with tempfile.TemporaryDirectory() as tmp:
