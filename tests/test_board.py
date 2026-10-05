@@ -84,6 +84,7 @@ class TargetResolutionTests(unittest.TestCase):
             ("board", float("inf"), "sima"),
             ("board", float("nan"), "sima"),
             ("board", 70000, "sima"),
+            ("board", "9" * 5000, "sima"),
             ("board", 22, True),
             ("board", 22, "a b"),
         ):
@@ -93,6 +94,7 @@ class TargetResolutionTests(unittest.TestCase):
         self.assertEqual(target_module.validate_ssh_target("board", "2222", None),
                          {"host": "board", "port": 2222, "user": "sima"})
         self.assertEqual(target_module.validate_ssh_target("board", 22.0, None)["port"], 22)
+        self.assertEqual(target_module.validate_ssh_target("board", "000022", None)["port"], 22)
 
     def test_store_round_trips_and_ignores_corrupt_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -143,6 +145,10 @@ class BoardApiTests(unittest.TestCase):
         self.assertEqual(body["board"]["machine"], "modalix")
         self.assertEqual(body["board"]["build_version"], "2.1.3_master_B4837")
         self.assertEqual(len(body["board"]["fingerprint"]), 16)
+
+    def test_a_port_too_long_for_int_is_a_400_not_a_500(self):
+        response = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": "9" * 5000, "user": "sima"})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
 
     def test_select_and_reset_bump_generation_and_close_old_connection(self):
         first = self.client.get("/api/board").get_json()["generation"]

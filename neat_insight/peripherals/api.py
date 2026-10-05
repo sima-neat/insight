@@ -48,6 +48,11 @@ def _run_check(session, payload: dict):
             ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
         )
         session.require_current()
+        if result.exit_code != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()[-2000:]
+            logging.warning(
+                "The peripheral camera check exited %s on %s: %s", result.exit_code, session.target.label, stderr
+            )
         check = json.loads(result.stdout.decode("utf-8", errors="replace")) if result.exit_code == 0 else None
     except ValueError:
         check = None
