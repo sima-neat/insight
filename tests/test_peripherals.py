@@ -32,13 +32,14 @@ NO_RATES_NOTE = "The camera reports no frame rates, so only CameraInput's defaul
 NO_BUFFER_COUNT = "Insight does not read libcamerasrc's properties on the board, so the code omits capture_buffer_count."
 C920_BY_ID = "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0"
 OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
-DEVKIT_CAPTURE = Path(__file__).parent / "fixtures" / "sentinel-peripherals-devkit-2026-10-05.json"
+# Sentinel's published contract example, copied byte for byte from sima-neat/sentinel
+# docs/peripherals/catalog-example.json at commit 7efb980: a real DevKit response (IMX477 MIPI camera,
+# Logitech C920 camera and its microphone) with the USB camera trimmed to one mode per format.
+CONTRACT_EXAMPLE = Path(__file__).parent / "fixtures" / "sentinel-catalog-example.json"
 
 
-def devkit_catalog():
-    """Real DevKit capture: Sentinel's GET /v1/peripherals on a Modalix DevKit with an IMX477 MIPI camera and a
-    Logitech C920, whose microphone Sentinel lists as a separate device (2026-10-05)."""
-    return json.loads(DEVKIT_CAPTURE.read_text(encoding="utf-8"))
+def contract_catalog():
+    return json.loads(CONTRACT_EXAMPLE.read_text(encoding="utf-8"))
 
 
 def mipi_mode(fmt, width, height):
@@ -344,8 +345,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["modes_source"], "live")
         self.assertEqual(camera["notes"], [NO_RATES_NOTE, ISP_NOTE])
 
-    def test_real_devkit_capture_lists_both_cameras_with_neat_core_verdicts(self):
-        doc = devkit_catalog()
+    def test_sentinels_contract_example_lists_both_cameras_with_neat_core_verdicts(self):
+        doc = contract_catalog()
         snapshot = snapshot_of(doc)
         self.assertEqual(snapshot["scan_id"], f"{doc['revision']}:{doc['observed_at']}")
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
@@ -370,9 +371,10 @@ class SnapshotTests(unittest.TestCase):
         usb = item(snapshot, C920)
         self.assertEqual((usb["connection"], usb["name"], usb["support"]["tier"]), ("usb", "HD Pro Webcam C920", "unsupported"))
         self.assertEqual(usb["device"]["usb"]["bus_path"], doc["devices"][1]["identity"]["topology"])
-        self.assertEqual([(f["format"], len(f["sizes"])) for f in usb["formats"]], [("MJPG", 17), ("YUYV", 18)])
+        self.assertEqual([(f["format"], len(f["sizes"])) for f in usb["formats"]], [("MJPG", 1), ("YUYV", 1)])
+        self.assertEqual([c["value"] for c in size_of(fmt_of(usb, "MJPG"), 1920, 1080)["fps"]], [30, 24, 20, 15, 10, 7.5, 5])
         self.assertEqual([c["value"] for c in size_of(fmt_of(usb, "YUYV"), 2560, 1472)["fps"]], [2])
-        self.assertEqual(usb["default_selection"], {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertEqual(usb["default_selection"], {"format": "MJPG", "width": 1920, "height": 1080, "fps": 30})
 
     def test_without_a_neat_core_verdict_support_is_unknown_and_the_page_says_why(self):
         unknown = {
@@ -526,7 +528,7 @@ class SnapshotTests(unittest.TestCase):
 
     def test_non_camera_devices_are_not_listed(self):
         other = {"id": "future:1", "type": "future_sensor", "backend": "future"}
-        microphone = next(d for d in devkit_catalog()["devices"] if d["type"] == "microphone")
+        microphone = next(d for d in contract_catalog()["devices"] if d["type"] == "microphone")
         self.assertEqual([i["id"] for i in snapshot_of(catalog(other, microphone, imx477()))["items"]], [IMX477])
 
 
@@ -660,6 +662,16 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
         self.assertIsNone(snapshot["changes"])
         self.assertEqual(self.client.get("/api/peripherals").get_json(), snapshot)
+
+    def test_sentinels_contract_example_refreshes_and_exports_both_cameras(self):
+        self.use(contract_catalog())
+        snapshot = self.refresh().get_json()
+        self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
+        mipi = self.export().get_json()
+        self.assertEqual(json.loads(mipi["exports"][2]["content"])["options"]["camera_name"], "imx477 5-001a")
+        usb = self.export(id=C920, format="MJPG", width=1920, height=1080, fps=30).get_json()
+        self.assertEqual(json.loads(usb["exports"][1]["content"])["device"],
+                         "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0")
 
     def test_a_board_without_cameras_needs_no_board_check(self):
         transport = self.use(catalog())

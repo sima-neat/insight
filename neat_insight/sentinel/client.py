@@ -52,13 +52,9 @@ class SentinelSocket:
 
     def _call_local(self, method, path, body, timeout):
         try:
-            if method == "REFRESH":
-                return socket_client.refresh(socket_path=self.socket_path, timeout=timeout, max_bytes=self.max_body_bytes)
             return socket_client.request(
                 method, path, body, socket_path=self.socket_path, timeout=timeout, max_bytes=self.max_body_bytes
             )
-        except socket_client.RefreshTimedOut as exc:
-            raise self._socket_error(socket_client.REFRESH_TIMED_OUT, "") from exc
         except socket_client.ResponseTooLarge as exc:
             raise self._too_large() from exc
         except HTTPException as exc:
