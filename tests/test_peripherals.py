@@ -767,6 +767,12 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "microphone:alsa:bare", "Codec", "Codec", 1, [{"format": "S16_LE"}])))
         malformed = {
             "modes": lambda mic: mic.update(modes=None),
+            # Codex 4187561597: without a backend, provider_of() is "microphone.None" and evades provider errors.
+            "missing backend": lambda mic: mic.pop("backend"),
+            "empty backend": lambda mic: mic.update(backend=""),
+            "non-string backend": lambda mic: mic.update(backend=7),
+            "missing connection": lambda mic: mic.pop("connection"),
+            "non-string connection": lambda mic: mic.update(connection=None),
             "stable key": lambda mic: mic["identity"].pop("stable_key"),
             "PCM device": lambda mic: mic["capture_target"].update(device=-1),
             "selector": lambda mic: mic["capture_target"].update(selector=7),

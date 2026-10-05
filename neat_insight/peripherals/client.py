@@ -268,8 +268,8 @@ class PeripheralClient:
 
     def _validate_microphone(self, microphone: dict) -> None:
         """Sentinel's ALSA capture record; optional identity fields are omitted, never null. `backend` and
-        `connection` are not checked against today's values: a new one is shown, not a reason to reject
-        the whole catalog."""
+        `connection` must be non-empty strings but are not checked against today's values: a new one is
+        shown, not a reason to reject the whole catalog. `backend` names the provider whose errors apply."""
         target = microphone.get("capture_target")
         identity = microphone.get("identity")
         availability = microphone.get("availability")
@@ -277,6 +277,7 @@ class PeripheralClient:
         if (
             not isinstance(microphone.get("name"), str)
             or not microphone["name"]
+            or not all(isinstance(microphone.get(key), str) and microphone[key] for key in ("backend", "connection"))
             or not isinstance(target, dict)
             or not _non_negative_int(target.get("device"))
             or not all(isinstance(target.get(key, ""), str) for key in ("card_id", "selector"))
