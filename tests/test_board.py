@@ -622,6 +622,30 @@ class SshTransportErrorTests(unittest.TestCase):
         channel.close.assert_called_once_with()
         self.assertFalse(self.transport._closed)
 
+    def test_cancel_event_stops_a_command_whose_start_is_stalled(self):
+        # Stop pressed while exec_command hangs (slow SSH setup) must not wait for the command deadline.
+        channel = mock.Mock()
+        stalled = threading.Event()
+        channel.exec_command.side_effect = lambda command: stalled.wait(30)
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        started = time.monotonic()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+        stalled.set()
+        self.assertLess(time.monotonic() - started, 5)
+        channel.close.assert_called()
+        self.assertFalse(self.transport._closed)
+
+    def test_a_command_cancelled_before_its_channel_opens_never_runs(self):
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch.object(self.transport, "_open_channel") as open_channel:
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+        open_channel.assert_not_called()
+
     def test_network_failures_are_unreachable(self):
         self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")
         self.assertEqual(self._connect_raising(ConnectionRefusedError("refused")).code, "unreachable")

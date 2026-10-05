@@ -211,16 +211,22 @@ class SshTransport:
             channel_cancelled.set()
             threading.Thread(target=channel.close, daemon=True).start()
 
+        def check_cancelled():
+            if cancel_event is not None and cancel_event.is_set():
+                raise CommandCancelled()
+
         try:
+            check_cancelled()
             channel = self._open_channel(deadline, argv, timeout)
+            check_cancelled()
             self._arm(channel, deadline, argv, timeout)
             self._run_bounded(
-                lambda: channel.exec_command(shlex.join(argv)), cancel_channel, deadline, argv, timeout
+                lambda: channel.exec_command(shlex.join(argv)), cancel_channel, deadline, argv, timeout, cancel_event
             )
             if stdin:
-                self._sendall(channel, stdin, deadline, argv, timeout)
+                self._sendall(channel, stdin, deadline, argv, timeout, check_cancelled)
             self._arm(channel, deadline, argv, timeout)
-            self._run_bounded(channel.shutdown_write, cancel_channel, deadline, argv, timeout)
+            self._run_bounded(channel.shutdown_write, cancel_channel, deadline, argv, timeout, cancel_event)
             return self._collect(channel, argv, deadline, timeout, on_stdout, cancel_event)
         except BoardError as exc:
             if channel is not None and exc.code == "timeout" and not channel_cancelled.is_set():
@@ -425,7 +431,8 @@ class SshTransport:
                 connection.close()
         raise last_error or socket.gaierror(f"Could not resolve {self.host}")
 
-    def _run_bounded(self, action, cancel, deadline, argv, timeout):
+    def _run_bounded(self, action, cancel, deadline, argv, timeout, cancel_event=None):
+        # A set cancel_event stops the wait at once: the channel is closed and CommandCancelled raised.
         result = []
         done = threading.Event()
         remaining = self._remaining(deadline, argv, timeout)
@@ -440,10 +447,17 @@ class SshTransport:
 
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
-        if not done.wait(remaining):
-            # Cancellation is best-effort and must return without extending the caller's deadline.
-            cancel()
-            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+        end = time.monotonic() + remaining
+        while not done.is_set():
+            left = end - time.monotonic()
+            if left <= 0:
+                # Cancellation is best-effort and must return without extending the caller's deadline.
+                cancel()
+                raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+            if cancel_event is not None and cancel_event.is_set():
+                cancel()
+                raise CommandCancelled()
+            done.wait(left if cancel_event is None else min(left, 0.05))
         succeeded, value = result[0]
         if not succeeded:
             raise value
@@ -458,9 +472,10 @@ class SshTransport:
     def _arm(self, channel, deadline, argv, timeout) -> None:
         channel.settimeout(self._remaining(deadline, argv, timeout))
 
-    def _sendall(self, channel, data, deadline, argv, timeout) -> None:
+    def _sendall(self, channel, data, deadline, argv, timeout, check_cancelled=lambda: None) -> None:
         pending = memoryview(data)
         while pending:
+            check_cancelled()
             self._arm(channel, deadline, argv, timeout)
             sent = channel.send(pending)
             if sent <= 0:
