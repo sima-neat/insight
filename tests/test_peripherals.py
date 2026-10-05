@@ -1160,6 +1160,17 @@ class PeripheralsApiTests(unittest.TestCase):
                 self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
         self.assertEqual(self.export(generation=1.0).status_code, 200)
 
+    def test_export_rejects_a_frame_rate_that_is_not_a_finite_number(self):
+        # Codex 4188993845: an integer too large for a float overflowed against a fractional rate (a 500).
+        from neat_insight.peripherals import export
+
+        page = {"id": C920, "format": "MJPG", "width": 1920, "height": 1080}
+        for fps in (10**400, float("nan"), float("inf")):
+            with self.subTest(fps=str(fps)[:12]), self.assertRaises(BoardError) as ctx:
+                export.parse_request(dict(page, fps=fps))
+            self.assertEqual(ctx.exception.code, "invalid_request")
+        self.assertEqual(export.parse_request(dict(page, fps=7.5))["fps"], 7.5)
+
     def test_the_pages_export_request_without_scan_tokens_uses_the_current_scan(self):
         """The Peripherals page sends only the mode; the optional tokens are checked only when sent."""
         self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))
