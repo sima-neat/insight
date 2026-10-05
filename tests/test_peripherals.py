@@ -812,6 +812,10 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "availability": lambda mic: mic["availability"].update(state="busy-ish"),
             "counts": lambda mic: mic["availability"].update(subdevices=True),
             "issues": lambda mic: mic.update(issues=[None]),
+            # ALSA reports these as unsigned int; a larger value would reach the browser as Infinity.
+            "channels beyond __u32": lambda mic: mic["modes"][0].update(channels=2**32),
+            "rate beyond __u32": lambda mic: mic["modes"][0].update(rates_hz=[2**32]),
+            "PCM device beyond __u32": lambda mic: mic["capture_target"].update(device=10**400),
         }
         # A backend or connection Sentinel may add later is not a malformed record.
         validate(catalog(dict(contract_microphone(), backend="pipewire", connection="bluetooth")))
