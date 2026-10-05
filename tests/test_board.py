@@ -403,6 +403,17 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "timeout")
         self.assertLess(time.monotonic() - started, 0.2)
 
+    def test_a_later_successful_connection_forgets_the_rejected_host_key(self):
+        # Codex 4189241123: a stale rejected key could still be trusted after the trusted key was accepted.
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertIs(self.transport.presented_host_key, new)
+        with mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "connect"), \
+             mock.patch.object(paramiko.SSHClient, "get_transport"):
+            self.transport._connect(time.monotonic() + 5, ["true"], 5)
+        self.assertIsNone(self.transport.presented_host_key)
+
     def test_auth_failure_suggests_ssh_copy_id(self):
         error = self._connect_raising(paramiko.AuthenticationException("denied"))
         self.assertEqual(error.code, "auth_failed")

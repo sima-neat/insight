@@ -369,6 +369,30 @@ class SocketClientTests(unittest.TestCase):
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
         self.assertIn("malformed or incomplete", ctx.exception.message)
 
+    def test_a_content_length_too_long_to_parse_is_a_stable_api_error(self):
+        # Codex 4189241135: int() refused a 5,000-digit Content-Length and Refresh returned a 500.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "api.sock")
+            ready = threading.Event()
+
+            def serve():
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                    server.bind(path)
+                    server.listen(1)
+                    ready.set()
+                    connection, _ = server.accept()
+                    with connection:
+                        connection.recv(4096)
+                        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " + b"9" * 5000 + b"\r\n\r\n{}")
+
+            worker = threading.Thread(target=serve)
+            worker.start()
+            self.assertTrue(ready.wait(2))
+            with self.assertRaises(BoardError) as ctx:
+                PeripheralClient(FakeSession(), socket_path=path).catalog()
+            worker.join(2)
+        self.assertEqual(ctx.exception.code, "peripheral_response")
+
     def test_trickled_response_is_bounded_by_one_wall_clock_deadline(self):
         # Each byte arrives well inside the per-operation timeout, so only a total deadline stops it.
         cases = {

@@ -104,14 +104,18 @@ def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SE
             headers["Content-Length"] = str(len(payload))
         connection.request(method, path, body=payload, headers=headers)
         response = connection.getresponse()
-        declared = response.getheader("Content-Length")
-        if declared and declared.isdigit() and int(declared) > limit:
+        declared = response.getheader("Content-Length") or ""
+        length = None
+        if declared.isascii() and declared.isdigit():
+            # Past 18 digits it is over the limit anyway, and int() refuses a long enough string.
+            length = int(declared) if len(declared) <= 18 else limit + 1
+        if length is not None and length > limit:
             raise ResponseTooLarge(limit)
         data = response.read(limit + 1)
         if len(data) > limit:
             raise ResponseTooLarge(limit)
-        if declared and declared.isdigit() and len(data) != int(declared):
-            raise IncompleteRead(data, int(declared) - len(data))
+        if length is not None and len(data) != length:
+            raise IncompleteRead(data, length - len(data))
         return response.status, data.decode("utf-8", errors="replace")
     finally:
         connection.close()
