@@ -1132,6 +1132,14 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertTrue(any("internals#244" in w for w in body["warnings"]))
         self.assertTrue(any("not stable" in w for w in body["warnings"]))
 
+        # Codex 4189173487: with neither path the descriptor's device was null, which nothing can open.
+        doc.pop("device_path")
+        self.use(catalog(doc))
+        self.refresh()
+        response = self.export(id=C920, format="YUYV", width=640, height=480, fps=30)
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+        self.assertIn("no device path", response.get_json()["error"])
+
     def test_export_refuses_modes_sentinel_did_not_report_or_core_did_not_verify(self):
         self.use()
         self.refresh()

@@ -51,26 +51,27 @@ _SOCKET_ERRORS = {
 }
 
 
+# Every integer Sentinel reports except the revision comes from a kernel __u32 (V4L2 sizes and frame
+# intervals, ALSA indices, rates and channels); a larger one would overflow a float or a browser number.
+U32_MAX = 2**32 - 1
+# The revision is a JSON number the browser reads; Sentinel keeps it below 2**52.
+MAX_SAFE_INTEGER = 2**53 - 1
+
+
 def _non_negative_int(value) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= U32_MAX
 
 
 def _positive_int(value) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+    return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= U32_MAX
 
 
 def _object_or_none(value) -> bool:
     return value is None or isinstance(value, dict)
 
 
-# V4L2 frame intervals are __u32 fractions; a larger value would overflow when the snapshot turns it into a float.
-U32_MAX = 2**32 - 1
-
-
 def _fraction(value) -> bool:
-    return isinstance(value, dict) and all(
-        _positive_int(value.get(key)) and value[key] <= U32_MAX for key in ("numerator", "denominator")
-    )
+    return isinstance(value, dict) and _positive_int(value.get("numerator")) and _positive_int(value.get("denominator"))
 
 
 def _finite_positive(value) -> bool:
@@ -206,7 +207,9 @@ class PeripheralClient:
     def _validate_catalog(self, payload: dict) -> None:
         observed_at = payload.get("observed_at", "")
         if (
-            not _non_negative_int(payload.get("revision"))
+            not isinstance(payload.get("revision"), int)
+            or isinstance(payload["revision"], bool)
+            or not 0 <= payload["revision"] <= MAX_SAFE_INTEGER
             or not (observed_at is None or (isinstance(observed_at, str) and _OBSERVED_AT.fullmatch(observed_at)))
             or not all(isinstance(payload.get(key), list) for key in ("devices", "errors"))
         ):
