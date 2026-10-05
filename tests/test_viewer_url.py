@@ -185,18 +185,18 @@ class ViewerUrlTests(unittest.TestCase):
         manager = SimpleNamespace(target=lambda: target)
         with app_module.app.test_request_context(headers={"Host": "10.0.0.23:9900"}), \
              mock.patch.object(app_module.board, "get_board_manager", return_value=manager), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
+             mock.patch.object(app_module, "sdk_env_target", return_value={"host": "10.42.0.175", "port": 22, "user": "sima"}):
             self.assertEqual(app_module._shell_target(), ("10.0.0.9", 2222, "dev", False))
             payload = app_module._build_devkit_shell_payload()
             self.assertFalse(payload["credentials_prefilled"])
             self.assertFalse(payload["launch_supported"])
             self.assertIsNone(payload["launch_url"])
 
-        # Insight running on the board itself has no shell of its own to open; the SDK's DevKit stands in.
+        # Insight running on the board itself has no shell of its own to open; the paired SDK DevKit stands in.
         local = SimpleNamespace(mode="local", source="on-board", host=None, port=None, user=None)
         with mock.patch.object(app_module.board, "get_board_manager", return_value=SimpleNamespace(target=lambda: local)), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"):
-            self.assertEqual(app_module._shell_target(), ("10.42.0.175", 22, "sima", True))
+             mock.patch.object(app_module, "sdk_env_target", return_value={"host": "10.42.0.175", "port": 2222, "user": "dev"}):
+            self.assertEqual(app_module._shell_target(), ("10.42.0.175", 2222, "dev", False))
 
     def test_sdk_shell_does_not_prefill_default_password_for_custom_user(self):
         target = SimpleNamespace(mode="ssh", source="sdk-env", host="10.0.0.9", port=2222, user="dev")
@@ -233,7 +233,7 @@ class ViewerUrlTests(unittest.TestCase):
         ]
 
         with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"), \
+             mock.patch.object(app_module, "sdk_env_target", return_value={"host": "10.42.0.175", "port": 22, "user": "sima"}), \
              mock.patch.object(app_module, "webssh_is_available", return_value=True), \
              mock.patch.object(app_module, "is_webssh_running", return_value=False):
             response = self.client.get("/api/devkit-shell", headers={"Host": "[fd00::23]:20710"})
@@ -247,7 +247,7 @@ class ViewerUrlTests(unittest.TestCase):
         ]
 
         with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"), \
+             mock.patch.object(app_module, "sdk_env_target", return_value={"host": "10.42.0.175", "port": 22, "user": "sima"}), \
              mock.patch.object(app_module, "webssh_is_available", return_value=True), \
              mock.patch.object(app_module, "is_webssh_running", return_value=False):
             response = self.client.get("/api/devkit-shell", headers={"Host": "10.0.0.23:23881"})
@@ -257,7 +257,7 @@ class ViewerUrlTests(unittest.TestCase):
 
     def test_devkit_shell_url_falls_back_to_internal_webssh_port(self):
         with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=[]), \
-             mock.patch.object(app_module, "get_devkit_sync_devkit_ip", return_value="10.42.0.175"), \
+             mock.patch.object(app_module, "sdk_env_target", return_value={"host": "10.42.0.175", "port": 22, "user": "sima"}), \
              mock.patch.object(app_module, "webssh_is_available", return_value=True), \
              mock.patch.object(app_module, "is_webssh_running", return_value=False):
             response = self.client.get("/api/devkit-shell", headers={"Host": "10.0.0.23:9900"})

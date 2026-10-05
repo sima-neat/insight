@@ -18,7 +18,7 @@ from typing import Optional
 
 from neat_insight.board import BoardError
 from neat_insight.board.transport import CommandCancelled
-from neat_insight.peripherals.cameras import _availability
+from neat_insight.peripherals.cameras import _availability, provider_of
 from neat_insight.peripherals.microphones import KERNEL_IN_USE_REASON
 
 # The longest a test records when nobody presses Stop.
@@ -71,26 +71,21 @@ def find_microphone(snapshot: dict, mic_id: str) -> dict:
 def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
     """The selector and format to record with, from Sentinel's current catalog.
 
-    `scanned` is the `instance_id` and `revision` of the catalog the last scan showed: a restarted
-    Sentinel or a changed catalog can route the same id elsewhere, so either one means Refresh first.
+    `scanned` is the `revision` of the catalog the last scan showed: a changed catalog, or a restarted
+    Sentinel, whose revisions never repeat, can route the same id elsewhere, so either means Refresh first.
     """
-    if (catalog.get("instance_id"), catalog.get("revision")) != (scanned["instance_id"], scanned["revision"]):
+    if catalog.get("revision") != scanned["revision"]:
         raise BoardError(
             "stale_snapshot",
             "SiMa Sentinel's peripheral catalog changed since the last scan.",
             hint=REFRESH_HINT,
-            current_instance_id=catalog.get("instance_id"),
             current_revision=catalog.get("revision"),
         )
-    device = next((item for item in catalog.get("devices", []) if item.get("id") == mic_id), None)
-    microphone = device.get("microphone") if device and device.get("type") == "microphone" else None
-    if not isinstance(microphone, dict):
+    microphone = next((item for item in catalog.get("devices", []) if item.get("id") == mic_id), None)
+    if not microphone or microphone.get("type") != "microphone":
         raise BoardError("not_found", "That microphone is no longer in SiMa Sentinel's catalog.", hint=UNPLUGGED_HINT)
-    retained = any(
-        issue.get("provider") == device.get("provider") and issue.get("retained_last_good") is True
-        for issue in catalog.get("issues", [])
-    )
-    if catalog.get("error") is not None or retained:
+    # A failed provider's devices are its last successful scan's.
+    if any(error.get("provider") == provider_of(microphone) for error in catalog.get("errors", [])):
         raise BoardError(
             "stale_snapshot",
             "SiMa Sentinel could not freshly read this microphone; its details are from an earlier scan.",

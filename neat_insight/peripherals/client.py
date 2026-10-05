@@ -1,17 +1,13 @@
 """Read the peripheral catalog from SiMa Sentinel on the selected board."""
 import json
-import time
 from http.client import HTTPException
 from pathlib import Path
 
 from neat_insight.board import BoardError
 from neat_insight.peripherals import socket_client
 
-SCHEMA_VERSION = 1
 CLIENT_PATH = Path(socket_client.__file__)
 DETAIL_LIMIT = 2000
-REFRESH_TIMEOUT_SEC = 45.0
-REFRESH_POLL_SEC = 0.2
 INSTALL_HINT = "Install or update it with `sima-cli neat install sentinel`, then check `systemctl status simaai-sentinel`."
 STATUS_HINT = "Check `systemctl status simaai-sentinel` and `journalctl -u simaai-sentinel` on the board."
 
@@ -44,6 +40,11 @@ _SOCKET_ERRORS = {
     socket_client.PROTOCOL: (
         "peripheral_response",
         "SiMa Sentinel on {label} returned a malformed or incomplete HTTP response.",
+        STATUS_HINT,
+    ),
+    socket_client.REFRESH_TIMED_OUT: (
+        "timeout",
+        "SiMa Sentinel on {label} accepted the refresh but did not finish it within 45 seconds.",
         STATUS_HINT,
     ),
 }
@@ -80,7 +81,6 @@ def _valid_interval(interval) -> bool:
         return False
     return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind])
 
-
 class PeripheralClient:
     def __init__(self, session, socket_path: str = socket_client.SOCKET_PATH):
         self.session = session
@@ -92,34 +92,10 @@ class PeripheralClient:
         return payload
 
     def refresh(self) -> dict:
-        expected_instance_id = self.catalog()["instance_id"]
-        accepted = self._call("POST", "/v1/peripherals/refresh")
-        target = accepted.get("target_scan_sequence")
-        if accepted.get("accepted") is not True or not _non_negative_int(target):
-            raise self._response_error("SiMa Sentinel returned an invalid refresh acknowledgement.", accepted)
-
-        deadline = time.monotonic() + REFRESH_TIMEOUT_SEC
-        while True:
-            catalog = self.catalog()
-            if catalog["instance_id"] != expected_instance_id:
-                raise BoardError(
-                    "stale_snapshot",
-                    "SiMa Sentinel restarted while refreshing its peripheral catalog.",
-                    hint="Retry the refresh against the restarted Sentinel.",
-                    expected_instance_id=expected_instance_id,
-                    observed_instance_id=catalog["instance_id"],
-                )
-            if catalog["scan_sequence"] >= target:
-                return catalog
-            if time.monotonic() >= deadline:
-                raise BoardError(
-                    "timeout",
-                    "SiMa Sentinel accepted the refresh but did not finish it within 45 seconds.",
-                    hint=STATUS_HINT,
-                    target_scan_sequence=target,
-                    observed_scan_sequence=catalog["scan_sequence"],
-                )
-            time.sleep(min(REFRESH_POLL_SEC, max(deadline - time.monotonic(), 0)))
+        """Rescan, waiting on the board until a scan that started after the request has finished."""
+        payload = self._call("REFRESH", "", timeout=socket_client.REFRESH_TIMEOUT_SEC)
+        self._validate_catalog(payload)
+        return payload
 
     def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC) -> dict:
         if self.session.target.mode == "local":
@@ -156,7 +132,11 @@ class PeripheralClient:
 
     def _call_local(self, method, path, body, timeout):
         try:
+            if method == "REFRESH":
+                return socket_client.refresh(socket_path=self.socket_path, timeout=timeout)
             return socket_client.request(method, path, body, socket_path=self.socket_path, timeout=timeout)
+        except socket_client.RefreshTimedOut as exc:
+            raise self._socket_error(socket_client.REFRESH_TIMED_OUT, "") from exc
         except socket_client.ResponseTooLarge as exc:
             raise self._too_large(str(exc)) from exc
         except HTTPException as exc:
@@ -174,7 +154,11 @@ class PeripheralClient:
             self.socket_path,
             str(timeout),
         ]
-        result = self.session.transport.exec(argv, timeout=timeout + 15.0, stdin=CLIENT_PATH.read_bytes())
+        result = self.session.transport.exec(
+            argv,
+            timeout=timeout + 15.0,
+            stdin=CLIENT_PATH.read_bytes(),
+        )
         if result.exit_code == 127:
             raise BoardError(
                 "tool_missing",
@@ -202,39 +186,20 @@ class PeripheralClient:
             raise self._response_error("The Sentinel socket client returned a malformed response envelope.", envelope)
         return status, text
 
-    def _validate_schema(self, payload: dict) -> None:
-        version = payload.get("schema_version")
-        if version != SCHEMA_VERSION:
-            raise BoardError(
-                "peripheral_version",
-                f"SiMa Sentinel speaks schema {version!r}; Insight understands schema {SCHEMA_VERSION}.",
-                hint="Update Insight and SiMa Sentinel to compatible versions.",
-                daemon_schema_version=version,
-                insight_schema_version=SCHEMA_VERSION,
-            )
-
     def _validate_catalog(self, payload: dict) -> None:
-        self._validate_schema(payload)
-        if (
-            not isinstance(payload.get("instance_id"), str)
-            or not payload["instance_id"]
-            or payload.get("state") not in {"starting", "ready", "degraded"}
-            or not isinstance(payload.get("ready"), bool)
-            or not isinstance(payload.get("stale"), bool)
-            or not all(_non_negative_int(payload.get(key)) for key in ("revision", "sequence", "scan_sequence"))
-            or not isinstance(payload.get("devices"), list)
-            or not (payload.get("error") is None or isinstance(payload.get("error"), dict))
-            or not isinstance(payload.get("issues", []), list)
-            or not self._valid_support(payload.get("support"))
-        ):
-            raise self._response_error("The Sentinel peripheral catalog does not match the v1 schema.", payload)
+        try:
+            socket_client.observed_ns(payload)
+        except ValueError:
+            valid = False
+        else:
+            valid = _non_negative_int(payload.get("revision")) and all(
+                isinstance(payload.get(key), list) for key in ("devices", "errors")
+            )
+        if not valid:
+            raise self._response_error("The Sentinel peripheral catalog does not match the v1 API.", payload)
         device_ids = set()
         for device in payload["devices"]:
-            if (
-                not isinstance(device, dict)
-                or not all(isinstance(device.get(key), str) and device[key] for key in ("id", "type", "provider"))
-                or not isinstance(device.get(device.get("type")), dict)
-            ):
+            if not isinstance(device, dict) or not all(isinstance(device.get(key), str) and device[key] for key in ("id", "type")):
                 raise self._response_error("SiMa Sentinel returned a malformed device record.", device)
             if device["id"] in device_ids:
                 raise self._response_error("SiMa Sentinel returned duplicate device identities.", device)
@@ -243,35 +208,53 @@ class PeripheralClient:
                 self._validate_camera(device)
             elif device["type"] == "microphone":
                 self._validate_microphone(device)
-        for issue in payload.get("issues", []):
-            if (
-                not isinstance(issue, dict)
-                or not all(isinstance(issue.get(key), str) and issue[key] for key in ("provider", "code", "reason"))
-                or not isinstance(issue.get("retained_last_good"), bool)
-            ):
-                raise self._response_error("SiMa Sentinel returned a malformed provider issue.", issue)
+        for error in payload["errors"]:
+            if not isinstance(error, dict) or not all(isinstance(error.get(key), str) and error[key] for key in ("provider", "code", "reason")):
+                raise self._response_error("SiMa Sentinel returned a malformed provider error.", error)
 
-    def _validate_camera(self, device: dict) -> None:
-        camera = device["camera"]
+    def _validate_camera(self, camera: dict) -> None:
+        identity = camera.get("identity")
         if (
             not isinstance(camera.get("backend"), str)
             or not camera["backend"]
             or not isinstance(camera.get("modes"), list)
-            or not (camera.get("camera_name") is None or isinstance(camera.get("camera_name"), str))
-            or not (camera.get("model") is None or isinstance(camera.get("model"), str))
-            # The snapshot reads fields of these objects, so a non-object would fail outside this check.
-            or not all(_object_or_none(camera.get(key)) for key in ("identity", "availability", "isp"))
+            or any(
+                camera.get(key) is not None and not isinstance(camera.get(key), str)
+                for key in (
+                    "camera_name", "model", "media_device", "bus_info",
+                    "csi_receiver", "device_path", "by_id_path",
+                )
+            )
+            or any(
+                camera.get(key) is not None and not isinstance(camera.get(key), dict)
+                for key in ("identity", "availability", "isp")
+            )
+            or (
+                isinstance(identity, dict)
+                and (
+                    any(
+                        identity.get(key) is not None and not isinstance(identity.get(key), str)
+                        for key in (
+                            "stable_key", "topology", "interface", "vendor_id", "product_id",
+                            "serial", "manufacturer", "speed",
+                        )
+                    )
+                    or (
+                        identity.get("node_index") is not None
+                        and not (
+                            isinstance(identity["node_index"], str)
+                            or _non_negative_int(identity["node_index"])
+                        )
+                    )
+                )
+            )
         ):
-            raise self._response_error("SiMa Sentinel returned malformed camera details.", device)
+            raise self._response_error("SiMa Sentinel returned malformed camera details.", camera)
         for mode in camera["modes"]:
             if (
                 not isinstance(mode, dict)
                 or not isinstance(mode.get("format"), str)
                 or not mode["format"]
-                or not _positive_int(mode.get("framerate_num"))
-                or not _positive_int(mode.get("framerate_den"))
-                or not isinstance(mode.get("supported"), bool)
-                or not isinstance(mode.get("reason"), str)
             ):
                 raise self._response_error("SiMa Sentinel returned a malformed camera mode.", mode)
             if "width" in mode or "height" in mode:
@@ -285,9 +268,8 @@ class PeripheralClient:
             if "frame_intervals" in mode and not self._valid_frame_intervals(mode["frame_intervals"]):
                 raise self._response_error("SiMa Sentinel returned malformed frame intervals.", mode)
 
-    def _validate_microphone(self, device: dict) -> None:
+    def _validate_microphone(self, microphone: dict) -> None:
         """Sentinel's ALSA capture record; optional identity fields are omitted, never null."""
-        microphone = device["microphone"]
         target = microphone.get("capture_target")
         identity = microphone.get("identity")
         availability = microphone.get("availability")
@@ -315,7 +297,7 @@ class PeripheralClient:
             or not all(_non_negative_int(availability.get(key, 0)) for key in ("subdevices", "subdevices_available"))
             or not isinstance(issues, list)
         ):
-            raise self._response_error("SiMa Sentinel returned malformed microphone details.", device)
+            raise self._response_error("SiMa Sentinel returned malformed microphone details.", microphone)
         for mode in microphone["modes"]:
             if not self._valid_microphone_mode(mode):
                 raise self._response_error("SiMa Sentinel returned a malformed microphone mode.", mode)
@@ -357,11 +339,6 @@ class PeripheralClient:
             and all(_valid_interval(interval) for interval in entry["intervals"])
             for entry in value
         )
-
-    @staticmethod
-    def _valid_support(value) -> bool:
-        """The snapshot looks up the support rules' state in a table, so it must be a string when present."""
-        return value is None or (isinstance(value, dict) and (value.get("state") is None or isinstance(value["state"], str)))
 
     @staticmethod
     def _valid_size_range(value) -> bool:

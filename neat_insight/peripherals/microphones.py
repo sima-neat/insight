@@ -5,7 +5,7 @@ capabilities and availability only: there is nothing to export for it.
 """
 from typing import Optional
 
-from neat_insight.peripherals.cameras import _availability
+from neat_insight.peripherals.cameras import _availability, provider_of
 
 SOUND_SERVER_NAMES = {"pulseaudio": "PulseAudio", "pipewire": "PipeWire", "pipewire-pulse": "PipeWire"}
 NO_CAPABILITIES_NOTE = "Capture formats cannot be read without opening the device."
@@ -20,7 +20,7 @@ def microphones_of(catalog: dict) -> list:
 
 def check_nodes(device: dict) -> list:
     """The capture PCM node the board check reads live: its open substreams and the processes holding it."""
-    node = device["microphone"]["identity"].get("pcm_node")
+    node = device["identity"].get("pcm_node")
     return [node] if isinstance(node, str) and node.startswith("/dev/") else []
 
 
@@ -33,7 +33,7 @@ def microphone_items(catalog: dict, check: Optional[dict], cameras: list, retain
             # Sentinel's camera topology is the USB device's sysfs path; ALSA names the device by its last part.
             usb_cameras[bus_path.rsplit("/", 1)[-1]] = camera
     return [
-        _item(device, check, servers, usb_cameras, device["provider"] in retained)
+        _item(device, check, servers, usb_cameras, provider_of(device) in retained)
         for device in microphones_of(catalog)
     ]
 
@@ -53,8 +53,7 @@ def _availability_of(mic: dict, users: Optional[list], method: Optional[str], li
     return _availability(users, method, None)
 
 
-def _item(device: dict, check: Optional[dict], servers: list, usb_cameras: dict, retained: bool) -> dict:
-    mic = device["microphone"]
+def _item(mic: dict, check: Optional[dict], servers: list, usb_cameras: dict, retained: bool) -> dict:
     identity, target = mic["identity"], mic["capture_target"]
     usb = identity.get("usb")
     card_id = identity.get("card_id") or target.get("card_id") or None
@@ -82,7 +81,7 @@ def _item(device: dict, check: Optional[dict], servers: list, usb_cameras: dict,
     notes += [issue["reason"] for issue in mic.get("issues", []) if issue["code"] != CAPABILITIES_ISSUE]
     if retained:
         notes.append(
-            f"Details are from SiMa Sentinel's last successful scan; its {device['provider']} provider failed "
+            f"Details are from SiMa Sentinel's last successful scan; its {provider_of(mic)} provider failed "
             "during this refresh."
         )
     for server in servers:
@@ -91,15 +90,15 @@ def _item(device: dict, check: Optional[dict], servers: list, usb_cameras: dict,
             "here while a sound-server client is using it."
         )
 
-    users = (check or {}).get("users", {}).get(device["id"])
+    users = (check or {}).get("users", {}).get(mic["id"])
     return {
-        "id": device["id"],
+        "id": mic["id"],
         "kind": "microphone",
         "connection": "usb" if mic["connection"] == "usb" else "onboard",
         "name": (usb or {}).get("product") or mic["name"],
         "device": info,
         "availability": _availability_of(
-            mic, users, (check or {}).get("availability_method"), ((check or {}).get("capture_open") or {}).get(device["id"])
+            mic, users, (check or {}).get("availability_method"), ((check or {}).get("capture_open") or {}).get(mic["id"])
         ),
         "capture": [_capture(mode) for mode in modes] if modes else None,
         "notes": notes,

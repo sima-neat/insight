@@ -27,7 +27,7 @@
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, export a camera input configuration, and test a microphone. Sentinel discovers the devices; Insight adds which processes hold each one. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a microphone test records, and only while it runs. Each camera and mode states whether Core `CameraInput` supports it, as classified by Neat Core's support rules on the board; Core has no audio input node, so microphones have nothing to export."}
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, export a camera input configuration, and test a microphone. Sentinel discovers the devices; Insight adds which processes hold each one. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a microphone test records, and only while it runs. Each camera and mode states whether Core `CameraInput` supports it, as Neat Core on the board classifies it (unknown without Neat Core); Core has no audio input node, so microphones have nothing to export."}
   ],
   "x-tagGroups": [
     {
@@ -841,7 +841,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Scan the selected board for cameras and microphones",
-        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan and waits until its target `scan_sequence` is reached, then reads the catalog. Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes and how many of each microphone's capture substreams are open now (from `/proc/asound`; the holders are looked up only when one is open), and which sound servers run. Microphone availability comes from that live count; Sentinel's counts, which can still show a sound server's brief open after hot-plug, are used only when the check cannot run, and camera availability is then `unknown`. Microphones are Sentinel's ALSA capture devices, read from `/proc/asound` and sysfs without opening a sound device. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists devices added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan and, on the board, waits until the catalog's `observed_at` is at or after the request, then reads the catalog. Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes and how many of each microphone's capture substreams are open now (from `/proc/asound`; the holders are looked up only when one is open), and which sound servers run, and asks PyNeat (`pyneat.peripherals.list()`) which camera modes Core `CameraInput` supports; without a PyNeat that classifies camera modes, support is unknown (tier `\"\"`). Microphone availability comes from that live count; Sentinel's counts, which can still show a sound server's brief open after hot-plug, are used only when the check cannot run, and camera availability is then `unknown`. Microphones are Sentinel's ALSA capture devices, read from `/proc/asound` and sysfs without opening a sound device. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists devices added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
         "operationId": "refreshPeripherals",
         "responses": {
           "200": {"description": "New peripheral snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
@@ -856,9 +856,9 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the last scan without contacting the board. A MIPI mode must be one Neat Core's rules accept. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core's rules reject returns `400` with Sentinel's reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board changed since the scan.",
+        "description": "Renders one mode from the identified peripheral scan without contacting the board. A MIPI mode must be one Neat Core accepts. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core rejects, or whose support is unknown, returns `400` with the reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board was never scanned, and, when the optional `generation` and `scan_id` are sent, when the selected board or peripheral scan changed since the selection was read.",
         "operationId": "exportCameraInput",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "scan_id": "1791164913635:2026-10-05T01:48:33.635147447Z", "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
           "200": {"description": "Rendered configurations with the mode's support tier and warnings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExport"}}}},
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -1446,10 +1446,10 @@
       },
       "SupportTier": {
         "type": "object",
-        "description": "Whether Core `CameraInput` can use a camera, format, or mode, from Neat Core's support rules as SiMa Sentinel applies them. `verified`: the rules accept it. `unsupported`: they reject it, and `reason` is Sentinel's. `advertised` is not produced from Sentinel's catalog. A frame rate the device advertises but Sentinel did not classify has tier `\"\"` (unknown).",
+        "description": "Whether Core `CameraInput` can use a camera, format, or mode, as Neat Core on the board classifies it. `verified`: Core accepts it. `unsupported`: Core rejects it, and `reason` is Core's. `\"\"` (unknown): Neat Core is not installed, cannot classify camera modes, or did not classify this mode or frame rate. `advertised` is not produced from Sentinel's catalog.",
         "required": ["tier", "reason"],
         "properties": {
-          "tier": {"type": "string", "enum": ["verified", "advertised", "unsupported"]},
+          "tier": {"type": "string", "enum": ["verified", "advertised", "unsupported", ""]},
           "reason": {"type": "string"},
           "links": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "url": {"type": "string", "format": "uri"}}}}
         }
@@ -1533,10 +1533,11 @@
       },
       "PeripheralsSnapshot": {
         "type": "object",
-        "required": ["board", "generation", "scanned_at", "items", "issues", "changes", "platform"],
+        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "platform"],
         "properties": {
           "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
           "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
+          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan. Send it back when exporting a camera mode."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
           "platform": {"type": ["object", "null"], "description": "Tools the on-board check found and how camera and microphone users were detected."},
@@ -1549,6 +1550,8 @@
         "type": "object",
         "required": ["id", "format", "width", "height", "fps"],
         "properties": {
+          "generation": {"type": "integer", "minimum": 1, "description": "Optional. Generation from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a different selected board returns `409 stale_snapshot`."},
+          "scan_id": {"type": "string", "minLength": 1, "description": "Optional. Opaque scan identifier from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a newer scan returns `409 stale_snapshot`."},
           "id": {"type": "string"},
           "format": {"type": "string", "example": "NV12"},
           "width": {"type": "integer"},
