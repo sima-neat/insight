@@ -204,6 +204,28 @@ class PreviewTests(unittest.TestCase):
         self.assertRegex(session.transport.calls[-1], r'rm -rf "\$base/(\w+)" "\$base/\1\.log"')
         self.assertIsNone(self.manager.current(1))
 
+    def test_a_failed_start_stops_the_pipeline_it_launched(self):
+        # Codex 4189177587: a start reported as failed must not leave a hung build holding the camera.
+        session = fake_session(FakeTransport(started=b"4242\nINFO Camera: building the graph\n"))
+        with self.assertRaises(BoardError):
+            self.start(session)
+        self.assertEqual(len(session.transport.kills()), 1)
+        self.assertIs(session.transport.calls[-1], session.transport.kills()[0])
+
+        class FailingCheck(FakeTransport):
+            def exec(self, argv, *, timeout, stdin=None):
+                if "grep -qx running" in argv[-1]:
+                    self.calls.append(argv[-1])
+                    raise BoardError("timeout", "The board did not answer in time.")
+                return super().exec(argv, timeout=timeout, stdin=stdin)
+
+        session = fake_session(FailingCheck())
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertEqual(len(session.transport.kills()), 1, "the launched pipeline is stopped when the check fails")
+        self.assertIsNone(self.manager.current(1))
+
     def test_a_failed_start_removes_its_saved_failure_log(self):
         session = fake_session(FakeTransport(started=b"camera_not_found: imx477 5-001a\n"))
         with self.assertRaises(BoardError) as ctx:

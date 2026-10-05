@@ -110,10 +110,6 @@ def _stop_script(session_id: str) -> str:
     )
 
 
-def _cleanup_script(session_id: str) -> str:
-    return _BASE + f'rm -rf "$base/{session_id}" "$base/{session_id}.log"'
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -467,6 +463,12 @@ class PreviewManager:
         with self._lock:
             self._forget(session_id)
 
+    @staticmethod
+    def _stop_failed_start(board_session, session_id: str) -> None:
+        """Best effort: kill a pipeline whose start failed (a hung graph.build() still holds the camera)."""
+        with suppress(BoardError):
+            board_session.transport.exec(["sh", "-c", _stop_script(session_id)], timeout=20)
+
     def _forget(self, session_id: str) -> None:
         if self._session is not None and self._session["id"] == session_id:
             self._session = self._owner = None
@@ -503,13 +505,17 @@ class PreviewManager:
     def _start_worker(self, board_session, session_id: str, command: list) -> None:
         for name, content in (("worker.sh", WORKER_SCRIPT.encode()), ("preview.py", PROGRAM)):
             board_session.transport.exec(["sh", "-c", _upload_script(session_id, name)], timeout=15, stdin=content)
-        board_session.transport.exec(["sh", "-c", _launch_script(session_id, command)], timeout=START_TIMEOUT_SEC)
-        # Only the program's `running` line means it started: the worker writes pipeline.pid before the
-        # graph is built, so a build that hangs still has a pid.
-        output = board_session.transport.exec(["sh", "-c", _check_script(session_id)], timeout=START_TIMEOUT_SEC).stdout.decode("utf-8", errors="replace")
+        try:
+            board_session.transport.exec(["sh", "-c", _launch_script(session_id, command)], timeout=START_TIMEOUT_SEC)
+            # Only the program's `running` line means it started: the worker writes pipeline.pid before the
+            # graph is built, so a build that hangs still has a pid.
+            output = board_session.transport.exec(["sh", "-c", _check_script(session_id)], timeout=START_TIMEOUT_SEC).stdout.decode("utf-8", errors="replace")
+        except BoardError:
+            # The launch may have been accepted before the error: stop whatever it started.
+            self._stop_failed_start(board_session, session_id)
+            raise
         if output.strip().split("\n")[0].strip() != "running":
-            with suppress(BoardError):
-                board_session.transport.exec(["sh", "-c", _cleanup_script(session_id)], timeout=10)
+            self._stop_failed_start(board_session, session_id)
             if _CAMERA_BUSY.search(output):
                 raise _camera_in_use(command[2], [], output[-1000:])  # command[2] is the camera_name
             raise BoardError(
