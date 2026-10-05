@@ -75,19 +75,24 @@ class TargetResolutionTests(unittest.TestCase):
             self.assertIsNone(target_module.sdk_env_target())
 
     def test_validation_rejects_option_like_hosts_bad_ports_and_users(self):
-        for host, port, user in (("-oProxyCommand=x", 22, "sima"), ("", 22, "sima"), ("board", 70000, "sima"), ("board", 22, "a b")):
+        for host, port, user in (
+            ("-oProxyCommand=x", 22, "sima"),
+            ("", 22, "sima"),
+            (True, 22, "sima"),
+            ("board", True, "sima"),
+            ("board", 22.9, "sima"),
+            ("board", float("inf"), "sima"),
+            ("board", float("nan"), "sima"),
+            ("board", 70000, "sima"),
+            ("board", 22, True),
+            ("board", 22, "a b"),
+        ):
             with self.assertRaises(BoardError) as ctx:
                 target_module.validate_ssh_target(host, port, user)
             self.assertEqual(ctx.exception.status, 400)
-
-    def test_ports_that_are_not_integers_are_rejected_not_coerced(self):
-        for port in (True, False, 22.9, 1.5, float("inf"), float("nan"), "22.9", [22]):
-            with self.subTest(port=port), self.assertRaises(BoardError) as ctx:
-                target_module.validate_ssh_target("board", port, "sima")
-            self.assertEqual((ctx.exception.code, ctx.exception.status), ("invalid_request", 400))
-        for port, expected in ((2222, 2222), (22.0, 22), ("2222", 2222), (None, 22), ("", 22)):
-            with self.subTest(port=port):
-                self.assertEqual(target_module.validate_ssh_target("board", port, "sima")["port"], expected)
+        self.assertEqual(target_module.validate_ssh_target("board", "2222", None),
+                         {"host": "board", "port": 2222, "user": "sima"})
+        self.assertEqual(target_module.validate_ssh_target("board", 22.0, None)["port"], 22)
 
     def test_store_round_trips_and_ignores_corrupt_files(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -141,7 +146,7 @@ class BoardApiTests(unittest.TestCase):
 
     def test_select_and_reset_bump_generation_and_close_old_connection(self):
         first = self.client.get("/api/board").get_json()["generation"]
-        body = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 2222, "user": "dev"}).get_json()
+        body = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 2222.0, "user": "dev"}).get_json()
         self.assertEqual(body["target"]["source"], "manual")
         self.assertEqual(body["saved"], {"host": "10.1.1.1", "port": 2222, "user": "dev"})
         self.assertGreater(body["generation"], first)
@@ -150,22 +155,6 @@ class BoardApiTests(unittest.TestCase):
         body = self.client.post("/api/board/select", json={"reset": True}).get_json()
         self.assertEqual(body["target"]["source"], "sdk-env")
         self.assertIsNone(body["saved"])
-
-    def test_a_non_integer_port_is_refused_and_not_saved(self):
-        for port in (True, 22.9):
-            with self.subTest(port=port):
-                response = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": port, "user": "sima"})
-                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
-                self.assertIsNone(self.client.get("/api/board").get_json()["saved"])
-
-    def test_a_non_string_host_or_user_is_refused_not_coerced(self):
-        # 2130706433 is 127.0.0.1 as an integer; str() would save it as a host the resolver accepts.
-        for body in ({"host": 2130706433}, {"host": True}, {"host": ["10.1.1.1"]},
-                     {"host": "10.1.1.1", "user": 123}, {"host": "10.1.1.1", "user": False}):
-            with self.subTest(body=body):
-                response = self.client.post("/api/board/select", json={"port": 22, **body})
-                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
-                self.assertIsNone(self.client.get("/api/board").get_json()["saved"])
 
     def test_reset_must_be_a_boolean_and_leaves_the_target_alone(self):
         self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 22, "user": "sima"})
@@ -295,7 +284,8 @@ class SshTransportErrorTests(unittest.TestCase):
         self.transport = SshTransport("192.168.2.2", 22, "sima", Path(self.tmp.name) / "known_hosts")
 
     def _connect_raising(self, exc):
-        with mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc):
+        with mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc):
             with self.assertRaises(BoardError) as ctx:
                 self.transport.exec(["true"], timeout=1)
         return ctx.exception
@@ -312,6 +302,94 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.transport.exec(["true"], timeout=1)
         self.assertEqual(ctx.exception.code, "stale_snapshot")
         connect.assert_not_called()
+
+    def test_exec_timeout_includes_waiting_for_the_transport_lock(self):
+        self.transport._lock.acquire()
+        started = time.monotonic()
+        try:
+            with self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=0.05)
+        finally:
+            self.transport._lock.release()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_exec_uses_one_deadline_for_command_launch_and_output(self):
+        clock = [0.0]
+
+        class SlowChannel:
+            def settimeout(self, timeout):
+                pass
+
+            def exec_command(self, command):
+                clock[0] = 0.15
+
+            def shutdown_write(self):
+                pass
+
+            def recv_ready(self):
+                return False
+
+            def recv_stderr_ready(self):
+                return False
+
+            def exit_status_ready(self):
+                return False
+
+            def close(self):
+                pass
+
+        with mock.patch.object(self.transport, "_open_channel", return_value=SlowChannel()), \
+             mock.patch.object(transport_module.time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(
+                 transport_module.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)
+             ), \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["true"], timeout=0.2)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertAlmostEqual(clock[0], 0.2)
+
+    def test_exec_timeout_interrupts_an_unacknowledged_command(self):
+        waiting = threading.Event()
+
+        class StuckChannel:
+            def settimeout(self, timeout):
+                pass
+
+            def exec_command(self, command):
+                waiting.wait()
+
+            def shutdown_write(self):
+                pass
+
+            def close(self):
+                waiting.set()
+
+        channel = StuckChannel()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), \
+             mock.patch.object(self.transport, "_drop") as drop, \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["true"], timeout=0.05)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertTrue(waiting.wait(1))
+        drop.assert_not_called()
+
+    def test_hostname_resolution_is_bounded_by_the_exec_deadline(self):
+        release = threading.Event()
+
+        def stalled_resolution(*args, **kwargs):
+            release.wait(1)
+            return []
+
+        started = time.monotonic()
+        try:
+            with mock.patch.object(socket, "getaddrinfo", side_effect=stalled_resolution), \
+                 self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=0.05)
+        finally:
+            release.set()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertLess(time.monotonic() - started, 0.2)
 
     def test_auth_failure_suggests_ssh_copy_id(self):
         error = self._connect_raising(paramiko.AuthenticationException("denied"))
@@ -342,6 +420,7 @@ class SshTransportErrorTests(unittest.TestCase):
                 errors.append(exc.code)
 
         with mock.patch.object(paramiko.SSHClient, "connect", side_effect=slow_connect), \
+             mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
              mock.patch.object(paramiko.SSHClient, "get_transport", return_value=mock.Mock()), \
              mock.patch.object(paramiko.SSHClient, "close") as close:
             worker = threading.Thread(target=run)

@@ -22,6 +22,14 @@ def _positive_int(value) -> bool:
 def parse_request(body) -> dict:
     if not isinstance(body, dict):
         raise _invalid("The request body must be a JSON object.")
+    # The Peripherals page sends neither scan token; a client that sends them gets them checked.
+    generation = body.get("generation")
+    if isinstance(generation, float) and generation.is_integer():
+        generation = int(generation)
+    if generation is not None and not _positive_int(generation):
+        raise _invalid("generation must be a positive integer from the last scan.")
+    if body.get("scan_id") is not None and (not isinstance(body["scan_id"], str) or not body["scan_id"]):
+        raise _invalid("scan_id must be the identifier from the last scan.")
     if not isinstance(body.get("id"), str) or not body["id"]:
         raise _invalid("id must be a camera id from the last scan.")
     if not isinstance(body.get("format"), str) or not body["format"]:
@@ -31,7 +39,11 @@ def parse_request(body) -> dict:
     fps = body.get("fps")
     if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0:
         raise _invalid("fps must be a positive number.")
-    return {key: body[key] for key in ("id", "format", "width", "height", "fps")}
+    return {
+        "generation": generation,
+        "scan_id": body.get("scan_id"),
+        **{key: body[key] for key in ("id", "format", "width", "height", "fps")},
+    }
 
 
 def render(snapshot: dict, request: dict) -> dict:
@@ -55,7 +67,7 @@ def render(snapshot: dict, request: dict) -> dict:
     if item["connection"] != "usb" and choice["tier"] != "verified":
         raise _invalid(
             f"{fmt['format']} {request['width']}x{request['height']} at {request['fps']} fps cannot be exported: "
-            + (choice.get("reason") or "Neat Core's support rules do not accept it.")
+            + (choice.get("reason") or "Neat Core does not accept it.")
         )
     selection = {
         "format": fmt["format"],
@@ -136,7 +148,7 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
 def _mode_support(mode: Optional[dict]) -> dict:
     if mode:
         return {"tier": "verified", "reason": f"Validated with Core CameraInput: {mode['evidence']}.", "links": []}
-    return {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []}
+    return {"tier": "verified", "reason": "Neat Core accepts this mode.", "links": []}
 
 
 def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict]) -> list:

@@ -34,15 +34,18 @@ def _check_board(session, catalog: dict):
     cameras = cameras_of(catalog)
     if not cameras:
         return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
-    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
+    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}, "support": True}
     try:
-        result = session.transport.exec(
+        # This probe is best-effort, so its failure must not mark the selected board disconnected.
+        result = session.raw_transport.exec(
             ["python3", "-", json.dumps(payload)], timeout=CHECK_TIMEOUT_SEC, stdin=CHECK_PATH.read_bytes()
         )
+        session.require_current()
         check = json.loads(result.stdout.decode("utf-8", errors="replace")) if result.exit_code == 0 else None
     except ValueError:
         check = None
     except BoardError as exc:
+        session.require_current()
         if exc.code == "stale_snapshot":
             raise
         logging.warning("The peripheral camera check failed on %s: %s", session.target.label, exc)
@@ -88,11 +91,23 @@ def export_camera():
     """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
     selection = export.parse_request(request.get_json(silent=True))
     session = get_board_manager().session()
+    if selection["generation"] is not None and selection["generation"] != session.generation:
+        raise BoardError(
+            "stale_snapshot",
+            "The camera selection belongs to an earlier board scan.",
+            hint="Click Refresh, then export again.",
+        )
     snapshot = scans.snapshot(session.generation)
     if snapshot is None:
         raise BoardError(
             "stale_snapshot",
             "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
+            hint="Click Refresh, then export again.",
+        )
+    if selection["scan_id"] is not None and selection["scan_id"] != snapshot["scan_id"]:
+        raise BoardError(
+            "stale_snapshot",
+            "The camera selection belongs to an earlier peripheral scan.",
             hint="Click Refresh, then export again.",
         )
     rendered = export.render(snapshot, selection)
