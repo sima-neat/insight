@@ -31,6 +31,7 @@ const HEALTH_OK = {
 const STATUS = {
   catalog: [
     { name: 'Qwen3-VL-4B-Instruct-GPTQ-a16w4', type: 'vlm', supportsVision: true, loaded: true, sizeBytes: 8369097563 },
+    { name: 'Qwen3-0.6B-Autoround-a16w4', type: 'chat', supportsVision: false, loaded: false, sizeBytes: 1379000000 },
     { name: 'florianvoss@whisper-small-a16w8-layered-encoder', type: 'asr', loaded: true, activeAsr: true },
     { name: 'gte-small', type: 'embedding', loaded: false }
   ],
@@ -153,7 +154,8 @@ test('api version check accepts unversioned and supported backends only', () => 
 })
 
 test('catalog helpers split chat and speech models', () => {
-  assert.deepEqual(chatModels(STATUS).map((m) => m.name), ['Qwen3-VL-4B-Instruct-GPTQ-a16w4'])
+  assert.deepEqual(chatModels(STATUS).map((m) => m.name), ['Qwen3-VL-4B-Instruct-GPTQ-a16w4', 'Qwen3-0.6B-Autoround-a16w4'])
+  assert.deepEqual(chatModels({ catalog: [{ name: 'untyped' }] }).map((m) => m.name), ['untyped'], "the board's default type is chat")
   assert.deepEqual(speechModels(STATUS).map((m) => m.name), ['florianvoss@whisper-small-a16w8-layered-encoder'])
   assert.equal(loadedChatModel(STATUS).name, 'Qwen3-VL-4B-Instruct-GPTQ-a16w4')
   assert.equal(loadedChatModel({ catalog: STATUS.catalog, loaded: [] }), null)

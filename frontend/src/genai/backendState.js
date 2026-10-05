@@ -120,8 +120,12 @@ export function canUseModels(state) {
   return state === 'ready' || state === 'failed'
 }
 
+// GenAI Studio types text models 'chat' (its default when a model has no type)
+// and image models 'vlm'; 'asr' and 'embedding' models don't chat.
+const CHAT_TYPES = new Set(['chat', 'llm', 'vlm'])
+
 export function chatModels(status) {
-  return ((status && status.catalog) || []).filter((m) => m.type === 'llm' || m.type === 'vlm')
+  return ((status && status.catalog) || []).filter((m) => CHAT_TYPES.has(m.type || 'chat'))
 }
 
 export function speechModels(status) {
