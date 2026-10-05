@@ -1,13 +1,10 @@
 import ipaddress
 import re
-import time
 from typing import Optional
 
-from flask import Blueprint, current_app, g, request
+from flask import Blueprint, current_app, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.board.target import resolve_target, sdk_env_target, validate_ssh_target
-from neat_insight.board.transport import key_fingerprint
 from neat_insight.peripherals import export
 from neat_insight.peripherals import api as peripherals_api
 
@@ -116,52 +113,6 @@ def previewable_mode(item: dict, body: dict) -> dict:
         raise _unsupported(f"{mode['format']} {mode['width']}x{mode['height']} at {fps} fps cannot be previewed: "
                            + (choice.get("reason") or "Neat Core has not verified it."), "Pick a mode marked Verified.")
     return {"format": mode["format"], "width": mode["width"], "height": mode["height"], "fps": int(fps)}
-
-
-@preview_bp.before_app_request
-def stop_before_board_change_or_scan():
-    """Stop a preview on its board before a board change closes the connection to it, and before a
-    refresh, so the scan sees the camera as applications will find it. A refresh that cannot stop the
-    preview on the board it scans is refused, and the preview is kept so it can still be stopped.
-
-    A board change or refresh holds the preview lock until its request ends, so no start can launch
-    capture on the board between this cleanup and the change of target or the end of the scan."""
-    if request.endpoint in ("board.select_board", "board.trust_board_host_key", "peripherals.refresh_peripherals"):
-        # A refresh queued here behind another one still shares that refresh's result.
-        g.refresh_requested_at = time.monotonic()
-        previews().board_lock.acquire()
-        g.preview_board_lock = True
-    if request.endpoint == "board.select_board":
-        body = request.get_json(silent=True)
-        body = body if isinstance(body, dict) else {}
-        manager = get_board_manager()
-        try:
-            saved = None if body.get("reset") is True else validate_ssh_target(body.get("host"), body.get("port"), body.get("user"))
-        except BoardError:
-            return  # The board route rejects the request and keeps the board.
-        if resolve_target(saved, manager.on_board, sdk_env_target()) == manager.target():
-            return
-    elif request.endpoint == "board.trust_board_host_key":
-        body = request.get_json(silent=True)
-        fingerprint = str((body if isinstance(body, dict) else {}).get("fingerprint") or "")
-        try:
-            key = getattr(get_board_manager().session().raw_transport, "presented_host_key", None)
-        except BoardError:
-            return  # The board route reports it and keeps the board.
-        if key is None or key_fingerprint(key) != fingerprint:
-            return  # The board route rejects a key the board did not present and keeps the board.
-    elif request.endpoint == "peripherals.refresh_peripherals":
-        previews().stop_for_refresh(get_board_manager().session().generation)
-        return
-    else:
-        return
-    previews().stop_for_board_change()
-
-
-@preview_bp.teardown_app_request
-def release_board_lock(_exc):
-    if g.pop("preview_board_lock", False):
-        previews().board_lock.release()
 
 
 # API: report the preview running on the selected board, if any.

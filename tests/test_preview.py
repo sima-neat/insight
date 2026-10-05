@@ -1,9 +1,14 @@
+import contextlib
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock as mock
+import uuid
 from types import SimpleNamespace
 
 import paramiko
@@ -144,7 +149,7 @@ class PreviewTests(unittest.TestCase):
         url = client.get("/api/peripherals/preview", headers={"Host": "insight.local:9900"}).get_json()["session"]["viewer_url"]
         self.assertTrue(url.startswith("https://insight.local:8081/static/viewer.html?mode=light&src=3&"), url)
         launch = next(call for call in self.session.transport.calls if "setsid nohup" in call)
-        self.assertIn("/home/sima/pyneat/bin/python /tmp/insight-preview/", launch)
+        self.assertIn("/home/sima/pyneat/bin/python preview.py ", launch)
         self.assertIn("'imx477 5-001a' 192.168.2.1 1920 1080 30 9000 3", launch)
 
     def test_the_session_has_the_shape_the_page_reads(self):
@@ -196,7 +201,7 @@ class PreviewTests(unittest.TestCase):
         check = next(call for call in session.transport.calls if "grep -qx running" in call)
         self.assertIn("&& echo running;", check)
         self.assertNotIn("pipeline.pid", check)
-        self.assertRegex(session.transport.calls[-1], r"rm -rf /tmp/insight-preview/(\w+) /tmp/insight-preview/\1\.log")
+        self.assertRegex(session.transport.calls[-1], r'rm -rf "\$base/(\w+)" "\$base/\1\.log"')
         self.assertIsNone(self.manager.current(1))
 
     def test_a_failed_start_removes_its_saved_failure_log(self):
@@ -204,7 +209,7 @@ class PreviewTests(unittest.TestCase):
         with self.assertRaises(BoardError) as ctx:
             self.start(session)
         self.assertIn("camera_not_found", ctx.exception.extra["detail"])
-        self.assertRegex(session.transport.calls[-1], r"rm -rf /tmp/insight-preview/(\w+) /tmp/insight-preview/\1\.log")
+        self.assertRegex(session.transport.calls[-1], r'rm -rf "\$base/(\w+)" "\$base/\1\.log"')
 
     def test_a_camera_another_process_holds_now_is_refused_before_anything_is_launched(self):
         session = fake_session(FakeTransport(users=[{"pid": 77, "command": "neat-app"}]))
@@ -241,6 +246,21 @@ class PreviewTests(unittest.TestCase):
             with self.assertRaises(BoardError) as ctx:
                 manager._reserve_channel(self.session)
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("no_channel", 409))
+
+    def test_a_failed_neat_json_is_retried_after_a_minute_and_a_good_answer_is_kept(self):
+        rows = [{"name": "videoUDP", "hostPortStart": 19000}]
+        answers = [OSError("neat: not found"), SimpleNamespace(stdout=json.dumps({"exposedPorts": rows}).encode())]
+        clock = [1000.0]
+        with mock.patch.object(preview, "_neat_ports", None), mock.patch.object(preview, "_neat_failed_at", None), \
+                mock.patch.object(preview.subprocess, "run", side_effect=answers) as run, \
+                mock.patch.object(preview.time, "monotonic", side_effect=lambda: clock[0]):
+            self.assertEqual(preview._neat_exposed_ports(), [])
+            clock[0] += 30
+            self.assertEqual(preview._neat_exposed_ports(), [], "not retried within a minute")
+            clock[0] += 31
+            self.assertEqual(preview._neat_exposed_ports(), rows)
+            self.assertEqual(preview._neat_exposed_ports(), rows)
+        self.assertEqual(run.call_count, 2)
 
     def test_a_second_preview_is_refused_while_one_starts_and_names_its_camera(self):
         entered, release = threading.Event(), threading.Event()
@@ -339,21 +359,26 @@ class BoardChangeTests(unittest.TestCase):
         """A start racing a board change must not launch capture on the board being deselected."""
         old = self.transports[0]
         in_window, release, changed, started = threading.Event(), threading.Event(), [], []
-        select = manager_module.BoardManager.select
+        board_manager = self.app.extensions["neat_board"]
+        guard = board_manager.target_change_guard
 
-        def paused_select(manager, *args):
-            in_window.set()
-            release.wait(5)
-            return select(manager, *args)
+        @contextlib.contextmanager
+        def paused_guard(changes):
+            with guard(changes):
+                # Inside the board change: the preview is stopped, the target not yet changed.
+                in_window.set()
+                release.wait(5)
+                yield
 
         def post(results, *args, **kwargs):
             results.append(self.app.test_client().post(*args, **kwargs).status_code)
 
-        with mock.patch.object(manager_module.BoardManager, "select", paused_select):
+        with mock.patch.object(board_manager, "target_change_guard", paused_guard):
             changer = threading.Thread(target=post, args=(changed, "/api/board/select"), kwargs={"json": {"host": "10.1.1.9"}})
             changer.start()
             self.assertTrue(in_window.wait(5))
             calls_after_cleanup = len(old.calls)
+            self.assertTrue(old.kills(), "the preview was stopped before the target changes")
             starter = threading.Thread(target=post, args=(started, PREVIEW), kwargs={"json": {"id": IMX477}})
             starter.start()
             starter.join(1.0)
@@ -476,6 +501,99 @@ class BoardChangeTests(unittest.TestCase):
             second.join(5)
         self.assertEqual(refresh.call_count, 1)
         self.assertEqual(results[0], results[1])
+
+
+class BoardScriptTests(unittest.TestCase):
+    """The board-side shell scripts, run for real with `sh` in a temporary home (no SSH)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = tmp.name
+        self.base = os.path.join(self.home, ".cache", "insight-preview")
+        self.env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": self.home, "SSH_CLIENT": "192.168.2.1 51234 22"}
+        self.sid = uuid.uuid4().hex
+
+    def sh(self, script, stdin=b"", **env):
+        done = subprocess.run(["sh", "-c", script], input=stdin, capture_output=True, timeout=60, env={**self.env, **env})
+        return done.stdout.decode()
+
+    def launch(self, program: str, ttl: int = 45):
+        """Upload the worker and a stand-in program, then launch it as the preview does."""
+        self.sh(preview._upload_script(self.sid, "worker.sh"), preview.WORKER_SCRIPT.encode())
+        self.sh(preview._upload_script(self.sid, "preview.py"), program.encode())
+        with mock.patch.object(preview, "SESSION_TTL_SEC", ttl):
+            self.sh(preview._launch_script(self.sid, [sys.executable, "preview.py"]))
+        self.addCleanup(lambda: self.sh(preview._stop_script(self.sid)))
+
+    def pid(self) -> int:
+        deadline = time.monotonic() + 10
+        path = os.path.join(self.base, self.sid, "pipeline.pid")
+        while not os.path.exists(path) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        with open(path) as handle:
+            return int(handle.read())
+
+    def wait_gone(self, pid: int, timeout: float = 20) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            # A killed child the worker has not reaped yet still answers kill -0.
+            with open(f"/proc/{pid}/stat") as handle:
+                if handle.read().split(") ")[1].startswith("Z"):
+                    return True
+            time.sleep(0.1)
+        return False
+
+    def test_the_work_directory_is_private_to_the_user(self):
+        self.sh(preview._upload_script(self.sid, "worker.sh"), b"x")
+        self.assertEqual(os.stat(self.base).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(os.path.join(self.base, self.sid)).st_mode & 0o777, 0o700)
+        self.assertFalse(preview.WORK_DIR.startswith("/tmp"))
+        cache = os.path.join(self.home, "xdg-cache")
+        self.sh(preview._upload_script(self.sid, "worker.sh"), b"x", XDG_CACHE_HOME=cache)
+        self.assertTrue(os.path.isfile(os.path.join(cache, "insight-preview", self.sid, "worker.sh")))
+
+    def test_the_worker_runs_the_program_and_the_check_waits_for_its_running_line(self):
+        self.launch("import time\ntime.sleep(0.5)\nprint('running', flush=True)\ntime.sleep(60)\n")
+        pid = self.pid()
+        self.assertEqual(self.sh(preview._check_script(self.sid)).splitlines()[0], "running")
+        self.assertIn("alive", self.sh(preview._heartbeat_script(self.sid)))
+        self.sh(preview._stop_script(self.sid))
+        self.assertTrue(self.wait_gone(pid))
+        self.assertFalse(os.path.exists(os.path.join(self.base, self.sid)))
+        self.assertNotIn("alive", self.sh(preview._heartbeat_script(self.sid)))
+
+    def test_the_worker_stops_the_program_once_heartbeats_lapse(self):
+        self.launch("import time\nprint('running', flush=True)\ntime.sleep(60)\n", ttl=1)
+        pid = self.pid()
+        self.assertTrue(self.wait_gone(pid), "the lease ended the program")
+        deadline = time.monotonic() + 10
+        while os.path.exists(os.path.join(self.base, self.sid)) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(os.path.exists(os.path.join(self.base, self.sid)))
+
+    def test_a_program_that_fails_before_running_reports_its_error(self):
+        self.launch("import sys\nprint('camera_not_found: imx477 5-001a', file=sys.stderr)\nsys.exit(1)\n")
+        output = self.sh(preview._check_script(self.sid))
+        self.assertNotEqual(output.splitlines()[0] if output else "", "running")
+        self.assertIn("camera_not_found", output)
+
+    def test_prepare_finds_pyneat_only_in_the_users_venv(self):
+        venv = os.path.join(self.home, "pyneat")
+        self.assertEqual(self.sh(preview.PREPARE_SCRIPT).splitlines(), ["192.168.2.1 51234 22"])
+        os.makedirs(os.path.join(venv, "bin"))
+        os.makedirs(os.path.join(venv, "lib", "python3.11", "site-packages", "pyneat-0.4.0.dist-info"))
+        python = os.path.join(venv, "bin", "python")
+        with open(python, "w") as handle:
+            handle.write("#!/bin/sh\n")
+        os.chmod(python, 0o755)
+        self.assertEqual(self.sh(preview.PREPARE_SCRIPT).splitlines(), ["192.168.2.1 51234 22", python])
+        other = os.path.join(self.home, "elsewhere")
+        self.assertEqual(self.sh(preview.PREPARE_SCRIPT, PYNEAT_VENV_DIR=other).splitlines(), ["192.168.2.1 51234 22"])
 
 if __name__ == "__main__":
     unittest.main()

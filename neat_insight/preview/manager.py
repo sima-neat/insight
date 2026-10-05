@@ -10,9 +10,8 @@ import threading
 import time
 import urllib.request
 import uuid
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +25,12 @@ START_TIMEOUT_SEC = 25.0
 VIDEO_ARRIVAL_TIMEOUT_SEC = 8.0
 PROGRAM = Path(__file__).with_name("graph.py").read_bytes()
 BOARD_CHECK = Path(__file__).parent.parent / "peripherals" / "board_check.py"
-WORKER_DIR = "/tmp/insight-preview"
+# The board-side work directory: private to the SSH user (mode 0700) and outside /tmp. A shell
+# expression, expanded on the board inside double quotes; every board command that uses it starts with
+# _BASE. The cache directory, not XDG_RUNTIME_DIR, because logind removes that one when the user's last
+# session ends, which would end a running preview.
+WORK_DIR = "${XDG_CACHE_HOME:-$HOME/.cache}/insight-preview"
+_BASE = f'base="{WORK_DIR}"; '
 # Prints the address Insight connects from, then PyNeat's python when the per-user venv has PyNeat.
 PREPARE_SCRIPT = (
     'echo "$SSH_CLIENT"; venv="${PYNEAT_VENV_DIR:-$HOME/pyneat}"; '
@@ -36,15 +40,18 @@ PREPARE_SCRIPT = (
 _DEVICE_NODE = re.compile(r"/dev/[A-Za-z0-9_./-]+")
 # What libcamera prints when another process holds the camera.
 _CAMERA_BUSY = re.compile(r"Failed to acquire camera|Device or resource busy")
-# The board-side worker stops the program once Insight stops touching the heartbeat file.
+# The board-side worker runs the program in its session directory and stops it once Insight stops
+# touching the heartbeat file. Run as `sh <base>/<sid>/worker.sh SID TTL COMMAND...`.
 WORKER_SCRIPT = """#!/bin/sh
 set -e
 sid="$1"; ttl="$2"; shift 2
-dir="{worker_dir}/$sid"
-find "{worker_dir}" -maxdepth 1 -name '*.log' -mmin +60 -delete 2>/dev/null || true
+dir=$(dirname "$0")
+base=$(dirname "$dir")
+find "$base" -maxdepth 1 -name '*.log' -mmin +60 -delete 2>/dev/null || true
 started=$(date +%s)
 beat="$dir/heartbeat"
 touch "$beat"
+cd "$dir"
 "$@" > "$dir/pipeline.log" 2>&1 &
 pipeline=$!
 echo "$pipeline" > "$dir/pipeline.pid"
@@ -61,11 +68,50 @@ while :; do
     fi
 done
 if [ $(( $(date +%s) - started )) -lt 15 ]; then
-    tail -c 800 "$dir/pipeline.log" > "{worker_dir}/$sid.log" 2>/dev/null || true
-    [ -s "{worker_dir}/$sid.log" ] || rm -f "{worker_dir}/$sid.log"
+    tail -c 800 "$dir/pipeline.log" > "$base/$sid.log" 2>/dev/null || true
+    [ -s "$base/$sid.log" ] || rm -f "$base/$sid.log"
 fi
 rm -rf "$dir"
-""".format(worker_dir=WORKER_DIR)
+"""
+
+
+def _upload_script(session_id: str, name: str) -> str:
+    """Writes stdin to one file of the session directory, creating it private to the user."""
+    return _BASE + f'umask 077 && mkdir -p "$base/{session_id}" && chmod 700 "$base" && cat > "$base/{session_id}/{name}"'
+
+
+def _launch_script(session_id: str, command: list) -> str:
+    return _BASE + (
+        f'setsid nohup sh "$base/{session_id}/worker.sh" {session_id} {int(SESSION_TTL_SEC)} {shlex.join(command)} '
+        f'> "$base/{session_id}/worker.log" 2>&1 < /dev/null &'
+    )
+
+
+def _check_script(session_id: str) -> str:
+    """Prints `running` once the program has built its graph (it prints that line), then the log tail."""
+    log = f'"$base/{session_id}/pipeline.log"'
+    return _BASE + (
+        f"for i in $(seq 40); do grep -qx running {log} 2>/dev/null && break; "
+        f'[ -d "$base/{session_id}" ] || break; sleep 0.5; done; '
+        f"grep -qx running {log} 2>/dev/null && echo running; {_log_tail(session_id)}"
+    )
+
+
+def _heartbeat_script(session_id: str) -> str:
+    return _BASE + f'[ -d "$base/{session_id}" ] && touch "$base/{session_id}/heartbeat" && echo alive || true'
+
+
+def _stop_script(session_id: str) -> str:
+    return _BASE + (
+        f'pid=$(cat "$base/{session_id}/pipeline.pid" 2>/dev/null); '
+        f'if [ -n "$pid" ]; then kill $pid 2>/dev/null; for i in $(seq 16); do kill -0 $pid 2>/dev/null || break; '
+        f"sleep 0.5; done; kill -9 $pid 2>/dev/null; fi; "
+        f'rm -rf "$base/{session_id}" "$base/{session_id}.log"'
+    )
+
+
+def _cleanup_script(session_id: str) -> str:
+    return _BASE + f'rm -rf "$base/{session_id}" "$base/{session_id}.log"'
 
 
 def _now() -> datetime:
@@ -121,14 +167,27 @@ def _channel_taken(channel: int) -> BoardError:
     )
 
 
-@lru_cache(maxsize=1)
+NEAT_RETRY_SEC = 60.0
+_neat_ports: Optional[list] = None
+_neat_failed_at: Optional[float] = None
+
+
 def _neat_exposed_ports() -> list:
-    """The SDK's published ports from `neat --json`, for setups without a port-map file."""
+    """The SDK's published ports from `neat --json`, for setups without a port-map file.
+
+    Read once. A failed read is retried, but at most once a minute, so heartbeats do not each run it."""
+    global _neat_ports, _neat_failed_at
+    if _neat_ports is not None:
+        return _neat_ports
+    if _neat_failed_at is not None and time.monotonic() - _neat_failed_at < NEAT_RETRY_SEC:
+        return []
     try:
         result = subprocess.run(["neat", "--json"], capture_output=True, timeout=20, check=False)
-        return list(json.loads(result.stdout.decode("utf-8", errors="replace")).get("exposedPorts", []))
+        _neat_ports = list(json.loads(result.stdout.decode("utf-8", errors="replace")).get("exposedPorts", []))
     except (OSError, ValueError, AttributeError, TypeError, subprocess.SubprocessError):
+        _neat_failed_at = time.monotonic()
         return []
+    return _neat_ports
 
 
 def _camera_in_use(name: str, users: list, detail: str = "") -> BoardError:
@@ -147,8 +206,8 @@ def _unknown_session() -> BoardError:
 
 
 def _log_tail(session_id: str) -> str:
-    directory = f"{WORKER_DIR}/{session_id}"
-    return f"tail -c 800 {directory}/pipeline.log 2>/dev/null || tail -c 800 {WORKER_DIR}/{session_id}.log 2>/dev/null"
+    """A command for scripts that start with _BASE."""
+    return f'tail -c 800 "$base/{session_id}/pipeline.log" 2>/dev/null || tail -c 800 "$base/{session_id}.log" 2>/dev/null'
 
 
 class PreviewManager:
@@ -159,8 +218,8 @@ class PreviewManager:
         self._channel_capacity = channel_capacity
         self._format_url = format_url
         self._lock = threading.Lock()
-        self._idle = threading.Condition(self._lock)
-        # Held by a preview start and by a board change for its whole request (see api).
+        # Held by a preview start for its whole request, and by board_change() and refresh() around a
+        # target change or a scan, so no start can launch capture on a board in between.
         self.board_lock = threading.Lock()
         self._session: Optional[dict] = None
         self._owner = None
@@ -214,7 +273,6 @@ class PreviewManager:
         finally:
             with self._lock:
                 self._starting = None
-                self._idle.notify_all()
 
     def _start(self, board_session, item: dict, mode: dict) -> dict:
         target_host, port_base, python = self._prepare(board_session)
@@ -223,7 +281,8 @@ class PreviewManager:
         previous = (_channel_rtp(channel) or {}).get("ssrc")
         session_id = uuid.uuid4().hex
         args = [item["device"]["camera_name"], target_host, mode["width"], mode["height"], mode["fps"], port_base, channel]
-        self._start_worker(board_session, session_id, [python, f"{WORKER_DIR}/{session_id}/preview.py", *map(str, args)])
+        # The worker runs the program in its session directory.
+        self._start_worker(board_session, session_id, [python, "preview.py", *map(str, args)])
         session = {
             "id": session_id,
             "camera_id": item["id"],
@@ -297,7 +356,7 @@ class PreviewManager:
             time.sleep(1.0)
         log = b""
         with suppress(BoardError):
-            log = board_session.transport.exec(["sh", "-c", _log_tail(session["id"])], timeout=10).stdout
+            log = board_session.transport.exec(["sh", "-c", _BASE + _log_tail(session["id"])], timeout=10).stdout
         self._stop_current(session["id"])
         if foreign:
             raise _channel_taken(session["channel"])
@@ -319,9 +378,7 @@ class PreviewManager:
                 self._forget(session_id)
                 raise _unknown_session()
             session = dict(session)
-        directory = f"{WORKER_DIR}/{session_id}"
-        beat = f"[ -d {directory} ] && touch {directory}/heartbeat && echo alive || true"
-        if b"alive" not in board_session.transport.exec(["sh", "-c", beat], timeout=10).stdout:
+        if b"alive" not in board_session.transport.exec(["sh", "-c", _heartbeat_script(session_id)], timeout=10).stdout:
             with self._lock:
                 self._forget(session_id)
             raise _unknown_session()
@@ -347,9 +404,27 @@ class PreviewManager:
             self._release(session_id)
         return {**session, "state": "stopped"}
 
+    @contextmanager
+    def board_change(self, changes):
+        """Around a request that may change the selected board: when `changes()` says it will, stop the
+        preview on its board before Insight closes that board's connection."""
+        with self.board_lock:
+            if changes():
+                self.stop_for_board_change()
+            yield
+
+    @contextmanager
+    def refresh(self, generation):
+        """Around a refresh: stop the preview before the scan and keep new previews out until it ends.
+        `generation` is a callable returning the selected board's generation."""
+        with self.board_lock:
+            self.stop_for_refresh(generation())
+            yield
+
     def stop_for_board_change(self) -> None:
         """Stop the preview on its board before Insight closes that board's connection."""
-        session = self._settled_session()
+        with self._lock:
+            session = self._session
         if session is not None:
             self._release(session["id"])
 
@@ -357,7 +432,8 @@ class PreviewManager:
         """Stop the preview before a refresh scans its board; refuse the scan when it cannot be stopped.
 
         Forgetting it instead would let the scan record the camera as held by a preview nobody can stop."""
-        session = self._settled_session()
+        with self._lock:
+            session = self._session
         if session is None:
             return
         if session["generation"] != generation:
@@ -371,11 +447,6 @@ class PreviewManager:
                 f"Could not stop the camera preview before the scan: {exc.message}",
                 hint="The preview is still running. Stop it, or click Refresh again once the board responds.",
             ) from exc
-
-    def _settled_session(self) -> Optional[dict]:
-        with self._idle:
-            self._idle.wait_for(lambda: not self._starting, timeout=START_TIMEOUT_SEC * 2)
-            return self._session
 
     def _release(self, session_id: str) -> None:
         try:
@@ -391,15 +462,8 @@ class PreviewManager:
             session, owner = self._session, self._owner
             if session is None or session["id"] != session_id:
                 return
-        directory = f"{WORKER_DIR}/{session_id}"
-        script = (
-            f"pid=$(cat {directory}/pipeline.pid 2>/dev/null); "
-            f'if [ -n "$pid" ]; then kill $pid 2>/dev/null; for i in $(seq 16); do kill -0 $pid 2>/dev/null || break; '
-            f"sleep 0.5; done; kill -9 $pid 2>/dev/null; fi; "
-            f"rm -rf {directory} {WORKER_DIR}/{session_id}.log"
-        )
         # The board that started it, even when another board is selected now.
-        owner.raw_transport.exec(["sh", "-c", script], timeout=20)
+        owner.raw_transport.exec(["sh", "-c", _stop_script(session_id)], timeout=20)
         with self._lock:
             self._forget(session_id)
 
@@ -437,20 +501,15 @@ class PreviewManager:
         return channel
 
     def _start_worker(self, board_session, session_id: str, command: list) -> None:
-        directory = f"{WORKER_DIR}/{session_id}"
         for name, content in (("worker.sh", WORKER_SCRIPT.encode()), ("preview.py", PROGRAM)):
-            board_session.transport.exec(["sh", "-c", f"mkdir -p {directory} && cat > {directory}/{name}"], timeout=15, stdin=content)
-        launch = f"setsid nohup sh {directory}/worker.sh {session_id} {int(SESSION_TTL_SEC)} {shlex.join(command)} > {directory}/worker.log 2>&1 < /dev/null &"
-        board_session.transport.exec(["sh", "-c", launch], timeout=START_TIMEOUT_SEC)
-        # The program prints "running" once PyNeat has built the graph; only that marker means it started.
-        # The worker writes pipeline.pid before the build, so a build that hangs still has a pid.
-        check = (f"for i in $(seq 40); do grep -qx running {directory}/pipeline.log 2>/dev/null && break; "
-                 f"[ -d {directory} ] || break; sleep 0.5; done; "
-                 f"grep -qx running {directory}/pipeline.log 2>/dev/null && echo running; {_log_tail(session_id)}")
-        output = board_session.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC).stdout.decode("utf-8", errors="replace")
+            board_session.transport.exec(["sh", "-c", _upload_script(session_id, name)], timeout=15, stdin=content)
+        board_session.transport.exec(["sh", "-c", _launch_script(session_id, command)], timeout=START_TIMEOUT_SEC)
+        # Only the program's `running` line means it started: the worker writes pipeline.pid before the
+        # graph is built, so a build that hangs still has a pid.
+        output = board_session.transport.exec(["sh", "-c", _check_script(session_id)], timeout=START_TIMEOUT_SEC).stdout.decode("utf-8", errors="replace")
         if output.strip().split("\n")[0].strip() != "running":
             with suppress(BoardError):
-                board_session.transport.exec(["sh", "-c", f"rm -rf {directory} {WORKER_DIR}/{session_id}.log"], timeout=10)
+                board_session.transport.exec(["sh", "-c", _cleanup_script(session_id)], timeout=10)
             if _CAMERA_BUSY.search(output):
                 raise _camera_in_use(command[2], [], output[-1000:])  # command[2] is the camera_name
             raise BoardError(

@@ -1,9 +1,10 @@
+import contextlib
 import json
 import logging
 import time
 from pathlib import Path
 
-from flask import Blueprint, g, request
+from flask import Blueprint, current_app, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.manager import board_summary
@@ -72,23 +73,26 @@ def get_peripherals():
 @peripherals_bp.post("/api/peripherals/refresh")
 def refresh_peripherals():
     """Ask SiMa Sentinel to rescan, then return a new snapshot, or the result of a refresh in flight."""
-    # The preview's board lock can queue this request; a refresh in flight when it arrived still counts.
-    requested = g.get("refresh_requested_at") or time.monotonic()
-    session = get_board_manager().session()
-    with scans.refresh_lock(session.generation):
-        in_flight = scans.completed_since(session.generation, requested)
-        if in_flight:
+    requested = time.monotonic()
+    # The camera preview stops on the board first and keeps new previews off it until the scan ends;
+    # a refresh queued behind it still shares the scan in flight when it arrived.
+    guard = current_app.extensions.get("neat_refresh_guard") or contextlib.nullcontext
+    with guard():
+        session = get_board_manager().session()
+        with scans.refresh_lock(session.generation):
+            in_flight = scans.completed_since(session.generation, requested)
+            if in_flight:
+                session.require_current()
+                return in_flight
+            board = board_summary(session, session.identity())
+            started = time.monotonic()
+            catalog = PeripheralClient(session).refresh()
+            check = _check_board(session, catalog)
+            scan_ms = int((time.monotonic() - started) * 1000)
             session.require_current()
-            return in_flight
-        board = board_summary(session, session.identity())
-        started = time.monotonic()
-        catalog = PeripheralClient(session).refresh()
-        check = _check_board(session, catalog)
-        scan_ms = int((time.monotonic() - started) * 1000)
-        session.require_current()
-        snapshot = scans.record(session.generation, board, catalog, check, scan_ms)
-        session.require_current()
-        return snapshot
+            snapshot = scans.record(session.generation, board, catalog, check, scan_ms)
+            session.require_current()
+            return snapshot
 
 
 # API: render an input configuration for one camera mode from the last scan.
