@@ -459,6 +459,17 @@ class SnapshotTests(unittest.TestCase):
                                          "step_width": 16, "step_height": 8})
         self.assertEqual([c["value"] for c in size_of(yuyv, 640, 480)["fps"]], [30, 25, 20, 15, 10])
 
+    def test_camerainput_default_rate_is_offered_for_mipi_modes_only(self):
+        """A USB mode exports as a V4L2 descriptor, so a mode without frame intervals offers no rate."""
+        usb = c920()
+        usb["modes"] = [{"format": "MJPG", "width": 640, "height": 480}]
+        mjpg = fmt_of(item(snapshot_of(catalog(usb)), C920), "MJPG")
+        self.assertEqual(size_of(mjpg, 640, 480)["fps"], [])
+        unknown = item(snapshot_of(catalog(usb), check(support={"state": "not_installed", "reason": "x"})), C920)
+        self.assertEqual(size_of(fmt_of(unknown, "MJPG"), 640, 480)["fps"], [])
+        mipi = item(snapshot_of(catalog(imx477())), IMX477)
+        self.assertEqual([c["value"] for c in size_of(fmt_of(mipi, "NV12"), 1920, 1080)["fps"]], [30])
+
     def test_isp_rates_offer_the_rate_core_classified_as_verified_and_the_rest_as_unknown(self):
         doc = imx477()
         doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), frame_intervals=[{"width": 1920, "height": 1080, "intervals": [
