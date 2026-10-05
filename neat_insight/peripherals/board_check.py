@@ -168,7 +168,11 @@ def user_checker(method, tools):
 
 
 def sound_servers():
-    pids = [pid for pid in (os.listdir(PROC_ROOT) if os.path.isdir(PROC_ROOT) else ()) if pid.isdigit()]
+    # Best-effort like scan_proc: an unlistable /proc must not fail the cameras' checks in the same run.
+    try:
+        pids = [pid for pid in os.listdir(PROC_ROOT) if pid.isdigit()]
+    except OSError:
+        pids = []
     return sorted({name for name in (_read(os.path.join(PROC_ROOT, pid, "comm")) for pid in pids) if name in SOUND_SERVERS})
 
 

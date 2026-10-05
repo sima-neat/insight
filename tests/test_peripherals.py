@@ -425,6 +425,18 @@ class BoardCheckTests(unittest.TestCase):
         with mock.patch.object(board_check, "which", return_value=None):
             self.assertNotIn("sound_servers", board_check.collect({"cameras": {}}))
 
+    def test_an_unlistable_proc_does_not_fail_the_cameras_checked_with_a_microphone(self):
+        # Codex 4189093714: listing sound servers raised and discarded every check in the run.
+        with mock.patch.object(board_check, "which", return_value=None), \
+             mock.patch.object(board_check.os, "geteuid", return_value=0), \
+             mock.patch.object(board_check, "scan_proc", return_value={"/dev/video97": {4242}}), \
+             mock.patch.object(board_check, "_read", return_value="neat-app"), \
+             mock.patch.object(board_check.os.path, "isdir", return_value=True), \
+             mock.patch.object(board_check.os, "listdir", side_effect=PermissionError("denied")):
+            result = board_check.collect({"cameras": {C920: ["/dev/video97"]}, "microphones": {YETI: []}})
+        self.assertEqual(result["users"][C920], [{"pid": 4242, "command": "neat-app"}])
+        self.assertEqual(result["sound_servers"], [])
+
 
     def test_a_capture_pcm_is_read_live_and_only_an_open_one_is_looked_up(self):
         with tempfile.TemporaryDirectory() as proc:
