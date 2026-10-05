@@ -845,8 +845,9 @@ class PeripheralsApiTests(unittest.TestCase):
         self.use()
         self.refresh()
         cases = (
-            ({"generation": None}, 400),
-            ({"scan_id": None}, 400),
+            ({"generation": 0}, 400),
+            ({"scan_id": ""}, 400),
+            ({"scan_id": 7}, 400),
             ({"generation": True}, 400),
             ({"generation": 1.5}, 400),
             ({"fps": None}, 400),
@@ -862,6 +863,19 @@ class PeripheralsApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
         self.assertEqual(self.export(generation=1.0).status_code, 200)
+
+    def test_the_pages_export_request_without_scan_tokens_uses_the_current_scan(self):
+        """The Peripherals page sends only the mode; the optional tokens are checked only when sent."""
+        self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))
+        page = {"id": IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
+        post = lambda: self.client.post("/api/peripherals/cameras/export", json=page)
+        self.assertEqual((post().status_code, post().get_json()["code"]), (409, "stale_snapshot"))
+        self.refresh()
+        self.assertEqual(post().status_code, 200)
+        self.refresh()
+        self.assertEqual(post().status_code, 200, "a later scan of the same board still serves the page")
+        self.use(generation=2)
+        self.assertEqual(post().status_code, 409, "a newly selected board without a scan has nothing to export")
 
     def test_export_is_stale_after_another_scan_of_the_same_board(self):
         self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))

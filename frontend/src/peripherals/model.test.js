@@ -15,6 +15,9 @@ import {
   defaultTargetText,
   deviceRows,
   deviceTabs,
+  exportBlockReason,
+  exportChoices,
+  formatDuration,
   formatOptions,
   formatRangeLabel,
   formatRelativeTime,
@@ -170,8 +173,6 @@ test('size and fps options carry their best support tier, for the pill beside th
   assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier]), [['1920×1080', 'verified'], ['1280×720', 'advertised']])
   assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.label, o.tier]), [['30 fps', 'verified'], ['60 fps', 'advertised']])
   assert.deepEqual(fpsOptions(imx568, 'NV12', 1920, 1080).map((o) => o.value), ['30', '59.94'])
-  const blocked = { formats: [{ format: 'NV12', sizes: [{ width: 1, height: 1, fps: [{ value: 60, tier: 'unsupported', reason: '30 fps only' }] }] }] }
-  assert.equal(fpsOptions(blocked, 'NV12', 1, 1)[0].reason, '30 fps only')
   assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
 })
 
@@ -278,7 +279,7 @@ test('issues sort by severity and changes read as sentences', () => {
   assert.deepEqual(changeSummary(null), [])
 })
 
-test('relative times', () => {
+test('relative times and durations', () => {
   const now = Date.parse('2026-09-21T10:00:00Z')
   assert.equal(formatRelativeTime('2026-09-21T09:59:58Z', now), 'just now')
   assert.equal(formatRelativeTime('2026-09-21T09:59:30Z', now), '30 s ago')
@@ -286,6 +287,8 @@ test('relative times', () => {
   assert.equal(formatRelativeTime('2026-09-21T07:00:00Z', now), '3 h ago')
   assert.equal(formatRelativeTime('2026-09-19T10:00:00Z', now), '2 d ago')
   assert.equal(formatRelativeTime(null, now), '')
+  assert.equal(formatDuration(3400), '3.4 s')
+  assert.equal(formatDuration(250), '250 ms')
 })
 
 test('API errors keep code, hint, and extra fields', () => {
@@ -342,9 +345,6 @@ test('only http(s) links are rendered', () => {
 
 test('the masthead board indicator collapses board state into a label and a short pill', () => {
   assert.deepEqual(boardIndicator(null).state.short, 'Loading…')
-  const loadFailure = boardIndicator(null, { message: 'Could not reach the Insight server.' })
-  assert.equal(loadFailure.state.short, 'Error')
-  assert.equal(loadFailure.title, 'Could not reach the Insight server.')
   const none = boardIndicator({ target: null, status: { state: 'unknown' } })
   assert.equal(none.label, 'No board')
   assert.equal(none.state.short, 'Not selected')
@@ -584,4 +584,15 @@ test('a mode menu groups its entries by tier, and the pill names the chosen one'
   assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
   assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
   assert.deepEqual(groupOptions([]), [])
+})
+
+test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {
+  assert.deepEqual(exportChoices(imx477).map((c) => c.id), ['python', 'cpp', 'json'])
+  assert.deepEqual(exportChoices(usb).map((c) => c.id), ['yaml', 'json'])
+  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), '')
+  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 60 }), "Neat Core's support rules do not accept this mode.")
+  const refused = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [{ width: 640, height: 480, fps: [{ value: 90, tier: 'unsupported', reason: 'The sensor has no 90 fps mode.' }] }])] }
+  assert.equal(exportBlockReason(refused, { format: 'NV12', width: 640, height: 480, fps: 90 }), 'The sensor has no 90 fps mode.')
+  assert.equal(exportBlockReason(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), '', 'a USB mode exports as a descriptor')
+  assert.equal(exportBlockReason(imx477, null), '')
 })

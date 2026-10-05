@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { copyText, requestJson } from './api.js'
+import { copyCameraExport } from './api.js'
 import {
   availabilityInfo,
   blockedFormatSummary,
   cameraSubtitle,
   cameraSummaryLine,
   deviceRows,
+  exportBlockReason,
+  exportChoices,
   formatOptions,
   fpsOptions,
   groupOptions,
@@ -54,82 +56,61 @@ function ModeOptions({ options }) {
   return groups.map((group) => <optgroup key={group.id} label={group.label}>{group.options.map(entry)}</optgroup>)
 }
 
-const EXPORTS = {
-  mipi: [['python', 'Python (PyNeat)'], ['cpp', 'C++'], ['json', 'JSON']],
-  usb: [['yaml', 'YAML descriptor'], ['json', 'JSON descriptor']]
-}
-
-function CopyConfig({ camera, selection, generation, scanId }) {
-  const choices = EXPORTS[camera.connection] || EXPORTS.mipi
+function CopyConfig({ camera, selection }) {
+  const choices = exportChoices(camera)
   const [wanted, setWanted] = useState('')
-  const [state, setState] = useState('idle')
-  const [error, setError] = useState(null)
-  const requestId = useRef(0)
-  const [id, label] = choices.find(([value]) => value === wanted) || choices[0]
-  const rate = fpsOptions(camera, selection.format, selection.width, selection.height)
-    .find((option) => option.value === String(selection.fps))
-  const blocked = camera.connection !== 'usb' && rate?.tier !== 'verified'
-    ? rate.reason || camera.formats.find((format) => format.format === selection.format)?.support?.reason || 'This mode cannot be used.'
-    : ''
-  const mode = `${generation}|${scanId}|${camera.id}|${modeLabel(selection)}`
+  const [state, setState] = useState({ status: 'idle' })
+  const seq = useRef(0)
+  const { id, label } = choices.find((choice) => choice.id === wanted) || choices[0]
+  const blocked = exportBlockReason(camera, selection)
+  const busy = state.status === 'busy'
+  const modeKey = `${camera.id}|${modeLabel(selection)}`
 
   useEffect(() => {
-    requestId.current += 1
-    setState('idle')
-    setError(null)
-  }, [mode])
+    seq.current += 1
+    setState({ status: 'idle' })
+  }, [modeKey])
 
   useEffect(() => {
-    if (state !== 'copied') return undefined
-    const timer = setTimeout(() => setState('idle'), 2000)
+    if (state.status !== 'copied') return undefined
+    const timer = setTimeout(() => setState({ status: 'idle' }), 2000)
     return () => clearTimeout(timer)
   }, [state])
 
   function copy() {
-    const current = ++requestId.current
-    setState('busy')
-    setError(null)
-    const { format, width, height, fps } = selection
-    const content = requestJson('/api/peripherals/cameras/export', {
-      method: 'POST', body: { generation, scan_id: scanId, id: camera.id, format, width, height, fps }
-    }).then((data) => {
-      if (current !== requestId.current) throw new Error('The selection changed; nothing was copied.')
-      const item = (data.exports || []).find((entry) => entry.id === id)
-      if (!item) throw new Error(`${label} is not available for this mode.`)
-      return item.content
-    })
-    copyText(content).then(
-      () => current === requestId.current && setState('copied'),
-      (reason) => {
-        if (current !== requestId.current) return
-        setState('error')
-        setError(normalizeError(reason))
-      }
+    const run = ++seq.current
+    setState({ status: 'busy' })
+    // Called straight from the click, so the clipboard write starts while the browser allows it.
+    copyCameraExport({ camera, selection, exportId: id, isCurrent: () => run === seq.current }).then(
+      () => run === seq.current && setState({ status: 'copied' }),
+      (err) => run === seq.current && setState({ status: 'error', error: normalizeError(err) })
     )
   }
 
-  return <>
-    <div className="periph-actions periph-copy">
-      <select aria-label="Configuration format" value={id} onChange={(event) => setWanted(event.target.value)}>
-        {choices.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-      </select>
-      <button
-        type="button"
-        className="btn-tonal"
-        onClick={() => state !== 'busy' && copy()}
-        disabled={Boolean(blocked)}
-        aria-disabled={state === 'busy' ? 'true' : undefined}
-        title={blocked || undefined}
-      >
-        {state === 'copied' ? 'Copied' : 'Copy configuration'}
-      </button>
-      <span className="sr-only" role="status">{state === 'copied' ? `Copied the ${label} configuration.` : ''}</span>
-    </div>
-    {state === 'error' && <ErrorNotice error={error} />}
-  </>
+  return (
+    <>
+      <div className="periph-actions periph-copy">
+        <select aria-label="Configuration format" value={id} onChange={(e) => setWanted(e.target.value)}>
+          {choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+        </select>
+        <button
+          type="button"
+          className="btn-tonal"
+          onClick={() => !busy && copy()}
+          disabled={Boolean(blocked)}
+          aria-disabled={busy ? 'true' : undefined}
+          title={blocked || undefined}
+        >
+          {state.status === 'copied' ? 'Copied' : 'Copy configuration'}
+        </button>
+        <span className="sr-only" role="status">{state.status === 'copied' ? `Copied the ${label} configuration.` : ''}</span>
+      </div>
+      {state.status === 'error' && <ErrorNotice error={state.error} />}
+    </>
+  )
 }
 
-function ModePicker({ camera, selection, notice, onChange, children }) {
+function ModePicker({ camera, selection, notice, onChange }) {
   const formats = formatOptions(camera)
   const sizes = selection ? sizeOptions(camera, selection.format) : []
   const rates = selection ? fpsOptions(camera, selection.format, selection.width, selection.height) : []
@@ -177,12 +158,12 @@ function ModePicker({ camera, selection, notice, onChange, children }) {
         </label>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
-      {children}
+      <CopyConfig camera={camera} selection={selection} />
     </fieldset>
   )
 }
 
-export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange, generation, scanId }) {
+export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
   const availability = availabilityInfo(camera.availability)
   const tier = tierInfo(camera.support?.tier)
   const summary = cameraSummaryLine(camera)
@@ -229,9 +210,7 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
         )}
       </details>
 
-      <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange}>
-        {selection && <CopyConfig camera={camera} selection={selection} generation={generation} scanId={scanId} />}
-      </ModePicker>
+      <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange} />
     </section>
   )
 }

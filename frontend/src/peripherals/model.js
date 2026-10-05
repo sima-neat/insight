@@ -72,14 +72,7 @@ export function connectionStateInfo(status) {
   return { label: 'Not checked', short: 'Not checked', tone: '' }
 }
 
-export function boardIndicator(board, error = null) {
-  if (!board && error) {
-    return {
-      label: 'Board',
-      state: { label: 'Connection failed', short: 'Error', tone: 'periph-danger' },
-      title: error.message || 'The selected board could not be loaded.'
-    }
-  }
+export function boardIndicator(board) {
   if (!board) return { label: 'Board', state: { label: 'Loading…', short: 'Loading…', tone: '' }, title: 'Loading the selected board' }
   const target = board.target
   if (!target) {
@@ -307,9 +300,32 @@ export function fpsOptions(camera, format, width, height) {
   return (size?.fps || []).map((f) => ({
     value: String(f.value),
     label: `${fpsLabel(f.value)} fps`,
-    tier: f.tier,
-    reason: f.reason || ''
+    tier: f.tier
   }))
+}
+
+// The formats POST /api/peripherals/cameras/export returns, by connection, with its labels.
+const MIPI_EXPORTS = [
+  { id: 'python', label: 'Python (pyneat)' },
+  { id: 'cpp', label: 'C++ (Neat)' },
+  { id: 'json', label: 'JSON' }
+]
+const USB_EXPORTS = [
+  { id: 'yaml', label: 'YAML descriptor' },
+  { id: 'json', label: 'JSON descriptor' }
+]
+
+export function exportChoices(camera) {
+  return camera?.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS
+}
+
+// Why the export refuses the selected mode, or '' when it accepts it: a USB mode always exports as a
+// descriptor; a MIPI mode needs a frame rate Neat Core's rules verified.
+export function exportBlockReason(camera, selection) {
+  if (!selection || camera?.connection === 'usb') return ''
+  const rate = findFps(findSize(findFormat(camera, selection.format), selection.width, selection.height), selection.fps)
+  if (rate?.tier === 'verified') return ''
+  return rate?.reason || "Neat Core's support rules do not accept this mode."
 }
 
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
@@ -412,6 +428,11 @@ export function formatRelativeTime(iso, now = Date.now()) {
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`
   return `${Math.floor(seconds / 86400)} d ago`
+}
+
+export function formatDuration(ms) {
+  if (!Number.isFinite(ms)) return ''
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
 }
 
 export function countLabel(count, noun) {

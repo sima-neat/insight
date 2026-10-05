@@ -777,7 +777,6 @@ export default function App() {
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
   const [devkitShellBusy, setDevkitShellBusy] = useState(false)
-  const devkitShellRequestRef = useRef(0)
   const [board, setBoard] = useState(null)
   const [boardError, setBoardError] = useState(null)
   const [boardLoading, setBoardLoading] = useState(true)
@@ -933,12 +932,11 @@ export default function App() {
   }
 
   async function loadDevkitShellInfo() {
-    const request = ++devkitShellRequestRef.current
     try {
       const data = await fetchJson('/api/devkit-shell')
-      if (request === devkitShellRequestRef.current) setDevkitShellInfo(data)
+      setDevkitShellInfo(data)
     } catch {
-      if (request === devkitShellRequestRef.current) setDevkitShellInfo(null)
+      setDevkitShellInfo(null)
     }
   }
 
@@ -2219,7 +2217,7 @@ export default function App() {
       : null
 
   const temperatureValue = metrics?.temperature_celsius_avg
-  const boardIndicatorInfo = boardIndicator(boardLoading && !board ? null : board, boardLoading ? null : boardError)
+  const boardIndicatorInfo = boardIndicator(boardLoading && !board ? null : board)
 
   return (
     <div className="app-shell">

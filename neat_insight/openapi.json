@@ -856,7 +856,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the identified peripheral scan without contacting the board. A MIPI mode must be one Neat Core accepts. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core rejects, or whose support is unknown, returns `400` with the reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board or peripheral scan changed since the selection was read.",
+        "description": "Renders one mode from the identified peripheral scan without contacting the board. A MIPI mode must be one Neat Core accepts. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core rejects, or whose support is unknown, returns `400` with the reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board was never scanned, and, when the optional `generation` and `scan_id` are sent, when the selected board or peripheral scan changed since the selection was read.",
         "operationId": "exportCameraInput",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "scan_id": "1791164913635:2026-10-05T01:48:33.635147447Z", "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
         "responses": {
@@ -1436,10 +1436,10 @@
       },
       "CameraExportRequest": {
         "type": "object",
-        "required": ["generation", "scan_id", "id", "format", "width", "height", "fps"],
+        "required": ["id", "format", "width", "height", "fps"],
         "properties": {
-          "generation": {"type": "integer", "minimum": 1, "description": "Generation from the `PeripheralsSnapshot` that supplied the camera and mode."},
-          "scan_id": {"type": "string", "minLength": 1, "description": "Opaque scan identifier from the `PeripheralsSnapshot` that supplied the camera and mode."},
+          "generation": {"type": "integer", "minimum": 1, "description": "Optional. Generation from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a different selected board returns `409 stale_snapshot`."},
+          "scan_id": {"type": "string", "minLength": 1, "description": "Optional. Opaque scan identifier from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a newer scan returns `409 stale_snapshot`."},
           "id": {"type": "string"},
           "format": {"type": "string", "example": "NV12"},
           "width": {"type": "integer"},
