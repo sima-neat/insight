@@ -46,6 +46,7 @@ def parse_request(body) -> dict:
     if not (_positive_int(body.get("width")) and _positive_int(body.get("height"))):
         raise _invalid("width and height must be positive integers.")
     fps = body.get("fps")
+    # JSON numbers such as 1e309 parse as inf and NaN is accepted too; neither is a frame rate.
     if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not _finite(fps) or fps <= 0:
         raise _invalid("fps must be a positive number.")
     return {

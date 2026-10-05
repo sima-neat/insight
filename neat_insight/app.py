@@ -72,6 +72,7 @@ from neat_insight.remote_devkit import (
     is_remote_devkit_connected,
 )
 from neat_insight.remotefs import read_remote_file
+from neat_insight import preview
 from neat_insight.utils import (
     board_type,
     check_and_generate_mkcert_certificate,
@@ -3340,6 +3341,14 @@ def viewer_url():
         "channel_limit_source": limit_source,
         "sdk_channel_limited": sdk_limited,
     }
+
+
+preview.init_app(
+    app,
+    exposed_ports=_read_exposed_ports_from_port_map,
+    channel_capacity=lambda: _resolve_video_channel_capacity()[0],
+    format_url=_format_browser_https_url,
+)
 
 
 # API: serve the built single-page application entrypoint.
