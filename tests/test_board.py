@@ -638,6 +638,31 @@ class SshTransportErrorTests(unittest.TestCase):
         channel.close.assert_called()
         self.assertFalse(self.transport._closed)
 
+    def test_cancel_event_stops_a_command_whose_channel_is_still_opening(self):
+        # Codex 4188926190: Stop pressed while connecting or opening the session must not wait for it.
+        channel = mock.Mock()
+        stalled = threading.Event()
+
+        def open_late(deadline, argv, timeout):
+            stalled.wait(30)
+            return channel
+
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        started = time.monotonic()
+        with mock.patch.object(self.transport, "_open_channel", side_effect=open_late):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+            self.assertLess(time.monotonic() - started, 5)
+            stalled.set()
+            # The channel that opens after Stop is closed, and the command never starts on it.
+            deadline = time.monotonic() + 5
+            while not channel.close.called and time.monotonic() < deadline:
+                time.sleep(0.01)
+        channel.close.assert_called()
+        channel.exec_command.assert_not_called()
+        self.assertFalse(self.transport._closed)
+
     def test_a_command_cancelled_before_its_channel_opens_never_runs(self):
         cancel = threading.Event()
         cancel.set()

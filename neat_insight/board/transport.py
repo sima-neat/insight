@@ -206,10 +206,25 @@ class SshTransport:
         deadline = time.monotonic() + timeout
         channel = None
         channel_cancelled = threading.Event()
+        guard = threading.Lock()
 
         def cancel_channel():
-            channel_cancelled.set()
-            threading.Thread(target=channel.close, daemon=True).start()
+            with guard:
+                channel_cancelled.set()
+                target = channel
+            if target is not None:
+                threading.Thread(target=target.close, daemon=True).start()
+
+        def open_channel():
+            # Runs in _run_bounded's worker: a channel that opens after Stop was pressed is closed.
+            nonlocal channel
+            opened = self._open_channel(deadline, argv, timeout)
+            with guard:
+                if not channel_cancelled.is_set():
+                    channel = opened
+                    return opened
+            opened.close()
+            raise CommandCancelled()
 
         def check_cancelled():
             if cancel_event is not None and cancel_event.is_set():
@@ -217,7 +232,10 @@ class SshTransport:
 
         try:
             check_cancelled()
-            channel = self._open_channel(deadline, argv, timeout)
+            if cancel_event is None:
+                channel = self._open_channel(deadline, argv, timeout)
+            else:
+                self._run_bounded(open_channel, cancel_channel, deadline, argv, timeout, cancel_event)
             check_cancelled()
             self._arm(channel, deadline, argv, timeout)
             self._run_bounded(
