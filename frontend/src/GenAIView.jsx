@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -36,6 +36,8 @@ import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
+
+const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
 const POLL_MS = 5000
 const MAX_TOKENS = 512
@@ -95,6 +97,7 @@ const ICONS = {
   newChat: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   export: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   shield: 'M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z',
+  gauge: 'M4 18a8 8 0 1 1 16 0M12 18l4-6M12 18h.01',
   help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17v.01',
   fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4'
@@ -145,6 +148,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [settings, setSettings] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [solutionsOpen, setSolutionsOpen] = useState(false)
+  const [benchOpen, setBenchOpen] = useState(false)
   const root = useRef(null)
   const [addressDraft, setAddressDraft] = useState('')
   const [health, setHealth] = useState(null)
@@ -794,6 +798,9 @@ export default function GenAIView({ onError, onStatus }) {
           <button type="button" className={`btn-ghost genai-tool${spot('solutions')}`} onClick={() => setSolutionsOpen(true)} aria-label="SiMaSentry Solutions" title="SiMaSentry Solutions: Med, Safe and Sec demo apps on the loaded model">
             <Icon d={ICONS.shield} />
           </button>
+          <button type="button" className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => setBenchOpen(true)} disabled={!usable} aria-label="Benchmark" title={usable ? 'Benchmark: first token time and tokens per second for the board\'s models' : backend.title}>
+            <Icon d={ICONS.gauge} />
+          </button>
           <button type="button" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null} aria-label="Tutorial" title="Tutorial">
             <Icon d={ICONS.help} />
           </button>
@@ -1089,6 +1096,12 @@ export default function GenAIView({ onError, onStatus }) {
           </div>
         </form>
       </section>
+
+      {benchOpen && (
+        <Suspense fallback={null}>
+          <GenAIBenchmark status={status} onClose={() => setBenchOpen(false)} onModelsChanged={refresh} />
+        </Suspense>
+      )}
 
       {solutionsOpen && (
         <SolutionsOverlay
