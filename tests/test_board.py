@@ -529,6 +529,18 @@ class SshTransportErrorTests(unittest.TestCase):
                     self.assertIsNone(transport._client)
                 close_at += 1
 
+    def test_output_that_never_pauses_stops_at_the_limit(self):
+        # Codex 4188993841: recv_ready() that stays true must not let output grow past the limit.
+        channel = mock.Mock()
+        channel.recv_ready.return_value = True
+        channel.recv.return_value = b"x" * 1024
+        with mock.patch.object(transport_module, "MAX_OUTPUT_BYTES", 4096), \
+             mock.patch.object(self.transport, "_open_channel", return_value=channel), \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["yes"], timeout=5)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertEqual(channel.recv.call_count, 5)
+
     def test_network_failures_are_unreachable(self):
         self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")
         self.assertEqual(self._connect_raising(ConnectionRefusedError("refused")).code, "unreachable")
