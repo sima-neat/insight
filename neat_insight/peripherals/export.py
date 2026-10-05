@@ -20,6 +20,14 @@ def _positive_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _finite(value) -> bool:
+    # An integer too large for a float would raise OverflowError when compared with a fractional rate.
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
+
+
 def parse_request(body) -> dict:
     if not isinstance(body, dict):
         raise _invalid("The request body must be a JSON object.")
@@ -38,8 +46,8 @@ def parse_request(body) -> dict:
     if not (_positive_int(body.get("width")) and _positive_int(body.get("height"))):
         raise _invalid("width and height must be positive integers.")
     fps = body.get("fps")
-    # JSON numbers such as 1e309 parse as inf and NaN is accepted too; neither has an integer value.
-    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or (isinstance(fps, float) and not math.isfinite(fps)) or fps <= 0:
+    # JSON numbers such as 1e309 parse as inf and NaN is accepted too; neither is a frame rate.
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not _finite(fps) or fps <= 0:
         raise _invalid("fps must be a positive number.")
     return {
         "generation": generation,
