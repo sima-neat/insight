@@ -1,0 +1,70 @@
+{
+  "sentinel": {
+    "baseline_deltas_pct": {"20260923T152712.952Z-insight-hw-1790177227": {"power_current_watts": -4.58477508650519}, "20260924T175231.958Z-tes3": {"power_current_watts": 0.0}},
+    "baseline_id": "20260924T175231.958Z-tes3",
+    "generated_at": "2026-09-25T00:33:12.457679752Z",
+    "runs": [
+      {
+        "metadata": {"ended_at": "2026-09-24T17:52:40.088551848Z", "id": "20260924T175231.958Z-tes3", "name": "tes3", "note": null, "started_at": "2026-09-24T17:52:31.958615236Z", "tags": []},
+        "metrics": [
+          {"key": "power_current_watts", "label": "Current board power", "unit": "W", "group": "Power"},
+          {"key": "cpu_usage_pct", "label": "CPU usage", "unit": "%", "group": "CPU"},
+          {"key": "cpu_load_1", "label": "CPU load 1m", "unit": "load", "group": "CPU"},
+          {"key": "linux_mem_used_mb", "label": "Linux memory used MB", "unit": "MB", "group": "Memory"},
+          {"key": "mla_mem_allocated_mb", "label": "MLA memory allocated", "unit": "MB", "group": "MLA"},
+          {"key": "ev74_cma_used_mb", "label": "EV74 CMA used", "unit": "MB", "group": "EV74"},
+          {"key": "rtsn_0", "label": "MLA RTSN-0", "unit": "C", "group": "MLA"},
+          {"key": "lm96163_temp2", "label": "LM96163 temp2", "unit": "C", "group": "Board"}
+        ],
+        "samples": [
+          {"timestamp": "2026-09-24T17:52:33.859427146Z", "values": {"power_current_watts": 9.03125, "rtsn_0": 51.77583007812501, "lm96163_temp2": 55.0}},
+          {"timestamp": "2026-09-24T17:52:35.848995119Z", "values": {"power_current_watts": 9.03125, "rtsn_0": 52.79960937499999, "lm96163_temp2": 54.875}},
+          {"timestamp": "2026-09-24T17:52:37.849109943Z", "values": {"power_current_watts": 9.03125, "rtsn_0": 52.79960937499999, "lm96163_temp2": 54.875}},
+          {"timestamp": "2026-09-24T17:52:39.859611809Z", "values": {"power_current_watts": 9.03125, "rtsn_0": 51.60520019531248, "lm96163_temp2": 54.625}}
+        ],
+        "schema": 1
+      },
+      {
+        "metadata": {
+          "ended_at": "2026-09-23T15:27:19.620064802Z",
+          "id": "20260923T152712.952Z-insight-hw-1790177227",
+          "name": "insight-hw-1790177227",
+          "note": "Insight hardware validation",
+          "started_at": "2026-09-23T15:27:12.952702307Z",
+          "tags": []
+        },
+        "metrics": [
+          {"key": "power_current_watts", "label": "Current board power", "unit": "W", "group": "Power"},
+          {"key": "cpu_usage_pct", "label": "CPU usage", "unit": "%", "group": "CPU"},
+          {"key": "cpu_load_1", "label": "CPU load 1m", "unit": "load", "group": "CPU"},
+          {"key": "linux_mem_used_mb", "label": "Linux memory used MB", "unit": "MB", "group": "Memory"},
+          {"key": "mla_mem_allocated_mb", "label": "MLA memory allocated", "unit": "MB", "group": "MLA"},
+          {"key": "ev74_cma_used_mb", "label": "EV74 CMA used", "unit": "MB", "group": "EV74"},
+          {"key": "rtsn_0", "label": "MLA RTSN-0", "unit": "C", "group": "MLA"},
+          {"key": "lm96163_temp2", "label": "LM96163 temp2", "unit": "C", "group": "Board"}
+        ],
+        "samples": [
+          {"timestamp": "2026-09-23T15:27:13.270295197Z", "values": {"power_current_watts": 8.53125, "rtsn_0": 38.29606933593749, "lm96163_temp2": 40.75}},
+          {"timestamp": "2026-09-23T15:27:15.280692862Z", "values": {"power_current_watts": 8.53125, "rtsn_0": 38.466699218749966, "lm96163_temp2": 40.625}},
+          {"timestamp": "2026-09-23T15:27:17.270418435Z", "values": {"power_current_watts": 8.53125, "rtsn_0": 38.466699218749966, "lm96163_temp2": 40.625}},
+          {"timestamp": "2026-09-23T15:27:19.270569777Z", "values": {"power_current_watts": 8.875, "rtsn_0": 38.80795898437498, "lm96163_temp2": 40.75}}
+        ],
+        "schema": 1
+      }
+    ],
+    "summaries": {
+      "20260923T152712.952Z-insight-hw-1790177227": {
+        "duration_ms": 6667,
+        "energy_joules": 51.533604984375,
+        "metrics": {"power_current_watts": {"count": 4, "maximum": 8.875, "mean": 8.6171875, "median": 8.53125, "minimum": 8.53125, "p95": 8.875}},
+        "samples": 4
+      },
+      "20260924T175231.958Z-tes3": {
+        "duration_ms": 8129,
+        "energy_joules": 54.1891436875,
+        "metrics": {"power_current_watts": {"count": 4, "maximum": 9.03125, "mean": 9.03125, "median": 9.03125, "minimum": 9.03125, "p95": 9.03125}},
+        "samples": 4
+      }
+    }
+  }
+}

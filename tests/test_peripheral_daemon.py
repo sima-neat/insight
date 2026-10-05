@@ -12,7 +12,8 @@ import unittest.mock as mock
 from neat_insight.board.errors import BoardError
 from neat_insight.board.target import BoardTarget
 from neat_insight.board.transport import ExecResult
-from neat_insight.peripherals import client as client_module, socket_client
+from neat_insight.peripherals import client as client_module
+from neat_insight.sentinel import socket_client
 from neat_insight.peripherals.client import PeripheralClient
 from test_peripherals import contract_catalog
 
@@ -276,7 +277,7 @@ class PeripheralClientTests(unittest.TestCase):
         with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(example))) as request:
             self.assertEqual(PeripheralClient(FakeSession(), socket_path="/tmp/s.sock").refresh(), example)
         request.assert_called_once_with("POST", "/v1/peripherals/refresh", None, socket_path="/tmp/s.sock",
-                                        timeout=client_module.REFRESH_TIMEOUT_SEC)
+                                        timeout=client_module.REFRESH_TIMEOUT_SEC, max_bytes=PeripheralClient.max_body_bytes)
         # Sentinel waits up to 10 s for the scan; Insight waits longer, so Sentinel's own 504 arrives.
         self.assertGreater(client_module.REFRESH_TIMEOUT_SEC, 10)
 
@@ -286,7 +287,7 @@ class PeripheralClientTests(unittest.TestCase):
         self.assertEqual(PeripheralClient(FakeSession("ssh", transport)).refresh(), catalog())
         argv = transport.exec.call_args.args[0]
         self.assertEqual(argv[:4], ["python3", "-", "POST", "/v1/peripherals/refresh"])
-        self.assertEqual(float(argv[-1]), client_module.REFRESH_TIMEOUT_SEC)
+        self.assertEqual(float(argv[-2]), client_module.REFRESH_TIMEOUT_SEC)
         self.assertEqual(transport.exec.call_args.kwargs["timeout"], client_module.REFRESH_TIMEOUT_SEC + 15.0)
 
     def test_a_refresh_sentinel_could_not_finish_or_queue_is_reported(self):

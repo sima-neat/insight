@@ -2,14 +2,12 @@
 import json
 import math
 import re
-from http.client import HTTPException
-from pathlib import Path
 
 from neat_insight.board import BoardError
-from neat_insight.peripherals import socket_client
+from neat_insight.sentinel import socket_client
+from neat_insight.sentinel.client import DETAIL_LIMIT, NOT_RUN, RESPONSE, TOOL_MISSING, SentinelSocket
 
-CLIENT_PATH = Path(socket_client.__file__)
-DETAIL_LIMIT = 2000
+MAX_BODY_BYTES = 4 * 1024 * 1024
 # Sentinel's refresh waits up to 10 s for its scan; the socket gets more so Sentinel's own 504 arrives.
 REFRESH_TIMEOUT_SEC = 20.0
 # RFC 3339 in UTC, as Sentinel serializes `observed_at`.
@@ -46,6 +44,28 @@ _SOCKET_ERRORS = {
     socket_client.PROTOCOL: (
         "peripheral_response",
         "SiMa Sentinel on {label} returned a malformed or incomplete HTTP response.",
+        STATUS_HINT,
+    ),
+}
+_CLIENT_ERRORS = {
+    TOOL_MISSING: (
+        "tool_missing",
+        "python3 was not found on the board, so SiMa Sentinel cannot be reached.",
+        "Install python3 (3.8 or newer) on the board, then retry.",
+    ),
+    NOT_RUN: (
+        "peripheral_response",
+        "The Sentinel socket client did not run on the board (python3 exited {exit_code}).",
+        "Check that python3 on the board is 3.8 or newer; its error output is in detail.",
+    ),
+    RESPONSE: (
+        "peripheral_response",
+        "The Sentinel socket client returned a malformed response envelope.",
+        STATUS_HINT,
+    ),
+    socket_client.TOO_LARGE: (
+        "peripheral_response",
+        "The Sentinel response is larger than the {limit_mib} MiB Insight limit.",
         STATUS_HINT,
     ),
 }
@@ -94,10 +114,11 @@ def _valid_interval(interval) -> bool:
         return False
     return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind])
 
-class PeripheralClient:
-    def __init__(self, session, socket_path: str = socket_client.SOCKET_PATH):
-        self.session = session
-        self.socket_path = socket_path
+class PeripheralClient(SentinelSocket):
+    socket_errors = _SOCKET_ERRORS
+    client_errors = _CLIENT_ERRORS
+    too_large_detail = "The Sentinel response is larger than {limit} bytes."
+    max_body_bytes = MAX_BODY_BYTES
 
     def catalog(self) -> dict:
         payload = self._call("GET", "/v1/peripherals")
@@ -111,10 +132,7 @@ class PeripheralClient:
         return payload
 
     def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC) -> dict:
-        if self.session.target.mode == "local":
-            status, text = self._call_local(method, path, body, timeout)
-        else:
-            status, text = self._call_remote(method, path, body, timeout)
+        status, text = self.request(method, path, body, timeout)
         self.session.require_current()
         try:
             parsed = json.loads(text) if text else None
@@ -147,58 +165,6 @@ class PeripheralClient:
         if not isinstance(parsed, dict):
             raise self._response_error("SiMa Sentinel returned a response Insight cannot read.", text)
         return parsed
-
-    def _call_local(self, method, path, body, timeout):
-        try:
-            return socket_client.request(method, path, body, socket_path=self.socket_path, timeout=timeout)
-        except socket_client.ResponseTooLarge as exc:
-            raise self._too_large(str(exc)) from exc
-        except HTTPException as exc:
-            raise self._socket_error(socket_client.PROTOCOL, str(exc)) from exc
-        except OSError as exc:
-            raise self._socket_error(socket_client.socket_failure(exc), str(exc)) from exc
-
-    def _call_remote(self, method, path, body, timeout):
-        argv = [
-            "python3",
-            "-",
-            method,
-            path,
-            json.dumps(body) if body is not None else "",
-            self.socket_path,
-            str(timeout),
-        ]
-        result = self.session.transport.exec(
-            argv,
-            timeout=timeout + 15.0,
-            stdin=CLIENT_PATH.read_bytes(),
-        )
-        if result.exit_code == 127:
-            raise BoardError(
-                "tool_missing",
-                "python3 was not found on the board, so SiMa Sentinel cannot be reached.",
-                hint="Install python3 (3.8 or newer) on the board, then retry.",
-                tool="python3",
-            )
-        try:
-            envelope = json.loads(result.stdout.decode("utf-8", errors="replace"))
-        except ValueError:
-            envelope = None
-        if not isinstance(envelope, dict) or ("status" not in envelope and "failure" not in envelope):
-            raise BoardError(
-                "peripheral_response",
-                f"The Sentinel socket client did not run on the board (python3 exited {result.exit_code}).",
-                hint="Check that python3 on the board is 3.8 or newer; its error output is in detail.",
-                detail=result.stderr.decode("utf-8", errors="replace").strip()[:DETAIL_LIMIT],
-            )
-        if envelope.get("failure") == socket_client.TOO_LARGE:
-            raise self._too_large(envelope.get("detail", ""))
-        if "failure" in envelope:
-            raise self._socket_error(envelope["failure"], envelope.get("detail", ""))
-        status, text = envelope.get("status"), envelope.get("text")
-        if not _non_negative_int(status) or not 100 <= status <= 599 or not isinstance(text, str):
-            raise self._response_error("The Sentinel socket client returned a malformed response envelope.", envelope)
-        return status, text
 
     def _validate_catalog(self, payload: dict) -> None:
         observed_at = payload.get("observed_at", "")
@@ -299,28 +265,3 @@ class PeripheralClient:
         if not all(_positive_int(value.get(key)) for key in keys):
             return False
         return value["min_width"] <= value["max_width"] and value["min_height"] <= value["max_height"]
-
-    def _response_error(self, message: str, detail) -> BoardError:
-        try:
-            rendered = json.dumps(detail, separators=(",", ":"))
-        except (TypeError, ValueError):
-            rendered = str(detail)
-        return BoardError("peripheral_response", message, hint=STATUS_HINT, detail=rendered[:DETAIL_LIMIT])
-
-    def _too_large(self, detail: str) -> BoardError:
-        return BoardError(
-            "peripheral_response",
-            f"The Sentinel response is larger than the {socket_client.MAX_BODY_BYTES // (1024 * 1024)} MiB Insight limit.",
-            hint=STATUS_HINT,
-            detail=detail[:DETAIL_LIMIT],
-            limit_bytes=socket_client.MAX_BODY_BYTES,
-        )
-
-    def _socket_error(self, failure: str, detail: str) -> BoardError:
-        code, message, hint = _SOCKET_ERRORS.get(failure, _SOCKET_ERRORS[socket_client.FAILED])
-        return BoardError(
-            code,
-            message.format(socket=self.socket_path, label=self.session.target.label),
-            hint=hint,
-            detail=detail[:DETAIL_LIMIT],
-        )
