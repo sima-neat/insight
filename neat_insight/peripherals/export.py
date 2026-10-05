@@ -72,6 +72,8 @@ def render(snapshot: dict, request: dict) -> dict:
         )
     if not fmt["exportable"]:
         raise _invalid(f"{fmt['format']} cannot be exported: {fmt['support']['reason']}")
+    if item["connection"] == "usb" and not (item["device"].get("by_id") or item["device"].get("video_node")):
+        raise _invalid("This camera reports no device path, so a V4L2 descriptor cannot name it.")
     if item["connection"] != "usb" and not item["device"].get("camera_name"):
         raise _invalid("This camera does not report the camera_name CameraInput needs.")
     if item["connection"] != "usb" and choice["tier"] != "verified":
