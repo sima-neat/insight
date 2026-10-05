@@ -260,6 +260,12 @@ class LocalTransportTests(unittest.TestCase):
         self.assertEqual((result.exit_code, result.stdout, result.stderr), (3, b"hello", b"err\n"))
         self.assertEqual(transport.exec(["no-such-command-xyz"], timeout=5).exit_code, 127)
 
+    def test_a_command_the_system_cannot_start_is_a_failed_exit_like_a_shell(self):
+        # Codex 4189090649: an argument over Linux's 128 KiB per-argument limit raised OSError (a 500).
+        result = LocalTransport().exec(["echo", "x" * (256 * 1024)], timeout=5)
+        self.assertEqual(result.exit_code, 126)
+        self.assertIn(b"too long", result.stderr)
+
     def test_exec_timeout_raises_board_error(self):
         with self.assertRaises(BoardError) as ctx:
             LocalTransport().exec(["sleep", "5"], timeout=0.2)

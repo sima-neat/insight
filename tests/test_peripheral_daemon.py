@@ -124,6 +124,11 @@ class PeripheralClientTests(unittest.TestCase):
             lambda camera: camera.update(identity="bad"),
             lambda camera: camera.update(availability=[]),
             lambda camera: camera.update(isp="bad"),
+            # Codex 4189090657: a max_fps too large for a float overflowed in the snapshot's note (a 500).
+            lambda camera: camera.update(max_fps=10**400),
+            lambda camera: camera.update(max_fps=float("nan")),
+            lambda camera: camera.update(max_fps=0),
+            lambda camera: camera.update(max_fps="66"),
         ):
             response = camera_catalog()
             mutate(response["devices"][0])
@@ -148,6 +153,8 @@ class PeripheralClientTests(unittest.TestCase):
             for key in ("minimum", "maximum", "step") for part in ("numerator", "denominator")
         ] + [dict(stepwise, step=None), dict(stepwise, step={"numerator": 0.0, "denominator": 30}),
              {"type": "continuous", "minimum": fraction, "maximum": {"numerator": 0, "denominator": 5}}]
+        # V4L2 fractions are __u32; a larger one overflowed when the snapshot converted it to a float.
+        zeroed += [dict(interval, denominator=2**32), dict(stepwise, minimum={"numerator": 1, "denominator": 10**400})]
         for value in ([None], 5, {}, [{"width": 1920, "height": 1080, "intervals": 5}],
                       [{"width": 1920, "height": 1080, "intervals": [None]}], [{"width": 1920, "height": 1080}],
                       *([{"width": 1920, "height": 1080, "intervals": [bad]}] for bad in zeroed)):

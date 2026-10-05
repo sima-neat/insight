@@ -1,5 +1,6 @@
 """Read the peripheral catalog from SiMa Sentinel on the selected board."""
 import json
+import math
 import re
 
 from neat_insight.board import BoardError
@@ -78,8 +79,23 @@ def _positive_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+# V4L2 frame intervals are __u32 fractions; a larger value would overflow when the snapshot turns it into a float.
+U32_MAX = 2**32 - 1
+
+
 def _fraction(value) -> bool:
-    return isinstance(value, dict) and _positive_int(value.get("numerator")) and _positive_int(value.get("denominator"))
+    return isinstance(value, dict) and all(
+        _positive_int(value.get(key)) and value[key] <= U32_MAX for key in ("numerator", "denominator")
+    )
+
+
+def _finite_positive(value) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value)) and value > 0
+    except OverflowError:
+        return False
 
 
 # The fractions of each interval type that the snapshot divides by; Sentinel reports none of them as zero.
@@ -187,6 +203,7 @@ class PeripheralClient(SentinelSocket):
                 camera.get(key) is not None and not isinstance(camera.get(key), dict)
                 for key in ("identity", "availability", "isp")
             )
+            or (camera.get("max_fps") is not None and not _finite_positive(camera["max_fps"]))
             or (
                 isinstance(identity, dict)
                 and (
