@@ -395,10 +395,11 @@ def _on_step(period: float, first: float, step: float) -> bool:
     return abs(first + k * step - period) <= period * 1e-3
 
 
-def _choices(modes: list) -> list:
+def _choices(modes: list, usb: bool) -> list:
     """The frame rates of one format and size. The rate Neat Core classified carries the mode's verdict
-    (CameraInput's default rate when the mode reports none); the other advertised rates are unsupported
-    with an unsupported mode and unknown otherwise."""
+    (CameraInput's default rate when a MIPI mode reports none); the other advertised rates are unsupported
+    with an unsupported mode and unknown otherwise. A USB mode exports as a V4L2 descriptor, not
+    CameraInput code, so it offers only the rates it advertises."""
     choices = {}
     for mode in modes:
         rates = [
@@ -407,13 +408,13 @@ def _choices(modes: list) -> list:
             if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height"))
             for rate in _interval_rates(entry)
         ]
-        classified = mode["rate"] or CAMERAINPUT_RATE
-        if mode["supported"]:
+        classified = mode["rate"] or (None if usb else CAMERAINPUT_RATE)
+        if mode["supported"] and classified:
             choices[_fps(classified.numerator, classified.denominator)] = _choice(classified, tier="verified")
             others = {"tier": ""}
         else:
-            rates = rates or [classified]
-            others = {"tier": "" if mode["supported"] is None else "unsupported", "reason": mode["reason"]}
+            rates = rates or ([classified] if classified else [])
+            others = {"tier": "unsupported" if mode["supported"] is False else "", "reason": mode["reason"]}
         for rate in rates:
             choices.setdefault(_fps(rate.numerator, rate.denominator), _choice(rate, **others))
     return [choices[value] for value in sorted(choices, reverse=True)]
@@ -442,7 +443,7 @@ def _formats(modes: list, usb: bool) -> list:
             "support": _verdict(entries, usb, name),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
-            "sizes": [{"width": w, "height": h, "fps": _choices(group)} for (w, h), group in sizes.items()],
+            "sizes": [{"width": w, "height": h, "fps": _choices(group, usb)} for (w, h), group in sizes.items()],
         })
     return formats
 
