@@ -53,11 +53,15 @@ jobs:
       - name: Python tests
         run: python -m unittest discover -s tests -v
 
+      # The frontend steps also run after a Python failure, so one run reports
+      # every failing test; the job still fails.
       - name: Install frontend dependencies
+        if: ${{ !cancelled() }}
         working-directory: frontend
         run: npm ci
 
       - name: Frontend tests
+        if: ${{ !cancelled() }}
         working-directory: frontend
         run: npm test
 
