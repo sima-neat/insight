@@ -36,7 +36,7 @@ def item_of(snapshot, item_id):
 
 
 class FakeTransport:
-    def __init__(self, ssh_client=b"192.168.2.1 51234 22", python=b"/home/sima/pyneat/bin/python", started=b"4242\n", users=None):
+    def __init__(self, ssh_client=b"192.168.2.1 51234 22", python=b"/home/sima/pyneat/bin/python", started=b"running\n", users=None):
         self.calls, self.closed = [], False
         report = {"users": {IMX477: users or []}}
         self.replies = {"SSH_CLIENT": ssh_client + b"\n" + python + b"\n", "/dev/media0": json.dumps(report).encode(),
@@ -185,6 +185,19 @@ class PreviewTests(unittest.TestCase):
                 self.start(fake_session(transport))
             self.assertEqual(ctx.exception.code, code)
             self.assertEqual(len(transport.calls), 1)
+
+    def test_a_graph_build_that_never_finishes_is_not_taken_as_started(self):
+        """The worker writes pipeline.pid before graph.build(); only the program's `running` line means started."""
+        session = fake_session(FakeTransport(started=b"4242\nINFO Camera: building the graph\n"))
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertIn("building the graph", ctx.exception.extra["detail"])
+        check = next(call for call in session.transport.calls if "grep -qx running" in call)
+        self.assertIn("&& echo running;", check)
+        self.assertNotIn("pipeline.pid", check)
+        self.assertRegex(session.transport.calls[-1], r"rm -rf /tmp/insight-preview/(\w+) /tmp/insight-preview/\1\.log")
+        self.assertIsNone(self.manager.current(1))
 
     def test_a_failed_start_removes_its_saved_failure_log(self):
         session = fake_session(FakeTransport(started=b"camera_not_found: imx477 5-001a\n"))

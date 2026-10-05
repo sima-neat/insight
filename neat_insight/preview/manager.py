@@ -442,11 +442,13 @@ class PreviewManager:
             board_session.transport.exec(["sh", "-c", f"mkdir -p {directory} && cat > {directory}/{name}"], timeout=15, stdin=content)
         launch = f"setsid nohup sh {directory}/worker.sh {session_id} {int(SESSION_TTL_SEC)} {shlex.join(command)} > {directory}/worker.log 2>&1 < /dev/null &"
         board_session.transport.exec(["sh", "-c", launch], timeout=START_TIMEOUT_SEC)
-        # The program prints "running" once PyNeat has built the graph.
+        # The program prints "running" once PyNeat has built the graph; only that marker means it started.
+        # The worker writes pipeline.pid before the build, so a build that hangs still has a pid.
         check = (f"for i in $(seq 40); do grep -qx running {directory}/pipeline.log 2>/dev/null && break; "
-                 f"[ -d {directory} ] || break; sleep 0.5; done; cat {directory}/pipeline.pid 2>/dev/null; {_log_tail(session_id)}")
+                 f"[ -d {directory} ] || break; sleep 0.5; done; "
+                 f"grep -qx running {directory}/pipeline.log 2>/dev/null && echo running; {_log_tail(session_id)}")
         output = board_session.transport.exec(["sh", "-c", check], timeout=START_TIMEOUT_SEC).stdout.decode("utf-8", errors="replace")
-        if not output.strip().split("\n")[0].strip().isdigit():
+        if output.strip().split("\n")[0].strip() != "running":
             with suppress(BoardError):
                 board_session.transport.exec(["sh", "-c", f"rm -rf {directory} {WORKER_DIR}/{session_id}.log"], timeout=10)
             if _CAMERA_BUSY.search(output):
