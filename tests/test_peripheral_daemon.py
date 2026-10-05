@@ -73,6 +73,7 @@ class PeripheralClientTests(unittest.TestCase):
         for name, response in {
             "revision": catalog(revision=-1),
             "boolean revision": catalog(revision=True),
+            "revision beyond a browser's integers": catalog(revision=2**53),
             "observed_at": catalog(observed_at="yesterday"),
             "observed_at without zone": catalog(observed_at="2026-10-05T01:48:33"),
             "missing observed_at": {key: value for key, value in catalog().items() if key != "observed_at"},
@@ -84,6 +85,9 @@ class PeripheralClientTests(unittest.TestCase):
                 with self.assertRaises(BoardError) as ctx:
                     PeripheralClient(FakeSession()).catalog()
                 self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
+        largest = catalog(revision=2**52 - 1)
+        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(largest))):
+            self.assertEqual(PeripheralClient(FakeSession()).catalog()["revision"], 2**52 - 1)
         before_first_scan = catalog(observed_at=None, devices=[])
         with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(before_first_scan))):
             self.assertEqual(PeripheralClient(FakeSession()).catalog(), before_first_scan)
@@ -129,6 +133,12 @@ class PeripheralClientTests(unittest.TestCase):
             lambda camera: camera.update(max_fps=float("nan")),
             lambda camera: camera.update(max_fps=0),
             lambda camera: camera.update(max_fps="66"),
+            # Codex 4189173469: sizes beyond V4L2's __u32 reached the browser as Infinity.
+            lambda camera: camera["modes"][0].update(size_range={
+                "min_width": 1, "min_height": 1, "max_width": 2**32, "max_height": 1, "step_width": 1, "step_height": 1,
+            }),
+            lambda camera: camera.update(modes=[{"format": "MJPG", "width": 2**32, "height": 1080}]),
+            lambda camera: camera.update(modes=[{"format": "MJPG", "width": 1920, "height": 10**400}]),
         ):
             response = camera_catalog()
             mutate(response["devices"][0])
