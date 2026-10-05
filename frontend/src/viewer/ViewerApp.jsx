@@ -737,6 +737,16 @@ export default function ViewerApp() {
     applyLayout(pageChannels.length);
   }, [pageChannels.length]);
 
+  // DEMO ONLY: the embedding Insight page shows or hides every channel banner (its B key).
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.data?.type !== "insight-tile-banners") return;
+      document.body.classList.toggle("hide-tile-banners", event.data.hidden === true);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event) => {
       const targetTag = event.target?.tagName?.toLowerCase();

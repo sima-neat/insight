@@ -738,18 +738,23 @@ function FpsStepper({ value, nativeFps, disabled = false, locked = false, title,
   )
 }
 
-// DEMO ONLY: a plain K (no modifier) toggles the compact layout; key presses inside the viewer iframe are ignored.
-function isCompactToggleKey(event) {
-  if (event.ctrlKey || event.metaKey || event.altKey) return false
-  if (event.key?.toLowerCase() !== 'k') return false
+// DEMO ONLY: plain keys (no modifier) on this page toggle demo views; key presses inside the
+// viewer iframe are ignored. K toggles the compact layout, B the channel banners in the viewer.
+const TILE_BANNERS_MESSAGE = 'insight-tile-banners'
+
+function demoToggleKey(event) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return ''
   const target = event.target
   const tag = target?.tagName?.toLowerCase()
-  return !(tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable)
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) return ''
+  return event.key?.toLowerCase() ?? ''
 }
 
 export default function App() {
   const initialRoute = routeStateFromLocation()
   const [compact, setCompact] = useState(true)
+  const [tileBannersHidden, setTileBannersHidden] = useState(false)
+  const viewerFrameRef = useRef(null)
   const [tab, setTab] = useState(() => {
     if (initialRoute.tab) return initialRoute.tab
     try {
@@ -1086,11 +1091,21 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (isCompactToggleKey(event)) setCompact((prev) => !prev)
+      const key = demoToggleKey(event)
+      if (key === 'k') setCompact((prev) => !prev)
+      else if (key === 'b') setTileBannersHidden((prev) => !prev)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  // The viewer is cross-origin, so it hides its own banners when told; sent on every change
+  // and again whenever the iframe (re)loads.
+  const sendTileBanners = () => {
+    viewerFrameRef.current?.contentWindow?.postMessage({ type: TILE_BANNERS_MESSAGE, hidden: tileBannersHidden }, '*')
+  }
+
+  useEffect(sendTileBanners, [tileBannersHidden])
 
   useEffect(() => {
     if (!tourOpen) return
@@ -2678,7 +2693,7 @@ export default function App() {
                 </details>
               )}
             </div>
-            {viewerUrl ? <iframe id="insight-viewer-frame" title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
+            {viewerUrl ? <iframe id="insight-viewer-frame" ref={viewerFrameRef} title="viewer" src={viewerUrl} onLoad={sendTileBanners} /> : <p>Viewer unavailable.</p>}
           </section>
         )}
 

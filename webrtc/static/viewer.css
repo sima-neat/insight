@@ -777,3 +777,8 @@ canvas {
   background: #fee2e2;
   color: #7f1d1d;
 }
+
+/* DEMO ONLY, not for release: Insight's B key hides every channel banner. */
+body.hide-tile-banners .tile-banner-wrapper {
+  display: none;
+}
