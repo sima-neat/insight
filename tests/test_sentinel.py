@@ -86,6 +86,9 @@ class FakeSentinel:
             raise self.exec_error
         if argv[0] == "python3":
             return self._api_call(argv)
+        if argv[0] == "systemctl":  # `systemctl show simaai-sentinel -p InvocationID --value`
+            invocation = self.status_fields[4] if len(self.status_fields) > 4 else ""
+            return ExecResult(0, (invocation + "\n").encode(), b"")
         script = argv[2]
         if "runs delete" in script:
             return self._delete(argv[4])
@@ -944,17 +947,43 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(len(self.transport.cache_reads), 2, "the new daemon's own window is read again")
 
     def test_each_metrics_poll_reads_the_daemon_status_once(self):
-        """A restart is told by systemd's invocation id; one read per poll, compared with the last poll's."""
+        """One full status read per poll, compared with the last poll's, plus one invocation check."""
         statuses = [{"instance_id": "inv-1"}, {"instance_id": "inv-2"}]
+        invocations = ["inv-1", "inv-2"]
         self.transport.answer("GET", "/v1/cache", 200, cache_document([]))
-        with mock.patch.object(api.install, "status", side_effect=statuses) as status:
+        with mock.patch.object(api.install, "status", side_effect=statuses) as status, \
+                mock.patch.object(api.install, "invocation_id", side_effect=invocations) as invocation:
             self.assertEqual(self.get("/api/sentinel/metrics?history=5").status_code, 200)
-            self.assertEqual(status.call_count, 1)
+            self.assertEqual((status.call_count, invocation.call_count), (1, 1))
             self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
             body = self.get("/api/sentinel/metrics?history=5").get_json()
-            self.assertEqual(status.call_count, 2)
+            self.assertEqual((status.call_count, invocation.call_count), (2, 2))
         self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:49Z"], "the restart started the history again")
         self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 2, "and re-read the definitions")
+
+    def test_a_restart_during_the_reads_is_retried_so_one_response_comes_from_one_daemon_run(self):
+        """Codex 4187447377: a restart between the status read and the reads must not mix two runs."""
+        self.transport.answer("GET", "/v1/cache", 200, cache_document([]))
+        api.cache.observe_daemon((1, "fp-1"), "inv-1")
+        api.cache.add_sample((1, "fp-1"), sample("2026-09-22T20:55:45Z")["sample"])
+        with mock.patch.object(api.install, "status", return_value={"instance_id": "inv-1"}) as status, \
+                mock.patch.object(api.install, "invocation_id", side_effect=["inv-2", "inv-2"]) as invocation:
+            body = self.get("/api/sentinel/metrics?history=5").get_json()
+        self.assertEqual((status.call_count, invocation.call_count), (1, 2), "no second status script")
+        self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:47Z"], "only the new run's sample")
+        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/samples/latest")), 2)
+        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 2)
+        self.assertEqual(api.cache.get((1, "fp-1"), "daemon")["instance_id"], "inv-2")
+        with mock.patch.object(api.install, "status", return_value={"instance_id": "inv-2"}), \
+                mock.patch.object(api.install, "invocation_id", side_effect=["inv-3", "inv-4"]):
+            self.refused(self.get("/api/sentinel/metrics?history=5"), 502, "sentinel_failed")
+
+    def test_the_invocation_check_is_one_systemctl_process(self):
+        board = FakeSession(self.transport)
+        self.assertIsNone(install.invocation_id(board), "a daemon systemd reports no invocation for")
+        self.transport.status_fields = ["active", "yes", "yes", "/usr/bin/sima-cli", "inv-9", "1"]
+        self.assertEqual(install.invocation_id(board), "inv-9")
+        self.assertEqual(self.transport.calls[-1][0], ["systemctl", "show", "simaai-sentinel", "-p", "InvocationID", "--value"])
 
     def test_telemetry_reads_hold_the_metrics_lock(self):
         held = []
@@ -974,6 +1003,8 @@ class SentinelApiTests(_ApiCase):
         api.cache.seed(key, [])
         corrected = sample("2026-09-22T20:55:49Z")
         with mock.patch.object(api.install, "status", return_value={"instance_id": "inv-1"}), mock.patch.object(
+            api.install, "invocation_id", return_value="inv-1"
+        ), mock.patch.object(
             api.SentinelClient, "latest", return_value=corrected
         ), mock.patch.object(api.cache_history, "read", return_value=[]) as read_history:
             response = self.get("/api/sentinel/metrics?history=5")

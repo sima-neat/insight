@@ -245,19 +245,32 @@ def get_metrics():
 
 
 def _get_metrics(context, limit):
-    """Read and cache one telemetry response.
+    """Read and cache one telemetry response from one run of the daemon.
 
-    The daemon's status is read once per poll. A restart since the previous poll (another systemd
-    invocation) starts the history and definitions again; one that lands during this read is seen,
-    and its history restarted, on the next poll."""
-    daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
-    cache.observe_daemon(context.key, daemon.get("instance_id"))
-    latest = context.client.latest()
-    definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
-    history = cache.add_sample(context.key, latest.get("sample"))
-    if cache.needs_seed(context.key):
-        history = cache.seed(context.key, cache_history.read(context.client))
-    return context.payload(**metric_view.build(definitions, latest, history, limit))
+    The full status is read once per poll; a restart since the previous poll (another systemd
+    invocation) starts the history and definitions again. Sentinel's responses carry no daemon ID,
+    so one `systemctl show` after the reads tells whether a restart landed during them; then the reads
+    are repeated once for the new run."""
+    daemon = install.status(context.session)
+    instance = daemon.get("instance_id")
+    for _ in range(2):
+        cache.record(context.key, "daemon", dict(daemon, instance_id=instance), STATUS_TTL_SEC)
+        cache.observe_daemon(context.key, instance)
+        latest = context.client.latest()
+        definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
+        history = cache.add_sample(context.key, latest.get("sample"))
+        seed = cache_history.read(context.client) if cache.needs_seed(context.key) else None
+        after = install.invocation_id(context.session)
+        if after == instance:
+            if seed is not None:
+                history = cache.seed(context.key, seed)
+            return context.payload(**metric_view.build(definitions, latest, history, limit))
+        instance = after
+    raise SentinelError(
+        "sentinel_failed",
+        "Sentinel telemetry changed repeatedly while it was being read.",
+        hint="Wait a moment, then retry.",
+    )
 
 
 # API: report the trace Sentinel is recording, if any.

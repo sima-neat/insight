@@ -91,6 +91,16 @@ def status(session) -> dict:
     }
 
 
+def invocation_id(session):
+    """systemd's ID for the daemon's current run, from one `systemctl show`; None when it reports none.
+
+    Sentinel's API carries no daemon start time or ID, so this tells whether reads came from one run."""
+    result = session.transport.exec(
+        ["systemctl", "show", SERVICE, "-p", "InvocationID", "--value"], timeout=STATUS_TIMEOUT_SEC
+    )
+    return result.stdout.decode("utf-8", errors="replace").strip() or None
+
+
 def describe(state: dict) -> dict:
     """Why Sentinel cannot be used, in the board error shape, or ``None`` when it can."""
     if state["healthy"]:
