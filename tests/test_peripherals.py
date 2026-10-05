@@ -768,7 +768,6 @@ class MicrophoneSnapshotTests(unittest.TestCase):
         malformed = {
             "modes": lambda mic: mic.update(modes=None),
             "stable key": lambda mic: mic["identity"].pop("stable_key"),
-            "connection": lambda mic: mic.update(connection="bluetooth"),
             "PCM device": lambda mic: mic["capture_target"].update(device=-1),
             "selector": lambda mic: mic["capture_target"].update(selector=7),
             "card index": lambda mic: mic["identity"].update(card_index="2"),
@@ -782,6 +781,8 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "counts": lambda mic: mic["availability"].update(subdevices=True),
             "issues": lambda mic: mic.update(issues=[None]),
         }
+        # A backend or connection Sentinel may add later is not a malformed record.
+        validate(catalog(dict(contract_microphone(), backend="pipewire", connection="bluetooth")))
         for name, mutate in malformed.items():
             doc = catalog(contract_microphone())
             mutate(doc["devices"][0])

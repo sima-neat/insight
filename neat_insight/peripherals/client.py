@@ -267,7 +267,9 @@ class PeripheralClient:
                 raise self._response_error("SiMa Sentinel returned malformed frame intervals.", mode)
 
     def _validate_microphone(self, microphone: dict) -> None:
-        """Sentinel's ALSA capture record; optional identity fields are omitted, never null."""
+        """Sentinel's ALSA capture record; optional identity fields are omitted, never null. `backend` and
+        `connection` are not checked against today's values: a new one is shown, not a reason to reject
+        the whole catalog."""
         target = microphone.get("capture_target")
         identity = microphone.get("identity")
         availability = microphone.get("availability")
@@ -275,8 +277,6 @@ class PeripheralClient:
         if (
             not isinstance(microphone.get("name"), str)
             or not microphone["name"]
-            or microphone.get("backend") != "alsa"
-            or microphone.get("connection") not in {"usb", "platform", "unknown"}
             or not isinstance(target, dict)
             or not _non_negative_int(target.get("device"))
             or not all(isinstance(target.get(key, ""), str) for key in ("card_id", "selector"))
