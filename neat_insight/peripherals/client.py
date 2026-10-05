@@ -318,6 +318,11 @@ class PeripheralClient:
             or not isinstance(availability, dict)
             or availability.get("state") not in {"available", "in_use", "unknown"}
             or not all(_non_negative_int(availability.get(key, 0)) for key in ("subdevices", "subdevices_available"))
+            # Both counts come from the same /proc/asound info file; more free than exist is impossible.
+            or (
+                "subdevices" in availability
+                and availability.get("subdevices_available", 0) > availability["subdevices"]
+            )
             or not isinstance(issues, list)
         ):
             raise self._response_error("SiMa Sentinel returned malformed microphone details.", microphone)

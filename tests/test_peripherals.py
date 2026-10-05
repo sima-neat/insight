@@ -811,6 +811,8 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "channel map": lambda mic: mic["modes"][0].update(channel_map="FL FR"),
             "availability": lambda mic: mic["availability"].update(state="busy-ish"),
             "counts": lambda mic: mic["availability"].update(subdevices=True),
+            # Codex 4189179496: more free than total made the snapshot report the microphone in use.
+            "more free than total": lambda mic: mic["availability"].update(subdevices=1, subdevices_available=2),
             "issues": lambda mic: mic.update(issues=[None]),
             # ALSA reports these as unsigned int; a larger value would reach the browser as Infinity.
             "channels beyond __u32": lambda mic: mic["modes"][0].update(channels=2**32),
