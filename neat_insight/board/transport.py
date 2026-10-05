@@ -432,6 +432,8 @@ class SshTransport:
             raise self._unreachable(f"Could not connect to {self.host}:{self.port}: {exc}") from exc
         self._check_connect_deadline(deadline, argv, command_timeout, client)
         client.get_transport().set_keepalive(15)
+        # The board now presents the trusted key, so an earlier rejected one must not be trusted later.
+        self.presented_host_key = None
         return client
 
     def _connect_socket(self, deadline, argv, timeout):
