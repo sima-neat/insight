@@ -134,6 +134,40 @@ Use the Video Viewer to confirm:
 
 The Video Viewer can show one or more channels at a time, with pagination and channel selection controls for larger multi-stream tests.
 
+## Peripherals
+
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a camera, so cameras stay available to your applications. The camera export API works from the last scan without touching the board.
+
+### Selected board
+
+Insight works with one selected board, shown in the header. Select it to open the board settings, where you can change the board, test the connection, or trust a reflashed board's host key. Peripherals uses this selection. The Stats view still uses its legacy local or `cfg.json` target and does not yet follow it.
+
+The board is chosen in this order:
+
+- **A board you entered**: open the board settings and give its address, SSH port, and user. **Use default** returns to the automatic choice.
+- **Insight installed on the board**: Insight inspects the board it runs on.
+- **Neat SDK**: the DevKit paired with `sima-cli sdk setup --devkit <ip>`.
+
+Insight connects over SSH with the keys of the account that runs it. It never asks for or stores a password. If authentication fails, the page shows the `ssh-copy-id` command that authorizes a key on the board. After a board is reflashed it presents a new SSH host key; Insight refuses to connect until you compare the fingerprints and select **Trust new key**.
+
+### Cameras and modes
+
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+
+| Level | Meaning |
+| --- | --- |
+| Verified | Neat Core on the board accepts the mode for Core `CameraInput`. |
+| Not supported | Neat Core rejects it, for example USB cameras and formats other than NV12; the page shows Core's reason. |
+| Support unknown | Neat Core is not installed on the board, or is too old to classify camera modes; install or update it with `sima-cli neat install core`. |
+
+Sentinel reports only what the hardware offers. During Refresh, Insight asks Neat Core on the board, through PyNeat, which modes `CameraInput` supports. Availability also comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+
+### Camera configuration API
+
+Under the mode menus, pick a format and select **Copy configuration** to copy the selected mode's export, described below, to the clipboard. For a MIPI camera the button is disabled unless Neat Core verified the selected mode; its tooltip gives the reason. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. Exports leave the capture-buffer count unset and include no Apps `config.yaml` `camera:` block, because Insight does not read the board's `libcamerasrc`. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
+
+Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
+
 ## Stats
 
 The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.
