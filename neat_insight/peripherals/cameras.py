@@ -543,11 +543,14 @@ class ScanCache:
             entry = self._entry
         return entry["snapshot"] if entry and entry["generation"] == generation else None
 
-    def catalog_version(self, generation: int) -> Optional[dict]:
-        """The `revision` of the Sentinel catalog the last scan of this board showed."""
+    def scan(self, generation: int) -> tuple:
+        """The last scan of this board as (snapshot, catalog revision), read together; (None, None) without one.
+
+        One read keeps a refresh that lands in between from pairing one scan's snapshot with another's revision.
+        """
         with self._lock:
             entry = self._entry
-        return entry["catalog"] if entry and entry["generation"] == generation else None
+        return (entry["snapshot"], entry["catalog"]) if entry and entry["generation"] == generation else (None, None)
 
     def completed_since(self, generation: int, since: float) -> Optional[dict]:
         """The snapshot of a refresh that finished after `since` (monotonic), i.e. one that was in flight."""

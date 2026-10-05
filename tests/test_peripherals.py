@@ -1386,6 +1386,28 @@ class MicrophoneApiTests(unittest.TestCase):
         self.reads["catalog"].assert_called_once()
         start.assert_not_called()
 
+    def test_a_refresh_between_the_cache_reads_cannot_pair_an_old_snapshot_with_a_new_catalog(self):
+        """The snapshot and the catalog revision of one scan are read together (Codex finding on api.py:131)."""
+        self.client.post("/api/peripherals/refresh")
+        cache, refreshed = api.scans, catalog(imx477(), revision=2)  # Yeti gone, its id free to be reused
+
+        class RefreshAfterFirstRead:
+            """Records a newer scan right after the start's first cache read returns."""
+            def __getattr__(self, name):
+                def read(*args):
+                    value = getattr(cache, name)(*args)
+                    cache.record(1, BOARD, refreshed, mic_check(), 5)
+                    return value
+                return read
+
+        self.sentinel = catalog(imx477(), yeti(), revision=2)  # Sentinel now serves the newer catalog
+        with mock.patch.object(api, "scans", RefreshAfterFirstRead()), \
+                mock.patch.object(mictest, "start", return_value={}) as start:
+            response = self.start()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "stale_snapshot")
+        start.assert_not_called()
+
     def test_start_records_with_sentinel_selector_then_poll_stop_and_audio_follow_the_reference_contract(self):
         self.client.post("/api/peripherals/refresh")
         pcm = sine(0.5)

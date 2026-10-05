@@ -128,8 +128,8 @@ def start_microphone_test():
     """Re-read Sentinel's catalog, then record from a scanned microphone until stopped or `seconds` (1-30, default 30); 202."""
     mic_id, seconds = mictest.parse_request(request.get_json(silent=True))
     session = get_board_manager().session()
-    snapshot, scanned = scans.snapshot(session.generation), scans.catalog_version(session.generation)
-    if snapshot is None or scanned is None:
+    snapshot, scanned = scans.scan(session.generation)
+    if snapshot is None:
         raise BoardError(
             "stale_snapshot",
             "There is no scan for the selected board; it was never scanned or has changed since the scan.",
