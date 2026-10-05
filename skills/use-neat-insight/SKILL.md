@@ -80,7 +80,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
 - Peripherals never captures video: SiMa Sentinel on the board discovers the cameras (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog and checks which processes hold each camera. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
-- Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
+- Board-facing features (Peripherals and Stats) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
@@ -422,6 +422,25 @@ Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge netw
 | `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`, optionally with `"generation"` and `"scan_id"` from `GET /api/peripherals` to refuse a stale selection (409); return Python, C++, and JSON input configurations without `capture_buffer_count` (Insight does not read the board's `libcamerasrc`, so there is no Apps `config.yaml`). |
 
 Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` is `verified` when Neat Core on the board (`pyneat.peripherals.list()`) accepts a mode, `unsupported` with Core's `reason` when it rejects it, and `""` (unknown) when PyNeat is missing or too old to classify camera modes; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838). Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503; also Sentinel's 429 when 8 refreshes already wait, with a retry hint), `peripheral_version` or `peripheral_response` (502), and `timeout` (504) when Sentinel's refresh scan does not finish within 10 s or the board does not answer. An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first.
+
+## Sentinel (Stats)
+
+Stats reads SiMa Sentinel on the selected board through its local API socket, the same way Peripherals does. Requests that change the board take the `generation` from the state they acted on and return 409 `stale_snapshot` when another board was selected since.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/sentinel` | Sentinel's availability, version and daemon health on the selected board; `?refresh=1` re-reads the daemon status. |
+| `POST` | `/api/sentinel/install?generation=N` | Run `sima-cli neat install sentinel` on the board; 409 when Sentinel is already healthy. |
+| `GET` | `/api/sentinel/metrics?history=N` | Metric definitions joined with the latest sample, plus up to N aligned history samples (240 kept, seeded once from Sentinel's `GET /v1/cache`). |
+| `GET` | `/api/sentinel/traces` | The active trace and its running summary, or nulls. |
+| `POST` | `/api/sentinel/traces?generation=N` | JSON `{"name", "note"?, "tags"?}`; start a named trace; 409 `trace_conflict` when one is active or the name is taken. |
+| `POST` | `/api/sentinel/traces/stop?generation=N&trace_id=ID` | Stop and save the active trace; 409 when none is active or it is not `trace_id`. |
+| `GET` | `/api/sentinel/runs` | Saved run summaries. |
+| `GET` | `/api/sentinel/runs/<run_id>` | One saved run with its samples. |
+| `DELETE` | `/api/sentinel/runs/<run_id>?generation=N` | Delete a completed run with `simaai-sentinel runs delete`. |
+| `GET` | `/api/sentinel/compare?runs=A,B&raw=1` | Compare two to eight runs against the first; `raw=1` adds their samples. |
+
+Insight reads at most 12 MiB of one Sentinel answer from the board. A run carries every sample it recorded, one every two seconds, so a run longer than about three hours, or runs that add up to more than that in one comparison, return 502 `response_too_large`.
 
 ## Error Handling
 

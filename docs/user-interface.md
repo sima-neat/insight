@@ -214,6 +214,8 @@ Run totals are shown in the units the rest of the view uses: a duration Sentinel
 
 If a run is deleted on the board while it is selected, its row leaves the list and there is no longer a checkbox to clear it with, so every comparison fails on it. Insight names any selected run Sentinel no longer lists and offers to drop it from the selection.
 
+Opening and comparing runs has a size limit. Insight reads at most 12 MiB of Sentinel's answer from the board, and a saved run carries every sample it recorded, one every two seconds. A run longer than about three hours cannot be opened, and runs whose lengths add up to more than about three hours cannot be compared together. Insight then says the answer was too large to read. Record shorter traces for runs you want to open or compare.
+
 A comparison asks for its runs as one comma-separated list of names, so a trace name cannot contain a comma: the request would be read as two runs the board does not have, and fail naming a run nobody selected. Insight refuses such a name when you start a trace, and names any already-saved run that carries one rather than letting Compare fail on it.
 
 ### Values from a board you have left
