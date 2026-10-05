@@ -247,6 +247,17 @@ class BoardCheckTests(unittest.TestCase):
             availability = item(snapshot_of(catalog(imx477(), c920()), result), IMX477)["availability"]
             self.assertEqual(availability["state"], "unknown")
 
+    def test_an_unreadable_proc_leaves_availability_unknown_not_available(self):
+        # Codex 4188915681: root without a listable /proc used to report every camera as available.
+        with mock.patch.object(board_check, "which", return_value=None), \
+             mock.patch.object(board_check.os, "geteuid", return_value=0), \
+             mock.patch.object(board_check.os, "listdir", side_effect=PermissionError("denied")):
+            result = board_check.collect({"cameras": {C920: ["/dev/video97"]}})
+        self.assertEqual(result["availability_method"], "proc-root")
+        self.assertEqual(result["users"], {C920: None})
+        availability = item(snapshot_of(catalog(imx477(), c920()), result), C920)["availability"]
+        self.assertEqual(availability["state"], "unknown")
+
     def test_a_holder_of_the_media_device_is_reported_even_without_the_graph(self):
         held = {"/dev/media0": {4242}}
         with mock.patch.object(board_check, "which", return_value=None), \
