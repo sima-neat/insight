@@ -259,6 +259,18 @@ class MicTest:
 _current: Optional[MicTest] = None
 
 
+def _test_running() -> BoardError:
+    return BoardError("test_running", "A microphone test is already recording.", hint="Wait for it to finish.")
+
+
+def refuse_if_running() -> None:
+    """Refuse a start while Insight's own test records, before any check of the board: the live
+    in-use check would find Insight's own arecord and report the microphone as held by another process."""
+    test = _current
+    if test is not None and test.status()["state"] == "recording":
+        raise _test_running()
+
+
 def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
     """Start recording in the background and return at once; poll `current()` for the level.
 
@@ -267,7 +279,7 @@ def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
     global _current
     with _lock:
         if _current is not None and _current.status()["state"] == "recording":
-            raise BoardError("test_running", "A microphone test is already recording.", hint="Wait for it to finish.")
+            raise _test_running()
         test = MicTest(session.generation, mic_id, bound["selector"], bound["rate"], bound["channels"], seconds)
         test.thread = threading.Thread(target=_record, args=(session, test), name="mic-test", daemon=True)
         _current = test

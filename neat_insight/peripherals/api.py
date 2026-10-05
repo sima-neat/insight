@@ -141,6 +141,7 @@ def start_microphone_test():
             hint="Click Refresh, then test again.",
         )
     mictest.find_microphone(snapshot, mic_id)
+    mictest.refuse_if_running()
     bound = mictest.bind_microphone(PeripheralClient(session).catalog(), scanned, mic_id)
     node = [bound["node"]] if isinstance(bound["node"], str) and bound["node"].startswith("/dev/") else []
     mictest.refuse_if_held(_run_check(session, {"microphones": {mic_id: node}}), mic_id)

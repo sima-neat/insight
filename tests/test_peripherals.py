@@ -1420,6 +1420,31 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertEqual(response.get_json()["code"], "stale_snapshot")
         start.assert_not_called()
 
+    def test_a_retried_start_while_insight_records_is_test_running_not_in_use(self):
+        """Codex 4187561574: the live in-use check would find Insight's own arecord and orphan the test."""
+        self.client.post("/api/peripherals/refresh")
+        recording = threading.Event()
+
+        def record(argv, on_stdout, cancel_event):
+            on_stdout(sine(0.5))
+            recording.set()
+            cancel_event.wait(30)
+            raise CommandCancelled()
+
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record)
+        first = self.start().get_json()["test"]
+        self.assertTrue(recording.wait(2))
+        # The board now shows the PCM open by Insight's own arecord.
+        self.answer_checks(mic_check(users={YETI: [{"pid": 4242, "command": "arecord"}]}, capture_open={YETI: 1}), record)
+        calls, reads = len(self.transport.calls), self.reads["catalog"].call_count
+        response = self.start()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "test_running"))
+        self.assertEqual((len(self.transport.calls), self.reads["catalog"].call_count), (calls, reads),
+                         "refused before Sentinel or the board is asked")
+        self.assertEqual(self.client.get("/api/peripherals/microphones/test").get_json()["test"]["token"], first["token"])
+        self.client.post("/api/peripherals/microphones/test/stop")
+        mictest._current.thread.join(2)
+
     def test_start_records_with_sentinel_selector_then_poll_stop_and_audio_follow_the_reference_contract(self):
         self.client.post("/api/peripherals/refresh")
         pcm = sine(0.5)
