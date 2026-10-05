@@ -215,18 +215,21 @@ class SshTransport:
         while True:
             self._remaining(deadline, argv, timeout)
             progressed = False
+            # The limit is checked per chunk: output that never pauses must not grow past it.
             while channel.recv_ready():
                 self._arm(channel, deadline, argv, timeout)
                 stdout.append(channel.recv(65536))
                 size += len(stdout[-1])
                 progressed = True
+                if size > MAX_OUTPUT_BYTES:
+                    raise _output_too_large(argv)
             while channel.recv_stderr_ready():
                 self._arm(channel, deadline, argv, timeout)
                 stderr.append(channel.recv_stderr(65536))
                 size += len(stderr[-1])
                 progressed = True
-            if size > MAX_OUTPUT_BYTES:
-                raise _output_too_large(argv)
+                if size > MAX_OUTPUT_BYTES:
+                    raise _output_too_large(argv)
             # Exit status is sent after all output, so both buffers are complete once it arrives.
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 return ExecResult(channel.recv_exit_status(), b"".join(stdout), b"".join(stderr))

@@ -1,5 +1,6 @@
 """Render camera input configurations for one mode of the cached scan."""
 import json
+import math
 from typing import Optional
 
 from neat_insight.board import BoardError
@@ -17,6 +18,14 @@ def _invalid(message: str) -> BoardError:
 
 def _positive_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _finite(value) -> bool:
+    # An integer too large for a float would raise OverflowError when compared with a fractional rate.
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
 
 
 def parse_request(body) -> dict:
@@ -37,7 +46,7 @@ def parse_request(body) -> dict:
     if not (_positive_int(body.get("width")) and _positive_int(body.get("height"))):
         raise _invalid("width and height must be positive integers.")
     fps = body.get("fps")
-    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0:
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not _finite(fps) or fps <= 0:
         raise _invalid("fps must be a positive number.")
     return {
         "generation": generation,
