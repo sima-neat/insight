@@ -191,6 +191,9 @@ def _classified(modes: list, verdicts: Optional[dict], unknown: Optional[str]) -
 
 def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation: int, previous: Optional[dict], scan_ms: int):
     """Return the snapshot; `check` is the board_check output, or None when it could not run."""
+    # microphones.py reuses this module's availability rule, so it is imported here, not at the top.
+    from neat_insight.peripherals.microphones import microphone_items
+
     # A failed provider's devices from its last successful scan stay in the catalog.
     retained = {error["provider"] for error in catalog["errors"]}
     platform = {
@@ -198,11 +201,12 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "availability_method": (check or {}).get("availability_method") or "none",
     }
     verdicts, unknown = _core_verdicts(check)
-    items = []
+    cameras = []
     for device in cameras_of(catalog):
         known = None if verdicts is None else verdicts.get(device["id"], {})
         modes = _classified(device.get("modes") or [], known, unknown)
-        items.append(_item(device, check, modes, provider_of(device) in retained))
+        cameras.append(_item(device, check, modes, provider_of(device) in retained))
+    items = cameras + microphone_items(catalog, check, cameras, retained)
     return {
         "board": board,
         "generation": generation,
@@ -211,7 +215,7 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _issues(catalog, check, items, unknown),
+        "issues": _issues(catalog, check, cameras, unknown),
         "changes": _changes(previous["items"], items) if previous else None,
     }
 
@@ -540,6 +544,15 @@ class ScanCache:
             entry = self._entry
         return entry["snapshot"] if entry and entry["generation"] == generation else None
 
+    def scan(self, generation: int) -> tuple:
+        """The last scan of this board as (snapshot, catalog revision), read together; (None, None) without one.
+
+        One read keeps a refresh that lands in between from pairing one scan's snapshot with another's revision.
+        """
+        with self._lock:
+            entry = self._entry
+        return (entry["snapshot"], entry["catalog"]) if entry and entry["generation"] == generation else (None, None)
+
     def completed_since(self, generation: int, since: float) -> Optional[dict]:
         """The snapshot of a refresh that finished after `since` (monotonic), i.e. one that was in flight."""
         with self._lock:
@@ -560,6 +573,7 @@ class ScanCache:
                     "generation": generation,
                     "fingerprint": board.get("fingerprint"),
                     "snapshot": snapshot,
+                    "catalog": {"revision": catalog["revision"]},
                     "completed": time.monotonic(),
                 }
             self._refresh_locks = {g: lock for g, lock in self._refresh_locks.items() if g >= generation}

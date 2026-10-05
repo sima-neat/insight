@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
   apiError,
   availabilityInfo,
+  captureModes,
   blockedFormatSummary,
   boardIndicator,
   cameraDeviceId,
@@ -24,16 +26,34 @@ import {
   fpsOptions,
   groupOptions,
   groupCameras,
+  groupMicrophones,
   initialBoardForm,
   isSnapshotStale,
+  microphoneRows,
+  microphoneSubtitle,
+  micLevelNotice,
+  micTestBlock,
+  micStartMayHaveRun,
+  micTestAfterFailedStart,
+  micTestToResume,
+  micTestAction,
+  micTestErrorAction,
+  MIC_TEST_IDLE,
+  nextMicTestState,
+  formatClock,
+  meterSegments,
+  segmentTone,
+  microphoneSummaryLine,
   modeLabel,
   normalizeError,
   optionTier,
   resolveCameraId,
   resolveDeviceKind,
+  resolveMicrophoneId,
   resolveSelection,
   safeHref,
   sameSelection,
+  sampleRateLabel,
   sizeOptions,
   sortIssues,
   sourceLabel,
@@ -130,6 +150,50 @@ const usb = {
   errors: []
 }
 
+// The Blue Yeti Nano item exactly as the real DevKit scan returned it.
+const yeti = {
+  id: 'usb:b58e:0005:1-3.1:c0',
+  kind: 'microphone',
+  connection: 'usb',
+  name: 'Yeti Nano',
+  device: {
+    card_index: 0,
+    card_id: 'Nano',
+    card_name: 'Yeti Nano',
+    card_driver: 'USB-Audio',
+    pcm_device: 0,
+    pcm_node: '/dev/snd/pcmC0D0c',
+    alsa_name: 'hw:CARD=Nano,DEV=0',
+    by_path: '/dev/snd/by-path/platform-7ff0000000.pci-pci-0003:01:00.0-usb-0:3.1:1.0',
+    by_id: '/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2127SG00CBA8_888-000441040606-00',
+    usb: {
+      vendor_id: 'b58e',
+      product_id: '0005',
+      manufacturer: 'Blue Microphones',
+      product: 'Yeti Nano',
+      serial: '2127SG00CBA8_888-000441040606',
+      bus_path: '1-3.1',
+      speed_mbps: 12
+    }
+  },
+  availability: available,
+  capture: [{ format: 'S24_3LE', channels: 2, bits: 24, rates: [32000, 44100, 48000], rate_range: null, channel_map: ['FL', 'FR'] }],
+  notes: ['PulseAudio is running: applications usually record through it, so this microphone can look free here while a sound-server client is using it.'],
+  errors: []
+}
+
+const onboardMic = {
+  id: 'alsa:simaaudio:c0',
+  kind: 'microphone',
+  connection: 'onboard',
+  name: 'sima-audio',
+  device: { card_index: 1, card_id: 'simaaudio', card_name: 'sima-audio', card_driver: 'simple-card', pcm_device: 0, pcm_node: '/dev/snd/pcmC1D0c', alsa_name: 'hw:CARD=simaaudio,DEV=0' },
+  availability: available,
+  capture: null,
+  notes: ['Capture formats cannot be read without opening the device.'],
+  errors: []
+}
+
 const snapshot = {
   board: { label: 'sima@192.168.2.2', source: 'sdk-env', hostname: 'modalix', machine: 'aarch64', build_version: '2.0.0', fingerprint: 'SHA256:abc' },
   generation: 3,
@@ -140,7 +204,7 @@ const snapshot = {
     libcamerasrc: { present: true, external_buffer_mode: true, buffer_count: true },
     availability_method: 'proc-user'
   },
-  items: [usb, imx477, { id: 'mic:0', kind: 'microphone', connection: 'usb', name: 'USB mic' }, imx568, inUse],
+  items: [usb, imx477, yeti, imx568, inUse],
   issues: [
     { severity: 'info', code: 'no_usb_power', message: 'USB hub reports low power.', hint: 'Use a powered hub.' },
     { severity: 'error', code: 'tool_missing', message: 'v4l2-ctl is missing.', hint: 'Install v4l-utils on the board.' },
@@ -370,15 +434,16 @@ test('the masthead board indicator collapses board state into a label and a shor
   assert.equal(boardIndicator({ target: { label: 'This board' }, status: null }).state.short, 'Not checked')
 })
 
-test('device sub-tabs come from the snapshot kinds and keep unbuilt kinds disabled', () => {
+test('device sub-tabs come from the snapshot kinds; microphones are selectable, unbuilt kinds disabled', () => {
   const tabs = deviceTabs(snapshot.items)
   assert.deepEqual(tabs.map((t) => t.id), ['camera', 'microphone', 'lidar'])
   assert.deepEqual(tabs.map((t) => t.label), ['Cameras', 'Microphones', 'LiDAR'])
   assert.equal(tabs[0].count, 4)
   assert.equal(tabs[0].disabled, false)
   assert.equal(tabs[1].count, 1, 'the microphone in the snapshot is counted')
-  assert.equal(tabs[1].disabled, true)
-  assert.match(tabs[1].note, /cannot show microphones yet/)
+  assert.equal(tabs[1].supported, true)
+  assert.equal(tabs[1].disabled, false)
+  assert.equal(tabs[1].note, '')
   assert.equal(tabs[2].count, 0)
   assert.equal(tabs[2].note, 'Not supported yet')
 })
@@ -401,7 +466,7 @@ test('each rail icon carries a count bubble, an accessible name and the reason i
   assert.deepEqual(tabs.map((t) => t.name), ['Cameras, 4 devices', 'Microphones, 1 device', 'LiDAR, 0 devices'])
   assert.equal(tabs[0].note, '', 'a selectable kind needs no explanation')
   assert.equal(tabs[0].tooltip, 'Cameras, 4 devices')
-  assert.equal(tabs[1].tooltip, 'Microphones — 1 device detected; Insight cannot show microphones yet.')
+  assert.equal(tabs[1].tooltip, 'Microphones, 1 device')
   assert.equal(tabs[2].tooltip, 'LiDAR — Not supported yet')
   const one = deviceTabs([{ kind: 'camera' }])[0]
   assert.equal(one.name, 'Cameras, 1 device')
@@ -426,7 +491,8 @@ test('a supported kind with nothing detected is greyed but says why', () => {
 test('only an enabled sub-tab can be selected', () => {
   const tabs = deviceTabs(snapshot.items)
   assert.equal(resolveDeviceKind(tabs, 'camera'), 'camera')
-  assert.equal(resolveDeviceKind(tabs, 'microphone'), 'camera', 'disabled kinds fall back')
+  assert.equal(resolveDeviceKind(tabs, 'microphone'), 'microphone')
+  assert.equal(resolveDeviceKind(tabs, 'lidar'), 'camera', 'disabled kinds fall back')
   assert.equal(resolveDeviceKind(tabs, 'nonsense'), 'camera')
   assert.equal(resolveDeviceKind([], 'camera'), null)
 })
@@ -584,6 +650,201 @@ test('a mode menu groups its entries by tier, and the pill names the chosen one'
   assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
   assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
   assert.deepEqual(groupOptions([]), [])
+})
+
+test('with no microphone detected the kind stays greyed and says so', () => {
+  const [, mics] = deviceTabs([imx477])
+  assert.equal(mics.supported, true)
+  assert.equal(mics.disabled, true)
+  assert.equal(mics.note, 'No microphones detected')
+  assert.equal(mics.tooltip, 'Microphones — No microphones detected')
+  assert.equal(resolveDeviceKind(deviceTabs([imx477]), 'microphone'), 'camera')
+  assert.equal(resolveDeviceKind(deviceTabs([yeti]), 'camera'), 'microphone', 'a board with only a mic opens on it')
+})
+
+test('microphones are grouped USB first, then on-board, and cameras are left out', () => {
+  const groups = groupMicrophones([onboardMic, imx477, yeti])
+  assert.deepEqual(groups.map((g) => g.label), ['USB (ALSA)', 'On-board (ALSA)'])
+  assert.deepEqual(groups.map((g) => g.items.map((m) => m.id)), [[yeti.id], [onboardMic.id]])
+  assert.deepEqual(groupCameras([yeti]), [], 'a microphone never shows in the camera list')
+})
+
+test('the selected microphone survives refreshes and removals', () => {
+  const items = { items: [yeti, onboardMic], changes: { added: [], removed: [{ id: 'usb:0c76:161f:1-3.2:c0', name: 'USB PnP Audio Device' }] } }
+  assert.equal(resolveMicrophoneId(items, null), yeti.id)
+  assert.equal(resolveMicrophoneId(items, onboardMic.id), onboardMic.id)
+  assert.equal(resolveMicrophoneId(items, 'usb:0c76:161f:1-3.2:c0'), 'usb:0c76:161f:1-3.2:c0')
+  assert.equal(resolveMicrophoneId(items, imx477.id), yeti.id, 'a camera id is not a microphone selection')
+})
+
+test('the real Yeti Nano reads as capture tags and device detail rows', () => {
+  assert.equal(microphoneSubtitle(yeti), '', 'the ALSA name lives in Device details, not under the title')
+  assert.deepEqual(captureModes(yeti), [{ key: '0-S24_3LE-2-24', badges: ['S24_3LE', '2 ch', '24-bit', '32 · 44.1 · 48 kHz'] }])
+  assert.deepEqual(microphoneRows(yeti), [
+    ['Connection', 'USB (ALSA)'],
+    ['ALSA device', 'hw:CARD=Nano,DEV=0'],
+    ['Card', 'Nano, card 0'],
+    ['Card name', 'Yeti Nano'],
+    ['Driver', 'USB-Audio'],
+    ['Device node', '/dev/snd/pcmC0D0c'],
+    ['By-path link', yeti.device.by_path],
+    ['By-id link', yeti.device.by_id],
+    ['USB ID', 'b58e:0005'],
+    ['Manufacturer', 'Blue Microphones'],
+    ['Product', 'Yeti Nano'],
+    ['Serial', '2127SG00CBA8_888-000441040606'],
+    ['USB bus path', '1-3.1'],
+    ['USB speed', '12 Mb/s']
+  ])
+  assert.equal(microphoneSummaryLine(yeti), '', 'an available mic needs no sentence')
+})
+
+test('capture tags cover mono, several formats, single rates and continuous ranges', () => {
+  const modes = captureModes({
+    capture: [
+      { format: 'S32_LE', channels: 2, bits: 24, rates: [44100, 48000, 88200, 96000], rate_range: null, channel_map: ['FL', 'FR'] },
+      { format: 'S16_LE', channels: 1, bits: 16, rates: [16000], rate_range: null, channel_map: ['MONO'] },
+      { format: 'S24_3LE', channels: 1, bits: 24, rates: [], rate_range: { min: 8000, max: 48000 }, channel_map: null },
+      { format: 'S16_LE', channels: 1, bits: 16, rates: [11025], rate_range: { min: 11025, max: 96000 }, channel_map: null }
+    ]
+  })
+  assert.deepEqual(modes.map((mode) => mode.badges), [
+    ['S32_LE', '2 ch', '24-bit', '44.1 · 48 · 88.2 · 96 kHz'],
+    ['S16_LE', '1 ch', '16-bit', '16 kHz'],
+    ['S24_3LE', '1 ch', '24-bit', '8–48 kHz'],
+    ['S16_LE', '1 ch', '16-bit', '11.025–96 kHz']
+  ], 'a continuous range stays one range')
+  assert.deepEqual(captureModes({ capture: [{ format: null, channels: null, bits: null, rates: [], rate_range: null }] })[0].badges, [],
+    'a field the kernel did not print is left out, not shown empty')
+  assert.equal(new Set(modes.map((m) => m.key)).size, 4, 'every combination keeps its own row')
+  assert.equal(sampleRateLabel(22050), '22.05 kHz')
+})
+
+test('a card without readable capabilities and a device without USB strings omit what is missing', () => {
+  assert.equal(captureModes(onboardMic), null)
+  assert.deepEqual(captureModes({ capture: [] }), [])
+  const rows = microphoneRows(onboardMic)
+  assert.deepEqual(rows.map(([label]) => label), ['Connection', 'ALSA device', 'Card', 'Card name', 'Driver', 'Device node'])
+  assert.equal(rows[0][1], 'On-board (ALSA)')
+  const bare = {
+    ...yeti,
+    name: 'USB Device 0x1234:0x5678',
+    device: { card_index: 3, pcm_device: 0, pcm_node: '/dev/snd/pcmC3D0c', usb: { vendor_id: '1234', product_id: '5678', manufacturer: null, product: null, serial: null, bus_path: '1-2', speed_mbps: null } }
+  }
+  assert.deepEqual(microphoneRows(bare), [
+    ['Connection', 'USB (ALSA)'],
+    ['Card', 'card 3'],
+    ['Device node', '/dev/snd/pcmC3D0c'],
+    ['USB ID', '1234:5678'],
+    ['USB bus path', '1-2']
+  ])
+  assert.equal(microphoneSubtitle(bare), '')
+})
+
+test('a webcam microphone names the camera it is part of', () => {
+  const webcamMic = { ...yeti, device: { ...yeti.device, alsa_name: 'hw:CARD=C920,DEV=0', part_of: { id: usb.id, name: 'HD Pro Webcam C920' } } }
+  assert.equal(microphoneSubtitle(webcamMic), 'Part of HD Pro Webcam C920')
+  assert.deepEqual(microphoneRows(webcamMic)[1], ['Part of', 'HD Pro Webcam C920'])
+})
+
+test('a microphone held by an unseen process says so; availability pills come from the shared rules', () => {
+  const hidden = { ...yeti, availability: { state: 'in_use', users: [], reason: 'The kernel reports the capture device open in another process.' } }
+  assert.equal(microphoneSummaryLine(hidden), 'The kernel reports the capture device open in another process.')
+  const named = { ...yeti, availability: { state: 'in_use', users: [{ pid: 4242, command: 'arecord' }], reason: 'Open in arecord (pid 4242).' } }
+  assert.equal(availabilityInfo(named.availability).label, 'In use by arecord (pid 4242)')
+  assert.equal(microphoneSummaryLine(named), '', 'the pill already names the holder')
+  assert.equal(microphoneSummaryLine({ availability: { state: 'unknown', reason: 'processes cannot be inspected on this board' } }), 'Availability unknown: processes cannot be inspected on this board')
+})
+
+test('microphone test: record, play back, replay, and never a late answer out of turn', () => {
+  const recording = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  assert.equal(recording.status, 'recording')
+  const test = { token: 'a', audio_url: '/x.wav', level: { silent: false } }
+  const playing = nextMicTestState(recording, { type: 'recorded', test })
+  assert.deepEqual(playing, { status: 'playing', test, error: null }, 'playback starts by itself')
+  const done = nextMicTestState(playing, { type: 'played' })
+  assert.equal(done.status, 'done')
+  assert.equal(nextMicTestState(done, { type: 'replay' }).status, 'playing')
+  assert.equal(nextMicTestState(recording, { type: 'replay' }), recording, 'nothing to replay while recording')
+  const failed = nextMicTestState(recording, { type: 'failed', error: { code: 'microphone_in_use' } })
+  assert.equal(failed.status, 'error')
+  assert.equal(nextMicTestState(MIC_TEST_IDLE, { type: 'recorded', test }), MIC_TEST_IDLE, 'an answer nobody is waiting for is dropped')
+  assert.equal(nextMicTestState(done, { type: 'failed', error: {} }), done)
+  assert.equal(nextMicTestState(done, { type: 'record' }).status, 'recording', 'test again from a finished test')
+  assert.deepEqual(nextMicTestState(failed, { type: 'reset' }), MIC_TEST_IDLE)
+  assert.equal(nextMicTestState(undefined, { type: 'nonsense' }), MIC_TEST_IDLE)
+})
+
+test('microphone test: a detail mounted mid-test takes up the board\'s test for its own microphone', () => {
+  const recording = { token: 't', id: yeti.id, state: 'recording', elapsed_ms: 1200, level_dbfs: -20 }
+  const ready = { token: 't', id: yeti.id, state: 'ready', audio_url: '/t.wav', level: { silent: false } }
+  assert.equal(micTestToResume(yeti.id, recording), recording)
+  assert.equal(micTestToResume(yeti.id, ready), ready, 'a recording finished while another mic was shown is kept')
+  assert.equal(micTestToResume(onboardMic.id, recording), null, 'another microphone\'s test is not shown here')
+  assert.equal(micTestToResume(yeti.id, { ...recording, state: 'failed' }), null)
+  assert.equal(micTestToResume(yeti.id, null), null)
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: recording }), { status: 'recording', test: null, error: null })
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: ready }), { status: 'done', test: ready, error: null })
+  const started = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  assert.equal(nextMicTestState(started, { type: 'resume', test: ready }), started, 'a test started here is not replaced')
+})
+
+test('microphone test: a start whose answer was lost takes up the recording it began', () => {
+  const recording = { token: 'new', id: yeti.id, state: 'recording', elapsed_ms: 400, level_dbfs: -30 }
+  const ready = { ...recording, state: 'ready', audio_url: '/new.wav' }
+  const lost = { code: 'network', message: 'Could not reach the Insight server.' }
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, recording, null), recording)
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: 'test_running' }, recording, 'old'), recording, 'a retry refused by its own recording')
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: '', message: 'Request failed: 504' }, ready, null), ready, 'a gateway error without an API body')
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, { ...ready, token: 'old' }, 'old'), null, 'the recording shown before Test is not new')
+  assert.equal(micTestAfterFailedStart(onboardMic.id, { code: 'test_running' }, recording, null), null, 'another microphone is recording')
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, { ...recording, state: 'failed' }, null), null)
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, null, null), null)
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: 'microphone_in_use' }, recording, null), null, 'the backend answered: its error stands')
+  assert.deepEqual([lost, { code: 'test_running' }, { code: '' }, { code: 'not_found' }].map(micStartMayHaveRun), [true, true, true, false], 'only these read the current test')
+})
+
+test('microphone test: the scan\'s in-use state is advisory and the start request rechecks the board', () => {
+  const held = { ...yeti, availability: { state: 'in_use', users: [{ pid: 4242, command: 'arecord' }] } }
+  assert.equal(micTestBlock(held, MIC_TEST_IDLE), 'In use by arecord (pid 4242)', 'still shown beside the button')
+  assert.equal(micTestAction('idle', false).disabled, false)
+  const source = readFileSync(new URL('./MicrophoneDetail.jsx', import.meta.url), 'utf8')
+  assert.match(source, /disabled=\{button\.disabled\}/, 'only the button state disables Test, not the scan')
+})
+
+test('the level meter lights green, then amber, then red, from -50 dBFS to full scale', () => {
+  assert.equal(meterSegments(null, 20), 0)
+  assert.equal(meterSegments(-80, 20), 0)
+  assert.equal(meterSegments(-50, 20), 0)
+  assert.equal(meterSegments(-25, 20), 10)
+  assert.equal(meterSegments(0, 20), 20)
+  assert.equal(meterSegments(6, 20), 20)
+  assert.deepEqual([0, 13, 14, 17, 18, 19].map((i) => segmentTone(i, 20)), ['low', 'low', 'mid', 'mid', 'high', 'high'])
+})
+
+test('microphone test: blocked only when the scan says the device is held, and it only speaks up about silence', () => {
+  assert.equal(micTestBlock(yeti, MIC_TEST_IDLE), '')
+  const held = { ...yeti, availability: { state: 'in_use', users: [{ pid: 4242, command: 'arecord' }] } }
+  assert.equal(micTestBlock(held, MIC_TEST_IDLE), 'In use by arecord (pid 4242)')
+  assert.match(micLevelNotice({ silent: true, peak_dbfs: null }), /Nothing was picked up/)
+  assert.equal(micLevelNotice({ silent: false, peak_dbfs: -9 }), '')
+  assert.equal(micLevelNotice(null), '')
+  assert.match(micTestErrorAction({ code: 'microphone_in_use' }), /never stops it/)
+  assert.match(micTestErrorAction({ code: 'tool_missing' }), /alsa-utils/)
+  assert.equal(micTestErrorAction({ code: 'command_failed', hint: 'See detail.' }), 'See detail.')
+  assert.equal(formatClock(0), '0:00')
+  assert.equal(formatClock(4.9), '0:04')
+  assert.equal(formatClock(75), '1:15')
+})
+
+test('microphone test: one button records, stops the recording, then stops the playback', () => {
+  assert.deepEqual(micTestAction('idle', false), { label: 'Test microphone', action: 'record', disabled: false })
+  assert.deepEqual(micTestAction('recording', false), { label: 'Stop recording', action: 'stop', disabled: false },
+    'Stop is available the moment recording starts')
+  assert.deepEqual(micTestAction('recording', true), { label: 'Stopping…', action: 'stop', disabled: true })
+  assert.deepEqual(micTestAction('playing', false), { label: 'Stop playing', action: 'stop-playing', disabled: false })
+  assert.equal(micTestAction('done', false).action, 'record')
+  assert.equal(micTestAction('error', false).action, 'record')
 })
 
 test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {

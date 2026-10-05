@@ -95,3 +95,36 @@ export function downloadText(filename, content) {
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+export function startMicrophoneTest(id) {
+  return requestJson('/api/peripherals/microphones/test', { method: 'POST', body: { id } })
+}
+
+export function stopMicrophoneTest() {
+  return requestJson('/api/peripherals/microphones/test/stop', { method: 'POST' })
+}
+
+export function getMicrophoneTest() {
+  return requestJson('/api/peripherals/microphones/test')
+}
+
+// The status read never contacts the board, so a failed read is a network blip or an Insight
+// restart, not the end of the recording: retry it. Codes that mean the test is gone end it, and so
+// does a run of failures (about 5 s at the page's 100 ms poll).
+const TERMINAL_MICROPHONE_STATUS_ERRORS = new Set(['not_found', 'stale_snapshot'])
+
+export async function readMicrophoneTest({
+  request = getMicrophoneTest,
+  isActive = () => true,
+  wait = () => new Promise((resolve) => setTimeout(resolve, 100)),
+  maxFailures = 50
+} = {}) {
+  for (let failures = 1; ; failures += 1) {
+    try {
+      return await request()
+    } catch (error) {
+      if (TERMINAL_MICROPHONE_STATUS_ERRORS.has(error?.code) || failures >= maxFailures || !isActive()) throw error
+      await wait()
+    }
+  }
+}

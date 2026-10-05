@@ -26,6 +26,18 @@ class ExecResult:
     stderr: bytes
 
 
+class CommandCancelled(Exception):
+    """Raised by exec when its cancel_event is set; the command has been stopped."""
+
+
+def _board_changed() -> BoardError:
+    return BoardError(
+        "stale_snapshot",
+        "The selected board changed while this request was running.",
+        hint="Retry to use the newly selected board.",
+    )
+
+
 def key_fingerprint(key) -> str:
     digest = hashlib.sha256(key.asbytes()).digest()
     return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
@@ -51,39 +63,63 @@ def _output_too_large(argv: List[str]) -> BoardError:
 
 
 class LocalTransport:
-    """Runs commands on the machine Insight runs on (Insight installed on the board)."""
+    """Runs commands on the machine Insight runs on (Insight installed on the board).
 
-    def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
+    exec's on_stdout, when given, is called with each stdout chunk as it arrives (the microphone
+    test meters audio live); setting cancel_event stops the command and raises CommandCancelled.
+    close() kills the commands still running, so a board change ends a recording at once.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active = set()
+        self._closed = False
+
+    def exec(
+        self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None, on_stdout=None, cancel_event=None
+    ) -> ExecResult:
         deadline = time.monotonic() + timeout
+        with self._lock:
+            if self._closed:
+                raise _board_changed()
+            try:
+                proc = subprocess.Popen(
+                    argv,
+                    stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
+            except OSError as exc:
+                # As a shell reports a command it cannot run (an argument list too long, a non-executable file).
+                return ExecResult(126, b"", f"{argv[0]}: {exc.strerror or exc}".encode())
+            self._active.add(proc)
         try:
-            proc = subprocess.Popen(
-                argv,
-                stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
-        except OSError as exc:
-            # As a shell reports a command it cannot run (an argument list too long, a non-executable file).
-            return ExecResult(126, b"", f"{argv[0]}: {exc.strerror or exc}".encode())
-        try:
-            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout)
+            stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout, on_stdout, cancel_event)
             try:
                 exit_code = proc.wait(max(deadline - time.monotonic(), 0))
             except subprocess.TimeoutExpired:
                 raise _timeout_error(argv, timeout, "this board") from None
+            with self._lock:
+                if self._closed:
+                    raise _board_changed()
             return ExecResult(exit_code, stdout, stderr)
         finally:
             if proc.poll() is None:
-                proc.kill()
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
                 proc.wait()
             for pipe in (proc.stdin, proc.stdout, proc.stderr):
                 if pipe and not pipe.closed:
                     pipe.close()
+            with self._lock:
+                self._active.discard(proc)
 
     @staticmethod
-    def _collect(proc, argv, stdin, deadline, timeout):
+    def _collect(proc, argv, stdin, deadline, timeout, on_stdout=None, cancel_event=None):
         # Read as the output arrives, so the SSH transport's output limit holds here too.
         chunks = {proc.stdout: [], proc.stderr: []}
         pending = memoryview(stdin or b"")
@@ -98,10 +134,14 @@ class LocalTransport:
                 else:
                     proc.stdin.close()
             while selector.get_map():
+                if cancel_event is not None and cancel_event.is_set():
+                    raise CommandCancelled()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise _timeout_error(argv, timeout, "this board")
-                for key, _ in selector.select(remaining):
+                # Wake up regularly when the command can be cancelled, even if it prints nothing.
+                wait = min(remaining, 0.1) if cancel_event is not None else remaining
+                for key, _ in selector.select(wait):
                     if key.fileobj is proc.stdin:
                         try:
                             pending = pending[os.write(key.fd, pending[:65536]):]
@@ -119,6 +159,8 @@ class LocalTransport:
                         continue
                     chunks[key.fileobj].append(chunk)
                     size += len(chunk)
+                    if on_stdout is not None and key.fileobj is proc.stdout:
+                        on_stdout(chunk)
                     if size > MAX_OUTPUT_BYTES:
                         raise _output_too_large(argv)
         return b"".join(chunks[proc.stdout]), b"".join(chunks[proc.stderr])
@@ -127,7 +169,15 @@ class LocalTransport:
         return None
 
     def close(self) -> None:
-        pass
+        with self._lock:
+            self._closed = True
+            active = list(self._active)
+        for proc in active:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
 
 
 class SshTransport:
@@ -152,26 +202,53 @@ class SshTransport:
     def host_key_name(self) -> str:
         return self.host if self.port == 22 else f"[{self.host}]:{self.port}"
 
-    def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
+    def exec(
+        self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None, on_stdout=None, cancel_event=None
+    ) -> ExecResult:
+        # on_stdout and cancel_event as for LocalTransport.exec; cancelling closes only this command's channel.
         deadline = time.monotonic() + timeout
         channel = None
         channel_cancelled = threading.Event()
+        guard = threading.Lock()
 
         def cancel_channel():
-            channel_cancelled.set()
-            threading.Thread(target=channel.close, daemon=True).start()
+            with guard:
+                channel_cancelled.set()
+                target = channel
+            if target is not None:
+                threading.Thread(target=target.close, daemon=True).start()
+
+        def open_channel():
+            # Runs in _run_bounded's worker: a channel that opens after Stop was pressed is closed.
+            nonlocal channel
+            opened = self._open_channel(deadline, argv, timeout)
+            with guard:
+                if not channel_cancelled.is_set():
+                    channel = opened
+                    return opened
+            opened.close()
+            raise CommandCancelled()
+
+        def check_cancelled():
+            if cancel_event is not None and cancel_event.is_set():
+                raise CommandCancelled()
 
         try:
-            channel = self._open_channel(deadline, argv, timeout)
+            check_cancelled()
+            if cancel_event is None:
+                channel = self._open_channel(deadline, argv, timeout)
+            else:
+                self._run_bounded(open_channel, cancel_channel, deadline, argv, timeout, cancel_event)
+            check_cancelled()
             self._arm(channel, deadline, argv, timeout)
             self._run_bounded(
-                lambda: channel.exec_command(shlex.join(argv)), cancel_channel, deadline, argv, timeout
+                lambda: channel.exec_command(shlex.join(argv)), cancel_channel, deadline, argv, timeout, cancel_event
             )
             if stdin:
-                self._sendall(channel, stdin, deadline, argv, timeout)
+                self._sendall(channel, stdin, deadline, argv, timeout, check_cancelled)
             self._arm(channel, deadline, argv, timeout)
-            self._run_bounded(channel.shutdown_write, cancel_channel, deadline, argv, timeout)
-            return self._collect(channel, argv, deadline, timeout)
+            self._run_bounded(channel.shutdown_write, cancel_channel, deadline, argv, timeout, cancel_event)
+            return self._collect(channel, argv, deadline, timeout, on_stdout, cancel_event)
         except BoardError as exc:
             if channel is not None and exc.code == "timeout" and not channel_cancelled.is_set():
                 cancel_channel()
@@ -213,9 +290,11 @@ class SshTransport:
         self._closed = True
         self._drop()
 
-    def _collect(self, channel, argv: List[str], deadline: float, timeout: float) -> ExecResult:
+    def _collect(self, channel, argv: List[str], deadline: float, timeout: float, on_stdout=None, cancel_event=None) -> ExecResult:
         stdout, stderr, size = [], [], 0
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise CommandCancelled()
             self._remaining(deadline, argv, timeout)
             progressed = False
             # The limit is checked per chunk: output that never pauses must not grow past it.
@@ -223,6 +302,8 @@ class SshTransport:
                 self._arm(channel, deadline, argv, timeout)
                 stdout.append(channel.recv(65536))
                 size += len(stdout[-1])
+                if on_stdout is not None:
+                    on_stdout(stdout[-1])
                 progressed = True
                 if size > MAX_OUTPUT_BYTES:
                     raise _output_too_large(argv)
@@ -376,7 +457,8 @@ class SshTransport:
                 connection.close()
         raise last_error or socket.gaierror(f"Could not resolve {self.host}")
 
-    def _run_bounded(self, action, cancel, deadline, argv, timeout):
+    def _run_bounded(self, action, cancel, deadline, argv, timeout, cancel_event=None):
+        # A set cancel_event stops the wait at once: the channel is closed and CommandCancelled raised.
         result = []
         done = threading.Event()
         remaining = self._remaining(deadline, argv, timeout)
@@ -391,10 +473,17 @@ class SshTransport:
 
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
-        if not done.wait(remaining):
-            # Cancellation is best-effort and must return without extending the caller's deadline.
-            cancel()
-            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+        end = time.monotonic() + remaining
+        while not done.is_set():
+            left = end - time.monotonic()
+            if left <= 0:
+                # Cancellation is best-effort and must return without extending the caller's deadline.
+                cancel()
+                raise _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+            if cancel_event is not None and cancel_event.is_set():
+                cancel()
+                raise CommandCancelled()
+            done.wait(left if cancel_event is None else min(left, 0.05))
         succeeded, value = result[0]
         if not succeeded:
             raise value
@@ -409,9 +498,10 @@ class SshTransport:
     def _arm(self, channel, deadline, argv, timeout) -> None:
         channel.settimeout(self._remaining(deadline, argv, timeout))
 
-    def _sendall(self, channel, data, deadline, argv, timeout) -> None:
+    def _sendall(self, channel, data, deadline, argv, timeout, check_cancelled=lambda: None) -> None:
         pending = memoryview(data)
         while pending:
+            check_cancelled()
             self._arm(channel, deadline, argv, timeout)
             sent = channel.send(pending)
             if sent <= 0:
@@ -425,11 +515,7 @@ class SshTransport:
             raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
 
     def _stale(self) -> BoardError:
-        return BoardError(
-            "stale_snapshot",
-            "The selected board changed while this request was running.",
-            hint="Retry to use the newly selected board.",
-        )
+        return _board_changed()
 
     def _unreachable(self, message: str) -> BoardError:
         return BoardError(
