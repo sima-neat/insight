@@ -778,6 +778,9 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "selector": lambda mic: mic["capture_target"].update(selector=7),
             "card index": lambda mic: mic["identity"].update(card_index="2"),
             "USB identity": lambda mic: mic["identity"].update(usb="1-3.2"),
+            # Codex 4188864853: a non-string bus path reached a dict lookup and returned a 500.
+            "USB bus path": lambda mic: mic["identity"].update(usb={"bus_path": []}),
+            "USB serial": lambda mic: mic["identity"].update(usb={"bus_path": "1-3.2", "serial": 7}),
             "empty rates": lambda mic: mic["modes"][0].update(rates_hz=[]),
             "rates and range": lambda mic: mic["modes"][0].update(rate_range_hz={"min": 8000, "max": 48000}),
             "inverted range": lambda mic: mic.update(modes=[{"format": "S16_LE", "rate_range_hz": {"min": 9, "max": 8}}]),

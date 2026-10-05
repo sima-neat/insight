@@ -290,6 +290,10 @@ class PeripheralClient:
                 for key in ("card_id", "card_name", "card_driver", "pcm_name", "pcm_node", "by_path", "by_id")
             )
             or not _object_or_none(identity.get("usb"))
+            or not all(
+                isinstance((identity.get("usb") or {}).get(key, ""), str)
+                for key in ("bus_path", "vendor_id", "product_id", "interface", "manufacturer", "product", "serial")
+            )
             or not isinstance(microphone.get("modes"), list)
             or not isinstance(availability, dict)
             or availability.get("state") not in {"available", "in_use", "unknown"}
