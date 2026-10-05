@@ -6,6 +6,7 @@ import {
   chatModels,
   checkApiVersion,
   deriveBackendState,
+  engineName,
   formatBytes,
   formatDuration,
   friendlyModelName,
@@ -18,6 +19,7 @@ import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } f
 import { languageNames, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
 import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
+import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -91,9 +93,10 @@ test('a chat reply that ends without the done marker is reported as cut off', as
   const delta = (text) => JSON.stringify({ choices: [{ delta: { content: text } }] })
   try {
     let text = ''
-    respondWith(200, sse(delta('Hel'), delta('lo'), '[DONE]'), 'text/event-stream')
-    await streamChat({ model: 'm', messages: [], onDelta: (d) => { text += d } })
+    respondWith(200, sse(delta('Hel'), delta('lo'), JSON.stringify({ choices: [{ delta: {} }], generated_tokens: 2, tps: 9.5 }), '[DONE]'), 'text/event-stream')
+    const stats = await streamChat({ model: 'm', messages: [], onDelta: (d) => { text += d } })
     assert.equal(text, 'Hello')
+    assert.deepEqual(stats, { tokens: 2, tps: 9.5 }, "the board's figures come back with the reply")
 
     text = ''
     respondWith(200, sse(delta('Partial ans')), 'text/event-stream')
@@ -301,4 +304,34 @@ test('voice engines that failed to load become plain warnings', () => {
   assert.equal(missingFile.accelerator, false, 'restarting the accelerator would not bring back a missing file')
   assert.deepEqual(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false }])), [])
   assert.deepEqual(voiceEngineWarnings(null), [])
+})
+
+test('reply speed uses the board figures and leaves out what was not measured', () => {
+  // The last chunk GenAI Studio sends on a DevKit.
+  const last = '{"choices":[{"delta":{},"finish_reason":"stop","index":0}],"generated_tokens":8,"tps":23.405731473813503}'
+  assert.deepEqual(chatStreamStats(last), { tokens: 8, tps: 23.405731473813503 })
+  assert.deepEqual(chatStreamStats('{"usage":{"completion_tokens":40}}'), { tokens: 40, tps: null })
+  assert.equal(chatStreamStats('{"choices":[{"delta":{"content":"hi"}}]}'), null)
+  assert.equal(chatStreamStats('[DONE]'), null)
+
+  const shown = (items) => Object.fromEntries(items.map((m) => [m.label, m.value]))
+  assert.deepEqual(shown(replyMetrics({ t0: 0, tFirst: 412, tEnd: 2500, stats: { tokens: 8, tps: 23.4057 } })), {
+    'First token': '412 ms', Speed: '23.4 tokens/s', Tokens: '8', Total: '2.50 s'
+  })
+  // Tokens without a rate: the rate is worked out from the writing time.
+  assert.equal(shown(replyMetrics({ t0: 0, tFirst: 1000, tEnd: 3000, stats: { tokens: 40, tps: null } })).Speed, '20.0 tokens/s')
+  // Nothing reported: no made-up speed or count.
+  assert.deepEqual(Object.keys(shown(replyMetrics({ t0: 0, tFirst: 300, tEnd: 900, stats: null }))), ['First token', 'Total'])
+  assert.deepEqual(replyMetrics({ t0: 0, tFirst: null, tEnd: 900 }), [], 'a reply with no text has no timings')
+})
+
+test('spoken and heard figures', () => {
+  const shown = (items) => Object.fromEntries(items.map((m) => [m.label, m.value]))
+  assert.deepEqual(shown(speechMetrics({ t0: 0, tAudio: 1930, rtf: '0.314', engine: 'Supertonic' })), {
+    'First audio': '1.93 s', RTF: '0.31', Voice: 'Supertonic'
+  })
+  assert.deepEqual(Object.keys(shown(speechMetrics({ t0: 0, tAudio: 800, rtf: null }))), ['First audio'])
+  assert.deepEqual(shown(heardMetrics({ ms: 640, language: 'English' })), { Transcribed: '640 ms', Language: 'English' })
+  assert.equal(engineName('piper-tts'), 'Piper')
+  assert.equal(engineName('new-engine'), 'new-engine')
 })

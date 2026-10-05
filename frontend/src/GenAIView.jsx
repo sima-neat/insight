@@ -7,6 +7,7 @@ import {
   canUseModels,
   chatModels,
   deriveBackendState,
+  engineName,
   formatBytes,
   formatDuration,
   friendlyModelName,
@@ -30,6 +31,7 @@ import {
   transcribe
 } from './genai/client.js'
 import { languageNames, readAloudSupport, speakableText } from './genai/speech.js'
+import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
 
@@ -86,6 +88,9 @@ const ICONS = {
   photo: 'M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4M15.5 9.5a1 1 0 1 0 0-.01',
   camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
+  send: 'M12 19V5M5 12l7-7 7 7',
+  stop: 'M7 7h10v10H7z',
+  newChat: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12l2-1-1-3-2 .5-1.5-1.5.5-2-3-1-1 2h-2l-1-2-3 1 .5 2L5 8.5 3 8l-1 3 2 1v0l-2 1 1 3 2-.5L6.5 16 6 18l3 1 1-2h2l1 2 3-1-.5-2 1.5-1.5 2 .5 1-3z'
 }
 
@@ -101,6 +106,19 @@ function StatusChip({ state }) {
     incompatible: 'Incompatible'
   }
   return <span className={`genai-pill genai-pill-${state}`}>{labels[state] || state}</span>
+}
+
+function Metrics({ items, label }) {
+  if (!items || !items.length) return null
+  return (
+    <p className="genai-metrics" aria-label={label}>
+      {items.map((m) => (
+        <span key={m.label} title={m.title}>
+          <span className="genai-metric-label">{m.label}</span> {m.value}
+        </span>
+      ))}
+    </p>
+  )
 }
 
 function ProgressBar({ pct, label }) {
@@ -160,6 +178,8 @@ export default function GenAIView({ onError, onStatus }) {
   const [speakingId, setSpeakingId] = useState(null)
   // {id, text}: why the last Read aloud of reply `id` failed, shown under it.
   const [speechError, setSpeechError] = useState(null)
+  // reply id -> speed figures of its last reading aloud.
+  const [speechStats, setSpeechStats] = useState({})
   const spokenLanguage = useRef(null)
 
   const [hubQuery, setHubQuery] = useState('')
@@ -367,7 +387,8 @@ export default function GenAIView({ onError, onStatus }) {
     return readAloudSupport(text, voices ? voices.languages : null, fallback)
   }
 
-  async function speakText(text, id, audio = unlockPlayer()) {
+  // t0: when the wait for this reading began (the send, or the Read aloud click).
+  async function speakText(text, id, audio = unlockPlayer(), t0 = performance.now()) {
     stopSpeaking()
     setSpeechError(null)
     const words = speakableText(text)
@@ -394,6 +415,8 @@ export default function GenAIView({ onError, onStatus }) {
       audio.onended = done
       audio.onpause = done
       await audio.play()
+      const metrics = speechMetrics({ t0, tAudio: performance.now(), rtf: result.rtf, engine: engineName(result.engine) })
+      setSpeechStats((prev) => ({ ...prev, [id]: metrics }))
     } catch (error) {
       setSpeakingId((current) => (current === id ? null : current))
       if (error.name !== 'AbortError') setSpeechError({ id, text: `Couldn't read this reply aloud: ${error.message}` })
@@ -407,7 +430,7 @@ export default function GenAIView({ onError, onStatus }) {
     return content.map((part) => (part.type === 'text' ? { ...part, text: `/no_think ${part.text}` } : part))
   }
 
-  async function sendMessage(text = draft, { replyPlayer = readAloud ? unlockPlayer() : null } = {}) {
+  async function sendMessage(text = draft, { replyPlayer = readAloud ? unlockPlayer() : null, heard = null } = {}) {
     const prompt = text.trim()
     if ((!prompt && !image) || !chatModel || streaming) return
     const userText = prompt || 'Describe this image.'
@@ -421,7 +444,7 @@ export default function GenAIView({ onError, onStatus }) {
       { role: 'user', content: canThink && !thinking ? withNoThink(userContent) : userContent }
     ]
     const replyId = Date.now()
-    setMessages((prev) => [...prev, { role: 'user', text: userText, image }, { role: 'assistant', id: replyId, content: '', pending: true }])
+    setMessages((prev) => [...prev, { role: 'user', text: userText, image, heard }, { role: 'assistant', id: replyId, content: '', pending: true }])
     setDraft('')
     setImage(null)
     stickToBottom.current = true
@@ -429,20 +452,23 @@ export default function GenAIView({ onError, onStatus }) {
     const controller = new AbortController()
     chatAbort.current = controller
     let reply = ''
+    const t0 = performance.now()
+    let tFirst = null
     const update = (extra) => setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', id: replyId, content: reply, ...extra }])
     try {
-      await streamChat({
+      const stats = await streamChat({
         model: chatModel.name,
         messages: outgoing,
         maxTokens: MAX_TOKENS,
         signal: controller.signal,
         onDelta: (piece) => {
+          if (tFirst === null) tFirst = performance.now()
           reply += piece
           update({ pending: true })
         }
       })
-      update({})
-      if (replyPlayer) speakText(splitThinking(reply).answer, replyId, replyPlayer)
+      update({ metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
+      if (replyPlayer) speakText(splitThinking(reply).answer, replyId, replyPlayer, t0)
     } catch (error) {
       const stopped = error.name === 'AbortError'
       update({ stopped, error: stopped ? null : error.message })
@@ -513,13 +539,16 @@ export default function GenAIView({ onError, onStatus }) {
         setRecording(false)
         setTranscribing(true)
         try {
+          const tStop = performance.now()
           const result = await transcribe(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), { language })
+          const heardMs = performance.now() - tStop
           const heard = (result.text || '').trim()
           if (!heard || result.ignored) {
             onStatus?.("Didn't catch that. Try again a little closer to the microphone.")
           } else {
             spokenLanguage.current = result.tts_language || null
-            if (chatModel) sendMessage(heard, { replyPlayer })
+            const languageName = result.language ? (languageNames([result.language])[0] || result.language.charAt(0).toUpperCase() + result.language.slice(1)) : null
+            if (chatModel) sendMessage(heard, { replyPlayer, heard: heardMetrics({ ms: heardMs, language: languageName }) })
             else setDraft(heard)
           }
         } catch (error) {
@@ -537,6 +566,15 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   // --- welcome cards ----------------------------------------------------------
+
+  function newChat() {
+    chatAbort.current?.abort()
+    stopSpeaking()
+    setSpeechError(null)
+    setSpeechStats({})
+    setMessages([])
+    composer.current?.focus()
+  }
 
   function tryPrompt(text) {
     setDraft(text)
@@ -572,6 +610,27 @@ export default function GenAIView({ onError, onStatus }) {
 
   return (
     <div className="genai">
+      {step && (
+        <section className="panel genai-tutorial" aria-label="GenAI Studio tutorial" aria-live="polite">
+          <p className="genai-tutorial-eyebrow">Tutorial · step {tutorialStep + 1} of {steps.length}</p>
+          <p className="genai-tutorial-title">{step.title}</p>
+          <p className="genai-tutorial-body">{step.body}</p>
+          <div className="genai-actions">
+            {step.action && (step.action !== 'camera' || (canChat && sees)) && (
+              <button type="button" className="btn-tonal" onClick={() => tryTutorialAction(step.action)}>Try it</button>
+            )}
+            <span className="genai-tutorial-spacer" />
+            <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
+            <button type="button" className="btn-ghost" disabled={tutorialStep === 0} onClick={() => setTutorialStep((i) => Math.max(0, i - 1))}>Back</button>
+            {tutorialStep < steps.length - 1 ? (
+              <button type="button" className="btn-tonal" onClick={() => setTutorialStep((i) => i + 1)}>Next</button>
+            ) : (
+              <button type="button" className="btn-tonal" onClick={closeTutorial}>Start chatting</button>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="panel genai-header" aria-label="GenAI Studio">
         <span className={`genai-spot-wrap${spot('status')}`}><StatusChip state={backend.state} /></span>
         <label className={`genai-model-picker${spot('model')}`}>
@@ -588,6 +647,10 @@ export default function GenAIView({ onError, onStatus }) {
             ))}
           </select>
         </label>
+        <button type="button" className="btn-ghost genai-small genai-new-chat" onClick={newChat} disabled={messages.length === 0} title="Start over: the model forgets this conversation">
+          <Icon d={ICONS.newChat} /> New chat
+        </button>
+        <span className="genai-header-spacer" />
         <label className={`genai-check${spot('read-aloud')}`} title="Read every reply aloud with the board's speech engine">
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
@@ -610,27 +673,6 @@ export default function GenAIView({ onError, onStatus }) {
           <Icon d={ICONS.settings} /> Settings
         </button>
       </section>
-
-      {step && (
-        <section className="panel genai-tutorial" aria-label="GenAI Studio tutorial" aria-live="polite">
-          <p className="genai-tutorial-eyebrow">Tutorial · step {tutorialStep + 1} of {steps.length}</p>
-          <p className="genai-tutorial-title">{step.title}</p>
-          <p className="genai-tutorial-body">{step.body}</p>
-          <div className="genai-actions">
-            {step.action && (step.action !== 'camera' || (canChat && sees)) && (
-              <button type="button" className="btn-tonal" onClick={() => tryTutorialAction(step.action)}>Try it</button>
-            )}
-            <span className="genai-tutorial-spacer" />
-            <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
-            <button type="button" className="btn-ghost" disabled={tutorialStep === 0} onClick={() => setTutorialStep((i) => Math.max(0, i - 1))}>Back</button>
-            {tutorialStep < steps.length - 1 ? (
-              <button type="button" className="btn-tonal" onClick={() => setTutorialStep((i) => i + 1)}>Next</button>
-            ) : (
-              <button type="button" className="btn-tonal" onClick={closeTutorial}>Start chatting</button>
-            )}
-          </div>
-        </section>
-      )}
 
       {needsAttention && (
         <section className={`panel genai-banner genai-banner-${backend.state}`} aria-live="polite">
@@ -803,6 +845,7 @@ export default function GenAIView({ onError, onStatus }) {
                 <div key={index} className="genai-msg genai-msg-user">
                   {m.image && <img src={m.image} alt="Sent with this message" className="genai-msg-image" />}
                   <p>{m.text}</p>
+                  <Metrics items={m.heard} label="How fast your speech was heard" />
                 </div>
               )
             }
@@ -824,6 +867,8 @@ export default function GenAIView({ onError, onStatus }) {
                 )}
                 {m.stopped && <p className="hint">Stopped.</p>}
                 {m.error && <p className="genai-error">{m.error}</p>}
+                <Metrics items={m.metrics} label="How fast the model answered" />
+                <Metrics items={speechStats[m.id]} label="How fast the reply was spoken" />
                 {speechError && speechError.id === m.id && <p className="genai-error">{speechError.text}</p>}
                 {support && !support.supported && (
                   <p className="hint genai-no-voice" title={voices ? `The board's voices speak ${languageNames(voices.languages).join(', ')}.` : ''}>
@@ -870,12 +915,6 @@ export default function GenAIView({ onError, onStatus }) {
 
         <form className={`genai-composer${spot('composer')}`} onSubmit={(e) => { e.preventDefault(); sendMessage() }}>
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => { attachImage(e.target.files[0]); e.target.value = '' }} />
-          <button type="button" className={`btn-ghost genai-icon-btn${spot('media')}`} aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!canChat || !sees} onClick={() => fileInput.current?.click()}>
-            <Icon d={ICONS.photo} />
-          </button>
-          <button type="button" className={`btn-ghost genai-icon-btn${spot('media')}`} aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!canChat || !sees || cameraOpen} onClick={openCamera}>
-            <Icon d={ICONS.camera} />
-          </button>
           <textarea
             ref={composer}
             value={draft}
@@ -891,26 +930,38 @@ export default function GenAIView({ onError, onStatus }) {
             rows={1}
             disabled={!canChat}
           />
-          <button
-            type="button"
-            className={`${recording ? 'btn-ghost danger genai-icon-btn' : 'btn-ghost genai-icon-btn'}${spot('mic')}`}
-            aria-label={recording ? 'Stop recording' : 'Speak your question'}
-            aria-pressed={recording}
-            title={recording ? 'Stop recording' : 'Speak your question'}
-            disabled={!usable || !status?.asrModel || transcribing}
-            onClick={toggleRecording}
-          >
-            <Icon d={ICONS.mic} />
-          </button>
-          {streaming ? (
-            <button type="button" className="btn-ghost danger" onClick={() => chatAbort.current?.abort()}>Stop</button>
-          ) : (
-            <button type="submit" className="btn-tonal" disabled={!canChat || (!draft.trim() && !image)}>Send</button>
-          )}
+          <div className="genai-composer-tools">
+            <span className={`genai-composer-media${spot('media')}`}>
+              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!canChat || !sees} onClick={() => fileInput.current?.click()}>
+                <Icon d={ICONS.photo} />
+              </button>
+              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!canChat || !sees || cameraOpen} onClick={openCamera}>
+                <Icon d={ICONS.camera} />
+              </button>
+            </span>
+            <span className="genai-header-spacer" />
+            <button
+              type="button"
+              className={`${recording ? 'btn-ghost danger genai-icon-btn' : 'btn-ghost genai-icon-btn'}${spot('mic')}`}
+              aria-label={recording ? 'Stop recording' : 'Speak your question'}
+              aria-pressed={recording}
+              title={recording ? 'Stop recording' : 'Speak your question'}
+              disabled={!usable || !status?.asrModel || transcribing}
+              onClick={toggleRecording}
+            >
+              <Icon d={ICONS.mic} />
+            </button>
+            {streaming ? (
+              <button type="button" className="genai-send genai-send-stop" aria-label="Stop the reply" title="Stop the reply" onClick={() => chatAbort.current?.abort()}>
+                <Icon d={ICONS.stop} />
+              </button>
+            ) : (
+              <button type="submit" className="genai-send" aria-label="Send" title="Send" disabled={!canChat || (!draft.trim() && !image)}>
+                <Icon d={ICONS.send} />
+              </button>
+            )}
+          </div>
         </form>
-        {messages.length > 0 && !streaming && (
-          <button type="button" className="btn-ghost genai-small genai-new-chat" onClick={() => { stopSpeaking(); setMessages([]) }}>New chat</button>
-        )}
       </section>
     </div>
   )

@@ -1,5 +1,6 @@
 // Calls from the GenAI tab to Insight's /api/genai relay (insight#150), which
 // forwards them to the board's GenAI Studio backend.
+import { chatStreamStats } from './metrics.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser } from './streams.js'
 
 export const RELAY = '/api/genai'
@@ -97,7 +98,8 @@ async function readStream(response, onText) {
 
 export const REPLY_CUT_OFF = 'The reply stopped early: the connection to the board closed before it finished.'
 
-// Streams a chat reply; calls onDelta(text) for each piece. Resolves when done.
+// Streams a chat reply; calls onDelta(text) for each piece. Resolves with the
+// board's {tokens, tps} for the reply, or null when it reported none.
 export async function streamChat({ model, messages, maxTokens, signal, onDelta }) {
   const response = await request('v1/chat/completions', {
     method: 'POST',
@@ -110,10 +112,12 @@ export async function streamChat({ model, messages, maxTokens, signal, onDelta }
   }
   const parser = createSseParser()
   let finished = false
+  let stats = null
   try {
     await readStream(response, (text) => {
       for (const event of parser.push(text)) {
         if (finished) continue
+        stats = chatStreamStats(event.data) || stats
         const delta = chatDeltaText(event.data)
         if (delta === null) finished = true
         else if (delta) onDelta(delta)
@@ -125,6 +129,7 @@ export async function streamChat({ model, messages, maxTokens, signal, onDelta }
   }
   // GenAI Studio ends every reply with [DONE]; a stream that ends without it was cut off.
   if (!finished) throw new GenaiError(REPLY_CUT_OFF)
+  return stats
 }
 
 // Follows /models/logs/stream while a load runs; calls onProgress(loading) with

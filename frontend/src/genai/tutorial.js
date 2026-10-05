@@ -29,8 +29,8 @@ export function tutorialSteps({ canThink = false } = {}) {
       id: 'ask',
       title: 'Ask anything',
       body:
-        'Type in the message box and press Enter. The answer appears as it is written; Stop ends it early. ' +
-        'New chat starts over.',
+        'Type in the message box and press Enter. The answer appears as it is written, with how fast it came ' +
+        'underneath; the stop button ends it early. New chat, next to the model, starts over.',
       target: 'composer',
       action: 'example-question'
     },

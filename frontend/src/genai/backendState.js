@@ -186,6 +186,11 @@ export function supportsThinking(name) {
 
 const ENGINE_NAMES = { supertonic: 'Supertonic', 'piper-plus': 'Piper Plus', 'piper-tts': 'Piper' }
 
+export function engineName(key) {
+  if (!key) return ''
+  return ENGINE_NAMES[key] || ENGINE_NAMES[String(key).toLowerCase()] || String(key)
+}
+
 // Voice engines the board reports as installed but failed to load (apps#560:
 // /health lists them with loaded:false and an error), as plain sentences.
 // `accelerator` is true when restarting the accelerator can help.

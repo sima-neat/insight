@@ -150,21 +150,31 @@ Start the backend on the board first, from the GenAI Studio application director
 ./run.sh --backend-only
 ```
 
-The banner at the top shows the backend's state and what to do next:
+The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header also holds the status label, the **Model** picker, **New chat**, **Read replies aloud**, **Think first** (only for models that can reason step by step) and **Settings**.
 
-- **Not set up**: no board is selected. Open **Board settings** and enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
-- **Unavailable**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+The status label, and a banner when something needs attention, show the backend's state and what to do next:
+
+- **Not set up**: no board is selected, and the settings open. Enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
+- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+- **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
 - **Starting**: the backend answers but its model server is not ready yet.
-- **Busy**: a model is loading or the accelerator is resetting. Chat and speech wait until it finishes.
-- **Ready**: chat and speech are available. **Error** keeps them available and offers **Reset MLA**.
+- **Busy**: a model is loading or the accelerator is restarting. Chat and speech wait until it finishes.
+- **Incompatible**: the board's GenAI Studio API version does not match this Insight. Update the one the banner names.
+- **Ready**: chat and speech are available. A voice that failed to load on the board is reported here too.
 
-**Chat** sends messages to the loaded chat model and shows the reply as it is generated. With a vision model you can attach an image or take one with the browser camera. **Thinking** lets reasoning models think before answering, shown folded above the reply. **Stop** ends a reply early, and **Speak** reads a reply aloud.
+**Chat** is one conversation in the middle of the page. Type in the message box, or press the microphone, speak, and press it again: your words are transcribed and sent. With a model that sees images, attach a picture or take one with the camera. Replies appear as they are written; the stop button ends one early, and **New chat** starts over so the model forgets the conversation. **Read aloud** reads one reply and **Stop speaking** ends it; **Read replies aloud** reads every reply. The browser asks for microphone and camera permission the first time.
 
-**Speech** records from the microphone and transcribes it with the active speech model. Use **Ask the chat model** to send the transcript as a message. Pick a voice engine and voice, and turn on **Speak replies** to hear every reply. The browser asks for microphone and camera permission the first time.
+Under each reply, Insight shows how fast it was produced, measured in the browser:
 
-**Models** lists the chat and speech models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
+- **First token**: from sending to the first text of the reply.
+- **Speed** and **Tokens**: tokens per second and the reply's length, as reported by the board.
+- **Total**: from sending to the end of the reply.
+- **First audio**, **RTF** and **Voice**, when the reply is read aloud: the time until it started playing, the real-time factor (seconds of compute per second of speech; below 1 is faster than real time), and the speech engine.
+- **Transcribed** and **Language**, under a spoken question: the time from the end of the recording to the text, and the language heard.
 
-**Reset MLA** unloads every model and restarts the model server when a load leaves the accelerator stuck. It needs the reset token that `run.sh` prints on the board; Insight asks for it once and keeps it in **Board settings**.
+**Settings** holds the board address and reset token, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
+
+**Restart the accelerator** unloads every model and restarts the model server when a load leaves the accelerator stuck. It needs the reset token that `run.sh` prints on the board; Insight asks for it once and keeps it in the settings.
 
 ## System Information
 
