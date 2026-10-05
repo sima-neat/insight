@@ -8,6 +8,8 @@ from fractions import Fraction
 from typing import Optional
 
 STANDARD_FPS = (60, 30, 25, 20, 15, 10, 5)
+# CameraInputOptions' default framerate_num/den: the rate CameraInput requests from a mode that reports none.
+CAMERAINPUT_RATE = Fraction(30, 1)
 
 
 def _link(repo: str, number: int) -> dict:
@@ -19,7 +21,7 @@ CORE_883 = _link("core", 883)
 CORE_903 = _link("core", 903)
 INTERNALS_244 = _link("internals", 244)
 
-VERIFIED_REASON = "Neat Core's support rules accept these modes for CameraInput; the rest are not usable."
+VERIFIED_REASON = "Neat Core accepts these modes for CameraInput; the rest are not usable."
 NO_MODES_REASON = "SiMa Sentinel reported no modes for this camera."
 USB_TRACKED = "USB support is tracked in core#838."
 USB_FORMAT_NOTES = {
@@ -63,26 +65,25 @@ AVAILABILITY_ISSUES = {
         "Check that /proc is mounted on the board, then Refresh.",
     ),
 }
-SUPPORT_ISSUES = {
+# Why Neat Core's verdicts are unknown: (issue message, hint, per-mode reason), by board_check support state.
+SUPPORT_UNKNOWN = {
     "not_installed": (
-        "warning",
-        "Neat Core's camera support rules are not installed on the board, so SiMa Sentinel marks every camera mode "
-        "as not usable.",
+        "Neat Core is not installed on the board, so CameraInput support for each camera mode is unknown.",
         "Install Neat Core on the board (`sima-cli neat install core`), then Refresh.",
+        "Neat Core is not installed, so CameraInput support for this mode is unknown.",
     ),
-    "invalid": (
-        "warning",
-        "Neat Core's camera support rules on the board cannot be read, so SiMa Sentinel marks every camera mode "
-        "as not usable.",
-        "Reinstall Neat Core on the board (`sima-cli neat install core`), then Refresh.",
+    "outdated": (
+        "Neat Core on the board does not classify camera modes, so CameraInput support for each mode is unknown.",
+        "Update Neat Core on the board (`sima-cli neat install core`), then Refresh.",
+        "Neat Core on the board does not classify camera modes, so CameraInput support for this mode is unknown.",
     ),
-    "stale": (
-        "warning",
-        "Neat Core's camera support rules on the board were updated with a file SiMa Sentinel cannot read; the "
-        "previous rules still apply.",
-        "Reinstall Neat Core on the board, or update SiMa Sentinel with `sima-cli neat install sentinel`, then Refresh.",
+    "failed": (
+        "Neat Core could not classify the camera modes, so CameraInput support for each mode is unknown.",
+        STATUS_HINT,
+        "Neat Core could not classify this mode, so CameraInput support for it is unknown.",
     ),
 }
+UNCLASSIFIED_REASON = "Neat Core did not classify this mode, so CameraInput support for it is unknown."
 
 
 def now_iso() -> str:
@@ -129,9 +130,8 @@ def empty_snapshot(board: dict, generation: int) -> dict:
     }
 
 
-def camera_nodes(device: dict) -> list:
+def camera_nodes(camera: dict) -> list:
     """The device nodes whose holders tell whether the camera is in use."""
-    camera = device["camera"]
     if camera.get("backend") == "mipi":
         isp = camera.get("isp") if isinstance(camera.get("isp"), dict) else {}
         nodes = [camera.get("media_device"), isp.get("device_path")]
@@ -146,23 +146,72 @@ def cameras_of(catalog: dict) -> list:
     return [device for device in catalog["devices"] if device["type"] == "camera"]
 
 
+def provider_of(device: dict) -> str:
+    """The Sentinel provider that reports a device; Sentinel names its providers `<type>.<backend>`."""
+    return f"{device['type']}.{device.get('backend')}"
+
+
+def _mode_key(mode: dict) -> tuple:
+    ranged = mode.get("size_range")
+    if ranged:
+        return (mode["format"], "range", *(ranged.get(key) for key in ("min_width", "min_height", "max_width", "max_height")))
+    return (mode["format"], mode.get("width"), mode.get("height"))
+
+
+def _core_verdicts(check: Optional[dict]):
+    """Neat Core's verdicts by camera id, then mode key; or None and the SUPPORT_UNKNOWN state."""
+    support = (check or {}).get("support")
+    state = support.get("state") if isinstance(support, dict) else "failed"
+    if state != "ok" or not isinstance(support.get("cameras"), dict):
+        return None, state if state in SUPPORT_UNKNOWN else "failed"
+    verdicts = {}
+    for camera_id, modes in support["cameras"].items():
+        for mode in modes if isinstance(modes, list) else []:
+            if isinstance(mode, dict) and isinstance(mode.get("format"), str):
+                verdicts.setdefault(camera_id, {})[_mode_key(mode)] = mode
+    return verdicts, None
+
+
+def _classified(modes: list, verdicts: Optional[dict], unknown: Optional[str]) -> list:
+    """Sentinel's modes with Neat Core's verdict: `supported` True or False, or None when unknown, plus the
+    `rate` Core classified (its fastest advertised rate), None when it reported none."""
+    result = []
+    for mode in modes:
+        verdict = (verdicts or {}).get(_mode_key(mode))
+        if verdict is None:
+            reason = SUPPORT_UNKNOWN[unknown][2] if unknown else UNCLASSIFIED_REASON
+            result.append(dict(mode, supported=None, reason=reason, rate=None))
+            continue
+        num, den = verdict.get("framerate_num"), verdict.get("framerate_den")
+        rate = Fraction(num, den) if isinstance(num, int) and isinstance(den, int) and num > 0 and den > 0 else None
+        reason = verdict.get("reason") if isinstance(verdict.get("reason"), str) else ""
+        result.append(dict(mode, supported=verdict.get("supported") is True, reason=reason, rate=rate))
+    return result
+
+
 def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation: int, previous: Optional[dict], scan_ms: int):
     """Return the snapshot; `check` is the board_check output, or None when it could not run."""
-    retained = {issue["provider"] for issue in catalog.get("issues", []) if issue["retained_last_good"]}
+    # A failed provider's devices from its last successful scan stay in the catalog.
+    retained = {error["provider"] for error in catalog["errors"]}
     platform = {
         "tools": (check or {}).get("tools") or {},
         "availability_method": (check or {}).get("availability_method") or "none",
     }
-    items = [_item(device, check, device["provider"] in retained) for device in cameras_of(catalog)]
+    verdicts, unknown = _core_verdicts(check)
+    items = []
+    for device in cameras_of(catalog):
+        known = None if verdicts is None else verdicts.get(device["id"], {})
+        modes = _classified(device.get("modes") or [], known, unknown)
+        items.append(_item(device, check, modes, provider_of(device) in retained))
     return {
         "board": board,
         "generation": generation,
-        "scan_id": f"{catalog['instance_id']}:{catalog['scan_sequence']}",
+        "scan_id": f"{catalog['revision']}:{catalog['observed_at']}",
         "scanned_at": now_iso(),
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _issues(catalog, check, items),
+        "issues": _issues(catalog, check, items, unknown),
         "changes": _changes(previous["items"], items) if previous else None,
     }
 
@@ -184,9 +233,8 @@ def _availability(users: Optional[list], method: Optional[str], fallback: Option
 
 
 def _connection(camera: dict) -> str:
-    if camera.get("backend") == "mipi":
-        return "mipi"
-    return camera.get("connection") or camera.get("backend") or "unknown"
+    # Sentinel's V4L2 provider reports USB cameras only.
+    return {"mipi": "mipi", "v4l2": "usb"}.get(camera.get("backend"), camera.get("backend") or "unknown")
 
 
 def _speed_mbps(speed):
@@ -200,14 +248,9 @@ def _speed_mbps(speed):
     return int(value) if value.is_integer() else value
 
 
-def _rate_label(values: list) -> str:
-    return ", ".join(f"{value:g}" for value in sorted(values, reverse=True))
-
-
-def _item(device: dict, check: Optional[dict], retained: bool) -> dict:
-    camera = device["camera"]
+def _item(camera: dict, check: Optional[dict], modes: list, retained: bool) -> dict:
+    """`modes` are the camera's modes with Neat Core's verdicts (_classified)."""
     connection = _connection(camera)
-    modes = camera.get("modes") or []
     usb = connection == "usb"
     formats = _formats(modes, usb)
     notes, errors = [], []
@@ -229,7 +272,7 @@ def _item(device: dict, check: Optional[dict], retained: bool) -> dict:
             info["by_id"] = camera["by_id_path"]
         else:
             notes.append(NO_BY_ID_NOTE)
-        name = camera.get("model") or camera.get("device_path") or device["id"]
+        name = camera.get("model") or camera.get("device_path") or camera["id"]
         default = _usb_default(formats)
     else:
         info = {"camera_name": camera.get("camera_name")}
@@ -238,7 +281,7 @@ def _item(device: dict, check: Optional[dict], retained: bool) -> dict:
         for key, source in (("media_device", "media_device"), ("bus_info", "bus_info"), ("csi", "csi_receiver")):
             if camera.get(source):
                 info[key] = camera[source]
-        name = camera.get("camera_name") or device["id"]
+        name = camera.get("camera_name") or camera["id"]
         default = _default(formats)
         notes += _mipi_notes(camera, modes)
     if not modes:
@@ -250,12 +293,12 @@ def _item(device: dict, check: Optional[dict], retained: bool) -> dict:
             errors.append(_error("no_modes", NO_MODES_REASON, STATUS_HINT))
     elif retained:
         notes.append(
-            f"Modes are from SiMa Sentinel's last successful scan; its {device['provider']} provider failed "
+            f"Modes are from SiMa Sentinel's last successful scan; its {provider_of(camera)} provider failed "
             "during this refresh."
         )
-    users = (check or {}).get("users", {}).get(device["id"])
+    users = (check or {}).get("users", {}).get(camera["id"])
     return {
-        "id": device["id"],
+        "id": camera["id"],
         "kind": "camera",
         "connection": connection,
         "name": name,
@@ -281,11 +324,11 @@ def _mipi_notes(camera: dict, modes: list) -> list:
             f"The sensor reports {max_fps:g} fps for its fastest mode. The delivered frame "
             "rate follows the sensor mode libcamera picks and can differ from the requested rate."
         )
-    else:
-        nominal = {_fps(m["framerate_num"], m["framerate_den"]) for m in modes if m.get("framerate_source") == "nominal"}
-        if nominal:
-            rates = _rate_label(nominal)
-            notes.append(f"The sensor did not report a maximum frame rate, so only {rates} fps is offered.")
+    elif any(not mode.get("frame_intervals") for mode in modes):
+        rate = _fps(CAMERAINPUT_RATE.numerator, CAMERAINPUT_RATE.denominator)
+        notes.append(
+            f"The camera reports no frame rates, so only CameraInput's default {rate} fps is offered for those modes."
+        )
     sizes = sorted({(mode["width"], mode["height"]) for mode in modes if mode.get("isp_output") and "width" in mode})
     if sizes:
         offered = ", ".join(f"{w}x{h}" for w, h in sizes)
@@ -296,16 +339,19 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     return notes
 
 
-def _common_reason(modes: list) -> str:
-    reasons = [mode["reason"] for mode in modes if not mode["supported"] and mode["reason"]]
+def _common_reason(modes: list, supported) -> str:
+    """The most common reason among modes whose verdict is `supported` (False, or None for unknown)."""
+    reasons = [mode["reason"] for mode in modes if mode["supported"] is supported and mode["reason"]]
     return Counter(reasons).most_common(1)[0][0] if reasons else ""
 
 
 def _verdict(modes: list, usb: bool, fmt: Optional[str] = None, fallback: str = "") -> dict:
-    """The verdict on a camera (`fmt` None) or one of its formats, from Sentinel's per-mode verdicts."""
+    """The verdict on a camera (`fmt` None) or one of its formats, from Neat Core's per-mode verdicts."""
     if any(mode["supported"] for mode in modes):
         return _support("verified", VERIFIED_REASON, () if usb else (CORE_883,))
-    reason = _common_reason(modes) or fallback
+    if any(mode["supported"] is None for mode in modes):
+        return _support("", _common_reason(modes, None))
+    reason = _common_reason(modes, False) or fallback
     if not usb:
         return _support("unsupported", reason)
     note, link = USB_FORMAT_NOTES.get(fmt, (None, None))
@@ -350,23 +396,26 @@ def _on_step(period: float, first: float, step: float) -> bool:
 
 
 def _choices(modes: list) -> list:
-    """The frame rates of one format and size: each Sentinel mode's rate carries its verdict; the other
-    rates the device advertises have none, so they share an unsupported verdict and are unknown otherwise."""
+    """The frame rates of one format and size. The rate Neat Core classified carries the mode's verdict
+    (CameraInput's default rate when the mode reports none); the other advertised rates are unsupported
+    with an unsupported mode and unknown otherwise."""
     choices = {}
     for mode in modes:
-        rate = Fraction(mode["framerate_num"], mode["framerate_den"])
-        value = _fps(rate.numerator, rate.denominator)
+        rates = [
+            rate
+            for entry in mode.get("frame_intervals") or []
+            if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height"))
+            for rate in _interval_rates(entry)
+        ]
+        classified = mode["rate"] or CAMERAINPUT_RATE
         if mode["supported"]:
-            choices[value] = _choice(rate, tier="verified")
-        elif choices.get(value, {}).get("tier") != "verified":
-            choices[value] = _choice(rate, tier="unsupported", reason=mode["reason"] or _common_reason(modes))
-    supported = any(mode["supported"] for mode in modes)
-    extra = {"tier": ""} if supported else {"tier": "unsupported", "reason": _common_reason(modes)}
-    for mode in modes:
-        for entry in mode.get("frame_intervals") or []:
-            if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height")):
-                for rate in _interval_rates(entry):
-                    choices.setdefault(_fps(rate.numerator, rate.denominator), _choice(rate, **extra))
+            choices[_fps(classified.numerator, classified.denominator)] = _choice(classified, tier="verified")
+            others = {"tier": ""}
+        else:
+            rates = rates or [classified]
+            others = {"tier": "" if mode["supported"] is None else "unsupported", "reason": mode["reason"]}
+        for rate in rates:
+            choices.setdefault(_fps(rate.numerator, rate.denominator), _choice(rate, **others))
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 
@@ -381,14 +430,15 @@ def _formats(modes: list, usb: bool) -> list:
             if "width" in mode:
                 sizes.setdefault((mode["width"], mode["height"]), []).append(mode)
         ranged = next((mode["size_range"] for mode in entries if "size_range" in mode), None)
-        supported = any(mode["supported"] for mode in entries)
+        # Unknown support stays selectable; only a verdict lets a MIPI mode export.
+        usable = any(mode["supported"] is not False for mode in entries)
         description = next((mode["format_description"] for mode in entries if mode.get("format_description")), None)
         formats.append({
             "format": name,
             # A USB driver names its own formats.
             "label": f"{name} ({description})" if usb and description else FORMAT_LABELS.get(name, name),
             # A USB format exports as a V4L2 descriptor, not CameraInput code, so it is exportable regardless.
-            "exportable": usb or supported,
+            "exportable": usb or usable,
             "support": _verdict(entries, usb, name),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
@@ -421,27 +471,26 @@ def _usb_default(formats: list) -> Optional[dict]:
     return None
 
 
-def _issues(catalog: dict, check: Optional[dict], items: list) -> list:
+def _issues(catalog: dict, check: Optional[dict], items: list, unknown: Optional[str]) -> list:
     issues = []
-    error = catalog.get("error")
-    if isinstance(error, dict):
-        message = str(error.get("reason") or error.get("code") or "SiMa Sentinel reported a problem.")
-        issues.append(_issue("warning", "sentinel_degraded", f"SiMa Sentinel: {message}", STATUS_HINT))
-    for issue in catalog.get("issues", []):
-        message = f"SiMa Sentinel's {issue['provider']} provider failed: {issue['reason']}"
-        if issue["retained_last_good"]:
+    listed = {provider_of(device) for device in catalog["devices"]}
+    for error in catalog["errors"]:
+        message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"
+        if error["provider"] in listed:
             message += " The devices it found last time are still listed."
-        issues.append(_issue("warning", issue["code"], message, STATUS_HINT))
-    support = catalog.get("support")
-    if isinstance(support, dict) and support.get("state") in SUPPORT_ISSUES:
-        issues.append(_issue(SUPPORT_ISSUES[support["state"]][0], "support_rules", *SUPPORT_ISSUES[support["state"]][1:]))
+        issues.append(_issue("warning", error["code"], message, STATUS_HINT))
     if not items:
         return issues
+    if unknown and check is not None:
+        message, hint = SUPPORT_UNKNOWN[unknown][:2]
+        detail = (check.get("support") or {}).get("reason") if unknown == "failed" else None
+        issues.append(_issue("warning", "support_unknown", f"{message} {detail}" if detail else message, hint))
     if check is None:
         issues.append(_issue(
             "warning",
             "availability_limited",
-            "Insight could not check which processes hold the cameras, so camera availability is unknown.",
+            "Insight could not check which processes hold the cameras or which modes Neat Core supports, so camera "
+            "availability and support are unknown.",
             "Check that python3 (3.8 or newer) runs on the board, then Refresh.",
         ))
         return issues

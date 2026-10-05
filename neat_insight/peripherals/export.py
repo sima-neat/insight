@@ -65,7 +65,7 @@ def render(snapshot: dict, request: dict) -> dict:
     if item["connection"] != "usb" and choice["tier"] != "verified":
         raise _invalid(
             f"{fmt['format']} {request['width']}x{request['height']} at {request['fps']} fps cannot be exported: "
-            + (choice.get("reason") or "Neat Core's support rules do not accept it.")
+            + (choice.get("reason") or "Neat Core does not accept it.")
         )
     selection = {
         "format": fmt["format"],
@@ -146,7 +146,7 @@ def _mipi_export(item: dict, choice: dict, selection: dict, snapshot: dict) -> d
 def _mode_support(mode: Optional[dict]) -> dict:
     if mode:
         return {"tier": "verified", "reason": f"Validated with Core CameraInput: {mode['evidence']}.", "links": []}
-    return {"tier": "verified", "reason": "Neat Core's support rules accept this mode.", "links": []}
+    return {"tier": "verified", "reason": "Neat Core accepts this mode.", "links": []}
 
 
 def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict]) -> list:

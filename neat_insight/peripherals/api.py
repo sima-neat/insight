@@ -34,7 +34,7 @@ def _check_board(session, catalog: dict):
     cameras = cameras_of(catalog)
     if not cameras:
         return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
-    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
+    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}, "support": True}
     try:
         # This probe is best-effort, so its failure must not mark the selected board disconnected.
         result = session.raw_transport.exec(

@@ -156,10 +156,11 @@ Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and w
 
 | Level | Meaning |
 | --- | --- |
-| Verified | Neat Core's support rules on the board accept the mode for Core `CameraInput`. |
-| Not supported | Neat Core's rules reject it, for example USB cameras and formats other than NV12; the page shows the reason Sentinel reports. Without Neat Core on the board, no mode is supported. |
+| Verified | Neat Core on the board accepts the mode for Core `CameraInput`. |
+| Not supported | Neat Core rejects it, for example USB cameras and formats other than NV12; the page shows Core's reason. |
+| Support unknown | Neat Core is not installed on the board, or is too old to classify camera modes; install or update it with `sima-cli neat install core`. |
 
-Sentinel applies the support rules that Neat Core installs on the board. Availability comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+Sentinel reports only what the hardware offers. During Refresh, Insight asks Neat Core on the board, through PyNeat, which modes `CameraInput` supports. Availability also comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
 ### Camera configuration API
 
