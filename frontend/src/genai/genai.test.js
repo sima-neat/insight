@@ -21,6 +21,7 @@ import { languageNames, readAloudSupport, scriptLanguage, speakableText } from '
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
 import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
+import { createSentenceSplitter, speakablePieces } from './sentences.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -340,4 +341,33 @@ test('spoken and heard figures', () => {
   assert.deepEqual(shown(heardMetrics({ ms: 640, language: 'English' })), { Transcribed: '640 ms', Language: 'English' })
   assert.equal(engineName('piper-tts'), 'Piper')
   assert.equal(engineName('new-engine'), 'new-engine')
+})
+
+test('a reply is cut into sentences to speak while it streams', () => {
+  const reply = 'An AI accelerator is a chip built for neural networks. It runs them much faster than a CPU!\n\n' +
+    '1. Fast\n2. Efficient at matrix maths\n\n```python\nprint("not spoken")\n```\nThat is all.'
+  // Fed a few characters at a time, as the stream arrives.
+  const splitter = createSentenceSplitter()
+  const streamed = []
+  for (let i = 1; i <= reply.length; i += 3) streamed.push(...splitter.push(reply.slice(0, i)))
+  streamed.push(...splitter.push(reply, true))
+  assert.deepEqual(streamed, [
+    'An AI accelerator is a chip built for neural networks.',
+    'It runs them much faster than a CPU!',
+    '1. Fast 2. Efficient at matrix maths',
+    'That is all.'
+  ])
+  assert.deepEqual(speakablePieces(reply), streamed, 'Read aloud on a finished reply cuts it the same way')
+})
+
+test('sentence pieces: the first one is ready before the reply ends, and short or unfinished text waits', () => {
+  const splitter = createSentenceSplitter()
+  assert.deepEqual(splitter.push('Hello there, this is the first sentence. And the sec'), ['Hello there, this is the first sentence.'])
+  assert.deepEqual(splitter.push('Hello there, this is the first sentence. And the sec'), [], 'nothing is spoken twice')
+  assert.deepEqual(splitter.push('Hello there, this is the first sentence. And the second one', true), ['And the second one'])
+  assert.deepEqual(speakablePieces('Yes. Of course I can help with that.'), ['Yes. Of course I can help with that.'])
+  assert.deepEqual(speakablePieces('Ok.'), ['Ok.'], 'a short reply is still spoken')
+  assert.deepEqual(speakablePieces('こんにちは。元気ですか？はい。'), ['こんにちは。元気ですか？はい。'])
+  assert.deepEqual(speakablePieces('Run this:\n```\nls -la\n'), ['Run this:'], 'an unfinished code block is not read')
+  assert.deepEqual(speakablePieces('Great job 👍 on the demo today!'), ['Great job on the demo today!'])
 })

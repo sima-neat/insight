@@ -31,8 +31,9 @@ import {
   streamChat,
   transcribe
 } from './genai/client.js'
-import { languageNames, readAloudSupport, speakableText } from './genai/speech.js'
+import { languageNames, readAloudSupport } from './genai/speech.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
+import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
 
@@ -388,40 +389,150 @@ export default function GenAIView({ onError, onStatus }) {
     return readAloudSupport(text, voices ? voices.languages : null, fallback)
   }
 
-  // t0: when the wait for this reading began (the send, or the Read aloud click).
-  async function speakText(text, id, audio = unlockPlayer(), t0 = performance.now()) {
+  // One reading of reply `id`, spoken piece by piece: add() takes each sentence
+  // as soon as it is known (while the reply streams), the board turns them into
+  // speech one after another, and they play in order on the unlocked player.
+  // t0: when the wait began (the send, or the Read aloud click).
+  function startReading(id, audio, t0) {
     stopSpeaking()
     setSpeechError(null)
-    const words = speakableText(text)
-    if (!words) return
+    const controller = new AbortController()
+    speechAbort.current = controller
+    const { signal } = controller
+    const pending = []          // pieces waiting to be turned into speech
+    const ready = []            // {audio blob, rtf, engine} waiting to play
+    let finished = false        // no more pieces will be added
+    let synthesizing = false
+    let playing = false
+    let language = null         // decided by the first piece
+    let firstAudio = null
+    const rtfs = []
+    let engineUsed = null
+    let wake = null             // resolves the player loop's wait for audio
+
+    const isOver = () => finished && !pending.length && !ready.length && !synthesizing
+    const end = () => {
+      setSpeakingId((current) => (current === id ? null : current))
+      if (speechAbort.current === controller) speechAbort.current = null
+    }
+    const fail = (error) => {
+      if (error.name === 'AbortError' || signal.aborted) return
+      controller.abort()
+      audio.pause()
+      end()
+      setSpeechError({ id, text: `Couldn't read this reply aloud: ${error.message}` })
+    }
+    const recordMetrics = () => {
+      const rtf = rtfs.length ? rtfs.reduce((a, b) => a + b, 0) / rtfs.length : null
+      setSpeechStats((prev) => ({ ...prev, [id]: speechMetrics({ t0, tAudio: firstAudio, rtf, engine: engineName(engineUsed) }) }))
+    }
+
+    function playOne({ blob }) {
+      return new Promise((resolve) => {
+        const url = URL.createObjectURL(blob)
+        const settle = () => {
+          audio.onended = null
+          audio.onpause = null
+          URL.revokeObjectURL(url)
+          resolve()
+        }
+        audio.src = url
+        audio.onended = settle
+        audio.onpause = settle
+        audio.play().then(() => {
+          if (firstAudio === null) {
+            firstAudio = performance.now()
+            recordMetrics()
+          }
+        }, settle)
+      })
+    }
+
+    async function playLoop() {
+      if (playing) return
+      playing = true
+      try {
+        for (;;) {
+          if (signal.aborted) return
+          if (!ready.length) {
+            if (isOver()) break
+            await new Promise((resolve) => { wake = resolve })
+            continue
+          }
+          await playOne(ready.shift())
+        }
+        if (firstAudio !== null) recordMetrics()
+        end()
+      } finally {
+        playing = false
+      }
+    }
+
+    async function synthLoop() {
+      if (synthesizing) return
+      synthesizing = true
+      try {
+        while (pending.length && !signal.aborted) {
+          const text = pending.shift()
+          const result = await speak({ text, model: engine, voice: voice || undefined, language, signal })
+          const rtf = Number(result.rtf)
+          if (Number.isFinite(rtf) && rtf > 0) rtfs.push(rtf)
+          engineUsed = engineUsed || result.engine
+          ready.push({ blob: result.audio })
+          wake?.()
+        }
+      } catch (error) {
+        fail(error)
+      } finally {
+        synthesizing = false
+        wake?.()
+      }
+    }
+
+    return {
+      // Returns false once the reply's language turns out to have no voice.
+      add(piece) {
+        if (signal.aborted) return false
+        if (language === null) {
+          const support = voiceLanguageFor(piece)
+          if (!support.supported) {
+            controller.abort()
+            end()
+            return false
+          }
+          language = support.language
+          setSpeakingId(id)
+          playLoop()
+        }
+        pending.push(piece)
+        synthLoop()
+        return true
+      },
+      finish() {
+        finished = true
+        if (language === null) end()
+        wake?.()
+      },
+      abort() {
+        controller.abort()
+        audio.pause()
+        end()
+      }
+    }
+  }
+
+  // Read aloud on a finished reply.
+  function speakText(text, id, audio = unlockPlayer(), t0 = performance.now()) {
+    const pieces = speakablePieces(text)
+    if (!pieces.length) return
     const support = voiceLanguageFor(text)
     if (!support.supported) {
       onStatus?.(`The board's voices can't read ${support.name} aloud yet.`)
       return
     }
-    const controller = new AbortController()
-    speechAbort.current = controller
-    setSpeakingId(id)
-    try {
-      const result = await speak({ text: words, model: engine, voice: voice || undefined, language: support.language, signal: controller.signal })
-      if (controller.signal.aborted) return
-      const url = URL.createObjectURL(result.audio)
-      const done = () => {
-        audio.onended = null
-        audio.onpause = null
-        URL.revokeObjectURL(url)
-        setSpeakingId((current) => (current === id ? null : current))
-      }
-      audio.src = url
-      audio.onended = done
-      audio.onpause = done
-      await audio.play()
-      const metrics = speechMetrics({ t0, tAudio: performance.now(), rtf: result.rtf, engine: engineName(result.engine) })
-      setSpeechStats((prev) => ({ ...prev, [id]: metrics }))
-    } catch (error) {
-      setSpeakingId((current) => (current === id ? null : current))
-      if (error.name !== 'AbortError') setSpeechError({ id, text: `Couldn't read this reply aloud: ${error.message}` })
-    }
+    const reading = startReading(id, audio, t0)
+    for (const piece of pieces) reading.add(piece)
+    reading.finish()
   }
 
   // --- chat -------------------------------------------------------------------
@@ -455,6 +566,19 @@ export default function GenAIView({ onError, onStatus }) {
     let reply = ''
     const t0 = performance.now()
     let tFirst = null
+    // Read replies aloud: speak each sentence as soon as it is written.
+    let reading = replyPlayer ? startReading(replyId, replyPlayer, t0) : null
+    const splitter = createSentenceSplitter()
+    const speakNew = (final) => {
+      if (!reading) return
+      for (const piece of splitter.push(splitThinking(reply).answer, final)) {
+        if (!reading.add(piece)) {
+          reading = null
+          return
+        }
+      }
+      if (final) reading.finish()
+    }
     const update = (extra) => setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', id: replyId, content: reply, ...extra }])
     try {
       const stats = await streamChat({
@@ -466,12 +590,17 @@ export default function GenAIView({ onError, onStatus }) {
           if (tFirst === null) tFirst = performance.now()
           reply += piece
           update({ pending: true })
+          speakNew(false)
         }
       })
       update({ metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
-      if (replyPlayer) speakText(splitThinking(reply).answer, replyId, replyPlayer, t0)
+      speakNew(true)
     } catch (error) {
       const stopped = error.name === 'AbortError'
+      // Stopping the reply stops its reading; a reply cut off by an error is
+      // still read up to where it stopped.
+      if (stopped) reading?.abort()
+      else speakNew(true)
       update({ stopped, error: stopped ? null : error.message })
       if (!stopped) fail(error.message === REPLY_CUT_OFF ? REPLY_CUT_OFF : `The chat model didn't answer: ${error.message}`)
     } finally {
@@ -880,10 +1009,11 @@ export default function GenAIView({ onError, onStatus }) {
                     Can't read {support.name} aloud yet: the board has no {support.name} voice.
                   </p>
                 )}
-                {support && support.supported && (
-                  speaking ? (
-                    <button type="button" className="btn-ghost genai-small" onClick={stopSpeaking}>Stop speaking</button>
-                  ) : (
+                {speaking ? (
+                  // Also while the reply is still being written and read.
+                  <button type="button" className="btn-ghost genai-small" onClick={stopSpeaking}>Stop speaking</button>
+                ) : (
+                  support && support.supported && (
                     <button type="button" className="btn-ghost genai-small" onClick={() => speakText(parts.answer, m.id)} disabled={!usable} title={usable ? 'Read this reply aloud' : backend.title}>
                       Read aloud
                     </button>

@@ -162,7 +162,7 @@ The status label, and a banner when something needs attention, show the backend'
 - **Incompatible**: the board's GenAI Studio API version does not match this Insight. Update the one the banner names.
 - **Ready**: chat and speech are available. A voice that failed to load on the board is reported here too.
 
-**Chat** is one conversation in the middle of the page. Type in the message box, or press the microphone, speak, and press it again: your words are transcribed and sent. With a model that sees images, attach a picture or take one with the camera. Replies appear as they are written; the stop button ends one early, and **New chat** starts over so the model forgets the conversation. **Read aloud** reads one reply and **Stop speaking** ends it; **Read replies aloud** reads every reply. The browser asks for microphone and camera permission the first time.
+**Chat** is one conversation in the middle of the page. Type in the message box, or press the microphone, speak, and press it again: your words are transcribed and sent. With a model that sees images, attach a picture or take one with the camera. Replies appear as they are written; the stop button ends one early, and **New chat** starts over so the model forgets the conversation. **Read aloud** reads one reply and **Stop speaking** ends it; **Read replies aloud** reads every reply, starting with the first sentence while the rest is still being written. The browser asks for microphone and camera permission the first time.
 
 Under each reply, Insight shows how fast it was produced, measured in the browser:
 
