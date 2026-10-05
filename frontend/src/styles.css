@@ -3799,30 +3799,43 @@ button:disabled {
   letter-spacing: 0.04em;
 }
 
-/* DEMO ONLY, not for release: hide the page chrome and let the viewer fill the window,
-   so every stream fits without a scrollbar. Reach tabs by URL (/viewer, /streaming, ...). */
-.masthead,
-.tab-toolbar,
-.viewer-panel-topbar {
+/* DEMO ONLY, not for release: compact mode (on by default, K toggles it) hides the page chrome;
+   on the viewer tab it also stretches every wrapper down to the iframe so the stream grid fills
+   the window without a scrollbar. Reach tabs by URL (/viewer, /streaming, ...). */
+#insight-app-shell.compact #insight-masthead,
+#insight-app-shell.compact #insight-tab-toolbar,
+#insight-app-shell.compact #insight-viewer-topbar {
   display: none;
 }
 
-.app-shell {
+#insight-app-shell.fill-viewer {
   height: 100vh;
+  padding: 0;
   display: flex;
   flex-direction: column;
 }
 
-.viewer-panel {
+#insight-app-shell.fill-viewer #insight-stage,
+#insight-app-shell.fill-viewer #insight-content,
+#insight-app-shell.fill-viewer #insight-tab-stage,
+#insight-app-shell.fill-viewer #insight-viewer-panel {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.viewer-panel iframe {
+#insight-app-shell.fill-viewer #insight-viewer-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+#insight-app-shell.fill-viewer #insight-viewer-frame {
   flex: 1;
   min-height: 0;
   height: auto;
   margin-top: 0;
+  border: 0;
+  border-radius: 0;
 }

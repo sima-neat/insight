@@ -738,8 +738,18 @@ function FpsStepper({ value, nativeFps, disabled = false, locked = false, title,
   )
 }
 
+// DEMO ONLY: a plain K (no modifier) toggles the compact layout; key presses inside the viewer iframe are ignored.
+function isCompactToggleKey(event) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return false
+  if (event.key?.toLowerCase() !== 'k') return false
+  const target = event.target
+  const tag = target?.tagName?.toLowerCase()
+  return !(tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable)
+}
+
 export default function App() {
   const initialRoute = routeStateFromLocation()
+  const [compact, setCompact] = useState(true)
   const [tab, setTab] = useState(() => {
     if (initialRoute.tab) return initialRoute.tab
     try {
@@ -1073,6 +1083,14 @@ export default function App() {
       window.localStorage.setItem(TAB_STORAGE_KEY, tab)
     } catch {}
   }, [tab])
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (isCompactToggleKey(event)) setCompact((prev) => !prev)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     if (!tourOpen) return
@@ -2068,8 +2086,11 @@ export default function App() {
   const temperatureValue = metrics?.temperature_celsius_avg
 
   return (
-    <div className="app-shell">
-      <header className="masthead">
+    <div
+      id="insight-app-shell"
+      className={['app-shell', compact && 'compact', compact && tab === 'viewer' && 'fill-viewer'].filter(Boolean).join(' ')}
+    >
+      <header id="insight-masthead" className="masthead">
         <div>
           <div className="masthead-title-row">
             <img src="/sima-logo.png" alt="Sima.ai" className="masthead-logo" />
@@ -2145,7 +2166,7 @@ export default function App() {
         </section>
       )}
 
-      <div className={blurForOverview ? 'tour-blur-shell' : ''}>
+      <div id="insight-stage" className={blurForOverview ? 'tour-blur-shell' : ''}>
         <div className="toast-stack" aria-live="polite">
           {error && <div className="toast error">{error}</div>}
           {uploadBusy && uploadProgress && !importDialogOpen ? (
@@ -2156,6 +2177,7 @@ export default function App() {
         </div>
 
         <nav
+          id="insight-tab-toolbar"
           className={focusedTourTab ? 'tab-toolbar tour-tab-focus' : 'tab-toolbar'}
           role="tablist"
           aria-label="Main sections"
@@ -2187,8 +2209,8 @@ export default function App() {
           })}
         </nav>
 
-        <main className="content">
-          <div key={tab} className="tab-stage">
+        <main id="insight-content" className="content">
+          <div key={tab} id="insight-tab-stage" className="tab-stage">
           {tab === 'workspace' && (
             <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading workspace...</p></section>}>
               <WorkspaceView
@@ -2616,8 +2638,8 @@ export default function App() {
         )}
 
         {tab === 'viewer' && (
-          <section className="panel viewer-panel">
-            <div className="panel-topbar viewer-panel-topbar">
+          <section id="insight-viewer-panel" className="panel viewer-panel">
+            <div id="insight-viewer-topbar" className="panel-topbar viewer-panel-topbar">
               <div>
                 <h2>Video Viewer</h2>
                 <p className="section-note">Monitor active channels with low-latency WebRTC playback.</p>
@@ -2656,7 +2678,7 @@ export default function App() {
                 </details>
               )}
             </div>
-            {viewerUrl ? <iframe title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
+            {viewerUrl ? <iframe id="insight-viewer-frame" title="viewer" src={viewerUrl} /> : <p>Viewer unavailable.</p>}
           </section>
         )}
 
