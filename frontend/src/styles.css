@@ -3933,3 +3933,155 @@ button:disabled {
   opacity: 0.5;
   cursor: help;
 }
+
+.genai-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.genai-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.genai:fullscreen {
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg);
+}
+
+/* SiMaSentry Solutions: a full-window launcher, then the chosen app. */
+.genai-solutions {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: #0b1018;
+  color: #e8eef6;
+}
+
+.genai-solutions-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #0b1018;
+}
+
+.genai-solutions-grid {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.genai-solutions-grid h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 30px;
+}
+
+.genai-solutions-grid h2 span {
+  background: linear-gradient(90deg, #2fd3b4, #58a6ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.genai-solutions-grid p {
+  margin: 0;
+  color: #a9b6c6;
+}
+
+.genai-solutions-model b {
+  color: #e8eef6;
+}
+
+.genai-solutions-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  justify-content: center;
+  gap: 18px;
+  width: 100%;
+  margin-top: 18px;
+}
+
+.genai-solutions-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 22px 18px;
+  border: 1px solid #253244;
+  border-radius: 18px;
+  background: #121a26;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.genai-solutions-card:hover,
+.genai-solutions-card:focus-visible {
+  border-color: #2fd3b4;
+  transform: translateY(-2px);
+}
+
+.genai-solutions-card img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.genai-solutions-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.genai-solutions-summary {
+  font-size: 13px;
+  color: #a9b6c6;
+}
+
+.genai-solutions-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #3a2a12;
+  color: #f2c46d;
+  font-size: 11px;
+}
+
+.genai-solutions-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.genai-solutions-actions .btn-ghost {
+  background: rgba(18, 26, 38, 0.85);
+  color: #e8eef6;
+  border-color: #253244;
+  text-decoration: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genai-solutions-card {
+    transition: none;
+  }
+}

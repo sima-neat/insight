@@ -22,6 +22,7 @@ import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } 
 import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
+import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -273,7 +274,7 @@ test('thinking is offered only for models that have a reasoning mode', () => {
 
 test('the tutorial covers every feature, and says why Think first is greyed out for a model that cannot', () => {
   const ids = tutorialSteps().map((s) => s.id)
-  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'think', 'help'])
+  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'solutions', 'export', 'think', 'help'])
   const think = (options) => tutorialSteps(options).find((s) => s.id === 'think').body
   assert.match(think({ canThink: true }), /Turn on Think first/)
   assert.match(think({ canThink: false, thinkingModel: 'Qwen3 0.6B' }), /greyed out.*choose Qwen3 0\.6B/)
@@ -370,4 +371,42 @@ test('sentence pieces: the first one is ready before the reply ends, and short o
   assert.deepEqual(speakablePieces('こんにちは。元気ですか？はい。'), ['こんにちは。元気ですか？はい。'])
   assert.deepEqual(speakablePieces('Run this:\n```\nls -la\n'), ['Run this:'], 'an unfinished code block is not read')
   assert.deepEqual(speakablePieces('Great job 👍 on the demo today!'), ['Great job on the demo today!'])
+})
+
+test("export chat writes the standalone Studio's .log format", () => {
+  const now = new Date(2026, 9, 5, 14, 3, 9)
+  const log = chatLog({
+    now,
+    model: 'Qwen3-VL-4B-Instruct-GPTQ-a16w4',
+    messages: [
+      { role: 'user', text: 'What is in this picture?', image: 'data:image/jpeg;base64,xx' },
+      { role: 'assistant', content: '<think>looking</think>A red bicycle.' },
+      { role: 'user', text: 'hello' },
+      { role: 'assistant', content: '', error: 'Model server crashed while answering' },
+      { role: 'assistant', content: '', pending: true }
+    ]
+  })
+  const lines = log.split('\n')
+  assert.equal(lines[0], 'Neat GenAI Studio — chat export')
+  assert.match(lines[1], /^Exported: /)
+  assert.equal(lines[2], 'Model: Qwen3-VL-4B-Instruct-GPTQ-a16w4')
+  assert.equal(lines[3], '='.repeat(60))
+  assert.deepEqual(lines.slice(5), [
+    'You:', '[image]', 'What is in this picture?', '',
+    'Assistant:', 'A red bicycle.', '',
+    'You:', 'hello', '',
+    'Assistant:', '[Model server crashed while answering]', ''
+  ], 'the reasoning is left out and an empty reply in progress is skipped')
+  assert.equal(chatLog({ messages: [] }), null)
+  assert.equal(chatLogFilename(now), 'neat-chat-20261005-140309.log')
+})
+
+test('SiMaSentry apps open on the loaded model through the relay', () => {
+  assert.deepEqual(SOLUTIONS.map((s) => s.name), ['SiMaSentry-Med', 'SiMaSentry-Safe', 'SiMaSentry-Sec'])
+  const url = new URL(solutionUrl('health', 'Qwen3-VL-4B-Instruct-GPTQ-a16w4'), 'http://insight')
+  assert.equal(url.pathname, '/genai-solutions/health/index.html')
+  assert.equal(url.searchParams.get('base_url'), '/api/genai/v1/chat/completions')
+  assert.equal(url.searchParams.get('provider'), 'ollama')
+  assert.equal(url.searchParams.get('model'), 'Qwen3-VL-4B-Instruct-GPTQ-a16w4')
+  assert.equal(new URL(solutionUrl('safety', null), 'http://insight').searchParams.has('model'), false)
 })

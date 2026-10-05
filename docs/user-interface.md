@@ -150,7 +150,7 @@ Start the backend on the board first, from the GenAI Studio application director
 ./run.sh --backend-only
 ```
 
-The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header also holds the status label, the **Model** picker, **New chat**, **Read replies aloud**, **Think first** (only for models that can reason step by step) and **Settings**.
+The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud** and **Think first** (greyed out for models that always answer directly), and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Tutorial**, **Settings** and **Full screen**.
 
 The status label, and a banner when something needs attention, show the backend's state and what to do next:
 
@@ -171,6 +171,10 @@ Under each reply, Insight shows how fast it was produced, measured in the browse
 - **Total**: from sending to the end of the reply.
 - **First audio**, **RTF** and **Voice**, when the reply is read aloud: the time until it started playing, the real-time factor (seconds of compute per second of speech; below 1 is faster than real time), and the speech engine.
 - **Transcribed** and **Language**, under a spoken question: the time from the end of the recording to the text, and the language heard.
+
+**Export chat** saves the conversation as a `.log` text file (`neat-chat-<date>-<time>.log`) with the export time and model at the top, then each turn; pictures appear as `[image]`.
+
+**SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
 
 **Settings** holds the board address and reset token, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
 

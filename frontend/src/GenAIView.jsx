@@ -33,6 +33,7 @@ import {
 } from './genai/client.js'
 import { languageNames, readAloudSupport } from './genai/speech.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
+import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
@@ -93,7 +94,11 @@ const ICONS = {
   send: 'M12 19V5M5 12l7-7 7 7',
   stop: 'M7 7h10v10H7z',
   newChat: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
-  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12l2-1-1-3-2 .5-1.5-1.5.5-2-3-1-1 2h-2l-1-2-3 1 .5 2L5 8.5 3 8l-1 3 2 1v0l-2 1 1 3 2-.5L6.5 16 6 18l3 1 1-2h2l1 2 3-1-.5-2 1.5-1.5 2 .5 1-3z'
+  export: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  shield: 'M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17v.01',
+  fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+  settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4'
 }
 
 function StatusChip({ state }) {
@@ -140,6 +145,8 @@ function modelLabel(model) {
 export default function GenAIView({ onError, onStatus }) {
   const [settings, setSettings] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [solutionsOpen, setSolutionsOpen] = useState(false)
+  const root = useRef(null)
   const [addressDraft, setAddressDraft] = useState('')
   const [tokenDraft, setTokenDraft] = useState('')
   const [health, setHealth] = useState(null)
@@ -697,6 +704,25 @@ export default function GenAIView({ onError, onStatus }) {
 
   // --- welcome cards ----------------------------------------------------------
 
+  function exportChat() {
+    const now = new Date()
+    const text = chatLog({ messages, model: chatModel ? chatModel.name : null, now })
+    if (!text) return
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
+    link.download = chatLogFilename(now)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(link.href), 1500)
+    onStatus?.(`Chat saved as ${link.download}.`)
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen?.()
+    else root.current?.requestFullscreen?.().catch(() => {})
+  }
+
   function newChat() {
     chatAbort.current?.abort()
     stopSpeaking()
@@ -740,7 +766,7 @@ export default function GenAIView({ onError, onStatus }) {
   // --- render -----------------------------------------------------------------
 
   return (
-    <div className="genai">
+    <div className="genai" ref={root}>
       {step && (
         <section className="panel genai-tutorial" aria-label="GenAI Studio tutorial" aria-live="polite">
           <p className="genai-tutorial-eyebrow">Tutorial · step {tutorialStep + 1} of {steps.length}</p>
@@ -778,10 +804,9 @@ export default function GenAIView({ onError, onStatus }) {
             ))}
           </select>
         </label>
-        <button type="button" className="btn-ghost genai-small genai-new-chat" onClick={newChat} disabled={messages.length === 0} title="Start over: the model forgets this conversation">
-          <Icon d={ICONS.newChat} /> New chat
+        <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={messages.length === 0} aria-label="New chat" title="New chat: start over, the model forgets this conversation">
+          <Icon d={ICONS.newChat} />
         </button>
-        <span className="genai-header-spacer" />
         <label className={`genai-check${spot('read-aloud')}`} title="Read every reply aloud with the board's speech engine">
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
@@ -795,17 +820,24 @@ export default function GenAIView({ onError, onStatus }) {
           <input type="checkbox" checked={canThink && thinking} disabled={!canThink} onChange={(e) => setThinking(e.target.checked)} />
           Think first
         </label>
-        <button type="button" className="btn-ghost genai-small genai-tutorial-btn" onClick={() => setTutorialStep(0)} aria-pressed={step !== null}>
-          Tutorial
-        </button>
-        <button
-          type="button"
-          className={settingsOpen ? 'btn-tonal genai-settings-btn' : 'btn-ghost genai-settings-btn'}
-          aria-expanded={settingsOpen}
-          onClick={() => setSettingsOpen((open) => !open)}
-        >
-          <Icon d={ICONS.settings} /> Settings
-        </button>
+        <span className="genai-header-spacer" />
+        <div className="genai-toolbar" role="toolbar" aria-label="GenAI Studio tools">
+          <button type="button" className={`btn-ghost genai-tool${spot('export')}`} onClick={exportChat} disabled={messages.length === 0} aria-label="Export chat" title="Export chat (.log)">
+            <Icon d={ICONS.export} />
+          </button>
+          <button type="button" className={`btn-ghost genai-tool${spot('solutions')}`} onClick={() => setSolutionsOpen(true)} aria-label="SiMaSentry Solutions" title="SiMaSentry Solutions: Med, Safe and Sec demo apps on the loaded model">
+            <Icon d={ICONS.shield} />
+          </button>
+          <button type="button" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null} aria-label="Tutorial" title="Tutorial">
+            <Icon d={ICONS.help} />
+          </button>
+          <button type="button" className={settingsOpen ? 'btn-tonal genai-tool' : 'btn-ghost genai-tool'} aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)} aria-label="Settings" title="Settings">
+            <Icon d={ICONS.settings} />
+          </button>
+          <button type="button" className="btn-ghost genai-tool" onClick={toggleFullscreen} aria-label="Full screen" title="Full screen">
+            <Icon d={ICONS.fullscreen} />
+          </button>
+        </div>
       </section>
 
       {needsAttention && (
@@ -1098,6 +1130,81 @@ export default function GenAIView({ onError, onStatus }) {
           </div>
         </form>
       </section>
+
+      {solutionsOpen && (
+        <SolutionsOverlay
+          model={chatModel ? chatModel.name : null}
+          sees={Boolean(chatModel && sees)}
+          onClose={() => setSolutionsOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// SiMaSentry Solutions, like the standalone Studio's shield button: a launcher
+// with the three demo apps, each opened full screen in a frame and wired to the
+// loaded model through the relay. An app's own Home button returns here.
+function SolutionsOverlay({ model, sees, onClose }) {
+  const [open, setOpen] = useState(null)
+  const frame = useRef(null)
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key !== 'Escape') return
+      if (open) setOpen(null)
+      else onClose()
+    }
+    function onMessage(e) {
+      if (!frame.current || e.source !== frame.current.contentWindow || e.origin !== window.location.origin) return
+      if (e.data && typeof e.data === 'object' && e.data.type === 'sima-sentry:home') setOpen(null)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('message', onMessage)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('message', onMessage)
+    }
+  }, [open, onClose])
+
+  function launch(app) {
+    if (!sees) {
+      const why = model
+        ? `${friendlyModelName(model)} doesn't see images, so the ${app.name} picture features won't work. Open it anyway?`
+        : `No chat model is loaded, so ${app.name} can't answer until you load one. Open it anyway?`
+      if (!window.confirm(why)) return
+    }
+    setOpen(app)
+  }
+
+  return (
+    <div className="genai-solutions" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
+      {open ? (
+        <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" />
+      ) : (
+        <div className="genai-solutions-grid">
+          <h2>SiMaSentry <span>Solutions</span></h2>
+          <p>Demo apps that run on the board's loaded model, entirely on the device.</p>
+          <p className="genai-solutions-model">
+            {model ? <>Using <b>{friendlyModelName(model)}</b>{sees ? '' : ': load a model that sees images for the picture features'}</> : 'No model loaded: choose one in the Model menu first'}
+          </p>
+          <div className="genai-solutions-cards">
+            {SOLUTIONS.map((app) => (
+              <button key={app.mode} type="button" className="genai-solutions-card" onClick={() => launch(app)}>
+                {!sees && <span className="genai-solutions-badge">{model ? 'no vision support' : 'no model loaded'}</span>}
+                <img src={`${SOLUTIONS_ROOT}/${app.mode}/${app.image}`} alt="" loading="lazy" />
+                <span className="genai-solutions-name">{app.name}</span>
+                <span className="genai-solutions-summary">{app.summary}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="genai-solutions-actions">
+        {open && <button type="button" className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>}
+        {open && <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>}
+        <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+      </div>
     </div>
   )
 }

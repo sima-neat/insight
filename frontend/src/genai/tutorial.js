@@ -72,6 +72,25 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     }
   ]
   steps.push({
+    id: 'solutions',
+    title: 'Try the SiMaSentry demos',
+    body:
+      'The shield opens SiMaSentry Solutions: three demo apps that run on the loaded model. SiMaSentry-Med ' +
+      'reviews medical images and symptoms, SiMaSentry-Safe checks PPE and hazards, and SiMaSentry-Sec ' +
+      'analyses security footage. Load a model that sees images for their picture features.',
+    target: 'solutions',
+    action: null
+  })
+  steps.push({
+    id: 'export',
+    title: 'Keep a copy of the chat',
+    body:
+      'The download button saves the conversation as a .log text file, with the time and the model at the top. ' +
+      'The pencil next to the model starts a new chat.',
+    target: 'export',
+    action: null
+  })
+  steps.push({
     id: 'think',
     title: 'Let it think first',
     body: canThink
