@@ -11,6 +11,7 @@ import {
   formatDuration,
   friendlyModelName,
   supportsThinking,
+  thinkingModelOnBoard,
   voiceEngineWarnings,
   loadedChatModel,
   speechModels
@@ -269,10 +270,15 @@ test('thinking is offered only for models that have a reasoning mode', () => {
   assert.equal(supportsThinking(''), false)
 })
 
-test('the tutorial covers every feature and mentions thinking only when the model can', () => {
+test('the tutorial covers every feature, and says why Think first is greyed out for a model that cannot', () => {
   const ids = tutorialSteps().map((s) => s.id)
-  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'help'])
-  assert.deepEqual(tutorialSteps({ canThink: true }).map((s) => s.id).slice(-2), ['think', 'help'])
+  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'think', 'help'])
+  const think = (options) => tutorialSteps(options).find((s) => s.id === 'think').body
+  assert.match(think({ canThink: true }), /Turn on Think first/)
+  assert.match(think({ canThink: false, thinkingModel: 'Qwen3 0.6B' }), /greyed out.*choose Qwen3 0\.6B/)
+  assert.match(think({ canThink: false }), /download one that can reason/)
+  assert.equal(thinkingModelOnBoard(STATUS), 'Qwen3 0.6B')
+  assert.equal(thinkingModelOnBoard({ catalog: [STATUS.catalog[0]] }), null)
   for (const step of tutorialSteps({ canThink: true })) {
     assert.ok(step.title && step.body.length > 40, step.id)
   }

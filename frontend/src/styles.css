@@ -3928,3 +3928,8 @@ button:disabled {
 .genai-composer .genai-icon-btn:hover:not(:disabled) {
   background: var(--surface-soft);
 }
+
+.genai-check-off {
+  opacity: 0.5;
+  cursor: help;
+}

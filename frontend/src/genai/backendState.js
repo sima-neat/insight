@@ -184,6 +184,13 @@ export function supportsThinking(name) {
   return /qwen3/.test(n) && !/instruct/.test(n)
 }
 
+// The readable name of a chat model on the board that can think first, to
+// suggest when the chosen one can't; null when there is none.
+export function thinkingModelOnBoard(status) {
+  const found = chatModels(status).find((m) => supportsThinking(m.name))
+  return found ? friendlyModelName(found.name) : null
+}
+
 const ENGINE_NAMES = { supertonic: 'Supertonic', 'piper-plus': 'Piper Plus', 'piper-tts': 'Piper' }
 
 export function engineName(key) {

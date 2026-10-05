@@ -14,6 +14,7 @@ import {
   loadedChatModel,
   speechModels,
   supportsThinking,
+  thinkingModelOnBoard,
   voiceEngineWarnings
 } from './genai/backendState.js'
 import {
@@ -581,7 +582,8 @@ export default function GenAIView({ onError, onStatus }) {
     composer.current?.focus()
   }
 
-  const steps = tutorialSteps({ canThink })
+  const thinkingModel = thinkingModelOnBoard(status)
+  const steps = tutorialSteps({ canThink, thinkingModel })
   const step = tutorialStep === null ? null : steps[Math.min(tutorialStep, steps.length - 1)]
   const spot = (target) => (step && step.target === target ? ' genai-spotlight' : '')
 
@@ -655,12 +657,15 @@ export default function GenAIView({ onError, onStatus }) {
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
         </label>
-        {canThink && (
-          <label className={`genai-check${spot('think')}`} title="This model can reason step by step before answering: slower, sometimes better for maths and logic. The reasoning appears folded above the answer.">
-            <input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} />
-            Think first
-          </label>
-        )}
+        <label
+          className={`genai-check${canThink ? '' : ' genai-check-off'}${spot('think')}`}
+          title={canThink
+            ? 'This model can reason step by step before answering: slower, sometimes better for maths and logic. The reasoning appears folded above the answer.'
+            : `${chatModel ? friendlyModelName(chatModel.name) : 'This model'} always answers directly. ${thinkingModel ? `Choose ${thinkingModel}` : 'Download a model that can reason, such as Qwen3,'} to think first.`}
+        >
+          <input type="checkbox" checked={canThink && thinking} disabled={!canThink} onChange={(e) => setThinking(e.target.checked)} />
+          Think first
+        </label>
         <button type="button" className="btn-ghost genai-small genai-tutorial-btn" onClick={() => setTutorialStep(0)} aria-pressed={step !== null}>
           Tutorial
         </button>

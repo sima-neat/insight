@@ -4,7 +4,7 @@
 
 export const TUTORIAL_STORAGE_KEY = 'neat-insight:genai-tutorial-seen'
 
-export function tutorialSteps({ canThink = false } = {}) {
+export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
   const steps = [
     {
       id: 'intro',
@@ -71,17 +71,18 @@ export function tutorialSteps({ canThink = false } = {}) {
       action: 'example-translate'
     }
   ]
-  if (canThink) {
-    steps.push({
-      id: 'think',
-      title: 'Let it think first',
-      body:
-        'This model can reason step by step before answering. Turn on Think first for maths or logic: it ' +
-        'is slower, and the reasoning appears folded above the answer.',
-      target: 'think',
-      action: null
-    })
-  }
+  steps.push({
+    id: 'think',
+    title: 'Let it think first',
+    body: canThink
+      ? 'This model can reason step by step before answering. Turn on Think first for maths or logic: it ' +
+        'is slower, and the reasoning appears folded above the answer.'
+      : 'Some models can reason step by step before answering, which helps with maths and logic. Think first ' +
+        'is greyed out because this model always answers directly' +
+        (thinkingModel ? `; choose ${thinkingModel} to use it.` : '; download one that can reason, such as Qwen3, to use it.'),
+    target: 'think',
+    action: null
+  })
   steps.push({
     id: 'help',
     title: 'When something is wrong',
