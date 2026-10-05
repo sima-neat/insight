@@ -3800,8 +3800,9 @@ button:disabled {
 }
 
 /* DEMO ONLY, not for release: compact mode (on by default, K toggles it) hides the page chrome;
-   on the viewer tab it also stretches every wrapper down to the iframe so the stream grid fills
-   the window without a scrollbar. Reach tabs by URL (/viewer, /streaming, ...). */
+   on the viewer tab it also stretches every wrapper down to the iframe so the stream card fills
+   the window without a scrollbar. The card stays as a click target outside the iframe for K.
+   Reach tabs by URL (/viewer, /streaming, ...). */
 #insight-app-shell.compact #insight-masthead,
 #insight-app-shell.compact #insight-tab-toolbar,
 #insight-app-shell.compact #insight-viewer-topbar {
@@ -3810,7 +3811,6 @@ button:disabled {
 
 #insight-app-shell.fill-viewer {
   height: 100vh;
-  padding: 0;
   display: flex;
   flex-direction: column;
 }
@@ -3825,17 +3825,9 @@ button:disabled {
   flex-direction: column;
 }
 
-#insight-app-shell.fill-viewer #insight-viewer-panel {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-}
-
 #insight-app-shell.fill-viewer #insight-viewer-frame {
   flex: 1;
   min-height: 0;
   height: auto;
   margin-top: 0;
-  border: 0;
-  border-radius: 0;
 }
