@@ -118,13 +118,14 @@ def availability_method(tools):
 
 
 def scan_proc():
-    """Map each /dev path held open to the pids holding it, for every process we may inspect."""
+    """Map each /dev path held open to the pids holding it, for every process we may inspect;
+    None when /proc itself cannot be listed, so no process could be checked."""
     held = {}
     own = os.getpid()
     try:
         pids = [name for name in os.listdir(PROC_ROOT) if name.isdigit() and int(name) != own]
     except OSError:
-        return held
+        return None
     for pid in pids:
         fd_dir = os.path.join(PROC_ROOT, pid, "fd")
         try:
@@ -145,6 +146,8 @@ def user_checker(method, tools):
     """Return nodes -> list of users, or None when the check could not run."""
     if method in ("proc-root", "proc-user"):
         held = scan_proc()
+        if held is None:
+            return lambda nodes: None
         return lambda nodes: _users({pid for node in nodes for pid in held.get(node, ())})
     if method == "sudo-fuser":
 
