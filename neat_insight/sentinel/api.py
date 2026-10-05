@@ -14,6 +14,7 @@ sentinel_bp = Blueprint("sentinel", __name__)
 
 MAX_COMPARE_RUNS = 8
 MAX_TAGS = 16
+TAG_LIMIT = 80
 NAME_LIMIT = 80
 NOTE_LIMIT = 512
 
@@ -106,10 +107,12 @@ def _trace_request(body) -> dict:
         )
     tags = body.get("tags")
     if tags is not None and (
-        not isinstance(tags, list) or len(tags) > MAX_TAGS or not all(isinstance(tag, str) and tag for tag in tags)
+        not isinstance(tags, list)
+        or len(tags) > MAX_TAGS
+        or not all(isinstance(tag, str) and 0 < len(tag) <= TAG_LIMIT for tag in tags)
     ):
         raise _invalid(
-            "`tags` must be a list of at most {} non-empty strings.".format(MAX_TAGS),
+            "`tags` must be a list of at most {} non-empty strings of at most {} characters.".format(MAX_TAGS, TAG_LIMIT),
             'Send tags like ["compiler-v2"], or omit them.',
         )
     return {"name": name, "note": note, "tags": tags}
@@ -242,27 +245,19 @@ def get_metrics():
 
 
 def _get_metrics(context, limit):
-    """Read and cache one internally consistent telemetry response."""
-    # A restart invalidates every value read from Sentinel. Retry once so the response
-    # always contains one daemon invocation.
-    for _ in range(2):
-        before = install.status(context.session)
-        cache.observe_daemon(context.key, before.get("instance_id"))
-        latest = context.client.latest()
-        definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
-        history = cache.add_sample(context.key, latest.get("sample"))
-        seed = cache_history.read(context.session) if cache.needs_seed(context.key) else None
-        daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
-        if before.get("instance_id") == daemon.get("instance_id"):
-            if seed is not None:
-                history = cache.seed(context.key, seed)
-            return context.payload(**metric_view.build(definitions, latest, history, limit))
-        cache.observe_daemon(context.key, daemon.get("instance_id"))
-    raise SentinelError(
-        "sentinel_failed",
-        "Sentinel telemetry changed repeatedly while it was being read.",
-        hint="Wait a moment, then retry.",
-    )
+    """Read and cache one telemetry response.
+
+    The daemon's status is read once per poll. A restart since the previous poll (another systemd
+    invocation) starts the history and definitions again; one that lands during this read is seen,
+    and its history restarted, on the next poll."""
+    daemon = cache.record(context.key, "daemon", install.status(context.session), STATUS_TTL_SEC)
+    cache.observe_daemon(context.key, daemon.get("instance_id"))
+    latest = context.client.latest()
+    definitions = context.cached("definitions", DEFINITIONS_TTL_SEC, context.client.metrics)
+    history = cache.add_sample(context.key, latest.get("sample"))
+    if cache.needs_seed(context.key):
+        history = cache.seed(context.key, cache_history.read(context.client))
+    return context.payload(**metric_view.build(definitions, latest, history, limit))
 
 
 # API: report the trace Sentinel is recording, if any.

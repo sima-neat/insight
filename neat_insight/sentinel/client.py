@@ -208,6 +208,10 @@ class SentinelClient(SentinelSocket):
     def latest(self) -> dict:
         return self.get("/v1/samples/latest")
 
+    def cache(self) -> dict:
+        """The daemon's whole cache document, including its recent samples (`docs/api.md`)."""
+        return self.get("/v1/cache")
+
     def active_trace(self) -> dict:
         return self.get("/v1/traces/active")
 

@@ -49,10 +49,10 @@ def sample(timestamp: str, **values) -> dict:
     return {"schema": 1, "version": HEALTH["version"], "updated_at": timestamp, "sample": {"timestamp": timestamp, "values": merged}}
 
 
-def export_table(samples):
-    keys = sorted(samples[0]["values"])
-    table = {"timestamps": [s["timestamp"] for s in samples], "keys": keys, "rows": [[s["values"][k] for k in keys] for s in samples]}
-    return ExecResult(0, json.dumps(table).encode(), b"")
+def cache_document(samples):
+    """Sentinel's `GET /v1/cache` body with these recent samples."""
+    return {"schema": 1, "version": HEALTH["version"], "metrics": [], "latest": samples[-1] if samples else None,
+            "samples": samples, "errors": []}
 
 
 SAMPLE = sample("2026-09-22T20:55:47Z")
@@ -70,12 +70,12 @@ class FakeSentinel:
             ("GET", "/v1/samples/latest"): (200, SAMPLE),
             ("GET", "/v1/traces/active"): (200, {"schema": 1, "trace": None, "summary": None}),
             ("GET", "/v1/runs"): (200, {"schema": 1, "runs": []}),
+            ("GET", "/v1/cache"): (200, cache_document([])),
         }
         self.calls = []
         self.exec_error = None
         # None deletes the run from /v1/runs, as the CLI would; an ExecResult is the CLI's answer and deletes nothing.
         self.delete_result = None
-        self.export_result = ExecResult(0, json.dumps({"timestamps": [], "keys": [], "rows": []}).encode(), b"")
 
     def answer(self, method, path, status, body):
         self.api[(method, path)] = (status, body)
@@ -89,8 +89,6 @@ class FakeSentinel:
         script = argv[2]
         if "runs delete" in script:
             return self._delete(argv[4])
-        if '"$cli" export' in script:
-            return self.export_result
         if "neat install sentinel" in script:
             return self.install_result
         return ExecResult(0, "@@".join(self.status_fields).encode(), b"")
@@ -126,7 +124,7 @@ class FakeSentinel:
         return [argv for argv, _, _ in self.calls if argv[0] == "sh" and text in argv[2]]
 
     deletes = property(lambda self: self._scripts_with("runs delete"))
-    exports = property(lambda self: self._scripts_with('"$cli" export'))
+    cache_reads = property(lambda self: [path for path in self.api_paths if path == ("GET", "/v1/cache")])
     scripts = property(lambda self: [argv[2] for argv in self._scripts_with("")])
     api_paths = property(lambda self: [(argv[2], argv[3]) for argv, _, _ in self.calls if argv[0] == "python3"])
 
@@ -907,31 +905,31 @@ class SentinelApiTests(_ApiCase):
 
     def test_the_first_metrics_read_seeds_history_from_the_daemons_cache(self):
         seed = [sample(f"2026-09-22T20:55:{second}Z", rtsn_0=60.0 + i)["sample"] for i, second in enumerate(("41", "43", "45"))]
-        self.transport.export_result = export_table(seed)
+        self.transport.answer("GET", "/v1/cache", 200, cache_document(seed))
         body = self.get("/api/sentinel/metrics?history=64").get_json()
         self.assertEqual(body["history"]["timestamps"][-4:], [s["timestamp"] for s in seed] + ["2026-09-22T20:55:47Z"])
         self.assertEqual(body["history"]["series"]["rtsn_0"], [60.0, 61.0, 62.0, 72.0])
-        self.assertEqual(self.transport.exports[0][3:], ["sh", "240"])
         self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
         self.get("/api/sentinel/metrics?history=64")
-        self.assertEqual(len(self.transport.exports), 1, "the cache is read once per board, not per poll")
+        self.assertEqual(len(self.transport.cache_reads), 1, "the cache is read once per board, not per poll")
 
     def test_a_gap_in_polling_reads_the_daemons_cache_again(self):
         self.get("/api/sentinel/metrics?history=240")
-        self.assertEqual(len(self.transport.exports), 1)
+        self.assertEqual(len(self.transport.cache_reads), 1)
         # Nobody polled for ten minutes; the daemon kept its own window meanwhile.
         seed = [sample(f"2026-09-22T21:05:{second}Z")["sample"] for second in ("40", "42", "44")]
-        self.transport.export_result = export_table(seed)
+        self.transport.answer("GET", "/v1/cache", 200, cache_document(seed))
         self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T21:05:46Z"))
         body = self.get("/api/sentinel/metrics?history=240").get_json()
-        self.assertEqual(len(self.transport.exports), 2)
+        self.assertEqual(len(self.transport.cache_reads), 2)
         self.assertEqual(body["history"]["timestamps"], [s["timestamp"] for s in seed] + ["2026-09-22T21:05:46Z"])
 
     def test_metrics_still_answer_when_the_cache_cannot_be_read(self):
-        for result in (ExecResult(127, b"", b"python3: not found"), ExecResult(0, b"not json", b""), ExecResult(0, b"{}", b""), ExecResult(0, b"[]", b"")):
-            with self.subTest(result=result):
+        for status, body in ((500, {"error": "cache unreadable"}), (200, {"schema": 1}), (200, {"schema": 1, "samples": "x"}),
+                             (200, "not json"), (200, dict(cache_document([]), schema=2))):
+            with self.subTest(status=status, body=body):
                 api.cache = state.BoardCache()
-                self.transport.export_result = result
+                self.transport.answer("GET", "/v1/cache", status, body)
                 response = self.get("/api/sentinel/metrics?history=64")
                 self.assertEqual((response.status_code, response.get_json()["history"]["timestamps"]), (200, ["2026-09-22T20:55:47Z"]))
 
@@ -943,22 +941,20 @@ class SentinelApiTests(_ApiCase):
         self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
         body = self.get("/api/sentinel/metrics?history=5").get_json()
         self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:49Z"])
-        self.assertEqual(len(self.transport.exports), 2, "the new daemon's own window is read again")
+        self.assertEqual(len(self.transport.cache_reads), 2, "the new daemon's own window is read again")
 
-    def test_telemetry_retries_when_the_daemon_restarts_mid_read(self):
-        statuses = [
-            {"instance_id": "inv-1"},
-            {"instance_id": "inv-2"},
-            {"instance_id": "inv-2"},
-            {"instance_id": "inv-2"},
-        ]
-        with mock.patch.object(api.install, "status", side_effect=statuses), mock.patch.object(
-            api.cache_history, "read", return_value=[]
-        ):
-            response = self.get("/api/sentinel/metrics?history=5")
-        self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/samples/latest")), 2)
-        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 2)
+    def test_each_metrics_poll_reads_the_daemon_status_once(self):
+        """A restart is told by systemd's invocation id; one read per poll, compared with the last poll's."""
+        statuses = [{"instance_id": "inv-1"}, {"instance_id": "inv-2"}]
+        self.transport.answer("GET", "/v1/cache", 200, cache_document([]))
+        with mock.patch.object(api.install, "status", side_effect=statuses) as status:
+            self.assertEqual(self.get("/api/sentinel/metrics?history=5").status_code, 200)
+            self.assertEqual(status.call_count, 1)
+            self.transport.answer("GET", "/v1/samples/latest", 200, sample("2026-09-22T20:55:49Z"))
+            body = self.get("/api/sentinel/metrics?history=5").get_json()
+            self.assertEqual(status.call_count, 2)
+        self.assertEqual(body["history"]["timestamps"], ["2026-09-22T20:55:49Z"], "the restart started the history again")
+        self.assertEqual(self.transport.api_paths.count(("GET", "/v1/metrics")), 2, "and re-read the definitions")
 
     def test_telemetry_reads_hold_the_metrics_lock(self):
         held = []
@@ -994,7 +990,8 @@ class SentinelApiTests(_ApiCase):
 
     def test_invalid_requests_never_reach_the_board(self):
         self.refused(self.get("/api/sentinel/metrics?history=lots"), 400, "invalid_request")
-        for body in ({}, {"name": ""}, {"name": "a", "tags": "x"}, {"name": "a", "note": 3}, []):
+        for body in ({}, {"name": ""}, {"name": "a", "tags": "x"}, {"name": "a", "note": 3}, [],
+                     {"name": "a", "tags": ["t" * 81]}):
             with self.subTest(body=body):
                 self.refused(self.post("/api/sentinel/traces", json=body), 400, "invalid_request")
         # /api/sentinel/compare splits its runs on commas, so a run named "before,after" could never be compared.
@@ -1208,34 +1205,36 @@ class DeleteRunTests(_ApiCase):
         self.refused(self.delete("/api/sentinel/runs/baseline"), 504, "timeout")
 
 
-class SeedScriptTests(unittest.TestCase):
-    """The cache-trimming script, run for real by sh with a fake simaai-sentinel that prints an export."""
+class CacheHistoryTests(unittest.TestCase):
+    """cache_history.read over Sentinel's `GET /v1/cache` document."""
 
-    def test_the_newest_samples_come_back_oldest_first_and_rounded(self):
-        with tempfile.TemporaryDirectory() as root:
-            export = {"schema": 1, "metrics": [], "samples": [
-                {"timestamp": f"2026-09-25T00:00:{second:02d}Z", "values": {"rtsn_0": 60.123456789 + second, "n": None}} for second in range(70)
-            ]}
-            cli = Path(root) / "simaai-sentinel"
-            cli.write_text("#!/bin/sh\n[ \"$1\" = export ] && cat " + shlex.quote(str(Path(root) / "export.json")) + "\n")
-            cli.chmod(0o755)
-            (Path(root) / "export.json").write_text(json.dumps(export))
-            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}")
-            out = subprocess.run(["sh", "-c", cache_history.SEED_SCRIPT, "sh", "64"], capture_output=True, env=env, check=True)
-        table = json.loads(out.stdout)
-        self.assertEqual(table["keys"], ["n", "rtsn_0"], "each key once")
-        self.assertEqual(len(table["rows"]), 64)
-        self.assertEqual((table["timestamps"][0], table["timestamps"][-1]), ("2026-09-25T00:00:06Z", "2026-09-25T00:00:69Z"))
-        self.assertEqual(table["rows"][0], [None, 66.1235])
+    class Client:
+        def __init__(self, answer):
+            self.answer = answer
+
+        def cache(self):
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+    def test_the_newest_samples_come_back_oldest_first_rounded_with_every_key(self):
+        samples = [{"timestamp": f"2026-09-25T00:00:{second:02d}Z", "values": {"rtsn_0": 60.123456789 + second, "n": None}}
+                   for second in range(70)]
+        samples[-1]["values"]["cpu"] = 12.5
+        read = cache_history.read(self.Client(cache_document(samples)), 64)
+        self.assertEqual(len(read), 64)
+        self.assertEqual((read[0]["timestamp"], read[-1]["timestamp"]), ("2026-09-25T00:00:06Z", "2026-09-25T00:00:69Z"))
+        self.assertEqual(read[0]["values"], {"cpu": None, "n": None, "rtsn_0": 66.1235}, "each key in every sample")
 
     def test_read_takes_only_well_formed_samples(self):
-        table = {"timestamps": ["2026-09-25T00:00:00Z", 5, "2026-09-25T00:00:04Z"], "keys": ["rtsn_0", "cpu"], "rows": [[60.0, 12.5], [61.0, 13.0], [62.0]]}
-        self.assertEqual(cache_history.read(StaticBoard(ExecResult(0, json.dumps(table).encode(), b""))),
+        samples = [{"timestamp": "2026-09-25T00:00:00Z", "values": {"rtsn_0": 60.0, "cpu": 12.5}},
+                   {"timestamp": 5, "values": {"rtsn_0": 61.0}}, {"timestamp": "2026-09-25T00:00:04Z", "values": None}, None]
+        self.assertEqual(cache_history.read(self.Client(cache_document(samples))),
                          [{"timestamp": "2026-09-25T00:00:00Z", "values": {"rtsn_0": 60.0, "cpu": 12.5}}],
-                         "a row with a bad timestamp or the wrong width is dropped")
-        mismatched = json.dumps(dict(table, rows=table["rows"][:2])).encode()
-        for result in (ExecResult(0, mismatched, b""), BoardError("unreachable", "gone"), ExecResult(1, b"[]", b"boom")):
-            self.assertEqual(cache_history.read(StaticBoard(result)), [])
+                         "a sample with a bad timestamp or values is dropped")
+        for answer in ({"schema": 1}, {"schema": 1, "samples": "x"}, BoardError("unreachable", "gone"),
+                       SentinelError("sentinel_failed", "boom")):
+            self.assertEqual(cache_history.read(self.Client(answer)), [])
 
 
 if __name__ == "__main__":
