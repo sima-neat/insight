@@ -153,8 +153,6 @@ def _mode_support(mode: Optional[dict]) -> dict:
 
 def _mipi_warnings(item: dict, choice: dict, mode: Optional[dict]) -> list:
     warnings = []
-    # An advertised mode says so on its own menu entry and on the tier pill; a paragraph repeating it
-    # above the code belongs to neither.
     if mode and mode.get("delivered_fps") and mode["delivered_fps"] != choice["value"]:
         warnings.append(
             f"Measured on a DevKit, this mode delivered about {mode['delivered_fps']} fps regardless of the "
