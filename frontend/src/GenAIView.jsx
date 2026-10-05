@@ -345,6 +345,10 @@ export default function GenAIView({ onError, onStatus }) {
   function unlockPlayer() {
     if (!player.current) player.current = new Audio()
     const audio = player.current
+    // Detach the last reading's handlers: pausing or replacing its audio must not
+    // end the reading that starts now (the same reply, read again, has the same id).
+    audio.onended = null
+    audio.onpause = null
     audio.pause()
     audio.src = SILENT_WAV
     audio.play().catch(() => {})
@@ -381,12 +385,14 @@ export default function GenAIView({ onError, onStatus }) {
       if (controller.signal.aborted) return
       const url = URL.createObjectURL(result.audio)
       const done = () => {
+        audio.onended = null
+        audio.onpause = null
         URL.revokeObjectURL(url)
         setSpeakingId((current) => (current === id ? null : current))
       }
+      audio.src = url
       audio.onended = done
       audio.onpause = done
-      audio.src = url
       await audio.play()
     } catch (error) {
       setSpeakingId((current) => (current === id ? null : current))
