@@ -3798,3 +3798,31 @@ button:disabled {
   font-size: 10px;
   letter-spacing: 0.04em;
 }
+
+/* DEMO ONLY, not for release: hide the page chrome and let the viewer fill the window,
+   so every stream fits without a scrollbar. Reach tabs by URL (/viewer, /streaming, ...). */
+.masthead,
+.tab-toolbar,
+.viewer-panel-topbar {
+  display: none;
+}
+
+.app-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-panel iframe {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  margin-top: 0;
+}
