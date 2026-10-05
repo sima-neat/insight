@@ -59,7 +59,8 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
         port = 0
     elif isinstance(port, str):
         port = port.strip()
-        port = int(port) if port.isdecimal() else 0
+        # A port has at most five significant digits; int() of a very long decimal string raises instead.
+        port = int(port) if port.isdecimal() and len(port.lstrip("0")) <= 5 else 0
     if not 1 <= port <= 65535:
         raise BoardError("invalid_request", "The SSH port must be between 1 and 65535.", hint="DevKits use port 22.")
     if not _USER_RE.match(user):

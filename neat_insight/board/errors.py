@@ -13,7 +13,6 @@ _HTTP_STATUS = {
     "unreachable": 502,
     "auth_failed": 502,
     "tool_missing": 502,
-    "permission_denied": 502,
     "command_failed": 502,
     "no_video": 502,
     "viewer_unavailable": 502,
