@@ -91,6 +91,9 @@ class LocalTransport:
                 )
             except FileNotFoundError:
                 return ExecResult(127, b"", f"{argv[0]}: command not found".encode())
+            except OSError as exc:
+                # As a shell reports a command it cannot run (an argument list too long, a non-executable file).
+                return ExecResult(126, b"", f"{argv[0]}: {exc.strerror or exc}".encode())
             self._active.add(proc)
         try:
             stdout, stderr = self._collect(proc, argv, stdin, deadline, timeout, on_stdout, cancel_event)
