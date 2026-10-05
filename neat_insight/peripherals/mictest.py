@@ -72,7 +72,8 @@ def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
     """The selector and format to record with, from Sentinel's current catalog.
 
     `scanned` is the `revision` of the catalog the last scan showed: a changed catalog, or a restarted
-    Sentinel, whose revisions never repeat, can route the same id elsewhere, so either means Refresh first.
+    Sentinel, which starts revisions from a random value, can route the same id elsewhere, so either means
+    Refresh first.
     """
     if catalog.get("revision") != scanned["revision"]:
         raise BoardError(
