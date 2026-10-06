@@ -67,11 +67,11 @@ def pipeline(connection: str, source: str, fmt: str, width: int, height: int, ra
         head = ["v4l2src", f"device={source}", "!", f"video/x-raw,format={RAW_FORMATS[fmt]},{caps}", "!", "videoconvert"]
     preview_width, preview_height = preview_size(width, height)
     return head + [
-        # Drop frames before scaling, so frames the preview skips are never scaled.
-        "!", "videorate",
-        "!", f"video/x-raw,framerate={fraction(min(rate, PREVIEW_FPS))}",
+        # Scale before videorate: on a Modalix DevKit (IMX477, 66 fps source) the reverse order delivered
+        # 6.9 fps instead of 13.9, because videorate then paces frames ahead of the slower scaler.
         "!", "videoscale",
-        "!", f"video/x-raw,width={preview_width},height={preview_height}",
+        "!", "videorate",
+        "!", f"video/x-raw,width={preview_width},height={preview_height},framerate={fraction(min(rate, PREVIEW_FPS))}",
         "!", "jpegenc", f"quality={JPEG_QUALITY}",
         "!", "multipartmux", f"boundary={BOUNDARY}",
         "!", "fdsink", "fd=1",

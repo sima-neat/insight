@@ -112,7 +112,7 @@ class PipelineTests(unittest.TestCase):
         arguments = gst.pipeline("mipi", gst.quoted("imx477 5-001a"), "NV12", 1920, 1080, Fraction(30))
         self.assertEqual(arguments, [
             "libcamerasrc", 'camera-name="imx477 5-001a"', "!", "video/x-raw,format=NV12,width=1920,height=1080,framerate=30/1",
-            "!", "videorate", "!", "video/x-raw,framerate=15/1", "!", "videoscale", "!", "video/x-raw,width=640,height=360",
+            "!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1",
             "!", "jpegenc", "quality=70", "!", "multipartmux", "boundary=frame", "!", "fdsink", "fd=1",
         ])
         command = gst.board_command(arguments)
@@ -123,19 +123,19 @@ class PipelineTests(unittest.TestCase):
     def test_a_usb_mjpg_mode_is_decoded_and_reencoded_small(self):
         arguments = gst.pipeline("usb", gst.quoted(C920_BY_ID), "MJPG", 1280, 720, Fraction(30))
         self.assertEqual(arguments[:6], ["v4l2src", f'device="{C920_BY_ID}"', "!", "image/jpeg,width=1280,height=720,framerate=30/1", "!", "jpegdec"])
-        self.assertEqual(arguments[6:14], ["!", "videorate", "!", "video/x-raw,framerate=15/1", "!", "videoscale", "!", "video/x-raw,width=640,height=360"])
+        self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1"])
 
     def test_a_usb_raw_mode_is_converted_and_a_slow_rate_is_not_raised(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "YUYV", 640, 480, Fraction(5))
         self.assertEqual(arguments[:6], ["v4l2src", 'device="/dev/video97"', "!", "video/x-raw,format=YUY2,width=640,height=480,framerate=5/1", "!", "videoconvert"])
-        self.assertEqual(arguments[6:14], ["!", "videorate", "!", "video/x-raw,framerate=5/1", "!", "videoscale", "!", "video/x-raw,width=640,height=480"])
+        self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=480,framerate=5/1"])
         self.assertEqual(gst.RAW_FORMATS["YU12"], "I420")
 
     def test_fractional_rates_are_exact_fractions(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "MJPG", 640, 480, Fraction(30000, 1001))
         self.assertIn("image/jpeg,width=640,height=480,framerate=30000/1001", arguments)
-        self.assertIn("video/x-raw,framerate=15/1", arguments)
-        self.assertIn("video/x-raw,framerate=15/2", gst.pipeline("usb", '"/dev/v"', "MJPG", 640, 480, Fraction(15, 2)))
+        self.assertIn("video/x-raw,width=640,height=480,framerate=15/1", arguments)
+        self.assertIn("video/x-raw,width=640,height=480,framerate=15/2", gst.pipeline("usb", '"/dev/v"', "MJPG", 640, 480, Fraction(15, 2)))
 
     def test_preview_size_keeps_the_aspect_ratio_with_even_sides(self):
         cases = {(1920, 1080): (640, 360), (2432, 2048): (640, 538), (640, 480): (640, 480), (320, 240): (320, 240),
