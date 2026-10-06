@@ -1,9 +1,8 @@
-const TIER_RANK = { verified: 0, advertised: 1, unsupported: 2 }
-
+// Every camera mode is Available (the board's camera overlays support the sensor, the ISP outputs the size,
+// and the format is NV12) or Unsupported. A camera or format is Available when any of its modes is.
 const TIERS = {
-  verified: { label: 'Verified with Core', short: 'verified', tone: 'ok' },
-  advertised: { label: 'Advertised, unverified', short: 'advertised', tone: 'warn' },
-  unsupported: { label: 'Not supported by Core CameraInput', short: 'unsupported', tone: 'periph-danger' }
+  available: { label: 'Available', tone: 'ok' },
+  unsupported: { label: 'Unsupported', tone: 'periph-danger' }
 }
 
 const CONNECTIONS = [
@@ -50,8 +49,18 @@ const USB_FIELDS = [
 
 export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
 
+function tierOf(tier) {
+  return tier === 'available' ? 'available' : 'unsupported'
+}
+
 export function tierInfo(tier) {
-  return TIERS[tier] || { label: 'Support unknown', short: 'unknown', tone: '' }
+  return TIERS[tierOf(tier)]
+}
+
+// The camera's own pill. Its availability pill already reads "Available" for a camera no process holds,
+// so an Available camera gets no second "Available"; its mode menus carry that state.
+export function cameraTierPill(camera) {
+  return tierOf(camera?.support?.tier) === 'available' ? null : TIERS.unsupported
 }
 
 export function severityInfo(severity) {
@@ -210,7 +219,7 @@ export function deviceRows(camera) {
 }
 
 function rank(tier) {
-  return TIER_RANK[tier] ?? 3
+  return tierOf(tier) === 'available' ? 0 : 1
 }
 
 function best(list, tierOf) {
@@ -221,8 +230,9 @@ function usableSizes(format) {
   return (format?.sizes || []).filter((size) => size.fps?.length)
 }
 
+// Unsupported modes stay in the menus, labelled; only a format without a size and rate cannot be chosen.
 function isSelectable(format) {
-  return Boolean(format?.exportable && usableSizes(format).length)
+  return usableSizes(format).length > 0
 }
 
 function sizeTier(size) {
@@ -274,13 +284,12 @@ export function formatOptions(camera) {
   return (camera?.formats || []).map((f) => {
     const selectable = isSelectable(f)
     const range = formatRangeLabel(f.range)
-    const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
     return {
       value: f.format,
       label: f.label || f.format,
-      tier: selectable ? f.support?.tier || '' : 'unsupported',
+      tier: selectable ? tierOf(f.support?.tier) : 'unsupported',
       disabled: !selectable,
-      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
+      reason: selectable ? '' : `no sizes with a frame rate were reported for it.${range ? ` Reported range: ${range}.` : ''}`,
       range: f.range || null
     }
   })
@@ -301,32 +310,25 @@ export function fpsOptions(camera, format, width, height) {
   return (size?.fps || []).map((f) => ({
     value: String(f.value),
     label: `${fpsLabel(f.value)} fps`,
-    tier: f.tier
+    tier: tierOf(f.tier)
   }))
 }
 
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
 // pill beside the menu for the chosen entry, and the entries are grouped under their tier.
-const TIER_PILLS = {
-  verified: { label: 'Verified', tone: 'ok' },
-  advertised: { label: 'Advertised', tone: 'warn' },
-  unsupported: { label: 'Not usable', tone: 'periph-danger' }
-}
 const TIER_GROUPS = [
-  { id: 'verified', label: 'Verified with Core' },
-  { id: 'advertised', label: 'Advertised by libcamera' },
-  { id: 'unsupported', label: 'Not usable' },
-  { id: '', label: 'Support unknown' }
+  { id: 'available', label: 'Available' },
+  { id: 'unsupported', label: 'Unsupported' }
 ]
 
 export function optionTier(options, value) {
   const option = (options || []).find((o) => o.value === String(value))
-  return option ? TIER_PILLS[option.tier] || null : null
+  return option ? tierInfo(option.tier) : null
 }
 
 export function groupOptions(options) {
   return TIER_GROUPS
-    .map((group) => ({ ...group, options: (options || []).filter((o) => (o.tier || '') === group.id) }))
+    .map((group) => ({ ...group, options: (options || []).filter((o) => tierOf(o.tier) === group.id) }))
     .filter((group) => group.options.length)
 }
 
@@ -334,15 +336,14 @@ export function groupOptions(options) {
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
   const availability = availabilityInfo(camera?.availability)
-  const tier = camera?.support?.tier
   if (camera?.availability?.state === 'in_use') {
     return `${availability.label}. Stop that process on the board before an application can open this camera.`
   }
-  // A USB camera is unsupported only because CameraInput takes MIPI cameras; its tier pill says enough.
-  if (tier && tier !== 'verified') return camera.connection === 'usb' ? '' : camera.support.reason || `${tierInfo(tier).label}.`
+  // A USB camera is Unsupported because USB cameras have no camera overlay; its pill says enough.
+  if (camera?.support && cameraTierPill(camera)) return camera.connection === 'usb' ? '' : camera.support.reason || 'Unsupported.'
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
-  // A working camera gets no sentence at all. Every mode menu already labels each entry
-  // "verified" or "advertised", so a paragraph repeating that distinction only adds text.
+  // An Available camera gets no sentence at all: every mode menu already labels each entry
+  // Available or Unsupported, so a paragraph repeating that only adds text.
   return ''
 }
 
@@ -404,10 +405,6 @@ export function cameraSetupRows(setup) {
   const overlays = (setup?.overlays || []).map(overlayName).filter(Boolean)
   if (overlays.length) rows.push(['Camera setup', overlays.join(', ')])
   return rows
-}
-
-export function supportedSensorNames(setup) {
-  return [...new Set((setup?.supported_sensors || []).map((sensor) => sensor?.name).filter(Boolean))]
 }
 
 export function changeSummary(changes) {

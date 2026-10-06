@@ -2,6 +2,7 @@ import {
   availabilityInfo,
   blockedFormatSummary,
   cameraSubtitle,
+  cameraTierPill,
   cameraSummaryLine,
   deviceRows,
   formatOptions,
@@ -9,10 +10,9 @@ import {
   groupOptions,
   optionTier,
   sizeKey,
-  sizeOptions,
-  tierInfo
+  sizeOptions
 } from './model.js'
-import { Callout, ErrorNotice, Pill, SupportLinks } from './ui.jsx'
+import { Callout, ErrorNotice, Pill } from './ui.jsx'
 
 export { cameraSubtitle }
 
@@ -104,7 +104,7 @@ function ModePicker({ camera, selection, notice, onChange }) {
 
 export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
   const availability = availabilityInfo(camera.availability)
-  const tier = tierInfo(camera.support?.tier)
+  const tier = cameraTierPill(camera)
   const summary = cameraSummaryLine(camera)
 
   return (
@@ -116,13 +116,13 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
         </div>
         <span className="periph-pills">
           <Pill tone={availability.tone}>{availability.label}</Pill>
-          <Pill tone={tier.tone}>{tier.label}</Pill>
+          {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
         </span>
       </div>
 
       {summary && (
         <p className="periph-summary-line">
-          {summary} <SupportLinks links={camera.support?.links} inline />
+          {summary}
         </p>
       )}
 

@@ -3978,10 +3978,6 @@ button:disabled {
   color: var(--ink-soft);
 }
 
-.periph-summary-line .periph-links {
-  color: inherit;
-}
-
 .periph-blocked-disclosure {
   margin: 8px 0 0;
   font-size: 12px;

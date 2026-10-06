@@ -27,7 +27,7 @@
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "List the MIPI and USB cameras SiMa Sentinel reports on the selected board. Sentinel discovers the cameras; Insight adds which processes hold each one. Neither captures frames, changes sensor controls, or publishes streams. Each camera and mode states whether Core `CameraInput` supports it, as Neat Core on the board classifies it; without Neat Core support is unknown."}
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras SiMa Sentinel reports on the selected board. Sentinel discovers the cameras; Insight adds which processes hold each one. Neither captures frames, changes sensor controls, or publishes streams. Each camera mode is Available or Unsupported, decided from Sentinel's report: its sensor is in the board's camera overlays, the ISP outputs its size, and its format is NV12 (a fixed fact about Neat's `CameraInput`, not queried from the board)."}
   ],
   "x-tagGroups": [
     {
@@ -841,7 +841,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Scan the selected board for cameras",
-        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes and asks PyNeat (`pyneat.peripherals.list()`) which modes Core `CameraInput` supports; if that check cannot run, availability is `unknown`, and without a PyNeat that classifies camera modes support is unknown (tier `\"\"`). A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists cameras added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes; if that check cannot run, availability is `unknown`. Each mode's `support` comes from Sentinel's catalog alone (see `SupportTier`). A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists cameras added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
         "operationId": "refreshPeripherals",
         "responses": {
           "200": {"description": "New camera snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
@@ -1377,12 +1377,11 @@
       },
       "SupportTier": {
         "type": "object",
-        "description": "Whether Core `CameraInput` can use a camera, format, or mode, as Neat Core on the board classifies it. `verified`: Core accepts it. `unsupported`: Core rejects it, and `reason` is Core's; for a USB camera, whose modes Core rejects because `CameraInput` takes MIPI cameras only, `reason` is only Insight's note on the format, or empty. `\"\"` (unknown): Neat Core is not installed, cannot classify camera modes, or did not classify this mode or frame rate.",
+        "description": "Whether a camera mode is usable, decided from SiMa Sentinel's catalog alone. `available`: Sentinel's `board` block lists the camera's sensor (the `configured_cameras` entry whose `camera_id` is the camera's id) among the sensors the board's camera overlays support (`supported_sensors`), the mode is an ISP output size (`isp_output`), and its format is NV12, which Neat's `CameraInput` outputs (a fixed fact, not queried from the board). `unsupported`: anything else, with `reason`: a USB camera, a sensor not in the board's camera overlays (also when no configured camera matches), a size the ISP cannot output, a format other than NV12, or a Sentinel that sends no `board` block (every mode). A camera or format is `available` when any of its modes is; otherwise its `reason` says why none is.",
         "required": ["tier", "reason"],
         "properties": {
-          "tier": {"type": "string", "enum": ["verified", "unsupported", ""]},
-          "reason": {"type": "string"},
-          "links": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "url": {"type": "string", "format": "uri"}}}}
+          "tier": {"type": "string", "enum": ["available", "unsupported"]},
+          "reason": {"type": "string", "description": "Empty when `available`."}
         }
       },
       "PeripheralCamera": {
@@ -1398,8 +1397,8 @@
           "availability": {"type": "object", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
           "support": {"$ref": "#/components/schemas/SupportTier"},
           "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
-          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}, "reason": {"type": "string", "description": "Why Neat Core rejects this rate (`unsupported`; empty for a USB camera) or why its support is unknown (`\"\"`)."}}}}}}}}}},
-          "default_selection": {"type": ["object", "null"]},
+          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean", "description": "Whether the format has an Available mode."}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["available", "unsupported"], "description": "The state of the mode this rate belongs to."}, "reason": {"type": "string", "description": "Why the mode is Unsupported; absent when it is Available."}}}}}}}}}},
+          "default_selection": {"type": ["object", "null"], "description": "The first Available mode (`format`, `width`, `height`, `fps`); null when no mode is Available."},
           "notes": {"type": "array", "items": {"type": "string"}},
           "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
         }
@@ -1422,10 +1421,10 @@
       },
       "PeripheralCameraSetup": {
         "type": "object",
-        "required": ["model", "overlays", "cameras", "supported_sensors"],
+        "required": ["model", "overlays", "cameras"],
         "properties": {
           "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
-          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some `supported_sensors` overlay names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]},
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]},
           "cameras": {"type": "array", "description": "Cameras the device tree configures. A camera that is not `detected` also raises a `camera_not_detected` warning in `issues`.", "items": {"type": "object", "required": ["name", "compatible", "detected"], "properties": {
             "name": {"type": "string", "description": "The sensor named from its compatible string.", "example": "IMX477"},
             "compatible": {"type": "string", "example": "sony,imx477"},
@@ -1434,8 +1433,7 @@
             "driver_bound": {"type": ["boolean", "null"], "description": "Whether the sensor's driver bound to it; null when Sentinel does not say."},
             "detected": {"type": "boolean", "description": "Whether SiMa Sentinel detected this camera."},
             "item_id": {"type": ["string", "null"], "description": "The `items` id of the detected camera.", "example": "camera:imx477 5-001a"}
-          }}},
-          "supported_sensors": {"type": "array", "description": "Sensors the board's installed camera overlays support, sorted by name.", "items": {"type": "object", "required": ["name", "compatible"], "properties": {"name": {"type": "string", "example": "IMX477"}, "compatible": {"type": "string", "example": "sony,imx477"}}}}
+          }}}
         }
       }
     }

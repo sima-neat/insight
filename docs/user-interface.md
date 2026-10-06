@@ -152,19 +152,18 @@ Insight connects over SSH with the keys of the account that runs it. It never as
 
 ### Cameras and modes
 
-Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each camera and mode has a support level:
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each mode is in one of two states, shown beside the pixel format, resolution, and frame rate menus, which group their entries under them:
 
-| Level | Meaning |
+| State | Meaning |
 | --- | --- |
-| Verified | Neat Core on the board accepts the mode for Core `CameraInput`. |
-| Not supported | Neat Core rejects it, for example USB cameras and formats other than NV12; for a MIPI camera the page shows Core's reason. |
-| Support unknown | Neat Core is not installed on the board, or is too old to classify camera modes; install or update it with `sima-cli neat install core`. |
+| Available | The board's camera overlays support the camera's sensor, the ISP outputs the mode's size, and its pixel format is NV12. |
+| Unsupported | Any of those fails. The pill's reason says which: USB cameras have no camera overlay on the board; the sensor is not in the board's camera overlays; the ISP cannot output the size; or the format is not NV12. A Sentinel too old to report the board's camera overlays leaves every mode Unsupported until you update it. |
 
-Sentinel reports only what the hardware offers. During Refresh, Insight asks Neat Core on the board, through PyNeat, which modes `CameraInput` supports. Availability also comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
+Insight decides this from SiMa Sentinel's report alone. The overlay check matches the sensor Sentinel links to the camera in the board's device tree against the sensors the overlays installed under `/boot` support. The NV12 condition is a fixed fact about Neat's `CameraInput`, which outputs NV12; Insight does not query Neat on the board. A camera with no Available mode shows an **Unsupported** pill and, for a MIPI camera, its reason; a camera with an Available mode shows only its availability. Availability also comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
 ### Camera setup
 
-A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a Refresh, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor, and the Cameras view lists the sensors the board's installed overlays support under **Cameras this SDK supports**. When the device tree configures a camera that Sentinel did not detect, a warning names the sensor and its I²C address, says when its driver did not load, and suggests checking the camera's ribbon cable and power and that the overlay matches the connected camera. With an older Sentinel, these details do not appear.
+A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a Refresh, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor. When the device tree configures a camera that Sentinel did not detect, a warning names the sensor and its I²C address, says when its driver did not load, and suggests checking the camera's ribbon cable and power and that the overlay matches the connected camera. With an older Sentinel, these details do not appear.
 
 ## Stats
 
