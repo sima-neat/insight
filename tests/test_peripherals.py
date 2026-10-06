@@ -86,6 +86,29 @@ def c920():
     }
 
 
+IMX477_OVERLAY = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
+
+
+def board_block(camera_id=IMX477, **camera):
+    """Sentinel's `board` block for a Modalix SoM whose device tree configures one IMX477 (as client.board_block
+    returns it); camera_id None is a configured camera Sentinel did not detect."""
+    configured = {
+        "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
+        "data_lanes": 2, "driver_bound": True, **camera,
+    }
+    if camera_id:
+        configured["camera_id"] = camera_id
+    return {
+        "model": "SiMa.ai Modalix SoM 16Gig Board",
+        "camera_overlays": [IMX477_OVERLAY],
+        "configured_cameras": [configured],
+        "supported_sensors": [
+            {"compatible": "sony,imx477", "overlays": [IMX477_OVERLAY]},
+            {"compatible": "onnn,ar0234", "overlays": ["modalix-som-ar0234.dtbo"]},
+        ],
+    }
+
+
 def catalog(*devices, **extra):
     return {"revision": 1791164913635, "observed_at": OBSERVED_AT, "devices": list(devices), "errors": [], **extra}
 
@@ -532,6 +555,50 @@ class SnapshotTests(unittest.TestCase):
         second = snapshot_of(catalog(imx477()), previous=first)
         self.assertEqual(second["changes"], {"added": [], "removed": [{"id": C920, "name": "HD Pro Webcam C920"}]})
         self.assertIsNone(first["changes"])
+
+    def test_camera_setup_names_the_overlay_configured_cameras_and_supported_sensors(self):
+        setup = snapshot_of(catalog(imx477(), board=board_block()))["camera_setup"]
+        self.assertEqual(setup, {
+            "model": "SiMa.ai Modalix SoM 16Gig Board",
+            "overlays": [IMX477_OVERLAY],
+            "cameras": [{
+                "name": "IMX477", "compatible": "sony,imx477", "i2c_device": "5-001a", "data_lanes": 2,
+                "driver_bound": True, "detected": True, "item_id": IMX477,
+            }],
+            "supported_sensors": [{"name": "AR0234", "compatible": "onnn,ar0234"},
+                                  {"name": "IMX477", "compatible": "sony,imx477"}],
+        })
+        self.assertEqual([cameras.sensor_name(c) for c in ("sony,imx477", "imx219", "sony,")], ["IMX477", "IMX219", "SONY,"])
+        sparse = {"configured_cameras": [{"compatible": "imx219"}]}
+        self.assertEqual(snapshot_of(catalog(board=sparse))["camera_setup"], {
+            "model": None, "overlays": [], "supported_sensors": [], "cameras": [{
+                "name": "IMX219", "compatible": "imx219", "i2c_device": None, "data_lanes": None,
+                "driver_bound": None, "detected": False, "item_id": None,
+            }],
+        })
+
+    def test_a_configured_camera_sentinel_did_not_detect_is_a_warning(self):
+        hint = cameras.NOT_DETECTED_HINT
+        for name, block, message in (
+            ("not detected", board_block(None), "IMX477 is configured in the device tree (I²C 5-001a) but was not detected."),
+            ("driver not bound", board_block(None, driver_bound=False),
+             "IMX477 is configured in the device tree (I²C 5-001a) but its driver did not load."),
+            ("no I2C device", {"configured_cameras": [{"compatible": "sony,imx477"}]},
+             "IMX477 is configured in the device tree but was not detected."),
+        ):
+            with self.subTest(name):
+                # With no camera detected the board check does not run (api._check_board), so facts are empty.
+                snapshot = snapshot_of(catalog(board=block), {"tools": {}, "availability_method": None, "users": {}, "failures": []})
+                self.assertEqual(snapshot["issues"], [
+                    {"severity": "warning", "code": "camera_not_detected", "message": message, "hint": hint},
+                ])
+        self.assertEqual(snapshot_of(catalog(imx477(), board=board_block()))["issues"], [])
+
+    def test_an_older_sentinel_without_a_board_block_adds_no_camera_setup(self):
+        snapshot = snapshot_of(catalog(imx477()))
+        self.assertIsNone(snapshot["camera_setup"])
+        self.assertEqual(snapshot["issues"], [])
+        self.assertIsNone(cameras.empty_snapshot(BOARD, 1)["camera_setup"])
 
     def test_non_camera_devices_are_not_listed(self):
         other = {"id": "future:1", "type": "future_sensor", "backend": "future"}

@@ -1416,7 +1416,26 @@
           "platform": {"type": ["object", "null"], "description": "Tools the on-board check found and how camera users were detected."},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
-          "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous refresh of the same board."}
+          "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous refresh of the same board."},
+          "camera_setup": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCameraSetup"}, {"type": "null"}], "description": "The board's camera setup from its device tree, as SiMa Sentinel reports it; null before the first scan or when Sentinel is too old to report it."}
+        }
+      },
+      "PeripheralCameraSetup": {
+        "type": "object",
+        "required": ["model", "overlays", "cameras", "supported_sensors"],
+        "properties": {
+          "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The camera device-tree overlays the board loads.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]},
+          "cameras": {"type": "array", "description": "Cameras the device tree configures. A camera that is not `detected` also raises a `camera_not_detected` warning in `issues`.", "items": {"type": "object", "required": ["name", "compatible", "detected"], "properties": {
+            "name": {"type": "string", "description": "The sensor named from its compatible string.", "example": "IMX477"},
+            "compatible": {"type": "string", "example": "sony,imx477"},
+            "i2c_device": {"type": ["string", "null"], "example": "5-001a"},
+            "data_lanes": {"type": ["integer", "null"], "example": 2},
+            "driver_bound": {"type": ["boolean", "null"], "description": "Whether the sensor's driver bound to it; null when Sentinel does not say."},
+            "detected": {"type": "boolean", "description": "Whether SiMa Sentinel detected this camera."},
+            "item_id": {"type": ["string", "null"], "description": "The `items` id of the detected camera.", "example": "camera:imx477 5-001a"}
+          }}},
+          "supported_sensors": {"type": "array", "description": "Sensors the board's installed camera overlays support, sorted by name.", "items": {"type": "object", "required": ["name", "compatible"], "properties": {"name": {"type": "string", "example": "IMX477"}, "compatible": {"type": "string", "example": "sony,imx477"}}}}
         }
       }
     }

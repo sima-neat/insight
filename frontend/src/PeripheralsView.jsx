@@ -18,6 +18,7 @@ import {
   sameSelection,
   severityInfo,
   sortIssues,
+  supportedSensorNames,
   tierInfo
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
@@ -39,6 +40,19 @@ function IssueList({ issues }) {
         )
       })}
     </ul>
+  )
+}
+
+function SupportedSensors({ setup }) {
+  const names = supportedSensorNames(setup)
+  if (!names.length) return null
+  return (
+    <details className="periph-identity">
+      <summary>Cameras this SDK supports</summary>
+      <ul className="periph-notes">
+        {names.map((name) => <li key={name}>{name}</li>)}
+      </ul>
+    </details>
   )
 }
 
@@ -289,6 +303,8 @@ export default function PeripheralsView({
   const removedName = snapshot?.changes?.removed?.find((item) => item.id === activeId)?.name || 'The selected camera'
 
   let body = null
+  // Whether the panel shows the scan's cameras (or that it found none), which the supported sensors follow.
+  let scanShown = false
   if (loading || (boardLoading && !board)) body = <p className="hint">Loading peripherals…</p>
   else if (boardError) {
     body = (
@@ -307,12 +323,14 @@ export default function PeripheralsView({
   else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
   else if (!scannedAt) body = !scanError && <p className="hint">Not scanned yet. Refresh to discover cameras on {target.label}.</p>
   else if (!groups.length) {
+    scanShown = true
     body = (
       <Callout tone="info" title={`No cameras detected on ${scannedLabel}`}>
         <p>{issues.length > 0 && 'Check the notes above. '}Connect a camera (power the board off before attaching a MIPI camera), then refresh.</p>
       </Callout>
     )
   } else {
+    scanShown = true
     body = (
       <div className="periph-grid">
         <CameraList groups={groups} selectedId={activeId} onSelect={setSelectedId} />
@@ -391,6 +409,7 @@ export default function PeripheralsView({
             aria-labelledby={activeKind ? `periph-kind-${activeKind}` : undefined}
           >
             {body}
+            {scanShown && <SupportedSensors setup={snapshot?.camera_setup} />}
           </div>
         </div>
       </section>

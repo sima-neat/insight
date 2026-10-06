@@ -5,7 +5,9 @@ import {
   apiError,
   availabilityInfo,
   blockedFormatSummary,
+  boardCameraSetup,
   boardIndicator,
+  cameraSetupRows,
   cameraDeviceId,
   cameraSubtitle,
   cameraSummaryLine,
@@ -27,6 +29,7 @@ import {
   modeLabel,
   normalizeError,
   optionTier,
+  overlayName,
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
@@ -35,6 +38,7 @@ import {
   sizeOptions,
   sortIssues,
   sourceLabel,
+  supportedSensorNames,
   tierInfo,
   validateBoardForm
 } from './model.js'
@@ -584,4 +588,40 @@ test('a mode menu groups its entries by tier, and the pill names the chosen one'
   assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
   assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
   assert.deepEqual(groupOptions([]), [])
+})
+
+const cameraSetup = {
+  model: 'SiMa.ai Modalix SoM 16Gig Board',
+  overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
+  cameras: [],
+  supported_sensors: [{ name: 'AR0234', compatible: 'onnn,ar0234' }, { name: 'IMX477', compatible: 'sony,imx477' }]
+}
+
+test('the board card names the model and camera overlays only when Sentinel reports them', () => {
+  assert.deepEqual(cameraSetupRows(cameraSetup), [
+    ['Model', 'SiMa.ai Modalix SoM 16Gig Board'],
+    ['Camera setup', 'modalix-som-waveshare-ARDU-IMX477-1CAM']
+  ])
+  assert.deepEqual(cameraSetupRows({ model: null, overlays: ['a.dtbo', '/boot/overlays/b.DTBO'] }), [['Camera setup', 'a, b']])
+  assert.deepEqual(cameraSetupRows({ model: '', overlays: [] }), [])
+  assert.deepEqual(cameraSetupRows(null), [])
+  assert.equal(overlayName('modalix-som-imx219.dtbo'), 'modalix-som-imx219')
+  assert.equal(overlayName('no-extension'), 'no-extension')
+})
+
+test('the camera setup belongs to the board that was scanned', () => {
+  const snapshot = { generation: 3, scanned_at: '2026-10-06T00:00:00+00:00', camera_setup: cameraSetup }
+  assert.equal(boardCameraSetup({ generation: 3 }, snapshot), cameraSetup)
+  assert.equal(boardCameraSetup({ generation: 4 }, snapshot), null, 'the selected board changed since the scan')
+  assert.equal(boardCameraSetup({ generation: 3 }, { ...snapshot, scanned_at: null }), null, 'not scanned yet')
+  assert.equal(boardCameraSetup({ generation: 3 }, { ...snapshot, camera_setup: null }), null, 'an older Sentinel')
+  assert.equal(boardCameraSetup(null, snapshot), null)
+  assert.equal(boardCameraSetup({ generation: 3 }, null), null)
+})
+
+test('supported sensors are listed by display name once each', () => {
+  assert.deepEqual(supportedSensorNames(cameraSetup), ['AR0234', 'IMX477'])
+  assert.deepEqual(supportedSensorNames({ supported_sensors: [{ name: 'IMX477' }, { name: 'IMX477' }, {}, null] }), ['IMX477'])
+  assert.deepEqual(supportedSensorNames({ supported_sensors: [] }), [])
+  assert.deepEqual(supportedSensorNames(null), [])
 })

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { copyText, requestJson } from './api.js'
 import {
+  cameraSetupRows,
   connectionStateInfo,
   createFocusReturn,
   defaultTargetText,
@@ -29,6 +30,7 @@ function Facts({ rows }) {
 
 export default function BoardTargetCard({
   board,
+  cameraSetup = null,
   loading = false,
   error = null,
   connectionError = null,
@@ -167,7 +169,7 @@ export default function BoardTargetCard({
           </div>
           <p className="section-note">{description}</p>
           {/* Identity and the last check read as one list rather than a line of prose and a grid. */}
-          <Facts rows={[...identity, ...(checked ? [['Checked', checked]] : [])]} />
+          <Facts rows={[...identity, ...cameraSetupRows(cameraSetup), ...(checked ? [['Checked', checked]] : [])]} />
           <div className="periph-actions periph-board-actions">
             {onOpenShell && shell?.launch_supported && (
               <button

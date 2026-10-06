@@ -94,6 +94,55 @@ def _valid_interval(interval) -> bool:
         return False
     return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind])
 
+
+# Sentinel's optional `board` block: the board model and the camera setup its device tree declares. It
+# only adds context, so a malformed field or entry is dropped instead of failing the refresh.
+BOARD_LIST_LIMIT = 32
+BOARD_TEXT_LIMIT = 256
+
+
+def _text(value) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= BOARD_TEXT_LIMIT
+
+
+def _texts(value) -> list:
+    return [entry for entry in value if _text(entry)][:BOARD_LIST_LIMIT] if isinstance(value, list) else []
+
+
+def _configured_camera(entry) -> dict:
+    if not isinstance(entry, dict) or not _text(entry.get("compatible")):
+        return {}
+    camera = {key: entry[key] for key in ("compatible", "dt_node", "i2c_device", "camera_id") if _text(entry.get(key))}
+    if _positive_int(entry.get("data_lanes")):
+        camera["data_lanes"] = entry["data_lanes"]
+    if isinstance(entry.get("driver_bound"), bool):
+        camera["driver_bound"] = entry["driver_bound"]
+    return camera
+
+
+def _supported_sensor(entry) -> dict:
+    if not isinstance(entry, dict) or not _text(entry.get("compatible")):
+        return {}
+    return {"compatible": entry["compatible"], "overlays": _texts(entry.get("overlays"))}
+
+
+def board_block(value):
+    """Sentinel's `board` block with every malformed field or entry dropped; None when there is none."""
+    if not isinstance(value, dict):
+        return None
+    block = {
+        "camera_overlays": _texts(value.get("camera_overlays")),
+        "configured_cameras": [],
+        "supported_sensors": [],
+    }
+    if _text(value.get("model")):
+        block["model"] = value["model"]
+    for key, parse in (("configured_cameras", _configured_camera), ("supported_sensors", _supported_sensor)):
+        entries = value.get(key) if isinstance(value.get(key), list) else []
+        block[key] = [parsed for parsed in map(parse, entries) if parsed][:BOARD_LIST_LIMIT]
+    return block
+
+
 class PeripheralClient:
     def __init__(self, session, socket_path: str = socket_client.SOCKET_PATH):
         self.session = session
@@ -222,6 +271,12 @@ class PeripheralClient:
         for error in payload["errors"]:
             if not isinstance(error, dict) or not all(isinstance(error.get(key), str) and error[key] for key in ("provider", "code", "reason")):
                 raise self._response_error("SiMa Sentinel returned a malformed provider error.", error)
+        if "board" in payload:
+            board = board_block(payload["board"])
+            if board is None:
+                del payload["board"]
+            else:
+                payload["board"] = board
 
     def _validate_camera(self, camera: dict) -> None:
         identity = camera.get("identity")

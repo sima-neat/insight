@@ -162,6 +162,10 @@ Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and w
 
 Sentinel reports only what the hardware offers. During Refresh, Insight asks Neat Core on the board, through PyNeat, which modes `CameraInput` supports. Availability also comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
 
+### Camera setup
+
+A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a Refresh, the board settings show the board **Model** and a **Camera setup** line naming the camera overlays the board loads, and the Cameras view lists the sensors the board's installed overlays support under **Cameras this SDK supports**. When the device tree configures a camera that Sentinel did not detect, a warning names the sensor and its I²C address, says when its driver did not load, and suggests checking the camera's ribbon cable and power and that the overlay matches the connected camera. With an older Sentinel, these details do not appear.
+
 ## Stats
 
 The Stats view is a placeholder in the current release. It marks the planned location for system load and runtime metrics while an application is running, including CPU, memory, disk, temperature when available, MLA memory, and profiling timeline data streamed through Insight.

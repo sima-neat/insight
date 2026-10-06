@@ -385,6 +385,31 @@ export function isSnapshotStale(board, snapshot) {
   return Number(board.generation) !== Number(snapshot.generation)
 }
 
+// The camera setup Sentinel read from the board's device tree (`camera_setup` in a snapshot), for the
+// board it scanned: null before a scan, after the selected board changed, or from an older Sentinel.
+export function boardCameraSetup(board, snapshot) {
+  if (!board || !snapshot?.scanned_at || Number(board.generation) !== Number(snapshot.generation)) return null
+  return snapshot.camera_setup || null
+}
+
+// "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo" reads as "modalix-som-waveshare-ARDU-IMX477-1CAM".
+export function overlayName(file) {
+  return String(file || '').split('/').pop().replace(/\.dtbo$/i, '')
+}
+
+// Board fact rows for the camera setup; each row is omitted when Sentinel did not report it.
+export function cameraSetupRows(setup) {
+  const rows = []
+  if (setup?.model) rows.push(['Model', String(setup.model)])
+  const overlays = (setup?.overlays || []).map(overlayName).filter(Boolean)
+  if (overlays.length) rows.push(['Camera setup', overlays.join(', ')])
+  return rows
+}
+
+export function supportedSensorNames(setup) {
+  return [...new Set((setup?.supported_sensors || []).map((sensor) => sensor?.name).filter(Boolean))]
+}
+
 export function changeSummary(changes) {
   const names = (list) => (list || []).map((item) => item.name || item.id).join(', ')
   const lines = []

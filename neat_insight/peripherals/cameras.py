@@ -82,6 +82,10 @@ SUPPORT_UNKNOWN = {
     ),
 }
 UNCLASSIFIED_REASON = "Neat Core did not classify this mode, so CameraInput support for it is unknown."
+NOT_DETECTED_HINT = (
+    "Check the camera's ribbon cable and power, and that the board's camera overlay matches the connected camera, "
+    "then Refresh."
+)
 
 
 def now_iso() -> str:
@@ -125,6 +129,7 @@ def empty_snapshot(board: dict, generation: int) -> dict:
         "issues": [],
         "changes": None,
         "platform": None,
+        "camera_setup": None,
     }
 
 
@@ -201,6 +206,7 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         known = None if verdicts is None else verdicts.get(device["id"], {})
         modes = _classified(device.get("modes") or [], known, unknown)
         items.append(_item(device, check, modes, provider_of(device) in retained))
+    setup = _camera_setup(catalog.get("board"), items)
     return {
         "board": board,
         "generation": generation,
@@ -209,9 +215,57 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _issues(catalog, check, items, unknown),
+        "issues": _setup_issues(setup) + _issues(catalog, check, items, unknown),
         "changes": _changes(previous["items"], items) if previous else None,
+        "camera_setup": setup,
     }
+
+
+def sensor_name(compatible: str) -> str:
+    """A sensor's display name from its device-tree compatible string: "sony,imx477" is IMX477."""
+    return (compatible.split(",", 1)[-1] or compatible).upper()
+
+
+def _camera_setup(block: Optional[dict], items: list) -> Optional[dict]:
+    """The board's camera setup from Sentinel's (validated) `board` block; None when Sentinel sends none."""
+    if not isinstance(block, dict):
+        return None
+    ids = {item["id"] for item in items}
+    cameras = []
+    for camera in block.get("configured_cameras") or []:
+        camera_id = camera.get("camera_id")
+        cameras.append({
+            "name": sensor_name(camera["compatible"]),
+            "compatible": camera["compatible"],
+            "i2c_device": camera.get("i2c_device"),
+            "data_lanes": camera.get("data_lanes"),
+            "driver_bound": camera.get("driver_bound"),
+            "detected": bool(camera_id),
+            "item_id": camera_id if camera_id in ids else None,
+        })
+    sensors = {sensor["compatible"]: sensor_name(sensor["compatible"]) for sensor in block.get("supported_sensors") or []}
+    return {
+        "model": block.get("model"),
+        "overlays": list(block.get("camera_overlays") or []),
+        "cameras": cameras,
+        "supported_sensors": [
+            {"name": name, "compatible": compatible}
+            for compatible, name in sorted(sensors.items(), key=lambda pair: (pair[1], pair[0]))
+        ],
+    }
+
+
+def _setup_issues(setup: Optional[dict]) -> list:
+    """A warning for each camera the device tree configures that Sentinel did not detect."""
+    issues = []
+    for camera in (setup or {}).get("cameras") or []:
+        if camera["detected"]:
+            continue
+        where = f" (I²C {camera['i2c_device']})" if camera["i2c_device"] else ""
+        outcome = "its driver did not load" if camera["driver_bound"] is False else "was not detected"
+        message = f"{camera['name']} is configured in the device tree{where} but {outcome}."
+        issues.append(_issue("warning", "camera_not_detected", message, NOT_DETECTED_HINT))
+    return issues
 
 
 def _availability(users: Optional[list], method: Optional[str], fallback: Optional[dict]) -> dict:

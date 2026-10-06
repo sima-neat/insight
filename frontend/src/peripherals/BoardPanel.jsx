@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import BoardTargetCard from './BoardTargetCard.jsx'
+import { requestJson } from './api.js'
+import { boardCameraSetup } from './model.js'
 
 export default function BoardPanel({
   board,
@@ -17,6 +19,17 @@ export default function BoardPanel({
 }) {
   const cardRef = useRef(null)
   const closeRef = useRef(null)
+  const [snapshot, setSnapshot] = useState(null)
+
+  useEffect(() => {
+    // The last peripheral scan carries the board's camera setup. Reading it never connects to the
+    // board, and it is an extra: without it the card simply omits those rows.
+    let active = true
+    requestJson('/api/peripherals').then((data) => active && setSnapshot(data), () => {})
+    return () => {
+      active = false
+    }
+  }, [board?.generation])
 
   useEffect(() => {
     // aria-modal tells assistive technology the page behind is inert, so keyboard focus has to
@@ -75,6 +88,7 @@ export default function BoardPanel({
         <div className="board-panel-body">
           <BoardTargetCard
             board={board}
+            cameraSetup={boardCameraSetup(board, snapshot)}
             loading={loading}
             error={error}
             description="Insight discovers peripherals and reads device statistics over this connection."
