@@ -790,7 +790,7 @@
       }
     },
     "/api/genai/{subpath}": {
-      "parameters": [{"name": "subpath", "in": "path", "required": true, "description": "A GenAI Studio API path: `health`, `voices`, or one under `v1/`, `audio/`, `models/`, `benchmark/`, `tts/`, `piperplus/`, `supertonic/`, `voices/`. `shutdown` and every other path are refused.", "schema": {"type": "string"}, "example": "v1/chat/completions"}],
+      "parameters": [{"name": "subpath", "in": "path", "required": true, "description": "A GenAI Studio API path: `health`, `voices`, or one under `v1/`, `audio/`, `models/`, `benchmark/`, `tts/`, `piperplus/`, `supertonic/`, `voices/`, `rag/`. `shutdown` and every other path are refused.", "schema": {"type": "string"}, "example": "v1/chat/completions"}],
       "get": {
         "tags": ["GenAI Studio"],
         "summary": "Relay a GET to the board's GenAI Studio backend",

@@ -4298,3 +4298,14 @@ button:disabled {
   font-weight: 600;
   font-size: 13px;
 }
+
+.genai-sources {
+  margin: 6px 0 0 !important;
+  font-style: italic;
+}
+
+.genai-doc-summary {
+  margin: 0 0 8px;
+  font-weight: 600;
+  font-size: 13px;
+}

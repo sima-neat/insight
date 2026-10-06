@@ -151,12 +151,18 @@ class GenaiRelayTests(unittest.TestCase):
 
     def test_refuses_shutdown_and_paths_outside_the_studio_api(self):
         self._configure(url=self.board)
-        for path in ("shutdown", "playground/", "static/newui.js", "models/../shutdown", "settingsx"):
+        for path in ("shutdown", "playground/", "static/newui.js", "models/../shutdown", "settingsx",
+                     "upload-to-rag", "rag/../shutdown"):
             with self.subTest(path=path):
                 response = self.client.post(f"/api/genai/{path}")
                 self.assertEqual(response.status_code, 404)
                 self.assertEqual(response.get_json()["reason"], "not-relayed")
         self.assertEqual(_FakeStudio.requests, [])
+
+    def test_relays_document_search_routes(self):
+        self.assertTrue(relay.is_allowed_path("rag/status"))
+        self.assertTrue(relay.is_allowed_path("rag/upload"))
+        self.assertFalse(relay.is_allowed_path("upload-to-rag"))
 
     def test_streams_server_sent_events_without_buffering(self):
         self._configure(url=self.board)

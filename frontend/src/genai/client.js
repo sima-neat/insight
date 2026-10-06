@@ -1,5 +1,6 @@
 // Calls from the GenAI tab to Insight's /api/genai relay (insight#150), which
 // forwards them to the board's GenAI Studio backend.
+import { parseSources } from './documents.js'
 import { chatStreamStats } from './metrics.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser } from './streams.js'
 
@@ -98,12 +99,19 @@ async function readStream(response, onText) {
 
 export const REPLY_CUT_OFF = 'The reply stopped early: the connection to the board closed before it finished.'
 
-// Streams a chat reply; calls onDelta(text) for each piece. Resolves with the
-// board's {tokens, tps} for the reply, or null when it reported none.
-export async function streamChat({ model, messages, maxTokens, signal, onDelta }) {
+// Streams a chat reply; calls onDelta(text) for each piece. Resolves with
+// {stats, rag}: the board's {tokens, tps} for the reply (or null), and with
+// useDocuments the passages the board added ({hits, sources}, else null).
+export async function streamChat({ model, messages, maxTokens, useDocuments = false, signal, onDelta }) {
   const response = await request('v1/chat/completions', {
     method: 'POST',
-    json: { model, messages, stream: true, ...(maxTokens ? { max_tokens: maxTokens } : {}) },
+    json: {
+      model,
+      messages,
+      stream: true,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      ...(useDocuments ? { neat_rag: true } : {})
+    },
     signal
   })
   if (!response.ok) {
@@ -129,7 +137,41 @@ export async function streamChat({ model, messages, maxTokens, signal, onDelta }
   }
   // GenAI Studio ends every reply with [DONE]; a stream that ends without it was cut off.
   if (!finished) throw new GenaiError(REPLY_CUT_OFF)
-  return stats
+  const hits = response.headers.get('X-RAG-Hits')
+  const rag = useDocuments && hits !== null
+    ? { hits: Number(hits) || 0, sources: parseSources(response.headers.get('X-RAG-Sources')) }
+    : null
+  return { stats, rag }
+}
+
+// Document upload, reset and clear stream progress as text; onText gets the
+// text so far. Resolves with the whole text.
+async function postTextStream(path, { form, signal, onText } = {}) {
+  const response = await request(path, { method: 'POST', form, signal })
+  if (!response.ok) {
+    const body = await readJson(response)
+    throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+  }
+  let text = ''
+  await readStream(response, (piece) => {
+    text += piece
+    onText?.(text)
+  })
+  return text
+}
+
+export function uploadDocument(file, options) {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  return postTextStream('rag/upload', { ...options, form })
+}
+
+export function resetDocuments(options) {
+  return postTextStream('rag/reset', options)
+}
+
+export function clearDocuments(options) {
+  return postTextStream('rag/clear', options)
 }
 
 // Follows /models/logs/stream while a load runs; calls onProgress(loading) with
