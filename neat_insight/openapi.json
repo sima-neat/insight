@@ -25,7 +25,8 @@
     {"name": "Media sources", "description": "Manage one-based source slots that publish assigned media over RTSP or HTTP MJPEG. A normal workflow is list videos → assign a slot → start it → inspect state → stop it before changing or deleting media."},
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
-    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."}
+    {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
+    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh --backend-only`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address and Reset MLA token once, then call the Studio's own API under `/api/genai/`."}
   ],
   "x-tagGroups": [
     {
@@ -766,6 +767,56 @@
         }
       }
     },
+    "/api/genai/settings": {
+      "get": {
+        "tags": ["GenAI Studio"],
+        "summary": "Get the GenAI Studio board settings",
+        "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`), and whether a Reset MLA token is stored. The token itself is never returned.",
+        "operationId": "getGenaiSettings",
+        "responses": {
+          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}}
+        }
+      },
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Set the GenAI Studio board settings",
+        "description": "Sets or clears the board address. An empty string clears it; an omitted field is unchanged. The address must be `http(s)://host[:port]` with no path. Settings persist in Insight's `cfg.json`.",
+        "operationId": "setGenaiSettings",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000"}}}},
+        "responses": {
+          "200": {"description": "Settings after the update.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"}
+        }
+      }
+    },
+    "/api/genai/{subpath}": {
+      "parameters": [{"name": "subpath", "in": "path", "required": true, "description": "A GenAI Studio API path: `health`, `voices`, or one under `v1/`, `audio/`, `models/`, `benchmark/`, `tts/`, `piperplus/`, `supertonic/`, `voices/`. `shutdown` and every other path are refused.", "schema": {"type": "string"}, "example": "v1/chat/completions"}],
+      "get": {
+        "tags": ["GenAI Studio"],
+        "summary": "Relay a GET to the board's GenAI Studio backend",
+        "description": "Forwards the request, with its query string, to the configured board and streams the response back unchanged: status, body, content type and the Studio's `X-*` headers. Server-sent event streams such as `models/logs/stream` pass through unbuffered. The board's self-signed certificate is accepted for the configured address only.",
+        "operationId": "relayGenaiGet",
+        "responses": {
+          "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
+          "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "503": {"description": "No board address is configured or derivable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+        }
+      },
+      "post": {
+        "tags": ["GenAI Studio"],
+        "summary": "Relay a POST to the board's GenAI Studio backend",
+        "description": "Forwards the request body as sent (JSON or multipart audio uploads) to the configured board and streams the response back, so streamed chat replies arrive token by token. For `models/reset-mla`, the stored Reset MLA token is added when the caller sends none.",
+        "operationId": "relayGenaiPost",
+        "requestBody": {"required": false, "content": {"*/*": {"schema": {}}}},
+        "responses": {
+          "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
+          "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "503": {"description": "No board address is configured or derivable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+        }
+      }
+    },
     "/api/buildinfo": {
       "get": {
         "tags": ["Service and system"],
@@ -1000,6 +1051,30 @@
         "required": ["error"],
         "properties": {"error": {"type": "string", "description": "Human-readable failure reason suitable for logs and user-facing diagnostics."}},
         "example": {"error": "Missing index"}
+      },
+      "GenaiError": {
+        "type": "object",
+        "description": "Error from the GenAI relay itself (not from the board), with a machine-readable reason.",
+        "required": ["error", "reason"],
+        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "unreachable", "bad-request"]}},
+        "example": {"error": "GenAI Studio backend unreachable at https://192.168.2.3:5000: [Errno 61] Connection refused", "reason": "unreachable"}
+      },
+      "GenaiSettings": {
+        "type": "object",
+        "description": "Board address Insight relays GenAI calls to, and stored settings.",
+        "required": ["url", "configuredUrl", "defaultUrl"],
+        "properties": {
+          "url": {"type": "string", "description": "Address in use; empty when none is configured or derivable."},
+          "configuredUrl": {"type": ["string", "null"], "description": "Address set by the user, or null."},
+          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."}
+        }
+      },
+      "GenaiSettingsUpdate": {
+        "type": "object",
+        "description": "Fields to change; an empty string clears a value.",
+        "properties": {
+          "url": {"type": "string", "description": "`http(s)://host[:port]` of the board's GenAI Studio backend."}
+        }
       },
       "Success": {
         "type": "object",
