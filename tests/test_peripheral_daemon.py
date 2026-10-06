@@ -98,7 +98,7 @@ class PeripheralClientTests(unittest.TestCase):
             "overlays": ["pcie-8rc.dtbo", overlay],
             "configured_cameras": [{
                 "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
-                "data_lanes": 2, "driver_bound": True, "camera_id": "camera:imx477 5-001a",
+                "data_lanes": 2, "camera_id": "camera:imx477 5-001a",
             }],
             "supported_sensors": [{"compatible": "sony,imx477", "overlays": [overlay]}],
         }
@@ -106,8 +106,7 @@ class PeripheralClientTests(unittest.TestCase):
             "model": 7,
             "overlays": [overlay, 3, "", "x" * 300],
             "configured_cameras": [
-                {"compatible": "sony,imx477", "i2c_device": ["5-001a"], "data_lanes": True,
-                 "driver_bound": "yes", "camera_id": None},
+                {"compatible": "sony,imx477", "i2c_device": ["5-001a"], "data_lanes": True, "camera_id": None},
                 {"i2c_device": "5-001a"},
                 "imx477",
             ],

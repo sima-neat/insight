@@ -163,7 +163,7 @@ Insight decides this from SiMa Sentinel's report alone. The overlay check matche
 
 ### Camera setup
 
-A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a Refresh, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor. When the device tree configures a camera that Sentinel did not detect, a warning names the sensor and its I²C address, says when its driver did not load, and suggests checking the camera's ribbon cable and power and that the overlay matches the connected camera. With an older Sentinel, these details do not appear.
+A Sentinel that reads the board's device tree also reports how the board is set up for cameras. After a Refresh, the board settings show the board **Model** and a **Camera setup** line naming the overlays the board loads that configure a camera sensor. With an older Sentinel, these details do not appear.
 
 ## Stats
 

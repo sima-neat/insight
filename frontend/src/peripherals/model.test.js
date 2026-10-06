@@ -615,8 +615,7 @@ test('a mode menu groups its entries as Available and Unsupported, and the pill 
 
 const cameraSetup = {
   model: 'SiMa.ai Modalix SoM 16Gig Board',
-  overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo'],
-  cameras: []
+  overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo']
 }
 
 test('the board card names the model and camera overlays only when Sentinel reports them', () => {

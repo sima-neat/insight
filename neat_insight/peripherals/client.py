@@ -117,8 +117,6 @@ def _configured_camera(entry) -> dict:
     camera = {key: entry[key] for key in ("compatible", "dt_node", "i2c_device", "camera_id") if _text(entry.get(key))}
     if _positive_int(entry.get("data_lanes")):
         camera["data_lanes"] = entry["data_lanes"]
-    if isinstance(entry.get("driver_bound"), bool):
-        camera["driver_bound"] = entry["driver_bound"]
     return camera
 
 

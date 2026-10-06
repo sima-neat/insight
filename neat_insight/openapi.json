@@ -1421,19 +1421,10 @@
       },
       "PeripheralCameraSetup": {
         "type": "object",
-        "required": ["model", "overlays", "cameras"],
+        "required": ["model", "overlays"],
         "properties": {
           "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
-          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]},
-          "cameras": {"type": "array", "description": "Cameras the device tree configures. A camera that is not `detected` also raises a `camera_not_detected` warning in `issues`.", "items": {"type": "object", "required": ["name", "compatible", "detected"], "properties": {
-            "name": {"type": "string", "description": "The sensor named from its compatible string.", "example": "IMX477"},
-            "compatible": {"type": "string", "example": "sony,imx477"},
-            "i2c_device": {"type": ["string", "null"], "example": "5-001a"},
-            "data_lanes": {"type": ["integer", "null"], "example": 2},
-            "driver_bound": {"type": ["boolean", "null"], "description": "Whether the sensor's driver bound to it; null when Sentinel does not say."},
-            "detected": {"type": "boolean", "description": "Whether SiMa Sentinel detected this camera."},
-            "item_id": {"type": ["string", "null"], "description": "The `items` id of the detected camera.", "example": "camera:imx477 5-001a"}
-          }}}
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]}
         }
       }
     }

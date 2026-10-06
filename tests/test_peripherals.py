@@ -85,11 +85,11 @@ IMX477_OVERLAY = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
 
 def board_block(camera_id=IMX477, **camera):
     """Sentinel's `board` block for a Modalix SoM whose device tree configures one IMX477 (as client.board_block
-    returns it); camera_id None is a configured camera Sentinel did not detect. U-Boot also applies a PCIe overlay,
+    returns it); camera_id None is a configured camera no catalog camera is linked to. U-Boot also applies a PCIe overlay,
     which configures no camera sensor."""
     configured = {
         "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
-        "data_lanes": 2, "driver_bound": True, **camera,
+        "data_lanes": 2, **camera,
     }
     if camera_id:
         configured["camera_id"] = camera_id
@@ -289,8 +289,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["scan_id"], f"{doc['revision']}:{doc['observed_at']}")
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
         self.assertEqual(snapshot["issues"], [])
-        # Sentinel's published example carries the board block; its camera is the detected IMX477.
-        self.assertEqual([(c["name"], c["item_id"]) for c in snapshot["camera_setup"]["cameras"]], [("IMX477", IMX477)])
+        # Sentinel's published example carries the board block, which links its IMX477 to the camera overlay.
+        self.assertEqual(snapshot["camera_setup"], {"model": "SiMa.ai Modalix SoM 16Gig Board", "overlays": [IMX477_OVERLAY]})
 
         mipi = item(snapshot, IMX477)
         self.assertEqual((mipi["connection"], mipi["support"]), ("mipi", {"tier": "available", "reason": ""}))
@@ -529,16 +529,9 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(second["changes"], {"added": [], "removed": [{"id": C920, "name": "HD Pro Webcam C920"}]})
         self.assertIsNone(first["changes"])
 
-    def test_camera_setup_names_the_model_camera_overlays_and_configured_cameras(self):
+    def test_camera_setup_names_the_model_and_camera_overlays(self):
         setup = snapshot_of(catalog(imx477(), board=board_block()))["camera_setup"]
-        self.assertEqual(setup, {
-            "model": "SiMa.ai Modalix SoM 16Gig Board",
-            "overlays": [IMX477_OVERLAY],
-            "cameras": [{
-                "name": "IMX477", "compatible": "sony,imx477", "i2c_device": "5-001a", "data_lanes": 2,
-                "driver_bound": True, "detected": True, "item_id": IMX477,
-            }],
-        })
+        self.assertEqual(setup, {"model": "SiMa.ai Modalix SoM 16Gig Board", "overlays": [IMX477_OVERLAY]})
         self.assertEqual([cameras.sensor_name(c) for c in ("sony,imx477", "imx219", "sony,")], ["IMX477", "IMX219", "SONY,"])
         # Only overlays that configure a sensor are shown, in U-Boot's order; none without supported sensors.
         both = {**board_block(), "overlays": [IMX477_OVERLAY, "pcie-8rc.dtbo", "modalix-som-ar0234.dtbo"]}
@@ -547,33 +540,7 @@ class SnapshotTests(unittest.TestCase):
         unsupported = {**board_block(), "supported_sensors": []}
         self.assertEqual(snapshot_of(catalog(imx477(), board=unsupported))["camera_setup"]["overlays"], [])
         sparse = {"configured_cameras": [{"compatible": "imx219"}]}
-        self.assertEqual(snapshot_of(catalog(board=sparse))["camera_setup"], {
-            "model": None, "overlays": [], "cameras": [{
-                "name": "IMX219", "compatible": "imx219", "i2c_device": None, "data_lanes": None,
-                "driver_bound": None, "detected": False, "item_id": None,
-            }],
-        })
-
-    def test_a_configured_camera_sentinel_did_not_detect_is_a_warning(self):
-        hint = cameras.NOT_DETECTED_HINT
-        for name, block, message in (
-            ("not detected", board_block(None), "IMX477 is configured in the device tree (I²C 5-001a) but was not detected."),
-            ("driver not bound", board_block(None, driver_bound=False),
-             "IMX477 is configured in the device tree (I²C 5-001a) but its driver did not load."),
-            ("no I2C device", {"configured_cameras": [{"compatible": "sony,imx477"}]},
-             "IMX477 is configured in the device tree but was not detected."),
-        ):
-            with self.subTest(name):
-                # With no camera detected the board check does not run (api._check_board), so facts are empty.
-                snapshot = snapshot_of(catalog(board=block), {"tools": {}, "availability_method": None, "users": {}, "failures": []})
-                self.assertEqual(snapshot["issues"], [
-                    {"severity": "warning", "code": "camera_not_detected", "message": message, "hint": hint},
-                ])
-        self.assertEqual(snapshot_of(catalog(imx477(), board=board_block()))["issues"], [])
-        # A failed MIPI provider explains the missing camera itself; a cable hint would send the user the wrong way.
-        mipi_failed = catalog(board=board_block(None), errors=[
-            {"provider": "camera.mipi", "code": "io.open", "reason": "could not open /dev/media0"}])
-        self.assertNotIn("camera_not_detected", [i["code"] for i in snapshot_of(mipi_failed)["issues"]])
+        self.assertEqual(snapshot_of(catalog(board=sparse))["camera_setup"], {"model": None, "overlays": []})
 
     def test_an_older_sentinel_without_a_board_block_adds_no_camera_setup(self):
         snapshot = snapshot_of(catalog(imx477()))

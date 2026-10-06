@@ -57,10 +57,6 @@ AVAILABILITY_ISSUES = {
         "Check that /proc is mounted on the board, then Refresh.",
     ),
 }
-NOT_DETECTED_HINT = (
-    "Check the camera's ribbon cable and power, and that the board's camera overlay matches the connected camera, "
-    "then Refresh."
-)
 
 
 def now_iso() -> str:
@@ -171,7 +167,6 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         reason = _camera_reason(device, catalog.get("board"))
         modes = [_classified(mode, reason) for mode in device.get("modes") or []]
         items.append(_item(device, check, modes, reason, provider_of(device) in retained))
-    setup = _camera_setup(catalog.get("board"), items)
     return {
         "board": board,
         "generation": generation,
@@ -180,9 +175,9 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _setup_issues(setup, catalog) + _issues(catalog, check, items),
+        "issues": _issues(catalog, check, items),
         "changes": _changes(previous["items"], items) if previous else None,
-        "camera_setup": setup,
+        "camera_setup": _camera_setup(catalog.get("board")),
     }
 
 
@@ -191,47 +186,17 @@ def sensor_name(compatible: str) -> str:
     return (compatible.split(",", 1)[-1] or compatible).upper()
 
 
-def _camera_setup(block: Optional[dict], items: list) -> Optional[dict]:
+def _camera_setup(block: Optional[dict]) -> Optional[dict]:
     """The board's camera setup from Sentinel's (validated) `board` block; None when Sentinel sends none."""
     if not isinstance(block, dict):
         return None
-    ids = {item["id"] for item in items}
-    cameras = []
-    for camera in block.get("configured_cameras") or []:
-        camera_id = camera.get("camera_id")
-        cameras.append({
-            "name": sensor_name(camera["compatible"]),
-            "compatible": camera["compatible"],
-            "i2c_device": camera.get("i2c_device"),
-            "data_lanes": camera.get("data_lanes"),
-            "driver_bound": camera.get("driver_bound"),
-            "detected": bool(camera_id),
-            "item_id": camera_id if camera_id in ids else None,
-        })
     # Sentinel lists every overlay U-Boot applies (PCIe, secure boot, ...); show those that configure a camera sensor.
     sensors = block.get("supported_sensors") or []
     camera_overlays = {overlay for sensor in sensors for overlay in sensor.get("overlays") or []}
     return {
         "model": block.get("model"),
         "overlays": [overlay for overlay in block.get("overlays") or [] if overlay in camera_overlays],
-        "cameras": cameras,
     }
-
-
-def _setup_issues(setup: Optional[dict], catalog: dict) -> list:
-    """A warning for each camera the device tree configures that Sentinel did not detect."""
-    # When MIPI discovery itself failed, its own error explains the missing cameras; a cable hint would mislead.
-    if any(error.get("provider") == "camera.mipi" for error in catalog.get("errors") or []):
-        return []
-    issues = []
-    for camera in (setup or {}).get("cameras") or []:
-        if camera["detected"]:
-            continue
-        where = f" (I²C {camera['i2c_device']})" if camera["i2c_device"] else ""
-        outcome = "its driver did not load" if camera["driver_bound"] is False else "was not detected"
-        message = f"{camera['name']} is configured in the device tree{where} but {outcome}."
-        issues.append(_issue("warning", "camera_not_detected", message, NOT_DETECTED_HINT))
-    return issues
 
 
 def _availability(users: Optional[list], method: Optional[str], fallback: Optional[dict]) -> dict:
