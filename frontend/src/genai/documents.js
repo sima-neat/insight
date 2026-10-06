@@ -6,7 +6,10 @@
 // Whether the board can answer from documents, from /health's `features`
 // (absent on GenAI Studio from before apps#572).
 export function documentsSupport(health) {
-  const features = health && health.body && health.body.features
+  if (!health || health.httpStatus !== 200) {
+    return { available: false, reason: 'Connect to a board to use documents.' }
+  }
+  const features = health.body && health.body.features
   if (!features || typeof features.rag !== 'boolean') {
     return { available: false, reason: "This board's GenAI Studio can't search documents yet. Update Apps on the board." }
   }

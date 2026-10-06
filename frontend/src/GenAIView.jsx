@@ -101,7 +101,7 @@ const ICONS = {
   newChat: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   export: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   shield: 'M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z',
-  gauge: 'M4 18a8 8 0 1 1 16 0M12 18l4-6M12 18h.01',
+  gauge: 'M3.5 17a8.5 8.5 0 1 1 17 0M12 17l4.5-5M12 17h.01M6.5 12.5l1.2.7M12 8.5V10M17.5 12.5l-1.2.7',
   help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17v.01',
   fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4'
@@ -170,6 +170,9 @@ export default function GenAIView({ onError, onStatus }) {
   const [image, setImage] = useState(null)
   const [thinking, setThinking] = useState(false)
   const [useDocs, setUseDocs] = useState(false)
+  // Turned on in a chat that already has replies: the model tends to repeat
+  // its earlier answers over the documents, so a new chat is suggested.
+  const [docsMidChat, setDocsMidChat] = useState(false)
   const [docStatus, setDocStatus] = useState(null)     // GET /rag/status
   const [docProgress, setDocProgress] = useState(null) // {label, text} while an upload/reset/clear runs
   const docInput = useRef(null)
@@ -832,7 +835,7 @@ export default function GenAIView({ onError, onStatus }) {
           className={`genai-check${docs.available ? '' : ' genai-check-off'}${spot('documents')}`}
           title={docs.available ? 'Answer from the documents on the board (Settings, Documents): the board adds the matching passages to each question.' : docs.reason}
         >
-          <input type="checkbox" checked={docs.available && useDocs} disabled={!docs.available} onChange={(e) => setUseDocs(e.target.checked)} />
+          <input type="checkbox" checked={docs.available && useDocs} disabled={!docs.available} onChange={(e) => { setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
           Use my documents
         </label>
         <span className="genai-header-spacer" />
@@ -1011,6 +1014,13 @@ export default function GenAIView({ onError, onStatus }) {
       )}
 
       <section className="panel genai-chat" aria-label="Chat">
+        {docsMidChat && useDocs && messages.length > 0 && (
+          <div className="genai-docs-hint" role="status">
+            <span>Earlier replies in this chat can win over your documents. Start a new chat to answer from them.</span>
+            <button type="button" className="btn-tonal genai-small" onClick={newChat}>New chat</button>
+            <button type="button" className="btn-ghost genai-small" onClick={() => setDocsMidChat(false)}>Keep this chat</button>
+          </div>
+        )}
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
           {messages.length === 0 && (
             <div className="genai-welcome">

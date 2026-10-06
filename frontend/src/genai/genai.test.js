@@ -460,6 +460,8 @@ test('documents: what the board offers, and the note under a reply', () => {
   assert.equal(documentsSupport(health({ rag: true, benchmark: true })).available, true)
   assert.match(documentsSupport(health({ rag: false })).reason, /app\.rag\.enabled/)
   assert.match(documentsSupport(health(null)).reason, /Update Apps/, 'GenAI Studio from before features existed')
+  assert.match(documentsSupport(null).reason, /Connect to a board/, 'before the board answers')
+  assert.match(documentsSupport({ httpStatus: 503, body: { reason: 'not-configured' } }).reason, /Connect to a board/, 'no board configured')
   // X-RAG-Sources as the board sends it (non-ASCII escaped).
   const sources = parseSources('[{"source":"","heading":"Lab handbook \\u203a DevKit lab hours","score":0.9677},{"source":"","heading":"Lab handbook \\u203a DevKit lab hours","score":0.8}]')
   assert.equal(sources[0].heading, 'Lab handbook › DevKit lab hours')
