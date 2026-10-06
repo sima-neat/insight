@@ -243,10 +243,13 @@ def _camera_setup(block: Optional[dict], items: list) -> Optional[dict]:
             "detected": bool(camera_id),
             "item_id": camera_id if camera_id in ids else None,
         })
-    sensors = {sensor["compatible"]: sensor_name(sensor["compatible"]) for sensor in block.get("supported_sensors") or []}
+    supported = block.get("supported_sensors") or []
+    sensors = {sensor["compatible"]: sensor_name(sensor["compatible"]) for sensor in supported}
+    # Sentinel lists every overlay U-Boot applies (PCIe, secure boot, ...); show those that configure a camera sensor.
+    camera_overlays = {overlay for sensor in supported for overlay in sensor.get("overlays") or []}
     return {
         "model": block.get("model"),
-        "overlays": list(block.get("camera_overlays") or []),
+        "overlays": [overlay for overlay in block.get("overlays") or [] if overlay in camera_overlays],
         "cameras": cameras,
         "supported_sensors": [
             {"name": name, "compatible": compatible}
@@ -532,7 +535,10 @@ def _issues(catalog: dict, check: Optional[dict], items: list, unknown: Optional
     issues = []
     listed = {provider_of(device) for device in catalog["devices"]}
     for error in catalog["errors"]:
-        message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"
+        if error["provider"] == "board":
+            message = f"SiMa Sentinel could not read part of the board's camera setup: {error['reason']}"
+        else:
+            message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"
         if error["provider"] in listed:
             message += " The devices it found last time are still listed."
         issues.append(_issue("warning", error["code"], message, STATUS_HINT))

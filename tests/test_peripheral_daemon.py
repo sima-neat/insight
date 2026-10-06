@@ -95,7 +95,7 @@ class PeripheralClientTests(unittest.TestCase):
         overlay = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
         good = {
             "model": "SiMa.ai Modalix SoM 16Gig Board",
-            "camera_overlays": [overlay],
+            "overlays": ["pcie-8rc.dtbo", overlay],
             "configured_cameras": [{
                 "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
                 "data_lanes": 2, "driver_bound": True, "camera_id": "camera:imx477 5-001a",
@@ -104,7 +104,7 @@ class PeripheralClientTests(unittest.TestCase):
         }
         malformed = {
             "model": 7,
-            "camera_overlays": [overlay, 3, "", "x" * 300],
+            "overlays": [overlay, 3, "", "x" * 300],
             "configured_cameras": [
                 {"compatible": "sony,imx477", "i2c_device": ["5-001a"], "data_lanes": True,
                  "driver_bound": "yes", "camera_id": None},
@@ -114,7 +114,7 @@ class PeripheralClientTests(unittest.TestCase):
             "supported_sensors": {"compatible": "sony,imx477"},
         }
         cleaned = {
-            "camera_overlays": [overlay],
+            "overlays": [overlay],
             "configured_cameras": [{"compatible": "sony,imx477"}],
             "supported_sensors": [],
         }
@@ -122,7 +122,9 @@ class PeripheralClientTests(unittest.TestCase):
         for name, block, expected in (
             ("good", good, good),
             ("malformed", malformed, cleaned),
-            ("bounded", many, {"camera_overlays": [], "configured_cameras": [],
+            # A list Sentinel could not read is absent, not empty.
+            ("overlays not a list", {"overlays": "a.dtbo"}, {"configured_cameras": [], "supported_sensors": []}),
+            ("bounded", many, {"configured_cameras": [],
                                "supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": []}
                                                      for i in range(client_module.SUPPORTED_SENSORS_LIMIT)]}),
         ):

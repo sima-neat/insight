@@ -1,8 +1,5 @@
 {
   "board": {
-    "camera_overlays": [
-      "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
-    ],
     "configured_cameras": [
       {
         "camera_id": "camera:imx477 5-001a",
@@ -14,6 +11,9 @@
       }
     ],
     "model": "SiMa.ai Modalix SoM 16Gig Board",
+    "overlays": [
+      "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
+    ],
     "supported_sensors": [
       {
         "compatible": "sony,imx477",

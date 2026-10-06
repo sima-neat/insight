@@ -1425,7 +1425,7 @@
         "required": ["model", "overlays", "cameras", "supported_sensors"],
         "properties": {
           "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
-          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The camera device-tree overlays the board loads.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]},
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some `supported_sensors` overlay names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]},
           "cameras": {"type": "array", "description": "Cameras the device tree configures. A camera that is not `detected` also raises a `camera_not_detected` warning in `issues`.", "items": {"type": "object", "required": ["name", "compatible", "detected"], "properties": {
             "name": {"type": "string", "description": "The sensor named from its compatible string.", "example": "IMX477"},
             "compatible": {"type": "string", "example": "sony,imx477"},

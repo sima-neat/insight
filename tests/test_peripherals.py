@@ -91,7 +91,8 @@ IMX477_OVERLAY = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
 
 def board_block(camera_id=IMX477, **camera):
     """Sentinel's `board` block for a Modalix SoM whose device tree configures one IMX477 (as client.board_block
-    returns it); camera_id None is a configured camera Sentinel did not detect."""
+    returns it); camera_id None is a configured camera Sentinel did not detect. U-Boot also applies a PCIe overlay,
+    which configures no camera sensor."""
     configured = {
         "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
         "data_lanes": 2, "driver_bound": True, **camera,
@@ -100,7 +101,7 @@ def board_block(camera_id=IMX477, **camera):
         configured["camera_id"] = camera_id
     return {
         "model": "SiMa.ai Modalix SoM 16Gig Board",
-        "camera_overlays": [IMX477_OVERLAY],
+        "overlays": ["pcie-8rc.dtbo", IMX477_OVERLAY],
         "configured_cameras": [configured],
         "supported_sensors": [
             {"compatible": "sony,imx477", "overlays": [IMX477_OVERLAY]},
@@ -530,6 +531,17 @@ class SnapshotTests(unittest.TestCase):
                          "SiMa Sentinel's hotplug provider failed: kernel uevents cannot be received")
         self.assertEqual(issues["io.open"]["severity"], "warning")
 
+    def test_a_board_reader_error_names_the_camera_setup(self):
+        error = {"provider": "board", "code": "peripherals.discovery_failed",
+                 "reason": "fw_printenv failed (exit status: 1): Cannot read environment, using default"}
+        snapshot = snapshot_of(catalog(imx477(), board=board_block(), errors=[error]))
+        self.assertEqual(snapshot["issues"], [{
+            "severity": "warning", "code": "peripherals.discovery_failed",
+            "message": "SiMa Sentinel could not read part of the board's camera setup: fw_printenv failed (exit "
+                       "status: 1): Cannot read environment, using default",
+            "hint": cameras.STATUS_HINT,
+        }])
+
     def test_availability_names_holders_and_degrades_to_unknown(self):
         holder = [{"pid": 4242, "command": "gst-launch-1.0"}]
         busy = item(snapshot_of(catalog(imx477()), check(users={IMX477: holder})), IMX477)["availability"]
@@ -571,6 +583,12 @@ class SnapshotTests(unittest.TestCase):
                                   {"name": "IMX477", "compatible": "sony,imx477"}],
         })
         self.assertEqual([cameras.sensor_name(c) for c in ("sony,imx477", "imx219", "sony,")], ["IMX477", "IMX219", "SONY,"])
+        # Only overlays that configure a sensor are shown, in U-Boot's order; none without supported sensors.
+        both = {**board_block(), "overlays": [IMX477_OVERLAY, "pcie-8rc.dtbo", "modalix-som-ar0234.dtbo"]}
+        self.assertEqual(snapshot_of(catalog(imx477(), board=both))["camera_setup"]["overlays"],
+                         [IMX477_OVERLAY, "modalix-som-ar0234.dtbo"])
+        unsupported = {**board_block(), "supported_sensors": []}
+        self.assertEqual(snapshot_of(catalog(imx477(), board=unsupported))["camera_setup"]["overlays"], [])
         sparse = {"configured_cameras": [{"compatible": "imx219"}]}
         self.assertEqual(snapshot_of(catalog(board=sparse))["camera_setup"], {
             "model": None, "overlays": [], "supported_sensors": [], "cameras": [{

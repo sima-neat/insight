@@ -129,16 +129,16 @@ def _supported_sensor(entry) -> dict:
 
 
 def board_block(value):
-    """Sentinel's `board` block with every malformed field or entry dropped; None when there is none."""
+    """Sentinel's `board` block with every malformed field or entry dropped; None when there is none.
+
+    `overlays` is every overlay U-Boot applies, camera or not; it is omitted when Sentinel could not read it."""
     if not isinstance(value, dict):
         return None
-    block = {
-        "camera_overlays": _texts(value.get("camera_overlays")),
-        "configured_cameras": [],
-        "supported_sensors": [],
-    }
+    block = {"configured_cameras": [], "supported_sensors": []}
     if _text(value.get("model")):
         block["model"] = value["model"]
+    if isinstance(value.get("overlays"), list):
+        block["overlays"] = _texts(value["overlays"])
     for key, parse, limit in (
         ("configured_cameras", _configured_camera, BOARD_LIST_LIMIT),
         ("supported_sensors", _supported_sensor, SUPPORTED_SENSORS_LIMIT),
