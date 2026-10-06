@@ -140,6 +140,46 @@ The Stats view is a placeholder in the current release. It marks the planned loc
 
 This feature is intended to be completed in the next release. Once complete, use Stats when you need to separate application behavior from system behavior. For example, a dropped frame problem may come from the application stream path, but it may also correlate with CPU load, memory pressure, or device runtime state.
 
+## GenAI Studio
+
+The GenAI Studio view runs language, vision and speech models on a board. It talks to GenAI Studio from Neat Apps, which runs on the board in backend-only mode; Insight relays every call, so the browser never connects to the board directly.
+
+Start the backend on the board first, from the GenAI Studio application directory:
+
+```bash
+./run.sh --backend-only
+```
+
+The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud** and **Think first** (greyed out for models that always answer directly), and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Tutorial**, **Settings** and **Full screen**.
+
+The status label, and a banner when something needs attention, show the backend's state and what to do next:
+
+- **Not set up**: no board is selected, and the settings open. Enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
+- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+- **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
+- **Starting**: the backend answers but its model server is not ready yet.
+- **Busy**: a model is loading. Chat and speech wait until it finishes.
+- **Incompatible**: the board's GenAI Studio API version does not match this Insight. Update the one the banner names.
+- **Ready**: chat and speech are available. A voice that failed to load on the board is reported here too.
+
+**Chat** is one conversation in the middle of the page. Type in the message box, or press the microphone, speak, and press it again: your words are transcribed and sent. With a model that sees images, attach a picture or take one with the camera. Replies appear as they are written; the stop button ends one early, and **New chat** starts over so the model forgets the conversation. **Read aloud** reads one reply and **Stop speaking** ends it; **Read replies aloud** reads every reply, starting with the first sentence while the rest is still being written. The browser asks for microphone and camera permission the first time.
+
+Under each reply, Insight shows how fast it was produced, measured in the browser:
+
+- **First token**: from sending to the first text of the reply.
+- **Speed** and **Tokens**: tokens per second and the reply's length, as reported by the board.
+- **Total**: from sending to the end of the reply.
+- **First audio**, **RTF** and **Voice**, when the reply is read aloud: the time until it started playing, the real-time factor (seconds of compute per second of speech; below 1 is faster than real time), and the speech engine.
+- **Transcribed** and **Language**, under a spoken question: the time from the end of the recording to the text, and the language heard.
+
+**Export chat** saves the conversation as a `.log` text file (`neat-chat-<date>-<time>.log`) with the export time and model at the top, then each turn; pictures appear as `[image]`.
+
+**SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
+
+**Settings** holds the board address, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
+
+If a model load fails or replies stop, restart GenAI Studio on the board (`./run.sh stop`, then `./run.sh --backend-only`); that frees the accelerator, and the model can then be loaded again. **Settings**, **Troubleshooting** repeats this.
+
 ## System Information
 
 The system information panel summarizes the environment Insight can see. In the Neat Development Environment, it can show SDK and component information, Insight status, update information, and exposed port mappings such as `mainUI` and `videoUI`.
