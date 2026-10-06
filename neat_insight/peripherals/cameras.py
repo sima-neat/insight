@@ -2,7 +2,6 @@
 import math
 import threading
 import time
-from collections import Counter
 from datetime import datetime, timezone
 from fractions import Fraction
 from typing import Optional
@@ -12,26 +11,19 @@ STANDARD_FPS = (60, 30, 25, 20, 15, 10, 5)
 CAMERAINPUT_RATE = Fraction(30, 1)
 
 
-def _link(repo: str, number: int) -> dict:
-    return {"label": f"{repo}#{number}", "url": f"https://github.com/sima-neat/{repo}/issues/{number}"}
-
-
-CORE_838 = _link("core", 838)
-CORE_883 = _link("core", 883)
-CORE_903 = _link("core", 903)
-INTERNALS_244 = _link("internals", 244)
-
-VERIFIED_REASON = "Neat Core accepts these modes for CameraInput; the rest are not usable."
+# Neat fact: CameraInput's default output format (CameraInputOptions.format = "NV12" in Neat Core
+# include/nodes/io/CameraInput.h, unchanged since v0.4.0). Written here as a constant on purpose:
+# Insight does not call or import Neat to decide support.
+CAMERAINPUT_FORMAT = "NV12"
+# A mode is Available when the board's camera overlays support the camera's sensor, the ISP outputs its size,
+# and its format is CAMERAINPUT_FORMAT; every other mode is Unsupported, for one of these reasons.
+NO_BOARD_REASON = "This board's SiMa Sentinel does not report camera overlays; update Sentinel."
+USB_REASON = "USB cameras have no camera overlay on this board."
+NOT_IN_OVERLAYS_REASON = "{name} is not in this board's camera overlays."
+NOT_ISP_SIZE_REASON = "The ISP cannot output this size."
+NO_ISP_SIZE_REASON = "The ISP cannot output any size this camera reports."
+FORMAT_REASON = f"Neat's CameraInput outputs {CAMERAINPUT_FORMAT} only."
 NO_MODES_REASON = "SiMa Sentinel reported no modes for this camera."
-USB_TRACKED = "USB support is tracked in core#838."
-USB_FORMAT_NOTES = {
-    "MJPG": (
-        "MJPG chroma subsampling cannot be read without decoding; "
-        "4:2:2 MJPEG stalls neatdecoder without an error (core#903).",
-        CORE_903,
-    ),
-    "YUYV": ("There is no YUYV to NV12 conversion on the CVU (internals#244).", INTERNALS_244),
-}
 NO_BY_ID_NOTE = "No /dev/v4l/by-id link was found; /dev/videoN numbering can change across reboots and replugs."
 # Sentinel names a MIPI camera after its sensor entity in the kernel media graph.
 NAME_SOURCE = "media-graph"
@@ -65,33 +57,14 @@ AVAILABILITY_ISSUES = {
         "Check that /proc is mounted on the board, then Refresh.",
     ),
 }
-# Why Neat Core's verdicts are unknown: (issue message, hint, per-mode reason), by board_check support state.
-SUPPORT_UNKNOWN = {
-    "not_installed": (
-        "Neat Core is not installed on the board, so CameraInput support for each camera mode is unknown.",
-        "Install Neat Core on the board (`sima-cli neat install core`), then Refresh.",
-        "Neat Core is not installed, so CameraInput support for this mode is unknown.",
-    ),
-    "outdated": (
-        "Neat Core on the board does not classify camera modes, so CameraInput support for each mode is unknown.",
-        "Update Neat Core on the board (`sima-cli neat install core`), then Refresh.",
-        "Neat Core on the board does not classify camera modes, so CameraInput support for this mode is unknown.",
-    ),
-    "failed": (
-        "Neat Core could not classify the camera modes, so CameraInput support for each mode is unknown.",
-        STATUS_HINT,
-        "Neat Core could not classify this mode, so CameraInput support for it is unknown.",
-    ),
-}
-UNCLASSIFIED_REASON = "Neat Core did not classify this mode, so CameraInput support for it is unknown."
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _support(tier: str, reason: str, links: tuple = ()) -> dict:
-    return {"tier": tier, "reason": reason, "links": list(links)}
+def _support(tier: str, reason: str) -> dict:
+    return {"tier": tier, "reason": reason}
 
 
 def _issue(severity: str, code: str, message: str, hint: str) -> dict:
@@ -112,7 +85,7 @@ def _fps(num: int, den: int):
 
 
 def _choice(rate: Fraction, **verdict) -> dict:
-    """One frame-rate choice: a display value plus the exact rate the export requests."""
+    """One frame-rate choice: a display value plus the exact rate as a fraction."""
     return {"value": _fps(rate.numerator, rate.denominator), "framerate_num": rate.numerator,
             "framerate_den": rate.denominator, **verdict}
 
@@ -127,6 +100,7 @@ def empty_snapshot(board: dict, generation: int) -> dict:
         "issues": [],
         "changes": None,
         "platform": None,
+        "camera_setup": None,
     }
 
 
@@ -151,42 +125,33 @@ def provider_of(device: dict) -> str:
     return f"{device['type']}.{device.get('backend')}"
 
 
-def _mode_key(mode: dict) -> tuple:
-    ranged = mode.get("size_range")
-    if ranged:
-        return (mode["format"], "range", *(ranged.get(key) for key in ("min_width", "min_height", "max_width", "max_height")))
-    return (mode["format"], mode.get("width"), mode.get("height"))
+def _camera_reason(camera: dict, board: Optional[dict]) -> str:
+    """Why none of a camera's modes can be Available; empty when the board's camera overlays support its sensor."""
+    if _connection(camera) == "usb":
+        return USB_REASON
+    if not isinstance(board, dict):
+        return NO_BOARD_REASON
+    # The device tree names a detected camera's sensor by its compatible string; Sentinel links the two by id.
+    configured = board.get("configured_cameras") or []
+    compatible = next((entry["compatible"] for entry in configured if entry.get("camera_id") == camera["id"]), None)
+    if compatible and compatible in {sensor["compatible"] for sensor in board.get("supported_sensors") or []}:
+        return ""
+    if compatible:
+        name = sensor_name(compatible)
+    else:
+        name = (camera.get("model") or "").upper() or camera.get("camera_name") or camera["id"]
+    return NOT_IN_OVERLAYS_REASON.format(name=name)
 
 
-def _core_verdicts(check: Optional[dict]):
-    """Neat Core's verdicts by camera id, then mode key; or None and the SUPPORT_UNKNOWN state."""
-    support = (check or {}).get("support")
-    state = support.get("state") if isinstance(support, dict) else "failed"
-    if state != "ok" or not isinstance(support.get("cameras"), dict):
-        return None, state if state in SUPPORT_UNKNOWN else "failed"
-    verdicts = {}
-    for camera_id, modes in support["cameras"].items():
-        for mode in modes if isinstance(modes, list) else []:
-            if isinstance(mode, dict) and isinstance(mode.get("format"), str):
-                verdicts.setdefault(camera_id, {})[_mode_key(mode)] = mode
-    return verdicts, None
-
-
-def _classified(modes: list, verdicts: Optional[dict], unknown: Optional[str]) -> list:
-    """Sentinel's modes with Neat Core's verdict: `supported` True or False, or None when unknown, plus the
-    `rate` Core classified (its fastest advertised rate), None when it reported none."""
-    result = []
-    for mode in modes:
-        verdict = (verdicts or {}).get(_mode_key(mode))
-        if verdict is None:
-            reason = SUPPORT_UNKNOWN[unknown][2] if unknown else UNCLASSIFIED_REASON
-            result.append(dict(mode, supported=None, reason=reason, rate=None))
-            continue
-        num, den = verdict.get("framerate_num"), verdict.get("framerate_den")
-        rate = Fraction(num, den) if isinstance(num, int) and isinstance(den, int) and num > 0 and den > 0 else None
-        reason = verdict.get("reason") if isinstance(verdict.get("reason"), str) else ""
-        result.append(dict(mode, supported=verdict.get("supported") is True, reason=reason, rate=rate))
-    return result
+def _classified(mode: dict, camera_reason: str) -> dict:
+    """A Sentinel mode with its state: `available` True or False, and why it is not (`reason`)."""
+    if camera_reason:
+        return dict(mode, available=False, reason=camera_reason)
+    if mode.get("isp_output") is not True:
+        return dict(mode, available=False, reason=NOT_ISP_SIZE_REASON)
+    if mode["format"] != CAMERAINPUT_FORMAT:
+        return dict(mode, available=False, reason=FORMAT_REASON)
+    return dict(mode, available=True, reason="")
 
 
 def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation: int, previous: Optional[dict], scan_ms: int):
@@ -197,12 +162,11 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "tools": (check or {}).get("tools") or {},
         "availability_method": (check or {}).get("availability_method") or "none",
     }
-    verdicts, unknown = _core_verdicts(check)
     items = []
     for device in cameras_of(catalog):
-        known = None if verdicts is None else verdicts.get(device["id"], {})
-        modes = _classified(device.get("modes") or [], known, unknown)
-        items.append(_item(device, check, modes, provider_of(device) in retained))
+        reason = _camera_reason(device, catalog.get("board"))
+        modes = [_classified(mode, reason) for mode in device.get("modes") or []]
+        items.append(_item(device, check, modes, reason, provider_of(device) in retained))
     return {
         "board": board,
         "generation": generation,
@@ -211,8 +175,27 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _issues(catalog, check, items, unknown),
+        "issues": _issues(catalog, check, items),
         "changes": _changes(previous["items"], items) if previous else None,
+        "camera_setup": _camera_setup(catalog.get("board")),
+    }
+
+
+def sensor_name(compatible: str) -> str:
+    """A sensor's display name from its device-tree compatible string: "sony,imx477" is IMX477."""
+    return (compatible.split(",", 1)[-1] or compatible).upper()
+
+
+def _camera_setup(block: Optional[dict]) -> Optional[dict]:
+    """The board's camera setup from Sentinel's (validated) `board` block; None when Sentinel sends none."""
+    if not isinstance(block, dict):
+        return None
+    # Sentinel lists every overlay U-Boot applies (PCIe, secure boot, ...); show those that configure a camera sensor.
+    sensors = block.get("supported_sensors") or []
+    camera_overlays = {overlay for sensor in sensors for overlay in sensor.get("overlays") or []}
+    return {
+        "model": block.get("model"),
+        "overlays": [overlay for overlay in block.get("overlays") or [] if overlay in camera_overlays],
     }
 
 
@@ -248,11 +231,11 @@ def _speed_mbps(speed):
     return int(value) if value.is_integer() else value
 
 
-def _item(camera: dict, check: Optional[dict], modes: list, retained: bool) -> dict:
-    """`modes` are the camera's modes with Neat Core's verdicts (_classified)."""
+def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retained: bool) -> dict:
+    """`modes` are the camera's classified modes (_classified); `reason` is why none can be Available, if any."""
     connection = _connection(camera)
     usb = connection == "usb"
-    formats = _formats(modes, usb)
+    formats = _formats(modes, usb, reason)
     notes, errors = [], []
     if usb:
         identity = camera.get("identity") or {}
@@ -273,7 +256,6 @@ def _item(camera: dict, check: Optional[dict], modes: list, retained: bool) -> d
         else:
             notes.append(NO_BY_ID_NOTE)
         name = camera.get("model") or camera.get("device_path") or camera["id"]
-        default = _usb_default(formats)
     else:
         info = {"camera_name": camera.get("camera_name")}
         if camera.get("camera_name"):
@@ -282,7 +264,6 @@ def _item(camera: dict, check: Optional[dict], modes: list, retained: bool) -> d
             if camera.get(source):
                 info[key] = camera[source]
         name = camera.get("camera_name") or camera["id"]
-        default = _default(formats)
         notes += _mipi_notes(camera, modes)
     if not modes:
         isp = camera.get("isp") or {}
@@ -305,10 +286,10 @@ def _item(camera: dict, check: Optional[dict], modes: list, retained: bool) -> d
         "model": camera.get("model") or None,
         "device": info,
         "availability": _availability(users, (check or {}).get("availability_method"), camera.get("availability")),
-        "support": _verdict(modes, usb, fallback=NO_MODES_REASON),
+        "support": _verdict(modes, reason),
         "modes_source": "unavailable" if not modes else "previous-scan" if retained else "live",
         "formats": formats,
-        "default_selection": default,
+        "default_selection": _default(formats),
         "notes": notes,
         "errors": errors,
     }
@@ -339,24 +320,15 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     return notes
 
 
-def _common_reason(modes: list, supported) -> str:
-    """The most common reason among modes whose verdict is `supported` (False, or None for unknown)."""
-    reasons = [mode["reason"] for mode in modes if mode["supported"] is supported and mode["reason"]]
-    return Counter(reasons).most_common(1)[0][0] if reasons else ""
-
-
-def _verdict(modes: list, usb: bool, fmt: Optional[str] = None, fallback: str = "") -> dict:
-    """The verdict on a camera (`fmt` None) or one of its formats, from Neat Core's per-mode verdicts."""
-    if any(mode["supported"] for mode in modes):
-        return _support("verified", VERIFIED_REASON, () if usb else (CORE_883,))
-    if any(mode["supported"] is None for mode in modes):
-        return _support("", _common_reason(modes, None))
-    reason = _common_reason(modes, False) or fallback
-    if not usb:
-        return _support("unsupported", reason)
-    note, link = USB_FORMAT_NOTES.get(fmt, (None, None))
-    text = " ".join(part for part in (reason, USB_TRACKED, note) if part)
-    return _support("unsupported", text, (CORE_838, link) if link else (CORE_838,))
+def _verdict(modes: list, reason: str) -> dict:
+    """A camera or format is Available when any of its modes is; `reason` is why none of the camera's can be."""
+    if any(mode["available"] for mode in modes):
+        return _support("available", "")
+    if reason or not modes:
+        return _support("unsupported", reason or NO_MODES_REASON)
+    # The sensor is supported: either the ISP outputs none of these sizes, or none it outputs is in NV12.
+    isp_sizes = any(mode.get("isp_output") is True for mode in modes)
+    return _support("unsupported", FORMAT_REASON if isp_sizes else NO_ISP_SIZE_REASON)
 
 
 def _interval_rates(entry: dict) -> list:
@@ -396,10 +368,8 @@ def _on_step(period: float, first: float, step: float) -> bool:
 
 
 def _choices(modes: list, usb: bool) -> list:
-    """The frame rates of one format and size. The rate Neat Core classified carries the mode's verdict
-    (CameraInput's default rate when a MIPI mode reports none); the other advertised rates are unsupported
-    with an unsupported mode and unknown otherwise. A USB mode exports as a V4L2 descriptor, not
-    CameraInput code, so it offers only the rates it advertises."""
+    """The frame rates of one format and size, each with its mode's state. A MIPI mode that reports no rate
+    offers CameraInput's default rate; a USB mode offers only the rates it advertises."""
     choices = {}
     for mode in modes:
         rates = [
@@ -407,20 +377,16 @@ def _choices(modes: list, usb: bool) -> list:
             for entry in mode.get("frame_intervals") or []
             if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height"))
             for rate in _interval_rates(entry)
-        ]
-        classified = mode["rate"] or (None if usb else CAMERAINPUT_RATE)
-        if mode["supported"] and classified:
-            choices[_fps(classified.numerator, classified.denominator)] = _choice(classified, tier="verified")
-            others = {"tier": ""}
-        else:
-            rates = rates or ([classified] if classified else [])
-            others = {"tier": "unsupported" if mode["supported"] is False else "", "reason": mode["reason"]}
+        ] or ([] if usb else [CAMERAINPUT_RATE])
+        state = {"tier": "available"} if mode["available"] else {"tier": "unsupported", "reason": mode["reason"]}
         for rate in rates:
-            choices.setdefault(_fps(rate.numerator, rate.denominator), _choice(rate, **others))
+            value = _fps(rate.numerator, rate.denominator)
+            if value not in choices or mode["available"]:
+                choices[value] = _choice(rate, **state)
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 
-def _formats(modes: list, usb: bool) -> list:
+def _formats(modes: list, usb: bool, reason: str) -> list:
     grouped = {}
     for mode in modes:
         grouped.setdefault(mode["format"], []).append(mode)
@@ -431,16 +397,13 @@ def _formats(modes: list, usb: bool) -> list:
             if "width" in mode:
                 sizes.setdefault((mode["width"], mode["height"]), []).append(mode)
         ranged = next((mode["size_range"] for mode in entries if "size_range" in mode), None)
-        # Unknown support stays selectable; only a verdict lets a MIPI mode export.
-        usable = any(mode["supported"] is not False for mode in entries)
         description = next((mode["format_description"] for mode in entries if mode.get("format_description")), None)
         formats.append({
             "format": name,
             # A USB driver names its own formats.
             "label": f"{name} ({description})" if usb and description else FORMAT_LABELS.get(name, name),
-            # A USB format exports as a V4L2 descriptor, not CameraInput code, so it is exportable regardless.
-            "exportable": usb or usable,
-            "support": _verdict(entries, usb, name),
+            "exportable": any(mode["available"] for mode in entries),
+            "support": _verdict(entries, reason),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
             "sizes": [{"width": w, "height": h, "fps": _choices(group, usb)} for (w, h), group in sizes.items()],
@@ -449,49 +412,35 @@ def _formats(modes: list, usb: bool) -> list:
 
 
 def _default(formats: list) -> Optional[dict]:
+    """The first Available mode; None when no mode is Available."""
     for fmt in formats:
         if not fmt["exportable"]:
             continue
         for size in fmt["sizes"]:
             for choice in size["fps"]:
-                if choice["tier"] == "verified":
+                if choice["tier"] == "available":
                     return _selection(fmt["format"], size, choice["value"])
     return None
 
 
-def _usb_default(formats: list) -> Optional[dict]:
-    for fmt in formats:
-        for size in fmt["sizes"]:
-            if fmt["format"] == "MJPG" and (size["width"], size["height"]) == (1280, 720) and size["fps"]:
-                values = [choice["value"] for choice in size["fps"]]
-                return _selection("MJPG", size, 30 if 30 in values else values[0])
-    for fmt in formats:
-        for size in fmt["sizes"]:
-            if size["fps"]:
-                return _selection(fmt["format"], size, size["fps"][0]["value"])
-    return None
-
-
-def _issues(catalog: dict, check: Optional[dict], items: list, unknown: Optional[str]) -> list:
+def _issues(catalog: dict, check: Optional[dict], items: list) -> list:
     issues = []
     listed = {provider_of(device) for device in catalog["devices"]}
     for error in catalog["errors"]:
-        message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"
+        if error["provider"] == "board":
+            message = f"SiMa Sentinel could not read part of the board's camera setup: {error['reason']}"
+        else:
+            message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"
         if error["provider"] in listed:
             message += " The devices it found last time are still listed."
         issues.append(_issue("warning", error["code"], message, STATUS_HINT))
     if not items:
         return issues
-    if unknown and check is not None:
-        message, hint = SUPPORT_UNKNOWN[unknown][:2]
-        detail = (check.get("support") or {}).get("reason") if unknown == "failed" else None
-        issues.append(_issue("warning", "support_unknown", f"{message} {detail}" if detail else message, hint))
     if check is None:
         issues.append(_issue(
             "warning",
             "availability_limited",
-            "Insight could not check which processes hold the cameras or which modes Neat Core supports, so camera "
-            "availability and support are unknown.",
+            "Insight could not check which processes hold the cameras, so camera availability is unknown.",
             "Check that python3 (3.8 or newer) runs on the board, then Refresh.",
         ))
         return issues

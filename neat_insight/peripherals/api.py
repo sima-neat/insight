@@ -4,11 +4,10 @@ import logging
 import time
 from pathlib import Path
 
-from flask import Blueprint, current_app, request
+from flask import Blueprint, current_app
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.manager import board_summary
-from neat_insight.peripherals import export
 from neat_insight.peripherals.cameras import ScanCache, camera_nodes, cameras_of, empty_snapshot
 from neat_insight.peripherals.client import PeripheralClient
 
@@ -35,7 +34,7 @@ def _check_board(session, catalog: dict):
     cameras = cameras_of(catalog)
     if not cameras:
         return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
-    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}, "support": True}
+    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}}
     try:
         # This probe is best-effort, so its failure must not mark the selected board disconnected.
         result = session.raw_transport.exec(
@@ -93,33 +92,3 @@ def refresh_peripherals():
             snapshot = scans.record(session.generation, board, catalog, check, scan_ms)
             session.require_current()
             return snapshot
-
-
-# API: render an input configuration for one camera mode from the last scan.
-@peripherals_bp.post("/api/peripherals/cameras/export")
-def export_camera():
-    """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
-    selection = export.parse_request(request.get_json(silent=True))
-    session = get_board_manager().session()
-    if selection["generation"] is not None and selection["generation"] != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The camera selection belongs to an earlier board scan.",
-            hint="Click Refresh, then export again.",
-        )
-    snapshot = scans.snapshot(session.generation)
-    if snapshot is None:
-        raise BoardError(
-            "stale_snapshot",
-            "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
-            hint="Click Refresh, then export again.",
-        )
-    if selection["scan_id"] is not None and selection["scan_id"] != snapshot["scan_id"]:
-        raise BoardError(
-            "stale_snapshot",
-            "The camera selection belongs to an earlier peripheral scan.",
-            hint="Click Refresh, then export again.",
-        )
-    rendered = export.render(snapshot, selection)
-    session.require_current()
-    return rendered

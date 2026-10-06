@@ -1,16 +1,17 @@
 import ipaddress
+import math
 import re
 from typing import Optional
 
 from flask import Blueprint, current_app, request
 
 from neat_insight.board import BoardError, get_board_manager
-from neat_insight.peripherals import export
 from neat_insight.peripherals import api as peripherals_api
 
 preview_bp = Blueprint("preview", __name__)
 
 MODE_KEYS = ("format", "width", "height", "fps")
+MODE_HINT = "Pick a format, size, and frame rate listed for the camera in the last scan."
 _HOST = re.compile(r"(?:\[([0-9A-Fa-f:.]+)\]|([A-Za-z0-9_.-]+))(?::(\d{1,5}))?")
 _HOST_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?")
 
@@ -57,6 +58,34 @@ def _unsupported(message: str, hint: str) -> BoardError:
     return BoardError("invalid_request", message, hint=hint)
 
 
+def _positive_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _finite(value) -> bool:
+    # An integer too large for a float would raise OverflowError when compared with a fractional rate.
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
+
+
+def parse_mode(body: dict) -> dict:
+    """The requested {format, width, height, fps}, refused unless each is well formed."""
+    def invalid(message):
+        return BoardError("invalid_request", message, hint=MODE_HINT)
+
+    if not isinstance(body.get("format"), str) or not body["format"]:
+        raise invalid("format must be a pixel format name.")
+    if not (_positive_int(body.get("width")) and _positive_int(body.get("height"))):
+        raise invalid("width and height must be positive integers.")
+    fps = body.get("fps")
+    # JSON numbers such as 1e309 parse as inf and NaN is accepted too; neither is a frame rate.
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not _finite(fps) or fps <= 0:
+        raise invalid("fps must be a positive number.")
+    return {key: body[key] for key in MODE_KEYS}
+
+
 def scanned_camera(generation: int, camera_id: str) -> dict:
     snapshot = peripherals_api.scans.snapshot(generation)
     if snapshot is None:
@@ -79,18 +108,17 @@ def require_camera_free(item: dict) -> None:
 
 def previewable_mode(item: dict, body: dict) -> dict:
     """The mode to preview: the one requested, or the camera's default; refused unless the scan
-    lists it and Neat Core verified it."""
+    lists it as Available."""
     mode = item.get("default_selection")
     if any(key in body for key in MODE_KEYS):
-        parsed = export.parse_request({"id": item["id"], **{key: body.get(key) for key in MODE_KEYS}})
-        mode = {key: parsed[key] for key in MODE_KEYS}
+        mode = parse_mode(body)
     if not mode:
         raise _unsupported("This camera has no mode Insight can preview.",
                            "Refresh; if the camera reports no usable modes, the errors on the camera say why.")
     if item["connection"] != "mipi" or not item["device"].get("camera_name"):
         raise _unsupported("Preview is available for MIPI cameras only in this release.",
-                           "USB cameras are discovered and can be exported, but preview is not implemented for them yet.")
-    # parse_request and the scan only yield positive numbers; preview also needs a whole one.
+                           "USB cameras are discovered, but preview is not implemented for them yet.")
+    # parse_mode and the scan only yield positive numbers; preview also needs a whole one.
     fps = mode["fps"]
     if fps != int(fps):
         raise _unsupported(f"{fps} fps cannot be previewed: preview needs a whole-number frame rate.",
@@ -99,7 +127,7 @@ def previewable_mode(item: dict, body: dict) -> dict:
     # The preview graph captures NV12, the format Core's camera-memory path delivers.
     if fmt is None or not fmt["exportable"] or mode["format"] != "NV12":
         raise _unsupported(f"{mode['format']} cannot be previewed on this camera.",
-                           "Pick a format Insight lists as usable with Core; preview uses the same capture path.")
+                           "Pick a format Insight lists as Available; preview uses the same capture path.")
     size = next((s for s in fmt["sizes"] if (s["width"], s["height"]) == (mode["width"], mode["height"])), None)
     if size is None:
         raise _unsupported(f"{mode['width']}x{mode['height']} is not a size this camera reported.",
@@ -109,9 +137,9 @@ def previewable_mode(item: dict, body: dict) -> dict:
         listed = ", ".join(str(entry["value"]) for entry in sorted(size["fps"], key=lambda entry: entry["value"]))
         raise _unsupported(f"{fps} fps is not a rate this camera reported for {mode['width']}x{mode['height']}.",
                            f"Pick one of: {listed}.")
-    if choice["tier"] != "verified":
+    if choice["tier"] != "available":
         raise _unsupported(f"{mode['format']} {mode['width']}x{mode['height']} at {fps} fps cannot be previewed: "
-                           + (choice.get("reason") or "Neat Core has not verified it."), "Pick a mode marked Verified.")
+                           + (choice.get("reason") or "it is not Available."), "Pick a mode marked Available.")
     return {"format": mode["format"], "width": mode["width"], "height": mode["height"], "fps": int(fps)}
 
 

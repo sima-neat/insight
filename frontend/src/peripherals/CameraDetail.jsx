@@ -1,25 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
 import PreviewPane from './PreviewPane.jsx'
-import { copyCameraExport } from './api.js'
 import {
   availabilityInfo,
   blockedFormatSummary,
   cameraSubtitle,
+  cameraTierPill,
   cameraSummaryLine,
   deviceRows,
-  exportBlockReason,
-  exportChoices,
   formatOptions,
   fpsOptions,
   groupOptions,
-  modeLabel,
-  normalizeError,
   optionTier,
   sizeKey,
-  sizeOptions,
-  tierInfo
+  sizeOptions
 } from './model.js'
-import { Callout, ErrorNotice, Pill, SupportLinks } from './ui.jsx'
+import { Callout, ErrorNotice, Pill } from './ui.jsx'
 
 export { cameraSubtitle }
 
@@ -55,60 +49,6 @@ function ModeOptions({ options }) {
   const entry = (o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>
   if (groups.length < 2) return options.map(entry)
   return groups.map((group) => <optgroup key={group.id} label={group.label}>{group.options.map(entry)}</optgroup>)
-}
-
-function CopyConfig({ camera, selection }) {
-  const choices = exportChoices(camera)
-  const [wanted, setWanted] = useState('')
-  const [state, setState] = useState({ status: 'idle' })
-  const seq = useRef(0)
-  const { id, label } = choices.find((choice) => choice.id === wanted) || choices[0]
-  const blocked = exportBlockReason(camera, selection)
-  const busy = state.status === 'busy'
-  const modeKey = `${camera.id}|${modeLabel(selection)}`
-
-  useEffect(() => {
-    seq.current += 1
-    setState({ status: 'idle' })
-  }, [modeKey])
-
-  useEffect(() => {
-    if (state.status !== 'copied') return undefined
-    const timer = setTimeout(() => setState({ status: 'idle' }), 2000)
-    return () => clearTimeout(timer)
-  }, [state])
-
-  function copy() {
-    const run = ++seq.current
-    setState({ status: 'busy' })
-    // Called straight from the click, so the clipboard write starts while the browser allows it.
-    copyCameraExport({ camera, selection, exportId: id, isCurrent: () => run === seq.current }).then(
-      () => run === seq.current && setState({ status: 'copied' }),
-      (err) => run === seq.current && setState({ status: 'error', error: normalizeError(err) })
-    )
-  }
-
-  return (
-    <>
-      <div className="periph-actions periph-copy">
-        <select aria-label="Configuration format" value={id} onChange={(e) => setWanted(e.target.value)}>
-          {choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-        </select>
-        <button
-          type="button"
-          className="btn-tonal"
-          onClick={() => !busy && copy()}
-          disabled={Boolean(blocked)}
-          aria-disabled={busy ? 'true' : undefined}
-          title={blocked || undefined}
-        >
-          {state.status === 'copied' ? 'Copied' : 'Copy configuration'}
-        </button>
-        <span className="sr-only" role="status">{state.status === 'copied' ? `Copied the ${label} configuration.` : ''}</span>
-      </div>
-      {state.status === 'error' && <ErrorNotice error={state.error} />}
-    </>
-  )
 }
 
 function ModePicker({ camera, selection, notice, onChange }) {
@@ -159,7 +99,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
         </label>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
-      <CopyConfig camera={camera} selection={selection} />
     </fieldset>
   )
 }
@@ -177,7 +116,7 @@ export default function CameraDetail({
   onOpenBoardPanel
 }) {
   const availability = availabilityInfo(camera.availability)
-  const tier = tierInfo(camera.support?.tier)
+  const tier = cameraTierPill(camera)
   const summary = cameraSummaryLine(camera)
 
   return (
@@ -189,13 +128,13 @@ export default function CameraDetail({
         </div>
         <span className="periph-pills">
           <Pill tone={availability.tone}>{availability.label}</Pill>
-          <Pill tone={tier.tone}>{tier.label}</Pill>
+          {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
         </span>
       </div>
 
       {summary && (
         <p className="periph-summary-line">
-          {summary} <SupportLinks links={camera.support?.links} inline />
+          {summary}
         </p>
       )}
 

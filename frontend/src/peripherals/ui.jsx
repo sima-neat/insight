@@ -1,5 +1,3 @@
-import { safeHref } from './model.js'
-
 export function Pill({ tone, children }) {
   return <span className={['sysinfo-pill', 'periph-pill', tone].filter(Boolean).join(' ')}>{children}</span>
 }
@@ -23,22 +21,5 @@ export function ErrorNotice({ error, children }) {
         {children}
       </Callout>
     </>
-  )
-}
-
-export function SupportLinks({ links, inline = false }) {
-  const valid = (links || []).filter((link) => safeHref(link.url))
-  if (!valid.length) return null
-  const Tag = inline ? 'span' : 'p'
-  return (
-    <Tag className="periph-links">
-      Tracked in{' '}
-      {valid.map((link, index) => (
-        <span key={link.url}>
-          {index > 0 && ', '}
-          <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label || link.url}</a>
-        </span>
-      ))}
-    </Tag>
   )
 }

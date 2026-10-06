@@ -7,6 +7,7 @@ import {
   PREVIEW_IDLE,
   adoptedSelection,
   availabilityInfo,
+  cameraTierPill,
   changeSummary,
   countLabel,
   deviceTabs,
@@ -25,8 +26,7 @@ import {
   sessionMatches,
   sessionToAdopt,
   severityInfo,
-  sortIssues,
-  tierInfo
+  sortIssues
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
@@ -164,7 +164,7 @@ function CameraList({ groups, selectedId, onSelect }) {
           <div id={`periph-group-${group.id}`} className="periph-group-title" role="presentation">{group.label}</div>
           {group.items.map((camera) => {
             const availability = availabilityInfo(camera.availability)
-            const tier = tierInfo(camera.support?.tier)
+            const tier = cameraTierPill(camera)
             return (
               <div
                 key={camera.id}
@@ -181,7 +181,7 @@ function CameraList({ groups, selectedId, onSelect }) {
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
                 <span className="periph-pills">
                   <Pill tone={availability.tone}>{availability.label}</Pill>
-                  <Pill tone={tier.tone}>{tier.label}</Pill>
+                  {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
                 </span>
               </div>
             )

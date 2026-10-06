@@ -1,14 +1,13 @@
-const TIER_RANK = { verified: 0, advertised: 1, unsupported: 2 }
-
+// Every camera mode is Available (the board's camera overlays support the sensor, the ISP outputs the size,
+// and the format is NV12) or Unsupported. A camera or format is Available when any of its modes is.
 const TIERS = {
-  verified: { label: 'Verified with Core', short: 'verified', tone: 'ok' },
-  advertised: { label: 'Advertised, unverified', short: 'advertised', tone: 'warn' },
-  unsupported: { label: 'Not supported by Core CameraInput', short: 'unsupported', tone: 'periph-danger' }
+  available: { label: 'Available', tone: 'ok' },
+  unsupported: { label: 'Unsupported', tone: 'periph-danger' }
 }
 
 const CONNECTIONS = [
-  { id: 'mipi', label: 'MIPI (libcamera)' },
-  { id: 'usb', label: 'USB (V4L2)' }
+  { id: 'mipi', label: 'MIPI' },
+  { id: 'usb', label: 'USB' }
 ]
 
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
@@ -50,8 +49,18 @@ const USB_FIELDS = [
 
 export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
 
+function tierOf(tier) {
+  return tier === 'available' ? 'available' : 'unsupported'
+}
+
 export function tierInfo(tier) {
-  return TIERS[tier] || { label: 'Support unknown', short: 'unknown', tone: '' }
+  return TIERS[tierOf(tier)]
+}
+
+// The camera's own pill. Its availability pill already reads "Available" for a camera no process holds,
+// so an Available camera gets no second "Available"; its mode menus carry that state.
+export function cameraTierPill(camera) {
+  return tierOf(camera?.support?.tier) === 'available' ? null : TIERS.unsupported
 }
 
 export function severityInfo(severity) {
@@ -186,7 +195,8 @@ export function cameraDeviceId(camera) {
 }
 
 export function cameraSubtitle(camera) {
-  const deviceId = cameraDeviceId(camera)
+  // A USB camera's kernel path is listed under Device details, not under its name.
+  const deviceId = camera?.connection === 'usb' ? '' : cameraDeviceId(camera)
   // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
@@ -209,7 +219,7 @@ export function deviceRows(camera) {
 }
 
 function rank(tier) {
-  return TIER_RANK[tier] ?? 3
+  return tierOf(tier) === 'available' ? 0 : 1
 }
 
 function best(list, tierOf) {
@@ -220,8 +230,9 @@ function usableSizes(format) {
   return (format?.sizes || []).filter((size) => size.fps?.length)
 }
 
+// Unsupported modes stay in the menus, labelled; only a format without a size and rate cannot be chosen.
 function isSelectable(format) {
-  return Boolean(format?.exportable && usableSizes(format).length)
+  return usableSizes(format).length > 0
 }
 
 function sizeTier(size) {
@@ -273,13 +284,12 @@ export function formatOptions(camera) {
   return (camera?.formats || []).map((f) => {
     const selectable = isSelectable(f)
     const range = formatRangeLabel(f.range)
-    const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
     return {
       value: f.format,
       label: f.label || f.format,
-      tier: selectable ? f.support?.tier || '' : 'unsupported',
+      tier: selectable ? tierOf(f.support?.tier) : 'unsupported',
       disabled: !selectable,
-      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
+      reason: selectable ? '' : `no sizes with a frame rate were reported for it.${range ? ` Reported range: ${range}.` : ''}`,
       range: f.range || null
     }
   })
@@ -300,56 +310,25 @@ export function fpsOptions(camera, format, width, height) {
   return (size?.fps || []).map((f) => ({
     value: String(f.value),
     label: `${fpsLabel(f.value)} fps`,
-    tier: f.tier
+    tier: tierOf(f.tier)
   }))
-}
-
-// The formats POST /api/peripherals/cameras/export returns, by connection, with its labels.
-const MIPI_EXPORTS = [
-  { id: 'python', label: 'Python (pyneat)' },
-  { id: 'cpp', label: 'C++ (Neat)' },
-  { id: 'json', label: 'JSON' }
-]
-const USB_EXPORTS = [
-  { id: 'yaml', label: 'YAML descriptor' },
-  { id: 'json', label: 'JSON descriptor' }
-]
-
-export function exportChoices(camera) {
-  return camera?.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS
-}
-
-// Why the export refuses the selected mode, or '' when it accepts it: a USB mode always exports as a
-// descriptor; a MIPI mode needs a frame rate Neat Core's rules verified.
-export function exportBlockReason(camera, selection) {
-  if (!selection || camera?.connection === 'usb') return ''
-  const rate = findFps(findSize(findFormat(camera, selection.format), selection.width, selection.height), selection.fps)
-  if (rate?.tier === 'verified') return ''
-  return rate?.reason || "Neat Core's support rules do not accept this mode."
 }
 
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
 // pill beside the menu for the chosen entry, and the entries are grouped under their tier.
-const TIER_PILLS = {
-  verified: { label: 'Verified', tone: 'ok' },
-  advertised: { label: 'Advertised', tone: 'warn' },
-  unsupported: { label: 'Not usable', tone: 'periph-danger' }
-}
 const TIER_GROUPS = [
-  { id: 'verified', label: 'Verified with Core' },
-  { id: 'advertised', label: 'Advertised by libcamera' },
-  { id: 'unsupported', label: 'Not usable' },
-  { id: '', label: 'Support unknown' }
+  { id: 'available', label: 'Available' },
+  { id: 'unsupported', label: 'Unsupported' }
 ]
 
 export function optionTier(options, value) {
   const option = (options || []).find((o) => o.value === String(value))
-  return option ? TIER_PILLS[option.tier] || null : null
+  return option ? tierInfo(option.tier) : null
 }
 
 export function groupOptions(options) {
   return TIER_GROUPS
-    .map((group) => ({ ...group, options: (options || []).filter((o) => (o.tier || '') === group.id) }))
+    .map((group) => ({ ...group, options: (options || []).filter((o) => tierOf(o.tier) === group.id) }))
     .filter((group) => group.options.length)
 }
 
@@ -357,14 +336,14 @@ export function groupOptions(options) {
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
   const availability = availabilityInfo(camera?.availability)
-  const tier = camera?.support?.tier
   if (camera?.availability?.state === 'in_use') {
     return `${availability.label}. Stop that process on the board before an application, or a preview here, can open this camera.`
   }
-  if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
+  // A USB camera is Unsupported because USB cameras have no camera overlay; its pill says enough.
+  if (camera?.support && cameraTierPill(camera)) return camera.connection === 'usb' ? '' : camera.support.reason || 'Unsupported.'
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
-  // A working camera gets no sentence at all. Every mode menu already labels each entry
-  // "verified" or "advertised", so a paragraph repeating that distinction only adds text.
+  // An Available camera gets no sentence at all: every mode menu already labels each entry
+  // Available or Unsupported, so a paragraph repeating that only adds text.
   return ''
 }
 
@@ -421,6 +400,27 @@ export function resolveCameraId(snapshot, previousId) {
 export function isSnapshotStale(board, snapshot) {
   if (!board || !snapshot?.scanned_at) return false
   return Number(board.generation) !== Number(snapshot.generation)
+}
+
+// The camera setup Sentinel read from the board's device tree (`camera_setup` in a snapshot), for the
+// board it scanned: null before a scan, after the selected board changed, or from an older Sentinel.
+export function boardCameraSetup(board, snapshot) {
+  if (!board || !snapshot?.scanned_at || Number(board.generation) !== Number(snapshot.generation)) return null
+  return snapshot.camera_setup || null
+}
+
+// "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo" reads as "modalix-som-waveshare-ARDU-IMX477-1CAM".
+export function overlayName(file) {
+  return String(file || '').split('/').pop().replace(/\.dtbo$/i, '')
+}
+
+// Board fact rows for the camera setup; each row is omitted when Sentinel did not report it.
+export function cameraSetupRows(setup) {
+  const rows = []
+  if (setup?.model) rows.push(['Model', String(setup.model)])
+  const overlays = (setup?.overlays || []).map(overlayName).filter(Boolean)
+  if (overlays.length) rows.push(['Camera setup', overlays.join(', ')])
+  return rows
 }
 
 export function changeSummary(changes) {
@@ -579,7 +579,7 @@ const PREVIEW_ERROR_ACTIONS = {
   camera_in_use: 'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
   preview_active: 'Stop the preview that is already running, then start this one.',
   no_channel: 'Every published viewer channel is taken. Stop a stream on the Streaming page, then start the preview again.',
-  invalid_request: 'Choose a mode Insight lists as verified; this one was rejected by the board.',
+  invalid_request: 'Choose a mode Insight lists as Available; this one was rejected.',
   command_failed: 'The capture worker could not start on the board. The board output below says why.',
   stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.',
   no_video: 'The board captured, but its video never reached Insight. The UDP port Insight listens on has to be reachable from the board; a host firewall is the usual reason it is not.',
@@ -654,8 +654,8 @@ export function previewBlock({ camera, selection, stale = false, session = null,
     }
   }
   if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
-  if (selectionTier(camera, selection) !== 'verified') {
-    return { blocked: true, reason: `${modeLabel(selection)} is not validated on this board. Choose a verified mode.` }
+  if (selectionTier(camera, selection) !== 'available') {
+    return { blocked: true, reason: `${modeLabel(selection)} is Unsupported on this board. Choose an Available mode.` }
   }
   if (camera.availability?.state === 'in_use') {
     return { blocked: true, reason: `${availabilityInfo(camera.availability).label}. Stop that process on the board, then refresh.` }

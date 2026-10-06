@@ -8,18 +8,19 @@ import {
   heartbeatFailureEvent,
   availabilityInfo,
   blockedFormatSummary,
+  boardCameraSetup,
   boardIndicator,
+  cameraSetupRows,
   cameraDeviceId,
   cameraSubtitle,
   cameraSummaryLine,
+  cameraTierPill,
   changeSummary,
   createBoardSync,
   createFocusReturn,
   defaultTargetText,
   deviceRows,
   deviceTabs,
-  exportBlockReason,
-  exportChoices,
   formatDuration,
   formatOptions,
   formatRangeLabel,
@@ -34,6 +35,7 @@ import {
   nextPreviewState,
   normalizeError,
   optionTier,
+  overlayName,
   previewBlock,
   previewErrorInfo,
   previewNeedsRestart,
@@ -53,8 +55,11 @@ import {
   validateBoardForm
 } from './model.js'
 
-const CORE_838 = { label: 'core#838', url: 'https://github.com/sima-neat/core/issues/838' }
-const support = (tier, reason = '', links = []) => ({ tier, reason, links })
+const ISP_SIZE = 'The ISP cannot output this size.'
+const NOT_IN_OVERLAYS = "IMX568 is not in this board's camera overlays."
+const USB_REASON = 'USB cameras have no camera overlay on this board.'
+const NO_BOARD = "This board's SiMa Sentinel does not report camera overlays; update Sentinel."
+const support = (tier, reason = '') => ({ tier, reason })
 const rates = (...pairs) => pairs.map(([value, tier]) => ({ value, tier }))
 const size = (width, height, ...pairs) => ({ width, height, fps: rates(...pairs) })
 const format = (name, label, exportable, formatSupport, sizes, range = null) => ({ format: name, label, exportable, support: formatSupport, range, sizes })
@@ -75,12 +80,12 @@ const imx477 = {
     video_node: '/dev/video3'
   },
   availability: available,
-  support: support('verified', 'imx477 NV12 1920x1080 at 30 fps is verified with Core CameraInput.'),
+  support: support('available'),
   modes_source: 'live',
   formats: [
-    format('NV12', 'NV12 (YUV 4:2:0)', true, support('verified'), [
-      size(1920, 1080, [30, 'verified'], [60, 'advertised']),
-      size(1280, 720, [60, 'advertised'])
+    format('NV12', 'NV12 (YUV 4:2:0)', true, support('available'), [
+      size(1920, 1080, [30, 'available'], [60, 'available']),
+      size(1280, 720, [60, 'unsupported'])
     ])
   ],
   default_selection: { format: 'NV12', width: 1920, height: 1080, fps: 30 },
@@ -96,14 +101,14 @@ const imx568 = {
   model: 'imx568',
   device: { camera_name: 'econ-imx568-fpga 5-0042', camera_name_source: 'media-graph', media_device: '/dev/media0' },
   availability: { state: 'unknown', users: [], reason: 'fuser is not installed on the board.' },
-  support: support('advertised', 'imx568 is enumerated by libcamera but not verified with Core.', [CORE_838]),
+  support: support('unsupported', NOT_IN_OVERLAYS),
   modes_source: 'live',
   formats: [
-    format('NV12', 'NV12 (YUV 4:2:0)', true, support('advertised'), [
-      size(2432, 2048, [30, 'advertised']),
-      size(1920, 1080, [30, 'advertised'], [59.94, 'advertised'])
+    format('NV12', 'NV12 (YUV 4:2:0)', false, support('unsupported', NOT_IN_OVERLAYS), [
+      size(2432, 2048, [30, 'unsupported']),
+      size(1920, 1080, [30, 'unsupported'], [59.94, 'unsupported'])
     ], { min_width: 64, min_height: 64, max_width: 2432, max_height: 2048, step_width: 2, step_height: 2 }),
-    format('RGB888', 'RGB888', false, support('unsupported', 'Core CameraInput outputs NV12 only.'), [size(1920, 1080, [30, 'unsupported'])])
+    format('RGB888', 'RGB888', false, support('unsupported', NOT_IN_OVERLAYS), [size(1920, 1080)])
   ],
   default_selection: null,
   notes: ['Sensor crop rectangle could not be read; defaults were used.'],
@@ -131,13 +136,13 @@ const usb = {
     usb: { vendor_id: '046d', product_id: '0825', manufacturer: 'Logitech', product: 'HD Webcam C270', serial: null, bus_path: '1-1.2', speed_mbps: 480 }
   },
   availability: available,
-  support: support('unsupported', 'Core CameraInput supports MIPI (libcamera) cameras only.', [CORE_838]),
+  support: support('unsupported', USB_REASON),
   modes_source: 'live',
   formats: [
-    format('MJPG', 'Motion-JPEG', true, support('unsupported'), [size(1280, 720, [30, 'unsupported']), size(640, 480, [30, 'unsupported'])]),
-    format('YUYV', 'YUYV 4:2:2', true, support('unsupported'), [size(640, 480, [30, 'unsupported'], [15, 'unsupported'])])
+    format('MJPG', 'Motion-JPEG', false, support('unsupported', USB_REASON), [size(1280, 720, [30, 'unsupported']), size(640, 480, [30, 'unsupported'])]),
+    format('YUYV', 'YUYV 4:2:2', false, support('unsupported', USB_REASON), [size(640, 480, [30, 'unsupported'], [15, 'unsupported'])])
   ],
-  default_selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 },
+  default_selection: null,
   notes: [],
   errors: []
 }
@@ -163,34 +168,46 @@ const snapshot = {
 
 test('cameras are grouped MIPI first, then USB, and other kinds are ignored', () => {
   const groups = groupCameras(snapshot.items)
-  assert.deepEqual(groups.map((g) => g.label), ['MIPI (libcamera)', 'USB (V4L2)'])
+  assert.deepEqual(groups.map((g) => g.label), ['MIPI', 'USB'])
   assert.deepEqual(groups[0].items.map((c) => c.id), [imx477.id, imx568.id, inUse.id])
   assert.deepEqual(groups[1].items.map((c) => c.id), [usb.id])
   assert.deepEqual(groupCameras([]), [])
 })
 
-test('format options disable non-exportable formats and keep their reason', () => {
+test('unsupported formats stay selectable; only a format without a size and rate is disabled', () => {
   const [nv12, rgb] = formatOptions(imx568)
   assert.equal(nv12.disabled, false)
   assert.equal(nv12.label, 'NV12 (YUV 4:2:0)')
-  assert.equal(nv12.tier, 'advertised')
+  assert.equal(nv12.tier, 'unsupported')
   assert.deepEqual(nv12.range.max_width, 2432)
   assert.equal(rgb.disabled, true)
   assert.equal(rgb.label, 'RGB888')
   assert.equal(rgb.tier, 'unsupported')
-  assert.equal(rgb.reason, 'Core CameraInput outputs NV12 only.')
+  assert.equal(rgb.reason, 'no sizes with a frame rate were reported for it.')
+  assert.deepEqual(formatOptions(usb).map((o) => [o.value, o.disabled, o.tier]), [['MJPG', false, 'unsupported'], ['YUYV', false, 'unsupported']])
+  assert.equal(formatOptions(imx477)[0].tier, 'available')
 })
 
-test('size and fps options carry their best support tier, for the pill beside the menu', () => {
-  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier]), [['1920×1080', 'verified'], ['1280×720', 'advertised']])
-  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.label, o.tier]), [['30 fps', 'verified'], ['60 fps', 'advertised']])
+test('size and fps options carry their best state, for the pill beside the menu', () => {
+  assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier]), [['1920×1080', 'available'], ['1280×720', 'unsupported']])
+  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.label, o.tier]), [['30 fps', 'available'], ['60 fps', 'available']])
   assert.deepEqual(fpsOptions(imx568, 'NV12', 1920, 1080).map((o) => o.value), ['30', '59.94'])
   assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
 })
 
-test('the default selection is preselected when it is exportable', () => {
+test('the default selection is preselected; without one an Available mode is preferred', () => {
   assert.deepEqual(resolveSelection(imx477, null), { format: 'NV12', width: 1920, height: 1080, fps: 30 })
+  // A USB camera has no Available mode and no default; its first reported mode is shown.
   assert.deepEqual(resolveSelection(usb, null), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
+  const mixed = {
+    ...imx477,
+    default_selection: null,
+    formats: [
+      format('AR24', 'AR24', false, support('unsupported', ISP_SIZE), [size(4056, 3040, [30, 'unsupported'])]),
+      format('NV12', 'NV12', true, support('available'), [size(4056, 3040, [30, 'unsupported']), size(1920, 1080, [15, 'unsupported'], [30, 'available'])])
+    ]
+  }
+  assert.deepEqual(resolveSelection(mixed, null), { format: 'NV12', width: 1920, height: 1080, fps: 30 })
 })
 
 test('a missing or non-exportable default falls back to the best exportable mode', () => {
@@ -251,10 +268,9 @@ test('a snapshot is stale only when it was scanned for another board generation'
 })
 
 test('labels for tiers, availability, sources, and defaults', () => {
-  assert.equal(tierInfo('verified').label, 'Verified with Core')
-  assert.equal(tierInfo('advertised').label, 'Advertised, unverified')
-  assert.equal(tierInfo('unsupported').label, 'Not supported by Core CameraInput')
-  assert.equal(tierInfo('bogus').short, 'unknown')
+  assert.deepEqual(tierInfo('available'), { label: 'Available', tone: 'ok' })
+  assert.deepEqual(tierInfo('unsupported'), { label: 'Unsupported', tone: 'periph-danger' })
+  assert.deepEqual(tierInfo('bogus'), tierInfo('unsupported'), 'every mode is one of the two states')
   assert.equal(availabilityInfo(inUse.availability).label, 'In use by gst-launch-1.0 (pid 812)')
   assert.deepEqual(availabilityInfo(imx568.availability), { label: 'Availability unknown', tone: '', reason: 'fuser is not installed on the board.' })
   assert.equal(availabilityInfo(available).label, 'Available')
@@ -279,8 +295,8 @@ test('identity rows list only known device fields', () => {
 test('a subtitle never repeats what the name already says', () => {
   // "imx477 5-001a" carries the model, so the subtitle beneath it must not read "imx477" again.
   assert.equal(cameraSubtitle(imx477), '')
-  // The USB camera reports its product string as both name and model, so only the device id is news.
-  assert.equal(cameraSubtitle(usb), usb.device.by_id)
+  // The USB camera reports its product string as both name and model, and its kernel path stays in Device details.
+  assert.equal(cameraSubtitle(usb), '')
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
 })
@@ -364,7 +380,7 @@ test('board form defaults and validation', () => {
 })
 
 test('only http(s) links are rendered', () => {
-  assert.equal(safeHref(CORE_838.url), CORE_838.url)
+  assert.equal(safeHref('https://github.com/sima-neat/core/issues/883'), 'https://github.com/sima-neat/core/issues/883')
   assert.equal(safeHref('javascript:alert(1)'), null)
   assert.equal(safeHref(undefined), null)
 })
@@ -479,21 +495,32 @@ test('stepwise and continuous format ranges keep their bounds and steps visible'
     formatRangeLabel({ min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 8 }),
     '16–1920×16–1080 in 16×8 steps'
   )
-  const option = formatOptions({ formats: [format('YUYV', 'YUYV', false, support('unsupported', 'Discrete sizes are unavailable.'), [], {
+  const option = formatOptions({ formats: [format('YUYV', 'YUYV', false, support('unsupported', USB_REASON), [], {
     min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 16
   })] })[0]
   assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
+test('the camera pill appears only for an Unsupported camera, beside its availability', () => {
+  assert.equal(cameraTierPill(imx477), null, 'an Available camera shows only its availability pill')
+  assert.equal(availabilityInfo(imx477.availability).label, 'Available')
+  assert.deepEqual(cameraTierPill(imx568), { label: 'Unsupported', tone: 'periph-danger' })
+  assert.deepEqual(cameraTierPill(usb), { label: 'Unsupported', tone: 'periph-danger' })
+  assert.deepEqual(cameraTierPill({ ...imx477, support: support('unsupported', NO_BOARD) }), { label: 'Unsupported', tone: 'periph-danger' })
+})
+
 test('the detail pane shows one explanation line, chosen by priority', () => {
   assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\. Stop that process/)
-  assert.equal(cameraSummaryLine(imx568), imx568.support.reason, 'an unverified tier wins over unknown availability')
-  // A verified, available camera says nothing: the mode menus carry the verified/advertised labels.
+  assert.equal(cameraSummaryLine(imx568), NOT_IN_OVERLAYS, 'the Unsupported reason wins over unknown availability')
+  assert.equal(cameraSummaryLine({ ...imx477, support: support('unsupported', NO_BOARD) }), NO_BOARD)
+  // An Available camera says nothing: the mode menus carry the Available/Unsupported labels.
   assert.equal(cameraSummaryLine(imx477), '')
   assert.equal(
-    cameraSummaryLine({ ...imx477, support: support('verified', ''), availability: imx568.availability }),
+    cameraSummaryLine({ ...imx477, availability: imx568.availability }),
     'Availability unknown: fuser is not installed on the board.'
   )
+  assert.equal(cameraSummaryLine(usb), '', 'an unsupported USB camera gets no sentence; its pill says it')
+  assert.match(cameraSummaryLine({ ...usb, availability: inUse.availability }), /^In use by gst-launch-1\.0/)
   assert.equal(cameraSummaryLine({}), '')
 })
 
@@ -601,22 +628,22 @@ test('renders without a collapse leave focus where it is', () => {
   assert.equal(change.focused, 1)
 })
 
-test('a mode menu groups its entries by tier, and the pill names the chosen one', () => {
+test('a mode menu groups its entries as Available and Unsupported, and the pill names the chosen one', () => {
   const sizes = sizeOptions(imx477, 'NV12')
   assert.deepEqual(groupOptions(sizes).map((g) => [g.label, g.options.map((o) => o.label)]),
-    [['Verified with Core', ['1920×1080']], ['Advertised by libcamera', ['1280×720']]])
-  assert.deepEqual(optionTier(sizes, sizes[1].value), { label: 'Advertised', tone: 'warn' })
+    [['Available', ['1920×1080']], ['Unsupported', ['1280×720']]])
+  assert.deepEqual(optionTier(sizes, sizes[1].value), { label: 'Unsupported', tone: 'periph-danger' })
   assert.equal(optionTier(sizes, 'no-such-size'), null)
   const formats = formatOptions(imx568)
-  assert.deepEqual(groupOptions(formats).map((g) => g.label), ['Advertised by libcamera', 'Not usable'])
-  assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
-  assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
+  assert.deepEqual(groupOptions(formats).map((g) => g.label), ['Unsupported'])
+  assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Unsupported', tone: 'periph-danger' })
+  assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Available', tone: 'ok' }, 'a numeric selection matches its string option')
   assert.deepEqual(groupOptions([]), [])
 })
 
 test('the selected mode keeps the tier the board reported for it', () => {
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), 'verified')
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1280, height: 720, fps: 60 }), 'advertised')
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), 'available')
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1280, height: 720, fps: 60 }), 'unsupported')
   assert.equal(selectionTier(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), 'unsupported')
   assert.equal(selectionTier(imx477, { format: 'NV12', width: 640, height: 480, fps: 30 }), '')
   assert.equal(selectionTier(imx477, null), '')
@@ -642,21 +669,19 @@ test('Start preview is blocked with the reason for every state that forbids it',
   assert.match(previewBlock({ camera: null, selection: null, target: boardTarget }).reason, /Select a camera/)
   assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, stale: true }).reason, /board changed/)
 
-  // A camera Core cannot open (USB, core#838) can still be exported, never previewed.
+  // A USB camera has no camera overlay, so it is Unsupported and not previewed.
   assert.equal(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }).reason, usb.support.reason)
 
   assert.match(previewBlock({ camera: imx477, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
 
-  const unvalidated = { ...imx477, formats: [format('NV12', 'NV12', true, support('advertised'), [size(1920, 1080, [30, 'unsupported'])])] }
-  assert.match(previewBlock({ camera: unvalidated, selection: mipiMode, target: boardTarget }).reason, /is not validated on this board/)
-  // The backend previews verified modes only: a rate Core has not judged ('' from frame_intervals) or an
-  // advertised one must not leave Start enabled.
-  for (const tier of ['', 'advertised']) {
-    const unjudged = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [size(1920, 1080, [30, tier])])] }
+  const unsupported = { ...imx477, formats: [format('NV12', 'NV12', false, support('unsupported', ISP_SIZE), [size(1920, 1080, [30, 'unsupported'])])] }
+  assert.match(previewBlock({ camera: unsupported, selection: mipiMode, target: boardTarget }).reason, /is Unsupported on this board/)
+  // The backend previews Available modes only: an Unsupported rate, or one with no state, must not leave Start enabled.
+  for (const tier of ['', 'unsupported']) {
+    const unjudged = { ...imx477, formats: [format('NV12', 'NV12', true, support('available'), [size(1920, 1080, [30, tier])])] }
     const block = previewBlock({ camera: unjudged, selection: mipiMode, target: boardTarget })
     assert.equal(block.blocked, true, `tier ${JSON.stringify(tier)}`)
-    // Only a verified mode can start, so the reason never sends the user to an advertised one.
-    assert.match(block.reason, /is not validated on this board\. Choose a verified mode\.$/)
+    assert.match(block.reason, /is Unsupported on this board\. Choose an Available mode\.$/)
   }
 
   assert.match(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }).reason, /In use by gst-launch-1\.0 \(pid 812\)/)
@@ -785,7 +810,7 @@ test('every preview failure carries a recovery action and nothing destructive', 
   // The two failures that come from the network between the board and Insight must say so.
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_video' }, 502))).action, /firewall/)
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'viewer_unavailable' }, 502))).action, /video viewer/)
-  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /^Choose a mode Insight lists as verified; /)
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /^Choose a mode Insight lists as Available; /)
 
   const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
   assert.equal(failed.detail, 'gst: no element')
@@ -836,13 +861,29 @@ test('a start refused because another tab started a preview adopts that preview'
   assert.equal(sessionToAdopt({ code: 'camera_in_use' }, session), null)
 })
 
-test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {
-  assert.deepEqual(exportChoices(imx477).map((c) => c.id), ['python', 'cpp', 'json'])
-  assert.deepEqual(exportChoices(usb).map((c) => c.id), ['yaml', 'json'])
-  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), '')
-  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 60 }), "Neat Core's support rules do not accept this mode.")
-  const refused = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [{ width: 640, height: 480, fps: [{ value: 90, tier: 'unsupported', reason: 'The sensor has no 90 fps mode.' }] }])] }
-  assert.equal(exportBlockReason(refused, { format: 'NV12', width: 640, height: 480, fps: 90 }), 'The sensor has no 90 fps mode.')
-  assert.equal(exportBlockReason(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), '', 'a USB mode exports as a descriptor')
-  assert.equal(exportBlockReason(imx477, null), '')
+const cameraSetup = {
+  model: 'SiMa.ai Modalix SoM 16Gig Board',
+  overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo']
+}
+
+test('the board card names the model and camera overlays only when Sentinel reports them', () => {
+  assert.deepEqual(cameraSetupRows(cameraSetup), [
+    ['Model', 'SiMa.ai Modalix SoM 16Gig Board'],
+    ['Camera setup', 'modalix-som-waveshare-ARDU-IMX477-1CAM']
+  ])
+  assert.deepEqual(cameraSetupRows({ model: null, overlays: ['a.dtbo', '/boot/overlays/b.DTBO'] }), [['Camera setup', 'a, b']])
+  assert.deepEqual(cameraSetupRows({ model: '', overlays: [] }), [])
+  assert.deepEqual(cameraSetupRows(null), [])
+  assert.equal(overlayName('modalix-som-imx219.dtbo'), 'modalix-som-imx219')
+  assert.equal(overlayName('no-extension'), 'no-extension')
+})
+
+test('the camera setup belongs to the board that was scanned', () => {
+  const snapshot = { generation: 3, scanned_at: '2026-10-06T00:00:00+00:00', camera_setup: cameraSetup }
+  assert.equal(boardCameraSetup({ generation: 3 }, snapshot), cameraSetup)
+  assert.equal(boardCameraSetup({ generation: 4 }, snapshot), null, 'the selected board changed since the scan')
+  assert.equal(boardCameraSetup({ generation: 3 }, { ...snapshot, scanned_at: null }), null, 'not scanned yet')
+  assert.equal(boardCameraSetup({ generation: 3 }, { ...snapshot, camera_setup: null }), null, 'an older Sentinel')
+  assert.equal(boardCameraSetup(null, snapshot), null)
+  assert.equal(boardCameraSetup({ generation: 3 }, null), null)
 })

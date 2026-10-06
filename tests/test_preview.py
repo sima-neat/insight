@@ -22,7 +22,7 @@ from neat_insight.board.transport import key_fingerprint
 from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
 from neat_insight.preview import api, manager as preview
-from test_peripherals import C920, IMX477, NOT_INSTALLED, c920, catalog, check, core_of, imx477, mipi_mode
+from test_peripherals import C920, IMX477, board_block, c920, catalog, check, imx477, mipi_mode
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
 PREVIEW = "/api/peripherals/cameras/preview"
@@ -30,10 +30,12 @@ AWAIT_VIDEO, INGEST_STATS = preview.PreviewManager._await_video, preview._ingest
 BOARD = {"label": "sima@board", "source": "test", "fingerprint": "fp"}
 
 
-def scanned(*devices, board_facts=None, generation=1):
-    """Record a scan of the given Sentinel devices and return its snapshot."""
-    facts = check(support=core_of(catalog(*devices))) if board_facts is None else board_facts
-    return peripherals_api.scans.record(generation, BOARD, catalog(*devices), facts, 5)
+def scanned(*devices, board_facts=None, generation=1, board=True):
+    """Record a scan of the given Sentinel devices on a board whose camera overlays support the IMX477
+    (`board=False`: a Sentinel that reports no overlays) and return its snapshot."""
+    facts = check() if board_facts is None else board_facts
+    doc = catalog(*devices, board=board_block()) if board else catalog(*devices)
+    return peripherals_api.scans.record(generation, BOARD, doc, facts, 5)
 
 
 def item_of(snapshot, item_id):
@@ -94,7 +96,7 @@ class PreviewTests(unittest.TestCase):
         app.extensions["neat_preview"] = self.manager
         return app.test_client()
 
-    def test_only_verified_nv12_modes_of_scanned_mipi_cameras_are_previewed(self):
+    def test_only_available_nv12_modes_of_scanned_mipi_cameras_are_previewed(self):
         self.assertEqual(api.previewable_mode(self.imx477, dict(MODE)), MODE)
         self.assertEqual(api.previewable_mode(self.imx477, {}), MODE)
         cases = (
@@ -121,21 +123,21 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(self.session.transport.calls, [])
         self.assertEqual(api.previewable_mode(self.imx477, {**MODE, "fps": 30.0}), MODE)
 
-    def test_a_rate_neat_core_did_not_verify_is_not_previewed(self):
+    def test_an_unsupported_mode_is_not_previewed(self):
         doc = imx477()
-        doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), frame_intervals=[{"width": 1920, "height": 1080, "intervals": [
-            {"type": "discrete", "numerator": 1, "denominator": 60}, {"type": "discrete", "numerator": 1, "denominator": 30}]}])]
+        doc["modes"] = [mipi_mode("NV12", 1920, 1080), dict(mipi_mode("NV12", 1280, 720), isp_output=False)]
         item = item_of(scanned(doc), IMX477)
-        # Neat Core classified the fastest rate, 60 fps; 30 fps is advertised but has no verdict.
-        self.assertEqual(api.previewable_mode(item, {**MODE, "fps": 60}), {**MODE, "fps": 60})
+        self.assertEqual(api.previewable_mode(item, MODE), MODE)
         with self.assertRaises(BoardError) as ctx:
-            api.previewable_mode(item, MODE)
-        self.assertIn("at 30 fps cannot be previewed: Neat Core has not verified it.", ctx.exception.message)
+            api.previewable_mode(item, {**MODE, "width": 1280, "height": 720})
+        self.assertIn("at 30 fps cannot be previewed: The ISP cannot output this size.", ctx.exception.message)
+        self.assertEqual(ctx.exception.hint, "Pick a mode marked Available.")
 
-        unknown = item_of(scanned(imx477(), board_facts=check(support={"state": "not_installed", "reason": "x"})), IMX477)
+        no_overlays = item_of(scanned(imx477(), board=False), IMX477)
         with self.assertRaises(BoardError) as ctx:
-            api.previewable_mode(unknown, MODE)
-        self.assertIn(f"cannot be previewed: {NOT_INSTALLED}", ctx.exception.message)
+            api.previewable_mode(no_overlays, MODE)
+        # Without overlays no NV12 mode is Available, so the format itself is refused.
+        self.assertEqual(ctx.exception.message, "NV12 cannot be previewed on this camera.")
 
     def test_each_browser_gets_a_viewer_url_for_its_own_validated_host(self):
         client = self.client()

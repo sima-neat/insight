@@ -31,13 +31,13 @@ function find(node, match) {
 }
 
 const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-const tier = { tier: 'verified', reason: '' }
+const tier = { tier: 'available', reason: '' }
 const camera = (id) => ({
   id,
   name: id,
   support: tier,
   availability: { state: 'free' },
-  formats: [{ format: 'NV12', exportable: true, support: tier, sizes: [{ width: 1920, height: 1080, fps: [{ value: 30, tier: 'verified' }] }] }]
+  formats: [{ format: 'NV12', exportable: true, support: tier, sizes: [{ width: 1920, height: 1080, fps: [{ value: 30, tier: 'available' }] }] }]
 })
 
 test('Start preview passes no click event, so the request carries the selected mode', () => {
