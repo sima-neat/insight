@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ import time
 import unittest
 import unittest.mock as mock
 from fractions import Fraction
+from pathlib import Path
 from types import SimpleNamespace
 
 import paramiko
@@ -30,6 +32,7 @@ PREVIEW = "/api/peripherals/cameras/preview"
 BOARD = {"label": "sima@board", "source": "test", "fingerprint": "fp"}
 JPEG = b"\xff\xd8\xff\xe0" + b"frame" + b"\xff\xd9"
 PID = 4242
+PID_LINE = b"neat-preview-pid=%d\n" % PID
 HAVE_GST = shutil.which("gst-launch-1.0") is not None
 
 
@@ -53,7 +56,7 @@ def item_of(snapshot, item_id):
 class FakeStream:
     """A board stream that returns `chunks` in order (None: nothing arrived in time), then ends."""
 
-    def __init__(self, chunks=(), stderr=b"%d\n" % PID, endless=False):
+    def __init__(self, chunks=(), stderr=PID_LINE, endless=False):
         self.chunks, self._stderr, self.endless = list(chunks), stderr, endless
         self.closed = False
 
@@ -109,30 +112,30 @@ class PipelineTests(unittest.TestCase):
         arguments = gst.pipeline("mipi", gst.quoted("imx477 5-001a"), "NV12", 1920, 1080, Fraction(30))
         self.assertEqual(arguments, [
             "libcamerasrc", 'camera-name="imx477 5-001a"', "!", "video/x-raw,format=NV12,width=1920,height=1080,framerate=30/1",
-            "!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1",
+            "!", "videorate", "!", "video/x-raw,framerate=15/1", "!", "videoscale", "!", "video/x-raw,width=640,height=360",
             "!", "jpegenc", "quality=70", "!", "multipartmux", "boundary=frame", "!", "fdsink", "fd=1",
         ])
         command = gst.board_command(arguments)
         self.assertEqual(command[:2], ["sh", "-c"])
-        self.assertTrue(command[2].startswith("echo $$ >&2; exec gst-launch-1.0 -q libcamerasrc "))
+        self.assertTrue(command[2].startswith("echo neat-preview-pid=$$ >&2; exec gst-launch-1.0 -q libcamerasrc "))
         self.assertEqual(shlex.split(command[2])[6:], arguments)
 
     def test_a_usb_mjpg_mode_is_decoded_and_reencoded_small(self):
         arguments = gst.pipeline("usb", gst.quoted(C920_BY_ID), "MJPG", 1280, 720, Fraction(30))
         self.assertEqual(arguments[:6], ["v4l2src", f'device="{C920_BY_ID}"', "!", "image/jpeg,width=1280,height=720,framerate=30/1", "!", "jpegdec"])
-        self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1"])
+        self.assertEqual(arguments[6:14], ["!", "videorate", "!", "video/x-raw,framerate=15/1", "!", "videoscale", "!", "video/x-raw,width=640,height=360"])
 
     def test_a_usb_raw_mode_is_converted_and_a_slow_rate_is_not_raised(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "YUYV", 640, 480, Fraction(5))
         self.assertEqual(arguments[:6], ["v4l2src", 'device="/dev/video97"', "!", "video/x-raw,format=YUY2,width=640,height=480,framerate=5/1", "!", "videoconvert"])
-        self.assertIn("video/x-raw,width=640,height=480,framerate=5/1", arguments)
+        self.assertEqual(arguments[6:14], ["!", "videorate", "!", "video/x-raw,framerate=5/1", "!", "videoscale", "!", "video/x-raw,width=640,height=480"])
         self.assertEqual(gst.RAW_FORMATS["YU12"], "I420")
 
     def test_fractional_rates_are_exact_fractions(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "MJPG", 640, 480, Fraction(30000, 1001))
         self.assertIn("image/jpeg,width=640,height=480,framerate=30000/1001", arguments)
-        self.assertIn("video/x-raw,width=640,height=480,framerate=15/1", arguments)
-        self.assertIn("video/x-raw,width=640,height=480,framerate=15/2", gst.pipeline("usb", '"/dev/v"', "MJPG", 640, 480, Fraction(15, 2)))
+        self.assertIn("video/x-raw,framerate=15/1", arguments)
+        self.assertIn("video/x-raw,framerate=15/2", gst.pipeline("usb", '"/dev/v"', "MJPG", 640, 480, Fraction(15, 2)))
 
     def test_preview_size_keeps_the_aspect_ratio_with_even_sides(self):
         cases = {(1920, 1080): (640, 360), (2432, 2048): (640, 538), (640, 480): (640, 480), (320, 240): (320, 240),
@@ -161,6 +164,13 @@ class PipelineTests(unittest.TestCase):
                 command = "exec gst-launch-1.0 -q " + shlex.join(["filesrc", f"location={gst.quoted(path)}", "!", "fdsink", "fd=1"])
                 with self.subTest(name=name):
                     self.assertEqual(subprocess.run(["sh", "-c", command], capture_output=True, timeout=30).stdout, name.encode())
+
+
+    def test_the_frontend_offers_preview_for_the_usb_formats_the_backend_previews(self):
+        model = (Path(__file__).parent.parent / "frontend" / "src" / "peripherals" / "model.js").read_text()
+        listed = re.search(r"USB_PREVIEW_FORMATS = Object\.freeze\(\[([^\]]*)\]\)", model)
+        self.assertIsNotNone(listed)
+        self.assertEqual(re.findall(r"'([A-Z0-9]+)'", listed[1]), ["MJPG", *gst.RAW_FORMATS])
 
 
 class FrameParserTests(unittest.TestCase):
@@ -315,7 +325,7 @@ class PreviewTests(unittest.TestCase):
     def test_a_busy_camera_fails_the_start_as_in_use_and_the_pipeline_is_stopped(self):
         for message in (b"[0:01] ERROR Camera camera.cpp:1009 Failed to acquire camera imx477 5-001a\n",
                         b"ERROR: from element /GstPipeline:pipeline0/GstV4l2Src:v4l2src0: Device '/dev/video97' is busy\n"):
-            stream = FakeStream([], stderr=b"%d\n" % PID + message)
+            stream = FakeStream([], stderr=PID_LINE + message)
             session = fake_session(FakeTransport(stream=stream))
             with self.subTest(message=message), self.assertRaises(BoardError) as ctx:
                 self.start(session)
@@ -328,13 +338,15 @@ class PreviewTests(unittest.TestCase):
             self.assertIsNone(self.manager.current(1))
 
     def test_a_pipeline_that_fails_or_sends_no_frame_is_stopped_with_its_output(self):
-        stream = FakeStream([], stderr=b"%d\nWARNING: erroneous pipeline: no element \"libcamerasrc\"\n" % PID)
+        error = b"ERROR: from element /GstPipeline:pipeline0/GstLibcameraSrc:libcamerasrc0: Internal data stream error."
+        stream = FakeStream([], stderr=PID_LINE + error + b"\n")
         session = fake_session(FakeTransport(stream=stream))
         with self.assertRaises(BoardError) as ctx:
             self.start(session)
         self.assertEqual(ctx.exception.code, "command_failed")
         self.assertEqual(ctx.exception.message, "The preview pipeline stopped before it sent a frame.")
-        self.assertEqual(ctx.exception.extra["detail"], 'WARNING: erroneous pipeline: no element "libcamerasrc"')
+        self.assertEqual(ctx.exception.extra["detail"], error.decode())
+        self.assertEqual(len(session.transport.kills()), 1)
 
         stream = FakeStream([b"--frame\r\n"], endless=True)
         session = fake_session(FakeTransport(stream=stream))
@@ -350,6 +362,43 @@ class PreviewTests(unittest.TestCase):
             self.start(fake_session(FakeTransport(stream=stream)))
         self.assertIn("not usable", ctx.exception.message)
         self.assertTrue(stream.closed)
+        self.assertIsNone(self.manager.current(1))
+
+    def test_a_missing_gstreamer_plugin_is_reported_with_the_install_hint(self):
+        stream = FakeStream([], stderr=PID_LINE + b'WARNING: erroneous pipeline: no element "libcamerasrc"\n')
+        session = fake_session(FakeTransport(stream=stream))
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual((ctx.exception.code, ctx.exception.status), ("tool_missing", 502))
+        self.assertEqual(ctx.exception.extra["tool"], "libcamerasrc")
+        self.assertIn("no libcamerasrc element", ctx.exception.message)
+        self.assertEqual(ctx.exception.hint, preview.GST_INSTALL_HINT)
+        self.assertEqual(ctx.exception.extra["detail"], 'WARNING: erroneous pipeline: no element "libcamerasrc"')
+        self.assertTrue(stream.closed)
+        self.assertIsNone(self.manager.current(1))
+
+    def test_shell_banners_before_the_pid_line_are_skipped_and_kept_out_of_the_detail(self):
+        banner = b"bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)\n"
+        stream = FakeStream([multipart(JPEG)], stderr=banner + PID_LINE, endless=True)
+        self.assertEqual(preview.PreviewManager._pid(stream), PID)
+        failed = FakeStream([], stderr=banner + PID_LINE + b"ERROR: the camera went away\n")
+        session = fake_session(FakeTransport(stream=failed))
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual(ctx.exception.extra["detail"], banner.decode() + "ERROR: the camera went away")
+        self.assertEqual(len(session.transport.kills()), 1)
+        self.assertIn(f"pid={PID};", session.transport.kills()[0])
+        # A bare number is not the tagged line: no PID is guessed from a banner.
+        self.assertIsNone(preview._PID.search(b"4242\n"))
+
+    def test_a_start_that_fails_unexpectedly_still_stops_the_pipeline(self):
+        stream = FakeStream([multipart(JPEG)], endless=True)
+        session = fake_session(FakeTransport(stream=stream))
+        with mock.patch.object(preview.PreviewManager, "_first_frames", side_effect=ValueError("boom")), \
+                self.assertRaises(ValueError):
+            self.start(session)
+        self.assertTrue(stream.closed)
+        self.assertEqual(len(session.transport.kills()), 1)
         self.assertIsNone(self.manager.current(1))
 
     def test_a_camera_another_process_holds_now_is_refused_before_anything_is_launched(self):
@@ -546,9 +595,10 @@ class LocalPipelineTests(unittest.TestCase):
         with mock.patch.object(gst, "pipeline", lambda *args: ["nosuchelement", "!", "fakesink"]), \
                 self.assertRaises(BoardError) as ctx:
             manager.start(session, item, mode)
-        self.assertEqual(ctx.exception.code, "command_failed")
-        self.assertEqual(ctx.exception.message, "The preview pipeline stopped before it sent a frame.")
+        self.assertEqual((ctx.exception.code, ctx.exception.extra["tool"]), ("tool_missing", "nosuchelement"))
+        self.assertEqual(ctx.exception.hint, preview.GST_INSTALL_HINT)
         self.assertIn('no element "nosuchelement"', ctx.exception.extra["detail"])
+        self.assertNotIn("neat-preview-pid=", ctx.exception.extra["detail"])
         self.assertIsNone(manager.current(1))
 
 

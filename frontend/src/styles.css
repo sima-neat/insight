@@ -3991,8 +3991,7 @@ button:disabled {
   font-weight: 700;
 }
 
-.periph-blocked-disclosure > summary:focus-visible,
-.periph-preview-frame:focus-visible {
+.periph-blocked-disclosure > summary:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
 }

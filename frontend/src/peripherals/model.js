@@ -593,8 +593,8 @@ export function previewStreamUrl(session) {
   return /^\/api\/peripherals\/cameras\/preview\/[A-Za-z0-9_-]+\/stream$/.test(url) ? url : null
 }
 
-// The pane's event for a stream the browser could not load or that broke off: the backend stops a
-// preview whose stream ends, so the preview is over, with the reason shown.
+// The pane's event for a stream that ended: the backend stops a preview whose stream ends, so the
+// preview is over, with the reason shown.
 export function streamEndedEvent(sessionId) {
   return {
     type: 'ended',
@@ -605,6 +605,40 @@ export function streamEndedEvent(sessionId) {
       hint: 'Start the preview again. If it keeps stopping, check the camera connection on the board.',
       details: {}
     }
+  }
+}
+
+// How often a live preview's page reads GET /api/peripherals/preview, which never contacts the board.
+export const PREVIEW_POLL_MS = 2500
+
+// One read of the backend's preview for a live session: the ended event when the backend no longer
+// runs it, null while it does. A failed read proves nothing, so it ends nothing.
+export async function previewStatusEvent(request, sessionId) {
+  let current
+  try {
+    current = (await request('/api/peripherals/preview'))?.session
+  } catch {
+    return null
+  }
+  return current?.id === sessionId && current.state !== 'stopped' ? null : streamEndedEvent(sessionId)
+}
+
+// An <img> fires no event when a multipart stream ends cleanly (end of the board stream, the stall
+// timeout, a refresh or board change from elsewhere), so a live preview is read every `interval` ms
+// until the backend no longer runs it; then `onEvent` gets the ended event. Returns the cancel function.
+export function watchPreview(request, sessionId, onEvent, interval = PREVIEW_POLL_MS) {
+  let cancelled = false
+  let timer = null
+  async function check() {
+    const event = await previewStatusEvent(request, sessionId)
+    if (cancelled) return
+    if (event) onEvent(event)
+    else timer = setTimeout(check, interval)
+  }
+  timer = setTimeout(check, interval)
+  return () => {
+    cancelled = true
+    clearTimeout(timer)
   }
 }
 
@@ -645,11 +679,15 @@ export function previewErrorInfo(error) {
   }
 }
 
+// The USB formats the backend previews: MJPG, and the raw FourCCs in neat_insight/preview/gst.py
+// RAW_FORMATS (tests/test_preview.py keeps the two lists equal).
+export const USB_PREVIEW_FORMATS = Object.freeze(['MJPG', 'YUYV', 'UYVY', 'YVYU', 'NV12', 'NV21', 'YU12', 'YV12', 'GREY', 'RGB3', 'BGR3'])
+
 export function previewBlock({ camera, selection, stale = false, session = null, target = null } = {}) {
   if (!target) return { blocked: true, reason: 'No board is selected. Open board settings and choose one.' }
   if (!camera) return { blocked: true, reason: 'Select a camera first.' }
   if (stale) return { blocked: true, reason: 'The board changed after this scan. Refresh before starting a preview.' }
-  // A USB camera previews any mode it lists; a MIPI camera only its Available modes.
+  // A USB camera previews any mode it lists in a format the preview reads; a MIPI camera only its Available modes.
   const mipi = camera.connection !== 'usb'
   if (mipi && camera.support?.tier === 'unsupported') {
     return {
@@ -658,6 +696,9 @@ export function previewBlock({ camera, selection, stale = false, session = null,
     }
   }
   if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
+  if (!mipi && !USB_PREVIEW_FORMATS.includes(selection.format)) {
+    return { blocked: true, reason: `Preview decodes MJPG and converts raw formats such as YUYV, not ${selection.format}. Choose another format.` }
+  }
   if (mipi && selectionTier(camera, selection) !== 'available') {
     return { blocked: true, reason: `${modeLabel(selection)} is Unsupported on this board. Choose an Available mode.` }
   }

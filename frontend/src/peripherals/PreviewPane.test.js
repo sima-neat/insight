@@ -113,7 +113,7 @@ test('a live preview shows the relayed stream in an img and reports a stream it 
   assert.equal(find(foreign, (node) => node.type === 'img'), null)
 })
 
-test('a USB camera can start a preview of any mode it lists', () => {
+test('a USB camera can start a preview of any mode it lists in a format the preview reads', () => {
   const calls = []
   const pane = PreviewPane({
     camera: usbCamera,
@@ -126,4 +126,19 @@ test('a USB camera can start a preview of any mode it lists', () => {
   assert.equal(start.props.disabled, false)
   start.props.onClick()
   assert.deepEqual(calls, [[]])
+})
+
+test('Start is disabled for a USB format the backend cannot preview, with the reason', () => {
+  const h264 = { ...usbCamera, formats: [...usbCamera.formats, { ...usbCamera.formats[0], format: 'H264' }] }
+  const pane = PreviewPane({
+    camera: h264,
+    selection: { id: h264.id, format: 'H264', width: 1280, height: 720, fps: 30 },
+    target: { label: 'board' },
+    state: { status: 'idle', session: null, error: null },
+    onStart() {}
+  })
+  const start = find(pane, (node) => node.type === 'button' && node.props.children === 'Start preview')
+  assert.equal(start.props.disabled, true)
+  const reason = find(pane, (node) => node.props?.id === 'periph-preview-reason')
+  assert.match(reason.props.children, /not H264\. Choose another format\.$/)
 })

@@ -25,7 +25,8 @@ import {
   sessionToAdopt,
   severityInfo,
   sortIssues,
-  streamEndedEvent
+  streamEndedEvent,
+  watchPreview
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
@@ -403,12 +404,20 @@ export default function PeripheralsView({
     if (Number(session.generation) !== Number(board.generation)) dispatchPreview({ type: 'reset' })
   }, [board?.generation])
 
-  // The <img> could not load the stream, or it broke off. The backend stops a preview whose stream
-  // ends (and one whose stream nobody opened), so the page only shows it as stopped. It sends no stop:
-  // a stream this tab could not open may be the one another tab is showing.
+  // The <img> could not load the stream. The backend stops a preview whose stream ends (and one whose
+  // stream nobody opened), so the page only shows it as stopped. It sends no stop: a stream this tab
+  // could not open may be the one another tab is showing.
   function streamEnded(sessionId) {
     dispatchPreview(streamEndedEvent(sessionId))
   }
+
+  // A stream that ends cleanly fires no <img> error, so while live the page reads whether the backend
+  // still runs this preview.
+  const liveSessionId = preview.status === 'live' ? preview.session?.id : null
+  useEffect(() => {
+    if (!liveSessionId) return undefined
+    return watchPreview(requestJson, liveSessionId, dispatchPreview)
+  }, [liveSessionId])
 
   useEffect(() => {
     // Only the "Scanning… N s" counter needs a clock now that nothing on the page shows a relative time.

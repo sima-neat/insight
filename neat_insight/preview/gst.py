@@ -8,6 +8,8 @@ PREVIEW_WIDTH = 640
 PREVIEW_FPS = Fraction(15)
 JPEG_QUALITY = 70
 BOUNDARY = "frame"
+# The board command's stderr line that carries the pipeline's PID.
+PID_TAG = "neat-preview-pid="
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 MAX_HEADER_BYTES = 1024
 # V4L2 FourCCs Sentinel reports for USB cameras, by the format name v4l2src gives them in video/x-raw caps.
@@ -65,9 +67,11 @@ def pipeline(connection: str, source: str, fmt: str, width: int, height: int, ra
         head = ["v4l2src", f"device={source}", "!", f"video/x-raw,format={RAW_FORMATS[fmt]},{caps}", "!", "videoconvert"]
     preview_width, preview_height = preview_size(width, height)
     return head + [
-        "!", "videoscale",
+        # Drop frames before scaling, so frames the preview skips are never scaled.
         "!", "videorate",
-        "!", f"video/x-raw,width={preview_width},height={preview_height},framerate={fraction(min(rate, PREVIEW_FPS))}",
+        "!", f"video/x-raw,framerate={fraction(min(rate, PREVIEW_FPS))}",
+        "!", "videoscale",
+        "!", f"video/x-raw,width={preview_width},height={preview_height}",
         "!", "jpegenc", f"quality={JPEG_QUALITY}",
         "!", "multipartmux", f"boundary={BOUNDARY}",
         "!", "fdsink", "fd=1",
@@ -75,8 +79,9 @@ def pipeline(connection: str, source: str, fmt: str, width: int, height: int, ra
 
 
 def board_command(arguments: List[str]) -> List[str]:
-    """The board command: the shell prints its PID to stderr, then becomes gst-launch-1.0 with that PID."""
-    return ["sh", "-c", "echo $$ >&2; exec gst-launch-1.0 -q " + shlex.join(arguments)]
+    """The board command: the shell prints its PID to stderr as a tagged line, then becomes gst-launch-1.0
+    with that PID."""
+    return ["sh", "-c", f"echo {PID_TAG}$$ >&2; exec gst-launch-1.0 -q " + shlex.join(arguments)]
 
 
 def part(frame: bytes) -> bytes:

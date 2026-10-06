@@ -2,7 +2,6 @@ import base64
 import getpass
 import hashlib
 import os
-import select
 import selectors
 import shlex
 import socket
@@ -92,6 +91,9 @@ class _LocalStream:
         # Held by read() for one poll at a time and by close(), so the pipe is never closed under a reader.
         self._lock = threading.Lock()
         self._closed = False
+        # selectors, not select.select, which refuses a descriptor above 1023.
+        self._selector = selectors.DefaultSelector()
+        self._selector.register(proc.stdout, selectors.EVENT_READ)
         self._stderr_done = threading.Event()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
 
@@ -112,7 +114,7 @@ class _LocalStream:
                     return b""
                 fd = self._proc.stdout.fileno()
                 wait = min(_STREAM_POLL_SEC, max(deadline - time.monotonic(), 0))
-                if select.select([fd], [], [], wait)[0]:
+                if self._selector.select(wait):
                     return os.read(fd, STREAM_CHUNK_BYTES)
             if time.monotonic() >= deadline:
                 return None
@@ -127,6 +129,7 @@ class _LocalStream:
             if self._closed:
                 return
             self._closed = True
+            self._selector.close()
             # The command's next write fails with SIGPIPE; reap it once it exits.
             self._proc.stdout.close()
         threading.Thread(target=self._proc.wait, daemon=True).start()

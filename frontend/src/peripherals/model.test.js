@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   PREVIEW_IDLE,
+  USB_PREVIEW_FORMATS,
   adoptedSelection,
   apiError,
   availabilityInfo,
@@ -37,6 +38,7 @@ import {
   previewBlock,
   previewErrorInfo,
   previewNeedsRestart,
+  previewStatusEvent,
   previewStatusInfo,
   previewStreamUrl,
   resolveCameraId,
@@ -52,7 +54,8 @@ import {
   sourceLabel,
   streamEndedEvent,
   tierInfo,
-  validateBoardForm
+  validateBoardForm,
+  watchPreview
 } from './model.js'
 
 const ISP_SIZE = 'The ISP cannot output this size.'
@@ -672,6 +675,15 @@ test('Start preview is blocked with the reason for every state that forbids it',
   assert.match(previewBlock({ camera: usb, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
   assert.match(previewBlock({ camera: { ...usb, availability: inUse.availability }, selection: { format: 'YUYV', width: 640, height: 480, fps: 15 }, target: boardTarget }).reason, /In use by gst-launch-1\.0/)
 
+  // Only the formats the backend previews: MJPG and the raw FourCCs GStreamer converts.
+  for (const fmt of ['MJPG', 'YUYV', 'GREY']) {
+    assert.equal(previewBlock({ camera: usb, selection: { format: fmt, width: 640, height: 480, fps: 30 }, target: boardTarget }).blocked, false, fmt)
+  }
+  const h264 = previewBlock({ camera: usb, selection: { format: 'H264', width: 1280, height: 720, fps: 30 }, target: boardTarget })
+  assert.equal(h264.blocked, true)
+  assert.match(h264.reason, /not H264\. Choose another format\.$/)
+  assert.ok(Object.isFrozen(USB_PREVIEW_FORMATS))
+
   assert.match(previewBlock({ camera: imx477, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
 
   const unsupported = { ...imx477, formats: [format('NV12', 'NV12', false, support('unsupported', ISP_SIZE), [size(1920, 1080, [30, 'unsupported'])])] }
@@ -737,6 +749,68 @@ test('preview transitions: a stale session id never disturbs a newer one', () =>
   assert.equal(ended.session, null)
   assert.equal(ended.error.message, 'The preview stream stopped.')
   assert.ok(previewErrorInfo(ended.error).hint, 'a stopped stream always offers a way back')
+})
+
+test("a live preview's status read ends it once the backend no longer runs this session", async () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  const reads = []
+  const reply = (body) => async (url) => {
+    reads.push(url)
+    return body
+  }
+
+  // Still the backend's current session: nothing changes.
+  assert.equal(await previewStatusEvent(reply({ session: liveSession }), '8f1c'), null)
+  assert.deepEqual(reads, ['/api/peripherals/preview'])
+
+  // No session, another session, or this one stopped: the stream is over.
+  for (const body of [{ session: null }, { session: { ...liveSession, id: 'other' } }, { session: { ...liveSession, state: 'stopped' } }]) {
+    const event = await previewStatusEvent(reply(body), '8f1c')
+    assert.deepEqual(event, streamEndedEvent('8f1c'), JSON.stringify(body))
+    const ended = nextPreviewState(live, event)
+    assert.equal(ended.status, 'idle')
+    assert.equal(ended.error.code, 'stream_ended')
+  }
+
+  // A read that fails proves nothing about the stream.
+  assert.equal(await previewStatusEvent(async () => { throw new Error('network') }, '8f1c'), null)
+})
+
+test('a watched live preview is read until the backend no longer runs it, and cancelling stops the reads', async () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const replies = [{ session: liveSession }, { session: liveSession }, { session: null }]
+  const reads = []
+  const requestJson = async (url) => {
+    reads.push(url)
+    return replies.shift() || { session: null }
+  }
+  const events = []
+  watchPreview(requestJson, '8f1c', (event) => events.push(event), 1)
+  const deadline = Date.now() + 2000
+  while (!events.length && Date.now() < deadline) await sleep(5)
+  assert.deepEqual(events, [streamEndedEvent('8f1c')])
+  assert.equal(reads.length, 3)
+  await sleep(20)
+  assert.equal(reads.length, 3, 'reading stops once the preview ended')
+
+  let count = 0
+  const cancel = watchPreview(async () => {
+    count += 1
+    return { session: null }
+  }, '8f1c', (event) => events.push(event), 1)
+  cancel()
+  await sleep(20)
+  assert.equal(count, 0)
+  assert.equal(events.length, 1)
+
+  // Cancelled while a read is in flight: its answer is dropped.
+  let answer
+  const slow = watchPreview(() => new Promise((resolve) => { answer = resolve }), '8f1c', (event) => events.push(event), 1)
+  while (!answer) await sleep(1)
+  slow()
+  answer({ session: null })
+  await sleep(10)
+  assert.equal(events.length, 1)
 })
 
 test('preview transitions: failures, reset, and adopting an existing session', () => {

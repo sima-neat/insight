@@ -32,7 +32,11 @@ GST_INSTALL_HINT = (
 _DEVICE_NODE = re.compile(r"/dev/[A-Za-z0-9_./-]+")
 # What libcamera and v4l2src print when another process holds the camera.
 _CAMERA_BUSY = re.compile(r"Failed to acquire camera|Device or resource busy|Device '[^']*' is busy")
-_PID = re.compile(rb"([0-9]{1,10})\n")
+# The line the board command writes to stderr before it becomes gst-launch-1.0 (see gst.board_command);
+# a login shell may print other lines first.
+_PID = re.compile(rb"^" + gst.PID_TAG.encode() + rb"([0-9]{1,10})$", re.M)
+_PID_LINE = re.compile("^" + re.escape(gst.PID_TAG) + "[0-9]+\n?", re.M)
+_NO_ELEMENT = re.compile(r'no element "(\w+)"')
 
 
 def _kill_script(pid: int) -> str:
@@ -66,10 +70,9 @@ def _unknown_session() -> BoardError:
 
 
 def _stderr_detail(stream, wait: float = 0) -> str:
-    """The pipeline's stderr without the PID line the shell writes first; `wait` lets an exiting one finish it."""
+    """The pipeline's stderr without the PID line the shell writes; `wait` lets an exiting one finish it."""
     text = stream.stderr(wait).decode("utf-8", errors="replace")
-    first, newline, rest = text.partition("\n")
-    return (rest if newline and first.strip().isdigit() else text).strip()[-1000:]
+    return _PID_LINE.sub("", text).strip()[-1000:]
 
 
 class _Relay:
@@ -137,7 +140,7 @@ class PreviewManager:
         try:
             frames = self._first_frames(stream, parser, item["name"])
             pid = self._pid(stream)
-        except BoardError:
+        except Exception:
             stream.close()
             self._kill(board_session, stream)
             raise
@@ -209,6 +212,15 @@ class PreviewManager:
         detail = _stderr_detail(stream, STDERR_WAIT_SEC if ended else 0)
         if _CAMERA_BUSY.search(detail):
             raise _camera_in_use(name, [], detail)
+        missing = _NO_ELEMENT.search(detail)
+        if missing:
+            raise BoardError(
+                "tool_missing",
+                f"The board's GStreamer has no {missing[1]} element, which the preview pipeline needs.",
+                hint=GST_INSTALL_HINT,
+                tool=missing[1],
+                detail=detail,
+            )
         raise BoardError(
             "command_failed",
             "The preview pipeline stopped before it sent a frame." if ended
@@ -222,7 +234,7 @@ class PreviewManager:
         """The pipeline's PID, which the shell writes to stderr before it becomes gst-launch-1.0."""
         deadline = time.monotonic() + PID_TIMEOUT_SEC
         while True:
-            match = _PID.match(stream.stderr())
+            match = _PID.search(stream.stderr())
             if match:
                 return int(match[1])
             if time.monotonic() >= deadline:
@@ -233,7 +245,7 @@ class PreviewManager:
     @staticmethod
     def _kill(board_session, stream) -> None:
         """Best effort: kill a pipeline whose start failed, so a stalled one does not keep the camera."""
-        match = _PID.match(stream.stderr())
+        match = _PID.search(stream.stderr())
         if match:
             with suppress(BoardError):
                 board_session.raw_transport.exec(["sh", "-c", _kill_script(int(match[1]))], timeout=STOP_TIMEOUT_SEC)
