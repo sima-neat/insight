@@ -583,6 +583,10 @@ class SnapshotTests(unittest.TestCase):
                                   {"name": "IMX477", "compatible": "sony,imx477"}],
         })
         self.assertEqual([cameras.sensor_name(c) for c in ("sony,imx477", "imx219", "sony,")], ["IMX477", "IMX219", "SONY,"])
+        # The DevKit's overlays name IMX568 twice (sony,imx568 and econ,imx568); the page lists it once.
+        twice = {"supported_sensors": [{"compatible": c, "overlays": ["a.dtbo"]} for c in ("sony,imx568", "econ,imx568")]}
+        self.assertEqual(snapshot_of(catalog(board=twice))["camera_setup"]["supported_sensors"],
+                         [{"name": "IMX568", "compatible": "econ,imx568"}])
         # Only overlays that configure a sensor are shown, in U-Boot's order; none without supported sensors.
         both = {**board_block(), "overlays": [IMX477_OVERLAY, "pcie-8rc.dtbo", "modalix-som-ar0234.dtbo"]}
         self.assertEqual(snapshot_of(catalog(imx477(), board=both))["camera_setup"]["overlays"],

@@ -251,11 +251,16 @@ def _camera_setup(block: Optional[dict], items: list) -> Optional[dict]:
         "model": block.get("model"),
         "overlays": [overlay for overlay in block.get("overlays") or [] if overlay in camera_overlays],
         "cameras": cameras,
-        "supported_sensors": [
-            {"name": name, "compatible": compatible}
-            for compatible, name in sorted(sensors.items(), key=lambda pair: (pair[1], pair[0]))
-        ],
+        "supported_sensors": _unique_sensors(sensors),
     }
+
+
+def _unique_sensors(sensors: dict) -> list:
+    """Sensors sorted by name, each name once: two vendors can ship one sensor (sony,imx568 and econ,imx568)."""
+    unique = {}
+    for compatible, name in sorted(sensors.items(), key=lambda pair: (pair[1], pair[0])):
+        unique.setdefault(name, {"name": name, "compatible": compatible})
+    return list(unique.values())
 
 
 def _setup_issues(setup: Optional[dict], catalog: dict) -> list:
