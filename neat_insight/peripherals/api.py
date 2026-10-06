@@ -87,4 +87,3 @@ def refresh_peripherals():
         snapshot = scans.record(session.generation, board, catalog, check, scan_ms)
         session.require_current()
         return snapshot
-

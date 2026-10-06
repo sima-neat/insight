@@ -215,7 +215,7 @@ def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation
         "scan_ms": scan_ms,
         "platform": platform,
         "items": items,
-        "issues": _setup_issues(setup) + _issues(catalog, check, items, unknown),
+        "issues": _setup_issues(setup, catalog) + _issues(catalog, check, items, unknown),
         "changes": _changes(previous["items"], items) if previous else None,
         "camera_setup": setup,
     }
@@ -255,8 +255,11 @@ def _camera_setup(block: Optional[dict], items: list) -> Optional[dict]:
     }
 
 
-def _setup_issues(setup: Optional[dict]) -> list:
+def _setup_issues(setup: Optional[dict], catalog: dict) -> list:
     """A warning for each camera the device tree configures that Sentinel did not detect."""
+    # When MIPI discovery itself failed, its own error explains the missing cameras; a cable hint would mislead.
+    if any(error.get("provider") == "camera.mipi" for error in catalog.get("errors") or []):
+        return []
     issues = []
     for camera in (setup or {}).get("cameras") or []:
         if camera["detected"]:

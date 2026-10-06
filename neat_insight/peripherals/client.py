@@ -98,6 +98,8 @@ def _valid_interval(interval) -> bool:
 # Sentinel's optional `board` block: the board model and the camera setup its device tree declares. It
 # only adds context, so a malformed field or entry is dropped instead of failing the refresh.
 BOARD_LIST_LIMIT = 32
+# Sentinel parses up to 512 overlay files, so the sensors they describe get a wider bound.
+SUPPORTED_SENSORS_LIMIT = 256
 BOARD_TEXT_LIMIT = 256
 
 
@@ -137,9 +139,12 @@ def board_block(value):
     }
     if _text(value.get("model")):
         block["model"] = value["model"]
-    for key, parse in (("configured_cameras", _configured_camera), ("supported_sensors", _supported_sensor)):
+    for key, parse, limit in (
+        ("configured_cameras", _configured_camera, BOARD_LIST_LIMIT),
+        ("supported_sensors", _supported_sensor, SUPPORTED_SENSORS_LIMIT),
+    ):
         entries = value.get(key) if isinstance(value.get(key), list) else []
-        block[key] = [parsed for parsed in map(parse, entries) if parsed][:BOARD_LIST_LIMIT]
+        block[key] = [parsed for parsed in map(parse, entries) if parsed][:limit]
     return block
 
 

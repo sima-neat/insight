@@ -118,19 +118,20 @@ class PeripheralClientTests(unittest.TestCase):
             "configured_cameras": [{"compatible": "sony,imx477"}],
             "supported_sensors": [],
         }
-        many = {"supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": [7]} for i in range(100)]}
+        many = {"supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": [7]} for i in range(300)]}
         for name, block, expected in (
             ("good", good, good),
             ("malformed", malformed, cleaned),
             ("bounded", many, {"camera_overlays": [], "configured_cameras": [],
                                "supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": []}
-                                                     for i in range(client_module.BOARD_LIST_LIMIT)]}),
+                                                     for i in range(client_module.SUPPORTED_SENSORS_LIMIT)]}),
         ):
             with self.subTest(name), mock.patch.object(
                 socket_client, "request", return_value=(200, json.dumps(camera_catalog(board=block)))
             ):
                 self.assertEqual(PeripheralClient(FakeSession()).catalog()["board"], expected)
-        for name, response in (("missing", camera_catalog()), ("not an object", camera_catalog(board=[1]))):
+        older = {key: value for key, value in camera_catalog().items() if key != "board"}
+        for name, response in (("missing", older), ("not an object", camera_catalog(board=[1]))):
             with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
                 self.assertNotIn("board", PeripheralClient(FakeSession()).catalog())
 

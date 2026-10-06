@@ -372,6 +372,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["scan_id"], f"{doc['revision']}:{doc['observed_at']}")
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
         self.assertEqual(snapshot["issues"], [])
+        # Sentinel's published example carries the board block; its camera is the detected IMX477.
+        self.assertEqual([(c["name"], c["item_id"]) for c in snapshot["camera_setup"]["cameras"]], [("IMX477", IMX477)])
 
         mipi = item(snapshot, IMX477)
         self.assertEqual((mipi["connection"], mipi["support"]["tier"]), ("mipi", "verified"))
@@ -593,6 +595,10 @@ class SnapshotTests(unittest.TestCase):
                     {"severity": "warning", "code": "camera_not_detected", "message": message, "hint": hint},
                 ])
         self.assertEqual(snapshot_of(catalog(imx477(), board=board_block()))["issues"], [])
+        # A failed MIPI provider explains the missing camera itself; a cable hint would send the user the wrong way.
+        mipi_failed = catalog(board=board_block(None), errors=[
+            {"provider": "camera.mipi", "code": "io.open", "reason": "could not open /dev/media0"}])
+        self.assertNotIn("camera_not_detected", [i["code"] for i in snapshot_of(mipi_failed)["issues"]])
 
     def test_an_older_sentinel_without_a_board_block_adds_no_camera_setup(self):
         snapshot = snapshot_of(catalog(imx477()))

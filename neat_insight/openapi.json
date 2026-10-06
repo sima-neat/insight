@@ -1406,7 +1406,7 @@
       },
       "PeripheralsSnapshot": {
         "type": "object",
-        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "platform"],
+        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "platform", "camera_setup"],
         "properties": {
           "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
           "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
