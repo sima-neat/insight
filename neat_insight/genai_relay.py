@@ -6,9 +6,8 @@ request to the Studio backend started with ``run.sh --backend-only``
 browser therefore talks to one HTTPS origin: it never has to accept the board's
 self-signed certificate, and the board needs no CORS allowlist.
 
-Only the Studio's API prefixes are forwarded, and never ``/shutdown``. Settings
-(board address and the Reset MLA token) live in Insight's ``cfg.json`` under
-``"genai"``; the token is sent to the board but never returned to the browser.
+Only the Studio's API prefixes are forwarded, and never ``/shutdown``. The board
+address lives in Insight's ``cfg.json`` under ``"genai"``.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ _QUICK_TIMEOUT_S = 5.0
 _LONG_TIMEOUT_S = 900.0
 _STREAM_CHUNK = 64 * 1024
 
-_REQUEST_HEADERS = ("Content-Type", "Accept", "Last-Event-ID", "X-Reset-Token")
+_REQUEST_HEADERS = ("Content-Type", "Accept", "Last-Event-ID")
 _RESPONSE_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control")
 
 
@@ -144,7 +143,7 @@ def is_allowed_path(subpath: str) -> bool:
 
 @genai_bp.get("/api/genai/settings")
 def get_genai_settings():
-    """Board address in use, whether it was configured, and whether a reset token is stored."""
+    """Board address in use, and whether it was configured or derived."""
     section = _section()
     configured = section.get("url") if isinstance(section.get("url"), str) else ""
     return jsonify(
@@ -152,14 +151,13 @@ def get_genai_settings():
             "url": board_url(),
             "configuredUrl": configured or None,
             "defaultUrl": default_board_url() or None,
-            "hasResetToken": bool(section.get("resetToken")),
         }
     )
 
 
 @genai_bp.post("/api/genai/settings")
 def set_genai_settings():
-    """Set or clear the board address and the Reset MLA token (empty string clears)."""
+    """Set or clear the board address (an empty string clears it)."""
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return _json_error("Expected a JSON object.", 400, "bad-request")
@@ -182,15 +180,6 @@ def set_genai_settings():
             section["url"] = url
         else:
             section.pop("url", None)
-
-    if "resetToken" in payload:
-        token = payload["resetToken"]
-        if not isinstance(token, str):
-            return _json_error("'resetToken' must be a string.", 400, "bad-request")
-        if token.strip():
-            section["resetToken"] = token.strip()
-        else:
-            section.pop("resetToken", None)
 
     data[CFG_SECTION] = section
     _write_cfg(data)
@@ -217,10 +206,6 @@ def relay_to_board(subpath: str):
         path += "?" + request.query_string.decode("latin-1")
 
     headers = {name: request.headers[name] for name in _REQUEST_HEADERS if name in request.headers}
-    if subpath == "models/reset-mla" and "X-Reset-Token" not in headers:
-        token = _section().get("resetToken")
-        if isinstance(token, str) and token:
-            headers["X-Reset-Token"] = token
     body = request.get_data(cache=False) if request.method == "POST" else None
 
     timeout = _QUICK_TIMEOUT_S if subpath in _QUICK_PATHS else _LONG_TIMEOUT_S

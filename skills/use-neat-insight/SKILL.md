@@ -414,8 +414,8 @@ Insight relays calls to the GenAI Studio backend on a board (started there with 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/genai/settings` | Return the board address in use (`url`), the configured and default addresses, and `hasResetToken`; the token itself is never returned. |
-| `POST` | `/api/genai/settings` | Set or clear `url` (`https://host[:port]`) and `resetToken`; an empty string clears a value. |
+| `GET` | `/api/genai/settings` | Return the board address in use (`url`) and the configured and default addresses. |
+| `POST` | `/api/genai/settings` | Set or clear `url` (`https://host[:port]`); an empty string clears it. |
 | `GET`, `POST` | `/api/genai/<path>` | Forward a Studio API call (`health`, `voices`, `v1/…`, `audio/…`, `models/…`, `benchmark/…`, `tts/…`, `piperplus/…`, `supertonic/…`, `voices/…`) and stream the answer back unchanged; `shutdown` and other paths return 404. |
 
 The default address is `https://127.0.0.1:5000` on a board, otherwise `https://<DEVKIT_SYNC_DEVKIT_IP>:5000`. Relay errors carry a `reason`: `not-relayed` (404), `unreachable` (502), `not-configured` (503).

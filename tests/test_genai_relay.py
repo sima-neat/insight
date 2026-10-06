@@ -65,9 +65,8 @@ class _FakeStudio(BaseHTTPRequestHandler):
                 {"bytes": len(body), "type": self.headers.get("Content-Type")},
                 {"X-ASR-Model": "whisper-small", "X-Elapsed-Time": "0.4"},
             )
-        elif self.path == "/models/reset-mla":
-            ok = self.headers.get("X-Reset-Token") == "secret"
-            self._send_json(200 if ok else 401, {"reset": ok})
+        elif self.path == "/models/load":
+            self._send_json(409, {"error": "Another model is loading"})
         else:
             self._send_json(200, {"echo": json.loads(body or b"{}")})
 
@@ -118,22 +117,19 @@ class GenaiRelayTests(unittest.TestCase):
             self.assertEqual(relay.default_board_url(), "https://192.168.2.3:5000")
         self.assertEqual(relay.default_board_url(), "")
 
-    def test_settings_round_trip_keeps_other_config_and_never_returns_the_token(self):
+    def test_settings_round_trip_keeps_other_config(self):
         self.cfg.write_text(json.dumps({"remote-devkit": {"ip": "10.0.0.9"}}))
 
-        body = self._configure(url="https://192.168.2.3:5000/", resetToken="secret")
+        body = self._configure(url="https://192.168.2.3:5000/")
 
         self.assertEqual(body["url"], "https://192.168.2.3:5000")
         self.assertEqual(body["configuredUrl"], "https://192.168.2.3:5000")
-        self.assertTrue(body["hasResetToken"])
-        self.assertNotIn("secret", json.dumps(body))
         stored = json.loads(self.cfg.read_text())
         self.assertEqual(stored["remote-devkit"], {"ip": "10.0.0.9"})
-        self.assertEqual(stored["genai"]["resetToken"], "secret")
+        self.assertEqual(stored["genai"]["url"], "https://192.168.2.3:5000")
 
-        cleared = self._configure(url="", resetToken="")
+        cleared = self._configure(url="")
         self.assertIsNone(cleared["configuredUrl"])
-        self.assertFalse(cleared["hasResetToken"])
 
     def test_settings_reject_addresses_that_are_not_a_plain_origin(self):
         for bad in ("ftp://board", "board:5000", "https://board:5000/v1", "https://user@board", 5):
@@ -201,21 +197,10 @@ class GenaiRelayTests(unittest.TestCase):
     def test_passes_the_board_status_through(self):
         self._configure(url=self.board)
 
-        response = self.client.post("/api/genai/models/reset-mla")
+        response = self.client.post("/api/genai/models/load", json={"name": "m"})
 
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.get_json(), {"reset": False})
-
-    def test_adds_the_stored_reset_token_only_to_reset_requests(self):
-        self._configure(url=self.board, resetToken="secret")
-
-        reset = self.client.post("/api/genai/models/reset-mla")
-        chat = self.client.post("/api/genai/v1/chat/completions", json={"model": "m"})
-
-        self.assertEqual(reset.status_code, 200)
-        self.assertEqual(_FakeStudio.requests[0]["headers"].get("X-Reset-Token"), "secret")
-        self.assertEqual(chat.get_json(), {"echo": {"model": "m"}})
-        self.assertNotIn("X-Reset-Token", _FakeStudio.requests[1]["headers"])
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json(), {"error": "Another model is loading"})
 
     def test_reports_an_unreachable_board(self):
         with socket_closed_port() as port:

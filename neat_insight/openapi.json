@@ -774,15 +774,15 @@
         "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`), and whether a Reset MLA token is stored. The token itself is never returned.",
         "operationId": "getGenaiSettings",
         "responses": {
-          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000", "hasResetToken": false}}}}
+          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}}
         }
       },
       "post": {
         "tags": ["GenAI Studio"],
         "summary": "Set the GenAI Studio board settings",
-        "description": "Sets or clears the board address and the Reset MLA token printed by the Studio's `run.sh`. An empty string clears a value; omitted fields are unchanged. The address must be `http(s)://host[:port]` with no path. Settings persist in Insight's `cfg.json`.",
+        "description": "Sets or clears the board address. An empty string clears it; an omitted field is unchanged. The address must be `http(s)://host[:port]` with no path. Settings persist in Insight's `cfg.json`.",
         "operationId": "setGenaiSettings",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000", "resetToken": "0123abcd"}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000"}}}},
         "responses": {
           "200": {"description": "Settings after the update.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}}}},
           "400": {"$ref": "#/components/responses/BadRequest"}
@@ -1062,20 +1062,18 @@
       "GenaiSettings": {
         "type": "object",
         "description": "Board address Insight relays GenAI calls to, and stored settings.",
-        "required": ["url", "configuredUrl", "defaultUrl", "hasResetToken"],
+        "required": ["url", "configuredUrl", "defaultUrl"],
         "properties": {
           "url": {"type": "string", "description": "Address in use; empty when none is configured or derivable."},
           "configuredUrl": {"type": ["string", "null"], "description": "Address set by the user, or null."},
-          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."},
-          "hasResetToken": {"type": "boolean", "description": "Whether a Reset MLA token is stored."}
+          "defaultUrl": {"type": ["string", "null"], "description": "Address used when none is configured, or null."}
         }
       },
       "GenaiSettingsUpdate": {
         "type": "object",
         "description": "Fields to change; an empty string clears a value.",
         "properties": {
-          "url": {"type": "string", "description": "`http(s)://host[:port]` of the board's GenAI Studio backend."},
-          "resetToken": {"type": "string", "description": "Reset MLA token printed by the Studio's `run.sh`."}
+          "url": {"type": "string", "description": "`http(s)://host[:port]` of the board's GenAI Studio backend."}
         }
       },
       "Success": {
