@@ -12,8 +12,6 @@ import {
   countLabel,
   deviceTabs,
   groupCameras,
-  heartbeatDelay,
-  heartbeatFailureEvent,
   isSnapshotStale,
   modeLabel,
   nextPreviewState,
@@ -26,7 +24,8 @@ import {
   sessionMatches,
   sessionToAdopt,
   severityInfo,
-  sortIssues
+  sortIssues,
+  streamEndedEvent
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
@@ -253,8 +252,7 @@ export default function PeripheralsView({
     try {
       await requestJson(previewUrl(sessionId, 'stop'), { method: 'POST' })
     } catch (err) {
-      // Keep ownership visible so the user can retry. The board-side TTL remains the final safety
-      // net, but it must not make a failed remote stop look successful.
+      // Keep ownership visible so the user can retry: a failed remote stop must not look successful.
       dispatchPreview({ type: 'stop-failed', for: sessionId, error: normalizeError(err) })
       return false
     }
@@ -380,10 +378,10 @@ export default function PeripheralsView({
   useEffect(() => () => {
     const session = previewRef.current.session
     if (session?.id) {
-      // Best effort on unmount: there is no UI left to report a failure to, and the board stops
-      // capturing by itself once the heartbeats stop, so a lost stop cannot strand the camera.
+      // Best effort on unmount: there is no UI left to report a failure to, and the backend stops
+      // the preview by itself once its stream closes with the page, so a lost stop cannot strand the camera.
       fetch(previewUrl(session.id, 'stop'), { method: 'POST' }).catch((error) => {
-        console.debug('Preview stop on page exit failed; the board heartbeat timeout will release the camera.', error)
+        console.debug('Preview stop on page exit failed; closing the stream releases the camera.', error)
       })
     }
   }, [])
@@ -405,32 +403,12 @@ export default function PeripheralsView({
     if (Number(session.generation) !== Number(board.generation)) dispatchPreview({ type: 'reset' })
   }, [board?.generation])
 
-  const beatSessionId = preview.session?.id || ''
-  const beatMs = heartbeatDelay(preview.session)
-  const beating = Boolean(beatSessionId) && (preview.status === 'starting' || preview.status === 'live')
-
-  useEffect(() => {
-    // A hidden tab keeps beating on purpose: the board frees the camera 45 s after the last
-    // heartbeat, so pausing here would kill a preview the user only briefly switched away from.
-    if (!beating) return
-    let cancelled = false
-    async function beat() {
-      try {
-        const data = await requestJson(previewUrl(beatSessionId, 'heartbeat'), { method: 'POST' })
-        if (!cancelled) dispatchPreview({ type: 'session', session: data.session })
-      } catch (err) {
-        if (cancelled) return
-        const event = heartbeatFailureEvent(normalizeError(err), beatSessionId)
-        if (event) dispatchPreview(event)
-      }
-    }
-    beat()
-    const timer = setInterval(beat, beatMs)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [beating, beatSessionId, beatMs])
+  // The <img> could not load the stream, or it broke off. The backend stops a preview whose stream
+  // ends (and one whose stream nobody opened), so the page only shows it as stopped. It sends no stop:
+  // a stream this tab could not open may be the one another tab is showing.
+  function streamEnded(sessionId) {
+    dispatchPreview(streamEndedEvent(sessionId))
+  }
 
   useEffect(() => {
     // Only the "Scanning… N s" counter needs a clock now that nothing on the page shows a relative time.
@@ -483,6 +461,7 @@ export default function PeripheralsView({
             preview={preview}
             onStartPreview={startPreview}
             onStopPreview={() => stopPreview()}
+            onPreviewStreamError={streamEnded}
             onOpenBoardPanel={onOpenBoardPanel}
           />
         ) : (

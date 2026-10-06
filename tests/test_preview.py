@@ -1,14 +1,15 @@
 import contextlib
 import json
 import os
+import shlex
+import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import time
 import unittest
 import unittest.mock as mock
-import uuid
+from fractions import Fraction
 from types import SimpleNamespace
 
 import paramiko
@@ -18,16 +19,23 @@ from neat_insight import board, preview as preview_pkg
 from neat_insight.board import BoardError, ExecResult
 from neat_insight.board import manager as manager_module
 from neat_insight.board.target import BoardTarget
-from neat_insight.board.transport import key_fingerprint
+from neat_insight.board.transport import LocalTransport, key_fingerprint
 from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
-from neat_insight.preview import api, manager as preview
-from test_peripherals import C920, IMX477, board_block, c920, catalog, check, imx477, mipi_mode
+from neat_insight.preview import api, gst, manager as preview
+from test_peripherals import C920, C920_BY_ID, IMX477, board_block, c920, catalog, check, imx477, mipi_mode, usb_mode
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
 PREVIEW = "/api/peripherals/cameras/preview"
-AWAIT_VIDEO, INGEST_STATS = preview.PreviewManager._await_video, preview._ingest_stats
 BOARD = {"label": "sima@board", "source": "test", "fingerprint": "fp"}
+JPEG = b"\xff\xd8\xff\xe0" + b"frame" + b"\xff\xd9"
+PID = 4242
+HAVE_GST = shutil.which("gst-launch-1.0") is not None
+
+
+def multipart(*frames):
+    """What multipartmux writes for these frames."""
+    return b"".join(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n%s\r\n" % (len(f), f) for f in frames)
 
 
 def scanned(*devices, board_facts=None, generation=1, board=True):
@@ -42,16 +50,46 @@ def item_of(snapshot, item_id):
     return next(item for item in snapshot["items"] if item["id"] == item_id)
 
 
+class FakeStream:
+    """A board stream that returns `chunks` in order (None: nothing arrived in time), then ends."""
+
+    def __init__(self, chunks=(), stderr=b"%d\n" % PID, endless=False):
+        self.chunks, self._stderr, self.endless = list(chunks), stderr, endless
+        self.closed = False
+
+    def read(self, timeout):
+        if self.closed:
+            return b""
+        if self.chunks:
+            return self.chunks.pop(0)
+        if self.endless:
+            time.sleep(min(timeout, 0.01))
+            return None
+        return b""
+
+    def stderr(self, wait=0):
+        return self._stderr
+
+    def close(self):
+        self.closed = True
+
+
 class FakeTransport:
-    def __init__(self, ssh_client=b"192.168.2.1 51234 22", python=b"/home/sima/pyneat/bin/python", started=b"running\n", users=None):
-        self.calls, self.closed = [], False
-        report = {"users": {IMX477: users or []}}
-        self.replies = {"SSH_CLIENT": ssh_client + b"\n" + python + b"\n", "/dev/media0": json.dumps(report).encode(),
-                        "echo alive": b"alive\n", "grep -qx running": started}
+    def __init__(self, gst_path=b"/usr/bin/gst-launch-1.0\n", users=None, stream=None):
+        self.calls, self.streams, self.closed = [], [], False
+        report = {"users": {IMX477: users or [], C920: users or []}}
+        self.replies = {"command -v gst-launch-1.0": gst_path, '"cameras"': json.dumps(report).encode()}
+        self.next_stream = stream
 
     def exec(self, argv, *, timeout, stdin=None):
         self.calls.append(argv[-1])
         return ExecResult(0, next((out for key, out in self.replies.items() if key in argv[-1]), b""), b"")
+
+    def stream(self, argv, *, timeout):
+        stream = self.next_stream or FakeStream([multipart(JPEG)], endless=True)
+        self.next_stream = None
+        self.streams.append((argv, stream))
+        return stream
 
     def close(self):
         self.closed = True
@@ -66,27 +104,117 @@ def fake_session(transport=None, generation=1):
                            transport=transport, raw_transport=transport)
 
 
-def new_manager():
-    rows = [{"name": "videoUDP", "hostPortStart": 9000, "hostPortEnd": 9003}]
-    return preview.PreviewManager(lambda: rows, lambda: 80, lambda host, port, path, query: f"https://{host}:{port}{path}?{query}")
+class PipelineTests(unittest.TestCase):
+    def test_a_mipi_camera_is_captured_in_nv12_by_libcamera(self):
+        arguments = gst.pipeline("mipi", gst.quoted("imx477 5-001a"), "NV12", 1920, 1080, Fraction(30))
+        self.assertEqual(arguments, [
+            "libcamerasrc", 'camera-name="imx477 5-001a"', "!", "video/x-raw,format=NV12,width=1920,height=1080,framerate=30/1",
+            "!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1",
+            "!", "jpegenc", "quality=70", "!", "multipartmux", "boundary=frame", "!", "fdsink", "fd=1",
+        ])
+        command = gst.board_command(arguments)
+        self.assertEqual(command[:2], ["sh", "-c"])
+        self.assertTrue(command[2].startswith("echo $$ >&2; exec gst-launch-1.0 -q libcamerasrc "))
+        self.assertEqual(shlex.split(command[2])[6:], arguments)
+
+    def test_a_usb_mjpg_mode_is_decoded_and_reencoded_small(self):
+        arguments = gst.pipeline("usb", gst.quoted(C920_BY_ID), "MJPG", 1280, 720, Fraction(30))
+        self.assertEqual(arguments[:6], ["v4l2src", f'device="{C920_BY_ID}"', "!", "image/jpeg,width=1280,height=720,framerate=30/1", "!", "jpegdec"])
+        self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1"])
+
+    def test_a_usb_raw_mode_is_converted_and_a_slow_rate_is_not_raised(self):
+        arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "YUYV", 640, 480, Fraction(5))
+        self.assertEqual(arguments[:6], ["v4l2src", 'device="/dev/video97"', "!", "video/x-raw,format=YUY2,width=640,height=480,framerate=5/1", "!", "videoconvert"])
+        self.assertIn("video/x-raw,width=640,height=480,framerate=5/1", arguments)
+        self.assertEqual(gst.RAW_FORMATS["YU12"], "I420")
+
+    def test_fractional_rates_are_exact_fractions(self):
+        arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "MJPG", 640, 480, Fraction(30000, 1001))
+        self.assertIn("image/jpeg,width=640,height=480,framerate=30000/1001", arguments)
+        self.assertIn("video/x-raw,width=640,height=480,framerate=15/1", arguments)
+        self.assertIn("video/x-raw,width=640,height=480,framerate=15/2", gst.pipeline("usb", '"/dev/v"', "MJPG", 640, 480, Fraction(15, 2)))
+
+    def test_preview_size_keeps_the_aspect_ratio_with_even_sides(self):
+        cases = {(1920, 1080): (640, 360), (2432, 2048): (640, 538), (640, 480): (640, 480), (320, 240): (320, 240),
+                 (1280, 721): (640, 360), (1280, 722): (640, 362), (641, 481): (640, 480), (3, 2): (2, 2)}
+        for size, expected in cases.items():
+            with self.subTest(size=size):
+                self.assertEqual(gst.preview_size(*size), expected)
+
+    def test_odd_camera_names_stay_one_quoted_value(self):
+        for name in ("imx477 5-001a", "a!b c", "it's", 'p"q', "b\\s", "x,y=z;w", "$(reboot)"):
+            with self.subTest(name=name):
+                value = gst.quoted(name)
+                command = gst.board_command(gst.pipeline("mipi", value, "NV12", 1920, 1080, Fraction(30)))
+                self.assertEqual(shlex.split(command[2])[7], f"camera-name={value}", "the shell passes it as one argument")
+        self.assertEqual(gst.quoted('p"q\\'), '"p\\"q\\\\"')
+        self.assertIsNone(gst.quoted("a\nb"))
+        self.assertIsNone(gst.quoted("a\x00b"))
+
+    @unittest.skipUnless(HAVE_GST, "gst-launch-1.0 is not installed")
+    def test_gstreamer_reads_a_quoted_value_back_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("imx477 5-001a", "a!b c", "it's", 'p"q', "b\\s", "x,y=z;w"):
+                path = os.path.join(tmp, name)
+                with open(path, "wb") as handle:
+                    handle.write(name.encode())
+                command = "exec gst-launch-1.0 -q " + shlex.join(["filesrc", f"location={gst.quoted(path)}", "!", "fdsink", "fd=1"])
+                with self.subTest(name=name):
+                    self.assertEqual(subprocess.run(["sh", "-c", command], capture_output=True, timeout=30).stdout, name.encode())
+
+
+class FrameParserTests(unittest.TestCase):
+    def test_frames_are_read_whole_from_one_chunk_or_many(self):
+        second = JPEG + b"2"
+        data = multipart(JPEG, second)
+        self.assertEqual(gst.FrameParser().feed(data), [JPEG, second])
+        parser, frames = gst.FrameParser(), []
+        for byte in data:
+            frames += parser.feed(bytes([byte]))
+        self.assertEqual(frames, [JPEG, second])
+
+    def test_bytes_before_a_part_are_skipped_and_garbage_is_not_kept(self):
+        self.assertEqual(gst.FrameParser().feed(b"gst noise\r\n" + multipart(JPEG)), [JPEG])
+        parser = gst.FrameParser()
+        for _ in range(100):
+            self.assertEqual(parser.feed(b"x" * 10000), [])
+        self.assertLess(len(parser._buffer), 16)
+        self.assertEqual(parser.feed(multipart(JPEG)), [JPEG])
+
+    def test_an_oversized_or_malformed_part_is_refused(self):
+        cases = {
+            "oversized": b"--frame\r\nContent-Length: %d\r\n\r\n" % (gst.MAX_FRAME_BYTES + 1),
+            "no length": b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + JPEG,
+            "bad length": b"--frame\r\nContent-Length: -5\r\n\r\n" + JPEG,
+            "not jpeg type": b"--frame\r\nContent-Type: text/html\r\nContent-Length: 8\r\n\r\n<script>",
+            "not a jpeg": b"--frame\r\nContent-Length: 8\r\n\r\n<script>",
+            "endless headers": b"--frame\r\n" + b"X-Pad: y\r\n" * 200,
+            "header line": b"--frame\r\ngarbage\r\n\r\n",
+        }
+        for name, data in cases.items():
+            with self.subTest(name), self.assertRaises(gst.FrameError):
+                gst.FrameParser().feed(data)
+
+    def test_a_relayed_part_carries_its_type_and_length(self):
+        self.assertEqual(gst.part(JPEG), b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 11\r\n\r\n" + JPEG + b"\r\n")
+        self.assertEqual(gst.FrameParser().feed(gst.part(JPEG)), [JPEG])
 
 
 class PreviewTests(unittest.TestCase):
     def setUp(self):
-        self.manager = new_manager()
+        self.manager = preview.PreviewManager()
         self.session = fake_session()
-        for patch in (
-            mock.patch.object(peripherals_api, "scans", cameras.ScanCache()),
-            mock.patch.object(preview, "_ingest_stats", return_value=[]),
-            mock.patch.object(preview.PreviewManager, "_await_video", lambda *args: None),
-        ):
-            patch.start()
-            self.addCleanup(patch.stop)
+        patch = mock.patch.object(peripherals_api, "scans", cameras.ScanCache())
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(lambda: self.manager.stop_for_board_change())
         self.snapshot = scanned(imx477(), c920())
         self.imx477 = item_of(self.snapshot, IMX477)
+        self.c920 = item_of(self.snapshot, C920)
 
-    def start(self, session=None):
-        return self.manager.start(session or self.session, self.imx477, dict(MODE))
+    def start(self, session=None, item=None, mode=MODE):
+        item = item or self.imx477
+        return self.manager.start(session or self.session, item, api.previewable_mode(item, dict(mode)))
 
     def client(self):
         app = Flask(__name__)
@@ -96,15 +224,23 @@ class PreviewTests(unittest.TestCase):
         app.extensions["neat_preview"] = self.manager
         return app.test_client()
 
-    def test_only_available_nv12_modes_of_scanned_mipi_cameras_are_previewed(self):
-        self.assertEqual(api.previewable_mode(self.imx477, dict(MODE)), MODE)
-        self.assertEqual(api.previewable_mode(self.imx477, {}), MODE)
+    def test_mipi_previews_available_modes_and_usb_any_listed_mode(self):
+        mode = api.previewable_mode(self.imx477, dict(MODE))
+        self.assertEqual((mode["rate"], mode["source"]), (Fraction(30), '"imx477 5-001a"'))
+        self.assertEqual({key: mode[key] for key in MODE}, MODE)
+        self.assertEqual(api.previewable_mode(self.imx477, {})["fps"], 30)
+        # A USB camera has no camera overlay, so its modes are Unsupported, and it still previews.
+        self.assertEqual(self.c920["formats"][0]["sizes"][0]["fps"][0]["tier"], "unsupported")
+        usb = api.previewable_mode(self.c920, {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertEqual((usb["rate"], usb["source"]), (Fraction(30), f'"{C920_BY_ID}"'))
+        self.assertEqual(api.previewable_mode(self.c920, {"format": "MJPG", "width": 640, "height": 480, "fps": 7.5})["rate"], Fraction(15, 2))
+        self.assertEqual(api.previewable_mode(self.c920, {"format": "YUYV", "width": 640, "height": 480, "fps": 5})["format"], "YUYV")
         cases = (
-            (self.imx477, {**MODE, "format": "RGB3"}, "RGB3 cannot be previewed"),
+            (self.imx477, {**MODE, "format": "RGB3"}, "cannot be previewed: Neat's CameraInput outputs NV12 only."),
+            (self.imx477, {**MODE, "format": "H264"}, "H264 is not a format this camera reported."),
             (self.imx477, {**MODE, "width": 1280, "height": 720}, "1280x720 is not a size"),
             (self.imx477, {**MODE, "fps": 60}, "Pick one of: 30."),
-            (self.imx477, {**MODE, "fps": 29.97}, "whole-number frame rate"),
-            (item_of(self.snapshot, C920), {**MODE, "format": "MJPG", "width": 1280, "height": 720}, "MIPI cameras only"),
+            (self.c920, {}, "no default mode"),
         )
         for item, mode, reason in cases:
             with self.subTest(mode=mode), self.assertRaises(BoardError) as ctx:
@@ -112,183 +248,216 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "invalid_request")
             self.assertIn(reason, ctx.exception.message + (ctx.exception.hint or ""))
 
-    def test_a_non_finite_frame_rate_is_an_invalid_request(self):
-        client = self.client()
-        for fps in ("1e309", "-1e309", "Infinity", "NaN"):
-            with self.subTest(fps=fps):
-                body = '{"id": "%s", "format": "NV12", "width": 1920, "height": 1080, "fps": %s}' % (IMX477, fps)
-                response = client.post(PREVIEW, data=body, content_type="application/json", headers={"Host": "insight.local"})
-                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
-                self.assertIn("fps must be a positive number", response.get_json()["error"])
-        self.assertEqual(self.session.transport.calls, [])
-        self.assertEqual(api.previewable_mode(self.imx477, {**MODE, "fps": 30.0}), MODE)
+    def test_a_usb_camera_opens_its_stable_path_and_needs_a_format_gstreamer_reads(self):
+        doc = c920()
+        del doc["by_id_path"]
+        doc["modes"].append(dict(usb_mode("MJPG", 320, 240, [(1, 30)]), format="H264", format_description="H.264"))
+        item = item_of(scanned(doc), C920)
+        self.assertEqual(api.previewable_mode(item, {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})["source"], '"/dev/video97"')
+        with self.assertRaises(BoardError) as ctx:
+            api.previewable_mode(item, {"format": "H264", "width": 320, "height": 240, "fps": 30})
+        self.assertIn("preview decodes MJPG and converts raw formats", ctx.exception.message)
+        item["device"]["video_node"] = "video97"
+        with self.assertRaises(BoardError) as ctx:
+            api.previewable_mode(item, {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertIn("reports no device Insight can open", ctx.exception.message)
 
-    def test_an_unsupported_mode_is_not_previewed(self):
+    def test_an_unsupported_mipi_mode_is_not_previewed(self):
         doc = imx477()
         doc["modes"] = [mipi_mode("NV12", 1920, 1080), dict(mipi_mode("NV12", 1280, 720), isp_output=False)]
         item = item_of(scanned(doc), IMX477)
-        self.assertEqual(api.previewable_mode(item, MODE), MODE)
         with self.assertRaises(BoardError) as ctx:
             api.previewable_mode(item, {**MODE, "width": 1280, "height": 720})
         self.assertIn("at 30 fps cannot be previewed: The ISP cannot output this size.", ctx.exception.message)
         self.assertEqual(ctx.exception.hint, "Pick a mode marked Available.")
-
         no_overlays = item_of(scanned(imx477(), board=False), IMX477)
         with self.assertRaises(BoardError) as ctx:
             api.previewable_mode(no_overlays, MODE)
-        # Without overlays no NV12 mode is Available, so the format itself is refused.
-        self.assertEqual(ctx.exception.message, "NV12 cannot be previewed on this camera.")
+        self.assertIn(f"cannot be previewed: {cameras.NO_BOARD_REASON}", ctx.exception.message)
 
-    def test_each_browser_gets_a_viewer_url_for_its_own_validated_host(self):
+    def test_a_non_finite_frame_rate_is_an_invalid_request(self):
         client = self.client()
-        body = {"id": IMX477, **MODE}
-        for host in ("evil.example/x", "evil:1:2", "[not-v6]:1", "@evil", 'evil"onload='):
-            response = client.post(PREVIEW, json=body, headers={"Host": host})
-            self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"), host)
+        for fps in ("1e309", "-1e309", "Infinity", "NaN", "10e400"):
+            with self.subTest(fps=fps):
+                body = '{"id": "%s", "format": "NV12", "width": 1920, "height": 1080, "fps": %s}' % (IMX477, fps)
+                response = client.post(PREVIEW, data=body, content_type="application/json")
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+                self.assertIn("fps must be a positive number", response.get_json()["error"])
+        for fps in (10**400, float("nan"), float("inf"), 0, True, "30"):
+            with self.subTest(fps=str(fps)[:12]), self.assertRaises(BoardError) as ctx:
+                api.parse_mode({**MODE, "fps": fps})
+            self.assertEqual(ctx.exception.code, "invalid_request")
         self.assertEqual(self.session.transport.calls, [])
-        started = client.post(PREVIEW, json=body, headers={"Host": "attacker.example"}).get_json()["session"]
-        self.assertEqual(started["channel"], 3)
-        url = client.get("/api/peripherals/preview", headers={"Host": "insight.local:9900"}).get_json()["session"]["viewer_url"]
-        self.assertTrue(url.startswith("https://insight.local:8081/static/viewer.html?mode=light&src=3&"), url)
-        launch = next(call for call in self.session.transport.calls if "setsid nohup" in call)
-        self.assertIn("/home/sima/pyneat/bin/python preview.py ", launch)
-        self.assertIn("'imx477 5-001a' 192.168.2.1 1920 1080 30 9000 3", launch)
+        self.assertEqual(api.parse_mode({**MODE, "fps": 7.5})["fps"], 7.5)
 
-    def test_the_session_has_the_shape_the_page_reads(self):
-        client = self.client()
-        session = client.post(PREVIEW, json={"id": IMX477, **MODE}, headers={"Host": "insight.local"}).get_json()["session"]
+    def test_a_start_runs_the_pipeline_and_waits_for_its_first_frame(self):
+        stream = FakeStream([multipart(JPEG)[:20], None, multipart(JPEG)[20:]], endless=True)
+        self.session.transport.next_stream = stream
+        session = self.client().post(PREVIEW, json={"id": IMX477, **MODE}).get_json()["session"]
+        self.assertEqual(session["stream_url"], f"{PREVIEW}/{session['id']}/stream")
         self.assertEqual((session["camera_id"], session["mode"], session["generation"], session["state"]), (IMX477, MODE, 1, "live"))
-        self.assertEqual(session["heartbeat_interval_ms"], preview.HEARTBEAT_INTERVAL_MS)
-        self.assertRegex(session["started_at"], r"^\d{4}-\d\d-\d\dT")
-        beat = client.post(f"{PREVIEW}/{session['id']}/heartbeat", headers={"Host": "insight.local"}).get_json()["session"]
-        self.assertEqual((beat["id"], beat["camera_id"]), (session["id"], IMX477))
-        stopped = client.post(f"{PREVIEW}/{session['id']}/stop", headers={"Host": "insight.local"}).get_json()["session"]
-        self.assertEqual(stopped["state"], "stopped")
-        self.assertTrue(self.session.transport.kills())
-        self.assertIsNone(client.get("/api/peripherals/preview", headers={"Host": "insight.local"}).get_json()["session"])
-        gone = client.post(f"{PREVIEW}/{session['id']}/stop", headers={"Host": "insight.local"})
-        self.assertEqual((gone.status_code, gone.get_json()["code"]), (404, "not_found"))
+        self.assertFalse({"channel", "ssrc", "viewer_url", "heartbeat_interval_ms", "expires_at"} & set(session))
+        argv, _ = self.session.transport.streams[0]
+        self.assertEqual(argv, gst.board_command(gst.pipeline("mipi", '"imx477 5-001a"', "NV12", 1920, 1080, Fraction(30))))
+        self.assertIn("command -v gst-launch-1.0", self.session.transport.calls[0])
+        self.assertEqual(self.manager.current(1)["id"], session["id"])
+        self.assertIsNone(self.manager.current(2))
+        self.assertFalse(stream.closed)
 
-    def test_a_start_needs_a_scan_of_this_board_and_a_scanned_camera(self):
-        client = self.client()
-        missing = client.post(PREVIEW, json={"id": "camera:nope"}, headers={"Host": "insight.local"})
-        self.assertEqual((missing.status_code, missing.get_json()["code"]), (404, "not_found"))
-        self.session = fake_session(generation=2)
-        stale = client.post(PREVIEW, json={"id": IMX477}, headers={"Host": "insight.local"})
-        self.assertEqual((stale.status_code, stale.get_json()["code"]), (409, "stale_snapshot"))
-        self.assertEqual(self.session.transport.calls, [])
+    def test_a_missing_gst_launch_is_reported_before_anything_runs(self):
+        session = fake_session(FakeTransport(gst_path=b""))
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual((ctx.exception.code, ctx.exception.extra["tool"]), ("tool_missing", "gst-launch-1.0"))
+        self.assertIn("gstreamer1.0-plugins-good", ctx.exception.hint)
+        self.assertEqual(session.transport.streams, [])
+
+    def test_a_busy_camera_fails_the_start_as_in_use_and_the_pipeline_is_stopped(self):
+        for message in (b"[0:01] ERROR Camera camera.cpp:1009 Failed to acquire camera imx477 5-001a\n",
+                        b"ERROR: from element /GstPipeline:pipeline0/GstV4l2Src:v4l2src0: Device '/dev/video97' is busy\n"):
+            stream = FakeStream([], stderr=b"%d\n" % PID + message)
+            session = fake_session(FakeTransport(stream=stream))
+            with self.subTest(message=message), self.assertRaises(BoardError) as ctx:
+                self.start(session)
+            self.assertEqual((ctx.exception.code, ctx.exception.status), ("camera_in_use", 409))
+            self.assertEqual(ctx.exception.message, "imx477 5-001a is already in use: the board reports the camera busy; another process holds it.")
+            self.assertEqual(ctx.exception.extra["detail"], message.decode().strip())
+            self.assertTrue(stream.closed)
+            self.assertEqual(len(session.transport.kills()), 1)
+            self.assertIn(f"pid={PID};", session.transport.kills()[0])
+            self.assertIsNone(self.manager.current(1))
+
+    def test_a_pipeline_that_fails_or_sends_no_frame_is_stopped_with_its_output(self):
+        stream = FakeStream([], stderr=b"%d\nWARNING: erroneous pipeline: no element \"libcamerasrc\"\n" % PID)
+        session = fake_session(FakeTransport(stream=stream))
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertEqual(ctx.exception.message, "The preview pipeline stopped before it sent a frame.")
+        self.assertEqual(ctx.exception.extra["detail"], 'WARNING: erroneous pipeline: no element "libcamerasrc"')
+
+        stream = FakeStream([b"--frame\r\n"], endless=True)
+        session = fake_session(FakeTransport(stream=stream))
+        with mock.patch.object(preview, "FIRST_FRAME_TIMEOUT_SEC", 0.05), self.assertRaises(BoardError) as ctx:
+            self.start(session)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertIn("sent no frame within", ctx.exception.message)
+        self.assertTrue(stream.closed)
+        self.assertEqual(len(session.transport.kills()), 1)
+
+        stream = FakeStream([b"--frame\r\nContent-Length: 99999999\r\n\r\n"], endless=True)
+        with self.assertRaises(BoardError) as ctx:
+            self.start(fake_session(FakeTransport(stream=stream)))
+        self.assertIn("not usable", ctx.exception.message)
+        self.assertTrue(stream.closed)
+        self.assertIsNone(self.manager.current(1))
+
+    def test_a_camera_another_process_holds_now_is_refused_before_anything_is_launched(self):
+        for item, node in ((self.imx477, "/dev/media0"), (self.c920, "/dev/video97")):
+            session = fake_session(FakeTransport(users=[{"pid": 77, "command": "neat-app"}]))
+            mode = MODE if item is self.imx477 else {"format": "MJPG", "width": 1280, "height": 720, "fps": 30}
+            with self.subTest(item=item["id"]), self.assertRaises(BoardError) as ctx:
+                self.start(session, item, mode)
+            self.assertEqual((ctx.exception.code, ctx.exception.status), ("camera_in_use", 409))
+            self.assertEqual(ctx.exception.message, f"{item['name']} is already in use: Open in neat-app (pid 77).")
+            self.assertEqual(session.transport.streams, [])
+            request = next(call for call in session.transport.calls if '"cameras"' in call)
+            self.assertEqual(json.loads(request), {"cameras": {item["id"]: [node]}})
 
     def test_a_camera_the_scan_found_busy_is_refused_by_name_before_its_modes(self):
         holder = [{"pid": 77, "command": "neat-app"}]
         scanned(imx477(), board_facts=check(users={IMX477: holder}))
-        response = self.client().post(PREVIEW, json={"id": IMX477, "format": "RGB3"}, headers={"Host": "insight.local"})
+        response = self.client().post(PREVIEW, json={"id": IMX477, "format": "RGB3"})
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "camera_in_use"))
         self.assertEqual(response.get_json()["error"], "imx477 5-001a is already in use: Open in neat-app (pid 77).")
         self.assertEqual(self.session.transport.calls, [])
 
-    def test_nothing_is_written_to_a_board_without_pyneat_or_with_a_forged_address(self):
-        for transport, code in ((FakeTransport(python=b""), "tool_missing"), (FakeTransport(ssh_client=b"$(reboot) 1 22"), "command_failed")):
-            with self.assertRaises(BoardError) as ctx:
-                self.start(fake_session(transport))
-            self.assertEqual(ctx.exception.code, code)
-            self.assertEqual(len(transport.calls), 1)
+    def test_a_start_needs_a_scan_of_this_board_and_a_scanned_camera(self):
+        client = self.client()
+        missing = client.post(PREVIEW, json={"id": "camera:nope"})
+        self.assertEqual((missing.status_code, missing.get_json()["code"]), (404, "not_found"))
+        self.session = fake_session(generation=2)
+        stale = client.post(PREVIEW, json={"id": IMX477})
+        self.assertEqual((stale.status_code, stale.get_json()["code"]), (409, "stale_snapshot"))
+        self.assertEqual(self.session.transport.calls, [])
 
-    def test_a_graph_build_that_never_finishes_is_not_taken_as_started(self):
-        """The worker writes pipeline.pid before graph.build(); only the program's `running` line means started."""
-        session = fake_session(FakeTransport(started=b"4242\nINFO Camera: building the graph\n"))
+    def test_the_stream_relays_the_frames_and_ends_the_preview_with_the_board_stream(self):
+        second = JPEG + b"2"
+        self.session.transport.next_stream = FakeStream([multipart(JPEG), multipart(second)[:9], multipart(second)[9:]])
+        client = self.client()
+        session = client.post(PREVIEW, json={"id": IMX477, **MODE}).get_json()["session"]
+        response = client.get(session["stream_url"])
+        self.assertEqual(response.headers["Content-Type"], "multipart/x-mixed-replace; boundary=frame")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.data, gst.part(JPEG) + gst.part(second))
+        # The board stream ended, so the preview did too.
+        self.assertIsNone(self.manager.current(1))
+        self.assertEqual(len(self.session.transport.kills()), 1)
+
+    def test_a_viewer_that_disconnects_stops_the_pipeline_and_a_second_viewer_is_refused(self):
+        self.start()
+        stream = self.session.transport.streams[0][1]
+        session_id = self.manager.current(1)["id"]
+        relay = self.manager.relay(self.session, session_id)
         with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual(ctx.exception.code, "command_failed")
-        self.assertIn("building the graph", ctx.exception.extra["detail"])
-        check = next(call for call in session.transport.calls if "grep -qx running" in call)
-        self.assertIn("&& echo running;", check)
-        self.assertNotIn("pipeline.pid", check)
-        self.assertRegex(session.transport.calls[-1], r'rm -rf "\$base/(\w+)" "\$base/\1\.log"')
+            self.manager.relay(self.session, session_id)
+        self.assertEqual((ctx.exception.code, ctx.exception.status), ("preview_active", 409))
+        frames = iter(relay)
+        self.assertEqual(next(frames), gst.part(JPEG))
+        relay.close()  # What the server does when the browser goes away.
+        self.assertTrue(stream.closed)
+        self.assertEqual(len(self.session.transport.kills()), 1)
         self.assertIsNone(self.manager.current(1))
 
-    def test_a_failed_start_stops_the_pipeline_it_launched(self):
-        # Codex 4189177587: a start reported as failed must not leave a hung build holding the camera.
-        session = fake_session(FakeTransport(started=b"4242\nINFO Camera: building the graph\n"))
+        self.start()
+        relay = self.manager.relay(self.session, self.manager.current(1)["id"])
+        relay.close()  # Closed before the server read a frame from it.
+        self.assertTrue(self.session.transport.streams[1][1].closed)
+        self.assertIsNone(self.manager.current(1))
+        with self.assertRaises(BoardError) as ctx:
+            self.manager.relay(self.session, "unknown")
+        self.assertEqual(ctx.exception.code, "not_found")
+
+    def test_a_stream_nobody_opens_is_stopped(self):
+        with mock.patch.object(preview, "UNCLAIMED_TIMEOUT_SEC", 0.05):
+            self.start()
+        deadline = time.monotonic() + 5
+        while self.manager.current(1) is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertIsNone(self.manager.current(1))
+        self.assertTrue(self.session.transport.streams[0][1].closed)
+        self.assertEqual(len(self.session.transport.kills()), 1)
+
+    def test_stop_kills_by_pid_and_is_idempotent_and_an_old_id_never_stops_a_newer_session(self):
+        client = self.client()
+        first = client.post(PREVIEW, json={"id": IMX477, **MODE}).get_json()["session"]
+        stopped = client.post(f"{PREVIEW}/{first['id']}/stop").get_json()["session"]
+        self.assertEqual((stopped["id"], stopped["state"]), (first["id"], "stopped"))
+        self.assertTrue(self.session.transport.streams[0][1].closed)
+        [kill] = self.session.transport.kills()
+        self.assertTrue(kill.startswith(f"pid={PID};"))
+        again = client.post(f"{PREVIEW}/{first['id']}/stop")
+        self.assertEqual((again.status_code, again.get_json()), (200, {"session": None}))
+        second = client.post(PREVIEW, json={"id": IMX477, **MODE}).get_json()["session"]
+        self.assertEqual(client.post(f"{PREVIEW}/{first['id']}/stop").get_json(), {"session": None})
+        self.assertEqual(client.get("/api/peripherals/preview").get_json()["session"]["id"], second["id"])
+        self.assertEqual(len(self.session.transport.kills()), 1)
+
+    def test_a_stop_the_board_does_not_answer_keeps_the_session_for_a_retry(self):
+        self.start()
+        session_id = self.manager.current(1)["id"]
+        exec_ = self.session.transport.exec
+        self.session.transport.exec = mock.Mock(side_effect=BoardError("unreachable", "gone"))
         with self.assertRaises(BoardError):
-            self.start(session)
-        self.assertEqual(len(session.transport.kills()), 1)
-        self.assertIs(session.transport.calls[-1], session.transport.kills()[0])
-
-        class FailingCheck(FakeTransport):
-            def exec(self, argv, *, timeout, stdin=None):
-                if "grep -qx running" in argv[-1]:
-                    self.calls.append(argv[-1])
-                    raise BoardError("timeout", "The board did not answer in time.")
-                return super().exec(argv, timeout=timeout, stdin=stdin)
-
-        session = fake_session(FailingCheck())
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual(ctx.exception.code, "timeout")
-        self.assertEqual(len(session.transport.kills()), 1, "the launched pipeline is stopped when the check fails")
-        self.assertIsNone(self.manager.current(1))
-
-    def test_a_failed_start_removes_its_saved_failure_log(self):
-        session = fake_session(FakeTransport(started=b"camera_not_found: imx477 5-001a\n"))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertIn("camera_not_found", ctx.exception.extra["detail"])
-        self.assertRegex(session.transport.calls[-1], r'rm -rf "\$base/(\w+)" "\$base/\1\.log"')
-
-    def test_a_camera_another_process_holds_now_is_refused_before_anything_is_launched(self):
-        session = fake_session(FakeTransport(users=[{"pid": 77, "command": "neat-app"}]))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("camera_in_use", 409))
-        self.assertEqual(ctx.exception.message, "imx477 5-001a is already in use: Open in neat-app (pid 77).")
-        self.assertEqual(ctx.exception.hint, "Stop the application using the camera, then start the preview.")
-        self.assertFalse(any("setsid nohup" in call for call in session.transport.calls))
-        self.assertIsNone(self.manager.current(1))
-        # The check is the read-only board_check program, asked about the camera's media device.
-        request = next(call for call in session.transport.calls if "/dev/media0" in call)
-        self.assertEqual(json.loads(request), {"cameras": {IMX477: ["/dev/media0"]}})
-
-    def test_a_camera_libcamera_cannot_acquire_reads_as_in_use_and_an_unreadable_check_does_not_block(self):
-        transport = FakeTransport(started=b"ERROR Camera: Failed to acquire camera imx477 5-001a\n")
-        transport.replies["/dev/media0"] = b"python3: not found"
-        with self.assertRaises(BoardError) as ctx:
-            self.start(fake_session(transport))
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("camera_in_use", 409))
-        self.assertIn("Failed to acquire camera", ctx.exception.extra["detail"])
-
-    def test_the_sdk_port_map_falls_back_to_neat_json_without_a_port_map_file(self):
-        rows = [{"name": "videoUDP", "hostPortStart": 19000, "hostPortEnd": 19003, "protocol": "udp"},
-                {"name": "videoUI", "hostPortStart": 18081, "protocol": "tcp"}]
-        manager = preview.PreviewManager(lambda: [], lambda: 80, lambda host, port, path, query: f"https://{host}:{port}{path}?{query}")
-        with mock.patch.object(preview, "_neat_exposed_ports", return_value=rows):
-            self.assertEqual(manager._udp_range(), (19000, 4))
-            self.assertTrue(manager.viewer_url("insight.local", 3).startswith("https://insight.local:18081/static/viewer.html?"))
-            started = manager.start(self.session, self.imx477, dict(MODE))
-        self.assertEqual(started["channel"], 3)
-        self.assertIn("192.168.2.1 1920 1080 30 19000 3", next(call for call in self.session.transport.calls if "setsid nohup" in call))
-        with mock.patch.object(preview, "_neat_exposed_ports", return_value=[]):
-            with self.assertRaises(BoardError) as ctx:
-                manager._reserve_channel(self.session)
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("no_channel", 409))
-
-    def test_a_failed_neat_json_is_retried_after_a_minute_and_a_good_answer_is_kept(self):
-        rows = [{"name": "videoUDP", "hostPortStart": 19000}]
-        answers = [OSError("neat: not found"), SimpleNamespace(stdout=json.dumps({"exposedPorts": rows}).encode())]
-        clock = [1000.0]
-        with mock.patch.object(preview, "_neat_ports", None), mock.patch.object(preview, "_neat_failed_at", None), \
-                mock.patch.object(preview.subprocess, "run", side_effect=answers) as run, \
-                mock.patch.object(preview.time, "monotonic", side_effect=lambda: clock[0]):
-            self.assertEqual(preview._neat_exposed_ports(), [])
-            clock[0] += 30
-            self.assertEqual(preview._neat_exposed_ports(), [], "not retried within a minute")
-            clock[0] += 31
-            self.assertEqual(preview._neat_exposed_ports(), rows)
-            self.assertEqual(preview._neat_exposed_ports(), rows)
-        self.assertEqual(run.call_count, 2)
+            self.manager.stop(self.session, session_id)
+        self.assertEqual(self.manager.current(1)["id"], session_id)
+        self.session.transport.exec = exec_
+        self.assertEqual(self.manager.stop(self.session, session_id)["state"], "stopped")
 
     def test_a_second_preview_is_refused_while_one_starts_and_names_its_camera(self):
         entered, release = threading.Event(), threading.Event()
-        with mock.patch.object(preview.PreviewManager, "_start_worker", lambda *args: (entered.set(), release.wait(5))):
+        slow = staticmethod(lambda *args: (entered.set(), release.wait(5)))
+        with mock.patch.object(preview.PreviewManager, "_require_gstreamer", slow):
             starter = threading.Thread(target=self.start)
             starter.start()
             self.assertTrue(entered.wait(2))
@@ -306,39 +475,81 @@ class PreviewTests(unittest.TestCase):
         self.assertTrue(self.session.transport.kills())
         self.assertFalse(other.transport.kills())
 
-    def test_another_sender_on_the_channel_stops_the_preview(self):
-        await_video = mock.patch.object(preview.PreviewManager, "_await_video", AWAIT_VIDEO)
-        with await_video, mock.patch.object(preview, "_channel_rtp", side_effect=[None, {"active": True, "ssrc": 1234}]):
-            started = self.start()
-        self.assertEqual(started["ssrc"], 1234)
-        with mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 777}):
-            with self.assertRaises(BoardError) as ctx:
-                self.manager.heartbeat(self.session, started["id"])
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("channel_taken", 409))
-        self.assertIsNone(self.manager.current(1))
-        busy = mock.patch.object(preview, "_channel_rtp", return_value={"active": True, "ssrc": 777})
-        with await_video, busy, mock.patch.object(preview, "VIDEO_ARRIVAL_TIMEOUT_SEC", 0.01), mock.patch.object(preview.time, "sleep"):
-            with self.assertRaises(BoardError) as ctx:
-                self.start()
-        self.assertEqual(ctx.exception.code, "channel_taken")
-        self.assertEqual(len(self.session.transport.kills()), 2)
 
-    def test_silent_channel_reports_no_video(self):
-        silent = mock.patch.object(preview, "_channel_rtp", return_value={"active": False, "ssrc": None})
-        with mock.patch.object(preview.PreviewManager, "_await_video", AWAIT_VIDEO), silent, \
-                mock.patch.object(preview, "VIDEO_ARRIVAL_TIMEOUT_SEC", 0.01), mock.patch.object(preview.time, "sleep"):
-            with self.assertRaises(BoardError) as ctx:
-                self.start()
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("no_video", 502))
+class KillScriptTests(unittest.TestCase):
+    """The board-side stop, run for real with `sh`."""
 
-    def test_vf_viewer_page_reads_as_unknown_never_as_all_channels_free(self):
-        response = mock.MagicMock()
-        response.__enter__.return_value.read.return_value = b"<!DOCTYPE html>"
-        with mock.patch.object(preview, "_ingest_stats", INGEST_STATS), \
-                mock.patch.object(preview.urllib.request, "urlopen", return_value=response):
-            with self.assertRaises(BoardError) as ctx:
-                self.manager._reserve_channel(self.session)
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("viewer_unavailable", 502))
+    def kill(self, pid):
+        subprocess.run(["sh", "-c", preview._kill_script(pid)], timeout=30, check=True)
+
+    def test_a_pid_that_is_not_gst_launch_is_never_signalled(self):
+        sleeper = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(sleeper.kill)
+        self.kill(sleeper.pid)
+        self.assertIsNone(sleeper.poll())
+        self.kill(999999999)  # No such process: nothing to do.
+
+    @unittest.skipUnless(HAVE_GST, "gst-launch-1.0 is not installed")
+    def test_the_pipeline_is_stopped_by_its_pid(self):
+        pipeline = subprocess.Popen(["gst-launch-1.0", "-q", "videotestsrc", "is-live=true", "!", "fakesink"])
+        self.addCleanup(pipeline.kill)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with open(f"/proc/{pipeline.pid}/comm") as handle:
+                if handle.read().strip() == "gst-launch-1.0":
+                    break
+            time.sleep(0.05)
+        self.kill(pipeline.pid)
+        self.assertIsNotNone(pipeline.wait(5))
+
+
+@unittest.skipUnless(HAVE_GST, "gst-launch-1.0 is not installed")
+class LocalPipelineTests(unittest.TestCase):
+    """A start, relay and stop through LocalTransport with a real gst-launch-1.0 (a test source stands in for the camera)."""
+
+    def test_frames_flow_and_closing_the_relay_ends_the_pipeline(self):
+        transport = LocalTransport()
+        session = SimpleNamespace(generation=1, transport=transport, raw_transport=transport)
+        manager = preview.PreviewManager()
+        manager._require_camera_free = lambda *args: None
+        source = ["videotestsrc", "is-live=true", "!", "video/x-raw,format=YUY2,width=1280,height=720,framerate=30/1", "!", "videoconvert"]
+        real = gst.pipeline
+
+        def test_source(connection, *args):
+            return source + real("usb", '"/dev/null"', "YUYV", 1280, 720, Fraction(30))[6:]
+
+        item = {"id": "camera:test", "name": "test", "connection": "usb", "device": {}}
+        mode = {"format": "YUYV", "width": 1280, "height": 720, "fps": 30, "rate": Fraction(30), "source": '"/dev/null"'}
+        with mock.patch.object(gst, "pipeline", test_source):
+            started = manager.start(session, item, mode)
+        pid = manager._run["pid"]
+        with open(f"/proc/{pid}/comm") as handle:
+            self.assertEqual(handle.read().strip(), "gst-launch-1.0")
+        relay = manager.relay(session, started["id"])
+        parts = iter(relay)
+        frames = [gst.FrameParser().feed(next(parts)) for _ in range(5)]
+        self.assertTrue(all(len(found) == 1 and found[0].startswith(b"\xff\xd8") for found in frames))
+        relay.close()
+        self.assertIsNone(manager.current(1))
+        deadline = time.monotonic() + 10
+        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(os.path.exists(f"/proc/{pid}"))
+
+    def test_a_pipeline_gstreamer_rejects_reports_its_error(self):
+        transport = LocalTransport()
+        session = SimpleNamespace(generation=1, transport=transport, raw_transport=transport)
+        manager = preview.PreviewManager()
+        manager._require_camera_free = lambda *args: None
+        item = {"id": "camera:test", "name": "test", "connection": "usb", "device": {}}
+        mode = {"format": "MJPG", "width": 640, "height": 480, "fps": 30, "rate": Fraction(30), "source": '"/dev/null"'}
+        with mock.patch.object(gst, "pipeline", lambda *args: ["nosuchelement", "!", "fakesink"]), \
+                self.assertRaises(BoardError) as ctx:
+            manager.start(session, item, mode)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertEqual(ctx.exception.message, "The preview pipeline stopped before it sent a frame.")
+        self.assertIn('no element "nosuchelement"', ctx.exception.extra["detail"])
+        self.assertIsNone(manager.current(1))
 
 
 class BoardChangeTests(unittest.TestCase):
@@ -350,22 +561,20 @@ class BoardChangeTests(unittest.TestCase):
             mock.patch.object(manager_module, "SshTransport", side_effect=lambda *a: self.transports.append(FakeTransport()) or self.transports[-1]),
             mock.patch.dict(os.environ, {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2"}, clear=True),
             mock.patch.object(peripherals_api, "scans", cameras.ScanCache()),
-            mock.patch.object(preview, "_ingest_stats", return_value=[]),
-            mock.patch.object(preview.PreviewManager, "_await_video", lambda *args: None),
         ):
             patch.start()
             self.addCleanup(patch.stop)
         app = Flask(__name__)
         board.init_app(app, tmp.name, on_board=False)
         app.register_blueprint(peripherals_bp)
-        preview_pkg.init_app(app, exposed_ports=lambda: [{"name": "videoUDP", "hostPortStart": 9000}], channel_capacity=lambda: 80,
-                             format_url=lambda *args: "https://x")
+        preview_pkg.init_app(app)
         self.app = app
         self.previews = app.extensions["neat_preview"]
+        self.addCleanup(self.previews.stop_for_board_change)
         self.client = app.test_client()
         item = item_of(scanned(imx477()), IMX477)
         with app.app_context():
-            self.previews.start(app.extensions["neat_board"].session(), item, dict(MODE))
+            self.previews.start(app.extensions["neat_board"].session(), item, api.previewable_mode(item, dict(MODE)))
 
     def test_selecting_another_board_stops_the_preview_before_its_connection_closes(self):
         old = self.transports[0]
@@ -377,6 +586,7 @@ class BoardChangeTests(unittest.TestCase):
         old.exec = lambda argv, **kw: closed_at_stop.append(old.closed) or exec_(argv, **kw)
         self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
         self.assertEqual((closed_at_stop, old.closed), ([False], True))
+        self.assertTrue(old.streams[0][1].closed)
         self.assertIsNone(self.previews._session)
 
     def test_a_start_cannot_slip_between_the_cleanup_and_the_board_change(self):
@@ -401,7 +611,6 @@ class BoardChangeTests(unittest.TestCase):
             changer = threading.Thread(target=post, args=(changed, "/api/board/select"), kwargs={"json": {"host": "10.1.1.9"}})
             changer.start()
             self.assertTrue(in_window.wait(5))
-            calls_after_cleanup = len(old.calls)
             self.assertTrue(old.kills(), "the preview was stopped before the target changes")
             starter = threading.Thread(target=post, args=(started, PREVIEW), kwargs={"json": {"id": IMX477}})
             starter.start()
@@ -410,7 +619,7 @@ class BoardChangeTests(unittest.TestCase):
             changer.join(5)
             starter.join(5)
         self.assertEqual(changed, [200])
-        self.assertEqual([call for call in old.calls[calls_after_cleanup:] if "setsid nohup" in call], [])
+        self.assertEqual(len(old.streams), 1, "no pipeline started on the old board")
         self.assertEqual(started, [409])
         self.assertIsNone(self.previews._session)
 
@@ -433,9 +642,14 @@ class BoardChangeTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
         self.assertIsNone(self.previews._session)
 
+    def scan(self, *args, **kwargs):
+        sentinel = mock.patch.object(peripherals_api.PeripheralClient, "refresh", *args, **kwargs)
+        identity = mock.patch.object(manager_module.BoardSession, "identity", return_value={"fingerprint": "fp"})
+        return sentinel, identity
+
     def test_a_refresh_stops_the_preview_before_it_scans(self):
-        with mock.patch.object(peripherals_api.PeripheralClient, "refresh", return_value=catalog(imx477())), \
-                mock.patch.object(manager_module.BoardSession, "identity", return_value={"fingerprint": "fp"}):
+        sentinel, identity = self.scan(return_value=catalog(imx477()))
+        with sentinel, identity:
             response = self.client.post("/api/peripherals/refresh")
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.previews._session)
@@ -462,32 +676,23 @@ class BoardChangeTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/peripherals/refresh").status_code, 200)
         self.assertIsNone(self.previews._session)
 
-    def scan(self, *args, **kwargs):
-        sentinel = mock.patch.object(peripherals_api.PeripheralClient, "refresh", *args, **kwargs)
-        identity = mock.patch.object(manager_module.BoardSession, "identity", return_value={"fingerprint": "fp"})
-        return sentinel, identity
-
     def test_a_refresh_waits_for_a_slow_start_to_finish_and_then_stops_it(self):
         self.previews.stop_for_board_change()
         entered, release, scanned_while_starting, results = threading.Event(), threading.Event(), [], []
-        start_worker = preview.PreviewManager._start_worker
 
-        def slow_start_worker(manager, *args):
+        def slow_check(board_session):
             entered.set()
             release.wait(5)
-            return start_worker(manager, *args)
 
         def sentinel_refresh(client):
             scanned_while_starting.append(not release.is_set())
-            return catalog(imx477())
+            return catalog(imx477(), board=board_block())
 
         def post(path, **kwargs):
             results.append((path, self.app.test_client().post(path, **kwargs).status_code))
 
         sentinel, identity = self.scan(side_effect=sentinel_refresh, autospec=True)
-        # Longer than the start-wait timeout, as a slow board makes a real start.
-        with sentinel, identity, mock.patch.object(preview, "START_TIMEOUT_SEC", 0.01), \
-                mock.patch.object(preview.PreviewManager, "_start_worker", slow_start_worker):
+        with sentinel, identity, mock.patch.object(preview.PreviewManager, "_require_gstreamer", staticmethod(slow_check)):
             starter = threading.Thread(target=post, args=(PREVIEW,), kwargs={"json": {"id": IMX477}})
             starter.start()
             self.assertTrue(entered.wait(5))
@@ -526,98 +731,6 @@ class BoardChangeTests(unittest.TestCase):
         self.assertEqual(refresh.call_count, 1)
         self.assertEqual(results[0], results[1])
 
-
-class BoardScriptTests(unittest.TestCase):
-    """The board-side shell scripts, run for real with `sh` in a temporary home (no SSH)."""
-
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.home = tmp.name
-        self.base = os.path.join(self.home, ".cache", "insight-preview")
-        self.env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": self.home, "SSH_CLIENT": "192.168.2.1 51234 22"}
-        self.sid = uuid.uuid4().hex
-
-    def sh(self, script, stdin=b"", **env):
-        done = subprocess.run(["sh", "-c", script], input=stdin, capture_output=True, timeout=60, env={**self.env, **env})
-        return done.stdout.decode()
-
-    def launch(self, program: str, ttl: int = 45):
-        """Upload the worker and a stand-in program, then launch it as the preview does."""
-        self.sh(preview._upload_script(self.sid, "worker.sh"), preview.WORKER_SCRIPT.encode())
-        self.sh(preview._upload_script(self.sid, "preview.py"), program.encode())
-        with mock.patch.object(preview, "SESSION_TTL_SEC", ttl):
-            self.sh(preview._launch_script(self.sid, [sys.executable, "preview.py"]))
-        self.addCleanup(lambda: self.sh(preview._stop_script(self.sid)))
-
-    def pid(self) -> int:
-        deadline = time.monotonic() + 10
-        path = os.path.join(self.base, self.sid, "pipeline.pid")
-        while not os.path.exists(path) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        with open(path) as handle:
-            return int(handle.read())
-
-    def wait_gone(self, pid: int, timeout: float = 20) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                return True
-            # A killed child the worker has not reaped yet still answers kill -0.
-            with open(f"/proc/{pid}/stat") as handle:
-                if handle.read().split(") ")[1].startswith("Z"):
-                    return True
-            time.sleep(0.1)
-        return False
-
-    def test_the_work_directory_is_private_to_the_user(self):
-        self.sh(preview._upload_script(self.sid, "worker.sh"), b"x")
-        self.assertEqual(os.stat(self.base).st_mode & 0o777, 0o700)
-        self.assertEqual(os.stat(os.path.join(self.base, self.sid)).st_mode & 0o777, 0o700)
-        self.assertFalse(preview.WORK_DIR.startswith("/tmp"))
-        cache = os.path.join(self.home, "xdg-cache")
-        self.sh(preview._upload_script(self.sid, "worker.sh"), b"x", XDG_CACHE_HOME=cache)
-        self.assertTrue(os.path.isfile(os.path.join(cache, "insight-preview", self.sid, "worker.sh")))
-
-    def test_the_worker_runs_the_program_and_the_check_waits_for_its_running_line(self):
-        self.launch("import time\ntime.sleep(0.5)\nprint('running', flush=True)\ntime.sleep(60)\n")
-        pid = self.pid()
-        self.assertEqual(self.sh(preview._check_script(self.sid)).splitlines()[0], "running")
-        self.assertIn("alive", self.sh(preview._heartbeat_script(self.sid)))
-        self.sh(preview._stop_script(self.sid))
-        self.assertTrue(self.wait_gone(pid))
-        self.assertFalse(os.path.exists(os.path.join(self.base, self.sid)))
-        self.assertNotIn("alive", self.sh(preview._heartbeat_script(self.sid)))
-
-    def test_the_worker_stops_the_program_once_heartbeats_lapse(self):
-        self.launch("import time\nprint('running', flush=True)\ntime.sleep(60)\n", ttl=1)
-        pid = self.pid()
-        self.assertTrue(self.wait_gone(pid), "the lease ended the program")
-        deadline = time.monotonic() + 10
-        while os.path.exists(os.path.join(self.base, self.sid)) and time.monotonic() < deadline:
-            time.sleep(0.1)
-        self.assertFalse(os.path.exists(os.path.join(self.base, self.sid)))
-
-    def test_a_program_that_fails_before_running_reports_its_error(self):
-        self.launch("import sys\nprint('camera_not_found: imx477 5-001a', file=sys.stderr)\nsys.exit(1)\n")
-        output = self.sh(preview._check_script(self.sid))
-        self.assertNotEqual(output.splitlines()[0] if output else "", "running")
-        self.assertIn("camera_not_found", output)
-
-    def test_prepare_finds_pyneat_only_in_the_users_venv(self):
-        venv = os.path.join(self.home, "pyneat")
-        self.assertEqual(self.sh(preview.PREPARE_SCRIPT).splitlines(), ["192.168.2.1 51234 22"])
-        os.makedirs(os.path.join(venv, "bin"))
-        os.makedirs(os.path.join(venv, "lib", "python3.11", "site-packages", "pyneat-0.4.0.dist-info"))
-        python = os.path.join(venv, "bin", "python")
-        with open(python, "w") as handle:
-            handle.write("#!/bin/sh\n")
-        os.chmod(python, 0o755)
-        self.assertEqual(self.sh(preview.PREPARE_SCRIPT).splitlines(), ["192.168.2.1 51234 22", python])
-        other = os.path.join(self.home, "elsewhere")
-        self.assertEqual(self.sh(preview.PREPARE_SCRIPT, PYNEAT_VENV_DIR=other).splitlines(), ["192.168.2.1 51234 22"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -163,11 +163,11 @@ Insight decides this from SiMa Sentinel's report alone. The overlay check matche
 
 ### Preview a camera
 
-Select **Start preview** to see what a camera sees. The board captures video, encodes it in hardware, and sends it to Insight's viewer; the preview appears in the page and reserves one viewer channel. The board captures through PyNeat, which must be installed for the account Insight connects as (`sima-cli neat install core`); if it is missing, the preview says so.
+Select **Start preview** to see what a camera sees. Insight runs a GStreamer pipeline on the board over its existing connection: it captures the selected mode (`libcamerasrc` for a MIPI camera, `v4l2src` for a USB camera), scales it to at most 640 pixels wide at up to 15 fps, and sends JPEG frames back, which the page shows as they arrive. Nothing else on the board is needed beyond GStreamer itself; if `gst-launch-1.0` is missing, the preview names the packages to install (`gstreamer1.0-tools`, `gstreamer1.0-plugins-base`, `gstreamer1.0-plugins-good`, and `gstreamer1.0-libcamera` for MIPI cameras).
 
-A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. It also stops by itself shortly after Insight stops watching, so a lost browser or a restarted Insight cannot leave the camera busy.
+A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. It also stops by itself when the page stops receiving frames, so a closed browser or a restarted Insight cannot leave the camera busy.
 
-Preview is available for MIPI cameras on modes Insight lists as Available. USB cameras are discovered, but preview is not available for them yet.
+A MIPI camera previews its Available modes. A USB camera previews any mode it lists in MJPG or a raw format such as YUYV, even though its modes are Unsupported for Neat's `CameraInput`; Insight opens it by its stable `/dev/v4l/by-id` path when the board has one.
 
 ### Camera setup
 

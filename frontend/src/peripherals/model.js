@@ -578,32 +578,34 @@ const PREVIEW_STATUS = {
 const PREVIEW_ERROR_ACTIONS = {
   camera_in_use: 'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
   preview_active: 'Stop the preview that is already running, then start this one.',
-  no_channel: 'Every published viewer channel is taken. Stop a stream on the Streaming page, then start the preview again.',
   invalid_request: 'Choose a mode Insight lists as Available; this one was rejected.',
-  command_failed: 'The capture worker could not start on the board. The board output below says why.',
-  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.',
-  no_video: 'The board captured, but its video never reached Insight. The UDP port Insight listens on has to be reachable from the board; a host firewall is the usual reason it is not.',
-  viewer_unavailable: 'Insight could not reach its own video viewer, which the preview plays through. Reload the page; if it keeps failing, Insight needs restarting.',
-  channel_taken: 'Another sender is using that viewer channel. Starting the preview again picks a channel nothing is sending to.'
+  command_failed: 'The preview pipeline could not start on the board. The board output below says why.',
+  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.'
 }
 
 export function previewStatusInfo(state) {
   return PREVIEW_STATUS[state?.status] || PREVIEW_STATUS.idle
 }
 
-export function heartbeatDelay(session) {
-  const ms = Number(session?.heartbeat_interval_ms)
-  if (!Number.isFinite(ms) || ms <= 0) return 5000
-  return Math.min(60000, Math.max(1000, Math.round(ms)))
+// The session's stream, only as the same-origin API path Insight serves it on; null for anything else.
+export function previewStreamUrl(session) {
+  const url = String(session?.stream_url || '')
+  return /^\/api\/peripherals\/cameras\/preview\/[A-Za-z0-9_-]+\/stream$/.test(url) ? url : null
 }
 
-// What a failed heartbeat means for the pane, or null to keep beating (a transient error).
-export function heartbeatFailureEvent(error, sessionId) {
-  // A 404 for an id we no longer hold must never stop a newer session: `for` scopes it.
-  if (error?.code === 'not_found') return { type: 'expired', for: sessionId }
-  // The backend stopped the preview because another stream arrived on its channel.
-  if (error?.code === 'channel_taken') return { type: 'ended', for: sessionId, error }
-  return null
+// The pane's event for a stream the browser could not load or that broke off: the backend stops a
+// preview whose stream ends, so the preview is over, with the reason shown.
+export function streamEndedEvent(sessionId) {
+  return {
+    type: 'ended',
+    for: sessionId,
+    error: {
+      message: 'The preview stream stopped.',
+      code: 'stream_ended',
+      hint: 'Start the preview again. If it keeps stopping, check the camera connection on the board.',
+      details: {}
+    }
+  }
 }
 
 // What the menus show for a preview the page adopts (reload, another tab): its camera and the mode
@@ -647,14 +649,16 @@ export function previewBlock({ camera, selection, stale = false, session = null,
   if (!target) return { blocked: true, reason: 'No board is selected. Open board settings and choose one.' }
   if (!camera) return { blocked: true, reason: 'Select a camera first.' }
   if (stale) return { blocked: true, reason: 'The board changed after this scan. Refresh before starting a preview.' }
-  if (camera.support?.tier === 'unsupported') {
+  // A USB camera previews any mode it lists; a MIPI camera only its Available modes.
+  const mipi = camera.connection !== 'usb'
+  if (mipi && camera.support?.tier === 'unsupported') {
     return {
       blocked: true,
       reason: camera.support.reason || 'Preview uses the board libcamera capture path, which this camera is not supported by.'
     }
   }
   if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
-  if (selectionTier(camera, selection) !== 'available') {
+  if (mipi && selectionTier(camera, selection) !== 'available') {
     return { blocked: true, reason: `${modeLabel(selection)} is Unsupported on this board. Choose an Available mode.` }
   }
   if (camera.availability?.state === 'in_use') {
@@ -705,18 +709,6 @@ export function nextPreviewState(state, event) {
     case 'stop-failed':
       if (outOfDate(current, event)) return current
       return { status: 'live', session: current.session || event.session || null, error: event.error || null }
-    case 'expired':
-      if (outOfDate(current, event)) return current
-      return {
-        status: 'idle',
-        session: null,
-        error: {
-          message: 'The preview stopped because the board stopped receiving heartbeats.',
-          code: 'not_found',
-          hint: 'Start the preview again. Insight only keeps a preview alive while this pane is open.',
-          details: {}
-        }
-      }
     case 'ended':
       // A live preview the backend stopped, with its reason; nothing is left to stop.
       if (outOfDate(current, event)) return current

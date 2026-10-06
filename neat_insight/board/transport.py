@@ -2,6 +2,7 @@ import base64
 import getpass
 import hashlib
 import os
+import select
 import selectors
 import shlex
 import socket
@@ -17,6 +18,13 @@ import paramiko
 from neat_insight.board.errors import BoardError
 
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+# A streaming command (stream()): stdout is read in chunks of at most this size, and stderr keeps only its
+# first and last bytes.
+STREAM_CHUNK_BYTES = 64 * 1024
+STDERR_HEAD_BYTES = 1024
+STDERR_TAIL_BYTES = 4096
+# How long a stream read blocks at a time, so close() never waits longer than this for a reader.
+_STREAM_POLL_SEC = 0.2
 
 
 @dataclass
@@ -50,8 +58,150 @@ def _output_too_large(argv: List[str]) -> BoardError:
     return BoardError("command_failed", f"`{argv[0]}` produced more than {MAX_OUTPUT_BYTES} bytes of output.")
 
 
+class _StderrBuffer:
+    """The first and the last bytes a command writes to stderr; the middle is dropped."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._head = bytearray()
+        self._tail = bytearray()
+        self._dropped = False
+
+    def add(self, data: bytes) -> None:
+        with self._lock:
+            room = STDERR_HEAD_BYTES - len(self._head)
+            if room > 0:
+                self._head += data[:room]
+                data = data[room:]
+            self._tail += data
+            if len(self._tail) > STDERR_TAIL_BYTES:
+                del self._tail[:-STDERR_TAIL_BYTES]
+                self._dropped = True
+
+    def value(self) -> bytes:
+        with self._lock:
+            return bytes(self._head) + (b"\n...\n" if self._dropped else b"") + bytes(self._tail)
+
+
+class _LocalStream:
+    """A local command whose stdout is read as it arrives; see LocalTransport.stream()."""
+
+    def __init__(self, proc: subprocess.Popen):
+        self._proc = proc
+        self._stderr = _StderrBuffer()
+        # Held by read() for one poll at a time and by close(), so the pipe is never closed under a reader.
+        self._lock = threading.Lock()
+        self._closed = False
+        self._stderr_done = threading.Event()
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
+
+    def _drain_stderr(self) -> None:
+        # Owns the stderr pipe: it ends when the command exits, which closing stdout or a kill brings about.
+        try:
+            with self._proc.stderr:
+                for chunk in iter(lambda: os.read(self._proc.stderr.fileno(), 4096), b""):
+                    self._stderr.add(chunk)
+        finally:
+            self._stderr_done.set()
+
+    def read(self, timeout: float) -> Optional[bytes]:
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if self._closed:
+                    return b""
+                fd = self._proc.stdout.fileno()
+                wait = min(_STREAM_POLL_SEC, max(deadline - time.monotonic(), 0))
+                if select.select([fd], [], [], wait)[0]:
+                    return os.read(fd, STREAM_CHUNK_BYTES)
+            if time.monotonic() >= deadline:
+                return None
+
+    def stderr(self, wait: float = 0) -> bytes:
+        """Its first and last stderr bytes; `wait` seconds at most for the command to finish writing them."""
+        self._stderr_done.wait(wait)
+        return self._stderr.value()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            # The command's next write fails with SIGPIPE; reap it once it exits.
+            self._proc.stdout.close()
+        threading.Thread(target=self._proc.wait, daemon=True).start()
+
+
+class _SshStream:
+    """A command on the board whose stdout is read as it arrives; see SshTransport.stream()."""
+
+    def __init__(self, channel, where: str):
+        self._channel = channel
+        self._where = where
+        self._stderr = _StderrBuffer()
+        self._lock = threading.Lock()
+        self._closed = False
+        self._stderr_done = threading.Event()
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
+
+    def _drain_stderr(self) -> None:
+        # Reading stderr keeps the channel's shared flow-control window open for stdout. The exit status
+        # arrives after all output, so once it is in and no stderr is pending, stderr is complete.
+        try:
+            while not self._channel.closed:
+                if self._channel.recv_stderr_ready():
+                    self._stderr.add(self._channel.recv_stderr(4096))
+                elif self._channel.exit_status_ready():
+                    return
+                else:
+                    time.sleep(0.05)
+        except (paramiko.SSHException, OSError, EOFError):
+            return
+        finally:
+            self._stderr_done.set()
+
+    def read(self, timeout: float) -> Optional[bytes]:
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if self._closed:
+                    return b""
+                self._channel.settimeout(max(min(_STREAM_POLL_SEC, deadline - time.monotonic()), 0.001))
+                try:
+                    return self._channel.recv(STREAM_CHUNK_BYTES)
+                except socket.timeout:
+                    pass
+                except (paramiko.SSHException, OSError, EOFError) as exc:
+                    raise BoardError("unreachable", f"The SSH session to {self._where} failed: {exc}") from exc
+            if time.monotonic() >= deadline:
+                return None
+
+    def stderr(self, wait: float = 0) -> bytes:
+        """Its first and last stderr bytes; `wait` seconds at most for the command to finish writing them."""
+        self._stderr_done.wait(wait)
+        return self._stderr.value()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+        # The board closes the command's pipes; its next write fails with SIGPIPE.
+        threading.Thread(target=self._channel.close, daemon=True).start()
+
+
 class LocalTransport:
     """Runs commands on the machine Insight runs on (Insight installed on the board)."""
+
+    def stream(self, argv: List[str], *, timeout: float):
+        """Start a command and return its stream: `read(timeout)` gives the next stdout chunk, `b""` once
+        stdout ends, or None when nothing arrived in time; `stderr(wait)` its first and last bytes of stderr;
+        `close()` closes stdout, so the command dies on SIGPIPE at its next write. `timeout` bounds the start."""
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+        except OSError as exc:
+            raise BoardError("command_failed", f"`{argv[0]}` could not be started: {exc.strerror or exc}") from exc
+        return _LocalStream(proc)
 
     def exec(self, argv: List[str], *, timeout: float, stdin: Optional[bytes] = None) -> ExecResult:
         deadline = time.monotonic() + timeout
@@ -181,15 +331,47 @@ class SshTransport:
                 cancel_channel()
             raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
         except (paramiko.SSHException, OSError, EOFError) as exc:
-            self._drop()
-            if self._closed:
-                raise self._stale() from exc
-            if time.monotonic() >= deadline:
-                raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
-            raise self._unreachable(f"The SSH session to {self.host} failed: {exc}") from exc
+            raise self._session_failed(exc, deadline, argv, timeout) from exc
         finally:
             if channel is not None and not channel_cancelled.is_set():
                 cancel_channel()
+
+    def stream(self, argv: List[str], *, timeout: float) -> _SshStream:
+        """Start a command on the board and return its stream (see LocalTransport.stream); `close()` closes
+        the SSH channel. `timeout` bounds connecting and starting the command."""
+        deadline = time.monotonic() + timeout
+        channel = None
+
+        def cancel_channel():
+            threading.Thread(target=channel.close, daemon=True).start()
+
+        try:
+            channel = self._open_channel(deadline, argv, timeout)
+            self._arm(channel, deadline, argv, timeout)
+            self._run_bounded(lambda: channel.exec_command(shlex.join(argv)), cancel_channel, deadline, argv, timeout)
+            self._run_bounded(channel.shutdown_write, cancel_channel, deadline, argv, timeout)
+            return _SshStream(channel, f"{self.user}@{self.host}")
+        except BoardError:
+            if channel is not None:
+                cancel_channel()
+            raise
+        except socket.timeout:
+            if channel is not None:
+                cancel_channel()
+            raise _timeout_error(argv, timeout, f"{self.user}@{self.host}") from None
+        except (paramiko.SSHException, OSError, EOFError) as exc:
+            if channel is not None:
+                cancel_channel()
+            raise self._session_failed(exc, deadline, argv, timeout) from exc
+
+    def _session_failed(self, exc, deadline, argv, timeout) -> BoardError:
+        """The error for an SSH session that failed while a command started or ran."""
+        self._drop()
+        if self._closed:
+            return self._stale()
+        if time.monotonic() >= deadline:
+            return _timeout_error(argv, timeout, f"{self.user}@{self.host}")
+        return self._unreachable(f"The SSH session to {self.host} failed: {exc}")
 
     def remote_host_key_fingerprint(self) -> Optional[str]:
         transport = self._client.get_transport() if self._client else None

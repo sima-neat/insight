@@ -35,10 +35,21 @@ const tier = { tier: 'available', reason: '' }
 const camera = (id) => ({
   id,
   name: id,
+  connection: 'mipi',
   support: tier,
   availability: { state: 'free' },
   formats: [{ format: 'NV12', exportable: true, support: tier, sizes: [{ width: 1920, height: 1080, fps: [{ value: 30, tier: 'available' }] }] }]
 })
+const usbReason = { tier: 'unsupported', reason: 'USB cameras have no camera overlay on this board.' }
+const usbCamera = {
+  id: 'camera:v4l2:c920',
+  name: 'HD Pro Webcam C920',
+  connection: 'usb',
+  support: usbReason,
+  availability: { state: 'free' },
+  formats: [{ format: 'MJPG', exportable: false, support: usbReason, sizes: [{ width: 1280, height: 720, fps: [{ value: 30, ...usbReason }] }] }]
+}
+const streamUrl = (id) => `/api/peripherals/cameras/preview/${id}/stream`
 
 test('Start preview passes no click event, so the request carries the selected mode', () => {
   const calls = []
@@ -55,11 +66,11 @@ test('Start preview passes no click event, so the request carries the selected m
 })
 
 test("another camera's retained preview is not shown as this camera's video", () => {
-  const session = { id: 's1', camera_id: 'camera:a', mode, viewer_url: 'https://insight.local:8081/static/viewer.html?src=3' }
+  const session = { id: 's1', camera_id: 'camera:a', mode, stream_url: streamUrl('s1') }
   const failed = { status: 'live', session, error: { message: 'Could not stop the preview.', code: 'unreachable', details: {} } }
   const props = { selection: { id: 'camera:b', ...mode }, target: { label: 'board' }, state: failed, onStart() {}, onStop() {} }
   const other = PreviewPane({ ...props, camera: camera('camera:b') })
-  assert.equal(find(other, (node) => node.type === 'iframe'), null)
+  assert.equal(find(other, (node) => node.type === 'img'), null)
   assert.equal(find(other, (node) => node.type === 'button' && node.props.children === 'Stop preview'), null)
   const start = find(other, (node) => node.type === 'button' && node.props.children === 'Start preview')
   assert.equal(start.props.disabled, true)
@@ -67,6 +78,52 @@ test("another camera's retained preview is not shown as this camera's video", ()
   assert.match(reason.props.children, /already running on camera:a/)
   // The camera that owns it still shows its video and the Stop button to retry.
   const owner = PreviewPane({ ...props, camera: camera('camera:a'), selection: { id: 'camera:a', ...mode } })
-  assert.ok(find(owner, (node) => node.type === 'iframe'))
+  assert.ok(find(owner, (node) => node.type === 'img'))
   assert.ok(find(owner, (node) => node.type === 'button' && node.props.children === 'Stop preview'))
+})
+
+test('a live preview shows the relayed stream in an img and reports a stream it cannot load', () => {
+  const ended = []
+  const session = { id: 's1', camera_id: 'camera:a', mode, stream_url: streamUrl('s1'), state: 'live' }
+  const pane = PreviewPane({
+    camera: camera('camera:a'),
+    selection: { id: 'camera:a', ...mode },
+    target: { label: 'board' },
+    state: { status: 'live', session, error: null },
+    onStart() {},
+    onStop() {},
+    onStreamError: (id) => ended.push(id)
+  })
+  const img = find(pane, (node) => node.type === 'img')
+  assert.equal(img.props.src, streamUrl('s1'))
+  assert.equal(img.props.alt, 'Live preview of camera:a')
+  assert.equal(find(pane, (node) => node.type === 'iframe'), null)
+  img.props.onError()
+  assert.deepEqual(ended, ['s1'])
+
+  // A stream address that is not Insight's own API path is never loaded.
+  const foreign = PreviewPane({
+    camera: camera('camera:a'),
+    selection: { id: 'camera:a', ...mode },
+    target: { label: 'board' },
+    state: { status: 'live', session: { ...session, stream_url: 'https://evil.example/x' }, error: null },
+    onStart() {},
+    onStop() {}
+  })
+  assert.equal(find(foreign, (node) => node.type === 'img'), null)
+})
+
+test('a USB camera can start a preview of any mode it lists', () => {
+  const calls = []
+  const pane = PreviewPane({
+    camera: usbCamera,
+    selection: { id: usbCamera.id, format: 'MJPG', width: 1280, height: 720, fps: 30 },
+    target: { label: 'board' },
+    state: { status: 'idle', session: null, error: null },
+    onStart: (...args) => calls.push(args)
+  })
+  const start = find(pane, (node) => node.type === 'button' && node.props.children === 'Start preview')
+  assert.equal(start.props.disabled, false)
+  start.props.onClick()
+  assert.deepEqual(calls, [[]])
 })

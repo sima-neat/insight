@@ -5,7 +5,6 @@ import {
   PREVIEW_IDLE,
   adoptedSelection,
   apiError,
-  heartbeatFailureEvent,
   availabilityInfo,
   blockedFormatSummary,
   boardCameraSetup,
@@ -28,7 +27,6 @@ import {
   fpsOptions,
   groupOptions,
   groupCameras,
-  heartbeatDelay,
   initialBoardForm,
   isSnapshotStale,
   modeLabel,
@@ -40,6 +38,7 @@ import {
   previewErrorInfo,
   previewNeedsRestart,
   previewStatusInfo,
+  previewStreamUrl,
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
@@ -51,6 +50,7 @@ import {
   sizeOptions,
   sortIssues,
   sourceLabel,
+  streamEndedEvent,
   tierInfo,
   validateBoardForm
 } from './model.js'
@@ -655,10 +655,8 @@ const liveSession = {
   id: '8f1c',
   camera_id: imx477.id,
   mode: mipiMode,
-  channel: 3,
-  viewer_url: 'https://host:8081/static/viewer.html?mode=light&src=3',
+  stream_url: '/api/peripherals/cameras/preview/8f1c/stream',
   generation: 3,
-  heartbeat_interval_ms: 5000,
   state: 'live'
 }
 
@@ -669,8 +667,10 @@ test('Start preview is blocked with the reason for every state that forbids it',
   assert.match(previewBlock({ camera: null, selection: null, target: boardTarget }).reason, /Select a camera/)
   assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, stale: true }).reason, /board changed/)
 
-  // A USB camera has no camera overlay, so it is Unsupported and not previewed.
-  assert.equal(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }).reason, usb.support.reason)
+  // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed mode.
+  assert.deepEqual(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }), { blocked: false, reason: '' })
+  assert.match(previewBlock({ camera: usb, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
+  assert.match(previewBlock({ camera: { ...usb, availability: inUse.availability }, selection: { format: 'YUYV', width: 640, height: 480, fps: 15 }, target: boardTarget }).reason, /In use by gst-launch-1\.0/)
 
   assert.match(previewBlock({ camera: imx477, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
 
@@ -705,10 +705,10 @@ test('preview transitions: start, live, stop', () => {
 
   const stopping = nextPreviewState(live, { type: 'stopping', for: '8f1c' })
   assert.equal(stopping.status, 'stopping')
-  assert.equal(stopping.session.id, '8f1c', 'the channel stays on screen while the board stops')
+  assert.equal(stopping.session.id, '8f1c', 'the session stays on screen while the board stops')
   assert.deepEqual(nextPreviewState(stopping, { type: 'stopped', for: '8f1c' }), PREVIEW_IDLE)
 
-  // The board reporting "stopped" on a heartbeat ends the session too.
+  // A session reported as "stopped" ends the preview too.
   assert.deepEqual(nextPreviewState(live, { type: 'session', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
 })
 
@@ -726,17 +726,17 @@ test('preview transitions: a start that was never adopted still releases the pag
 
 test('preview transitions: a stale session id never disturbs a newer one', () => {
   const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
-  assert.equal(nextPreviewState(live, { type: 'expired', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, streamEndedEvent('old-id')), live)
   assert.equal(nextPreviewState(live, { type: 'stopped', for: 'old-id' }), live)
   assert.equal(nextPreviewState(live, { type: 'stopping', for: 'old-id' }), live)
   assert.equal(nextPreviewState(live, { type: 'failed', for: 'old-id', error: { message: 'boom' } }), live)
   assert.equal(nextPreviewState(live, { type: 'session', session: { ...liveSession, id: 'other' } }), live)
 
-  const expired = nextPreviewState(live, { type: 'expired', for: '8f1c' })
-  assert.equal(expired.status, 'idle')
-  assert.equal(expired.session, null)
-  assert.match(expired.error.message, /stopped receiving heartbeats/)
-  assert.ok(expired.error.hint, 'an expiry always offers a way back')
+  const ended = nextPreviewState(live, streamEndedEvent('8f1c'))
+  assert.equal(ended.status, 'idle')
+  assert.equal(ended.session, null)
+  assert.equal(ended.error.message, 'The preview stream stopped.')
+  assert.ok(previewErrorInfo(ended.error).hint, 'a stopped stream always offers a way back')
 })
 
 test('preview transitions: failures, reset, and adopting an existing session', () => {
@@ -750,7 +750,7 @@ test('preview transitions: failures, reset, and adopting an existing session', (
 
   const adopted = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: liveSession })
   assert.equal(adopted.status, 'live')
-  assert.equal(adopted.session.channel, 3)
+  assert.equal(adopted.session.stream_url, liveSession.stream_url)
   assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
   assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: null }), PREVIEW_IDLE)
 
@@ -762,15 +762,6 @@ test('preview transitions: failures, reset, and adopting an existing session', (
   assert.equal(stopFailed.error.message, 'SSH failed')
   assert.equal(nextPreviewState(live, { type: 'nonsense' }), live)
   assert.equal(nextPreviewState(undefined, { type: 'nonsense' }), PREVIEW_IDLE)
-})
-
-test('heartbeats follow the backend interval, clamped to something sane', () => {
-  assert.equal(heartbeatDelay(liveSession), 5000)
-  assert.equal(heartbeatDelay(null), 5000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 0 }), 5000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 50 }), 1000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: 900000 }), 60000)
-  assert.equal(heartbeatDelay({ heartbeat_interval_ms: '2500' }), 2500)
 })
 
 test('a session belongs to the camera and board generation it was started for', () => {
@@ -806,10 +797,6 @@ test('every preview failure carries a recovery action and nothing destructive', 
   const flat = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409)))
   assert.equal(flat.otherCamera, usb.id)
 
-  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_channel' }, 409))).action, /Stop a stream on the Streaming page/)
-  // The two failures that come from the network between the board and Insight must say so.
-  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'no_video' }, 502))).action, /firewall/)
-  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'viewer_unavailable' }, 502))).action, /video viewer/)
   assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /^Choose a mode Insight lists as Available; /)
 
   const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
@@ -817,28 +804,13 @@ test('every preview failure carries a recovery action and nothing destructive', 
   assert.equal(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'unreachable' }, 502))).action, '')
 })
 
-test('a preview viewer address is only loaded when it is an http(s) URL', () => {
-  assert.equal(safeHref(liveSession.viewer_url), liveSession.viewer_url)
-  assert.equal(safeHref('javascript:alert(1)'), null)
-})
-
-test('preview heartbeat: a taken channel ends the preview with the backend reason', () => {
-  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
-  const error = {
-    code: 'channel_taken',
-    message: 'An application started sending to this channel; the preview stopped so it would not corrupt that stream.',
-    hint: 'Start the preview again.'
+test('the preview stream is only loaded from its same-origin API path', () => {
+  assert.equal(previewStreamUrl(liveSession), liveSession.stream_url)
+  for (const url of ['https://evil.example/api/peripherals/cameras/preview/8f1c/stream', 'javascript:alert(1)',
+    '/api/peripherals/cameras/preview/../stop/stream', '//evil.example/api/peripherals/cameras/preview/8f1c/stream', '', undefined]) {
+    assert.equal(previewStreamUrl({ ...liveSession, stream_url: url }), null, String(url))
   }
-  const event = heartbeatFailureEvent(error, liveSession.id)
-  const ended = nextPreviewState(live, event)
-  assert.equal(ended.status, 'idle')
-  assert.equal(ended.session, null)
-  assert.equal(ended.error.message, error.message)
-  assert.ok(previewErrorInfo(ended.error).action, 'the pane says what to do next')
-  // Scoped to its session: it never ends a newer one.
-  assert.equal(nextPreviewState(live, heartbeatFailureEvent(error, 'old-id')), live)
-  assert.deepEqual(heartbeatFailureEvent({ code: 'not_found' }, 'abc'), { type: 'expired', for: 'abc' })
-  assert.equal(heartbeatFailureEvent({ code: 'timeout' }, 'abc'), null)
+  assert.equal(previewStreamUrl(null), null)
 })
 
 test('an adopted preview selects the camera and the mode it streams, not the defaults', () => {

@@ -4039,8 +4039,11 @@ button:disabled {
 }
 
 .periph-preview-frame {
+  display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
+  /* The stream keeps the camera's aspect ratio, which need not be 16:9. */
+  object-fit: contain;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: #0e1923;

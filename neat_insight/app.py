@@ -3343,12 +3343,7 @@ def viewer_url():
     }
 
 
-preview.init_app(
-    app,
-    exposed_ports=_read_exposed_ports_from_port_map,
-    channel_capacity=lambda: _resolve_video_channel_capacity()[0],
-    format_url=_format_browser_https_url,
-)
+preview.init_app(app)
 
 
 # API: serve the built single-page application entrypoint.

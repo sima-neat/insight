@@ -113,6 +113,7 @@ export default function CameraDetail({
   preview,
   onStartPreview,
   onStopPreview,
+  onPreviewStreamError,
   onOpenBoardPanel
 }) {
   const availability = availabilityInfo(camera.availability)
@@ -171,6 +172,7 @@ export default function CameraDetail({
         state={preview}
         onStart={onStartPreview}
         onStop={onStopPreview}
+        onStreamError={onPreviewStreamError}
         onOpenBoardPanel={onOpenBoardPanel}
       />
     </section>

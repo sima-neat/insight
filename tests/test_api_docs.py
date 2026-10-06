@@ -133,8 +133,8 @@ class ApiDocumentationTests(unittest.TestCase):
         expected = {
             ("/api/board/select", "post"): {"400", "409", "502", "504"},
             ("/api/board/trust-host-key", "post"): {"400", "409", "502", "504"},
-            ("/api/peripherals/cameras/preview/{session_id}/heartbeat", "post"): {"404", "409", "502", "504"},
-            ("/api/peripherals/cameras/preview/{session_id}/stop", "post"): {"404", "409", "502", "504"},
+            ("/api/peripherals/cameras/preview/{session_id}/stream", "get"): {"404", "409"},
+            ("/api/peripherals/cameras/preview/{session_id}/stop", "post"): {"409", "502", "504"},
         }
 
         for (path, method), statuses in expected.items():

@@ -288,6 +288,51 @@ class LocalTransportTests(unittest.TestCase):
             LocalTransport().exec(["sh", "-c", "exec >&- 2>&-; sleep 5"], timeout=0.3)
         self.assertEqual(ctx.exception.code, "timeout")
 
+    def read_all(self, stream, limit=10):
+        chunks, deadline = [], time.monotonic() + limit
+        while time.monotonic() < deadline:
+            chunk = stream.read(1)
+            if chunk == b"":
+                return b"".join(chunks)
+            chunks.append(chunk or b"")
+        self.fail("the stream did not end")
+
+    def test_stream_reads_stdout_as_it_arrives_and_keeps_stderr_bounded(self):
+        stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; echo one; sleep 0.3; echo two"], timeout=5)
+        self.assertIsNone(LocalTransport().stream(["sleep", "5"], timeout=5).read(0.05), "nothing arrived in time")
+        self.assertEqual(self.read_all(stream), b"one\ntwo\n")
+        self.assertRegex(stream.stderr(), rb"^[0-9]+\n$")
+        self.assertEqual(stream.read(1), b"")
+        stream.close()
+        self.assertEqual(stream.read(1), b"", "a closed stream reads as ended")
+
+        noisy = LocalTransport().stream(["sh", "-c", "echo first >&2; head -c 100000 /dev/zero | tr '\\0' x >&2; echo last >&2"], timeout=5)
+        self.read_all(noisy)
+        deadline = time.monotonic() + 5
+        while not noisy.stderr().endswith(b"last\n") and time.monotonic() < deadline:
+            time.sleep(0.01)
+        stderr = noisy.stderr()
+        self.assertTrue(stderr.startswith(b"first\n") and stderr.endswith(b"last\n"))
+        self.assertLessEqual(len(stderr), transport_module.STDERR_HEAD_BYTES + transport_module.STDERR_TAIL_BYTES + 5)
+
+    def test_closing_a_stream_ends_the_command_at_its_next_write(self):
+        stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; exec yes"], timeout=5)
+        self.assertTrue(stream.read(5))
+        deadline = time.monotonic() + 5
+        while not stream.stderr() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        pid = int(stream.stderr())
+        stream.close()
+        deadline = time.monotonic() + 5
+        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(os.path.exists(f"/proc/{pid}"), "yes died on SIGPIPE and was reaped")
+
+    def test_a_stream_that_cannot_start_is_a_board_error(self):
+        with self.assertRaises(BoardError) as ctx:
+            LocalTransport().stream(["no-such-command-xyz"], timeout=5)
+        self.assertEqual(ctx.exception.code, "command_failed")
+
 
 class SshTransportErrorTests(unittest.TestCase):
     def setUp(self):
@@ -562,6 +607,57 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")
         self.assertEqual(self._connect_raising(ConnectionRefusedError("refused")).code, "unreachable")
         self.assertIn("could not be resolved", self._connect_raising(socket.gaierror("nope")).message)
+
+    def test_stream_reads_the_channel_and_close_closes_it(self):
+        channel = mock.Mock(closed=False)
+        replies = [b"--frame", None, b""]
+
+        def recv(size):
+            reply = replies.pop(0)
+            if reply is None:
+                time.sleep(0.02)  # The channel timeout passes with nothing to read.
+                raise socket.timeout()
+            return reply
+
+        channel.recv.side_effect = recv
+        stderr = [b"4242\n", b"libcamera noise\n"]
+        channel.recv_stderr_ready.side_effect = lambda: bool(stderr)
+        channel.recv_stderr.side_effect = lambda size: stderr.pop(0)
+        channel.exit_status_ready.return_value = True
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            stream = self.transport.stream(["sh", "-c", "echo $$ >&2; exec gst-launch-1.0 -q fakesrc ! fdsink fd=1"], timeout=5)
+        channel.exec_command.assert_called_once_with("sh -c 'echo $$ >&2; exec gst-launch-1.0 -q fakesrc ! fdsink fd=1'")
+        channel.shutdown_write.assert_called_once_with()
+        self.assertEqual(stream.read(1), b"--frame")
+        self.assertIsNone(stream.read(0.01))
+        self.assertEqual(stream.read(1), b"")
+        deadline = time.monotonic() + 5
+        while stderr and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(stream.stderr(), b"4242\nlibcamera noise\n")
+        stream.close()
+        stream.close()
+        deadline = time.monotonic() + 5
+        while not channel.close.called and time.monotonic() < deadline:
+            time.sleep(0.01)
+        channel.close.assert_called_once_with()
+        self.assertEqual(stream.read(1), b"")
+
+    def test_a_stream_whose_session_fails_reports_it_like_exec(self):
+        channel = mock.Mock(closed=False)
+        channel.exec_command.side_effect = paramiko.SSHException("channel refused")
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), self.assertRaises(BoardError) as ctx:
+            self.transport.stream(["true"], timeout=5)
+        self.assertEqual(ctx.exception.code, "unreachable")
+        channel = mock.Mock(closed=False)
+        channel.recv.side_effect = EOFError()
+        channel.recv_stderr_ready.return_value = False
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            stream = self.transport.stream(["true"], timeout=5)
+        with self.assertRaises(BoardError) as ctx:
+            stream.read(1)
+        self.assertEqual(ctx.exception.code, "unreachable")
+        stream.close()
 
 
 if __name__ == "__main__":

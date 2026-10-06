@@ -50,6 +50,19 @@ class _ReportingTransport:
         self._manager.require_generation(self._generation)
         return result
 
+    def stream(self, argv, *, timeout):
+        try:
+            stream = self._transport.stream(argv, timeout=timeout)
+        except BoardError as exc:
+            self._manager._record(self._generation, error=exc)
+            raise
+        try:
+            self._manager.require_generation(self._generation)
+        except BoardError:
+            stream.close()
+            raise
+        return stream
+
 
 class BoardSession:
     def __init__(self, manager: "BoardManager", target: BoardTarget, generation: int, transport):

@@ -4,7 +4,7 @@ import {
   previewBlock,
   previewErrorInfo,
   previewStatusInfo,
-  safeHref,
+  previewStreamUrl,
   sizeLabel
 } from './model.js'
 import { Callout, Pill } from './ui.jsx'
@@ -41,7 +41,7 @@ function ModeBadges({ mode, label }) {
   )
 }
 
-export default function PreviewPane({ camera, selection, stale, target, state: paneState, onStart, onStop, onOpenBoardPanel }) {
+export default function PreviewPane({ camera, selection, stale, target, state: paneState, onStart, onStop, onStreamError, onOpenBoardPanel }) {
   // A session kept for another camera (its stop failed when the user switched) is not this camera's
   // video: this camera reads as idle, blocked by that preview, with the failure; the owner's pane keeps Stop.
   const foreign = Boolean(paneState?.session?.camera_id) && paneState.session.camera_id !== camera?.id && paneState.status !== 'stopping'
@@ -50,13 +50,12 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
   const status = previewStatusInfo(state)
   const session = state?.session || null
   const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
-  const frameUrl = state?.status === 'live' ? safeHref(session?.viewer_url) : null
+  const streamUrl = state?.status === 'live' ? previewStreamUrl(session) : null
 
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
       <div className="periph-preview-head">
         <h4 id="periph-preview-title">Video Preview</h4>
-        {/* The channel is Insight's own bookkeeping, not something to act on, so it is not shown. */}
         <span className="periph-pills">
           {running && <ModeBadges mode={session?.mode} label="Streaming" />}
           <Pill tone={status.tone}>{status.label}</Pill>
@@ -65,7 +64,7 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
 
       <p className="sr-only" role="status">
         {state?.status === 'live'
-          ? `Preview live on channel ${session?.channel ?? 'unknown'}`
+          ? 'Preview live'
           : state?.status === 'starting'
             ? 'Starting the preview'
             : state?.status === 'stopping'
@@ -100,19 +99,20 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
             </button>
           </div>
-          {frameUrl ? (
-            <iframe
+          {streamUrl ? (
+            // The backend relays the board's JPEG frames as multipart/x-mixed-replace, which an <img> plays.
+            <img
               className="periph-preview-frame"
-              title={`Live preview of ${camera?.name || 'the camera'}`}
-              src={frameUrl}
-              allow="autoplay; fullscreen"
+              alt={`Live preview of ${camera?.name || 'the camera'}`}
+              src={streamUrl}
+              onError={() => onStreamError?.(session?.id)}
             />
           ) : state?.status === 'live' ? (
-            <Callout tone="danger" title="The viewer link could not be opened">
+            <Callout tone="danger" title="The preview stream could not be opened">
               <p>Insight returned a preview address this browser will not load. Stop the preview and report it with the board label.</p>
             </Callout>
           ) : (
-            <p className="periph-preview-placeholder" role="status">Waiting for the board to start the encoder…</p>
+            <p className="periph-preview-placeholder" role="status">Waiting for the board to start the camera…</p>
           )}
         </>
       )}
