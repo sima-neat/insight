@@ -16,14 +16,12 @@ def _link(repo: str, number: int) -> dict:
     return {"label": f"{repo}#{number}", "url": f"https://github.com/sima-neat/{repo}/issues/{number}"}
 
 
-CORE_838 = _link("core", 838)
 CORE_883 = _link("core", 883)
 CORE_903 = _link("core", 903)
 INTERNALS_244 = _link("internals", 244)
 
 VERIFIED_REASON = "Neat Core accepts these modes for CameraInput; the rest are not usable."
 NO_MODES_REASON = "SiMa Sentinel reported no modes for this camera."
-USB_TRACKED = "USB support is tracked in core#838."
 USB_FORMAT_NOTES = {
     "MJPG": (
         "MJPG chroma subsampling cannot be read without decoding; "
@@ -112,7 +110,7 @@ def _fps(num: int, den: int):
 
 
 def _choice(rate: Fraction, **verdict) -> dict:
-    """One frame-rate choice: a display value plus the exact rate the export requests."""
+    """One frame-rate choice: a display value plus the exact rate as a fraction."""
     return {"value": _fps(rate.numerator, rate.denominator), "framerate_num": rate.numerator,
             "framerate_den": rate.denominator, **verdict}
 
@@ -351,12 +349,11 @@ def _verdict(modes: list, usb: bool, fmt: Optional[str] = None, fallback: str = 
         return _support("verified", VERIFIED_REASON, () if usb else (CORE_883,))
     if any(mode["supported"] is None for mode in modes):
         return _support("", _common_reason(modes, None))
-    reason = _common_reason(modes, False) or fallback
     if not usb:
-        return _support("unsupported", reason)
-    note, link = USB_FORMAT_NOTES.get(fmt, (None, None))
-    text = " ".join(part for part in (reason, USB_TRACKED, note) if part)
-    return _support("unsupported", text, (CORE_838, link) if link else (CORE_838,))
+        return _support("unsupported", _common_reason(modes, False) or fallback)
+    # Core rejects a USB mode only because CameraInput takes MIPI cameras; the page does not repeat that.
+    note, link = USB_FORMAT_NOTES.get(fmt, ("", None))
+    return _support("unsupported", note, (link,) if link else ())
 
 
 def _interval_rates(entry: dict) -> list:
@@ -398,8 +395,8 @@ def _on_step(period: float, first: float, step: float) -> bool:
 def _choices(modes: list, usb: bool) -> list:
     """The frame rates of one format and size. The rate Neat Core classified carries the mode's verdict
     (CameraInput's default rate when a MIPI mode reports none); the other advertised rates are unsupported
-    with an unsupported mode and unknown otherwise. A USB mode exports as a V4L2 descriptor, not
-    CameraInput code, so it offers only the rates it advertises."""
+    with an unsupported mode and unknown otherwise. A USB mode is not a CameraInput mode, so it offers
+    only the rates it advertises."""
     choices = {}
     for mode in modes:
         rates = [
@@ -414,7 +411,9 @@ def _choices(modes: list, usb: bool) -> list:
             others = {"tier": ""}
         else:
             rates = rates or ([classified] if classified else [])
-            others = {"tier": "unsupported" if mode["supported"] is False else "", "reason": mode["reason"]}
+            rejected = mode["supported"] is False
+            # As in _verdict, a USB mode does not carry Core's MIPI-only reason.
+            others = {"tier": "unsupported" if rejected else "", "reason": "" if usb and rejected else mode["reason"]}
         for rate in rates:
             choices.setdefault(_fps(rate.numerator, rate.denominator), _choice(rate, **others))
     return [choices[value] for value in sorted(choices, reverse=True)]
@@ -431,14 +430,14 @@ def _formats(modes: list, usb: bool) -> list:
             if "width" in mode:
                 sizes.setdefault((mode["width"], mode["height"]), []).append(mode)
         ranged = next((mode["size_range"] for mode in entries if "size_range" in mode), None)
-        # Unknown support stays selectable; only a verdict lets a MIPI mode export.
+        # Unknown support stays selectable; only Core's rejection makes a MIPI format unusable.
         usable = any(mode["supported"] is not False for mode in entries)
         description = next((mode["format_description"] for mode in entries if mode.get("format_description")), None)
         formats.append({
             "format": name,
             # A USB driver names its own formats.
             "label": f"{name} ({description})" if usb and description else FORMAT_LABELS.get(name, name),
-            # A USB format exports as a V4L2 descriptor, not CameraInput code, so it is exportable regardless.
+            # A USB format is not a CameraInput format, so Core's rejection leaves it selectable.
             "exportable": usb or usable,
             "support": _verdict(entries, usb, name),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}

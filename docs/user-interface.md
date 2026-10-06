@@ -136,7 +136,7 @@ The Video Viewer can show one or more channels at a time, with pagination and ch
 
 ## Peripherals
 
-Peripherals lists the cameras connected to a board and shows the modes each camera reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a camera, so cameras stay available to your applications. The camera export API works from the last scan without touching the board.
+Peripherals lists the cameras connected to a board and shows the modes each camera reports. SiMa Sentinel on the board discovers them; Insight reads Sentinel's catalog. Discovery reads device information only: it never opens or streams a camera, so cameras stay available to your applications.
 
 ### Selected board
 
@@ -157,16 +157,10 @@ Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and w
 | Level | Meaning |
 | --- | --- |
 | Verified | Neat Core on the board accepts the mode for Core `CameraInput`. |
-| Not supported | Neat Core rejects it, for example USB cameras and formats other than NV12; the page shows Core's reason. |
+| Not supported | Neat Core rejects it, for example USB cameras and formats other than NV12; for a MIPI camera the page shows Core's reason. |
 | Support unknown | Neat Core is not installed on the board, or is too old to classify camera modes; install or update it with `sima-cli neat install core`. |
 
 Sentinel reports only what the hardware offers. During Refresh, Insight asks Neat Core on the board, through PyNeat, which modes `CameraInput` supports. Availability also comes from Insight: during Refresh it checks which processes hold each camera's device nodes and names the process that holds a camera; Insight can see other users' processes only when it runs as root or the board allows passwordless `sudo`, and reports **Unknown** otherwise.
-
-### Camera configuration API
-
-Under the mode menus, pick a format and select **Copy configuration** to copy the selected mode's export, described below, to the clipboard. For a MIPI camera the button is disabled unless Neat Core verified the selected mode; its tooltip gives the reason. API clients can post a selected mode to `/api/peripherals/cameras/export` and receive Python (`pyneat.CameraInputOptions`), C++, and JSON representations. Exports leave the capture-buffer count unset and include no Apps `config.yaml` `camera:` block, because Insight does not read the board's `libcamerasrc`. Exports always name the camera explicitly. For USB cameras the API returns a device descriptor, not a `CameraInput` configuration.
-
-Two behaviors measured on a Modalix DevKit shape the export. It allows CPU fallback (`allow_cpu_fallback = True`), because strict zero-copy did not start there. And the camera delivers the frame rate of the sensor mode libcamera picks, not the requested rate: an IMX477 at 1920×1080 delivered about 66 fps when 15 or 30 fps was requested. Drop frames in your application if you need fewer.
 
 ## Stats
 

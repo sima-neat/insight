@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult, board_bp
-from neat_insight.peripherals import api, board_check, cameras, export
+from neat_insight.peripherals import api, board_check, cameras
 from neat_insight.peripherals.api import peripherals_bp
 
 IMX477 = "camera:imx477 5-001a"
@@ -23,13 +23,11 @@ C920 = "camera:v4l2:421bbe426738013b"
 BACKEND_REASON = "CameraInput currently accepts MIPI cameras only; direct V4L2 capture is not supported."
 FORMAT_REASON = "CameraInput's current camera-memory path supports NV12 output only."
 NOT_INSTALLED = "Neat Core is not installed, so CameraInput support for this mode is unknown."
-TRACKED = " USB support is tracked in core#838."
 ISP_NOTE = (
     "Only sizes the ISP can output (1920x1080, 2048x1080, 2432x2048) are offered; libcamera also advertises "
     "sizes the ISP cannot produce, which fail to start (core#883)."
 )
 NO_RATES_NOTE = "The camera reports no frame rates, so only CameraInput's default 30 fps is offered for those modes."
-NO_BUFFER_COUNT = "Insight does not read libcamerasrc's properties on the board, so the code omits capture_buffer_count."
 C920_BY_ID = "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0"
 OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
 # Sentinel's published contract example, copied byte for byte from sima-neat/sentinel
@@ -158,17 +156,6 @@ def fmt_of(camera, name):
 
 def size_of(fmt, width, height):
     return next(s for s in fmt["sizes"] if (s["width"], s["height"]) == (width, height))
-
-
-def parse_yaml_block(text: str) -> dict:
-    lines = [line for line in text.splitlines() if line and not line.startswith("#")]
-    assert lines[0] == "camera:", lines[0]
-    values = {}
-    for line in lines[1:]:
-        assert line.startswith("  ") and ": " in line, line
-        key, raw = line[2:].split(": ", 1)
-        values[key] = json.loads(raw)
-    return values
 
 
 class BoardCheckTests(unittest.TestCase):
@@ -398,7 +385,7 @@ class SnapshotTests(unittest.TestCase):
                 snapshot = snapshot_of(catalog(imx477()), check(support={"state": state, "reason": "Sentinel is down."}))
                 camera = item(snapshot, IMX477)
                 self.assertEqual(camera["support"], {"tier": "", "reason": reason, "links": []})
-                # Unknown is not "not usable": every format stays selectable, but nothing is verified to export.
+                # Unknown is not "not usable": every format stays selectable, but nothing is verified.
                 self.assertTrue(all(f["exportable"] and f["support"]["tier"] == "" for f in camera["formats"]))
                 self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"], [
                     {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "", "reason": reason},
@@ -412,12 +399,10 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(item(missed, IMX477)["support"]["reason"], cameras.UNCLASSIFIED_REASON)
         self.assertNotIn("support_unknown", [i["code"] for i in missed["issues"]])
 
-    def test_usb_camera_is_unsupported_with_core_reason_and_every_advertised_rate(self):
+    def test_usb_camera_is_unsupported_without_cores_mipi_only_reason_and_offers_every_advertised_rate(self):
         camera = item(snapshot_of(catalog(c920())), C920)
         self.assertEqual((camera["connection"], camera["name"]), ("usb", "HD Pro Webcam C920"))
-        self.assertEqual(
-            camera["support"], {"tier": "unsupported", "reason": BACKEND_REASON + TRACKED, "links": [cameras.CORE_838]}
-        )
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "", "links": []})
         self.assertEqual(camera["device"], {
             "video_node": "/dev/video97",
             "by_id": C920_BY_ID,
@@ -426,14 +411,14 @@ class SnapshotTests(unittest.TestCase):
         })
         mjpg = fmt_of(camera, "MJPG")
         self.assertEqual((mjpg["label"], mjpg["exportable"]), ("MJPG (Motion-JPEG)", True))
-        self.assertEqual(mjpg["support"]["links"], [cameras.CORE_838, cameras.CORE_903])
-        self.assertIn("core#903", mjpg["support"]["reason"])
+        self.assertEqual(mjpg["support"], {"tier": "unsupported", "reason": cameras.USB_FORMAT_NOTES["MJPG"][0],
+                                           "links": [cameras.CORE_903]})
         yuyv = fmt_of(camera, "YUYV")
         self.assertEqual(yuyv["label"], "YUYV (YUYV 4:2:2)")
-        self.assertEqual(yuyv["support"]["links"], [cameras.CORE_838, cameras.INTERNALS_244])
+        self.assertEqual(yuyv["support"]["links"], [cameras.INTERNALS_244])
         fps = size_of(mjpg, 640, 480)["fps"]
         self.assertEqual([c["value"] for c in fps], [30, 24, 20, 15, 10, 7.5, 5])
-        self.assertEqual({(c["tier"], c["reason"]) for c in fps}, {("unsupported", BACKEND_REASON)})
+        self.assertEqual({(c["tier"], c["reason"]) for c in fps}, {("unsupported", "")})
         self.assertEqual(camera["default_selection"], {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
         self.assertEqual(camera["notes"], [])
 
@@ -471,7 +456,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([c["value"] for c in size_of(yuyv, 640, 480)["fps"]], [30, 25, 20, 15, 10])
 
     def test_camerainput_default_rate_is_offered_for_mipi_modes_only(self):
-        """A USB mode exports as a V4L2 descriptor, so a mode without frame intervals offers no rate."""
+        """A USB mode is not a CameraInput mode, so a mode without frame intervals offers no rate."""
         usb = c920()
         usb["modes"] = [{"format": "MJPG", "width": 640, "height": 480}]
         mjpg = fmt_of(item(snapshot_of(catalog(usb)), C920), "MJPG")
@@ -636,19 +621,6 @@ class PeripheralsApiTests(unittest.TestCase):
             self.scan_id = response.get_json()["scan_id"]
         return response
 
-    def export(self, **body):
-        body = {
-            "generation": self.manager.current.generation,
-            "scan_id": self.scan_id,
-            "id": IMX477,
-            "format": "NV12",
-            "width": 1920,
-            "height": 1080,
-            "fps": 30,
-            **body,
-        }
-        return self.client.post("/api/peripherals/cameras/export", json=body)
-
     def test_scan_responses_are_not_cached(self):
         self.use()
         self.assertEqual(self.client.get("/api/peripherals").headers["Cache-Control"], "no-store")
@@ -685,15 +657,10 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertIsNone(snapshot["changes"])
         self.assertEqual(self.client.get("/api/peripherals").get_json(), snapshot)
 
-    def test_sentinels_contract_example_refreshes_and_exports_both_cameras(self):
+    def test_sentinels_contract_example_refreshes_both_cameras(self):
         self.use(contract_catalog())
         snapshot = self.refresh().get_json()
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
-        mipi = self.export().get_json()
-        self.assertEqual(json.loads(mipi["exports"][2]["content"])["options"]["camera_name"], "imx477 5-001a")
-        usb = self.export(id=C920, format="MJPG", width=1920, height=1080, fps=30).get_json()
-        self.assertEqual(json.loads(usb["exports"][1]["content"])["device"],
-                         "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0")
 
     def test_a_board_without_cameras_needs_no_board_check(self):
         transport = self.use(catalog())
@@ -735,54 +702,8 @@ class PeripheralsApiTests(unittest.TestCase):
     def test_in_use_warning_names_the_holding_processes(self):
         holder = [{"pid": 4242, "command": "gst-launch-1.0"}]
         self.use(checks=[check(users={IMX477: holder, C920: []})])
-        self.assertEqual(self.refresh().get_json()["items"][0]["availability"]["state"], "in_use")
-        self.assertIn(
-            "The camera is in use by gst-launch-1.0 (pid 4242); CameraInput cannot acquire it until it is released.",
-            self.export().get_json()["warnings"],
-        )
-
-    def test_export_mipi_renders_core_shapes(self):
-        self.use()
-        self.refresh()
-        response = self.export()
-        self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertEqual(body["selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertEqual(body["support"]["tier"], "verified")
-        self.assertIn("Validated with Core CameraInput", body["support"]["reason"])
-        warnings = body["warnings"]
-        self.assertIn("delivered about 66 fps", warnings[0])
-        self.assertEqual(warnings[1:], [NO_BUFFER_COUNT])
-        exports = {e["id"]: e for e in body["exports"]}
-        self.assertEqual(list(exports), ["python", "cpp", "json"])
-
-        python = exports["python"]["content"]
-        compile(python, "camera_input.py", "exec")
-        for line in (
-            "camera.camera_name = 'imx477 5-001a'",
-            "camera.framerate_num = 30",
-            "camera.framerate_den = 1",
-            "camera.buffer_name = 'camera0'",
-            "camera.allow_cpu_fallback = True",
-            "graph.add(pyneat.nodes.camera_input(camera))",
-        ):
-            self.assertIn(line, python)
-
-        cpp = exports["cpp"]["content"]
-        self.assertEqual(cpp.count("{"), cpp.count("}"))
-        self.assertIn('camera.camera_name = "imx477 5-001a";', cpp)
-        self.assertIn("graph.add(neat::nodes::CameraInput(camera));", cpp)
-        descriptor = json.loads(exports["json"]["content"])
-        self.assertEqual((descriptor["kind"], descriptor["version"], descriptor["camera_id"]), ("neat.camera-input", 1, IMX477))
-        self.assertEqual(descriptor["options"]["camera_name"], "imx477 5-001a")
-        self.assertEqual((descriptor["support_tier"], descriptor["capture_buffer_count"]), ("verified", 0))
-
-    def test_export_of_a_supported_mode_without_evidence_has_no_measured_rate(self):
-        self.use()
-        self.refresh()
-        body = self.export(width=2048).get_json()
-        self.assertEqual(body["support"], {"tier": "verified", "reason": "Neat Core accepts this mode.", "links": []})
-        self.assertEqual(body["warnings"], [NO_BUFFER_COUNT])
+        availability = self.refresh().get_json()["items"][0]["availability"]
+        self.assertEqual((availability["state"], availability["reason"]), ("in_use", "Open in gst-launch-1.0 (pid 4242)."))
 
     def test_stepwise_intervals_offer_only_rates_on_their_step(self):
         doc = c920()
@@ -797,170 +718,6 @@ class PeripheralsApiTests(unittest.TestCase):
         self.use(catalog(doc))
         camera = item(self.refresh().get_json(), C920)
         self.assertEqual([choice["value"] for choice in size_of(fmt_of(camera, "YUYV"), 640, 480)["fps"]], [30, 15, 10, 5])
-        self.assertEqual(self.export(id=C920, format="YUYV", width=640, height=480, fps=25).status_code, 400)
-
-    def test_export_keeps_a_fractional_catalog_rate_exact(self):
-        mipi = imx477()
-        for mode in mipi["modes"]:
-            mode["frame_intervals"] = [{"width": mode["width"], "height": mode["height"], "intervals": [
-                {"type": "discrete", "numerator": 1001, "denominator": 30000}]}]
-        usb = c920()
-        usb["modes"] = [usb_mode("YUYV", 640, 480, [(1001, 30000), (1, 15)])]
-        self.use(catalog(mipi, usb))
-        self.refresh()
-        descriptor = json.loads(self.export(fps=29.97).get_json()["exports"][2]["content"])
-        self.assertEqual((descriptor["options"]["framerate_num"], descriptor["options"]["framerate_den"]), (30000, 1001))
-        body = self.export(id=C920, format="YUYV", width=640, height=480, fps=29.97).get_json()
-        descriptor = json.loads(body["exports"][1]["content"])
-        self.assertEqual((descriptor["framerate_num"], descriptor["framerate_den"]), (30000, 1001))
-
-    def test_export_escapes_device_strings(self):
-        doc = imx477()
-        hostile = 'cam"\n\\ 5-001a'
-        doc.update(camera_name=hostile, model=None)
-        self.use(catalog(doc))
-        self.refresh()
-        body = self.export().get_json()
-        exports = {e["id"]: e["content"] for e in body["exports"]}
-        self.assertEqual(list(exports), ["python", "cpp", "json"])
-        namespace = {}
-        code = compile(exports["python"].replace("import pyneat", ""), "export", "exec")
-        exec(code, {"pyneat": _FakePyneat()}, namespace)
-        self.assertEqual(namespace["camera"].camera_name, hostile)
-        self.assertTrue(namespace["camera"].allow_cpu_fallback)
-        self.assertIn("neat::nodes::CameraInput(camera)", exports["cpp"])
-        self.assertNotIn("\n\\ 5", exports["cpp"])
-
-    def test_export_usb_emits_descriptors_only(self):
-        self.use()
-        self.refresh()
-        response = self.export(id=C920, format="MJPG", width=1280, height=720, fps=7.5)
-        self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertEqual([e["id"] for e in body["exports"]], ["yaml", "json"])
-        self.assertEqual(body["support"]["tier"], "unsupported")
-        descriptor = json.loads(body["exports"][1]["content"])
-        self.assertEqual((descriptor["kind"], descriptor["core_support"]), ("v4l2-camera", "unsupported"))
-        self.assertEqual(descriptor["device"], C920_BY_ID)
-        self.assertEqual((descriptor["vendor_id"], descriptor["product_id"], descriptor["serial"]), ("046d", "08e5", "BE998CAF"))
-        self.assertEqual((descriptor["framerate_num"], descriptor["framerate_den"]), (15, 2))
-        yaml_values = parse_yaml_block(body["exports"][0]["content"])
-        self.assertEqual((yaml_values["core_support"], yaml_values["format"]), ("unsupported", "MJPG"))
-        self.assertTrue(any("core#903" in w for w in body["warnings"]))
-        self.assertFalse(any("not stable" in w for w in body["warnings"]))
-
-        doc = c920()
-        doc.pop("by_id_path")
-        self.use(catalog(doc))
-        self.refresh()
-        body = self.export(id=C920, format="YUYV", width=640, height=480, fps=30).get_json()
-        self.assertEqual(json.loads(body["exports"][1]["content"])["device"], "/dev/video97")
-        self.assertTrue(any("internals#244" in w for w in body["warnings"]))
-        self.assertTrue(any("not stable" in w for w in body["warnings"]))
-
-        # Codex 4189173487: with neither path the descriptor's device was null, which nothing can open.
-        doc.pop("device_path")
-        self.use(catalog(doc))
-        self.refresh()
-        response = self.export(id=C920, format="YUYV", width=640, height=480, fps=30)
-        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
-        self.assertIn("no device path", response.get_json()["error"])
-
-    def test_export_refuses_modes_sentinel_did_not_report_or_core_did_not_verify(self):
-        self.use()
-        self.refresh()
-        for width, height in ((1280, 720), (3840, 2160)):
-            with self.subTest(size=f"{width}x{height}"):
-                response = self.export(width=width, height=height)
-                self.assertEqual(response.status_code, 400)
-                body = response.get_json()
-                self.assertEqual((body["code"], body["hint"]), ("invalid_request", export.MODE_HINT))
-                self.assertIn(f"{width}x{height} at 30 fps is not a mode this camera reported", body["error"])
-        self.assertIn(FORMAT_REASON, self.export(format="RGB3").get_json()["error"])
-        self.use(checks=[check(support={"state": "not_installed", "reason": "No module named 'pyneat'"})])
-        self.refresh()
-        response = self.export()
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(f"at 30 fps cannot be exported: {NOT_INSTALLED}", response.get_json()["error"])
-
-    def test_export_rejects_invalid_requests(self):
-        self.use()
-        self.refresh()
-        cases = (
-            ({"generation": 0}, 400),
-            ({"scan_id": ""}, 400),
-            ({"scan_id": 7}, 400),
-            ({"generation": True}, 400),
-            ({"generation": 1.5}, 400),
-            ({"fps": None}, 400),
-            ({"width": True}, 400),
-            ({"format": "AR24"}, 400),
-            ({"width": 1234}, 400),
-            ({"fps": 60}, 400),
-            ({"id": "camera:nope"}, 404),
-        )
-        for body, status in cases:
-            with self.subTest(body=body):
-                response = self.export(**body)
-                self.assertEqual(response.status_code, status)
-                self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
-        self.assertEqual(self.export(generation=1.0).status_code, 200)
-
-    def test_export_rejects_a_frame_rate_that_is_not_a_finite_number(self):
-        # Codex 4188993845: an integer too large for a float overflowed against a fractional rate (a 500).
-        from neat_insight.peripherals import export
-
-        page = {"id": C920, "format": "MJPG", "width": 1920, "height": 1080}
-        for fps in (10**400, float("nan"), float("inf")):
-            with self.subTest(fps=str(fps)[:12]), self.assertRaises(BoardError) as ctx:
-                export.parse_request(dict(page, fps=fps))
-            self.assertEqual(ctx.exception.code, "invalid_request")
-        self.assertEqual(export.parse_request(dict(page, fps=7.5))["fps"], 7.5)
-
-    def test_the_pages_export_request_without_scan_tokens_uses_the_current_scan(self):
-        """The Peripherals page sends only the mode; the optional tokens are checked only when sent."""
-        self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))
-        page = {"id": IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
-        post = lambda: self.client.post("/api/peripherals/cameras/export", json=page)
-        self.assertEqual((post().status_code, post().get_json()["code"]), (409, "stale_snapshot"))
-        self.refresh()
-        self.assertEqual(post().status_code, 200)
-        self.refresh()
-        self.assertEqual(post().status_code, 200, "a later scan of the same board still serves the page")
-        self.use(generation=2)
-        self.assertEqual(post().status_code, 409, "a newly selected board without a scan has nothing to export")
-
-    def test_export_is_stale_after_another_scan_of_the_same_board(self):
-        self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))
-        first = self.refresh().get_json()
-        old_scan_id = first["scan_id"]
-        self.refresh()
-        response = self.export(scan_id=old_scan_id)
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
-
-    def test_export_is_stale_after_the_board_changes(self):
-        self.use()
-        self.assertEqual(self.export().status_code, 409)
-        self.refresh()
-        self.use(generation=2)
-        response = self.export()
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
-        self.assertEqual(self.client.get("/api/peripherals").get_json()["scanned_at"], None)
-
-    def test_export_rejects_an_old_tab_after_the_new_board_is_scanned(self):
-        self.use()
-        old_generation = self.refresh().get_json()["generation"]
-        self.use(generation=2)
-        self.refresh()
-        response = self.export(generation=old_generation)
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
-
-    def test_export_is_refused_when_the_board_changes_before_it_returns(self):
-        self.use()
-        self.refresh()
-        self.manager.current.stale = True
-        response = self.export()
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
 
     def test_get_is_refused_when_the_board_changes_before_it_returns(self):
         self.use()
@@ -1079,21 +836,5 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(results["first"].status_code, 200)
         second = results["second"]
         self.assertEqual((second.status_code, second.get_json()["code"]), (409, "stale_snapshot"))
-class _FakePyneat:
-    """Just enough of pyneat to execute the exported Python."""
-
-    class CameraInputOptions(SimpleNamespace):
-        pass
-
-    class Graph:
-        def __init__(self, name):
-            self.nodes = []
-
-        def add(self, node):
-            self.nodes.append(node)
-
-    nodes = SimpleNamespace(camera_input=lambda options, capture_buffer_count=0: (options, capture_buffer_count))
-
-
 if __name__ == "__main__":
     unittest.main()

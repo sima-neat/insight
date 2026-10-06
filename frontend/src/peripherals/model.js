@@ -7,8 +7,8 @@ const TIERS = {
 }
 
 const CONNECTIONS = [
-  { id: 'mipi', label: 'MIPI (libcamera)' },
-  { id: 'usb', label: 'USB (V4L2)' }
+  { id: 'mipi', label: 'MIPI' },
+  { id: 'usb', label: 'USB' }
 ]
 
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
@@ -186,7 +186,8 @@ export function cameraDeviceId(camera) {
 }
 
 export function cameraSubtitle(camera) {
-  const deviceId = cameraDeviceId(camera)
+  // A USB camera's kernel path is listed under Device details, not under its name.
+  const deviceId = camera?.connection === 'usb' ? '' : cameraDeviceId(camera)
   // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
@@ -304,30 +305,6 @@ export function fpsOptions(camera, format, width, height) {
   }))
 }
 
-// The formats POST /api/peripherals/cameras/export returns, by connection, with its labels.
-const MIPI_EXPORTS = [
-  { id: 'python', label: 'Python (pyneat)' },
-  { id: 'cpp', label: 'C++ (Neat)' },
-  { id: 'json', label: 'JSON' }
-]
-const USB_EXPORTS = [
-  { id: 'yaml', label: 'YAML descriptor' },
-  { id: 'json', label: 'JSON descriptor' }
-]
-
-export function exportChoices(camera) {
-  return camera?.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS
-}
-
-// Why the export refuses the selected mode, or '' when it accepts it: a USB mode always exports as a
-// descriptor; a MIPI mode needs a frame rate Neat Core's rules verified.
-export function exportBlockReason(camera, selection) {
-  if (!selection || camera?.connection === 'usb') return ''
-  const rate = findFps(findSize(findFormat(camera, selection.format), selection.width, selection.height), selection.fps)
-  if (rate?.tier === 'verified') return ''
-  return rate?.reason || "Neat Core's support rules do not accept this mode."
-}
-
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
 // pill beside the menu for the chosen entry, and the entries are grouped under their tier.
 const TIER_PILLS = {
@@ -361,7 +338,8 @@ export function cameraSummaryLine(camera) {
   if (camera?.availability?.state === 'in_use') {
     return `${availability.label}. Stop that process on the board before an application can open this camera.`
   }
-  if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
+  // A USB camera is unsupported only because CameraInput takes MIPI cameras; its tier pill says enough.
+  if (tier && tier !== 'verified') return camera.connection === 'usb' ? '' : camera.support.reason || `${tierInfo(tier).label}.`
   if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
   // A working camera gets no sentence at all. Every mode menu already labels each entry
   // "verified" or "advertised", so a paragraph repeating that distinction only adds text.

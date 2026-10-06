@@ -15,8 +15,6 @@ import {
   defaultTargetText,
   deviceRows,
   deviceTabs,
-  exportBlockReason,
-  exportChoices,
   formatDuration,
   formatOptions,
   formatRangeLabel,
@@ -41,7 +39,7 @@ import {
   validateBoardForm
 } from './model.js'
 
-const CORE_838 = { label: 'core#838', url: 'https://github.com/sima-neat/core/issues/838' }
+const CORE_883 = { label: 'core#883', url: 'https://github.com/sima-neat/core/issues/883' }
 const support = (tier, reason = '', links = []) => ({ tier, reason, links })
 const rates = (...pairs) => pairs.map(([value, tier]) => ({ value, tier }))
 const size = (width, height, ...pairs) => ({ width, height, fps: rates(...pairs) })
@@ -84,7 +82,7 @@ const imx568 = {
   model: 'imx568',
   device: { camera_name: 'econ-imx568-fpga 5-0042', camera_name_source: 'media-graph', media_device: '/dev/media0' },
   availability: { state: 'unknown', users: [], reason: 'fuser is not installed on the board.' },
-  support: support('advertised', 'imx568 is enumerated by libcamera but not verified with Core.', [CORE_838]),
+  support: support('advertised', 'imx568 is enumerated by libcamera but not verified with Core.', [CORE_883]),
   modes_source: 'live',
   formats: [
     format('NV12', 'NV12 (YUV 4:2:0)', true, support('advertised'), [
@@ -119,7 +117,7 @@ const usb = {
     usb: { vendor_id: '046d', product_id: '0825', manufacturer: 'Logitech', product: 'HD Webcam C270', serial: null, bus_path: '1-1.2', speed_mbps: 480 }
   },
   availability: available,
-  support: support('unsupported', 'Core CameraInput supports MIPI (libcamera) cameras only.', [CORE_838]),
+  support: support('unsupported'),
   modes_source: 'live',
   formats: [
     format('MJPG', 'Motion-JPEG', true, support('unsupported'), [size(1280, 720, [30, 'unsupported']), size(640, 480, [30, 'unsupported'])]),
@@ -151,7 +149,7 @@ const snapshot = {
 
 test('cameras are grouped MIPI first, then USB, and other kinds are ignored', () => {
   const groups = groupCameras(snapshot.items)
-  assert.deepEqual(groups.map((g) => g.label), ['MIPI (libcamera)', 'USB (V4L2)'])
+  assert.deepEqual(groups.map((g) => g.label), ['MIPI', 'USB'])
   assert.deepEqual(groups[0].items.map((c) => c.id), [imx477.id, imx568.id, inUse.id])
   assert.deepEqual(groups[1].items.map((c) => c.id), [usb.id])
   assert.deepEqual(groupCameras([]), [])
@@ -267,8 +265,8 @@ test('identity rows list only known device fields', () => {
 test('a subtitle never repeats what the name already says', () => {
   // "imx477 5-001a" carries the model, so the subtitle beneath it must not read "imx477" again.
   assert.equal(cameraSubtitle(imx477), '')
-  // The USB camera reports its product string as both name and model, so only the device id is news.
-  assert.equal(cameraSubtitle(usb), usb.device.by_id)
+  // The USB camera reports its product string as both name and model, and its kernel path stays in Device details.
+  assert.equal(cameraSubtitle(usb), '')
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
 })
@@ -336,7 +334,7 @@ test('board form defaults and validation', () => {
 })
 
 test('only http(s) links are rendered', () => {
-  assert.equal(safeHref(CORE_838.url), CORE_838.url)
+  assert.equal(safeHref(CORE_883.url), CORE_883.url)
   assert.equal(safeHref('javascript:alert(1)'), null)
   assert.equal(safeHref(undefined), null)
 })
@@ -466,6 +464,8 @@ test('the detail pane shows one explanation line, chosen by priority', () => {
     cameraSummaryLine({ ...imx477, support: support('verified', ''), availability: imx568.availability }),
     'Availability unknown: fuser is not installed on the board.'
   )
+  assert.equal(cameraSummaryLine(usb), '', 'an unsupported USB camera gets no sentence; its pill says it')
+  assert.match(cameraSummaryLine({ ...usb, availability: inUse.availability }), /^In use by gst-launch-1\.0/)
   assert.equal(cameraSummaryLine({}), '')
 })
 
@@ -584,15 +584,4 @@ test('a mode menu groups its entries by tier, and the pill names the chosen one'
   assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Not usable', tone: 'periph-danger' })
   assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Verified', tone: 'ok' }, 'a numeric selection matches its string option')
   assert.deepEqual(groupOptions([]), [])
-})
-
-test('the copy action offers the export formats of the connection and refuses a MIPI mode Core did not verify', () => {
-  assert.deepEqual(exportChoices(imx477).map((c) => c.id), ['python', 'cpp', 'json'])
-  assert.deepEqual(exportChoices(usb).map((c) => c.id), ['yaml', 'json'])
-  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), '')
-  assert.equal(exportBlockReason(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 60 }), "Neat Core's support rules do not accept this mode.")
-  const refused = { ...imx477, formats: [format('NV12', 'NV12', true, support('verified'), [{ width: 640, height: 480, fps: [{ value: 90, tier: 'unsupported', reason: 'The sensor has no 90 fps mode.' }] }])] }
-  assert.equal(exportBlockReason(refused, { format: 'NV12', width: 640, height: 480, fps: 90 }), 'The sensor has no 90 fps mode.')
-  assert.equal(exportBlockReason(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), '', 'a USB mode exports as a descriptor')
-  assert.equal(exportBlockReason(imx477, null), '')
 })

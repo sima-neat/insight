@@ -27,7 +27,7 @@
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "List the MIPI and USB cameras SiMa Sentinel reports on the selected board and export a camera input configuration. Sentinel discovers the cameras; Insight adds which processes hold each one. Neither captures frames, changes sensor controls, or publishes streams. Each camera and mode states whether Core `CameraInput` supports it, as Neat Core on the board classifies it; without Neat Core support is unknown."}
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras SiMa Sentinel reports on the selected board. Sentinel discovers the cameras; Insight adds which processes hold each one. Neither captures frames, changes sensor controls, or publishes streams. Each camera and mode states whether Core `CameraInput` supports it, as Neat Core on the board classifies it; without Neat Core support is unknown."}
   ],
   "x-tagGroups": [
     {
@@ -852,21 +852,6 @@
         }
       }
     },
-    "/api/peripherals/cameras/export": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the identified peripheral scan without contacting the board. A MIPI mode must be one Neat Core accepts. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core rejects, or whose support is unknown, returns `400` with the reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board was never scanned, and, when the optional `generation` and `scan_id` are sent, when the selected board or peripheral scan changed since the selection was read.",
-        "operationId": "exportCameraInput",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "scan_id": "1791164913635:2026-10-05T01:48:33.635147447Z", "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
-        "responses": {
-          "200": {"description": "Rendered configurations with the mode's support tier and warnings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExport"}}}},
-          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
-        }
-      }
-    },
     "/api/buildinfo": {
       "get": {
         "tags": ["Service and system"],
@@ -1392,7 +1377,7 @@
       },
       "SupportTier": {
         "type": "object",
-        "description": "Whether Core `CameraInput` can use a camera, format, or mode, as Neat Core on the board classifies it. `verified`: Core accepts it. `unsupported`: Core rejects it, and `reason` is Core's. `\"\"` (unknown): Neat Core is not installed, cannot classify camera modes, or did not classify this mode or frame rate.",
+        "description": "Whether Core `CameraInput` can use a camera, format, or mode, as Neat Core on the board classifies it. `verified`: Core accepts it. `unsupported`: Core rejects it, and `reason` is Core's; for a USB camera, whose modes Core rejects because `CameraInput` takes MIPI cameras only, `reason` is only Insight's note on the format, or empty. `\"\"` (unknown): Neat Core is not installed, cannot classify camera modes, or did not classify this mode or frame rate.",
         "required": ["tier", "reason"],
         "properties": {
           "tier": {"type": "string", "enum": ["verified", "unsupported", ""]},
@@ -1413,7 +1398,7 @@
           "availability": {"type": "object", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
           "support": {"$ref": "#/components/schemas/SupportTier"},
           "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
-          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}, "reason": {"type": "string", "description": "Why Neat Core rejects this rate (`unsupported`) or why its support is unknown (`\"\"`)."}}}}}}}}}},
+          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}, "reason": {"type": "string", "description": "Why Neat Core rejects this rate (`unsupported`; empty for a USB camera) or why its support is unknown (`\"\"`)."}}}}}}}}}},
           "default_selection": {"type": ["object", "null"]},
           "notes": {"type": "array", "items": {"type": "string"}},
           "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
@@ -1425,37 +1410,13 @@
         "properties": {
           "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
           "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
-          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan. Send it back when exporting a camera mode."},
+          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
           "platform": {"type": ["object", "null"], "description": "Tools the on-board check found and how camera users were detected."},
           "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
           "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous refresh of the same board."}
-        }
-      },
-      "CameraExportRequest": {
-        "type": "object",
-        "required": ["id", "format", "width", "height", "fps"],
-        "properties": {
-          "generation": {"type": "integer", "minimum": 1, "description": "Optional. Generation from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a different selected board returns `409 stale_snapshot`."},
-          "scan_id": {"type": "string", "minLength": 1, "description": "Optional. Opaque scan identifier from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a newer scan returns `409 stale_snapshot`."},
-          "id": {"type": "string"},
-          "format": {"type": "string", "example": "NV12"},
-          "width": {"type": "integer"},
-          "height": {"type": "integer"},
-          "fps": {"type": "number"}
-        }
-      },
-      "CameraExport": {
-        "type": "object",
-        "required": ["camera_id", "selection", "support", "warnings", "exports"],
-        "properties": {
-          "camera_id": {"type": "string"},
-          "selection": {"type": "object"},
-          "support": {"$ref": "#/components/schemas/SupportTier"},
-          "warnings": {"type": "array", "items": {"type": "string"}},
-          "exports": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "enum": ["python", "cpp", "yaml", "json"]}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
         }
       }
     }
