@@ -18,7 +18,6 @@ import {
   voiceEngineWarnings
 } from './genai/backendState.js'
 import {
-  GenaiError,
   REPLY_CUT_OFF,
   downloadModel,
   followLoadProgress,
@@ -148,7 +147,6 @@ export default function GenAIView({ onError, onStatus }) {
   const [solutionsOpen, setSolutionsOpen] = useState(false)
   const root = useRef(null)
   const [addressDraft, setAddressDraft] = useState('')
-  const [tokenDraft, setTokenDraft] = useState('')
   const [health, setHealth] = useState(null)
   const [status, setStatus] = useState(null)
   const [busyOp, setBusyOp] = useState(null)
@@ -266,50 +264,18 @@ export default function GenAIView({ onError, onStatus }) {
     recorder.current?.stream?.getTracks().forEach((t) => t.stop())
   }, [])
 
-  // --- settings and recovery -------------------------------------------------
+  // --- settings ----------------------------------------------------------------
 
   async function applySettings(event) {
     event.preventDefault()
     try {
-      const update = { url: addressDraft.trim() }
-      if (tokenDraft.trim()) update.resetToken = tokenDraft.trim()
-      const saved = await saveSettings(update)
+      const saved = await saveSettings({ url: addressDraft.trim() })
       setSettings(saved)
-      setTokenDraft('')
       setVoices(null)
       onStatus?.('Board settings saved.')
       refresh()
     } catch (error) {
       onError?.(error.message)
-    }
-  }
-
-  async function restartAccelerator() {
-    if (!window.confirm('Restart the board\'s accelerator? Every model is unloaded and the model server restarts; a reply in progress stops.')) return
-    setBusyOp('Restarting the accelerator')
-    try {
-      await postJson('models/reset-mla', {})
-      setLastError(null)
-      onStatus?.('Accelerator restarted. Load a chat model to continue.')
-    } catch (error) {
-      if (error instanceof GenaiError && error.status === 401) {
-        const token = window.prompt('Restarting the accelerator needs the reset token that run.sh printed on the board. Enter it to save it for next time:')
-        if (token && token.trim()) {
-          try {
-            setSettings(await saveSettings({ resetToken: token.trim() }))
-            await postJson('models/reset-mla', {})
-            setLastError(null)
-            onStatus?.('Accelerator restarted. Load a chat model to continue.')
-          } catch (retryError) {
-            fail(`Restart failed: ${retryError.message}`)
-          }
-        }
-      } else {
-        fail(`Restart failed: ${error.message}`)
-      }
-    } finally {
-      setBusyOp(null)
-      refresh()
     }
   }
 
@@ -855,9 +821,6 @@ export default function GenAIView({ onError, onStatus }) {
             {(backend.action === 'settings' || backend.action === 'start-command') && !settingsOpen && (
               <button type="button" className="btn-ghost" onClick={() => setSettingsOpen(true)}>Change board address</button>
             )}
-            {(backend.action === 'reset-mla' || voiceWarnings.some((w) => w.accelerator)) && (
-              <button type="button" className="btn-ghost danger" onClick={restartAccelerator}>Restart the accelerator</button>
-            )}
             {lastError && <button type="button" className="btn-ghost" onClick={() => setLastError(null)}>Dismiss</button>}
           </div>
         </section>
@@ -871,10 +834,6 @@ export default function GenAIView({ onError, onStatus }) {
               <label>
                 <span>Board address</span>
                 <input value={addressDraft} onChange={(e) => setAddressDraft(e.target.value)} placeholder={settings?.defaultUrl || 'https://192.168.1.20:5000'} />
-              </label>
-              <label>
-                <span>Reset token</span>
-                <input type="password" value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)} placeholder={settings?.hasResetToken ? 'Saved' : 'Printed by run.sh'} autoComplete="off" />
               </label>
               <button type="submit" className="btn-tonal">Save</button>
             </form>
@@ -967,10 +926,10 @@ export default function GenAIView({ onError, onStatus }) {
 
           <div className="genai-settings-section">
             <h3>Troubleshooting</h3>
-            <p className="hint">If a model load gets stuck or replies stop, restart the board's accelerator. Every model is unloaded and the model server restarts.</p>
-            <button type="button" className="btn-ghost danger" onClick={restartAccelerator} disabled={!health || health.httpStatus !== 200}>
-              Restart the accelerator
-            </button>
+            <p className="hint">
+              If a model load fails or replies stop, restart GenAI Studio on the board: <code>./run.sh stop</code>, then <code>{START_COMMAND}</code>.
+              That frees the accelerator; then load the model again.
+            </p>
           </div>
         </section>
       )}

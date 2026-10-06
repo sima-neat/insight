@@ -78,7 +78,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     }
   }
 
-  // An operation this tab started (a model load, a reset) keeps the model server
+  // An operation this tab started (a model load) keeps the model server
   // too busy to answer /health; report it as such rather than as a restart.
   const loading = status && status.loading
   if (busyOp) {
@@ -107,7 +107,7 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
       state: 'failed',
       title: 'The last operation failed',
       detail: lastError,
-      action: 'reset-mla'
+      action: null
     }
   }
 
@@ -200,7 +200,6 @@ export function engineName(key) {
 
 // Voice engines the board reports as installed but failed to load (apps#560:
 // /health lists them with loaded:false and an error), as plain sentences.
-// `accelerator` is true when restarting the accelerator can help.
 export function voiceEngineWarnings(health) {
   const engines = (health && health.body && health.body.tts && health.body.tts.engines) || []
   return engines
@@ -208,13 +207,11 @@ export function voiceEngineWarnings(health) {
     .map((e) => {
       const name = ENGINE_NAMES[e.key] || e.key
       const raw = String(e.error)
-      const accelerator = /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
-      const cause = accelerator
+      const cause = /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
         ? 'the accelerator was busy or unavailable when it started'
         : raw.split('\n')[0].replace(/^\w*Error:\s*/, '').replace(/^\[[^\]]+\]\s*/, '').slice(0, 160)
       return {
         key: e.key,
-        accelerator,
         message: `The ${name} voice didn't load: ${cause}. Other voices still work, and the board tries ${name} again on the next spoken reply.`
       }
     })

@@ -158,7 +158,7 @@ The status label, and a banner when something needs attention, show the backend'
 - **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
 - **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
 - **Starting**: the backend answers but its model server is not ready yet.
-- **Busy**: a model is loading or the accelerator is restarting. Chat and speech wait until it finishes.
+- **Busy**: a model is loading. Chat and speech wait until it finishes.
 - **Incompatible**: the board's GenAI Studio API version does not match this Insight. Update the one the banner names.
 - **Ready**: chat and speech are available. A voice that failed to load on the board is reported here too.
 
@@ -176,9 +176,9 @@ Under each reply, Insight shows how fast it was produced, measured in the browse
 
 **SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
 
-**Settings** holds the board address and reset token, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
+**Settings** holds the board address, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
 
-**Restart the accelerator** unloads every model and restarts the model server when a load leaves the accelerator stuck. It needs the reset token that `run.sh` prints on the board; Insight asks for it once and keeps it in the settings.
+If a model load fails or replies stop, restart GenAI Studio on the board (`./run.sh stop`, then `./run.sh --backend-only`); that frees the accelerator, and the model can then be loaded again. **Settings**, **Troubleshooting** repeats this.
 
 ## System Information
 

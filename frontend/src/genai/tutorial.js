@@ -107,8 +107,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     title: 'When something is wrong',
     body:
       'The label at the top left shows whether the board is ready. If it says Not running, start GenAI ' +
-      'Studio on the board; Settings holds the board address. If a model gets stuck, Settings, ' +
-      'Troubleshooting restarts the accelerator. Replay this tutorial any time with Tutorial.',
+      'Studio on the board; Settings holds the board address. If a model gets stuck, restart GenAI Studio ' +
+      'on the board (Settings, Troubleshooting says how). Replay this tutorial any time with Tutorial.',
     target: 'status',
     action: 'settings'
   })
