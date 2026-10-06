@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -19,6 +19,9 @@ import {
 } from './genai/backendState.js'
 import {
   REPLY_CUT_OFF,
+  clearDocuments,
+  resetDocuments,
+  uploadDocument,
   downloadModel,
   followLoadProgress,
   getJson,
@@ -33,9 +36,12 @@ import {
 import { languageNames, readAloudSupport } from './genai/speech.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
+import { documentsSummary, documentsSupport, progressOutcome, sourcesNote } from './genai/documents.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
+
+const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
 const POLL_MS = 5000
 const MAX_TOKENS = 512
@@ -95,6 +101,7 @@ const ICONS = {
   newChat: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   export: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   shield: 'M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z',
+  gauge: 'M3.5 17a8.5 8.5 0 1 1 17 0M12 17l4.5-5M12 17h.01M6.5 12.5l1.2.7M12 8.5V10M17.5 12.5l-1.2.7',
   help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17v.01',
   fullscreen: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
   settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4'
@@ -145,6 +152,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [settings, setSettings] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [solutionsOpen, setSolutionsOpen] = useState(false)
+  const [benchOpen, setBenchOpen] = useState(false)
   const root = useRef(null)
   const [addressDraft, setAddressDraft] = useState('')
   const [health, setHealth] = useState(null)
@@ -161,6 +169,13 @@ export default function GenAIView({ onError, onStatus }) {
   const [draft, setDraft] = useState('')
   const [image, setImage] = useState(null)
   const [thinking, setThinking] = useState(false)
+  const [useDocs, setUseDocs] = useState(false)
+  // Turned on in a chat that already has replies: the model tends to repeat
+  // its earlier answers over the documents, so a new chat is suggested.
+  const [docsMidChat, setDocsMidChat] = useState(false)
+  const [docStatus, setDocStatus] = useState(null)     // GET /rag/status
+  const [docProgress, setDocProgress] = useState(null) // {label, text} while an upload/reset/clear runs
+  const docInput = useRef(null)
   const [tutorialStep, setTutorialStep] = useState(null)
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
@@ -195,6 +210,7 @@ export default function GenAIView({ onError, onStatus }) {
 
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   const usable = canUseModels(backend.state)
+  const docs = documentsSupport(health)
   const chatModel = loadedChatModel(status)
   const sees = Boolean(chatModel && chatModel.supportsVision)
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
@@ -218,6 +234,11 @@ export default function GenAIView({ onError, onStatus }) {
     }
     return nextHealth
   }, [])
+
+  // The Documents section shows what the board's database holds.
+  useEffect(() => {
+    if (settingsOpen && docs.available) loadDocumentStatus()
+  }, [settingsOpen, docs.available])
 
   useEffect(() => {
     let cancelled = false
@@ -554,10 +575,11 @@ export default function GenAIView({ onError, onStatus }) {
     }
     const update = (extra) => setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', id: replyId, content: reply, ...extra }])
     try {
-      const stats = await streamChat({
+      const { stats, rag } = await streamChat({
         model: chatModel.name,
         messages: outgoing,
         maxTokens: MAX_TOKENS,
+        useDocuments: useDocs && docs.available,
         signal: controller.signal,
         onDelta: (piece) => {
           if (tFirst === null) tFirst = performance.now()
@@ -566,7 +588,7 @@ export default function GenAIView({ onError, onStatus }) {
           speakNew(false)
         }
       })
-      update({ metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
+      update({ metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }), rag })
       speakNew(true)
     } catch (error) {
       const stopped = error.name === 'AbortError'
@@ -669,6 +691,29 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   // --- welcome cards ----------------------------------------------------------
+
+  async function loadDocumentStatus() {
+    try {
+      setDocStatus(await getJson('rag/status'))
+    } catch {
+      setDocStatus(null)
+    }
+  }
+
+  async function runDocumentTask(label, task) {
+    setDocProgress({ label, text: '' })
+    try {
+      const text = await task({ onText: (t) => setDocProgress({ label, text: t }) })
+      const outcome = progressOutcome(text)
+      if (outcome.ok) onStatus?.(outcome.message)
+      else onError?.(outcome.message || `${label} the documents failed.`)
+    } catch (error) {
+      onError?.(`${label} the documents failed: ${error.message}`)
+    } finally {
+      setDocProgress(null)
+      loadDocumentStatus()
+    }
+  }
 
   function exportChat() {
     const now = new Date()
@@ -786,6 +831,13 @@ export default function GenAIView({ onError, onStatus }) {
           <input type="checkbox" checked={canThink && thinking} disabled={!canThink} onChange={(e) => setThinking(e.target.checked)} />
           Think first
         </label>
+        <label
+          className={`genai-check${docs.available ? '' : ' genai-check-off'}${spot('documents')}`}
+          title={docs.available ? 'Answer from the documents on the board (Settings, Documents): the board adds the matching passages to each question.' : docs.reason}
+        >
+          <input type="checkbox" checked={docs.available && useDocs} disabled={!docs.available} onChange={(e) => { setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
+          Use my documents
+        </label>
         <span className="genai-header-spacer" />
         <div className="genai-toolbar" role="toolbar" aria-label="GenAI Studio tools">
           <button type="button" className={`btn-ghost genai-tool${spot('export')}`} onClick={exportChat} disabled={messages.length === 0} aria-label="Export chat" title="Export chat (.log)">
@@ -793,6 +845,9 @@ export default function GenAIView({ onError, onStatus }) {
           </button>
           <button type="button" className={`btn-ghost genai-tool${spot('solutions')}`} onClick={() => setSolutionsOpen(true)} aria-label="SiMaSentry Solutions" title="SiMaSentry Solutions: Med, Safe and Sec demo apps on the loaded model">
             <Icon d={ICONS.shield} />
+          </button>
+          <button type="button" className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => setBenchOpen(true)} disabled={!usable} aria-label="Benchmark" title={usable ? 'Benchmark: first token time and tokens per second for the board\'s models' : backend.title}>
+            <Icon d={ICONS.gauge} />
           </button>
           <button type="button" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null} aria-label="Tutorial" title="Tutorial">
             <Icon d={ICONS.help} />
@@ -925,6 +980,30 @@ export default function GenAIView({ onError, onStatus }) {
           )}
 
           <div className="genai-settings-section">
+            <h3>Documents</h3>
+            {docs.available ? (
+              <>
+                <p className="hint">
+                  With <b>Use my documents</b> on, the board answers from these documents. Uploading a Markdown file
+                  replaces them; Reset brings back the default SiMa document.
+                </p>
+                <p className="genai-doc-summary">{documentsSummary(docStatus)}</p>
+                <input ref={docInput} type="file" accept=".md,text/markdown" hidden onChange={(e) => { runDocumentTask('Uploading', (o) => uploadDocument(e.target.files[0], o)); e.target.value = '' }} />
+                <div className="genai-actions">
+                  <button type="button" className="btn-tonal" disabled={!!docProgress} onClick={() => docInput.current?.click()}>Upload a Markdown file</button>
+                  <button type="button" className="btn-ghost" disabled={!!docProgress} onClick={() => runDocumentTask('Resetting', resetDocuments)}>Reset to the default</button>
+                  <button type="button" className="btn-ghost danger" disabled={!!docProgress || !(docStatus && docStatus.database)} onClick={() => window.confirm('Remove all documents from the board? Use my documents then finds nothing until you upload or reset.') && runDocumentTask('Clearing', clearDocuments)}>Clear</button>
+                </div>
+                {docProgress && (
+                  <p className="hint" aria-live="polite">{docProgress.label}… {progressOutcome(docProgress.text).message}</p>
+                )}
+              </>
+            ) : (
+              <p className="hint">{docs.reason}</p>
+            )}
+          </div>
+
+          <div className="genai-settings-section">
             <h3>Troubleshooting</h3>
             <p className="hint">
               If a model load fails or replies stop, restart GenAI Studio on the board: <code>./run.sh stop</code>, then <code>{START_COMMAND}</code>.
@@ -935,6 +1014,13 @@ export default function GenAIView({ onError, onStatus }) {
       )}
 
       <section className="panel genai-chat" aria-label="Chat">
+        {docsMidChat && useDocs && messages.length > 0 && (
+          <div className="genai-docs-hint" role="status">
+            <span>Earlier replies in this chat can win over your documents. Start a new chat to answer from them.</span>
+            <button type="button" className="btn-tonal genai-small" onClick={newChat}>New chat</button>
+            <button type="button" className="btn-ghost genai-small" onClick={() => setDocsMidChat(false)}>Keep this chat</button>
+          </div>
+        )}
         <div className="genai-transcript" ref={transcriptBox} onScroll={onTranscriptScroll}>
           {messages.length === 0 && (
             <div className="genai-welcome">
@@ -992,6 +1078,7 @@ export default function GenAIView({ onError, onStatus }) {
                 )}
                 {m.stopped && <p className="hint">Stopped.</p>}
                 {m.error && <p className="genai-error">{m.error}</p>}
+                {m.rag && <p className="hint genai-sources">{sourcesNote(m.rag)}</p>}
                 <Metrics items={m.metrics} label="How fast the model answered" />
                 <Metrics items={speechStats[m.id]} label="How fast the reply was spoken" />
                 {speechError && speechError.id === m.id && <p className="genai-error">{speechError.text}</p>}
@@ -1089,6 +1176,12 @@ export default function GenAIView({ onError, onStatus }) {
           </div>
         </form>
       </section>
+
+      {benchOpen && (
+        <Suspense fallback={null}>
+          <GenAIBenchmark status={status} onClose={() => setBenchOpen(false)} onModelsChanged={refresh} />
+        </Suspense>
+      )}
 
       {solutionsOpen && (
         <SolutionsOverlay

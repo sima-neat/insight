@@ -42,6 +42,7 @@ _ALLOWED_PREFIXES = (
     "piperplus/",
     "supertonic/",
     "voices/",
+    "rag/",
 )
 # Quick status calls fail fast so the tab can show "unavailable"; model loads,
 # downloads and streamed replies can legitimately run for minutes.

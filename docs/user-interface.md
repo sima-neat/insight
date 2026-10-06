@@ -150,7 +150,7 @@ Start the backend on the board first, from the GenAI Studio application director
 ./run.sh --backend-only
 ```
 
-The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud** and **Think first** (greyed out for models that always answer directly), and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Tutorial**, **Settings** and **Full screen**.
+The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
 
 The status label, and a banner when something needs attention, show the backend's state and what to do next:
 
@@ -175,6 +175,10 @@ Under each reply, Insight shows how fast it was produced, measured in the browse
 **Export chat** saves the conversation as a `.log` text file (`neat-chat-<date>-<time>.log`) with the export time and model at the top, then each turn; pictures appear as `[image]`.
 
 **SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
+
+**Benchmark** measures the board's chat models. Choose one or more models, the number of runs (1 to 50), the reply length in tokens (8 to 2048) and, optionally, a prompt, then **Run benchmark**. Each model runs in turn; a model that isn't loaded is loaded first, which can unload the chat model, so reload it from the **Model** menu afterwards. Progress and the reply appear while it runs, and **Stop** ends it. The results compare tokens per second (mean, p90 and standard deviation), time to first token and reply length, with the fastest values highlighted; **Each run** lists the runs of the last model. **Download CSV** and **Download JSON** save the results.
+
+**Use my documents** answers from the document database on the board: the board looks up the passages that match each question and adds them before the model answers, and a note under the reply names the sections used (or says nothing matched). **Settings**, **Documents** shows what the database holds, uploads a Markdown file (replacing the documents), resets to the default SiMa document, or clears it. It needs GenAI Studio with document search (the switch is greyed out with the reason otherwise).
 
 **Settings** holds the board address, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space. **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. When the board is online, search Hugging Face and **Download** a model onto the board.
 

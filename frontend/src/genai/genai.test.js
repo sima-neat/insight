@@ -22,7 +22,9 @@ import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } 
 import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
+import { documentsSummary, documentsSupport, parseSources, progressOutcome, sourcesNote } from './documents.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
+import { benchProgress, benchmarkCsv, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -97,9 +99,10 @@ test('a chat reply that ends without the done marker is reported as cut off', as
   try {
     let text = ''
     respondWith(200, sse(delta('Hel'), delta('lo'), JSON.stringify({ choices: [{ delta: {} }], generated_tokens: 2, tps: 9.5 }), '[DONE]'), 'text/event-stream')
-    const stats = await streamChat({ model: 'm', messages: [], onDelta: (d) => { text += d } })
+    const { stats, rag } = await streamChat({ model: 'm', messages: [], onDelta: (d) => { text += d } })
     assert.equal(text, 'Hello')
     assert.deepEqual(stats, { tokens: 2, tps: 9.5 }, "the board's figures come back with the reply")
+    assert.equal(rag, null, 'no documents asked for')
 
     text = ''
     respondWith(200, sse(delta('Partial ans')), 'text/event-stream')
@@ -274,7 +277,7 @@ test('thinking is offered only for models that have a reasoning mode', () => {
 
 test('the tutorial covers every feature, and says why Think first is greyed out for a model that cannot', () => {
   const ids = tutorialSteps().map((s) => s.id)
-  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'solutions', 'export', 'think', 'help'])
+  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'solutions', 'documents', 'benchmark', 'export', 'think', 'help'])
   const think = (options) => tutorialSteps(options).find((s) => s.id === 'think').body
   assert.match(think({ canThink: true }), /Turn on Think first/)
   assert.match(think({ canThink: false, thinkingModel: 'Qwen3 0.6B' }), /greyed out.*choose Qwen3 0\.6B/)
@@ -407,4 +410,73 @@ test('SiMaSentry apps open on the loaded model through the relay', () => {
   assert.equal(url.searchParams.get('provider'), 'ollama')
   assert.equal(url.searchParams.get('model'), 'Qwen3-VL-4B-Instruct-GPTQ-a16w4')
   assert.equal(new URL(solutionUrl('safety', null), 'http://insight').searchParams.has('model'), false)
+})
+
+// A summary as GenAI Studio's model manager returns it (_benchmark_summary).
+const stats = (mean, extra = {}) => ({ mean, median: mean, min: mean - 1, max: mean + 1, stdev: 0.5, cv: 1, p90: mean + 0.5, p95: mean + 0.8, ...extra })
+const summary = (tps, ttft, tokens = 128) => ({ count: 5, errors: 0, ttftMs: stats(ttft), tps: stats(tps), tokens: stats(tokens), totalTokens: tokens * 5 })
+
+test('benchmark settings are clamped to what the board accepts', () => {
+  assert.equal(clampSetting('0', BENCH_LIMITS.runs), 1)
+  assert.equal(clampSetting('500', BENCH_LIMITS.runs), 50)
+  assert.equal(clampSetting('', BENCH_LIMITS.runs), 5)
+  assert.equal(clampSetting('4096', BENCH_LIMITS.maxTokens), 2048)
+  assert.deepEqual(benchmarkRequest({ model: 'Qwen3-0.6B-Autoround-a16w4', runs: '3', maxTokens: 'x', prompt: '  hi  ' }), {
+    model: 'Qwen3-0.6B-Autoround-a16w4', num_samples: 3, max_new_tokens: 128, prompt: 'hi'
+  })
+})
+
+test('benchmark progress and the comparison mark the fastest model', () => {
+  assert.equal(benchProgress({ running: true, done: 1, total: 5, current: { tokens: 40, tps: 22.84 } }).text, 'Run 2 of 5 · 40 tokens · 22.8 tokens/s')
+  assert.equal(benchProgress({ running: true, done: 1, total: 5 }).pct, 20)
+  assert.equal(benchProgress({ running: false, done: 5, total: 5 }).text, '5 of 5 runs done')
+  const rows = comparisonRows([
+    { model: 'Qwen3-VL-4B-Instruct-GPTQ-a16w4', summary: summary(22.8, 250) },
+    { model: 'Qwen3-0.6B-Autoround-a16w4', summary: summary(95.4, 38) },
+    { model: 'Broken', failed: 'failed to load: out of memory' }
+  ])
+  assert.deepEqual(rows.map((r) => [r.bestTps, r.bestTtft]), [[false, false], [true, true], [undefined, undefined]])
+  assert.equal(rows[2].failed, 'failed to load: out of memory')
+})
+
+test('benchmark exports match the standalone Studio', () => {
+  const entries = [
+    { model: 'Qwen3-0.6B-Autoround-a16w4', summary: summary(95.4, 38), runs: [{ ttftMs: 38, tps: 95.4, tokens: 128 }] },
+    { model: 'Broken, "quoted"', failed: 'failed to load' }
+  ]
+  const csv = benchmarkCsv(entries).split('\n')
+  assert.equal(csv[0], 'model,tpsMean,tpsMedian,tpsMin,tpsMax,tpsP90,tpsStdev,ttftMeanMs,ttftP90Ms,tokensMean,validRuns,errors')
+  assert.equal(csv[1], 'Qwen3-0.6B-Autoround-a16w4,95.4,95.4,94.4,96.4,95.9,0.5,38,38.5,128,5,0')
+  assert.equal(csv.length, 2, 'a model without a result has no CSV line')
+  const json = JSON.parse(benchmarkJson(entries, { runs: '5', maxTokens: '128', prompt: '' }, new Date('2026-10-05T12:00:00Z')))
+  assert.deepEqual(json.config, { runs: 5, maxNewTokens: 128, prompt: '(default)' })
+  assert.equal(json.results[1].loadFailed, true)
+  assert.equal(benchmarkCsv([{ model: 'x', failed: 'no' }]), null)
+  assert.equal(benchmarkFilename('csv', new Date(2026, 9, 5, 9, 5, 7)), 'neat-benchmark-20261005-090507.csv')
+})
+
+test('documents: what the board offers, and the note under a reply', () => {
+  const health = (features) => ({ httpStatus: 200, body: { ...HEALTH_OK, ...(features ? { features } : {}) } })
+  assert.equal(documentsSupport(health({ rag: true, benchmark: true })).available, true)
+  assert.match(documentsSupport(health({ rag: false })).reason, /app\.rag\.enabled/)
+  assert.match(documentsSupport(health(null)).reason, /Update Apps/, 'GenAI Studio from before features existed')
+  assert.match(documentsSupport(null).reason, /Connect to a board/, 'before the board answers')
+  assert.match(documentsSupport({ httpStatus: 503, body: { reason: 'not-configured' } }).reason, /Connect to a board/, 'no board configured')
+  // X-RAG-Sources as the board sends it (non-ASCII escaped).
+  const sources = parseSources('[{"source":"","heading":"Lab handbook \\u203a DevKit lab hours","score":0.9677},{"source":"","heading":"Lab handbook \\u203a DevKit lab hours","score":0.8}]')
+  assert.equal(sources[0].heading, 'Lab handbook › DevKit lab hours')
+  assert.equal(sourcesNote({ hits: 2, sources }), 'From your documents: Lab handbook › DevKit lab hours')
+  assert.match(sourcesNote({ hits: 0, sources: [] }), /nothing matched/)
+  assert.deepEqual(parseSources('not json'), [])
+})
+
+test('documents: the database in words, and upload progress', () => {
+  assert.equal(documentsSummary({ enabled: true, database: true, service: 'ok', meta: { chunks: 8, input: '/x/src/common/rag/neat.md' } }), '8 sections from neat.md')
+  assert.match(documentsSummary({ enabled: true, database: true, service: 'starting', meta: { chunks: 1, input: 'a.md' } }), /1 section from a\.md \(the search service is starting\)/)
+  assert.match(documentsSummary({ enabled: true, database: false, service: 'no-database' }), /No documents yet/)
+  assert.deepEqual(progressOutcome('⏳ Starting...\n📚 Creating VectorDB from Markdown...\n✅ Markdown RAG database is ready.\n'), {
+    done: true, ok: true, message: 'Markdown RAG database is ready.', lines: ['Starting...', 'Creating VectorDB from Markdown...', 'Markdown RAG database is ready.']
+  })
+  assert.equal(progressOutcome('📚 Creating...\n❌ RAG document upload failed.\n').ok, false)
+  assert.equal(progressOutcome('⏳ Starting...\n').done, false)
 })

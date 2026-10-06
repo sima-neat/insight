@@ -82,6 +82,25 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     action: null
   })
   steps.push({
+    id: 'documents',
+    title: 'Answer from your documents',
+    body:
+      'Turn on Use my documents and the board looks up the matching passages in its document database before ' +
+      'answering, and says which ones it used. Settings, Documents uploads your own Markdown file or resets to ' +
+      'the default SiMa document.',
+    target: 'documents',
+    action: null
+  })
+  steps.push({
+    id: 'benchmark',
+    title: 'Measure the speed',
+    body:
+      'The gauge opens the benchmark: choose one or more models, the number of runs and the reply length, and ' +
+      'compare time to first token and tokens per second. Download the results as CSV or JSON.',
+    target: 'benchmark',
+    action: null
+  })
+  steps.push({
     id: 'export',
     title: 'Keep a copy of the chat',
     body:
