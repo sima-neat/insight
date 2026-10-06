@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="/static/viewer.css">
+  <link rel="stylesheet" href="/static/viewer.css?v=14">
   <link rel="stylesheet" href="/static/pagination.css">
 </head>
 <body>
@@ -18,6 +18,7 @@
       <div class="settings-popup-body">
         <div class="settings-tab-header">
           <button class="settings-tab-link active" data-tab="viewer-metadata">Metadata</button>
+          <button class="settings-tab-link" data-tab="viewer-pose3d">3D Pose</button>
           <button class="settings-tab-link" data-tab="viewer-roi">ROI</button>
           <button class="settings-tab-link" data-tab="viewer-general">General</button>
         </div>
@@ -27,6 +28,8 @@
             <div class="metadata-type-row">
               <label for="metadataTypeSelector">Metadata Type</label>
               <select id="metadataTypeSelector"></select>
+              <label for="toggleMetadataVisibility">Show Overlay</label>
+              <input type="checkbox" id="toggleMetadataVisibility" checked>
             </div>
             <div id="objectDetectionSettings" class="metadata-type-section">
               <table class="filter-table metadata-filter-table">
@@ -108,8 +111,79 @@
                 </tr>
               </table>
             </div>
+            <div id="poseEstimationSettings" class="metadata-type-section">
+              <table class="filter-table">
+                <tr>
+                  <td><label for="togglePoseKeypoints">Show Joint Markers</label></td>
+                  <td><input type="checkbox" id="togglePoseKeypoints" checked></td>
+                </tr>
+                <tr>
+                  <td><label for="togglePoseKeypointLabels">Show Landmark Names</label></td>
+                  <td><input type="checkbox" id="togglePoseKeypointLabels"></td>
+                </tr>
+              </table>
+              <p class="settings-field-note">
+                Landmark names are off by default to keep the video overlay readable.
+              </p>
+            </div>
             <div id="metadataNoSettings" class="metadata-type-section metadata-empty-state">
               No settings for this metadata type yet.
+            </div>
+          </div>
+
+          <!-- BlazePose 3D Config Tab -->
+          <div id="viewer-pose3d" class="settings-tab-section">
+            <p id="blazePose3DScopeNote" class="settings-scope-note">
+              Configure the BlazePose world-landmark panel for this viewer scope.
+            </p>
+            <table class="filter-table">
+              <tr>
+                <td><label for="toggleBlazePose3DPanel">Show 3D Pose Panel</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DPanel" checked></td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DPanelMode">Panel Size</label></td>
+                <td>
+                  <select id="blazePose3DPanelMode">
+                    <option value="compact">Compact</option>
+                    <option value="collapsed">Collapsed</option>
+                    <option value="expanded">Expanded</option>
+                  </select>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DTransparencySlider">Panel Transparency</label></td>
+                <td>
+                  <input type="range" id="blazePose3DTransparencySlider" class="settings-slider" min="0" max="100" step="5" value="0">
+                  <span id="blazePose3DTransparencyDisplay">0%</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DYawSlider">Camera Yaw</label></td>
+                <td>
+                  <input type="range" id="blazePose3DYawSlider" class="settings-slider" min="-180" max="180" step="5" value="-45">
+                  <span id="blazePose3DYawDisplay">-45&deg;</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="blazePose3DPitchSlider">Camera Pitch</label></td>
+                <td>
+                  <input type="range" id="blazePose3DPitchSlider" class="settings-slider" min="-60" max="60" step="5" value="20">
+                  <span id="blazePose3DPitchDisplay">20&deg;</span>
+                </td>
+              </tr>
+              <tr class="blazepose-3d-dependent">
+                <td><label for="toggleBlazePose3DReferenceBox">Show 3D Reference Box</label></td>
+                <td><input type="checkbox" id="toggleBlazePose3DReferenceBox" checked></td>
+              </tr>
+            </table>
+            <p class="settings-field-note">
+              Changes preview immediately. Save persists them; closing restores the saved view.
+              Transparency affects panel surfaces only; the pose and controls remain fully visible.
+            </p>
+            <div class="settings-inline-actions">
+              <button id="resetBlazePose3DView" type="button" class="app-button">Reset View</button>
+              <button id="useGlobalBlazePose3DView" type="button" class="app-button" style="display:none">Use Global Settings</button>
             </div>
           </div>
 
@@ -149,8 +223,8 @@
               <tr>
                 <td><label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label></td>
                 <td>
-                  <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="350">
-                  <span id="videoSyncBufferDisplay">350</span>
+                  <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="300">
+                  <span id="videoSyncBufferDisplay">300</span>
                 </td>
               </tr>
               <tr>
@@ -175,14 +249,14 @@
     <img src="/static/icons/menu.png" alt="Settings Menu">
   </button>
 
-  <script src="/static/js/viewer-settings-resolver.js"></script>
-  <script src="/static/drawing.js"></script>
-  <script src="/static/viewer-react.js"></script>
-  <link rel="stylesheet" href="/static/css/settings.css">
+  <script src="/static/js/viewer-settings-resolver.js?v=16"></script>
+  <script src="/static/drawing.js?v=16"></script>
+  <script src="/static/viewer-react.js?v=17"></script>
+  <link rel="stylesheet" href="/static/css/settings.css?v=14">
   <link rel="stylesheet" href="/static/css/app-buttons.css">
   <link rel="stylesheet" href="/static/css/roi.css">
   <script type="module" src="/static/js/roi.js"></script>
-  <script src="/static/settings.js"></script>
+  <script src="/static/settings.js?v=17"></script>
 
 </body>
 </html>
