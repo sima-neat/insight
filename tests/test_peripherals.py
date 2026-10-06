@@ -283,6 +283,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["modes_source"], "live")
         self.assertEqual(camera["notes"], [NO_RATES_NOTE, ISP_NOTE])
 
+    def test_a_mipi_mode_without_rates_offers_the_sensor_rate_else_camerainputs_default(self):
+        for name, extra, rate in (("sensor timing", {"max_fps": 66.18}, 66.18), ("none", {}, 30),
+                                  ("not finite", {"max_fps": float("inf")}, 30), ("zero", {"max_fps": 0}, 30)):
+            with self.subTest(name):
+                camera = item(snapshot_of(catalog(dict(imx477(), **extra), board=board_block())), IMX477)
+                self.assertEqual(camera["default_selection"]["fps"], rate)
+                self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]], [rate])
+
     def test_sentinels_contract_example_makes_the_imx477_available_and_the_c920_unsupported(self):
         doc = contract_catalog()
         snapshot = snapshot_of(doc)
@@ -299,14 +307,16 @@ class SnapshotTests(unittest.TestCase):
                          [("AR24", False, "unsupported"), ("NV12", True, "available"), ("RGB3", False, "unsupported")])
         for fmt in mipi["formats"]:
             self.assertEqual([(s["width"], s["height"]) for s in fmt["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
-            state = (30, "available", None) if fmt["format"] == "NV12" else (30, "unsupported", cameras.FORMAT_REASON)
+            # The ISP reports no rates, so the sensor's rate from its timing (max_fps) is offered: libcamera
+            # delivers it whatever rate is requested (66 fps measured on the DevKit at 1920x1080).
+            state = (66.18, "available", None) if fmt["format"] == "NV12" else (66.18, "unsupported", cameras.FORMAT_REASON)
             for size in fmt["sizes"]:
                 self.assertEqual(states(size["fps"]), [state])
         # The first Available mode in Sentinel's order.
-        self.assertEqual(mipi["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        self.assertEqual(mipi["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 66.18})
         self.assertEqual(mipi["notes"], [
-            "The sensor reports 66.18 fps for its fastest mode. The delivered frame rate follows the sensor mode "
-            "libcamera picks and can differ from the requested rate.",
+            "The sensor's timing gives 66.18 fps for its current mode, so that rate is offered. "
+            "libcamera delivers the sensor's rate whatever rate is requested.",
             ISP_NOTE,
         ])
 
