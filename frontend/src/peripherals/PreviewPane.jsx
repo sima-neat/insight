@@ -114,6 +114,8 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
           ) : (
             <p className="periph-preview-placeholder" role="status">Waiting for the board to start the camera…</p>
           )}
+          {/* The preview runs on when the sensor's rate could not be set; say so, without alarm. */}
+          {state?.status === 'live' && session?.rate_note && <p className="hint">{session.rate_note}</p>}
         </>
       )}
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from neat_insight.board import BoardError
-from neat_insight.preview import gst
+from neat_insight.preview import gst, sensor
 
 FIRST_FRAME_TIMEOUT_SEC = 10.0
 # A stream nobody opened within this long after the start is stopped.
@@ -140,6 +140,12 @@ class PreviewManager:
         try:
             frames = self._first_frames(stream, parser, item["name"])
             pid = self._pid(stream)
+            # libcamera starts a MIPI sensor at its own rate; once it runs, set the rate this mode asked for.
+            # Best effort: when that fails the preview runs on at the sensor's rate, with a note saying so.
+            sensor_rate, rate_note = (
+                sensor.apply(board_session.raw_transport, item["device"].get("camera_name"), mode["rate"])
+                if item["connection"] == "mipi" else (None, None)
+            )
         except Exception:
             stream.close()
             self._kill(board_session, stream)
@@ -153,6 +159,8 @@ class PreviewManager:
             "generation": board_session.generation,
             "started_at": _now(),
             "state": "live",
+            "sensor_rate": sensor_rate,
+            "rate_note": rate_note,
         }
         timer = threading.Timer(UNCLAIMED_TIMEOUT_SEC, self._stop_unclaimed, args=(session_id,))
         timer.daemon = True

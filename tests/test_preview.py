@@ -24,7 +24,7 @@ from neat_insight.board.target import BoardTarget
 from neat_insight.board.transport import LocalTransport, key_fingerprint
 from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
-from neat_insight.preview import api, gst, manager as preview
+from neat_insight.preview import api, gst, manager as preview, sensor
 from test_peripherals import C920, C920_BY_ID, IMX477, board_block, c920, catalog, check, imx477, mipi_mode, usb_mode
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
@@ -34,6 +34,9 @@ JPEG = b"\xff\xd8\xff\xe0" + b"frame" + b"\xff\xd9"
 PID = 4242
 PID_LINE = b"neat-preview-pid=%d\n" % PID
 HAVE_GST = shutil.which("gst-launch-1.0") is not None
+# What the rate script prints on the DevKit's IMX477 at 1920x1080 and 30 fps: pixel_rate, width,
+# horizontal_blanking, height, and the vertical_blanking it set.
+RATE_REPLY = b"840000000 1920 9332 1080 1408\n"
 
 
 def multipart(*frames):
@@ -83,10 +86,19 @@ class FakeTransport:
         report = {"users": {IMX477: users or [], C920: users or []}}
         self.replies = {"command -v gst-launch-1.0": gst_path, '"cameras"': json.dumps(report).encode()}
         self.next_stream = stream
+        # The sensor rate script's result, or a BoardError it raises.
+        self.rate = ExecResult(0, RATE_REPLY, b"")
 
     def exec(self, argv, *, timeout, stdin=None):
         self.calls.append(argv[-1])
+        if "vertical_blanking" in argv[-1]:
+            if isinstance(self.rate, BaseException):
+                raise self.rate
+            return self.rate
         return ExecResult(0, next((out for key, out in self.replies.items() if key in argv[-1]), b""), b"")
+
+    def rate_calls(self):
+        return [call for call in self.calls if "vertical_blanking" in call]
 
     def stream(self, argv, *, timeout):
         stream = self.next_stream or FakeStream([multipart(JPEG)], endless=True)
@@ -112,7 +124,7 @@ class PipelineTests(unittest.TestCase):
         arguments = gst.pipeline("mipi", gst.quoted("imx477 5-001a"), "NV12", 1920, 1080, Fraction(30))
         self.assertEqual(arguments, [
             "libcamerasrc", 'camera-name="imx477 5-001a"', "!", "video/x-raw,format=NV12,width=1920,height=1080,framerate=30/1",
-            "!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1",
+            "!", "videoscale", "n-threads=4", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=30/1",
             "!", "jpegenc", "quality=70", "!", "multipartmux", "boundary=frame", "!", "fdsink", "fd=1",
         ])
         command = gst.board_command(arguments)
@@ -123,18 +135,20 @@ class PipelineTests(unittest.TestCase):
     def test_a_usb_mjpg_mode_is_decoded_and_reencoded_small(self):
         arguments = gst.pipeline("usb", gst.quoted(C920_BY_ID), "MJPG", 1280, 720, Fraction(30))
         self.assertEqual(arguments[:6], ["v4l2src", f'device="{C920_BY_ID}"', "!", "image/jpeg,width=1280,height=720,framerate=30/1", "!", "jpegdec"])
-        self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=15/1"])
+        self.assertEqual(arguments[6:13], ["!", "videoscale", "n-threads=4", "!", "videorate", "!", "video/x-raw,width=640,height=360,framerate=30/1"])
+        # The preview never runs faster than PREVIEW_FPS.
+        self.assertIn("video/x-raw,width=640,height=360,framerate=30/1", gst.pipeline("usb", '"/dev/v"', "MJPG", 1280, 720, Fraction(60)))
 
     def test_a_usb_raw_mode_is_converted_and_a_slow_rate_is_not_raised(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "YUYV", 640, 480, Fraction(5))
         self.assertEqual(arguments[:6], ["v4l2src", 'device="/dev/video97"', "!", "video/x-raw,format=YUY2,width=640,height=480,framerate=5/1", "!", "videoconvert"])
-        self.assertEqual(arguments[6:12], ["!", "videoscale", "!", "videorate", "!", "video/x-raw,width=640,height=480,framerate=5/1"])
+        self.assertEqual(arguments[6:13], ["!", "videoscale", "n-threads=4", "!", "videorate", "!", "video/x-raw,width=640,height=480,framerate=5/1"])
         self.assertEqual(gst.RAW_FORMATS["YU12"], "I420")
 
     def test_fractional_rates_are_exact_fractions(self):
         arguments = gst.pipeline("usb", gst.quoted("/dev/video97"), "MJPG", 640, 480, Fraction(30000, 1001))
         self.assertIn("image/jpeg,width=640,height=480,framerate=30000/1001", arguments)
-        self.assertIn("video/x-raw,width=640,height=480,framerate=15/1", arguments)
+        self.assertIn("video/x-raw,width=640,height=480,framerate=30000/1001", arguments)
         self.assertIn("video/x-raw,width=640,height=480,framerate=15/2", gst.pipeline("usb", '"/dev/v"', "MJPG", 640, 480, Fraction(15, 2)))
 
     def test_preview_size_keeps_the_aspect_ratio_with_even_sides(self):
@@ -523,6 +537,174 @@ class PreviewTests(unittest.TestCase):
         self.start(other)
         self.assertTrue(self.session.transport.kills())
         self.assertFalse(other.transport.kills())
+
+
+    def test_a_mipi_preview_sets_the_sensor_rate_once_its_first_frame_arrived(self):
+        transport = self.session.transport
+        exec_ = transport.exec
+        seen = []
+
+        def exec_after_frames(argv, **kwargs):
+            if "vertical_blanking" in argv[-1]:
+                # The pipeline is running: its stream was opened and its first frame read.
+                seen.append(len(transport.streams) == 1 and transport.streams[0][1].chunks == [])
+            return exec_(argv, **kwargs)
+
+        transport.exec = exec_after_frames
+        session = self.start(mode={**MODE, "fps": 30})
+        self.assertEqual(seen, [True])
+        self.assertEqual(transport.rate_calls(), [sensor.rate_script("imx477 5-001a", Fraction(30))])
+        self.assertEqual(session["sensor_rate"], {"fps": 30, "vblank": 1408, "sensor_fps": 30.01})
+        self.assertIsNone(session["rate_note"])
+        self.assertEqual(self.manager.current(1)["sensor_rate"]["vblank"], 1408)
+
+    def test_a_usb_preview_leaves_the_rate_to_v4l2src(self):
+        session = self.start(item=self.c920, mode={"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertEqual(self.session.transport.rate_calls(), [])
+        self.assertEqual((session["sensor_rate"], session["rate_note"]), (None, None))
+
+    def test_a_failing_rate_command_leaves_the_preview_live_with_a_note(self):
+        cases = (
+            (ExecResult(1, b"", b"motd\nv4l2-ctl (v4l-utils) is not installed on the board.\n"),
+             "v4l2-ctl (v4l-utils) is not installed on the board."),
+            (ExecResult(1, b"", b"No V4L2 sub-device on the board is named after the camera.\n"),
+             "No V4L2 sub-device on the board is named after the camera."),
+            (ExecResult(1, b"", b"The sensor refused vertical_blanking=1408.\n"), "The sensor refused vertical_blanking=1408."),
+            (ExecResult(0, b"banner only\n", b""), "The board's command did not report the sensor's timing."),
+            (BoardError("timeout", "`sh` did not finish within 10 s on sima@board."), "`sh` did not finish within 10 s on sima@board."),
+        )
+        for reply, reason in cases:
+            transport = FakeTransport()
+            transport.rate = reply
+            board_session = fake_session(transport)
+            with self.subTest(reason=reason):
+                session = self.start(board_session)
+                self.assertEqual(session["state"], "live")
+                self.assertIsNone(session["sensor_rate"])
+                self.assertEqual(session["rate_note"], f"{sensor.RATE_NOTE} {reason}")
+                self.assertEqual(transport.kills(), [])
+                self.assertFalse(transport.streams[0][1].closed)
+                self.assertEqual(self.manager.current(1)["rate_note"], session["rate_note"])
+                self.manager.stop(board_session, session["id"])
+
+
+class SensorRateScriptTests(unittest.TestCase):
+    """The board's rate script, run for real with `sh` against a fake sysfs and a fake v4l2-ctl."""
+
+    FAKE_V4L2_CTL = r"""#!/bin/sh
+# v4l2-ctl -d DEV <option> [arg], answering like v4l-utils 1.2x for a sensor sub-device.
+echo "$2 $3 $4" >> "$FAKE/log"
+case $3 in
+  --get-ctrl)
+    case $4 in
+      pixel_rate) echo "pixel_rate: $FAKE_PR" ;;
+      horizontal_blanking) echo "horizontal_blanking: $FAKE_HB" ;;
+      vertical_blanking) cat "$FAKE/vb" ;;
+    esac ;;
+  --get-subdev-fmt)
+    printf 'ioctl: VIDIOC_SUBDEV_G_FMT (pad=0)
+	Width/Height      : %s/%s
+	Mediabus Code     : 0x3010
+' "$FAKE_W" "$FAKE_H" ;;
+  --list-ctrls)
+    printf '
+Image Source Controls
+
+'
+    printf '              vertical_blanking 0x009e0901 (int)    : min=48 max=65459 step=1 default=2242 value=2242
+'
+    printf '            horizontal_blanking 0x009e0902 (int)    : min=9332 max=9332 step=1 default=9332 value=9332 flags=read-only
+' ;;
+  --set-ctrl)
+    [ -z "$FAKE_REFUSE" ] || exit 1
+    echo "vertical_blanking: ${4#vertical_blanking=}" > "$FAKE/vb" ;;
+esac
+"""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.bin = self.dir / "bin"
+        self.bin.mkdir()
+        tool = self.bin / "v4l2-ctl"
+        tool.write_text(self.FAKE_V4L2_CTL)
+        tool.chmod(0o755)
+        (self.dir / "vb").write_text("vertical_blanking: 2242\n")
+        self.sysfs = self.dir / "sys"
+        for index, name in ((0, "csi2 receiver"), (1, "imx477 5-001b"), (2, "imx477 5-001a")):
+            (self.sysfs / f"v4l-subdev{index}").mkdir(parents=True)
+            (self.sysfs / f"v4l-subdev{index}" / "name").write_text(name + "\n")
+
+    def run_script(self, name="imx477 5-001a", rate=Fraction(15), pr=840000000, hb=9332, w=1920, h=1080, **env):
+        environ = {"PATH": f"{self.bin}:{os.environ['PATH']}", "FAKE": str(self.dir),
+                   "FAKE_PR": str(pr), "FAKE_HB": str(hb), "FAKE_W": str(w), "FAKE_H": str(h), **env}
+        script = sensor.rate_script(name, rate, sysfs=str(self.sysfs))
+        return subprocess.run(["sh", "-c", script], capture_output=True, timeout=30, env=environ, text=True, cwd=self.dir)
+
+    def log(self):
+        path = self.dir / "log"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def test_the_blanking_for_each_rate_follows_the_sensors_live_timing(self):
+        # Measured on the DevKit's IMX477: pixel_rate 840000000, horizontal_blanking 9332.
+        for rate, w, h, vblank in ((15, 1920, 1080, 3897), (60, 1920, 1080, 164), (5, 1920, 1080, 13851),
+                                   (30, 1920, 1080, 1408), (30, 2048, 1080, 1380)):
+            with self.subTest(rate=rate, size=(w, h)):
+                result = self.run_script(rate=Fraction(rate), w=w, h=h)
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                self.assertEqual(result.stdout.split(), ["840000000", str(w), "9332", str(h), str(vblank)])
+                self.assertIn(f"/dev/v4l-subdev2 --set-ctrl vertical_blanking={vblank}", self.log())
+                fps = 840000000 / ((w + 9332) * (h + vblank))
+                self.assertAlmostEqual(fps, rate, delta=rate * 0.001)
+
+    def test_a_fractional_rate_and_a_rate_past_the_sensor_are_rounded_and_clamped(self):
+        result = self.run_script(rate=Fraction(30000, 1001))
+        self.assertEqual(result.stdout.split()[-1], str(round(840000000 * 1001 / (30000 * 11252)) - 1080))
+        # 200 fps would need a negative blanking: the control's minimum (48 on the IMX477) is set instead.
+        self.assertEqual(self.run_script(rate=Fraction(200)).stdout.split()[-1], "48")
+
+    def test_the_camera_name_is_one_quoted_value_and_matches_its_sub_device_exactly(self):
+        for name in ("it's", "$(touch pwned)", "a b;c", 'p"q', "`touch pwned`", "x\\y", "-n"):
+            with self.subTest(name=name):
+                (self.sysfs / "v4l-subdev2" / "name").write_text(name + "\n")
+                script = sensor.rate_script(name, Fraction(15), sysfs=str(self.sysfs))
+                self.assertTrue(script.startswith(f"name={shlex.quote(name)}; num=15; den=1; "))
+                result = self.run_script(name=name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((self.dir / "pwned").exists())
+        # A name that only prefixes a sub-device's name, or names another one, does not match it.
+        for name in ("imx477", "imx477 5-001"):
+            with self.subTest(name=name):
+                result = self.run_script(name=name)
+                self.assertEqual((result.returncode, result.stderr.strip()),
+                                 (1, "No V4L2 sub-device on the board is named after the camera."))
+
+    def test_each_failure_is_one_sentence_and_a_non_zero_exit(self):
+        cases = (
+            ({"PATH": "/usr/bin:/bin"}, "v4l2-ctl (v4l-utils) is not installed on the board."),
+            ({"FAKE_PR": ""}, "Could not read the sensor's timing from /dev/v4l-subdev2."),
+            ({"FAKE_W": "?"}, "Could not read the sensor's timing from /dev/v4l-subdev2."),
+            ({"FAKE_REFUSE": "1"}, "The sensor refused vertical_blanking=3897."),
+        )
+        for env, message in cases:
+            with self.subTest(message=message):
+                result = self.run_script(**env)
+                self.assertEqual((result.returncode, result.stdout, result.stderr.strip()), (1, "", message))
+
+    def test_a_sensor_that_keeps_another_value_is_a_failure(self):
+        (self.bin / "v4l2-ctl").write_text(self.FAKE_V4L2_CTL.replace('echo "vertical_blanking: ${4#vertical_blanking=}"', 'echo "vertical_blanking: 2242"'))
+        result = self.run_script()
+        self.assertEqual((result.returncode, result.stderr.strip()), (1, "The sensor kept vertical_blanking at 2242, not 3897."))
+
+    def test_apply_reports_the_values_it_set_or_why_it_could_not(self):
+        transport = FakeTransport()
+        transport.rate = ExecResult(0, b"motd\n840000000 1920 9332 1080 3897\n", b"")
+        self.assertEqual(sensor.apply(transport, "imx477 5-001a", Fraction(15)),
+                         ({"fps": 15, "vblank": 3897, "sensor_fps": 15.0}, None))
+        self.assertEqual(transport.calls, [sensor.rate_script("imx477 5-001a", Fraction(15))])
+        self.assertEqual(sensor.apply(transport, None, Fraction(15)),
+                         (None, f"{sensor.RATE_NOTE} The camera has no name to find its sensor by."))
 
 
 class KillScriptTests(unittest.TestCase):
