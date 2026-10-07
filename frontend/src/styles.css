@@ -3575,6 +3575,22 @@ button:disabled {
   color: #2f4c61;
 }
 
+/* The camera's frame rate sits in the menu row as plain text: it is shown, not chosen. */
+.periph-mode-rate {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2f4c61;
+}
+
+.periph-mode-rate > span:last-child {
+  font-size: 14px;
+  font-weight: 400;
+  padding: 6px 0;
+}
+
 /* A menu's title with the chosen entry's tier as a pill, so no entry needs a suffix. */
 .periph-field-head {
   display: flex;

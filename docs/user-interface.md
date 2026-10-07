@@ -152,7 +152,7 @@ Insight connects over SSH with the keys of the account that runs it. It never as
 
 ### Cameras and modes
 
-Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. Each mode is in one of two states, shown beside the pixel format, resolution, and frame rate menus, which group their entries under them:
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. The frame rate shown for a mode is the rate the camera runs at in that mode; it is not a setting. Each mode is in one of two states, shown beside the pixel format and resolution menus, which group their entries under them:
 
 | State | Meaning |
 | --- | --- |
