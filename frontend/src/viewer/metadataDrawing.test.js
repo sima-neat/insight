@@ -16,6 +16,9 @@ function loadStrategies(t, polygons = []) {
   vm.runInNewContext(drawingSource, {
     window, performance, console,
     localStorage: { getItem: () => JSON.stringify(polygons) },
+    // RLE masks are decoded onto an offscreen canvas before being drawn.
+    document: { createElement: () => ({ getContext: recordingContext }) },
+    ImageData: class {},
   });
   globalThis.window = window;
   t.after(() => {
@@ -47,6 +50,8 @@ function recordingContext() {
     fillRect() {},
     measureText(text) { return { width: text.length * 7 }; },
     fillText() {},
+    drawImage() {},
+    putImageData() {},
   };
 }
 
@@ -123,7 +128,12 @@ test("shared ROI is drawn once in any metadata order and filtering still applies
   const boxes = [[10, 20, 30, 40], [500, 300, 30, 40]];
   const messages = [
     { type: "object-detection", data: { objects: boxes.map(bbox => ({ bbox, label: "person", confidence: 1 })) } },
-    { type: "segmentation", data: { segments: boxes.map(bbox => ({ bbox, mask_format: "polygon", mask: [[10, 20], [40, 20], [10, 60]] })) } },
+    { type: "segmentation", data: { segments: boxes.map(bbox => ({
+      bbox,
+      mask_format: "polygon",
+      show_rectangle: true,
+      mask: [[10, 20], [40, 20], [10, 60]],
+    })) } },
     { type: "tracking", data: { tracks: boxes.map((bbox, id) => ({ bbox, id })) } },
   ];
   const settings = { general: { showRoi: true }, type: {} };
@@ -137,6 +147,27 @@ test("shared ROI is drawn once in any metadata order and filtering still applies
     }
     assert.equal(ctx.fills.filter(color => color === "rgba(0,255,0,0.1)").length - before, 1);
     assert.equal(ctx.boxes.length - boxesBefore, 3);
+  }
+});
+
+test("segment rectangles are drawn only when show_rectangle is boolean true", (t) => {
+  const strategies = loadStrategies(t);
+  const canvas = { clientWidth: 640, clientHeight: 480 };
+  const video = { videoWidth: 640, videoHeight: 480 };
+  const settings = { general: { showRoi: false }, type: {} };
+  const box = [10, 20, 30, 40];
+  const masks = {
+    polygon: { mask: [[10, 20], [40, 20], [10, 60]] },
+    rle: { bbox: box, mask: { size: [4, 3], counts: [0, 6, 6] } },
+  };
+  const cases = [[undefined, []], [true, [box]], [false, []], ["true", []], [1, []]];
+  for (const [mask_format, segment] of Object.entries(masks)) {
+    for (const [show_rectangle, expected] of cases) {
+      const ctx = recordingContext();
+      const segments = [{ ...segment, mask_format, show_rectangle }];
+      strategies.segmentation(ctx, canvas, { segments }, video, 0, { settings });
+      assert.deepEqual(ctx.boxes, expected, `${mask_format} show_rectangle=${JSON.stringify(show_rectangle)}`);
+    }
   }
 });
 
