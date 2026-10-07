@@ -22,7 +22,6 @@ import {
   formatOptions,
   formatRangeLabel,
   formatRelativeTime,
-  fpsOptions,
   groupOptions,
   groupCameras,
   initialBoardForm,
@@ -31,6 +30,7 @@ import {
   normalizeError,
   optionTier,
   overlayName,
+  rateLabel,
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
@@ -176,11 +176,38 @@ test('unsupported formats stay selectable; only a format without a size and rate
   assert.equal(formatOptions(imx477)[0].tier, 'available')
 })
 
-test('size and fps options carry their best state, for the pill beside the menu', () => {
+test('size options carry their best state, for the pill beside the menu', () => {
   assert.deepEqual(sizeOptions(imx477, 'NV12').map((o) => [o.label, o.tier]), [['1920×1080', 'available'], ['1280×720', 'unsupported']])
-  assert.deepEqual(fpsOptions(imx477, 'NV12', 1920, 1080).map((o) => [o.label, o.tier]), [['30 fps', 'available'], ['60 fps', 'available']])
-  assert.deepEqual(fpsOptions(imx568, 'NV12', 1920, 1080).map((o) => o.value), ['30', '59.94'])
   assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
+})
+
+test('a USB resolution names the rate the page uses for that mode; a MIPI resolution names none', () => {
+  assert.deepEqual(sizeOptions(usb, 'MJPG').map((o) => o.label), ['1280×720 · 30 fps', '640×480 · 30 fps'])
+  // Highest Available rate, else the highest: what resolveSelection picks for the mode.
+  const webcam = {
+    ...usb,
+    formats: [format('YUYV', 'YUYV 4:2:2', true, support('available'), [
+      size(640, 480, [60, 'unsupported'], [30, 'available']),
+      size(320, 240, [29.97, 'unsupported'], [15, 'unsupported']),
+      size(160, 120, [7.5, 'unsupported'])
+    ])]
+  }
+  assert.deepEqual(sizeOptions(webcam, 'YUYV').map((o) => [o.value, o.label]),
+    [['640x480', '640×480 · 30 fps'], ['320x240', '320×240 · 30 fps'], ['160x120', '160×120 · 7.5 fps']])
+  assert.equal(resolveSelection(webcam, { format: 'YUYV', width: 640, height: 480 }).fps, 30)
+  for (const camera of [imx477, imx568]) {
+    for (const option of sizeOptions(camera, 'NV12')) assert.doesNotMatch(option.label, /fps/)
+  }
+})
+
+test('a rate reads as a whole number within 1% of one, else as reported', () => {
+  assert.equal(rateLabel(30), '30 fps')
+  assert.equal(rateLabel(66.18), '66 fps')
+  assert.equal(rateLabel(29.97), '30 fps')
+  assert.equal(rateLabel('59.94'), '60 fps')
+  assert.equal(rateLabel(7.5), '7.5 fps')
+  assert.equal(rateLabel(12.345), '12.35 fps')
+  for (const unknown of [null, undefined, '', 0, -5, NaN, Infinity, 'x']) assert.equal(rateLabel(unknown), '')
 })
 
 test('the default selection is preselected; without one an Available mode is preferred', () => {
@@ -330,9 +357,12 @@ test('API errors keep code, hint, and extra fields', () => {
 
 test('mode labels and selection equality drive the fallback notice', () => {
   const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-  assert.equal(modeLabel(mode), 'NV12 1920×1080 @ 30 fps')
-  assert.equal(modeLabel({ ...mode, fps: 59.94 }), 'NV12 1920×1080 @ 59.94 fps')
-  assert.equal(modeLabel(null), '')
+  // A MIPI mode's rate is not known before it runs, so only a USB mode names one.
+  assert.equal(modeLabel(mode, imx477), 'NV12 1920×1080')
+  assert.equal(modeLabel(mode), 'NV12 1920×1080')
+  assert.equal(modeLabel(mode, usb), 'NV12 1920×1080 @ 30 fps')
+  assert.equal(modeLabel({ ...mode, fps: 59.94 }, usb), 'NV12 1920×1080 @ 59.94 fps')
+  assert.equal(modeLabel(null, usb), '')
   assert.ok(sameSelection(mode, { ...mode, fps: '30' }))
   assert.ok(!sameSelection(mode, { ...mode, width: 1280, height: 720 }))
   assert.ok(!sameSelection(mode, { ...mode, format: 'YUYV' }))
@@ -609,7 +639,7 @@ test('a mode menu groups its entries as Available and Unsupported, and the pill 
   const formats = formatOptions(imx568)
   assert.deepEqual(groupOptions(formats).map((g) => g.label), ['Unsupported'])
   assert.deepEqual(optionTier(formats, 'RGB888'), { label: 'Unsupported', tone: 'periph-danger' })
-  assert.deepEqual(optionTier(fpsOptions(imx477, 'NV12', 1920, 1080), 30), { label: 'Available', tone: 'ok' }, 'a numeric selection matches its string option')
+  assert.deepEqual(optionTier([{ value: '30', tier: 'available' }], 30), { label: 'Available', tone: 'ok' }, 'a numeric selection matches its string option')
   assert.deepEqual(groupOptions([]), [])
 })
 
