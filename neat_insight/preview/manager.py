@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from neat_insight.board import BoardError
+from neat_insight.peripherals.client import PeripheralClient
 from neat_insight.preview import gst
 
 FIRST_FRAME_TIMEOUT_SEC = 10.0
@@ -21,6 +22,8 @@ STALL_TIMEOUT_SEC = 10.0
 START_TIMEOUT_SEC = 15.0
 STOP_TIMEOUT_SEC = 15.0
 PID_TIMEOUT_SEC = 2.0
+# How long SiMa Sentinel gets to rescan a MIPI camera once its preview runs, for the camera's rate.
+CAMERA_FPS_TIMEOUT_SEC = 10.0
 # How long a pipeline that exited gets to finish writing its error, which arrives apart from stdout.
 STDERR_WAIT_SEC = 2.0
 STREAM_PATH = "/api/peripherals/cameras/preview/{}/stream"
@@ -153,15 +156,44 @@ class PreviewManager:
             "generation": board_session.generation,
             "started_at": _now(),
             "state": "live",
+            # The rate the camera runs at: a USB camera's driver honours the mode's rate the pipeline
+            # requests; a MIPI sensor's is read from Sentinel once it runs in this mode (None until then).
+            "camera_fps": mode["fps"] if item["connection"] == "usb" else None,
         }
         timer = threading.Timer(UNCLAIMED_TIMEOUT_SEC, self._stop_unclaimed, args=(session_id,))
         timer.daemon = True
+        reader = None
+        if item["connection"] == "mipi":
+            reader = threading.Thread(target=self._read_camera_fps, args=(board_session, session_id, item["id"]),
+                                      name=f"preview-fps-{session_id[:8]}", daemon=True)
         with self._lock:
             self._session = session
             self._run = {"owner": board_session, "stream": stream, "parser": parser, "pid": pid,
-                         "frames": frames, "claimed": False, "timer": timer}
+                         "frames": frames, "claimed": False, "timer": timer, "fps_reader": reader}
+            started = dict(session)
         timer.start()
-        return dict(session)
+        if reader is not None:
+            reader.start()
+        return started
+
+    def _read_camera_fps(self, board_session, session_id: str, camera_id: str) -> None:
+        """Set a MIPI preview's `camera_fps` from SiMa Sentinel's rescan, after its first frame.
+
+        Sentinel's `max_fps` comes from the sensor's current mode, which is now the preview's mode, so it
+        is the rate the camera really runs at. This asks Sentinel directly: Insight records no snapshot
+        and runs no refresh, so the preview is not stopped. Any failure leaves `camera_fps` None."""
+        fps = None
+        try:
+            catalog = PeripheralClient(board_session).refresh(timeout=CAMERA_FPS_TIMEOUT_SEC)
+            device = next((entry for entry in catalog["devices"] if entry["id"] == camera_id), None)
+            value = (device or {}).get("max_fps")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+                fps = value
+        except Exception as exc:  # Best effort: the preview runs on without the rate.
+            logging.info("Could not read the rate of camera preview %s from SiMa Sentinel: %s", session_id, exc)
+        with self._lock:
+            if self._session is not None and self._session["id"] == session_id:
+                self._session["camera_fps"] = fps
 
     @staticmethod
     def _require_gstreamer(board_session) -> None:

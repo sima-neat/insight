@@ -142,3 +142,40 @@ test('Start is disabled for a USB format the backend cannot preview, with the re
   const reason = find(pane, (node) => node.props?.id === 'periph-preview-reason')
   assert.match(reason.props.children, /not H264\. Choose another format\.$/)
 })
+
+// The pane is called as a function, so its ModeBadges element is rendered here the same way.
+function badgeTexts(pane, label) {
+  const element = find(pane, (node) => typeof node.type === 'function' && node.props?.label === label)
+  const group = element && element.type(element.props)
+  if (!group) return null
+  return { aria: group.props['aria-label'], texts: [group.props.children].flat().filter(Boolean).map((child) => child.props.children) }
+}
+
+test("a running preview's mode chip shows the camera's rate once known, and only format and size before", () => {
+  const session = { id: 's1', camera_id: 'camera:a', mode, stream_url: streamUrl('s1'), state: 'live' }
+  const props = { camera: camera('camera:a'), selection: { id: 'camera:a', ...mode }, target: { label: 'board' }, onStart() {}, onStop() {} }
+  for (const camera_fps of [undefined, null]) {
+    const pane = PreviewPane({ ...props, state: { status: 'live', session: { ...session, camera_fps }, error: null } })
+    assert.deepEqual(badgeTexts(pane, 'Streaming'), { aria: 'Streaming: NV12 1920×1080', texts: ['NV12', '1920×1080'] })
+  }
+  const known = PreviewPane({ ...props, state: { status: 'live', session: { ...session, camera_fps: 66.18 }, error: null } })
+  assert.deepEqual(badgeTexts(known, 'Streaming'), { aria: 'Streaming: NV12 1920×1080 at 66 fps', texts: ['NV12', '1920×1080', '66 fps'] })
+  const usb = PreviewPane({
+    ...props,
+    camera: usbCamera,
+    selection: { id: usbCamera.id, format: 'MJPG', width: 1280, height: 720, fps: 30 },
+    state: { status: 'live', session: { ...session, camera_id: usbCamera.id, mode: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, camera_fps: 30 }, error: null }
+  })
+  assert.deepEqual(badgeTexts(usb, 'Streaming').texts, ['MJPG', '1280×720', '30 fps'])
+})
+
+test('the mode chip before a preview names no rate: Insight sets none', () => {
+  const pane = PreviewPane({
+    camera: camera('camera:a'),
+    selection: { id: 'camera:a', ...mode },
+    target: { label: 'board' },
+    state: { status: 'idle', session: null, error: null },
+    onStart() {}
+  })
+  assert.deepEqual(badgeTexts(pane, 'Mode'), { aria: 'Mode: NV12 1920×1080', texts: ['NV12', '1920×1080'] })
+})

@@ -152,7 +152,7 @@ Insight connects over SSH with the keys of the account that runs it. It never as
 
 ### Cameras and modes
 
-Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. A USB camera's resolutions show the frame rate the camera runs at in that mode. A MIPI camera's frame rate depends on the sensor mode it is running in, so no rate is shown for its resolutions. Insight does not set frame rates. Each mode is in one of two states, shown beside the pixel format and resolution menus, which group their entries under them:
+Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and waits for the result. Sentinel finds MIPI cameras through the media graph and the ISP, and USB cameras through V4L2. If Sentinel is not installed, not running, or too old to report peripherals, the page says so; install or update it with `sima-cli neat install sentinel`. For each camera the page shows the identity, connection, device identifier, availability, and the pixel formats, resolutions, and frame rates the camera reports. A USB camera's resolutions show the frame rate the camera runs at in that mode. A MIPI camera's frame rate depends on the sensor mode it is running in, so its resolutions show none; its rate is shown while its preview runs. Insight does not set frame rates. Each mode is in one of two states, shown beside the pixel format and resolution menus, which group their entries under them:
 
 | State | Meaning |
 | --- | --- |
@@ -168,6 +168,8 @@ Select **Start preview** to see what a camera sees. Insight runs a GStreamer pip
 A preview holds the camera, so your application cannot open it until you stop the preview. Insight will not start one on a camera another process is already using, and it never stops that process for you. Capture stops when you select **Stop**, leave the page, refresh the scan, or change the selected board. A closed browser stops it too. If Insight stops or restarts, the board pipeline exits at its next frame, once its output connection has closed; after a silent network loss it can hold the camera until the board's SSH connection times out. To clear a preview that still holds the camera, select **Stop** while the page still shows it, wait for that timeout, or end the `gst-launch-1.0` process on the board.
 
 A MIPI camera previews its Available modes. A USB camera previews any mode it lists in MJPG or a raw format such as YUYV, even though its modes are Unsupported for Neat's `CameraInput`; Insight opens it by its stable `/dev/v4l/by-id` path when the board has one.
+
+While a preview runs, the mode beside it shows the frame rate the camera runs at, which can be faster than the preview's 15 fps. For a USB camera this is the mode's rate. For a MIPI camera, Insight asks SiMa Sentinel to read the sensor once the first frame arrives, so the rate appears a few seconds after the picture; if Sentinel cannot report it, no rate is shown.
 
 ### Camera setup
 

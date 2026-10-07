@@ -843,6 +843,31 @@ test('a watched live preview is read until the backend no longer runs it, and ca
   assert.equal(events.length, 1)
 })
 
+test("a live preview's status read passes on the camera's rate once the backend knows it", async () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  const reply = (body) => async () => body
+  // Unknown (a MIPI sensor before Sentinel answers, or one it could not read): nothing to pass on.
+  assert.equal(await previewStatusEvent(reply({ session: { ...liveSession, camera_fps: null } }), '8f1c'), null)
+  const event = await previewStatusEvent(reply({ session: { ...liveSession, camera_fps: 66.18 } }), '8f1c')
+  assert.deepEqual(event, { type: 'camera-fps', for: '8f1c', fps: 66.18 })
+  const known = nextPreviewState(live, event)
+  assert.equal(known.status, 'live')
+  assert.equal(known.session.camera_fps, 66.18)
+  assert.equal(known.session.stream_url, liveSession.stream_url)
+  assert.equal(nextPreviewState(known, event), known, 'an unchanged rate keeps the state')
+  assert.equal(nextPreviewState(live, { ...event, for: 'other' }), live, "another session's rate is ignored")
+  assert.equal(nextPreviewState(PREVIEW_IDLE, event), PREVIEW_IDLE)
+
+  // Reading goes on after the rate arrives, until the preview ends.
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const replies = [{ session: liveSession }, { session: { ...liveSession, camera_fps: 66.18 } }, { session: null }]
+  const events = []
+  watchPreview(async () => replies.shift() || { session: null }, '8f1c', (e) => events.push(e), 1)
+  const deadline = Date.now() + 2000
+  while (events.length < 2 && Date.now() < deadline) await sleep(5)
+  assert.deepEqual(events, [event, streamEndedEvent('8f1c')])
+})
+
 test('preview transitions: failures, reset, and adopting an existing session', () => {
   const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
   const failed = nextPreviewState(starting, { type: 'failed', error: { message: 'Camera in use', code: 'camera_in_use' } })

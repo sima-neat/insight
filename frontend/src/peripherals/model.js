@@ -626,7 +626,8 @@ export function streamEndedEvent(sessionId) {
 export const PREVIEW_POLL_MS = 2500
 
 // One read of the backend's preview for a live session: the ended event when the backend no longer
-// runs it, null while it does. A failed read proves nothing, so it ends nothing.
+// runs it; while it does, the camera's rate once the backend knows it (a MIPI sensor's arrives after
+// the first frame), else null. A failed read proves nothing, so it ends nothing.
 export async function previewStatusEvent(request, sessionId) {
   let current
   try {
@@ -634,12 +635,14 @@ export async function previewStatusEvent(request, sessionId) {
   } catch {
     return null
   }
-  return current?.id === sessionId && current.state !== 'stopped' ? null : streamEndedEvent(sessionId)
+  if (current?.id !== sessionId || current.state === 'stopped') return streamEndedEvent(sessionId)
+  return rateLabel(current.camera_fps) ? { type: 'camera-fps', for: sessionId, fps: current.camera_fps } : null
 }
 
 // An <img> fires no event when a multipart stream ends cleanly (end of the board stream, the stall
 // timeout, a refresh or board change from elsewhere), so a live preview is read every `interval` ms
-// until the backend no longer runs it; then `onEvent` gets the ended event. Returns the cancel function.
+// until the backend no longer runs it; then `onEvent` gets the ended event. A read that finds the
+// camera's rate passes it on as a camera-fps event and reading goes on. Returns the cancel function.
 export function watchPreview(request, sessionId, onEvent, interval = PREVIEW_POLL_MS) {
   let cancelled = false
   let timer = null
@@ -647,7 +650,7 @@ export function watchPreview(request, sessionId, onEvent, interval = PREVIEW_POL
     const event = await previewStatusEvent(request, sessionId)
     if (cancelled) return
     if (event) onEvent(event)
-    else timer = setTimeout(check, interval)
+    if (event?.type !== 'ended') timer = setTimeout(check, interval)
   }
   timer = setTimeout(check, interval)
   return () => {
@@ -764,6 +767,10 @@ export function nextPreviewState(state, event) {
     case 'stop-failed':
       if (outOfDate(current, event)) return current
       return { status: 'live', session: current.session || event.session || null, error: event.error || null }
+    case 'camera-fps':
+      // The rate the camera runs at, for the running session only; unchanged, the state is kept as is.
+      if (!current.session || outOfDate(current, event) || current.session.camera_fps === event.fps) return current
+      return { ...current, session: { ...current.session, camera_fps: event.fps } }
     case 'ended':
       // A live preview the backend stopped, with its reason; nothing is left to stop.
       if (outOfDate(current, event)) return current

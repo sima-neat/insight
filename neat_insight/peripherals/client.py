@@ -156,9 +156,9 @@ class PeripheralClient:
         self._validate_catalog(payload)
         return payload
 
-    def refresh(self) -> dict:
+    def refresh(self, timeout: float = REFRESH_TIMEOUT_SEC) -> dict:
         """Rescan: Sentinel answers with the catalog of a scan that started after the request."""
-        payload = self._call("POST", "/v1/peripherals/refresh", timeout=REFRESH_TIMEOUT_SEC)
+        payload = self._call("POST", "/v1/peripherals/refresh", timeout=timeout)
         self._validate_catalog(payload)
         return payload
 

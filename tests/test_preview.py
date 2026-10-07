@@ -525,6 +525,107 @@ class PreviewTests(unittest.TestCase):
         self.assertFalse(other.transport.kills())
 
 
+class FakeSentinel:
+    """Stands in for PeripheralClient: records each rescan and answers with `answer` (an exception is raised)."""
+
+    def __init__(self, answer):
+        self.answer, self.calls = answer, []
+
+    def __call__(self, session):
+        sentinel = self
+
+        class Client:
+            def refresh(self, timeout):
+                sentinel.calls.append((session, timeout))
+                if isinstance(sentinel.answer, Exception):
+                    raise sentinel.answer
+                return sentinel.answer
+
+        return Client()
+
+
+class CameraFpsTests(unittest.TestCase):
+    """The rate a running preview reports: a MIPI sensor's from SiMa Sentinel once it runs, a USB mode's own."""
+
+    setUp = PreviewTests.setUp
+    start = PreviewTests.start
+
+    def start_with(self, answer, item=None, mode=MODE):
+        sentinel = FakeSentinel(answer)
+        with mock.patch.object(preview, "PeripheralClient", sentinel):
+            session = self.start(item=item, mode=mode)
+            reader = self.manager._run["fps_reader"]
+            if reader is not None:
+                reader.join(5)
+                self.assertFalse(reader.is_alive())
+        return session, sentinel
+
+    def assert_still_live_without_side_effects(self, session_id):
+        current = self.manager.current(1)
+        self.assertEqual((current["id"], current["state"]), (session_id, "live"))
+        self.assertEqual(self.session.transport.kills(), [])
+        self.assertFalse(self.session.transport.streams[0][1].closed)
+        # No Insight scan was recorded: the page's snapshot is the one from before the preview.
+        self.assertIs(peripherals_api.scans.snapshot(1), self.snapshot)
+
+    def test_a_mipi_preview_reads_the_sensors_rate_from_one_sentinel_rescan_after_its_first_frame(self):
+        session, sentinel = self.start_with(catalog(dict(imx477(), max_fps=66.18), c920()))
+        self.assertIsNone(session["camera_fps"], "unknown until Sentinel answers")
+        self.assertEqual(sentinel.calls, [(self.session, preview.CAMERA_FPS_TIMEOUT_SEC)])
+        self.assertEqual(self.manager.current(1)["camera_fps"], 66.18)
+        self.assert_still_live_without_side_effects(session["id"])
+
+    def test_a_failed_rescan_or_no_rate_leaves_camera_fps_null_and_the_preview_live(self):
+        answers = {
+            "sentinel error": BoardError("timeout", "SiMa Sentinel did not answer."),
+            "unexpected error": RuntimeError("boom"),
+            "no max_fps": catalog(imx477()),
+            "camera gone": catalog(c920()),
+        }
+        for name, answer in answers.items():
+            with self.subTest(name):
+                session, sentinel = self.start_with(answer)
+                self.assertEqual(len(sentinel.calls), 1)
+                self.assertIsNone(self.manager.current(1)["camera_fps"])
+                self.assert_still_live_without_side_effects(session["id"])
+                self.manager.stop(self.session, session["id"])
+                self.session = fake_session()
+
+    def test_a_start_that_sends_no_frame_never_asks_sentinel(self):
+        self.session.transport.next_stream = FakeStream([], stderr=PID_LINE + b"ERROR: no camera\n")
+        sentinel = FakeSentinel(catalog(dict(imx477(), max_fps=66.18)))
+        with mock.patch.object(preview, "PeripheralClient", sentinel), self.assertRaises(BoardError):
+            self.start()
+        self.assertEqual(sentinel.calls, [])
+
+    def test_a_rate_that_arrives_after_the_preview_stopped_is_dropped(self):
+        answered, release = threading.Event(), threading.Event()
+        sentinel = FakeSentinel(catalog(dict(imx477(), max_fps=66.18)))
+        refresh = sentinel.__call__
+
+        def slow(session):
+            client = refresh(session)
+            original = client.refresh
+            client.refresh = lambda timeout: (answered.set(), release.wait(5), original(timeout))[2]
+            return client
+
+        with mock.patch.object(preview, "PeripheralClient", slow):
+            first = self.start()
+            reader = self.manager._run["fps_reader"]
+            self.assertTrue(answered.wait(5))
+            self.manager.stop(self.session, first["id"])
+            release.set()
+            reader.join(5)
+        self.assertIsNone(self.manager.current(1))
+
+    def test_a_usb_preview_reports_its_modes_rate_without_asking_sentinel(self):
+        session, sentinel = self.start_with(RuntimeError("not called"), item=self.c920,
+                                            mode={"format": "MJPG", "width": 640, "height": 480, "fps": 7.5})
+        self.assertEqual(session["camera_fps"], 7.5)
+        self.assertEqual(sentinel.calls, [])
+        self.assertIsNone(self.manager._run["fps_reader"])
+
+
 class KillScriptTests(unittest.TestCase):
     """The board-side stop, run for real with `sh`."""
 

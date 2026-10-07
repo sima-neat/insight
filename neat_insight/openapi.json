@@ -1485,7 +1485,7 @@
       "PreviewSession": {
         "type": "object",
         "description": "An explicit, temporary capture whose JPEG frames Insight relays at `stream_url`.",
-        "required": ["id", "camera_id", "mode", "stream_url", "generation", "state"],
+        "required": ["id", "camera_id", "mode", "stream_url", "generation", "state", "camera_fps"],
         "properties": {
           "id": {"type": "string", "description": "Session id; every later call must present it."},
           "camera_id": {"type": "string"},
@@ -1493,7 +1493,8 @@
           "stream_url": {"type": "string", "description": "Same-origin path of the session's multipart JPEG stream.", "example": "/api/peripherals/cameras/preview/0f3c2a9e5b7d4c1e8a6f2d0b9c4e7a13/stream"},
           "generation": {"type": "integer"},
           "started_at": {"type": "string", "format": "date-time"},
-          "state": {"type": "string", "enum": ["live", "stopped"]}
+          "state": {"type": "string", "enum": ["live", "stopped"]},
+          "camera_fps": {"type": ["number", "null"], "description": "The frame rate the camera runs at in this mode, or null while it is unknown. A USB camera's is the mode's rate, which the pipeline requests. A MIPI camera's is SiMa Sentinel's `max_fps` from a rescan Insight requests after the first frame, when the sensor runs in this mode; it stays null when Sentinel does not report it. That rescan records no Insight scan and does not stop the preview.", "example": 66.18}
         }
       },
       "PeripheralCameraSetup": {

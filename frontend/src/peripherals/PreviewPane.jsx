@@ -1,10 +1,10 @@
 import {
-  fpsLabel,
   modeLabel,
   previewBlock,
   previewErrorInfo,
   previewStatusInfo,
   previewStreamUrl,
+  rateLabel,
   sizeLabel
 } from './model.js'
 import { Callout, Pill } from './ui.jsx'
@@ -28,15 +28,17 @@ function PreviewError({ error, onOpenBoardPanel }) {
   )
 }
 
-// The mode as three tags -- format, size, rate -- rather than one run of text, so each reads at a
-// glance. Screen readers get the same sentence the text used to be.
-function ModeBadges({ mode, label }) {
+// The mode as tags -- format, size, and the camera's rate once a running preview knows it -- rather
+// than one run of text, so each reads at a glance. Screen readers get the same sentence.
+// The rate is what the camera runs at (`camera_fps`), never a requested one: Insight sets no rate.
+function ModeBadges({ mode, fps = null, label }) {
   if (!mode) return null
+  const rate = rateLabel(fps)
   return (
-    <span className="periph-mode-badges" role="group" aria-label={`${label}: ${modeLabel(mode)}`}>
+    <span className="periph-mode-badges" role="group" aria-label={`${label}: ${modeLabel(mode)}${rate ? ` at ${rate}` : ''}`}>
       <span>{mode.format}</span>
       <span>{sizeLabel(mode.width, mode.height)}</span>
-      <span>{fpsLabel(mode.fps)} fps</span>
+      {rate && <span>{rate}</span>}
     </span>
   )
 }
@@ -57,7 +59,7 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
       <div className="periph-preview-head">
         <h4 id="periph-preview-title">Video Preview</h4>
         <span className="periph-pills">
-          {running && <ModeBadges mode={session?.mode} label="Streaming" />}
+          {running && <ModeBadges mode={session?.mode} fps={session?.camera_fps} label="Streaming" />}
           <Pill tone={status.tone}>{status.label}</Pill>
         </span>
       </div>
