@@ -702,6 +702,231 @@ func TestRTPTimestampRewriterAdvancesPerFrame(t *testing.T) {
 	}
 }
 
+func TestRTPTimestampRewriterPreservesBackwardSourceDeltas(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+	const ssrc = 0x1234
+	// Decode order of an I P B B P B B stream at 30 FPS: PTS moves backward
+	// for each B-frame. Starting near the wrap point also covers uint32 wrap.
+	base := uint32(0xffffffff - 4000)
+	sourceSteps := []uint32{0, 9000, 3000, 6000, 18000, 12000, 15000}
+	for i, sourceStep := range sourceSteps {
+		got := rewriter.timestampForSourceFrame(base+sourceStep, ssrc, false, start.Add(time.Duration(i)*33*time.Millisecond))
+		if want := initialRTPTimestamp + sourceStep; got != want {
+			t.Fatalf("frame %d: expected timestamp %d, got %d", i, want, got)
+		}
+	}
+}
+
+func TestRTPTimestampRewriterFallsBackOnLargeBackwardSourceJump(t *testing.T) {
+	rewriter := newRTPTimestampRewriter()
+	start := time.Unix(100, 0)
+	const ssrc = 0x1234
+
+	first := rewriter.timestampForSourceFrame(1_000_000, ssrc, false, start)
+	second := rewriter.timestampForSourceFrame(1_000_000-uint32(maxSourceRTPTimestampStep)-1, ssrc, false, start.Add(40*time.Millisecond))
+
+	if want := first + 3600; second != want {
+		t.Fatalf("expected arrival-time step to %d, got %d", want, second)
+	}
+}
+
+func TestRTPTimestampRewriterSourceStepFallbacks(t *testing.T) {
+	const ssrc = 0x1234
+	const sourceTimestamp = uint32(1_000_000)
+	tests := []struct {
+		name               string
+		sourceTimestamp    uint32
+		ssrc               uint32
+		afterSequenceBreak bool
+		arrival            time.Duration
+		wantStep           uint32
+	}{
+		{name: "in-range source step", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3000},
+		{name: "ssrc change", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc + 1, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "repeated source timestamp", sourceTimestamp: sourceTimestamp, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "repeated source timestamp at the same arrival", sourceTimestamp: sourceTimestamp, ssrc: ssrc, wantStep: 1},
+		{name: "large forward source jump", sourceTimestamp: sourceTimestamp + uint32(maxSourceRTPTimestampStep) + 1, ssrc: ssrc, arrival: 40 * time.Millisecond, wantStep: 3600},
+		{name: "after a sequence break", sourceTimestamp: sourceTimestamp + 3000, ssrc: ssrc, afterSequenceBreak: true, arrival: 40 * time.Millisecond, wantStep: 3600},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriter := newRTPTimestampRewriter()
+			start := time.Unix(100, 0)
+
+			first := rewriter.timestampForSourceFrame(sourceTimestamp, ssrc, false, start)
+			second := rewriter.timestampForSourceFrame(tt.sourceTimestamp, tt.ssrc, tt.afterSequenceBreak, start.Add(tt.arrival))
+
+			if got := second - first; got != tt.wantStep {
+				t.Fatalf("expected step %d, got %d", tt.wantStep, got)
+			}
+		})
+	}
+}
+
+// A sender that restarts its sequence but keeps its SSRC can rewind its source
+// clock by less than maxSourceRTPTimestampStep. The access-unit buffer drops the
+// unit that carries the sequence break, so the next accepted unit is the first
+// the rewriter sees after the restart and must not apply the rewind.
+func TestRTPForwarderUsesArrivalTimeAfterSameSSRCSequenceRestart(t *testing.T) {
+	tests := []struct {
+		name     string
+		codec    videoCodec
+		pt       uint8
+		key      []byte
+		delta    []byte
+		restarts [][]byte
+	}{
+		{
+			name: "h264", codec: videoCodecH264, pt: h264RTPPayloadType,
+			key: []byte{0x65, 0x88}, delta: []byte{0x41, 0x88},
+			restarts: [][]byte{{0x65, 0x88}},
+		},
+		{
+			// The recovery gate also withholds the delta unit after the break, so
+			// the restart has to survive more than one dropped unit.
+			name: "h265", codec: videoCodecH265, pt: h265RTPPayloadType,
+			key: []byte{0x26, 0x01}, delta: []byte{0x02, 0x01},
+			restarts: [][]byte{{0x02, 0x01}, {0x26, 0x01}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := &Channel{
+				Stats:         NewIngestStats(0, 9000, 9100),
+				MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+				MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+			}
+			media := mustNewChannelMedia(t, tt.codec)
+			channel.Media.Store(media)
+			media.track.bindingCount.Store(1)
+			forwarder := newRTPForwarder()
+			send := func(sequence uint16, timestamp uint32, payload []byte) uint32 {
+				pkt := testRTPPacketForCodec(t, tt.pt, sequence, timestamp, true, payload)
+				forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+				return forwarder.timestampRewriter.nextTimestamp
+			}
+
+			// Four seconds into the stream at 30 FPS.
+			send(100, 360000, tt.key)
+			// Sampled before the last pre-restart frame records its arrival, so the
+			// bound below covers the whole interval the fallback step can measure.
+			lastFrameSentAt := time.Now()
+			if got, want := send(101, 363000, tt.delta), initialRTPTimestamp+3000; got != want {
+				t.Fatalf("expected source cadence before restart: want %d, got %d", want, got)
+			}
+			beforeRestart := forwarder.timestampRewriter.nextTimestamp
+
+			// Restart: sequence and source timestamp start again from zero.
+			send(0, 0, tt.key)
+			sequence := uint16(1)
+			for _, payload := range tt.restarts {
+				send(sequence, uint32(sequence)*3000, payload)
+				sequence++
+			}
+			afterRestart := forwarder.timestampRewriter.nextTimestamp
+			maxArrivalStep := int32(time.Since(lastFrameSentAt).Seconds()*videoRTPClockRate) + 1
+
+			if step := int32(afterRestart - beforeRestart); step < 1 || step > maxArrivalStep {
+				t.Fatalf("expected an arrival-time step in [1, %d] after restart, got %d", maxArrivalStep, step)
+			}
+			if got, want := send(sequence, uint32(sequence)*3000, tt.delta), afterRestart+3000; got != want {
+				t.Fatalf("expected source cadence after restart: want %d, got %d", want, got)
+			}
+		})
+	}
+}
+
+// H.264 decode order with B-frames; units after a loss arrive in a burst. Losing
+// B 12000 makes the buffer reject B 15000, which carries the sequence break, so
+// P 27000 takes the arrival-time step. The B-frames behind it must not rewind
+// the outgoing clock below frames already sent before the gap.
+func TestRTPForwarderKeepsPostGapBFramesAboveSentTimeline(t *testing.T) {
+	channel := &Channel{
+		Stats:         NewIngestStats(0, 9000, 9100),
+		MetadataSync:  newMetadataTimestampCorrelator(metadataCorrelationCapacity, metadataCorrelationRetention),
+		MetadataReady: newMetadataForwardQueue(metadataForwardQueueCapacity),
+	}
+	media := mustNewChannelMedia(t, videoCodecH264)
+	channel.Media.Store(media)
+	media.track.bindingCount.Store(1)
+	forwarder := newRTPForwarder()
+	send := func(sequence uint16, timestamp uint32, payload []byte) uint32 {
+		pkt := testRTPPacketForCodec(t, h264RTPPayloadType, sequence, timestamp, true, payload)
+		forwarder.forward(channel, media, pkt.packet, pkt.raw, nil)
+		return forwarder.timestampRewriter.nextTimestamp
+	}
+	idr, nonIDR := []byte{0x65, 0x88}, []byte{0x41, 0x88}
+
+	send(1, 9000, idr)
+	sentBeforeGap := send(2, 18000, nonIDR)
+	// Sequence 3 (B 12000) is lost.
+	send(4, 15000, nonIDR)
+	for _, frame := range []struct {
+		sequence  uint16
+		timestamp uint32
+	}{{5, 27000}, {6, 21000}, {7, 24000}} {
+		if got := send(frame.sequence, frame.timestamp, nonIDR); int32(got-sentBeforeGap) <= 0 {
+			t.Fatalf("source %d: outgoing %d is not after %d sent before the gap", frame.timestamp, got, sentBeforeGap)
+		}
+	}
+	afterGap := forwarder.timestampRewriter.nextTimestamp
+	if got, want := send(8, 36000, nonIDR), afterGap+12000; got != want {
+		t.Fatalf("expected source cadence once past the gap: want %d, got %d", want, got)
+	}
+}
+
+// After any discontinuity fallback the source mapping is re-anchored, so later
+// backward source deltas are held above the highest timestamp already sent.
+func TestRTPTimestampRewriterHoldsTimelineAfterDiscontinuity(t *testing.T) {
+	const ssrc = 0x1234
+	type frame struct {
+		source             uint32
+		ssrc               uint32
+		afterSequenceBreak bool
+	}
+	tests := []struct {
+		name   string
+		before []frame
+		after  []frame
+	}{
+		{
+			name:   "sequence break after an anchor",
+			before: []frame{{9000, ssrc, false}, {18000, ssrc, false}},
+			after:  []frame{{27000, ssrc, true}, {21000, ssrc, false}, {24000, ssrc, false}},
+		},
+		{
+			name:   "sequence break after a B-frame",
+			before: []frame{{9000, ssrc, false}, {18000, ssrc, false}, {12000, ssrc, false}},
+			after:  []frame{{27000, ssrc, true}, {21000, ssrc, false}, {24000, ssrc, false}},
+		},
+		{
+			name:   "ssrc change",
+			before: []frame{{9000, ssrc, false}, {18000, ssrc, false}},
+			after:  []frame{{500000, ssrc + 1, false}, {494000, ssrc + 1, false}, {497000, ssrc + 1, false}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriter := newRTPTimestampRewriter()
+			// Same arrival for every frame: the burst gives a one-tick fallback step.
+			now := time.Unix(100, 0)
+			var highest uint32
+			for i, f := range tt.before {
+				got := rewriter.timestampForSourceFrame(f.source, f.ssrc, f.afterSequenceBreak, now)
+				if i == 0 || int32(got-highest) > 0 {
+					highest = got
+				}
+			}
+			for _, f := range tt.after {
+				if got := rewriter.timestampForSourceFrame(f.source, f.ssrc, f.afterSequenceBreak, now); int32(got-highest) <= 0 {
+					t.Fatalf("source %d: outgoing %d is not after %d already sent", f.source, got, highest)
+				}
+			}
+		})
+	}
+}
+
 func TestRTPPacketRewriterSetsTimestamp(t *testing.T) {
 	rewriter := rtpPacketRewriter{}
 	original := &rtp.Packet{
