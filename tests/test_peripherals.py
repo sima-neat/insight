@@ -21,7 +21,6 @@ ISP_NOTE = (
     "Only sizes the ISP can output (1920x1080, 2048x1080, 2432x2048) are offered; libcamera also advertises "
     "sizes the ISP cannot produce, which fail to start (core#883)."
 )
-NO_RATES_NOTE = "The camera reports no frame rates, so only CameraInput's default 30 fps is offered for those modes."
 C920_BY_ID = "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0"
 OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
 # Sentinel's published contract example, copied byte for byte from sima-neat/sentinel
@@ -281,7 +280,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(camera["availability"], {"state": "available", "users": [], "reason": None})
         self.assertEqual(camera["modes_source"], "live")
-        self.assertEqual(camera["notes"], [NO_RATES_NOTE, ISP_NOTE])
+        self.assertEqual(camera["notes"], [ISP_NOTE])
 
     def test_sentinels_contract_example_makes_the_imx477_available_and_the_c920_unsupported(self):
         doc = contract_catalog()
@@ -304,11 +303,7 @@ class SnapshotTests(unittest.TestCase):
                 self.assertEqual(states(size["fps"]), [state])
         # The first Available mode in Sentinel's order.
         self.assertEqual(mipi["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertEqual(mipi["notes"], [
-            "The sensor reports 66.18 fps for its fastest mode. The delivered frame rate follows the sensor mode "
-            "libcamera picks and can differ from the requested rate.",
-            ISP_NOTE,
-        ])
+        self.assertEqual(mipi["notes"], [ISP_NOTE])
 
         usb = item(snapshot, C920)
         self.assertEqual((usb["connection"], usb["name"]), ("usb", "HD Pro Webcam C920"))
