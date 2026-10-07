@@ -265,9 +265,21 @@ export function fpsLabel(value) {
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
 
-export function modeLabel(selection) {
+// A rate the camera runs at, for display: a whole number when within 1% of one (66.18 reads "66 fps"),
+// else fpsLabel. Empty when the rate is unknown.
+export function rateLabel(value) {
+  const n = Number(value)
+  if (value === null || value === undefined || value === '' || !Number.isFinite(n) || n <= 0) return ''
+  const whole = Math.round(n)
+  return `${whole > 0 && Math.abs(n - whole) <= n * 0.01 ? whole : fpsLabel(n)} fps`
+}
+
+// Only a USB camera's rate is named: its driver advertises a rate per mode. A MIPI mode's rate is not
+// known until the camera runs in it, so it is left out rather than shown wrong.
+export function modeLabel(selection, camera) {
   if (!selection) return ''
-  return `${selection.format} ${sizeLabel(selection.width, selection.height)} @ ${fpsLabel(selection.fps)} fps`
+  const mode = `${selection.format} ${sizeLabel(selection.width, selection.height)}`
+  return camera?.connection === 'usb' ? `${mode} @ ${fpsLabel(selection.fps)} fps` : mode
 }
 
 export function formatRangeLabel(range) {
@@ -295,23 +307,25 @@ export function formatOptions(camera) {
   })
 }
 
-export function sizeOptions(camera, format) {
-  return usableSizes(findFormat(camera, format)).map((s) => ({
-    value: sizeKey(s.width, s.height),
-    width: s.width,
-    height: s.height,
-    label: sizeLabel(s.width, s.height),
-    tier: sizeTier(s)
-  }))
+// The rate the page uses for a size (resolveSelection's pick): its highest Available rate, else its highest.
+function sizeRate(size) {
+  return best(size?.fps, (f) => f.tier)?.value ?? null
 }
 
-export function fpsOptions(camera, format, width, height) {
-  const size = findSize(findFormat(camera, format), width, height)
-  return (size?.fps || []).map((f) => ({
-    value: String(f.value),
-    label: `${fpsLabel(f.value)} fps`,
-    tier: tierOf(f.tier)
-  }))
+// A USB resolution names the rate the camera runs at in that mode ("1280×720 · 30 fps"); a MIPI one does not
+// (see modeLabel).
+export function sizeOptions(camera, format) {
+  const usb = camera?.connection === 'usb'
+  return usableSizes(findFormat(camera, format)).map((s) => {
+    const rate = usb ? rateLabel(sizeRate(s)) : ''
+    return {
+      value: sizeKey(s.width, s.height),
+      width: s.width,
+      height: s.height,
+      label: rate ? `${sizeLabel(s.width, s.height)} · ${rate}` : sizeLabel(s.width, s.height),
+      tier: sizeTier(s)
+    }
+  })
 }
 
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a

@@ -7,7 +7,6 @@ import {
   cameraSummaryLine,
   deviceRows,
   formatOptions,
-  fpsLabel,
   groupOptions,
   optionTier,
   sizeKey,
@@ -90,11 +89,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
             <ModeOptions options={sizes} />
           </select>
         </label>
-        {/* The camera's own rate for this mode; it is shown, not chosen. */}
-        <div className="periph-mode-rate">
-          <span className="periph-field-head">Frame rate</span>
-          <span>{fpsLabel(selection.fps)} fps</span>
-        </div>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
     </fieldset>
