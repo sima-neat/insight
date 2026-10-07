@@ -7,9 +7,6 @@ from fractions import Fraction
 from typing import Optional
 
 STANDARD_FPS = (60, 30, 25, 20, 15, 10, 5)
-# The rates offered for a MIPI mode that reports none, up to the sensor's own rate: preview sets the chosen
-# one on the sensor through its vertical blanking, since libcamera starts the sensor at its own rate.
-SENSOR_FPS = (60, 50, 30, 25, 24, 20, 15, 10, 5)
 # CameraInputOptions' default framerate_num/den: the rate CameraInput requests from a mode that reports none.
 CAMERAINPUT_RATE = Fraction(30, 1)
 
@@ -238,7 +235,7 @@ def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retaine
     """`modes` are the camera's classified modes (_classified); `reason` is why none can be Available, if any."""
     connection = _connection(camera)
     usb = connection == "usb"
-    formats = _formats(modes, usb, reason, () if usb else tuple(_sensor_rates(camera)))
+    formats = _formats(modes, usb, reason, _sensor_rate(camera))
     notes, errors = [], []
     if usb:
         identity = camera.get("identity") or {}
@@ -292,8 +289,7 @@ def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retaine
         "support": _verdict(modes, reason),
         "modes_source": "unavailable" if not modes else "previous-scan" if retained else "live",
         "formats": formats,
-        # A MIPI camera defaults to CameraInput's 30 fps when offered, not to the sensor's fastest rate.
-        "default_selection": _default(formats, None if usb else _fps(CAMERAINPUT_RATE.numerator, CAMERAINPUT_RATE.denominator)),
+        "default_selection": _default(formats),
         "notes": notes,
         "errors": errors,
     }
@@ -306,9 +302,8 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     max_fps = camera.get("max_fps")
     if isinstance(max_fps, (int, float)) and not isinstance(max_fps, bool) and max_fps > 0:
         notes.append(
-            f"The sensor's timing gives {max_fps:g} fps for its current mode, so standard rates up to it are offered. "
-            "libcamera starts the sensor at its own rate whatever rate is requested; Preview then sets the chosen "
-            "rate on the sensor."
+            f"The sensor's timing gives {max_fps:g} fps for its current mode, so that rate is offered. "
+            "libcamera delivers the sensor's rate whatever rate is requested."
         )
     elif any(not mode.get("frame_intervals") for mode in modes):
         rate = _fps(CAMERAINPUT_RATE.numerator, CAMERAINPUT_RATE.denominator)
@@ -372,20 +367,18 @@ def _on_step(period: float, first: float, step: float) -> bool:
     return abs(first + k * step - period) <= period * 1e-3
 
 
-def _sensor_rates(camera: dict) -> list:
-    """The rates to offer for a MIPI mode that reports none: the SENSOR_FPS up to the sensor's rate from its
-    timing (Sentinel's `max_fps`), or that rate itself when it is below them all; CameraInput's default
-    without it."""
+def _sensor_rate(camera: dict) -> Fraction:
+    """The rate to offer for a MIPI mode that reports none: the sensor's rate from its timing (Sentinel's
+    `max_fps`), which is what libcamera delivers whatever rate is requested; CameraInput's default without it."""
     max_fps = camera.get("max_fps")
     if isinstance(max_fps, (int, float)) and not isinstance(max_fps, bool) and math.isfinite(max_fps) and max_fps > 0:
-        # A small tolerance, so a sensor whose timing gives 59.99 fps still offers 60.
-        return [Fraction(fps) for fps in SENSOR_FPS if fps <= max_fps * 1.001] or [Fraction(max_fps).limit_denominator(100)]
-    return [CAMERAINPUT_RATE]
+        return Fraction(max_fps).limit_denominator(100)
+    return CAMERAINPUT_RATE
 
 
-def _choices(modes: list, usb: bool, fallback: tuple = (CAMERAINPUT_RATE,)) -> list:
+def _choices(modes: list, usb: bool, fallback: Fraction = CAMERAINPUT_RATE) -> list:
     """The frame rates of one format and size, each with its mode's state. A MIPI mode that reports no rate
-    offers `fallback` (_sensor_rates); a USB mode offers only the rates it advertises."""
+    offers `fallback` (_sensor_rate); a USB mode offers only the rates it advertises."""
     choices = {}
     for mode in modes:
         rates = [
@@ -393,7 +386,7 @@ def _choices(modes: list, usb: bool, fallback: tuple = (CAMERAINPUT_RATE,)) -> l
             for entry in mode.get("frame_intervals") or []
             if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height"))
             for rate in _interval_rates(entry)
-        ] or ([] if usb else list(fallback))
+        ] or ([] if usb else [fallback])
         state = {"tier": "available"} if mode["available"] else {"tier": "unsupported", "reason": mode["reason"]}
         for rate in rates:
             value = _fps(rate.numerator, rate.denominator)
@@ -402,7 +395,7 @@ def _choices(modes: list, usb: bool, fallback: tuple = (CAMERAINPUT_RATE,)) -> l
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 
-def _formats(modes: list, usb: bool, reason: str, fallback: tuple = (CAMERAINPUT_RATE,)) -> list:
+def _formats(modes: list, usb: bool, reason: str, fallback: Fraction = CAMERAINPUT_RATE) -> list:
     grouped = {}
     for mode in modes:
         grouped.setdefault(mode["format"], []).append(mode)
@@ -427,16 +420,15 @@ def _formats(modes: list, usb: bool, reason: str, fallback: tuple = (CAMERAINPUT
     return formats
 
 
-def _default(formats: list, preferred=None) -> Optional[dict]:
-    """The first Available format and size, at the `preferred` rate when it is Available there, else at its
-    highest Available rate; None when no mode is Available."""
+def _default(formats: list) -> Optional[dict]:
+    """The first Available mode; None when no mode is Available."""
     for fmt in formats:
         if not fmt["exportable"]:
             continue
         for size in fmt["sizes"]:
-            rates = [choice["value"] for choice in size["fps"] if choice["tier"] == "available"]
-            if rates:
-                return _selection(fmt["format"], size, preferred if preferred in rates else rates[0])
+            for choice in size["fps"]:
+                if choice["tier"] == "available":
+                    return _selection(fmt["format"], size, choice["value"])
     return None
 
 

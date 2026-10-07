@@ -142,15 +142,3 @@ test('Start is disabled for a USB format the backend cannot preview, with the re
   const reason = find(pane, (node) => node.props?.id === 'periph-preview-reason')
   assert.match(reason.props.children, /not H264\. Choose another format\.$/)
 })
-
-test("a live preview shows the session's rate note as a hint, and nothing when the rate was set", () => {
-  const note = 'The camera runs at its own rate; Insight could not set it. v4l2-ctl (v4l-utils) is not installed on the board.'
-  const session = { id: 's1', camera_id: 'camera:a', mode, stream_url: streamUrl('s1'), state: 'live' }
-  const props = { camera: camera('camera:a'), selection: { id: 'camera:a', ...mode }, target: { label: 'board' }, onStart() {}, onStop() {} }
-  const hint = (pane) => find(pane, (node) => node.type === 'p' && node.props.className === 'hint')
-  const noted = PreviewPane({ ...props, state: { status: 'live', session: { ...session, rate_note: note }, error: null } })
-  assert.ok(find(noted, (node) => node.type === 'img'))
-  assert.equal(hint(noted).props.children, note)
-  const set = PreviewPane({ ...props, state: { status: 'live', session: { ...session, rate_note: null, sensor_rate: { fps: 30, vblank: 1408 } }, error: null } })
-  assert.equal(hint(set), null)
-})

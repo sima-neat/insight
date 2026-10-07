@@ -283,25 +283,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["modes_source"], "live")
         self.assertEqual(camera["notes"], [NO_RATES_NOTE, ISP_NOTE])
 
-    def test_a_mipi_mode_without_rates_offers_standard_rates_up_to_the_sensor_rate_else_camerainputs_default(self):
-        cases = (
-            ("sensor timing", {"max_fps": 66.18}, [60, 50, 30, 25, 24, 20, 15, 10, 5], 30),
-            # Within the tolerance a sensor whose timing gives a hair under 60 still offers 60.
-            ("just under 60", {"max_fps": 59.95}, [60, 50, 30, 25, 24, 20, 15, 10, 5], 30),
-            ("slower than 30", {"max_fps": 24.5}, [24, 20, 15, 10, 5], 24),
-            # Below every standard rate, the sensor's own rate is offered rather than nothing.
-            ("slower than 5", {"max_fps": 3.5}, [3.5], 3.5),
-            ("none", {}, [30], 30),
-            ("not finite", {"max_fps": float("inf")}, [30], 30),
-            ("zero", {"max_fps": 0}, [30], 30),
-        )
-        for name, extra, rates, default in cases:
+    def test_a_mipi_mode_without_rates_offers_the_sensor_rate_else_camerainputs_default(self):
+        for name, extra, rate in (("sensor timing", {"max_fps": 66.18}, 66.18), ("none", {}, 30),
+                                  ("not finite", {"max_fps": float("inf")}, 30), ("zero", {"max_fps": 0}, 30)):
             with self.subTest(name):
                 camera = item(snapshot_of(catalog(dict(imx477(), **extra), board=board_block())), IMX477)
-                self.assertEqual(camera["default_selection"]["fps"], default)
-                self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]], rates)
-                self.assertEqual({c["tier"] for c in size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]}, {"available"})
-                self.assertEqual({c["tier"] for c in size_of(fmt_of(camera, "RGB3"), 1920, 1080)["fps"]}, {"unsupported"})
+                self.assertEqual(camera["default_selection"]["fps"], rate)
+                self.assertEqual([c["value"] for c in size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]], [rate])
 
     def test_sentinels_contract_example_makes_the_imx477_available_and_the_c920_unsupported(self):
         doc = contract_catalog()
@@ -319,17 +307,16 @@ class SnapshotTests(unittest.TestCase):
                          [("AR24", False, "unsupported"), ("NV12", True, "available"), ("RGB3", False, "unsupported")])
         for fmt in mipi["formats"]:
             self.assertEqual([(s["width"], s["height"]) for s in fmt["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
-            # The ISP reports no rates, so the standard rates up to the sensor's rate from its timing (max_fps,
-            # 66 fps measured on the DevKit at 1920x1080) are offered; preview sets the chosen one on the sensor.
-            state = ("available", None) if fmt["format"] == "NV12" else ("unsupported", cameras.FORMAT_REASON)
+            # The ISP reports no rates, so the sensor's rate from its timing (max_fps) is offered: libcamera
+            # delivers it whatever rate is requested (66 fps measured on the DevKit at 1920x1080).
+            state = (66.18, "available", None) if fmt["format"] == "NV12" else (66.18, "unsupported", cameras.FORMAT_REASON)
             for size in fmt["sizes"]:
-                self.assertEqual(states(size["fps"]), [(rate, *state) for rate in (60, 50, 30, 25, 24, 20, 15, 10, 5)])
-        # The first Available mode in Sentinel's order, at CameraInput's 30 fps rather than the fastest rate.
-        self.assertEqual(mipi["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+                self.assertEqual(states(size["fps"]), [state])
+        # The first Available mode in Sentinel's order.
+        self.assertEqual(mipi["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 66.18})
         self.assertEqual(mipi["notes"], [
-            "The sensor's timing gives 66.18 fps for its current mode, so standard rates up to it are offered. "
-            "libcamera starts the sensor at its own rate whatever rate is requested; Preview then sets the chosen "
-            "rate on the sensor.",
+            "The sensor's timing gives 66.18 fps for its current mode, so that rate is offered. "
+            "libcamera delivers the sensor's rate whatever rate is requested.",
             ISP_NOTE,
         ])
 
