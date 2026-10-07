@@ -7,7 +7,7 @@ import {
   cameraSummaryLine,
   deviceRows,
   formatOptions,
-  fpsOptions,
+  fpsLabel,
   groupOptions,
   optionTier,
   sizeKey,
@@ -54,7 +54,6 @@ function ModeOptions({ options }) {
 function ModePicker({ camera, selection, notice, onChange }) {
   const formats = formatOptions(camera)
   const sizes = selection ? sizeOptions(camera, selection.format) : []
-  const rates = selection ? fpsOptions(camera, selection.format, selection.width, selection.height) : []
 
   if (!selection) {
     return (
@@ -75,7 +74,7 @@ function ModePicker({ camera, selection, notice, onChange }) {
       <div className="periph-mode-fields">
         <label>
           <FieldHead title="Pixel format" tier={optionTier(formats, selection.format)} />
-          <select value={selection.format} onChange={(e) => onChange({ ...selection, format: e.target.value })}>
+          <select value={selection.format} onChange={(e) => onChange({ format: e.target.value })}>
             <ModeOptions options={formats} />
           </select>
         </label>
@@ -85,18 +84,17 @@ function ModePicker({ camera, selection, notice, onChange }) {
             value={sizeKey(selection.width, selection.height)}
             onChange={(e) => {
               const size = sizes.find((s) => s.value === e.target.value)
-              onChange({ format: selection.format, width: size.width, height: size.height, fps: selection.fps })
+              onChange({ format: selection.format, width: size.width, height: size.height })
             }}
           >
             <ModeOptions options={sizes} />
           </select>
         </label>
-        <label>
-          <FieldHead title="Frame rate" tier={optionTier(rates, selection.fps)} />
-          <select value={String(selection.fps)} onChange={(e) => onChange({ ...selection, fps: Number(e.target.value) })}>
-            <ModeOptions options={rates} />
-          </select>
-        </label>
+        {/* The camera's own rate for this mode; it is shown, not chosen. */}
+        <div className="periph-mode-rate">
+          <span className="periph-field-head">Frame rate</span>
+          <span>{fpsLabel(selection.fps)} fps</span>
+        </div>
       </div>
       {notice && <p className="hint" role="status">{notice}</p>}
     </fieldset>
