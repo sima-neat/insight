@@ -299,17 +299,6 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     if not modes:
         return []
     notes = []
-    max_fps = camera.get("max_fps")
-    if isinstance(max_fps, (int, float)) and not isinstance(max_fps, bool) and max_fps > 0:
-        notes.append(
-            f"The sensor reports {max_fps:g} fps for its fastest mode. The delivered frame "
-            "rate follows the sensor mode libcamera picks and can differ from the requested rate."
-        )
-    elif any(not mode.get("frame_intervals") for mode in modes):
-        rate = _fps(CAMERAINPUT_RATE.numerator, CAMERAINPUT_RATE.denominator)
-        notes.append(
-            f"The camera reports no frame rates, so only CameraInput's default {rate} fps is offered for those modes."
-        )
     sizes = sorted({(mode["width"], mode["height"]) for mode in modes if mode.get("isp_output") and "width" in mode})
     if sizes:
         offered = ", ".join(f"{w}x{h}" for w, h in sizes)
