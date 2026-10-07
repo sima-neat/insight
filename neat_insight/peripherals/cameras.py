@@ -235,7 +235,7 @@ def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retaine
     """`modes` are the camera's classified modes (_classified); `reason` is why none can be Available, if any."""
     connection = _connection(camera)
     usb = connection == "usb"
-    formats = _formats(modes, usb, reason, _sensor_rate(camera))
+    formats = _formats(modes, usb, reason)
     notes, errors = [], []
     if usb:
         identity = camera.get("identity") or {}
@@ -302,8 +302,8 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     max_fps = camera.get("max_fps")
     if isinstance(max_fps, (int, float)) and not isinstance(max_fps, bool) and max_fps > 0:
         notes.append(
-            f"The sensor's timing gives {max_fps:g} fps for its current mode, so that rate is offered. "
-            "libcamera delivers the sensor's rate whatever rate is requested."
+            f"The sensor reports {max_fps:g} fps for its fastest mode. The delivered frame "
+            "rate follows the sensor mode libcamera picks and can differ from the requested rate."
         )
     elif any(not mode.get("frame_intervals") for mode in modes):
         rate = _fps(CAMERAINPUT_RATE.numerator, CAMERAINPUT_RATE.denominator)
@@ -367,18 +367,9 @@ def _on_step(period: float, first: float, step: float) -> bool:
     return abs(first + k * step - period) <= period * 1e-3
 
 
-def _sensor_rate(camera: dict) -> Fraction:
-    """The rate to offer for a MIPI mode that reports none: the sensor's rate from its timing (Sentinel's
-    `max_fps`), which is what libcamera delivers whatever rate is requested; CameraInput's default without it."""
-    max_fps = camera.get("max_fps")
-    if isinstance(max_fps, (int, float)) and not isinstance(max_fps, bool) and math.isfinite(max_fps) and max_fps > 0:
-        return Fraction(max_fps).limit_denominator(100)
-    return CAMERAINPUT_RATE
-
-
-def _choices(modes: list, usb: bool, fallback: Fraction = CAMERAINPUT_RATE) -> list:
+def _choices(modes: list, usb: bool) -> list:
     """The frame rates of one format and size, each with its mode's state. A MIPI mode that reports no rate
-    offers `fallback` (_sensor_rate); a USB mode offers only the rates it advertises."""
+    offers CameraInput's default rate; a USB mode offers only the rates it advertises."""
     choices = {}
     for mode in modes:
         rates = [
@@ -386,7 +377,7 @@ def _choices(modes: list, usb: bool, fallback: Fraction = CAMERAINPUT_RATE) -> l
             for entry in mode.get("frame_intervals") or []
             if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height"))
             for rate in _interval_rates(entry)
-        ] or ([] if usb else [fallback])
+        ] or ([] if usb else [CAMERAINPUT_RATE])
         state = {"tier": "available"} if mode["available"] else {"tier": "unsupported", "reason": mode["reason"]}
         for rate in rates:
             value = _fps(rate.numerator, rate.denominator)
@@ -395,7 +386,7 @@ def _choices(modes: list, usb: bool, fallback: Fraction = CAMERAINPUT_RATE) -> l
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 
-def _formats(modes: list, usb: bool, reason: str, fallback: Fraction = CAMERAINPUT_RATE) -> list:
+def _formats(modes: list, usb: bool, reason: str) -> list:
     grouped = {}
     for mode in modes:
         grouped.setdefault(mode["format"], []).append(mode)
@@ -415,7 +406,7 @@ def _formats(modes: list, usb: bool, reason: str, fallback: Fraction = CAMERAINP
             "support": _verdict(entries, reason),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
-            "sizes": [{"width": w, "height": h, "fps": _choices(group, usb, fallback)} for (w, h), group in sizes.items()],
+            "sizes": [{"width": w, "height": h, "fps": _choices(group, usb)} for (w, h), group in sizes.items()],
         })
     return formats
 
