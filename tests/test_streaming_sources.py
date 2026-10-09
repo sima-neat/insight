@@ -2667,6 +2667,36 @@ class PullSourceTests(_SourceFixture):
         self.assertIsNone(app_module.pull_registry.get(3))
         self.assertEqual(self.mtx.pull_sources, {}, "mediamtx was never told to pull")
 
+    def test_assign_rechecks_for_a_pull_under_the_lock(self):
+        # Codex review: a pull installed after assign's first check must still turn it into a 409.
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        real_derive = app_module._derive_source_stream_settings
+
+        def pull_lands_during_the_probe(*args, **kwargs):
+            if app_module.pull_registry.get(3) is None:
+                self._pull()
+            return real_derive(*args, **kwargs)
+
+        with mock.patch.object(app_module, "_derive_source_stream_settings", side_effect=pull_lands_during_the_probe):
+            response = self.client.post("/api/mediasrc/assign", json={"index": 3, "file": "b.mp4"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "src3 is pulling from 172.18.51.40:554. Stop it first.")
+        self.assertEqual(app_module.load_sources()[2]["file"], "", "the stored assignment was not changed")
+
+    def test_pull_is_abandoned_when_the_slot_changes_during_the_probe(self):
+        # Codex review: a Stop, Reset or reassignment during the camera probe leaves no record,
+        # process or holder, so the generation is what must turn the late pull into a 409.
+        def slot_reset_while_probing(url, timeout=2.0):
+            app_module._bump_slot(3)
+            return app_module.pull_sources.ProbeResult("ok")
+
+        with mock.patch.object(app_module, "probe_rtsp", side_effect=slot_reset_while_probing):
+            response = self._pull()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("changed while the camera was being checked", response.get_json()["error"])
+        self.assertIsNone(app_module.pull_registry.get(3))
+        self.assertEqual(self.mtx.pull_sources, {}, "mediamtx was never told to pull")
+
     def test_assign_webcam_to_a_pulled_slot_is_409(self):
         self._pull()
         response = self.client.post("/api/mediasrc/assign-webcam", json={"index": 3}, headers={"Host": "localhost:9900"})

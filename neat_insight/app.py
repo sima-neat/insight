@@ -2900,6 +2900,11 @@ def assign_source():
             # Changed while the release, stop or probe was in flight; whatever
             # is on the slot now was never released or stopped by this request.
             return _json_error("Source changed while it was being reassigned; reload and try again", 409)
+        # A pull installs its record under this lock, so one that started after the
+        # check at the top of this route is seen here.
+        record = _pull_record(index)
+        if record:
+            return _pull_conflict_error(index, record)
         # Whether to restart is decided here, from what is running now, not
         # from the snapshot: the same file can have been started by another
         # tab during the probe, and that process is the one to replace. (A
@@ -3763,6 +3768,9 @@ def pull_source():
             return _pull_conflict_error(index, record)
         if media_stream_is_running(index):
             return _json_error(f"src{index} is streaming. Stop it first.", 409)
+        # A Stop, Reset or reassignment during the probe leaves no record, process or
+        # holder behind; only the generation shows that the slot moved on.
+        generation = _slot_generation(index)
     # Probe outside the lock: two seconds at most, and no slot state changes until it answers.
     result = probe_rtsp(target.url)
     if result.status == "auth_failed":
@@ -3772,7 +3780,8 @@ def pull_source():
                                      started_at=now, status=pull_sources.status_from_probe(result), error=result.error, probed_at=now)
     with _sources_lock:
         became_webcam = any(s.get("index") == index and s.get("type") == SOURCE_TYPE_WEBCAM for s in load_sources())
-        if became_webcam or _pull_record(index) or media_stream_is_running(index) or _external_holder(index):
+        moved_on = _slot_generation(index) != generation
+        if moved_on or became_webcam or _pull_record(index) or media_stream_is_running(index) or _external_holder(index):
             return _json_error(f"src{index} changed while the camera was being checked. Try again.", 409)
         try:
             mediamtx_client.set_pull_source(f"src{index}", target.url)
