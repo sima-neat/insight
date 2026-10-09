@@ -14,7 +14,7 @@ import "./blazePose3DRenderer.js";
 import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
 import { bufferSettleMs, lateNoticeDetails, nextWarningActive } from "./metadataLateness.js";
 import MetadataLateNotice from "./MetadataLateNotice.jsx";
-import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
+import { formatChannelStatus, resolveCodecLabel, tileState } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
 import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
 import {
@@ -117,6 +117,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const [lateNotice, setLateNotice] = useState(null);
   const [banner, setBanner] = useState(`Channel ${index}`);
   const [active, setActive] = useState(false);
+  // Whether the video element holds a frame of this connection. It tells a stream
+  // that stopped, whose last frame is still there, from a tile that never played.
+  const hasShownFrameRef = useRef(false);
+  const [hasShownFrame, setHasShownFrame] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -141,6 +145,12 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setActive(nextActive);
       onActiveChange(index, nextActive);
       debugLog("active", nextActive);
+    };
+
+    const setFrameShown = (shown) => {
+      if (hasShownFrameRef.current === shown) return;
+      hasShownFrameRef.current = shown;
+      setHasShownFrame(shown);
     };
 
     const applySynchronizationSettings = () => {
@@ -207,6 +217,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
+      setFrameShown(false);
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
@@ -312,6 +323,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
         if (video.readyState >= 2) {
           if (frameMetadata) {
             playbackRef.current.lastFrameAt = Date.now();
+            setFrameShown(true);
             setTileActive(true);
           }
 
@@ -416,6 +428,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
             );
             if (tracker.decoderHealth.decodedAdvanced) {
               playbackRef.current.lastFrameAt = Date.now();
+              setFrameShown(true);
               setTileActive(true);
             }
             decoderStalled ||= tracker.decoderHealth.stalled;
@@ -643,12 +656,23 @@ function ChannelTile({ index, onActiveChange, debug }) {
     return false;
   };
 
+  const state = tileState(active, hasShownFrame);
+
   return (
-    <div className="video-tile" style={{ position: "relative" }} data-active={active ? "1" : "0"}>
+    <div
+      className="video-tile"
+      style={{ position: "relative" }}
+      data-active={active ? "1" : "0"}
+      data-state={state}
+    >
       <video ref={videoRef} autoPlay playsInline muted />
       <canvas ref={canvasRef} />
       <AuxiliaryPanel ref={auxiliaryPanelRef} channelIndex={index} />
-      {!active && <div className="tile-no-video">No active video received</div>}
+      {state !== "playing" && (
+        <div className="tile-no-video">
+          <span className="tile-no-video-text">No active video received</span>
+        </div>
+      )}
       <div className="tile-banner-wrapper">
         <div className="tile-banner-text">{banner}</div>
         <MetadataLateNotice details={active ? lateNotice : null} onRaise={raiseVideoSyncBuffer} />
