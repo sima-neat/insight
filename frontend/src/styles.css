@@ -3684,10 +3684,32 @@ button:disabled {
   font-size: 12px;
 }
 
-.assign-cameras {
+.assign-tabs {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  gap: 4px;
+  margin: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.assign-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.assign-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.assign-cameras {
+  display: grid;
   gap: 6px;
   margin: 0 0 10px;
 }
@@ -3696,10 +3718,15 @@ button:disabled {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  padding: 8px 10px;
   font: inherit;
   font-size: 13px;
+  text-align: left;
   cursor: pointer;
+}
+
+.assign-enable-cameras {
+  margin-right: auto;
 }
 
 .assign-camera:hover {

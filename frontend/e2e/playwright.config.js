@@ -23,5 +23,8 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // A fake webcam, granted without a prompt, for the Camera tab of the source dialog.
+    permissions: ['camera'],
+    launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
   },
 })

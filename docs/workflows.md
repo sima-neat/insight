@@ -58,8 +58,8 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 Use this workflow to test an application against a real camera instead of a recorded file. The webcam is attached to the computer running your browser, not to the board: the browser publishes it to Insight, which serves it as an ordinary RTSP source your application consumes exactly like a file.
 
 1. Open Insight over HTTPS and confirm the browser trusts its certificate.
-2. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. Allow access when the browser asks; your cameras then appear in the list.
-3. Go to Streaming Sources, select the file field of `src1`, and pick your camera under **Cameras** in the **Assign media to src1** dialog. The row shows a `[CAM]` marker once the camera is assigned.
+2. Go to Streaming Sources, select the file field of `src1`, and switch the **Source for src1** dialog to **Camera**.
+3. Select **Enable camera access** and allow access when the browser asks, then pick your camera and **Assign** it. The row shows a `[CAM]` marker once the camera is assigned.
 4. Start `src1` and confirm the slot reports `Live` and the preview shows the camera.
 5. Run your application against the same RTSP URL a file source would use. Insight normalizes the webcam to the same baseline H.264 with regular keyframes a file source produces, so the board's hardware decoder and GStreamer `rtspsrc` consume it with no extra step — no manual `ffmpeg` and no separate path:
    - Inside the SDK container: `rtsp://127.0.0.1:8554/src1`

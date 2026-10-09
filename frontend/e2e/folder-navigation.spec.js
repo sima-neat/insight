@@ -40,7 +40,7 @@ test.describe.serial('folder navigation', () => {
     if (!tree) return
     try {
       try {
-        await releaseTestSources(request, tree.name)
+        await releaseTestSources(request, tree.name, SLOT)
       } finally {
         await deleteViaApi(request, tree.name)
       }
@@ -234,5 +234,33 @@ test.describe.serial('folder navigation', () => {
     await expect(lib.browser(page)).toHaveAttribute('data-folder', `${tree.name}/30FPS`)
     await page.getByRole('button', { name: 'Back to parent folder' }).click()
     await expect(lib.folder(page, `${tree.name}/30FPS`).locator('.folder-count')).toHaveText(String(nested - 1))
+  })
+
+  // Chromium's fake capture device (see playwright.config.js) stands in for a webcam.
+  test('10. the Camera tab enables camera access, assigns a camera and opens on it for a webcam slot', async ({ page, request }) => {
+    await openTab(page, '/streaming')
+    await page.getByTestId(`source-file-${SLOT}`).click()
+    const dialog = page.getByTestId('assign-dialog')
+    await expect(dialog.getByTestId('assign-tab-file')).toHaveAttribute('aria-selected', 'true')
+    await dialog.getByTestId('assign-tab-camera').click()
+    // The camera permission is pre-granted, so the page may already list the fake camera;
+    // the button then reads "Refresh cameras" and re-scans.
+    await dialog.getByTestId('assign-enable-cameras').click()
+    const camera = dialog.getByTestId('assign-camera').first()
+    await expect(camera).toBeVisible()
+    const label = (await camera.textContent()).trim()
+    await camera.click()
+    await dialog.getByTestId('assign-camera-submit').click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByTestId(`source-file-${SLOT}`)).toHaveText(label)
+    await expect.poll(async () => (await sourceByIndex(request, SLOT)).type).toBe('webcam')
+
+    await page.getByTestId(`source-file-${SLOT}`).click()
+    await expect(dialog.getByTestId('assign-tab-camera')).toHaveAttribute('aria-selected', 'true')
+    await expect(dialog.getByTestId('assign-camera').first()).toHaveAttribute('aria-selected', 'true')
+    await dialog.getByRole('button', { name: 'Clear' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect.poll(async () => (await sourceByIndex(request, SLOT)).type).toBe('file')
+    await expect(page.getByTestId(`source-file-${SLOT}`)).toHaveText('Not assigned')
   })
 })

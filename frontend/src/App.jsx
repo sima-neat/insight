@@ -3718,8 +3718,11 @@ export default function App() {
             sourceIndex={assignTarget}
             currentFile={target.file || ''}
             currentValue={targetIsWebcam ? (targetCamera ? `${WEBCAM_OPTION_PREFIX}${targetCamera.deviceId}` : '') : (target.file || '')}
-            clearable={targetIsWebcam || Boolean(target.file)}
+            isWebcam={targetIsWebcam}
             cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label }))}
+            cameraProbing={cameraProbing}
+            cameraError={cameraError}
+            onEnableCameras={enableCameraAccess}
             tree={mediaTree}
             // Through the row's select handler, so switching to or away from a camera
             // closes this tab's publisher and names its session, as the dropdown did.

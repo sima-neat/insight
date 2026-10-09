@@ -9,10 +9,12 @@ export async function sourceByIndex(request, index) {
   return (await sources(request)).find((s) => s.index === index)
 }
 
-// Stops and clears every slot that points into the test folder, leaving other slots untouched.
-export async function releaseTestSources(request, folderName) {
+// Stops and clears every slot that points into the test folder, and the test slot if a camera test
+// left it a webcam, leaving other slots untouched.
+export async function releaseTestSources(request, folderName, testSlot = null) {
   for (const src of await sources(request)) {
-    if (!(src.file || '').startsWith(`${folderName}/`)) continue
+    const leftoverWebcam = src.index === testSlot && src.type === 'webcam'
+    if (!leftoverWebcam && !(src.file || '').startsWith(`${folderName}/`)) continue
     if (src.state === 'playing') {
       const stopped = await request.post('/api/mediasrc/stop', { data: { index: src.index } })
       if (!stopped.ok()) throw new Error(`POST /api/mediasrc/stop for src${src.index} failed: ${stopped.status()}`)

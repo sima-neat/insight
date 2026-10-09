@@ -63,7 +63,7 @@ Insight selects codec and transport options from the assigned media:
 
 The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
 
-Select the file field of a source row to open **Assign media to srcN**, a dialog with the same folder browser as Media Sources; pick a video or one of your cameras, then **Assign**, or **Clear** to unassign. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
+Select the file field of a source row to open **Source for srcN**. Its **Video file** tab has the same folder browser as Media Sources; pick a video, then **Assign**, or **Clear** to unassign. Its **Camera** tab assigns one of your cameras instead. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
@@ -75,9 +75,9 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
 
-1. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. The browser asks for camera permission; Insight cannot grant it for you.
-2. After you allow access, your cameras appear under **Cameras** at the top of each source's **Assign media to srcN** dialog, above the folder browser.
-3. Select a camera for a source slot and **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
+1. Select the file field of a source slot and switch the **Source for srcN** dialog to **Camera**.
+2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
+3. Select a camera and **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
