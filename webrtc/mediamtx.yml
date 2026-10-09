@@ -82,6 +82,10 @@ paths:
   # rather than `-force_key_frames "expr:..."`. -profile:v baseline matches what
   # the browser emits and what the decoder accepts.
   #
+  # The ?publisher= query on the output marks src{N} as Insight's own stream, not
+  # an external publisher; Insight swaps in its per-run tag at launch
+  # (neat_insight/mediamtx.py render_config).
+  #
   # -r 30 is required, not cosmetic: a WebRTC webcam has no fixed framerate, so
   # libx264 cannot compute an H.264 level and emits the maximum (6.2), which the
   # hardware decoder rejects with a media-caps mismatch. Forcing a constant 30fps
@@ -106,7 +110,7 @@ paths:
       -i rtsp://127.0.0.1:8554/$MTX_PATH -an
       -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
       -pix_fmt yuv420p -r 30 -g 30 -keyint_min 30
-      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1?publisher=insight-unrendered
     runOnReadyRestart: yes
 
   src1: {}

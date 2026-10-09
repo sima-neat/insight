@@ -54,6 +54,8 @@ class MediamtxIntegrationTests(unittest.TestCase):
         base_cfg = (REPO / "webrtc" / "mediamtx.yml").read_text(encoding="utf-8")
         cfg = base_cfg.replace("rtspAddress: :8554", f"rtspAddress: :{self.rtsp_port}")
         cfg = cfg.replace("apiAddress: 127.0.0.1:9997", f"apiAddress: 127.0.0.1:{self.api_port}")
+        # The webcam normalizer reads and writes over loopback RTSP.
+        cfg = cfg.replace("rtsp://127.0.0.1:8554/", f"rtsp://127.0.0.1:{self.rtsp_port}/")
         # rtspTransports: [tcp] avoids binding UDP rtp/rtcp ports (mediamtx requires the
         # RTP port to be even; on some hosts ephemeral ports from _free_port() are always
         # odd, which would make mediamtx fail to start). The tests only publish over TCP.
@@ -78,8 +80,8 @@ class MediamtxIntegrationTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-    def _publish(self, query=""):
-        url = f"rtsp://127.0.0.1:{self.rtsp_port}/src2" + (f"?{query}" if query else "")
+    def _publish(self, query="", path="src2"):
+        url = f"rtsp://127.0.0.1:{self.rtsp_port}/{path}" + (f"?{query}" if query else "")
         cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
                "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "15", "-pix_fmt", "yuv420p",
                "-f", "rtsp", "-rtsp_transport", "tcp", url]
@@ -107,6 +109,14 @@ class MediamtxIntegrationTests(unittest.TestCase):
         self.assertTrue(_wait_until(lambda: self._fresh().get("src2", mediamtx.PathInfo("src2")).ready))
         with mock.patch.object(mediasrc, "MEDIAMTX_API_BASE_URL", f"http://127.0.0.1:{self.api_port}"):
             self.assertIn("src2", mediasrc.webcam_ready_paths())
+
+    def test_webcam_normalizer_output_is_insights_own(self):
+        # A browser publishes to cam{N}; mediamtx's runOnReady ffmpeg republishes it on
+        # src{N}, which must not read as an external publisher on the webcam's own slot.
+        self._publish(path="cam2")
+        self.assertTrue(_wait_until(lambda: self._fresh().get("src2", mediamtx.PathInfo("src2")).ready, timeout=15.0))
+        self.assertTrue(_wait_until(lambda: self._fresh()["src2"].owned_by_insight))
+        self.assertFalse(self._fresh()["src2"].external)
 
     def test_first_publisher_holds_slot_and_second_is_rejected(self):
         first = self._publish()

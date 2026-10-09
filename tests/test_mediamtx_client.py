@@ -4,6 +4,7 @@ import threading
 import time
 import unittest
 import unittest.mock as mock
+from pathlib import Path
 
 from neat_insight import mediamtx
 
@@ -123,6 +124,13 @@ class ApiCredentialTests(unittest.TestCase):
     def test_render_config_swaps_the_placeholder_for_the_password(self):
         rendered = mediamtx.render_config(f"user: insight\npass: {mediamtx.API_PASSWORD_PLACEHOLDER}\n", "s3cret")
         self.assertEqual(rendered, 'user: insight\npass: "s3cret"\n')
+
+    def test_render_config_tags_the_webcam_normalizer_as_insight(self):
+        shipped = (Path(__file__).resolve().parent.parent / "webrtc" / "mediamtx.yml").read_text(encoding="utf-8")
+        self.assertIn(f"/src$G1?{mediamtx.PUBLISHER_TAG_PLACEHOLDER}", shipped)
+        rendered = mediamtx.render_config(shipped, "s3cret")
+        self.assertIn(f"/src$G1?{mediamtx.PUBLISHER_TAG}", rendered)
+        self.assertNotIn(mediamtx.PUBLISHER_TAG_PLACEHOLDER, rendered)
 
     def test_rendered_password_is_a_quoted_yaml_string(self):
         # A bare `pass: null` would read as no password at all, opening the API; the

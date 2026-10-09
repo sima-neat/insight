@@ -27,6 +27,9 @@ RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
 PUBLISHER_KEY = "publisher"
 PUBLISHER_VALUE = f"insight-{secrets.token_hex(8)}"
 PUBLISHER_TAG = f"{PUBLISHER_KEY}={PUBLISHER_VALUE}"
+# Stands in mediamtx.yml for the tag of a publisher mediamtx itself starts (the webcam
+# normalizer); render_config swaps in this run's tag.
+PUBLISHER_TAG_PLACEHOLDER = f"{PUBLISHER_KEY}=insight-unrendered"
 PROBE_READER_TAG = "reader=insight-probe"
 PREVIEW_READER_TAG = "reader=insight-preview"
 SUPPORTED_CODECS = {"h264", "h265", "mjpeg"}
@@ -170,7 +173,8 @@ def render_config(text: str, password: str) -> str:
     # Quoted, so a password such as "null" or "true" stays a string instead of turning
     # into a YAML null (no password at all) or boolean. The token character set contains
     # nothing that needs escaping inside double quotes.
-    return text.replace(API_PASSWORD_PLACEHOLDER, f'"{password}"')
+    rendered = text.replace(API_PASSWORD_PLACEHOLDER, f'"{password}"')
+    return rendered.replace(PUBLISHER_TAG_PLACEHOLDER, PUBLISHER_TAG)
 
 
 def api_auth_headers() -> dict:
