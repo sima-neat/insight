@@ -6,7 +6,6 @@ import {
   USB_PREVIEW_FORMATS,
   adoptedSelection,
   apiError,
-  availabilityInfo,
   blockedFormatSummary,
   boardCameraSetup,
   boardIndicator,
@@ -297,13 +296,10 @@ test('a snapshot is stale only when it was scanned for another board generation'
   assert.equal(isSnapshotStale(null, snapshot), false)
 })
 
-test('labels for tiers, availability, sources, and defaults', () => {
+test('labels for tiers, sources, and defaults', () => {
   assert.deepEqual(tierInfo('available'), { label: 'Available', tone: 'ok' })
   assert.deepEqual(tierInfo('unsupported'), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(tierInfo('bogus'), tierInfo('unsupported'), 'every mode is one of the two states')
-  assert.equal(availabilityInfo(inUse.availability).label, 'In use by gst-launch-1.0 (pid 812)')
-  assert.deepEqual(availabilityInfo(imx568.availability), { label: 'Availability unknown', tone: '', reason: 'fuser is not installed on the board.' })
-  assert.equal(availabilityInfo(available).label, 'Available')
   assert.equal(sourceLabel('on-board'), 'On this board')
   assert.equal(sourceLabel('sdk-env'), 'SDK DevKit')
   assert.equal(sourceLabel('manual'), 'Manual')
@@ -534,26 +530,23 @@ test('stepwise and continuous format ranges keep their bounds and steps visible'
   assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
-test('the camera pill appears only for an Unsupported camera, beside its availability', () => {
-  assert.equal(cameraTierPill(imx477), null, 'an Available camera shows only its availability pill')
-  assert.equal(availabilityInfo(imx477.availability).label, 'Available')
+test('the camera pill appears only for an Unsupported camera', () => {
+  assert.equal(cameraTierPill(imx477), null, 'an Available camera shows no pill; its modes carry the labels')
   assert.deepEqual(cameraTierPill(imx568), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill(usb), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill({ ...imx477, support: support('unsupported', NO_BOARD) }), { label: 'Unsupported', tone: 'periph-danger' })
 })
 
 test('the detail pane shows one explanation line, chosen by priority', () => {
-  assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\. Stop that process/)
-  assert.equal(cameraSummaryLine(imx568), NOT_IN_OVERLAYS, 'the Unsupported reason wins over unknown availability')
+  assert.equal(cameraSummaryLine(imx568), NOT_IN_OVERLAYS)
   assert.equal(cameraSummaryLine({ ...imx477, support: support('unsupported', NO_BOARD) }), NO_BOARD)
   // An Available camera says nothing: the mode menus carry the Available/Unsupported labels.
   assert.equal(cameraSummaryLine(imx477), '')
-  assert.equal(
-    cameraSummaryLine({ ...imx477, availability: imx568.availability }),
-    'Availability unknown: fuser is not installed on the board.'
-  )
+  // Whether another program holds the camera is not a scan fact: Sentinel's availability is passed
+  // through untouched and never becomes a sentence; a preview that cannot open the camera says so.
+  assert.equal(cameraSummaryLine(inUse), '')
+  assert.equal(cameraSummaryLine({ ...imx477, availability: imx568.availability }), '')
   assert.equal(cameraSummaryLine(usb), '', 'an unsupported USB camera gets no sentence; its pill says it')
-  assert.match(cameraSummaryLine({ ...usb, availability: inUse.availability }), /^In use by gst-launch-1\.0/)
   assert.equal(cameraSummaryLine({}), '')
 })
 
@@ -703,7 +696,8 @@ test('Start preview is blocked with the reason for every state that forbids it',
   // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed mode.
   assert.deepEqual(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }), { blocked: false, reason: '' })
   assert.match(previewBlock({ camera: usb, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
-  assert.match(previewBlock({ camera: { ...usb, availability: inUse.availability }, selection: { format: 'YUYV', width: 640, height: 480, fps: 15 }, target: boardTarget }).reason, /In use by gst-launch-1\.0/)
+  // A camera the scan says is in use is not blocked up front: the start reports a busy camera itself.
+  assert.deepEqual(previewBlock({ camera: { ...usb, availability: inUse.availability }, selection: { format: 'YUYV', width: 640, height: 480, fps: 15 }, target: boardTarget }), { blocked: false, reason: '' })
 
   // Only the formats the backend previews: MJPG and the raw FourCCs GStreamer converts.
   for (const fmt of ['MJPG', 'YUYV', 'GREY']) {
@@ -726,7 +720,8 @@ test('Start preview is blocked with the reason for every state that forbids it',
     assert.match(block.reason, /is Unsupported on this board\. Choose an Available mode\.$/)
   }
 
-  assert.match(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }).reason, /In use by gst-launch-1\.0 \(pid 812\)/)
+  // The scan's availability never blocks Start; a busy camera is reported by the start itself.
+  assert.deepEqual(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }), { blocked: false, reason: '' })
 
   const elsewhere = previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: { ...liveSession, camera_id: imx568.id } })
   assert.match(elsewhere.reason, /already running on mipi:econ-imx568-fpga 5-0042/)

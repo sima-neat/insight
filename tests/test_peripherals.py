@@ -121,9 +121,8 @@ def check(**extra):
 BOARD = {"label": "sima@192.168.2.2", "source": "manual", "hostname": "modalix", "fingerprint": "fp-1"}
 
 
-def snapshot_of(doc, board_facts=None, previous=None):
-    facts = check() if board_facts is None else board_facts
-    return cameras.build_snapshot(doc, facts, BOARD, 1, previous, 5)
+def snapshot_of(doc, previous=None):
+    return cameras.build_snapshot(doc, BOARD, 1, previous, 5)
 
 
 def item(snapshot, item_id):
@@ -141,18 +140,6 @@ def size_of(fmt, width, height):
 class BoardCheckTests(unittest.TestCase):
     def test_source_parses_as_python_38(self):
         ast.parse(Path(board_check.__file__).read_text(encoding="utf-8"), feature_version=(3, 8))
-
-    def test_mipi_availability_checks_media_and_every_isp_output(self):
-        camera = imx477()
-        camera["isp"] = {
-            "state": "available",
-            "device_path": "/dev/video0out",
-            "device_paths": ["/dev/video0out", "/dev/video1out"],
-        }
-        self.assertEqual(
-            cameras.camera_nodes(camera),
-            ["/dev/media0", "/dev/video0out", "/dev/video1out"],
-        )
 
     def test_media_graph_nodes_and_fuser_output(self):
         text = "- entity 1: csi2 (2 pads)\n\t\tdevice node name /dev/v4l-subdev0\n- entity 5: vid\n\t\tdevice node name /dev/video0\n"
@@ -211,8 +198,6 @@ class BoardCheckTests(unittest.TestCase):
                 result = board_check.collect({"cameras": {IMX477: ["/dev/media0"], C920: ["/dev/video97"]}})
             self.assertEqual(result["availability_method"], "proc-root")
             self.assertEqual(result["users"], {IMX477: None, C920: []})
-            availability = item(snapshot_of(catalog(imx477(), c920()), result), IMX477)["availability"]
-            self.assertEqual(availability["state"], "unknown")
 
     def test_an_unreadable_proc_leaves_availability_unknown_not_available(self):
         # Codex 4188915681: root without a listable /proc used to report every camera as available.
@@ -222,8 +207,6 @@ class BoardCheckTests(unittest.TestCase):
             result = board_check.collect({"cameras": {C920: ["/dev/video97"]}})
         self.assertEqual(result["availability_method"], "proc-root")
         self.assertEqual(result["users"], {C920: None})
-        availability = item(snapshot_of(catalog(imx477(), c920()), result), C920)["availability"]
-        self.assertEqual(availability["state"], "unknown")
 
     def test_a_holder_of_the_media_device_is_reported_even_without_the_graph(self):
         held = {"/dev/media0": {4242}}
@@ -278,7 +261,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
         self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "available"}])
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertEqual(camera["availability"], {"state": "available", "users": [], "reason": None})
+        self.assertEqual(camera["availability"], {"state": "unknown", "users": [], "reason": "Discovery never opens a stream."})
         self.assertEqual(camera["modes_source"], "live")
         self.assertEqual(camera["notes"], [ISP_NOTE])
 
@@ -525,29 +508,21 @@ class SnapshotTests(unittest.TestCase):
             "hint": cameras.STATUS_HINT,
         }])
 
-    def test_availability_names_holders_and_degrades_to_unknown(self):
-        holder = [{"pid": 4242, "command": "gst-launch-1.0"}]
-        busy = item(snapshot_of(catalog(imx477()), check(users={IMX477: holder})), IMX477)["availability"]
-        self.assertEqual(busy, {"state": "in_use", "users": holder, "reason": "Open in gst-launch-1.0 (pid 4242)."})
-
-        snapshot = snapshot_of(catalog(imx477()), check(availability_method="proc-user"))
-        self.assertEqual(item(snapshot, IMX477)["availability"]["reason"], cameras.UNKNOWN_USERS_REASON)
-        self.assertIn(("info", "availability_limited"), [(i["severity"], i["code"]) for i in snapshot["issues"]])
-
-        unchecked = cameras.build_snapshot(catalog(imx477()), None, BOARD, 1, None, 5)
-        self.assertEqual(item(unchecked, IMX477)["availability"],
-                         {"state": "unknown", "users": [], "reason": "Discovery never opens a stream."})
-        limited = next(i for i in unchecked["issues"] if i["code"] == "availability_limited")
-        self.assertEqual(limited["message"],
-                         "Insight could not check which processes hold the cameras, so camera availability is unknown.")
-        self.assertNotIn("libcamerasrc", unchecked["platform"])
-
-    def test_missing_board_tools_are_reported(self):
-        facts = check(tools={"media-ctl": False, "fuser": True})
-        codes = [(i["severity"], i["code"]) for i in snapshot_of(catalog(imx477()), facts)["issues"]]
-        self.assertEqual(codes, [("warning", "tool_missing")])
-        # Tool issues are about MIPI cameras; a USB-only board does not need them.
-        self.assertEqual(snapshot_of(catalog(c920()), facts)["issues"], [])
+    def test_the_snapshot_passes_sentinels_availability_through_and_never_inspects_processes(self):
+        """Whether another program holds a camera is found out when a preview opens it, not during a scan: that
+        needed root (or passwordless sudo) to be right and showed "unknown" with a root banner otherwise."""
+        snapshot = snapshot_of(catalog(imx477(), c920()))
+        for camera_id in (IMX477, C920):
+            self.assertEqual(item(snapshot, camera_id)["availability"],
+                             {"state": "unknown", "users": [], "reason": "Discovery never opens a stream."})
+        self.assertEqual([i["code"] for i in snapshot["issues"]], [])
+        self.assertNotIn("platform", snapshot)
+        self.assertFalse(hasattr(cameras, "AVAILABILITY_ISSUES"))
+        self.assertFalse(hasattr(cameras, "TOOL_ISSUES"))
+        doc = imx477()
+        doc["availability"] = {"state": "in_use", "reason": "Open in neat-app."}
+        self.assertEqual(item(snapshot_of(catalog(doc)), IMX477)["availability"],
+                         {"state": "in_use", "users": [], "reason": "Open in neat-app."})
 
     def test_changes_are_reported_against_the_previous_refresh(self):
         first = snapshot_of(catalog(imx477(), c920()))
@@ -649,9 +624,9 @@ class PeripheralsApiTests(unittest.TestCase):
             raise response
         return copy.deepcopy(response)
 
-    def use(self, *catalogs, checks=(), generation: int = 1, fingerprint: str = "fp-1") -> CheckTransport:
+    def use(self, *catalogs, generation: int = 1, fingerprint: str = "fp-1") -> CheckTransport:
         self.catalogs = list(catalogs) or [catalog(imx477(), c920())]
-        transport = CheckTransport(*checks, default=check())
+        transport = CheckTransport()
         self.manager.current = FakeSession(generation, transport, fingerprint)
         return transport
 
@@ -671,26 +646,20 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertEqual(
-            (body["scan_id"], body["scanned_at"], body["items"], body["changes"], body["platform"]),
-            (None, None, [], None, None),
+            (body["scan_id"], body["scanned_at"], body["items"], body["changes"]),
+            (None, None, [], None),
         )
         self.assertEqual(body["board"]["label"], "sima@192.168.2.2")
         self.assertEqual(transport.calls, [])
         self.sentinel.assert_not_called()
 
-    def test_refresh_asks_sentinel_then_runs_one_board_check(self):
+    def test_refresh_asks_sentinel_and_runs_nothing_else_on_the_board(self):
         transport = self.use()
         response = self.refresh()
         self.assertEqual(response.status_code, 200)
         self.sentinel.assert_called_once()
-        self.assertEqual(len(transport.calls), 1)
-        argv, timeout, stdin = transport.calls[0]
-        self.assertEqual(argv[:2], ["python3", "-"])
-        self.assertEqual(
-            json.loads(argv[2]),
-            {"cameras": {IMX477: ["/dev/media0", "/dev/video0out"], C920: ["/dev/video97"]}},
-        )
-        self.assertEqual(stdin, Path(board_check.__file__).read_bytes())
+        # No process check during a scan: whether a camera is busy is reported when a preview opens it.
+        self.assertEqual(transport.calls, [])
         snapshot = response.get_json()
         self.assertEqual(snapshot["board"]["fingerprint"], "fp-1")
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
@@ -708,22 +677,12 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(self.refresh().get_json()["items"], [])
         self.assertEqual(transport.calls, [])
 
-    def test_a_failed_board_check_degrades_availability_instead_of_failing(self):
-        for failure in (ExecResult(127, b"", b"sh: python3: not found"), ExecResult(0, b"Traceback", b""),
-                        BoardError("timeout", "timed out")):
-            with self.subTest(failure=failure):
-                self.use(checks=[failure])
-                response = self.refresh()
-                self.assertEqual(response.status_code, 200)
-                camera = response.get_json()["items"][0]
-                self.assertEqual(camera["availability"]["state"], "unknown")
-
-    def test_a_failed_board_check_does_not_use_the_status_reporting_transport(self):
-        raw = self.use(checks=[BoardError("timeout", "timed out")])
+    def test_a_refresh_runs_nothing_on_the_board_beyond_sentinels_rescan(self):
+        raw = self.use()
         reporting = mock.Mock()
         self.manager.current.transport = reporting
         self.assertEqual(self.refresh().status_code, 200)
-        self.assertEqual(len(raw.calls), 1)
+        self.assertEqual(raw.calls, [])
         reporting.exec.assert_not_called()
 
     def test_refresh_reflects_removal_and_reconnection(self):
@@ -739,12 +698,6 @@ class PeripheralsApiTests(unittest.TestCase):
         self.refresh()
         self.use(catalog(), fingerprint="fp-2")
         self.assertIsNone(self.refresh().get_json()["changes"])
-
-    def test_in_use_warning_names_the_holding_processes(self):
-        holder = [{"pid": 4242, "command": "gst-launch-1.0"}]
-        self.use(checks=[check(users={IMX477: holder, C920: []})])
-        availability = self.refresh().get_json()["items"][0]["availability"]
-        self.assertEqual((availability["state"], availability["reason"]), ("in_use", "Open in gst-launch-1.0 (pid 4242)."))
 
     def test_stepwise_intervals_offer_only_rates_on_their_step(self):
         doc = c920()

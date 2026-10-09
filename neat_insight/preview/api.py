@@ -67,14 +67,6 @@ def scanned_camera(generation: int, camera_id: str) -> dict:
     return item
 
 
-def require_camera_free(item: dict) -> None:
-    """Refuse a camera the last scan found busy, by name, before looking at modes."""
-    if item["availability"]["state"] == "in_use":
-        holders = item["availability"].get("reason") or "another process is using it"
-        raise BoardError("camera_in_use", f"{item['name']} is already in use: {holders}",
-                         hint="Stop the application using the camera, then start the preview.")
-
-
 def _source(item: dict) -> str:
     """What the pipeline opens: a MIPI camera's libcamera name, or a USB camera's stable by-id path
     (its /dev/videoN node when it has none), quoted for GStreamer."""
@@ -147,7 +139,6 @@ def start_preview():
     with previews().board_lock:
         session = get_board_manager().session()
         item = scanned_camera(session.generation, str(body.get("id") or ""))
-        require_camera_free(item)
         return {"session": previews().start(session, item, previewable_mode(item, body))}
 
 

@@ -36,29 +36,6 @@ FORMAT_LABELS = {
     "AR24": "AR24 (packed 32-bit)",
 }
 STATUS_HINT = "Check `systemctl status simaai-sentinel` and `journalctl -u simaai-sentinel` on the board, then Refresh."
-TOOL_ISSUES = {
-    "media-ctl": (
-        "`media-ctl` was not found, so only the media device of each MIPI camera is checked for other processes.",
-        "Install v4l-utils (media-ctl) on the board, then Refresh.",
-    ),
-}
-UNKNOWN_USERS_REASON = "processes owned by other users cannot be inspected without root"
-UNCHECKED_REASON = "the camera's device nodes could not be checked for other users"
-AVAILABILITY_ISSUES = {
-    "proc-user": (
-        "info",
-        "Insight connects as a non-root user without passwordless sudo, so cameras held by other users' processes "
-        "cannot be detected; idle-looking cameras show as unknown.",
-        "Connect as root, or allow passwordless sudo and install fuser (psmisc), then Refresh.",
-    ),
-    "none": (
-        "warning",
-        "Processes cannot be inspected on this board, so camera availability is unknown.",
-        "Check that /proc is mounted on the board, then Refresh.",
-    ),
-}
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -99,21 +76,8 @@ def empty_snapshot(board: dict, generation: int) -> dict:
         "items": [],
         "issues": [],
         "changes": None,
-        "platform": None,
         "camera_setup": None,
     }
-
-
-def camera_nodes(camera: dict) -> list:
-    """The device nodes whose holders tell whether the camera is in use."""
-    if camera.get("backend") == "mipi":
-        isp = camera.get("isp") if isinstance(camera.get("isp"), dict) else {}
-        nodes = [camera.get("media_device"), isp.get("device_path")]
-        if isinstance(isp.get("device_paths"), list):
-            nodes.extend(isp["device_paths"])
-    else:
-        nodes = [camera.get("device_path")]
-    return list(dict.fromkeys(node for node in nodes if isinstance(node, str) and node.startswith("/dev/")))
 
 
 def cameras_of(catalog: dict) -> list:
@@ -159,28 +123,23 @@ def _classified(mode: dict, camera_reason: str) -> dict:
     return dict(mode, available=True, reason="")
 
 
-def build_snapshot(catalog: dict, check: Optional[dict], board: dict, generation: int, previous: Optional[dict], scan_ms: int):
-    """Return the snapshot; `check` is the board_check output, or None when it could not run."""
+def build_snapshot(catalog: dict, board: dict, generation: int, previous: Optional[dict], scan_ms: int):
+    """Return the snapshot built from Sentinel's catalog."""
     # A failed provider's devices from its last successful scan stay in the catalog.
     retained = {error["provider"] for error in catalog["errors"]}
-    platform = {
-        "tools": (check or {}).get("tools") or {},
-        "availability_method": (check or {}).get("availability_method") or "none",
-    }
     items = []
     for device in cameras_of(catalog):
         reason = _camera_reason(device, catalog.get("board"))
         modes = [_classified(mode, reason) for mode in device.get("modes") or []]
-        items.append(_item(device, check, modes, reason, provider_of(device) in retained))
+        items.append(_item(device, modes, reason, provider_of(device) in retained))
     return {
         "board": board,
         "generation": generation,
         "scan_id": f"{catalog['revision']}:{catalog['observed_at']}",
         "scanned_at": now_iso(),
         "scan_ms": scan_ms,
-        "platform": platform,
         "items": items,
-        "issues": _issues(catalog, check, items),
+        "issues": _issues(catalog, items),
         "changes": _changes(previous["items"], items) if previous else None,
         "camera_setup": _camera_setup(catalog.get("board")),
     }
@@ -204,20 +163,14 @@ def _camera_setup(block: Optional[dict]) -> Optional[dict]:
     }
 
 
-def _availability(users: Optional[list], method: Optional[str], fallback: Optional[dict]) -> dict:
-    if users:
-        holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users)
-        return {"state": "in_use", "users": users, "reason": f"Open in {holders}."}
-    if users is not None and method in ("proc-root", "sudo-fuser"):
-        return {"state": "available", "users": [], "reason": None}
-    if users is not None and method == "proc-user":
-        reason = UNKNOWN_USERS_REASON
-    elif method == "none":
-        reason = "processes cannot be inspected on this board"
-    else:
-        # Sentinel never opens a stream, so its own availability is always "unknown" with a reason.
-        reason = (fallback or {}).get("reason") or UNCHECKED_REASON
-    return {"state": "unknown", "users": [], "reason": reason}
+def _availability(reported: Optional[dict]) -> dict:
+    """Sentinel's own availability fact, passed through. Sentinel never opens a stream, so for cameras it is
+    always `unknown` with a reason; Insight does not inspect the board's processes for this. Whether a camera is
+    busy is found out, and reported, when a preview tries to open it."""
+    state = (reported or {}).get("state")
+    if state not in ("available", "in_use", "unknown"):
+        state = "unknown"
+    return {"state": state, "users": [], "reason": (reported or {}).get("reason") or None}
 
 
 def _connection(camera: dict) -> str:
@@ -236,7 +189,7 @@ def _speed_mbps(speed):
     return int(value) if value.is_integer() else value
 
 
-def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retained: bool) -> dict:
+def _item(camera: dict, modes: list, reason: str, retained: bool) -> dict:
     """`modes` are the camera's classified modes (_classified); `reason` is why none can be Available, if any."""
     connection = _connection(camera)
     usb = connection == "usb"
@@ -282,7 +235,6 @@ def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retaine
             f"Modes are from SiMa Sentinel's last successful scan; its {provider_of(camera)} provider failed "
             "during this refresh."
         )
-    users = (check or {}).get("users", {}).get(camera["id"])
     return {
         "id": camera["id"],
         "kind": "camera",
@@ -290,7 +242,7 @@ def _item(camera: dict, check: Optional[dict], modes: list, reason: str, retaine
         "name": name,
         "model": camera.get("model") or None,
         "device": info,
-        "availability": _availability(users, (check or {}).get("availability_method"), camera.get("availability")),
+        "availability": _availability(camera.get("availability")),
         "support": _verdict(modes, reason),
         "modes_source": "unavailable" if not modes else "previous-scan" if retained else "live",
         "formats": formats,
@@ -418,7 +370,7 @@ def _default(formats: list) -> Optional[dict]:
     return None
 
 
-def _issues(catalog: dict, check: Optional[dict], items: list) -> list:
+def _issues(catalog: dict, items: list) -> list:
     issues = []
     listed = {provider_of(device) for device in catalog["devices"]}
     for error in catalog["errors"]:
@@ -429,32 +381,6 @@ def _issues(catalog: dict, check: Optional[dict], items: list) -> list:
         if error["provider"] in listed:
             message += " The devices it found last time are still listed."
         issues.append(_issue("warning", error["code"], message, STATUS_HINT))
-    if not items:
-        return issues
-    if check is None:
-        issues.append(_issue(
-            "warning",
-            "availability_limited",
-            "Insight could not check which processes hold the cameras, so camera availability is unknown.",
-            "Check that python3 (3.8 or newer) runs on the board, then Refresh.",
-        ))
-        return issues
-    mipi = any(item["connection"] == "mipi" for item in items)
-    tools = check.get("tools") or {}
-    issues += [
-        _issue("warning", "tool_missing", *TOOL_ISSUES[tool]) for tool in TOOL_ISSUES if mipi and not tools.get(tool)
-    ]
-    if check.get("availability_method") in AVAILABILITY_ISSUES:
-        severity, message, hint = AVAILABILITY_ISSUES[check["availability_method"]]
-        issues.append(_issue(severity, "availability_limited", message, hint))
-    for failure in check.get("failures") or []:
-        tool = failure.get("tool")
-        hint = f"Refresh again; if it keeps failing, run `{tool}` on the board to see the full error."
-        if failure.get("reason") == "timeout":
-            code, message = "timeout", f"`{tool}` timed out on the board."
-        else:
-            code, message = "command_failed", f"`{tool}` failed: {failure.get('detail') or 'no output'}"
-        issues.append(_issue("warning", code, message, hint))
     return issues
 
 
@@ -492,12 +418,12 @@ class ScanCache:
             return entry["snapshot"]
         return None
 
-    def record(self, generation: int, board: dict, catalog: dict, check: Optional[dict], scan_ms: int) -> dict:
+    def record(self, generation: int, board: dict, catalog: dict, scan_ms: int) -> dict:
         with self._lock:
             previous = self._entry
         if previous and (previous["generation"], previous["fingerprint"]) != (generation, board.get("fingerprint")):
             previous = None
-        snapshot = build_snapshot(catalog, check, board, generation, previous and previous["snapshot"], scan_ms)
+        snapshot = build_snapshot(catalog, board, generation, previous and previous["snapshot"], scan_ms)
         with self._lock:
             if self._entry is None or self._entry["generation"] <= generation:
                 self._entry = {

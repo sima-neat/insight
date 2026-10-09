@@ -159,7 +159,7 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 | Available（可用） | 開發板的相機 overlay 支援該相機的感測器、ISP 能輸出此模式的尺寸，且其像素格式為 NV12。 |
 | Unsupported（不支援） | 上述任一條件不成立。標籤上的原因會指出是哪一項：USB 相機在開發板上沒有相機 overlay；感測器不在開發板的相機 overlay 中；ISP 無法輸出該尺寸；或格式不是 NV12。若 Sentinel 版本過舊而無法回報開發板的相機 overlay，則在您更新之前，每個模式都會是 Unsupported（不支援）。 |
 
-Insight 僅依據 SiMa Sentinel 的報告做出此判斷。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。沒有任何 Available（可用）模式的相機會顯示 **Unsupported**（不支援）標籤，若為 MIPI 相機還會顯示其原因；具有 Available（可用）模式的相機只會顯示其可用性。可用性同樣由 Insight 判斷：重新整理期間，它會檢查哪些程序持有每部相機的裝置節點，並指出持有相機的程序；只有在 Insight 以 root 身分執行，或開發板允許無密碼 `sudo` 時，它才能看到其他使用者的程序，否則會回報 **Unknown**（未知）。
+Insight 僅依據 SiMa Sentinel 的報告做出此判斷。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。沒有任何 Available（可用）模式的相機會顯示 **Unsupported**（不支援）標籤，若為 MIPI 相機還會顯示其原因；具有 Available（可用）模式的相機不會顯示標籤。Insight 不會指出是否有其他程式正在使用相機：這會在預覽嘗試開啟相機時得知，並在該處回報。
 
 ### 預覽相機
 

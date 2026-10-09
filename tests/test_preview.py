@@ -41,12 +41,11 @@ def multipart(*frames):
     return b"".join(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n%s\r\n" % (len(f), f) for f in frames)
 
 
-def scanned(*devices, board_facts=None, generation=1, board=True):
+def scanned(*devices, generation=1, board=True):
     """Record a scan of the given Sentinel devices on a board whose camera overlays support the IMX477
     (`board=False`: a Sentinel that reports no overlays) and return its snapshot."""
-    facts = check() if board_facts is None else board_facts
     doc = catalog(*devices, board=board_block()) if board else catalog(*devices)
-    return peripherals_api.scans.record(generation, BOARD, doc, facts, 5)
+    return peripherals_api.scans.record(generation, BOARD, doc, 5)
 
 
 def item_of(snapshot, item_id):
@@ -412,14 +411,6 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(session.transport.streams, [])
             request = next(call for call in session.transport.calls if '"cameras"' in call)
             self.assertEqual(json.loads(request), {"cameras": {item["id"]: [node]}})
-
-    def test_a_camera_the_scan_found_busy_is_refused_by_name_before_its_modes(self):
-        holder = [{"pid": 77, "command": "neat-app"}]
-        scanned(imx477(), board_facts=check(users={IMX477: holder}))
-        response = self.client().post(PREVIEW, json={"id": IMX477, "format": "RGB3"})
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "camera_in_use"))
-        self.assertEqual(response.get_json()["error"], "imx477 5-001a is already in use: Open in neat-app (pid 77).")
-        self.assertEqual(self.session.transport.calls, [])
 
     def test_a_start_needs_a_scan_of_this_board_and_a_scanned_camera(self):
         client = self.client()

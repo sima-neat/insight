@@ -1,6 +1,5 @@
 import PreviewPane from './PreviewPane.jsx'
 import {
-  availabilityInfo,
   blockedFormatSummary,
   cameraSubtitle,
   cameraTierPill,
@@ -108,7 +107,6 @@ export default function CameraDetail({
   onPreviewStreamError,
   onOpenBoardPanel
 }) {
-  const availability = availabilityInfo(camera.availability)
   const tier = cameraTierPill(camera)
   const summary = cameraSummaryLine(camera)
 
@@ -119,10 +117,7 @@ export default function CameraDetail({
           <h3 id="periph-detail-title">{camera.name}</h3>
           {cameraSubtitle(camera) && <p className="hint">{cameraSubtitle(camera)}</p>}
         </div>
-        <span className="periph-pills">
-          <Pill tone={availability.tone}>{availability.label}</Pill>
-          {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
-        </span>
+        {tier && <span className="periph-pills"><Pill tone={tier.tone}>{tier.label}</Pill></span>}
       </div>
 
       {summary && (
