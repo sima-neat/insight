@@ -2854,6 +2854,46 @@ class PullSourceTests(_SourceFixture):
         self.assertEqual(self._slot(2)["state"], "pulled")
         self.assertEqual(self._slot(2)["file"], "")             # reset still clears the stored record
 
+    def test_bulk_start_rechecks_for_a_pull_before_each_target(self):
+        # Codex review: a pull that lands while an earlier target is starting must not get a file stream.
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},'
+            ' {"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+
+        def pull_lands_during_the_first_start(src):
+            if src["index"] == 1:
+                self._pull(index=2)
+            return Path(src["file"]), None, None, None
+
+        with mock.patch.object(app_module, "_resolve_stream_input", side_effect=pull_lands_during_the_first_start), \
+             mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("rtsp", "h264", ["rtsp"])), \
+             mock.patch.object(app_module, "start_media_stream", return_value=(True, None, object())) as start:
+            bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).get_json()
+        self.assertEqual(bulk["started"], [1])
+        self.assertEqual(bulk["errors"], [{"index": 2, "error": "src2 is pulling from 172.18.51.40:554. Stop it first."}])
+        self.assertEqual([c.args[0] for c in start.call_args_list], [1], "no file stream was launched on the pulled slot")
+        self.assertEqual(self._slot(2)["state"], "pulled")
+
+    def test_auto_assign_rechecks_for_a_pull_before_applying_the_plan(self):
+        # Codex review: a pull that lands while Auto Assign probes files keeps its stored file.
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.sources_file.write_text('[{"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+
+        def pull_lands_during_the_probe(*args, **kwargs):
+            if app_module.pull_registry.get(2) is None:
+                self._pull(index=2)
+            return ("rtsp", "h264", ["rtsp"])
+
+        with mock.patch.object(app_module, "_collect_video_files", return_value=["a.mp4", "b.mp4"]), \
+             mock.patch.object(app_module, "_derive_source_stream_settings", side_effect=pull_lands_during_the_probe):
+            auto = self.client.post("/api/mediasrc/auto-assign-all").get_json()
+        self.assertIn(2, auto["skipped_pulled"])
+        self.assertEqual(app_module.load_sources()[1]["file"], "b.mp4", "the stored assignment was not changed")
+        self.assertEqual(self._slot(2)["state"], "pulled")
+
     def test_bulk_start_with_only_a_pulled_slot_answers_in_result_shape(self):
         (self.media_dir / "b.mp4").write_bytes(b"x")
         self.sources_file.write_text('[{"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")

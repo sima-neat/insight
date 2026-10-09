@@ -2405,8 +2405,12 @@ def _pull_record(index):
     return pull_registry.get(index) if isinstance(index, int) else None
 
 
+def _pull_conflict_message(index, record) -> str:
+    return f"src{index} is pulling from {record.host}. Stop it first."
+
+
 def _pull_conflict_error(index, record):
-    return _json_error(f"src{index} is pulling from {record.host}. Stop it first.", 409)
+    return _json_error(_pull_conflict_message(index, record), 409)
 
 
 def _pull_payload(record, path) -> dict:
@@ -3077,6 +3081,12 @@ def auto_assign_all_sources():
             if src["index"] in replaced or (src.get("type"), src.get("file")) != outcome["was"]:
                 changed.append(src["index"])
                 continue
+            if _pull_record(src["index"]):
+                # Pulled while the releases and probes ran: a pull keeps the stored
+                # (type, file), so the identity check above cannot see it.
+                plan.pop(src["index"])
+                skipped_pulled.append(src["index"])
+                continue
             # File streams are stopped here, after the identity check, so a
             # file another tab assigned meanwhile is neither killed nor overwritten.
             _bump_slot(src["index"])
@@ -3186,6 +3196,11 @@ def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Opt
                 return True, None, 200
             if _slot_changed_since(src, generation):
                 return stale
+            # A pull that landed before the caller read the generation (Bulk Start reads it
+            # per target, after earlier targets may have encoded for minutes) is caught here.
+            record = _pull_record(index)
+            if record:
+                return False, _pull_conflict_message(index, record), 409
             if rendition and not input_path.is_file():
                 # Clear renditions ran between the cache lookup and this launch; prepare again.
                 if attempt == 0:
