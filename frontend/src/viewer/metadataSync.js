@@ -1,5 +1,9 @@
 const METADATA_QUEUE_LIMIT = 300;
 const UNTYPED = "";
+const LATENESS_WINDOW_MS = 5000;
+const LATENESS_WINDOW_MIN_MESSAGES = 10;
+// Bounds both memories against a stream that presents or sends far faster than expected.
+const LATENESS_MEMORY_LIMIT = 1024;
 
 function metadataTypeOf(data) {
   return typeof data?.type === "string" ? data.type : UNTYPED;
@@ -26,6 +30,12 @@ export function createMetadataQueue() {
     timestamped: new Map(),
     timestampedEntries: 0,
     arrival: [],
+    // Presented frames, oldest first: RTP timestamp -> presentation time.
+    presented: new Map(),
+    lastPresented: null,
+    lastPresentedAt: 0,
+    // Outcomes of timestamped messages in the recent window, oldest first.
+    outcomes: [],
     stats: {
       timestampMatches: 0,
       arrivalFallbacks: 0,
@@ -33,6 +43,7 @@ export function createMetadataQueue() {
       expired: 0,
       evicted: 0,
       untimestampedReceived: 0,
+      late: 0,
     },
   };
 }
@@ -42,6 +53,18 @@ export function enqueueMetadata(queue, data, receivedAt) {
   const item = { receivedAt, data };
   if (Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0) {
     const key = rtpTimestamp >>> 0;
+    if (isLate(queue, key)) {
+      // Its frame is gone, so it can never be drawn. Queueing it would only
+      // surface later as an eviction, which reads as a capacity problem.
+      const presentedAt = queue.presented.get(key);
+      queue.stats.late += 1;
+      recordOutcome(queue, {
+        at: queue.lastPresentedAt,
+        late: true,
+        latenessMs: presentedAt === undefined ? null : Math.max(0, receivedAt - presentedAt),
+      });
+      return;
+    }
     // A producer may describe one frame with several metadata types, so a frame
     // holds one entry per type. A repeat of the same type replaces it.
     const byType = queue.timestamped.get(key) ?? new Map();
@@ -75,11 +98,16 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
   const hasFrameTimestamp = Number.isInteger(rtpTimestamp) && rtpTimestamp >= 0;
   if (hasFrameTimestamp) {
     const key = rtpTimestamp >>> 0;
+    recordPresentedFrame(queue, key, now);
     const byType = queue.timestamped.get(key) ?? null;
     if (byType && byType.size > 0) {
       queue.timestamped.delete(key);
       queue.timestampedEntries -= byType.size;
       queue.stats.timestampMatches += 1;
+      // The late share is a share of messages, so every type of the frame counts.
+      for (let matched = 0; matched < byType.size; matched += 1) {
+        recordOutcome(queue, { at: now, late: false, latenessMs: null });
+      }
       return [...byType.values()];
     }
   }
@@ -122,11 +150,63 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
 }
 
 export function metadataQueueSnapshot(queue) {
+  const lateOutcomes = queue.outcomes.filter((outcome) => outcome.late);
+  const lateness = lateOutcomes
+    .map((outcome) => outcome.latenessMs)
+    .filter((value) => value !== null)
+    .sort((a, b) => a - b);
   return {
     ...queue.stats,
     timestampedPending: queue.timestampedEntries,
     arrivalPending: queue.arrival.length,
+    recentLateShare:
+      queue.outcomes.length >= LATENESS_WINDOW_MIN_MESSAGES
+        ? lateOutcomes.length / queue.outcomes.length
+        : null,
+    recentLatenessMedianMs: nearestRank(lateness, 0.5),
+    recentLatenessP90Ms: nearestRank(lateness, 0.9),
+    recentLatenessMaxMs: lateness.length ? lateness[lateness.length - 1] : null,
   };
+}
+
+export function resetLatenessWindow(queue) {
+  queue.outcomes.length = 0;
+}
+
+// The subtraction is reduced to a signed 32-bit value, so it stays correct
+// across the RTP timestamp wrap.
+function isLate(queue, key) {
+  return queue.lastPresented !== null && ((key - queue.lastPresented) | 0) <= 0;
+}
+
+// The window is aged here and nowhere else: a hidden tab presents no frames
+// while messages keep arriving, and must not dilute or expire the window.
+function recordPresentedFrame(queue, key, now) {
+  queue.presented.delete(key);
+  queue.presented.set(key, now);
+  queue.lastPresented = key;
+  queue.lastPresentedAt = now;
+  for (const [timestamp, presentedAt] of queue.presented) {
+    if (now - presentedAt <= LATENESS_WINDOW_MS && queue.presented.size <= LATENESS_MEMORY_LIMIT) break;
+    queue.presented.delete(timestamp);
+  }
+  let expired = 0;
+  while (expired < queue.outcomes.length && now - queue.outcomes[expired].at > LATENESS_WINDOW_MS) {
+    expired += 1;
+  }
+  if (expired > 0) queue.outcomes.splice(0, expired);
+}
+
+function recordOutcome(queue, outcome) {
+  queue.outcomes.push(outcome);
+  if (queue.outcomes.length > LATENESS_MEMORY_LIMIT) {
+    queue.outcomes.splice(0, queue.outcomes.length - LATENESS_MEMORY_LIMIT);
+  }
+}
+
+function nearestRank(sorted, fraction) {
+  if (sorted.length === 0) return null;
+  return sorted[Math.min(sorted.length - 1, Math.ceil(fraction * sorted.length) - 1)];
 }
 
 function pruneMetadataQueue(queue, metadataRetentionMs, now) {

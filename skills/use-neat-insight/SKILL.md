@@ -155,6 +155,9 @@ capture.
 | `expired_metadata` | Messages that aged past retention without matching. |
 | `evicted_video` | Frame mappings retired inside retention, by capacity or a source restart, whether or not they matched metadata. |
 | `evicted_metadata` | Messages dropped inside retention, by capacity or a source restart. |
+| `video_first_lag_recent_median_ms` | Median time between a frame's arrival and its metadata's arrival, over the most recent video-first matches. Omitted without samples. |
+| `video_first_lag_recent_max_ms` | Largest such lag among the same matches. Omitted without samples. |
+| `video_first_lag_samples` | Number of matches the two lag values are based on, at most 256. |
 | `messages_forwarded` | Delivered to a browser DataChannel. Not a correlation result. |
 | `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
@@ -196,13 +199,19 @@ Read them in this order:
 - `evicted_metadata` climbing: unmatched metadata reached the capacity bound or
   was cleared by a source restart.
 - `pending_metadata` high with matches still occurring: ordinary arrival skew.
+- `matched_video_first` climbing with `video_first_lag_recent_median_ms` above
+  the viewer's video sync buffer (350 ms by default): correlation works, but the
+  browser has already shown each frame when its metadata arrives. Overlays are
+  missing or flicker. Confirm with `metadata_late` in `/api/egress/stats`, then
+  raise the video sync buffer for the channel or make the producer send sooner.
 - `matched_*` climbing but `messages_forwarded` flat: correlation works. Inspect
   the DataChannel, the viewer, and the browser cache instead.
 
 Two properties to respect when reading:
 
 - Only `pending_video` and `pending_metadata` are instantaneous depths;
-  everything else is cumulative. Sample twice over a known interval and compare
+  the `video_first_lag_*` fields describe the most recent matches; everything
+  else is cumulative. Sample twice over a known interval and compare
   the deltas, or a long-running channel looks broken from its history alone.
 - Retention only binds while arrivals fit in the correlator's capacity. At the
   ~100 messages per second measured on a DevKit, capacity holds ~2.5 s, so a
@@ -230,7 +239,18 @@ Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbo
 
 `synchronization.timestamped_metadata_pending` counts queued messages, including
 each metadata type for a shared frame. Both pending counts and the expiry/eviction
-counters use messages; `timestamp_matches` counts matched video-frame callbacks.
+counters use messages, and so does `metadata_late`; `timestamp_matches` counts
+matched video-frame callbacks.
+
+The `synchronization` object also reports late metadata:
+
+| Field | Meaning |
+| --- | --- |
+| `metadata_late` | Cumulative count of messages that arrived after their frame had been presented. The browser discards them. |
+| `metadata_lateness_recent_median_ms` | Median time by which those messages missed their frame, over the last 5 s of presented frames. Omitted without samples. |
+| `metadata_lateness_recent_max_ms` | Largest such time in the same window. Omitted without samples. |
+
+`metadata_late` climbing means the video sync buffer is smaller than the producer's metadata lag. It is not a capacity or loss problem: `metadata_evicted` stays flat. The buffer needed is roughly `video_sync_buffer_ms` plus the lateness. These counters only advance while the viewer tab is visible.
 
 Examples:
 
