@@ -1,7 +1,8 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, latestOnly, liveFor,
-  previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
+  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, isPulled, latestOnly, liveFor,
+  previewSrc, protocolLabel, pullChipText, pullSourceText, pullStatusClass, pullStatusLabel,
+  readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
@@ -953,7 +954,10 @@ export default function App() {
   // the bulk controls until every slot has settled.
   const anyWebcamBusy = Object.keys(webcamBusy).length > 0
   const bulkHoldTitle = anyWebcamBusy ? 'Waiting for a webcam selection to finish' : undefined
-  const previewImgSrc = isExternal(currentSource) ? previewSrc(currentSource.index, previewEnabled, previewToken, currentSource.external?.since) : null
+  const previewInfo = isExternal(currentSource) ? (currentSource.external || {}) : (isPulled(currentSource) ? currentSource.pull : null)
+  const previewImgSrc = previewInfo && (!isPulled(currentSource) || previewInfo.status === 'live')
+    ? previewSrc(currentSource.index, previewEnabled, previewToken, previewInfo.since)
+    : null
   // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
   // load must be keyed on the tab as well, not on the URL alone.
   const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
@@ -2285,6 +2289,19 @@ export default function App() {
     await stopWebcamSessionBound(index, webcamSessionsRef.current.get(index))
   }
 
+  // Rejects with the server's message so the dialog can show it inline and stay open.
+  async function pullSource(index, payload) {
+    const data = await fetchJson('/api/mediasrc/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index, ...payload })
+    })
+    await loadSources()
+    // Built from the server's credential-free pull record, never from the typed URL, which may
+    // still carry a password after the first '@' in a userinfo containing a literal '@'.
+    setUploadStatus(`src${index} is pulling from ${pullSourceText(data.pull)}.`)
+  }
+
   async function autoAssignAllSources() {
     try {
       // The backend rewrites every slot to a file source; the browser has to
@@ -2836,8 +2853,50 @@ export default function App() {
 
               <div className="sources">
                 {sources.map((src) => (
-                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : ''].filter(Boolean).join(' ')} onClick={() => selectSource(src.index)}>
+                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : '', isPulled(src) ? `pulled ${pullStatusClass(src.pull)}`.trim() : ''].filter(Boolean).join(' ')} onClick={() => selectSource(src.index)}>
                     {(() => {
+                      if (isPulled(src)) {
+                        const pull = src.pull || {}
+                        const warning = pull.status === 'live' ? codecWarningText(pull, codecLabel(src.codec)) : null
+                        const chip = pullChipText(pull)
+                        return (
+                          <>
+                            <span className="src-label">src{src.index}</span>
+                            <span className={`src-state pulled ${pullStatusClass(pull)}`.trim()}>{pullStatusLabel(pull)}</span>
+                            <span className="pull-chip" title={chip}>{chip}</span>
+                            <span className="codec-lock" title="Pulled streams are forwarded over RTSP">RTSP</span>
+                            <span
+                              className={warning ? 'codec-lock warn' : 'codec-lock'}
+                              title={warning || 'Codec of the pulled stream'}
+                            >
+                              {pull.status === 'live' ? codecLabel(src.codec) : '-'}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
+                            </span>
+                            {/* Holds the FPS column so the actions line up with file-backed rows. */}
+                            <span aria-hidden="true" />
+                            <button
+                              className="icon-action-btn stop"
+                              onClick={(e) => { e.stopPropagation(); stopSource(src.index).catch(reportSourceError) }}
+                              aria-label={`Stop src${src.index}`}
+                              title={`Stop pulling into src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                              </svg>
+                            </button>
+                            <button
+                              className="icon-action-btn copy"
+                              onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
+                              aria-label={`Copy stream URL for src${src.index}`}
+                              title={`Copy stream URL for src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9 9h10v12H9z" />
+                                <path d="M5 3h10v2H7v10H5z" />
+                              </svg>
+                            </button>
+                          </>
+                        )
+                      }
                       if (isExternal(src)) {
                         const ext = src.external || {}
                         const warning = codecWarningText(ext, codecLabel(src.codec))
@@ -2997,7 +3056,7 @@ export default function App() {
 
             <section className="panel">
               {(() => {
-                if (!isExternal(currentSource)) {
+                if (!isExternal(currentSource) && !isPulled(currentSource)) {
                   const info = currentSource
                   const progress = encodeProgress[info.index]
                   const panelTransports = Array.isArray(info.allowed_transports) ? info.allowed_transports : (info.file ? ['rtsp'] : [])
@@ -3076,14 +3135,17 @@ export default function App() {
                     </>
                   )
                 }
-                const ext = currentSource.external || {}
-                const warning = codecWarningText(ext, codecLabel(currentSource.codec))
+                const pulled = isPulled(currentSource)
+                const ext = pulled ? (currentSource.pull || {}) : (currentSource.external || {})
+                const warning = (!pulled || ext.status === 'live') ? codecWarningText(ext, codecLabel(currentSource.codec)) : null
                 const src = previewImgSrc
+                const badgeClass = pulled ? `src-state pulled preview-badge ${pullStatusClass(ext)}`.trim() : 'src-state external preview-badge'
+                const badgeText = pulled ? pullStatusLabel(ext) : 'External'
                 return (
                   <>
                     <div className="panel-topbar">
                       <div>
-                        <h2>Source Preview: src{currentSource.index} <span className="src-state external preview-badge">External</span></h2>
+                        <h2>Source Preview: src{currentSource.index} <span className={badgeClass}>{badgeText}</span></h2>
                         <p className="hint"><code>{currentSource.urls?.rtsp || `${rtspBase}/src${currentSource.index}`}</code></p>
                       </div>
                       <button
@@ -3104,7 +3166,9 @@ export default function App() {
                           </>
                         )}
                       </div>
-                      {!src && <p>Preview is off. Nothing is decoded. Turn it on to watch this stream.</p>}
+                      {!src && (pulled && ext.status !== 'live'
+                        ? <p>{ext.status === 'auth_failed' ? ext.error : 'Waiting for the camera…'}{ext.status === 'unreachable' && ext.error ? ` (${ext.error})` : ''}</p>
+                        : <p>Preview is off. Nothing is decoded. Turn it on to watch this stream.</p>)}
                       {src && previewError && (
                         <p>
                           Preview unavailable.{' '}
@@ -3125,7 +3189,10 @@ export default function App() {
                     </div>
                     <table className="kv-table">
                       <tbody>
-                        <tr><th>Publisher</th><td>{protocolLabel(ext.protocol)} · {ext.address || '-'}</td></tr>
+                        {pulled
+                          ? <tr><th>Source</th><td><code>{pullSourceText(ext)}</code></td></tr>
+                          : <tr><th>Publisher</th><td>{protocolLabel(ext.protocol)} · {ext.address || '-'}</td></tr>}
+                        {pulled && <tr><th>Status</th><td>{pullStatusLabel(ext)}{ext.error ? <span className={ext.status === 'auth_failed' ? 'pull-error-text' : 'warn-text'}> · {ext.error}</span> : ''}</td></tr>}
                         <tr><th>Video</th><td>{codecLabel(currentSource.codec)}{dimensionsText(ext) ? ` · ${dimensionsText(ext)}` : ''}{warning && <span className="warn-text"> ⚠ {warning}</span>}</td></tr>
                         <tr><th>Live for</th><td>{liveFor(ext.since, now)}</td></tr>
                         <tr><th>Bitrate</th><td>{formatBitrate(ext.bitrate_bps)}</td></tr>
@@ -3726,6 +3793,7 @@ export default function App() {
             // Through the row's select handler, so switching to or away from a camera
             // closes this tab's publisher and names its session, as the dropdown did.
             onAssign={(value) => handleSourceSelectChange(assignTarget, value)}
+            onPull={(payload) => pullSource(assignTarget, payload)}
             onClose={() => setAssignTarget(null)}
           />
         )

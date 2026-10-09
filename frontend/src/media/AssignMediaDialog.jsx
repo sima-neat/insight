@@ -3,10 +3,13 @@ import { useState } from 'react'
 import FolderBrowser from './FolderBrowser.jsx'
 import { nearestExistingFolder, parentPath } from './mediaTree.js'
 
+const STREAM_URL_PATTERN = /^rtsps?:\/\//i
+
 // "Source for srcN" (issue #113): a Video file tab with the folder browser, opening in the folder of
-// the current file so a swap inside one category is one click away, and a Camera tab for the
-// browser's cameras. onAssign(value) is awaited and may throw; '' clears the slot. A camera's
-// value goes to onAssign like a file path does. `currentValue` is what the slot holds now.
+// the current file so a swap inside one category is one click away, a Camera tab for the browser's
+// cameras, and a Stream URL tab that pulls a network stream (issue #127). onAssign(value) and
+// onPull({url, username, password}) are awaited and may throw; '' clears the slot. A camera's value
+// goes to onAssign like a file path does. `currentValue` is what the slot holds now.
 export default function AssignMediaDialog({
   sourceIndex,
   currentFile,
@@ -18,6 +21,7 @@ export default function AssignMediaDialog({
   onEnableCameras,
   tree,
   onAssign,
+  onPull,
   onClose,
 }) {
   const [mode, setMode] = useState(isWebcam ? 'camera' : 'file')
@@ -26,6 +30,10 @@ export default function AssignMediaDialog({
   const [picked, setPicked] = useState(isWebcam ? '' : (currentFile || ''))
   const [pickedCamera, setPickedCamera] = useState(isWebcam ? (currentValue || '') : '')
   const [busy, setBusy] = useState(false)
+  const [url, setUrl] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [pullError, setPullError] = useState('')
   // The folder can disappear while the dialog is open (a delete elsewhere); browse its nearest
   // surviving ancestor rather than an empty view.
   const view = nearestExistingFolder(tree, folder)
@@ -35,15 +43,34 @@ export default function AssignMediaDialog({
     setFilter('')
   }
 
+  function close() {
+    setPassword('') // never keep a credential in component state longer than the dialog
+    onClose()
+  }
+
   async function commit(value) {
     setBusy(true)
     try {
       await onAssign(value)
-      onClose()
+      close()
     } catch {
       setBusy(false) // the assignment already surfaced the error; keep the dialog open
     }
   }
+
+  async function pull() {
+    setBusy(true)
+    setPullError('')
+    try {
+      await onPull({ url: url.trim(), username: username.trim(), password })
+      close()
+    } catch (e) {
+      setPullError(e.message || 'Could not pull the stream.')
+      setBusy(false)
+    }
+  }
+
+  const canPull = STREAM_URL_PATTERN.test(url.trim()) && !busy
 
   const tab = (id, label) => (
     <button
@@ -65,8 +92,9 @@ export default function AssignMediaDialog({
         <div className="assign-tabs" role="tablist" aria-label="Source kind">
           {tab('file', 'Video file')}
           {tab('camera', 'Camera')}
+          {tab('stream', 'Stream URL')}
         </div>
-        {mode === 'file' ? (
+        {mode === 'file' && (
           <>
             <p className="hint">Selected: <span className="assign-target" data-testid="assign-picked">{picked || 'Not assigned'}</span></p>
             <FolderBrowser
@@ -81,11 +109,12 @@ export default function AssignMediaDialog({
             />
             <div className="modal-actions">
               <button type="button" className="btn-ghost" onClick={() => commit('')} disabled={busy || !currentFile}>Clear</button>
-              <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+              <button type="button" onClick={close} disabled={busy}>Cancel</button>
               <button type="button" className="btn-tonal" onClick={() => commit(picked)} disabled={busy || !picked || picked === currentValue}>Assign</button>
             </div>
           </>
-        ) : (
+        )}
+        {mode === 'camera' && (
           <>
             <p className="hint">The browser publishes the camera to <code>rtsp://…:8554/src{sourceIndex}</code> while this tab stays open.</p>
             {cameras.length > 0 ? (
@@ -115,10 +144,36 @@ export default function AssignMediaDialog({
                 </button>
               )}
               {isWebcam && <button type="button" className="btn-ghost" onClick={() => commit('')} disabled={busy}>Clear</button>}
-              <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+              <button type="button" onClick={close} disabled={busy}>Cancel</button>
               <button type="button" className="btn-tonal" onClick={() => commit(pickedCamera)} disabled={busy || !pickedCamera || pickedCamera === currentValue} data-testid="assign-camera-submit">Assign</button>
             </div>
           </>
+        )}
+        {mode === 'stream' && (
+          <form className="pull-form" onSubmit={(e) => { e.preventDefault(); if (canPull) pull() }}>
+            <p className="hint">Insight pulls the stream and forwards it unchanged to <code>rtsp://…:8554/src{sourceIndex}</code>. RTSP and RTSPS only.</p>
+            {isWebcam && <p className="hint muted-text" data-testid="pull-webcam-note">This slot is a webcam source. Clear it on the Camera tab before pulling a stream into it.</p>}
+            <label className="pull-field">
+              <span>Stream URL</span>
+              <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="rtsp://192.168.1.10:554/stream1" autoFocus data-testid="pull-url" />
+            </label>
+            <div className="pull-credentials">
+              <label className="pull-field">
+                <span>Username</span>
+                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" data-testid="pull-username" />
+              </label>
+              <label className="pull-field">
+                <span>Password</span>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" data-testid="pull-password" />
+              </label>
+            </div>
+            <p className="hint muted-text">Most IP cameras need a username and password. Credentials typed into the URL work too and are never shown again.</p>
+            {pullError && <p className="pull-error" role="alert" data-testid="pull-error">{pullError}</p>}
+            <div className="modal-actions">
+              <button type="button" onClick={close} disabled={busy}>Cancel</button>
+              <button type="submit" className="btn-tonal" disabled={!canPull || isWebcam} data-testid="pull-submit">{busy ? 'Checking…' : 'Pull'}</button>
+            </div>
+          </form>
         )}
       </div>
     </div>

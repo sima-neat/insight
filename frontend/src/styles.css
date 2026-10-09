@@ -51,6 +51,8 @@
   --ext-soft: #f1eafc;
   --warn: #8a5a00;
   --warn-soft: #fff6e0;
+  --pull: #0f6b6b;
+  --pull-soft: #d5efee;
 
   --radius-sm: 10px;
   --radius-md: 14px;
@@ -912,6 +914,76 @@ button:hover:not(:disabled) {
 .icon-action-btn.takeover {
   color: var(--ext);
   border-color: #d9c8f3;
+}
+
+.src-state.pulled {
+  background: var(--pull-soft);
+  color: var(--pull);
+}
+
+.src-state.pulled.connecting {
+  background: #eef2f6;
+  color: #5f7487;
+}
+
+.src-state.pulled.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.src-state.pulled.failed {
+  background: #fde8e8;
+  color: var(--danger);
+}
+
+.source-row.pulled {
+  border-color: #a9d3d6;
+  background: #f3fbfb;
+}
+
+.source-row.pulled.warn,
+.source-row.pulled.failed {
+  border-color: #f0d49a;
+  background: #fffaf0;
+}
+
+.source-row.pulled.active {
+  border-color: var(--pull);
+  background: var(--pull-soft);
+}
+
+.source-row.pulled.warn.active,
+.source-row.pulled.failed.active {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.pull-chip {
+  min-height: 36px;
+  border: 1px solid #a9d3d6;
+  border-radius: var(--radius-sm);
+  background: var(--pull-soft);
+  color: var(--pull);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.source-row.pulled.warn .pull-chip,
+.source-row.pulled.failed .pull-chip {
+  border-color: #f0d49a;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pull-error-text {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .preview-badge {
@@ -3736,6 +3808,39 @@ button:disabled {
 .assign-camera.active {
   border-color: rgba(15, 122, 116, 0.55);
   background: var(--accent-soft);
+}
+
+.pull-form {
+  display: grid;
+  gap: 8px;
+}
+
+.pull-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.pull-field input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.pull-credentials {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pull-error {
+  margin: 0;
+  color: #a12626;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .source-file-btn {
