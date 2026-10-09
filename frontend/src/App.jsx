@@ -14,6 +14,7 @@ import {
   recordWebcamStopsOnExit,
   createDisconnectWatcher,
   pinH264,
+  camerasFromDevices,
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
@@ -1993,9 +1994,7 @@ export default function App() {
     } catch {
       return
     }
-    const cameras = devices
-      .filter((device) => device.kind === 'videoinput' && device.deviceId)
-      .map((device, i) => ({ deviceId: device.deviceId, label: device.label || `Camera ${i + 1}` }))
+    const cameras = camerasFromDevices(devices)
     setWebcamDevices(cameras)
 
     const validIds = new Set(cameras.map((c) => c.deviceId))
