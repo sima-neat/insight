@@ -37,11 +37,27 @@ webrtcLocalUDPAddress: :8189
 webrtcTrackGatherTimeout: 10s
 
 # Backs the "is this webcam actually publishing" status Insight polls per
-# source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,
-# never exposed outside the container/host.
+# source (see neat_insight/mediasrc.py webcam_is_publishing) and the detection
+# of external publishers (neat_insight/mediamtx.py); loopback-only, never
+# exposed outside the container/host.
 api: yes
 apiAddress: 127.0.0.1:9997
-
+apiAllowOrigin: 'http://127.0.0.1'
+# Replaces mediamtx's default, which gives every loopback client the API without credentials.
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+  - user: insight
+    # Unusable placeholder: Insight writes a per-run password into its own copy at launch.
+    pass: sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    ips: ['127.0.0.1', '::1']
+    permissions:
+      - action: api
+pathDefaults:
+  overridePublisher: no
 
 # Webcam ingest + normalization. A browser WHIP-publishes its camera to
 # cam{N} (see neat_insight/mediasrc.py webcam_ingest_path_name), NOT to src{N}. A
@@ -65,6 +81,10 @@ paths:
   # without a full shell, so `-g 30 -keyint_min 30` forces a keyframe every second
   # rather than `-force_key_frames "expr:..."`. -profile:v baseline matches what
   # the browser emits and what the decoder accepts.
+  #
+  # The ?publisher= query on the output marks src{N} as Insight's own stream, not
+  # an external publisher; Insight swaps in its per-run tag at launch
+  # (neat_insight/mediamtx.py render_config).
   #
   # -r 30 is required, not cosmetic: a WebRTC webcam has no fixed framerate, so
   # libx264 cannot compute an H.264 level and emits the maximum (6.2), which the
@@ -90,7 +110,7 @@ paths:
       -i rtsp://127.0.0.1:8554/$MTX_PATH -an
       -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
       -pix_fmt yuv420p -r 30 -g 30 -keyint_min 30
-      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1?publisher=insight-unrendered
     runOnReadyRestart: yes
 
   src1: {}
