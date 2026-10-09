@@ -8,9 +8,7 @@ import {
   boardIndicator,
   cameraSetupRows,
   cameraDeviceId,
-  cameraSelectable,
   cameraSubtitle,
-  noUsableCameraNotice,
   cameraSummaryLine,
   cameraTierPill,
   CONNECTED_PILL,
@@ -270,8 +268,7 @@ test('a selection that disappears after refresh falls back instead of clearing',
 
 test('the selected camera id survives refreshes and removals', () => {
   assert.equal(resolveCameraId(snapshot, null), imx477.id)
-  // An Unsupported camera cannot be selected, so a stale selection of one falls back to the first usable camera.
-  assert.equal(resolveCameraId(snapshot, usb.id), imx477.id)
+  assert.equal(resolveCameraId(snapshot, usb.id), usb.id, 'an Unsupported camera opens like any other')
   assert.equal(resolveCameraId(snapshot, 'mipi:gone'), 'mipi:gone', 'removed cameras stay selected so the UI can explain')
   assert.equal(resolveCameraId(snapshot, 'usb:unknown'), imx477.id)
   assert.equal(resolveCameraId({ items: [] }, 'usb:unknown'), null)
@@ -503,27 +500,9 @@ test('stepwise and continuous format ranges keep their bounds and steps visible'
   assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
-test('when no detected camera can be used, the panel says which and why', () => {
-  assert.equal(noUsableCameraNotice([usb, imx477]), null, 'an Available camera means something can be selected')
-  assert.equal(noUsableCameraNotice([]), null)
-  assert.deepEqual(noUsableCameraNotice([usb]), {
-    title: 'HD Webcam C270 cannot be used with Neat',
-    reasons: [{ reason: USB_REASON, names: ['HD Webcam C270'] }],
-    hint: 'Connect a MIPI camera (power the board off first), then Refresh.'
-  })
-  const both = noUsableCameraNotice([usb, imx568])
-  assert.equal(both.title, 'No camera on this board can be used with Neat')
-  // In list order: MIPI cameras come before USB ones.
-  assert.deepEqual(both.reasons.map((r) => r.reason), [NOT_IN_OVERLAYS, USB_REASON])
-  assert.match(both.hint, /camera overlay/)
-})
-
-test('every camera row shows its verdict pill, and only Available cameras can be selected', () => {
+test('every camera row shows its verdict pill beside Connected', () => {
   assert.deepEqual(cameraTierPill(imx477), { label: 'Available', tone: 'ok' })
   assert.deepEqual(cameraTierPill(imx568), { label: 'Unsupported', tone: 'periph-danger' })
-  assert.equal(cameraSelectable(imx477), true)
-  assert.equal(cameraSelectable(imx568), false)
-  assert.equal(cameraSelectable(usb), false)
   assert.deepEqual(CONNECTED_PILL, { label: 'Connected', tone: '' })
   assert.deepEqual(cameraTierPill(usb), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill({ ...imx477, support: support('unsupported', NO_BOARD) }), { label: 'Unsupported', tone: 'periph-danger' })
@@ -538,7 +517,7 @@ test('the detail pane shows one explanation line, chosen by priority', () => {
   // through untouched and never becomes a sentence; a preview that cannot open the camera says so.
   assert.equal(cameraSummaryLine(inUse), '')
   assert.equal(cameraSummaryLine({ ...imx477, availability: imx568.availability }), '')
-  assert.equal(cameraSummaryLine(usb), '', 'an unsupported USB camera gets no sentence; its pill says it')
+  assert.equal(cameraSummaryLine(usb), USB_REASON, 'the panel carries no pill, so it says why')
   assert.equal(cameraSummaryLine({}), '')
 })
 
