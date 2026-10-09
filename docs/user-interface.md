@@ -37,6 +37,8 @@ Supported video formats include common container formats such as `mp4`, `mov`, `
 
 After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
+The library is shown as folders. Folder rows open the folder and list its subfolders and videos; each folder row shows how many streamable files it holds. Use **Back** to return to the parent folder, **Media Root** to jump to the top of the library, and the breadcrumb to see where you are or jump to any level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
+
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
 Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
@@ -61,7 +63,7 @@ Insight selects codec and transport options from the assigned media:
 
 The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
 
-You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
+Select the file field of a source row to open **Source for srcN**. Its **Video file** tab has the same folder browser as Media Sources; pick a video, then **Assign**, or **Clear** to unassign. Its **Camera** tab assigns one of your cameras instead, and its **Stream URL** tab pulls a network stream (see below). You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
@@ -73,19 +75,9 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
 
-1. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. The browser asks for camera permission; Insight cannot grant it for you.
-2. After you allow access, your cameras appear in each source dropdown under a **Cameras** group, above your video files:
-
-   ```text
-   Not assigned
-   Cameras
-     Integrated Camera
-     USB Camera
-   Video files
-     catalog/parking_garage_cars/parking_garage_cars_1080p.mp4
-   ```
-
-3. Select a camera for a source slot, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
+1. Select the file field of a source slot and switch the **Source for srcN** dialog to **Camera**.
+2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
+3. Select a camera and **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
@@ -106,6 +98,49 @@ If starting a webcam fails, the message names the cause:
 
 Browsers only allow camera access on pages they consider secure. If **Enable camera access** does nothing, open Insight over HTTPS and trust its certificate first; see [Install and Upgrade](install-upgrade.md).
 
+### External streams
+
+Any RTSP, WebRTC (WHIP) or SRT tool can publish directly to a source slot, for example ffmpeg capturing a camera on the host:
+
+```bash
+ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p \
+  -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2
+```
+
+The SDK container maps the RTSP port (8554) and the WHIP port (`webrtcWhip`, 8889); SRT publishers must run inside the container or on a DevKit-native install.
+
+Insight shows such a slot as **External** within about two seconds: the row is read-only, the chip lists protocol, publisher address and, once probed, resolution and frame rate. The codec cell turns amber with a warning when the stream uses a codec Neat pipelines cannot decode (anything other than H.264, H.265 or MJPEG). Copy URL stays available; applications keep reading `rtsp://…/srcN` as usual, regardless of the publish protocol.
+
+Whoever publishes first holds the slot. Starting a file on an External slot, or publishing to a slot Insight is already streaming, is rejected instead of silently replacing the running stream. **Take over** — the square stop glyph in the External row — disconnects the external publisher (and its readers) after a confirmation; the slot returns to Idle with its previous file assignment. A publisher that reconnects automatically may re-take an idle slot, so stop the external tool first when you want to reuse the slot for a file.
+
+The Source Preview panel can show an External slot live at the source's own frame rate; the preview is **off by default** (remembered per browser) and decodes nothing while off. After selecting another external slot, a "Connecting" indicator is shown until the first frame of the new stream arrives. That wait is mostly the time until the publisher's next keyframe, so give streams you intend to preview a keyframe interval of about a second (`-g 30` at 30 fps in the example above; encoder defaults are often several seconds). Inside the SDK container, publishers and readers outside the container appear with the Docker bridge address rather than their real IP.
+
+Auto Assign, Bulk Start, Stop All and Reset never touch an External stream; the result message lists which slots were skipped. Reset still clears the stored assignment of every slot, External ones included.
+
+![Insight Streaming Sources view with two External slots, one of them flagged for an unsupported codec.](images/insight-external-source.png)
+
+External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
+
+### Pulled streams
+
+A stream that already exists on the network, typically an IP camera, can be pulled into a slot. Click the file button of an Idle slot, switch the dialog to **Stream URL**, enter the camera's `rtsp://` or `rtsps://` URL and, if the camera needs them, its username and password, then press **Pull**. Insight configures mediamtx to pull the stream and forward it unchanged to `rtsp://…:8554/srcN`; nothing is decoded or re-encoded, and applications read the slot like any other.
+
+The row shows **Pulled** in teal once frames arrive, with the source host, resolution and frame rate in the chip and the codec in the codec cell. Before that it shows **Connecting…**. If the camera cannot be reached the row turns amber, **Unreachable**, with the reason; mediamtx keeps retrying and the row returns to Pulled by itself when the camera is back. If the camera rejects the username or password when you press **Pull**, the dialog shows the message and the slot is unchanged. The row shows **Auth failed** in red only if the camera starts rejecting the credentials later, for example after it was unreachable at first, and stays there: press **Stop** and pull again with the right credentials. A password is only ever kept in memory; Insight never writes it to disk, shows it again, or logs it, and a pulled slot is not restored after Insight restarts.
+
+**Stop** on the row releases the pull and the slot returns to Idle with its previous file assignment. Assigning a file, starting, or taking over a pulled slot is rejected. Auto Assign, Bulk Start, Stop All and Reset skip pulled slots like External ones and list them in the result message.
+
+The Source Preview panel works for pulled slots exactly like for External ones (preview off by default). An `rtsps://` camera with a self-signed certificate is reported as unreachable with a certificate message in this release.
+
+### Frame rate
+
+The Source Preview panel shows an FPS control under the file name of the selected source, and the row notes the chosen rate next to the file once it is set. When you assign a video, the control shows the frame rate detected in the file. Use the `−` and `+` buttons to change it in steps of 5, or type a whole number between 1 and 240.
+
+When the value differs from the file's native frame rate, starting the source first creates a *rendition*: a copy of the video re-encoded at the requested constant frame rate with the same encoding rules as the Insight media catalog (H.264 baseline or H.265 main, `yuv420p`, no B-frames, one reference frame, a closed one-second GOP). The row shows **Encoding** with a progress bar in the preview panel, then goes **Live** streaming the rendition. Renditions are stored under `.renditions/` in the media directory and recorded in `renditions.json`, so the next start — including after restarting Insight — reuses them instead of encoding again. Replacing a source file with different content invalidates its old renditions. Deleting a source file removes its renditions. Byte-identical files (for example a copy under another name) share one rendition, which stays until the last of them is deleted or replaced. If encoding fails, the source file is untouched and no partial rendition is kept.
+
+MJPEG sources cannot change frame rate; the control is disabled for them.
+
+**Clear renditions** in the Streaming Sources toolbar deletes every cached rendition (except ones a playing source is using); they are re-created on the next start.
+
 ## Video Viewer
 
 The Video Viewer displays low-latency WebRTC streams from the video forwarder.
@@ -122,6 +157,60 @@ For example, channel `0` uses video UDP `9000` and metadata UDP `9100`; channel 
 If the sender runs on a DevKit or another external machine, use the mapped `videoUDP` and `metadataUDP` host port ranges from `neat --json`. The channel math is the same, but the starting ports may be different.
 
 The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and synchronization buffering. Metadata timestamps use source PTS milliseconds and are omitted when unavailable.
+
+### Global and channel settings
+
+Viewer settings exist in two scopes. The settings button of the viewer page opens the global settings. The button at the right end of a tile's status bar opens the settings of that channel; the dialog's title names the channel.
+
+A channel follows the global settings. To give a channel its own value, open its settings, switch on **Own value** next to the setting, set the value and select **Save**. A value that a channel sets itself takes precedence over the global value. Switching **Own value** off again makes the channel follow the global value. Class colors work per entry: the channel's dialog shows the global entries as **from global**, and **Override** copies one into an entry of the channel.
+
+The global dialog lists, under each setting, the channels that set their own value. **Use global value** removes a channel's own value at once, without **Save**. **Reset all channels to the global settings…** removes the own values of every channel; regions of interest are kept.
+
+Settings are stored in the browser. They are not shared between browsers or machines.
+
+### Metadata colors
+
+Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when more than 20 identities need a color at once: classes across all channels, or tracks or poses on one channel. Each metadata type defines what identity means:
+
+| Metadata type | Colored by | Parts that share the color |
+|---|---|---|
+| `object-detection` | class `label` | box, label, confidence |
+| `segmentation` | class `label` | mask, outline, box, label |
+| `classification` | class `label` | each label line |
+| `tracking` | track `id` | box, label, history trail |
+| `pose-estimation` | pose `id` | keypoints, skeleton, keypoint names, box, label |
+
+A color is allocated the first time an identity appears. Class labels share one allocation across all channels, so `bicycle` has the same color on every tile and `person` looks the same in detection, segmentation and classification. Overrides are per metadata type: an object-detection entry for `person` does not recolor `person` in segmentation or classification. Tracks and poses are allocated per channel, because an `id` is only unique within one stream; their colors start over when the channel reconnects. An identity keeps its color while it is on screen on any channel. Once it has been gone for more than 5 seconds, its color can be handed to a new identity. When more identities are on screen than the palette holds, new identities share the color of the one drawn longest ago rather than taking a color from anything visible.
+
+Tracks and poses without an `id` draw in one neutral color. Senders that want per-person or per-track colors must include `id`.
+
+Object detection and segmentation settings hold optional per-class overrides. An entry for a label fixes that class's color and line style. An entry labelled `default` fixes the color of every class without its own entry. Without any entries, all classes are colored automatically.
+
+### Late metadata
+
+An overlay is drawn only if its metadata has reached the browser by the time the video frame is shown. The viewer holds video back by the video sync buffer (350 ms by default) to give metadata that time. An application that sends metadata later than the buffer allows loses its overlays, even though video and message rate look healthy.
+
+When at least half of the recent messages arrive after their frame, the tile shows a **Metadata late** chip in its status bar. Select it to see:
+
+| Value | Meaning |
+|---|---|
+| Arrives after its frame | How long after the frame was shown its metadata arrived, as measured by this browser. |
+| Video sync buffer | The buffer in effect for this channel. |
+| Late messages | Share of recent messages that arrived too late to be drawn. |
+
+The panel offers two ways to raise the buffer to a value that covers the measured lateness:
+
+| Button | Effect |
+|---|---|
+| **Raise for this channel to N ms** | Sets the video sync buffer of this channel only. Other channels keep their setting. |
+| **Raise globally to N ms** | Sets the global video sync buffer. It applies to every channel that has no value of its own. If this channel had its own value, that value is removed. |
+| **Use global value (V ms)** | Shown instead of **Raise globally to N ms** when the global video sync buffer already covers the measured lateness. Removes this channel's own value; the global value is not changed. |
+
+The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself, and the panel never lowers the global buffer. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
+
+The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner. If the lateness could not be measured, because the metadata does not belong to the frames that were shown, the panel says so and offers no button either.
+
+Applications that forward the encoded input stream unchanged and send metadata only after decode and inference are the typical case, because their video does not wait for inference.
 
 Use the Video Viewer to confirm:
 

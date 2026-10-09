@@ -78,12 +78,13 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Use JSON request bodies for POST endpoints except `/api/upload/media`, which uses multipart form field `file`.
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
-- Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
+- Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments and cached FPS renditions for deleted files, including files inside a deleted directory.
 - Do not configure DevKit IP through neat-insight UI or API. Remote devkit configuration is environment-driven.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
 - Use `neat-insight-metadata-test` or `neat_insight/tools/multisrc-harness.sh` when vf metadata/DataChannel behavior needs reproducible synthetic traffic.
+- Overlay colors are assigned per identity from one palette (`webrtc/static/js/metadata-colors.js`): class label for detection, segmentation and classification, `id` for tracking and pose. See `docs/user-interface.md#metadata-colors` before judging colors in a screenshot.
 - Use the SDK port map before instructing DevKit-side apps or external tools to connect to Insight. Default ports only apply when the SDK was able to publish the defaults.
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 - Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
@@ -91,6 +92,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
+- A source with `state: "external"` is held by a publisher Insight did not start. Do not call start/assign/stop on it (409); call `/api/mediasrc/takeover` only when the user explicitly wants that stream disconnected. Bulk endpoints leave the external stream alone and report such slots in `skipped_external`; `reset` still clears the stored assignment of every slot.
+- A source with `state: "pulled"` is a network stream Insight pulls into the slot (session-only). Do not call start/assign/prepare/takeover on it (409); call stop only when the user wants the pull released. Bulk endpoints skip such slots and report them in `skipped_pulled`. Never echo the URL a user gave for a pull with its credentials; the API never returns them.
 
 ## Health And Metrics
 
@@ -152,6 +155,9 @@ capture.
 | `expired_metadata` | Messages that aged past retention without matching. |
 | `evicted_video` | Frame mappings retired inside retention, by capacity or a source restart, whether or not they matched metadata. |
 | `evicted_metadata` | Messages dropped inside retention, by capacity or a source restart. |
+| `video_first_lag_recent_median_ms` | Median time between a frame's arrival and its metadata's arrival, over the most recent video-first matches. Omitted without samples. |
+| `video_first_lag_recent_max_ms` | Largest such lag among the same matches. Omitted without samples. |
+| `video_first_lag_samples` | Number of matches the two lag values are based on, at most 256. |
 | `messages_forwarded` | Delivered to a browser DataChannel. Not a correlation result. |
 | `dropped_no_data_channel` | Reached forwarding, but no browser peer accepted it. |
 | `frame_id` | Latest producer frame identifier. Diagnostics only; nothing correlates on it. |
@@ -193,13 +199,19 @@ Read them in this order:
 - `evicted_metadata` climbing: unmatched metadata reached the capacity bound or
   was cleared by a source restart.
 - `pending_metadata` high with matches still occurring: ordinary arrival skew.
+- `matched_video_first` climbing with `video_first_lag_recent_median_ms` above
+  the viewer's video sync buffer (350 ms by default): correlation works, but the
+  browser has already shown each frame when its metadata arrives. Overlays are
+  missing or flicker. Confirm with `metadata_late` in `/api/egress/stats`, then
+  raise the video sync buffer for the channel or make the producer send sooner.
 - `matched_*` climbing but `messages_forwarded` flat: correlation works. Inspect
   the DataChannel, the viewer, and the browser cache instead.
 
 Two properties to respect when reading:
 
 - Only `pending_video` and `pending_metadata` are instantaneous depths;
-  everything else is cumulative. Sample twice over a known interval and compare
+  the `video_first_lag_*` fields describe the most recent matches; everything
+  else is cumulative. Sample twice over a known interval and compare
   the deltas, or a long-running channel looks broken from its history alone.
 - Retention only binds while arrivals fit in the correlator's capacity. At the
   ~100 messages per second measured on a DevKit, capacity holds ~2.5 s, so a
@@ -227,7 +239,18 @@ Browser reports also include `inbound_rtp.average_jitter_buffer_delay_ms`, `inbo
 
 `synchronization.timestamped_metadata_pending` counts queued messages, including
 each metadata type for a shared frame. Both pending counts and the expiry/eviction
-counters use messages; `timestamp_matches` counts matched video-frame callbacks.
+counters use messages, and so does `metadata_late`; `timestamp_matches` counts
+matched video-frame callbacks.
+
+The `synchronization` object also reports late metadata:
+
+| Field | Meaning |
+| --- | --- |
+| `metadata_late` | Cumulative count of messages that arrived after their frame had been presented. The browser discards them. |
+| `metadata_lateness_recent_median_ms` | Median time by which those messages missed their frame, over the last 5 s of presented frames. Omitted without samples. |
+| `metadata_lateness_recent_max_ms` | Largest such time in the same window. Omitted without samples. |
+
+`metadata_late` climbing means the video sync buffer is smaller than the producer's metadata lag. It is not a capacity or loss problem: `metadata_evicted` stays flat. The buffer needed is roughly `video_sync_buffer_ms` plus the lateness. These counters only advance while the viewer tab is visible.
 
 Examples:
 
@@ -282,7 +305,7 @@ neat-insight-metadata-test --count 4 --types object-detection,classification --f
 neat_insight/tools/multisrc-harness.sh start --count 16 --meta-types object-detection,segmentation
 ```
 
-The metadata sender targets UDP `9100+channel` by default and emits JSON compatible with Insight's metadata overlays. It supports `object-detection`, `classification`, `pose-estimation`, and `segmentation`.
+The metadata sender targets UDP `9100+channel` by default and emits JSON compatible with Insight's metadata overlays. It supports `object-detection`, `classification`, `pose-estimation`, `segmentation`, and `tracking`, and sends several identities per type so color assignment can be checked.
 
 ## Segmentation Metadata
 
@@ -303,9 +326,9 @@ Dropped segments warn once per channel and id in the browser console. Check ther
 
 | Method | Path | Request | Response |
 | --- | --- | --- | --- |
-| `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. |
+| `GET` | `/api/media-files` | None | Recursive folder tree under the media directory; hidden files and macOS archive metadata are omitted. File nodes carry `streamable` (accepted by the media-source streamer), folder nodes carry `streamable_count`; the UI hides files with `streamable: false`. |
 | `POST` | `/api/upload/media` | Multipart form field `file` | Streaming `text/plain` progress while saving a file or extracting `zip`, `tar`, `gz`, or `tar.gz` archives. |
-| `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments that point at deleted files. |
+| `POST` | `/api/delete-media` | JSON `{"path": "relative/path"}` | `{"message": "Deleted successfully"}`; clears media-source assignments and cached FPS renditions for deleted files (directories included). |
 | `POST` | `/api/media-info` | JSON `{"path": "relative/path"}` | File size plus image dimensions for JPG/PNG or video track metadata from ffprobe, including detected codec when available. |
 | `GET` | `/api/media-preview/mjpeg?path=<path>` | Query string | Multipart MJPEG preview for MJPEG media files that browsers cannot preview directly. |
 | `GET` | `/media/<path:filename>` | Relative media path | Raw media file content for preview or download. |
@@ -351,7 +374,7 @@ For multi-stream testing, import multiple files, then use `/api/mediasrc/auto-as
 
 ## Media Sources
 
-Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state`, selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`.
+Media sources are indexed source slots. Each source object includes an `index`, an assigned relative `file`, playback `state` (`playing`, `stopped`, `external` or `pulled`), selected `transport`, detected `codec`, `allowed_transports`, and generated stream `urls`. Each source also carries `readers` (current mediamtx readers) and, while external, an `external` object with protocol, address, since, codec_supported, width, height, fps and bitrate_bps; while pulled, a `pull` object with status (`connecting`, `live`, `unreachable`, `auth_failed`), scheme, host, path, error, since, codec_supported, width, height, fps and bitrate_bps.
 
 Codec and transport are derived from the assigned media:
 
@@ -363,15 +386,21 @@ Codec and transport are derived from the assigned media:
 | --- | --- | --- | --- |
 | `GET` | `/api/mediasrc/videos` | None | Return sorted relative media paths accepted by the media-source streamer. |
 | `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. |
-| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp"}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. |
-| `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. |
-| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. |
+| `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp", "fps": 15}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. `fps` (whole number 1–240, or null for the source rate) selects the output frame rate; changing `file` without `fps` resets it. Returns 409 for an external slot. |
+| `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. Slots whose file changes lose their `fps` override. |
+| `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot, or if the slot was stopped, reassigned, reset or unassigned while its FPS rendition was being prepared (start it again). |
+| `POST` | `/api/mediasrc/prepare` | JSON `{"index": 1}` | Create or reuse the FPS rendition `start` will stream when the slot's `fps` differs from the media's native rate; streams `text/plain` progress ending in `Rendition ready:`, `Reusing rendition:`, `Source frame rate matches`, or `Error:`. `start` does the same silently when `prepare` is skipped. |
+| `GET` | `/api/mediasrc/renditions` | None | Return `{"count": int, "bytes": int}` for all currently stored FPS renditions. |
+| `POST` | `/api/mediasrc/renditions/clear` | None | Delete every cached FPS rendition except one a playing source is currently streaming; returns `{"removed": int, "freed_bytes": int, "kept": [rel paths]}`. |
 | `POST` | `/api/mediasrc/start-bulk` | JSON `{"count": 4}` | Start the first `count` assigned sources in index order and report `started`, `already_running`, and `errors`. |
-| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. |
+| `POST` | `/api/mediasrc/stop` | JSON `{"index": 1}` | Stop one source and persist `stopped`. Returns 409 for an external slot that carries no Insight stream. |
 | `POST` | `/api/mediasrc/stop-all` | None | Stop every source and return how many were previously playing. |
-| `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments. |
+| `POST` | `/api/mediasrc/takeover` | JSON `{"index": 2}` | Disconnect the external publisher holding a slot (409 when the slot is not external, 502 when the mediamtx API is unreachable). |
+| `POST` | `/api/mediasrc/pull` | JSON `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` | Pull an existing RTSP/RTSPS stream into the slot (mediamtx forwards it unchanged). 400 with `reason: "auth_failed"` when the camera rejects the credentials, 409 when the slot is streaming, external or pulled, 502 when mediamtx refuses or cannot be reached while configuring the slot. `stop` releases it. |
+| `POST` | `/api/mediasrc/reset` | None | Stop all sources and rewrite default empty assignments, including for an externally held slot; the external stream keeps running and its slot is listed in `skipped_external`. |
 | `GET` | `/stream/http/src<int:index>.mjpg` | None | Active HTTP multipart MJPEG stream for an HTTP/MJPEG source. |
 | `GET` | `/stream/http/src<int:index>.jpg` | None | One JPEG snapshot from an active HTTP/MJPEG source. |
+| `GET` | `/stream/preview/src<int:index>.mjpg` | None | Multipart MJPEG preview of any live slot at the source frame rate. Max 4 concurrent (429). |
 
 Common workflow:
 
@@ -384,6 +413,12 @@ curl -k -H "Content-Type: application/json" \
   -d '{"index":1}' \
   https://127.0.0.1:9900/api/mediasrc/start
 curl -k https://127.0.0.1:9900/api/mediasrc
+```
+
+```bash
+curl -k -H "Content-Type: application/json" \
+  -d '{"index":3,"url":"rtsp://192.168.1.10:554/stream1","username":"admin","password":"secret"}' \
+  https://127.0.0.1:9900/api/mediasrc/pull
 ```
 
 If the consumer runs outside the SDK container, build RTSP URLs from the SDK port map rather than using the container-local default. For source `src1`, use:
@@ -419,5 +454,7 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `502` for unreachable or unreadable remote devkit build information.
 - `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
 - `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
+- `503` from `/api/mediasrc/pull` when the mediamtx control API was disabled at launch.
+- `502` from `/api/mediasrc/pull` when mediamtx refuses or cannot be reached while configuring the slot.
 
 When automating, check HTTP status before trusting the payload, and preserve error strings in user-facing diagnostics.

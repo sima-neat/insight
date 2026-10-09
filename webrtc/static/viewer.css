@@ -149,23 +149,35 @@ canvas {
   width: 14px;
   height: 14px;
   display: block;
-  filter: invert(1) brightness(70%);
-  opacity: 0.8;
-  transition: filter 0.2s ease, opacity 0.2s ease;
-}
-
-.channel-menu-button:hover .channel-menu-icon {
-  filter: invert(1) brightness(90%);
+  filter: invert(1);
   opacity: 1;
 }
+
 .channel-menu-button {
-  background: none;
-  border: none;
+  box-sizing: border-box;
+  width: 24px;
+  height: 22px;
+  /* Solid, not translucent: over bright or busy video a see-through surface
+     disappears, and the button is the only way to a channel's settings. */
+  background: #4b525b;
+  border: 1px solid #8a929c;
+  border-radius: 6px;
   padding: 2px;
   margin-left: 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+
+.channel-menu-button:hover {
+  background: #626a74;
+}
+
+.channel-menu-button:focus-visible {
+  outline: 2px solid #ffbe3c;
+  outline-offset: 2px;
 }
 
 .tile-banner-wrapper {
@@ -194,17 +206,197 @@ canvas {
   inset: 0;
   display: grid;
   place-items: center;
-  color: rgba(240, 240, 240, 0.56);
-  font-size: 1.05rem;
   text-align: center;
   pointer-events: none;
   z-index: 2;
+}
+
+/* The notice scales with the tile (cqw needs the tile to be a container, see
+   container-type below), so it stays readable on a page of 48 tiles. */
+.tile-no-video-text {
+  padding: 0.5em 1.1em;
+  border-radius: 8px;
+  background: rgba(120, 126, 134, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-family: var(--viewer-font-sans);
+  font-size: clamp(10px, 4.2cqw, 18px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* A tile that has not shown a frame. One surface lies behind the whole page and
+   each empty tile shows its part of it: the gradients are attached to the
+   viewport, not to the tile. The video element is hidden because its own black
+   background would cover the surface. A playing tile is not touched, so the bars
+   around video of another aspect ratio stay black. */
+.video-tile[data-state="empty"] {
+  background-color: #1b1f24;
+  background-image:
+    radial-gradient(ellipse at 22% 30%, #42546a 0%, transparent 45%),
+    radial-gradient(ellipse at 78% 72%, #55463a 0%, transparent 42%),
+    radial-gradient(ellipse at 60% 20%, #2f3f4a 0%, transparent 38%);
+  background-attachment: fixed;
+}
+
+.video-tile[data-state="empty"] video,
+.video-tile[data-state="empty"] canvas {
+  visibility: hidden;
+}
+
+[data-theme="light"] .video-tile[data-state="empty"] {
+  background-color: #e4e7ea;
+  background-image:
+    radial-gradient(ellipse at 22% 30%, #c3d2e2 0%, transparent 45%),
+    radial-gradient(ellipse at 78% 72%, #e6d6c6 0%, transparent 42%),
+    radial-gradient(ellipse at 60% 20%, #d3dfe6 0%, transparent 38%);
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="light"] .video-tile[data-state="empty"] .tile-no-video-text {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #2a2f36;
+}
+
+/* A stream that stopped keeps its last frame, frosted: recognisable as what was
+   playing, and not mistakable for live video. The frame is scaled up so the blur
+   does not fade out at the tile's edge. Overlays belong to a frame that is no
+   longer current and stay hidden. */
+.video-tile[data-state="stopped"] video {
+  filter: blur(9px) saturate(0.6) brightness(0.75);
+  transform: scale(1.07);
+}
+
+.video-tile[data-state="stopped"] canvas {
+  visibility: hidden;
 }
 
 .layout-presets {
   display: inline-flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.tile-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Lets the panel's max-height be measured against the tile's own height (cqh),
+   since the tile has no intrinsic content size of its own to lose. */
+.video-tile {
+  container-type: size;
+}
+
+.metadata-late-notice {
+  flex: 0 0 auto;
+  font-family: var(--viewer-font-sans);
+}
+
+.metadata-late-chip,
+.metadata-late-panel {
+  background: rgba(40, 28, 0, 0.92);
+  border: 1px solid rgba(255, 190, 60, 0.7);
+  color: #ffd98a;
+}
+
+.metadata-late-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.metadata-late-chip:focus-visible,
+.metadata-late-action:focus-visible {
+  outline: 2px solid #ffbe3c;
+  outline-offset: 2px;
+}
+
+/* Positioned against the banner wrapper, just above it. The tile clips its
+   content, so the panel's height is capped to the tile's and scrolls when a
+   tile in a dense grid is shorter than the panel. */
+.metadata-late-panel {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  box-sizing: border-box;
+  width: min(290px, calc(100% - 16px));
+  max-height: calc(100cqh - 100% - 14px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  z-index: 3;
+}
+
+.metadata-late-title {
+  font-weight: 600;
+}
+
+.metadata-late-values {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  margin: 6px 0 0;
+}
+
+.metadata-late-values dt,
+.metadata-late-values dd {
+  margin: 0;
+}
+
+.metadata-late-values dd {
+  font-weight: 600;
+  text-align: right;
+}
+
+.metadata-late-blocked {
+  margin-top: 6px;
+}
+
+.metadata-late-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.metadata-late-action {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: #ffbe3c;
+  color: #231800;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metadata-late-action--secondary {
+  background: transparent;
+  border: 1px solid #ffbe3c;
+  color: #ffbe3c;
+}
+
+.metadata-late-action-sub {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.85;
 }
 
 .page-size-label {
@@ -269,4 +461,319 @@ canvas {
     margin-right: 0;
     width: 100%;
   }
+}
+
+/* Settings dialog: which scope a value comes from (spec part 3). The dialog's
+   base rules live in css/settings.css, which loads after this file, so the rules
+   that meet one of its rules on the same element carry the higher specificity. */
+
+/* The kind of dialog: this block is the only place where it decides what is
+   displayed. settings-scope.js states the kind once, as data-settings-scope on
+   #viewerSettingsOverlay; without the scope UI (fallback) the attribute is absent
+   and neither kind's elements are displayed. The rules are anchored on the id so
+   that they outweigh every layout rule of the dialog by specificity; no layout
+   rule below may use an id selector. */
+#viewerSettingsOverlay[data-settings-scope="global"] .settings-channel-only,
+#viewerSettingsOverlay[data-settings-scope="channel"] .settings-global-only,
+#viewerSettingsOverlay:not([data-settings-scope]) .settings-channel-only,
+#viewerSettingsOverlay:not([data-settings-scope]) .settings-global-only {
+  display: none;
+}
+
+/* State that depends on data or interaction (an empty note or list, the reset
+   link with no channel scope, the confirmation closed) is the hidden attribute,
+   authoritative anywhere in the dialog. */
+#viewerSettingsOverlay [hidden] {
+  display: none;
+}
+
+/* The dialog keeps its size; the tab content scrolls so the footer stays visible. */
+.settings-popup-modal .settings-popup-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-popup-modal .settings-tab-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.settings-scope-line {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.settings-scope-line,
+.settings-scope-note--info {
+  background: rgba(0, 188, 212, 0.12);
+  border: 1px solid rgba(0, 188, 212, 0.45);
+  color: #b8eef6;
+}
+
+[data-theme="light"] .settings-scope-line,
+[data-theme="light"] .settings-scope-note--info {
+  background: #e3f6fa;
+  border-color: #7fd3e2;
+  color: #0b4f5c;
+}
+
+/* The switch that gives a channel its own value: a real checkbox drawn as a switch. */
+.settings-own-switch {
+  white-space: nowrap;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.8rem;
+  color: #c8c8c8;
+}
+
+.filter-table td.settings-own-switch {
+  padding-left: 4px;
+}
+
+.settings-own-switch label {
+  margin-left: 6px;
+  cursor: pointer;
+}
+
+[data-theme="light"] .settings-own-switch {
+  color: #3a3a3a;
+}
+
+.settings-own-switch .settings-own-switch-input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 28px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid #8a8a8a;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.settings-own-switch .settings-own-switch-input::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c8c8c8;
+  transition: transform 0.15s;
+}
+
+.settings-own-switch .settings-own-switch-input:checked {
+  background: #00bcd4;
+  border-color: #00bcd4;
+}
+
+.settings-own-switch .settings-own-switch-input:checked::before {
+  transform: translateX(12px);
+  background: #ffffff;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input {
+  border-color: #6a6a6a;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input::before {
+  background: #6a6a6a;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input:checked {
+  background: #00838f;
+  border-color: #00838f;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input:checked::before {
+  background: #ffffff;
+}
+
+.settings-own-switch .settings-own-switch-input:focus-visible {
+  outline: 2px solid #4dd0e1;
+  outline-offset: 2px;
+}
+
+[data-theme="light"] .settings-own-switch .settings-own-switch-input:focus-visible {
+  outline-color: #00707f;
+}
+
+/* A locked control (switch off, or track history off) looks disabled; its switch
+   and its note stay as they are. */
+.settings-scope-locked > :not(.settings-own-switch):not(.settings-scope-note) {
+  opacity: 0.45;
+}
+
+.settings-scope-locked input:disabled {
+  cursor: not-allowed;
+}
+
+/* The ROI tab's two settings: each a group in the row, its note below it. */
+.roi-scope-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.roi-scope-setting .settings-own-switch {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The note under a setting: its own row spanning the table, or a line in a group. */
+.filter-table td.settings-scope-note,
+.roi-scope-setting .settings-scope-note {
+  padding: 0 12px 8px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #aaa;
+}
+
+.roi-scope-setting .settings-scope-note {
+  flex-basis: 100%;
+  max-width: 320px;
+  padding: 0;
+}
+
+[data-theme="light"] .filter-table td.settings-scope-note,
+[data-theme="light"] .roi-scope-setting .settings-scope-note {
+  color: #4a4a4a;
+}
+
+.settings-scope-note--info {
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.filter-table td.settings-scope-note .settings-scope-note--info,
+.roi-scope-setting .settings-scope-note .settings-scope-note--info {
+  color: #b8eef6;
+}
+
+[data-theme="light"] .filter-table td.settings-scope-note .settings-scope-note--info,
+[data-theme="light"] .roi-scope-setting .settings-scope-note .settings-scope-note--info {
+  color: #0b4f5c;
+}
+
+.settings-scope-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #4dd0e1;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+[data-theme="light"] .settings-scope-link {
+  color: #00707f;
+}
+
+.settings-scope-link:focus-visible,
+.settings-reset-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Inherited class colour entries: read-only rows above the channel's own. */
+.viewer-object-table .settings-inherited-row td {
+  color: #9a9a9a;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+[data-theme="light"] .viewer-object-table .settings-inherited-row td {
+  color: #5a5a5a;
+}
+
+.settings-inherited-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .settings-inherited-tag {
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.settings-inherited-swatch {
+  display: inline-block;
+  width: 40px;
+  height: 14px;
+  border-radius: 3px;
+  opacity: 0.6;
+  vertical-align: middle;
+}
+
+.viewer-object-table .settings-inherited-row .settings-scope-link {
+  font-size: 0.8rem;
+}
+
+/* The footer: the reset link and its confirmation on the left, Save on the right. */
+.settings-popup-modal .modal-footer {
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-reset {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.85rem;
+}
+
+.settings-reset-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The dialog is a fixed 700px, so the message plus both buttons never fit on one
+   line. Forcing the message to its own full-width row leaves Reset and Cancel
+   together on the row below it, instead of Cancel wrapping alone. */
+.settings-reset-confirm .settings-reset-message {
+  flex-basis: 100%;
+}
+
+.settings-reset-button {
+  padding: 4px 12px;
+  border: 1px solid #8a8a8a;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-reset-button--danger {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
+[data-theme="light"] .settings-reset-button {
+  border-color: #6a6a6a;
+}
+
+[data-theme="light"] .settings-reset-button--danger {
+  border-color: #b91c1c;
+  background: #fee2e2;
+  color: #7f1d1d;
 }

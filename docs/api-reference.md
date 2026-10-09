@@ -43,7 +43,21 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
+To stream at a different frame rate, include `fps` in the assignment and optionally watch the encode:
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare` streams `progress <seconds>/<total>` lines and ends with `Rendition ready: …`, `Reusing rendition: …`, or `Error: …`. `start` performs the same preparation silently when `prepare` is skipped. `GET /api/mediasrc/renditions` reports cached rendition disk usage; `POST /api/mediasrc/renditions/clear` deletes cached renditions not in use by a playing source.
+
 Read `/api/mediasrc` before changing assignments or playback state. Stop active sources before deleting their media when possible.
+
+A slot published to by something other than Insight reports `state: "external"` with an `external` object (protocol, address, since, codec support, dimensions, bit rate); every slot also lists its current `readers`. `start` and `assign` return `409` for such a slot, and so does `stop` once Insight has no stream of its own left on it; `POST /api/mediasrc/takeover` disconnects the publisher. Bulk operations leave the external stream running and list the slots in `skipped_external`; `reset` still clears the stored record of every slot. `GET /stream/preview/src<N>.mjpg` renders an MJPEG preview of any live slot at the source frame rate.
+
+`POST /api/mediasrc/pull` with `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` pulls an existing RTSP/RTSPS stream into a slot; the slot then reports `state: "pulled"` with a `pull` object (`status` of `connecting`, `live`, `unreachable` or `auth_failed`, plus scheme, host, path, error, since, codec support, dimensions, frame rate and bit rate; never the credentials). Rejected credentials answer `400` with `"reason": "auth_failed"`; a slot that is streaming, external, a webcam source or already pulled answers `409`, and `502` means mediamtx refused the configuration or could not be reached. `stop` releases the pull. `assign`, `assign-webcam`, `start`, `prepare` and `takeover` return `409` for a pulled slot, and bulk operations skip it and list it in `skipped_pulled`. Pulls are session-only.
 
 ## Response and streaming conventions
 

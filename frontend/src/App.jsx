@@ -1,4 +1,13 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  codecWarningText, dimensionsText, externalChipText, formatBitrate, isExternal, isPulled, latestOnly, liveFor,
+  previewSrc, protocolLabel, pullChipText, pullSourceText, pullStatusClass, pullStatusLabel,
+  readPreviewEnabled, readersText, writePreviewEnabled,
+} from './externalSource.js'
+import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import FolderBrowser from './media/FolderBrowser.jsx'
+import AssignMediaDialog from './media/AssignMediaDialog.jsx'
+import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 import {
   closeAllWebcamSessions,
@@ -6,6 +15,7 @@ import {
   recordWebcamStopsOnExit,
   createDisconnectWatcher,
   pinH264,
+  camerasFromDevices,
   confirmWebcamPublishing,
   describeWebcamError,
   publishWebcamOffer,
@@ -120,14 +130,6 @@ const ONBOARDING_STEPS = [
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
   }
 ]
-
-function flattenFiles(tree, acc = []) {
-  for (const node of tree || []) {
-    if (node.type === 'file') acc.push(node.path)
-    if (node.type === 'folder') flattenFiles(node.children || [], acc)
-  }
-  return acc
-}
 
 function prettyKey(key) {
   if (key === 'duration_ms') return 'Duration'
@@ -694,6 +696,70 @@ function UploadProgressCard({ progress, className = '' }) {
   )
 }
 
+function FpsStepper({ value, nativeFps, disabled = false, locked = false, title, onCommit, onInvalidChange }) {
+  const effective = value ?? nativeFps ?? null
+  const [draft, setDraft] = useState(effective == null ? '' : String(effective))
+  const [invalid, setInvalid] = useState(false)
+  const inert = disabled || locked
+  const changed = value != null && nativeFps != null && value !== nativeFps
+
+  useEffect(() => {
+    setDraft(effective == null ? '' : String(effective))
+    setInvalid(false)
+    if (onInvalidChange) onInvalidChange(false)
+  }, [effective])
+
+  function markInvalid(next) {
+    setInvalid(next)
+    if (onInvalidChange) onInvalidChange(next)
+  }
+
+  function commit(next) {
+    markInvalid(false)
+    if (next !== effective) onCommit(next)
+  }
+
+  function commitDraft() {
+    if (draft.trim() === '') {
+      setDraft(effective == null ? '' : String(effective))
+      markInvalid(false)
+      return
+    }
+    const parsed = parseFps(draft)
+    if (parsed == null) {
+      setDraft(effective == null ? '' : String(effective))
+      markInvalid(false)
+      return
+    }
+    commit(parsed)
+  }
+
+  const className = ['fps-stepper', changed ? 'changed' : '', invalid ? 'invalid' : '', locked ? 'locked' : ''].filter(Boolean).join(' ')
+  return (
+    <div className={className} title={title} onClick={(e) => e.stopPropagation()}>
+      <button type="button" aria-label="Decrease FPS by 5" disabled={inert || effective == null} onClick={() => commit(stepFps(effective, -1))}>−</button>
+      <span className="fps-field">
+        <input
+          inputMode="numeric"
+          aria-label="Frames per second"
+          aria-invalid={invalid || undefined}
+          placeholder="—"
+          value={draft}
+          disabled={inert}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            markInvalid(e.target.value.trim() !== '' && parseFps(e.target.value) == null)
+          }}
+          onBlur={commitDraft}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+        />
+        <small>fps</small>
+      </span>
+      <button type="button" aria-label="Increase FPS by 5" disabled={inert || effective == null} onClick={() => commit(stepFps(effective, 1))}>+</button>
+    </div>
+  )
+}
+
 export default function App() {
   const initialRoute = routeStateFromLocation()
   const [tab, setTab] = useState(() => {
@@ -707,6 +773,8 @@ export default function App() {
   const [routeWorkspacePath, setRouteWorkspacePath] = useState(() => initialRoute.workspacePath)
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
+  const [mediaFolder, setMediaFolder] = useState('')
+  const mediaFolderRef = useRef('') // so async reloads read the current folder, not a stale closure
   const [sources, setSources] = useState([])
   const [webcamDevices, setWebcamDevices] = useState([])
   // Explicit camera opt-in lives on the Media Sources tab (a camera is a kind
@@ -734,8 +802,29 @@ export default function App() {
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
+  const [assignTarget, setAssignTarget] = useState(null) // slot index while the assign dialog is open
   const [bulkStartCount, setBulkStartCount] = useState('1')
+  const [renditionUsage, setRenditionUsage] = useState({ count: 0, bytes: 0 })
+  const [clearRenditionsOpen, setClearRenditionsOpen] = useState(false)
   const [selectedSource, setSelectedSource] = useState(1)
+  const [previewEnabled, setPreviewEnabled] = useState(() => {
+    try {
+      return readPreviewEnabled(window.localStorage)
+    } catch {
+      return false
+    }
+  })
+  const [previewError, setPreviewError] = useState(false)
+  const [previewToken, setPreviewToken] = useState(() => Date.now())
+  const [loadedPreviewSrc, setLoadedPreviewSrc] = useState(null)
+  const previewImgRef = useRef(null)
+  const pendingFpsCommits = useRef(new Map()) // slot index -> promise of the in-flight FPS assign
+  const [takeoverTarget, setTakeoverTarget] = useState(null)
+  const [takeoverBusy, setTakeoverBusy] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  const [fpsInvalid, setFpsInvalid] = useState({})
+  const [encodeProgress, setEncodeProgress] = useState({})
+  const encodeAbortRef = useRef({})
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(null)
@@ -782,14 +871,16 @@ export default function App() {
   const [error, setError] = useState('')
   const metricEs = useRef(null)
   const youtubeImportAbortRef = useRef(null)
+  const sourcesRef = useRef(sources)
+  const beginSourcesLoad = useRef(null)
+  if (!beginSourcesLoad.current) beginSourcesLoad.current = latestOnly()
+  const sourcePollBusy = useRef(false)
+  sourcesRef.current = sources
 
-  const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
-  const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
-  const filteredFiles = useMemo(() => {
-    const q = mediaFilter.trim().toLowerCase()
-    if (!q) return allFiles
-    return allFiles.filter((f) => f.toLowerCase().includes(q))
-  }, [allFiles, mediaFilter])
+  // Streamable files drive assignment and Bulk Start; the library also lists the rest greyed (issue #113).
+  const allFiles = useMemo(() => streamableFiles(mediaTree), [mediaTree])
+  const allMediaPaths = useMemo(() => allFilePaths(mediaTree), [mediaTree])
+  const videoFiles = allFiles // streamable files only; Bulk Start needs at least one
   const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
   const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
   const catalogSourcesById = useMemo(() => {
@@ -863,6 +954,15 @@ export default function App() {
   // the bulk controls until every slot has settled.
   const anyWebcamBusy = Object.keys(webcamBusy).length > 0
   const bulkHoldTitle = anyWebcamBusy ? 'Waiting for a webcam selection to finish' : undefined
+  const previewInfo = isExternal(currentSource) ? (currentSource.external || {}) : (isPulled(currentSource) ? currentSource.pull : null)
+  const previewImgSrc = previewInfo && (!isPulled(currentSource) || previewInfo.status === 'live')
+    ? previewSrc(currentSource.index, previewEnabled, previewToken, previewInfo.since)
+    : null
+  // Leaving the Streaming tab unmounts the preview <img>, so the cleanup that aborts its
+  // load must be keyed on the tab as well, not on the URL alone.
+  const activePreviewSrc = tab === 'rtsp' ? previewImgSrc : null
+  const previewLoading = Boolean(activePreviewSrc) && !previewError && loadedPreviewSrc !== activePreviewSrc
+  const takeoverSource = takeoverTarget && (sources.find((s) => s.index === takeoverTarget.index) || takeoverTarget)
   const deleteTargetPaths = selectedMediaPaths.length ? selectedMediaPaths : (selectedFile ? [selectedFile] : [])
 
   function selectTab(nextTab, workspacePath = '', options = {}) {
@@ -874,20 +974,56 @@ export default function App() {
   async function loadMedia(forceSelectFirst = false) {
     const data = await fetchJson('/api/media-files')
     setMediaTree(data)
-    const flat = flattenFiles(data)
+    // A folder can vanish between loads (its last file deleted); fall back to the nearest ancestor.
+    const current = mediaFolderRef.current
+    const folder = nearestExistingFolder(data, current)
+    if (folder !== current) {
+      setMediaFolder(folder)
+      setMediaFilter('')
+    }
     if (forceSelectFirst) {
-      setSelectedFile(flat[0] || '')
+      // Prefer something the user can see: the first streamable file in the folder they are in.
+      const here = listFolder(data, folder).files.find((f) => f.streamable)
+      setSelectedFile(here ? here.path : '')
       return
     }
-    if (!selectedFile && flat.length > 0) {
-      setSelectedFile(flat[0])
+    if (!selectedFile) {
+      const flat = streamableFiles(data)
+      if (flat.length > 0) setSelectedFile(flat[0])
     }
   }
 
+  function navigateMediaFolder(path) {
+    setMediaFolder(path)
+    setMediaFilter('') // a scoped search never silently carries over to another folder
+  }
+
+  // Show the folder that holds `path` and select it (imports and uploads land outside the
+  // folder the user is browsing).
+  function revealMediaFile(path) {
+    setMediaFolder(parentPath(path))
+    setMediaFilter('')
+    setSelectedFile(path)
+  }
+
   async function loadSources() {
+    // A poll answered after a newer request (such as the reload that follows a user
+    // action) holds older data and must not overwrite it.
+    const isLatest = beginSourcesLoad.current()
     const data = await fetchJson('/api/mediasrc')
-    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {} })
+    if (!isLatest()) return
+    const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {}, readers: [] })
     setSources(filled)
+    try {
+      await loadRenditionUsage()
+    } catch {
+      // A failed usage refresh must never break source loading.
+    }
+  }
+
+  async function loadRenditionUsage() {
+    const data = await fetchJson('/api/mediasrc/renditions')
+    setRenditionUsage(data)
   }
 
   async function loadViewerUrl() {
@@ -960,6 +1096,10 @@ export default function App() {
       setError(e.message)
     }
   }
+
+  useEffect(() => {
+    mediaFolderRef.current = mediaFolder
+  }, [mediaFolder])
 
   useEffect(() => {
     Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
@@ -1051,12 +1191,12 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedMediaPaths.length) return
-    const available = new Set(allFiles)
+    const available = new Set(allMediaPaths)
     const next = selectedMediaPaths.filter((path) => available.has(path))
     if (next.length !== selectedMediaPaths.length) {
       setSelectedMediaPaths(next)
     }
-  }, [allFiles, selectedMediaPaths])
+  }, [allMediaPaths, selectedMediaPaths])
 
   useEffect(() => {
     if (!selectedCatalogSource) {
@@ -1086,6 +1226,64 @@ export default function App() {
       setCatalogSelectedAssetPaths(next)
     }
   }, [catalogSelectedAssetPaths, typeMatchingCatalogAssets])
+
+  // A preview that failed (e.g. its publisher dropped) gets a fresh start whenever its URL
+  // changes: a replacement publisher yields a new URL, and the image only mounts while
+  // there is no error.
+  useEffect(() => {
+    setPreviewError(false)
+  }, [activePreviewSrc])
+
+  useEffect(() => {
+    if (!activePreviewSrc) return undefined
+    const img = previewImgRef.current
+    return () => {
+      // A browser keeps an mjpeg <img> load running after the element is dropped, so an
+      // unmounted preview would decode forever; clearing src aborts it. The <img> is keyed
+      // on its URL, so every URL change detaches the element captured above (the ref
+      // already points at the replacement, or at null, when this cleanup runs).
+      if (img && !img.isConnected) img.src = ''
+      // Coming back to the tab mounts a new <img> on the same URL; forgetting the loaded
+      // URL brings the connecting indicator back without a second, aborted request.
+      setLoadedPreviewSrc(null)
+    }
+  }, [activePreviewSrc])
+
+  useEffect(() => {
+    if (!activePreviewSrc || previewError) return undefined
+    // A multipart mjpeg <img> fires load unreliably (Chrome only once the stream ends), so
+    // the first decoded frame is detected by the element gaining dimensions. The <img> is
+    // keyed on its URL, so a switch starts from a fresh element with naturalWidth 0.
+    const timer = setInterval(() => {
+      const img = previewImgRef.current
+      if (img && img.naturalWidth > 0) {
+        setLoadedPreviewSrc(activePreviewSrc)
+        clearInterval(timer)
+      }
+    }, 100)
+    return () => clearInterval(timer)
+  }, [activePreviewSrc, previewError])
+
+  useEffect(() => {
+    if (tab !== 'rtsp') return undefined
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      if (sourcesRef.current.some(isExternal)) setNow(Date.now())
+      // One poll at a time: a slow server would otherwise have every response superseded.
+      if (sourcePollBusy.current) return
+      sourcePollBusy.current = true
+      loadSources()
+        .catch((e) => console.warn('Source poll failed:', e.message))
+        .finally(() => { sourcePollBusy.current = false })
+    }
+    tick()
+    const timer = setInterval(tick, 2000)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [tab])
 
   useEffect(() => {
     if (tab !== 'visualizer') return
@@ -1272,7 +1470,7 @@ export default function App() {
       const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved YouTube media to '))
       const savedPath = savedLine ? savedLine.replace(/^Saved YouTube media to\s+/, '').trim() : ''
       await loadMedia()
-      if (savedPath) setSelectedFile(savedPath)
+      if (savedPath) revealMediaFile(savedPath)
       setUploadProgress(null)
       setUploadStatus('Imported YouTube video.')
       setImportDialogOpen(false)
@@ -1343,7 +1541,7 @@ export default function App() {
         if (savedPath) lastSavedPath = savedPath
       }
       await loadMedia()
-      if (lastSavedPath) setSelectedFile(lastSavedPath)
+      if (lastSavedPath) revealMediaFile(lastSavedPath)
       setUploadProgress(null)
       setUploadStatus(`Imported ${assetsToImport.length} catalog asset(s).`)
       setImportDialogOpen(false)
@@ -1431,6 +1629,8 @@ export default function App() {
       }
 
       await loadMedia()
+      // Uploads always land at the top of the library, so show it if we are browsing elsewhere.
+      if (mediaFolderRef.current) navigateMediaFolder('')
       if (!failed.length) {
         setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
@@ -1541,6 +1741,30 @@ export default function App() {
     }
   }
 
+  // A per-source action can be refused, e.g. with 409 when an external publisher took the
+  // slot since the last poll: show the reason and resync the list.
+  async function sourceAction(run) {
+    try {
+      await run()
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+      loadSources().catch(() => {})
+    }
+  }
+
+  // The stepper commits on blur; a Play click in the same motion must wait for that assign and
+  // act on the committed fps, otherwise it skips the prepare step and races /assign on the server.
+  function commitFps(index, fps) {
+    const commit = updateSource(index, { fps })
+      .then(() => ({ ok: true, fps }), () => ({ ok: false })) // updateSource already showed the error
+      .finally(() => { if (pendingFpsCommits.current.get(index) === commit) pendingFpsCommits.current.delete(index) })
+    pendingFpsCommits.current.set(index, commit)
+    return commit
+  }
+
+  // Rejects when the assign is refused, so a caller (commitFps) can tell a committed value from a
+  // rejected one; the list is refreshed either way and the error is shown once, here.
   async function updateSource(index, patch) {
     const src = sources.find((item) => item.index === index) || {}
     const next = {
@@ -1549,24 +1773,136 @@ export default function App() {
       transport: src.transport || 'rtsp',
       ...patch
     }
-    await fetchJson('/api/mediasrc/assign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(next)
-    })
+    try {
+      await fetchJson('/api/mediasrc/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next)
+      })
+    } catch (e) {
+      setError(e.message)
+      loadSources().catch(() => {})
+      throw e
+    }
     await loadSources()
+  }
+
+  function prepareProgressForLine(line, prev) {
+    const progress = /^progress (\d+(?:\.\d+)?)(?:\/(\d+(?:\.\d+)?))?$/.exec(line)
+    if (progress) {
+      const seconds = Number(progress[1])
+      const total = progress[2] ? Number(progress[2]) : null
+      const percent = total ? Math.min(99, Math.floor((seconds / total) * 100)) : null
+      return { ...prev, seconds, total, percent }
+    }
+    const encoding = /^Encoding .+ at (\d+) fps \((.+)\)\.\.\.$/.exec(line)
+    if (encoding) return { ...prev, fps: Number(encoding[1]), encoder: encoding[2], label: `Encoding ${encoding[1]} fps rendition…` }
+    return { ...prev, label: line }
+  }
+
+  async function readPrepareProgress(response, index) {
+    const apply = (line) => setEncodeProgress((prev) => ({ ...prev, [index]: prepareProgressForLine(line, prev[index] || {}) }))
+    if (!response.body) {
+      const text = await response.text()
+      text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach(apply)
+      return text
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    let pending = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      const chunk = decoder.decode(value || new Uint8Array(), { stream: !done })
+      if (chunk) {
+        text += chunk
+        pending += chunk
+        const lines = pending.split(/\r?\n/)
+        pending = lines.pop() || ''
+        lines.map((line) => line.trim()).filter(Boolean).forEach(apply)
+      }
+      if (done) break
+    }
+    if (pending.trim()) apply(pending.trim())
+    return text
+  }
+
+  async function prepareSource(index, fps) {
+    const controller = new AbortController()
+    encodeAbortRef.current[index] = controller
+    setEncodeProgress((prev) => ({ ...prev, [index]: { label: 'Preparing rendition…', percent: null, seconds: 0, total: null } }))
+    try {
+      const response = await fetch('/api/mediasrc/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index }),
+        signal: controller.signal
+      })
+      if (!response.ok) {
+        let message = `Prepare failed (${response.status})`
+        try {
+          const body = await response.json()
+          message = body.error || body.message || message
+        } catch {}
+        throw new Error(message)
+      }
+      const text = await readPrepareProgress(response, index)
+      const errorLine = text.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith('Error:'))
+      if (errorLine) {
+        throw new Error(`Encoding src${index} at ${fps} fps failed. Partial output was removed; the source file is unchanged. ${errorLine.replace(/^Error:\s*/, '')}`)
+      }
+      setEncodeProgress((prev) => ({ ...prev, [index]: { ...(prev[index] || {}), label: 'Starting stream…', percent: 99 } }))
+    } finally {
+      delete encodeAbortRef.current[index]
+    }
+  }
+
+  function cancelPrepare(index) {
+    const controller = encodeAbortRef.current[index]
+    if (controller) controller.abort()
   }
 
   async function startSource(index, { expectType = null } = {}) {
     // expectType lets a webcam confirm say "only start this if it is still a
     // webcam", so a file another tab assigned to the slot between confirm polls
     // is refused (410) rather than started in the webcam's place.
-    await fetchJson('/api/mediasrc/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(expectType ? { index, expect_type: expectType } : { index })
-    })
-    await loadSources()
+    if (expectType === 'webcam') {
+      await fetchJson('/api/mediasrc/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index, expect_type: expectType })
+      })
+      await loadSources()
+      return
+    }
+    const pending = pendingFpsCommits.current.get(index)
+    const src = withCommittedFps(sources.find((s) => s.index === index), pending ? await pending : undefined)
+    if (!src) return // the fps commit failed and already reported; nothing to start
+    try {
+      if (needsRendition(src)) await prepareSource(index, src.fps)
+      await fetchJson('/api/mediasrc/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(expectType ? { index, expect_type: expectType } : { index })
+      })
+    } catch (e) {
+      if (e.name !== 'AbortError') throw e
+      setUploadStatus(`Cancelled encoding for src${index}.`)
+    } finally {
+      // Refresh first so the row goes Encoding -> Live without an Idle flash, but always clear the progress.
+      try {
+        await loadSources()
+      } catch (e) {
+        setError(e.message)
+      } finally {
+        setEncodeProgress((prev) => {
+          if (!(index in prev)) return prev
+          const next = { ...prev }
+          delete next[index]
+          return next
+        })
+      }
+    }
   }
 
   // The per-row Start/Stop buttons for file sources call the two helpers above
@@ -1662,9 +1998,7 @@ export default function App() {
     } catch {
       return
     }
-    const cameras = devices
-      .filter((device) => device.kind === 'videoinput' && device.deviceId)
-      .map((device, i) => ({ deviceId: device.deviceId, label: device.label || `Camera ${i + 1}` }))
+    const cameras = camerasFromDevices(devices)
     setWebcamDevices(cameras)
 
     const validIds = new Set(cameras.map((c) => c.deviceId))
@@ -1730,6 +2064,8 @@ export default function App() {
         })
       }
       await loadSources().catch(() => {})
+      // Reported above; rejecting keeps the assign dialog open to retry.
+      throw e
     } finally {
       setWebcamBusy((prev) => {
         const next = { ...prev }
@@ -1739,6 +2075,8 @@ export default function App() {
     }
   }
 
+  // Returns the assignment's promise: the assign dialog waits on it, and a failed
+  // camera or file assignment rejects (after reporting) so the dialog stays open to retry.
   function handleSourceSelectChange(index, value) {
     if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
       const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
@@ -1748,8 +2086,7 @@ export default function App() {
       // the replacement is rejected because the path already has a publisher.
       const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
       teardownWebcamSession(index)
-      assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
-      return
+      return assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
     }
     const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
     if (webcamAssignments[index]) {
@@ -1763,7 +2100,7 @@ export default function App() {
     // Closing our own publisher above released the camera, so the backend does
     // not need MediaMTX to confirm it before converting the slot to a file —
     // provided we can name the session, so a stale claim cannot hit another's.
-    assignFileToSource(index, value, claim)
+    return assignFileToSource(index, value, claim)
   }
 
   // A file selection is a server write like a camera selection, and just as
@@ -1782,6 +2119,7 @@ export default function App() {
     } catch (e) {
       setError(e.message)
       await loadSources().catch(() => {})
+      throw e
     } finally {
       setWebcamBusy((prev) => {
         const next = { ...prev }
@@ -1951,6 +2289,19 @@ export default function App() {
     await stopWebcamSessionBound(index, webcamSessionsRef.current.get(index))
   }
 
+  // Rejects with the server's message so the dialog can show it inline and stay open.
+  async function pullSource(index, payload) {
+    const data = await fetchJson('/api/mediasrc/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index, ...payload })
+    })
+    await loadSources()
+    // Built from the server's credential-free pull record, never from the typed URL, which may
+    // still carry a password after the first '@' in a userinfo containing a literal '@'.
+    setUploadStatus(`src${index} is pulling from ${pullSourceText(data.pull)}.`)
+  }
+
   async function autoAssignAllSources() {
     try {
       // The backend rewrites every slot to a file source; the browser has to
@@ -1982,6 +2333,10 @@ export default function App() {
       return
     }
     try {
+      // Like Play, wait for any in-flight FPS commit so the server starts the committed rates,
+      // and do nothing if one was refused (the commit already showed its error).
+      const commits = await Promise.all([...pendingFpsCommits.current.values()])
+      if (!allCommitsSucceeded(commits)) return
       const data = await fetchJson('/api/mediasrc/start-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2028,10 +2383,60 @@ export default function App() {
         body: JSON.stringify({ released_webcams: released })
       })
       await loadSources()
-      setSelectedSource(1)
+      selectSource(1)
       setUploadStatus(data.message || 'Reset all assignments.')
     } catch (e) {
       setError(e.message)
+    }
+  }
+
+  async function takeOverSource() {
+    const index = takeoverTarget?.index
+    if (!index) return
+    setTakeoverBusy(true)
+    try {
+      await fetchJson('/api/mediasrc/takeover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index })
+      })
+      setTakeoverTarget(null)
+      await loadSources()
+      setUploadStatus(`Disconnected the external stream on src${index}.`)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setTakeoverBusy(false)
+    }
+  }
+
+  // Selecting a slot and refreshing the preview token in one render keeps a source switch
+  // to a single preview request instead of one aborted and one kept.
+  function selectSource(index) {
+    setSelectedSource(index)
+    setPreviewError(false)
+    setPreviewToken(Date.now())
+  }
+
+  function togglePreview() {
+    const next = !previewEnabled
+    setPreviewEnabled(next)
+    setPreviewError(false)
+    setPreviewToken(Date.now())
+    try {
+      writePreviewEnabled(window.localStorage, next)
+    } catch {}
+  }
+
+  async function clearRenditions() {
+    try {
+      const data = await fetchJson('/api/mediasrc/renditions/clear', { method: 'POST' })
+      setUploadStatus(`Removed ${data.removed} rendition(s), freed ${formatBytes(data.freed_bytes)}.` + (data.kept.length ? ` ${data.kept.length} kept: in use by a playing source.` : ''))
+      await loadSources()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setClearRenditionsOpen(false)
     }
   }
 
@@ -2324,8 +2729,6 @@ export default function App() {
                   <span className="sr-only">Import Media</span>
                 </button>
               </div>
-              <p className="meta-count">{filteredFiles.length} files</p>
-
               <div className="camera-optin">
                 <div className="camera-optin-head">
                   <span className="camera-optin-title">Local cameras</span>
@@ -2354,35 +2757,26 @@ export default function App() {
                 )}
               </div>
 
-              <div className="media-toolbar">
-                <input className="search-input" placeholder="Filter files..." value={mediaFilter} onChange={(e) => setMediaFilter(e.target.value)} />
-              </div>
-
-              <div className="media-list">
-                {filteredFiles.map((path) => {
-                  const checked = selectedMediaPaths.includes(path)
-                  const className = [
-                    'media-row',
-                    path === selectedFile ? 'active' : '',
-                    checked ? 'selected' : ''
-                  ].filter(Boolean).join(' ')
-                  return (
-                    <div key={path} className={className}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelectedMediaPath(path)}
-                        aria-label={`Select ${path} for deletion`}
-                      />
-                      <button type="button" className="media-row-preview" onClick={() => setSelectedFile(path)}>
-                        <span className="media-name">{path}</span>
-                        <span className="media-ext">{path.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                      </button>
-                    </div>
-                  )
-                })}
-                {filteredFiles.length === 0 && <p className="empty">No files match the filter.</p>}
-              </div>
+              <FolderBrowser
+                tree={mediaTree}
+                folder={mediaFolder}
+                onNavigate={navigateMediaFolder}
+                filter={mediaFilter}
+                onFilterChange={setMediaFilter}
+                selectedPath={selectedFile}
+                onSelect={setSelectedFile}
+                showUnsupported
+                fileRowClass={(path) => (selectedMediaPaths.includes(path) ? 'selected' : '')}
+                renderFileLead={(path) => (
+                  <input
+                    type="checkbox"
+                    checked={selectedMediaPaths.includes(path)}
+                    onChange={() => toggleSelectedMediaPath(path)}
+                    aria-label={`Select ${path} for deletion`}
+                  />
+                )}
+                idPrefix="library"
+              />
             </section>
 
             <section className="panel">
@@ -2445,6 +2839,9 @@ export default function App() {
                   <button className="btn-ghost" onClick={resetAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>
                     Reset
                   </button>
+                  <button className="btn-ghost" onClick={() => setClearRenditionsOpen(true)} disabled={!renditionUsage.count} title="Delete cached FPS renditions; they are re-created on the next start">
+                    Clear renditions{renditionUsage.count ? ` (${renditionUsage.count} · ${formatBytes(renditionUsage.bytes)})` : ''}
+                  </button>
                 </div>
               </div>
               <p className="hint">Default RTSP base: <code>{rtspBase}</code></p>
@@ -2456,8 +2853,92 @@ export default function App() {
 
               <div className="sources">
                 {sources.map((src) => (
-                  <div key={src.index} className={src.index === selectedSource ? 'source-row active' : 'source-row'} onClick={() => setSelectedSource(src.index)}>
+                  <div key={src.index} className={['source-row', src.index === selectedSource ? 'active' : '', isExternal(src) ? 'external' : '', isPulled(src) ? `pulled ${pullStatusClass(src.pull)}`.trim() : ''].filter(Boolean).join(' ')} onClick={() => selectSource(src.index)}>
                     {(() => {
+                      if (isPulled(src)) {
+                        const pull = src.pull || {}
+                        const warning = pull.status === 'live' ? codecWarningText(pull, codecLabel(src.codec)) : null
+                        const chip = pullChipText(pull)
+                        return (
+                          <>
+                            <span className="src-label">src{src.index}</span>
+                            <span className={`src-state pulled ${pullStatusClass(pull)}`.trim()}>{pullStatusLabel(pull)}</span>
+                            <span className="pull-chip" title={chip}>{chip}</span>
+                            <span className="codec-lock" title="Pulled streams are forwarded over RTSP">RTSP</span>
+                            <span
+                              className={warning ? 'codec-lock warn' : 'codec-lock'}
+                              title={warning || 'Codec of the pulled stream'}
+                            >
+                              {pull.status === 'live' ? codecLabel(src.codec) : '-'}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
+                            </span>
+                            {/* Holds the FPS column so the actions line up with file-backed rows. */}
+                            <span aria-hidden="true" />
+                            <button
+                              className="icon-action-btn stop"
+                              onClick={(e) => { e.stopPropagation(); stopSource(src.index).catch(reportSourceError) }}
+                              aria-label={`Stop src${src.index}`}
+                              title={`Stop pulling into src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                              </svg>
+                            </button>
+                            <button
+                              className="icon-action-btn copy"
+                              onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
+                              aria-label={`Copy stream URL for src${src.index}`}
+                              title={`Copy stream URL for src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9 9h10v12H9z" />
+                                <path d="M5 3h10v2H7v10H5z" />
+                              </svg>
+                            </button>
+                          </>
+                        )
+                      }
+                      if (isExternal(src)) {
+                        const ext = src.external || {}
+                        const warning = codecWarningText(ext, codecLabel(src.codec))
+                        const chip = externalChipText(ext)
+                        return (
+                          <>
+                            <span className="src-label">src{src.index}</span>
+                            <span className="src-state external">External</span>
+                            <span className="external-chip" title={chip}>{chip}</span>
+                            <span className="codec-lock" title="External streams are read over RTSP">RTSP</span>
+                            <span
+                              className={warning ? 'codec-lock warn' : 'codec-lock'}
+                              title={warning || 'Codec of the external stream'}
+                            >
+                              {codecLabel(src.codec)}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
+                            </span>
+                            {/* Holds the FPS column so the actions line up with file-backed rows. */}
+                            <span aria-hidden="true" />
+                            <button
+                              className="icon-action-btn takeover"
+                              onClick={(e) => { e.stopPropagation(); setTakeoverTarget(src) }}
+                              aria-label={`Take over: disconnect the external publisher on src${src.index}`}
+                              title={`Take over: disconnect the external publisher on src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                              </svg>
+                            </button>
+                            <button
+                              className="icon-action-btn copy"
+                              onClick={(e) => { e.stopPropagation(); copyStreamUrl(src) }}
+                              aria-label={`Copy stream URL for src${src.index}`}
+                              title={`Copy stream URL for src${src.index}`}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M9 9h10v12H9z" />
+                                <path d="M5 3h10v2H7v10H5z" />
+                              </svg>
+                            </button>
+                          </>
+                        )
+                      }
                       const isWebcam = src.type === 'webcam'
                       const webcamAssignment = webcamAssignments[src.index]
                       const isAssigned = isWebcam || Boolean(src.file)
@@ -2472,9 +2953,9 @@ export default function App() {
                       // converting a just-assigned webcam back to a file). Hold
                       // every mutating control on the row, not just the select.
                       const rowBusy = Boolean(webcamBusy[src.index])
-                      const selectValue = isWebcam
-                        ? (webcamAssignment ? `${WEBCAM_OPTION_PREFIX}${webcamAssignment.deviceId}` : '')
-                        : (src.file || '')
+                      const assignLabel = isWebcam
+                        ? (webcamAssignment ? webcamAssignment.label : 'Select a camera')
+                        : (src.file || 'Not assigned')
                       return (
                         <>
                           <span className="src-label">
@@ -2485,38 +2966,28 @@ export default function App() {
                               </span>
                             )}
                           </span>
-                          <span className={src.state === 'playing' ? 'src-state playing' : 'src-state stopped'}>
-                            {src.state === 'playing' ? 'Live' : 'Idle'}
+                          <span className={encodeProgress[src.index] ? 'src-state encoding' : (src.state === 'playing' ? 'src-state playing' : 'src-state stopped')}>
+                            {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
+                          </span>
+                          <span className="src-file-cell">
+                            <button
+                              type="button"
+                              className={src.file || webcamAssignment ? 'source-file-btn' : 'source-file-btn unassigned'}
+                              onClick={(e) => { e.stopPropagation(); selectSource(src.index); setAssignTarget(src.index) }}
+                              disabled={rowBusy || Boolean(encodeProgress[src.index])}
+                              aria-label={`Assign media to src${src.index}`}
+                              title={rowBusy ? 'Waiting for the current change to finish' : assignLabel}
+                              data-testid={`source-file-${src.index}`}
+                            >
+                              {assignLabel}
+                            </button>
+                            {src.fps != null && (
+                              <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
+                            )}
                           </span>
                           <select
-                            value={selectValue}
-                            disabled={rowBusy}
-                            onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
-                          >
-                            <option value="">Not assigned</option>
-                            {/* Grouped so a camera reads differently from a file
-                                at a glance; the selected type shows as a
-                                [CAM]/[VID] badge on the row (per review feedback). */}
-                            {webcamDevices.length > 0 && (
-                              <optgroup label="Cameras">
-                                {webcamDevices.map((device) => (
-                                  <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
-                                    {device.label}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {videoFiles.length > 0 && (
-                              <optgroup label="Video files">
-                                {videoFiles.map((file) => (
-                                  <option key={file} value={file}>{file}</option>
-                                ))}
-                              </optgroup>
-                            )}
-                          </select>
-                          <select
                             value={transportValue}
-                            onChange={(e) => updateSource(src.index, { transport: e.target.value })}
+                            onChange={(e) => updateSource(src.index, { transport: e.target.value }).catch(() => {})}
                             disabled={transportLocked || rowBusy}
                             aria-label={`Transport for src${src.index}`}
                             title={rowBusy ? 'Waiting for the current change to finish' : (!isAssigned ? 'Assign media before choosing a transport' : (!canStream ? 'Codec could not be detected for this media' : (transportLocked ? 'Transport is determined by the selected media format' : `Transport for src${src.index}`)))}
@@ -2529,13 +3000,18 @@ export default function App() {
                           <span className={isAssigned && canStream ? 'codec-lock' : 'codec-lock empty'} title={isAssigned ? (canStream ? 'Codec is determined by the selected media format' : 'Codec could not be detected for this media') : 'Assign media before selecting a codec'}>
                             {isAssigned ? codecLabel(src.codec) : '-'}
                           </span>
-                          {src.state === 'playing' ? (
+                          {(src.state === 'playing' || encodeProgress[src.index]) ? (
                             <button
                               className="icon-action-btn stop"
-                              onClick={(e) => { e.stopPropagation(); isWebcam ? stopWebcamSource(src.index) : stopSource(src.index).catch(reportSourceError) }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                if (encodeProgress[src.index]) cancelPrepare(src.index)
+                                else if (isWebcam) stopWebcamSource(src.index)
+                                else stopSource(src.index).catch(reportSourceError)
+                              }}
                               disabled={rowBusy}
-                              aria-label={`Stop src${src.index}`}
-                              title={rowBusy ? 'Waiting for the current change to finish' : `Stop src${src.index}`}
+                              aria-label={encodeProgress[src.index] ? `Cancel encoding for src${src.index}` : `Stop src${src.index}`}
+                              title={encodeProgress[src.index] ? `Cancel encoding for src${src.index}` : (rowBusy ? 'Waiting for the current change to finish' : `Stop src${src.index}`)}
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
                                 <rect x="6" y="6" width="12" height="12" rx="1.5" />
@@ -2545,12 +3021,12 @@ export default function App() {
                             <button
                               className="icon-action-btn play"
                               onClick={(e) => { e.stopPropagation(); isWebcam ? startWebcamSource(src.index) : startSource(src.index).catch(reportSourceError) }}
-                              disabled={rowBusy || !canStream || (isWebcam && !webcamAssignment)}
+                              disabled={rowBusy || !canStream || (isWebcam && !webcamAssignment) || Boolean(fpsInvalid[src.index])}
                               aria-label={`Start src${src.index}`}
                               title={
                                 isWebcam
                                   ? (webcamAssignment ? `Start publishing ${webcamAssignment.label}` : 'Select a webcam first')
-                                  : (canStream ? `Start src${src.index}` : 'Codec must be detected before streaming')
+                                  : (!canStream ? 'Codec must be detected before streaming' : (fpsInvalid[src.index] ? 'FPS must be a whole number between 1 and 240' : `Start src${src.index}`))
                               }
                             >
                               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2579,37 +3055,153 @@ export default function App() {
             </section>
 
             <section className="panel">
-              <h2>Source Preview: src{currentSource.index}</h2>
-              <p className="hint">
-                {currentSource.type === 'webcam'
-                  ? `Webcam: ${webcamAssignments[currentSource.index]?.label || 'Not selected'}`
-                  : `File: ${currentSource.file || 'Not assigned'}`}
-              </p>
-              <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
-
-              <div className="preview">
-                {currentSource.type === 'webcam' ? (
-                  webcamPreviewStream ? (
-                    <video
-                      autoPlay
-                      muted
-                      playsInline
-                      ref={(el) => {
-                        if (el && el.srcObject !== webcamPreviewStream) el.srcObject = webcamPreviewStream
-                      }}
-                    />
-                  ) : (
-                    <p>Start this source to preview the live webcam.</p>
+              {(() => {
+                if (!isExternal(currentSource) && !isPulled(currentSource)) {
+                  const info = currentSource
+                  const progress = encodeProgress[info.index]
+                  const panelTransports = Array.isArray(info.allowed_transports) ? info.allowed_transports : (info.file ? ['rtsp'] : [])
+                  const panelCanStream = Boolean(info.file) && panelTransports.length > 0
+                  const effectiveFps = info.fps ?? info.native_fps ?? null
+                  const customFps = info.fps != null && info.native_fps != null && info.fps !== info.native_fps
+                  const streamingRendition = info.state === 'playing' && info.active_file && info.active_file !== info.file
+                  const fileDetail = info.file ? [info.file, info.native_fps != null ? `${info.native_fps} fps` : null].filter(Boolean).join(' · ') : 'Not assigned'
+                  let outputDetail = `${info.transport ? info.transport.toUpperCase() : '-'} / ${codecLabel(info.codec)}`
+                  if (effectiveFps != null) outputDetail += ` · ${effectiveFps} fps`
+                  return (
+                    <>
+                      <h2>Source Preview: src{currentSource.index}</h2>
+                      {currentSource.type === 'webcam' ? (
+                        <>
+                          <p className="hint">Webcam: {webcamAssignments[currentSource.index]?.label || 'Not selected'}</p>
+                          <p className="hint">Output: {currentSource.transport ? currentSource.transport.toUpperCase() : '-'} / {codecLabel(currentSource.codec)}</p>
+                          <div className="preview">
+                            {webcamPreviewStream ? (
+                              <video
+                                autoPlay
+                                muted
+                                playsInline
+                                ref={(el) => {
+                                  if (el && el.srcObject !== webcamPreviewStream) el.srcObject = webcamPreviewStream
+                                }}
+                              />
+                            ) : (
+                              <p>Start this source to preview the live webcam.</p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                      <p className="hint">File: {fileDetail}</p>
+                      <div className="fps-field-row">
+                        <span className="hint">Output frame rate</span>
+                        <FpsStepper
+                          value={info.fps ?? null}
+                          nativeFps={info.native_fps ?? null}
+                          disabled={!info.file || !panelCanStream || info.codec === 'mjpeg'}
+                          locked={info.state === 'playing' || Boolean(progress)}
+                          title={!info.file ? 'Assign media before choosing a frame rate' : (info.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (info.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${info.index} (source ${info.native_fps ?? '?'} fps)`))}
+                          onCommit={(fps) => commitFps(info.index, fps)}
+                          onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[info.index] === bad ? prev : { ...prev, [info.index]: bad }))}
+                        />
+                        <span className="hint muted-text">{info.native_fps != null ? `Native ${info.native_fps} fps. A different rate creates a rendition on start.` : 'A rate other than the native one creates a rendition on start.'}</span>
+                      </div>
+                      <p className="hint">
+                        Output: {outputDetail}
+                        {streamingRendition && <span className="ok-text"> · streaming rendition <code>{info.active_file}</code></span>}
+                        {!streamingRendition && customFps && info.state !== 'playing' && !progress && <span className="muted-text"> (rendition will be created on start)</span>}
+                      </p>
+                      <div className="preview">
+                        <div className="preview-loading" role="status" aria-live="polite">
+                          {progress && (
+                            <>
+                              <div className="upload-progress-track">
+                                <div
+                                  className={Number.isFinite(progress.percent) ? 'upload-progress-bar' : 'upload-progress-bar indeterminate'}
+                                  style={Number.isFinite(progress.percent) ? { width: `${progress.percent}%` } : undefined}
+                                />
+                              </div>
+                              <span>{progress.label}{Number.isFinite(progress.percent) ? ` ${progress.percent}%` : ''}</span>
+                              <span className="muted-text mono">{formatFpsProgress(progress)}{progress.encoder ? ` · ${progress.encoder}` : ''}</span>
+                            </>
+                          )}
+                        </div>
+                        {!progress && info.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(info.file)} alt={info.file} />}
+                        {!progress && info.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${info.file}`} />}
+                        {!progress && info.file && sourcePreviewIsImage && <img src={`/media/${info.file}`} alt={info.file} />}
+                        {!info.file && <p>Assign a media file to preview.</p>}
+                      </div>
+                        </>
+                      )}
+                    </>
                   )
-                ) : (
+                }
+                const pulled = isPulled(currentSource)
+                const ext = pulled ? (currentSource.pull || {}) : (currentSource.external || {})
+                const warning = (!pulled || ext.status === 'live') ? codecWarningText(ext, codecLabel(currentSource.codec)) : null
+                const src = previewImgSrc
+                const badgeClass = pulled ? `src-state pulled preview-badge ${pullStatusClass(ext)}`.trim() : 'src-state external preview-badge'
+                const badgeText = pulled ? pullStatusLabel(ext) : 'External'
+                return (
                   <>
-                    {currentSource.file && sourcePreviewIsMjpeg && <img src={mediaPreviewUrl(currentSource.file)} alt={currentSource.file} />}
-                    {currentSource.file && sourcePreviewIsVideo && <video controls autoPlay muted loop src={`/media/${currentSource.file}`} />}
-                    {currentSource.file && sourcePreviewIsImage && <img src={`/media/${currentSource.file}`} alt={currentSource.file} />}
-                    {!currentSource.file && <p>Assign a media file to preview.</p>}
+                    <div className="panel-topbar">
+                      <div>
+                        <h2>Source Preview: src{currentSource.index} <span className={badgeClass}>{badgeText}</span></h2>
+                        <p className="hint"><code>{currentSource.urls?.rtsp || `${rtspBase}/src${currentSource.index}`}</code></p>
+                      </div>
+                      <button
+                        type="button"
+                        className={previewEnabled ? 'btn-tonal preview-toggle' : 'btn-ghost preview-toggle'}
+                        aria-pressed={previewEnabled}
+                        onClick={togglePreview}
+                      >
+                        {previewEnabled ? 'Preview on' : 'Preview off'}
+                      </button>
+                    </div>
+                    <div className="preview">
+                      <div className="preview-loading" role="status" aria-live="polite">
+                        {previewLoading && (
+                          <>
+                            <div className="upload-progress-track"><div className="upload-progress-bar indeterminate" /></div>
+                            <span>Connecting to src{currentSource.index}...</span>
+                          </>
+                        )}
+                      </div>
+                      {!src && (pulled && ext.status !== 'live'
+                        ? <p>{ext.status === 'auth_failed' ? ext.error : 'Waiting for the camera…'}{ext.status === 'unreachable' && ext.error ? ` (${ext.error})` : ''}</p>
+                        : <p>Preview is off. Nothing is decoded. Turn it on to watch this stream.</p>)}
+                      {src && previewError && (
+                        <p>
+                          Preview unavailable.{' '}
+                          <button type="button" className="btn-ghost" onClick={() => { setPreviewError(false); setPreviewToken(Date.now()) }}>Retry</button>
+                        </p>
+                      )}
+                      {src && !previewError && (
+                        <img
+                          key={src}
+                          ref={previewImgRef}
+                          src={src}
+                          className={previewLoading ? 'loading' : undefined}
+                          alt={`Live preview of src${currentSource.index}`}
+                          onLoad={() => setLoadedPreviewSrc(src)}
+                          onError={() => setPreviewError(true)}
+                        />
+                      )}
+                    </div>
+                    <table className="kv-table">
+                      <tbody>
+                        {pulled
+                          ? <tr><th>Source</th><td><code>{pullSourceText(ext)}</code></td></tr>
+                          : <tr><th>Publisher</th><td>{protocolLabel(ext.protocol)} · {ext.address || '-'}</td></tr>}
+                        {pulled && <tr><th>Status</th><td>{pullStatusLabel(ext)}{ext.error ? <span className={ext.status === 'auth_failed' ? 'pull-error-text' : 'warn-text'}> · {ext.error}</span> : ''}</td></tr>}
+                        <tr><th>Video</th><td>{codecLabel(currentSource.codec)}{dimensionsText(ext) ? ` · ${dimensionsText(ext)}` : ''}{warning && <span className="warn-text"> ⚠ {warning}</span>}</td></tr>
+                        <tr><th>Live for</th><td>{liveFor(ext.since, now)}</td></tr>
+                        <tr><th>Bitrate</th><td>{formatBitrate(ext.bitrate_bps)}</td></tr>
+                        <tr><th>Readers</th><td>{readersText(currentSource.readers)}</td></tr>
+                      </tbody>
+                    </table>
                   </>
-                )}
-              </div>
+                )
+              })()}
             </section>
           </div>
         )}
@@ -3183,11 +3775,36 @@ export default function App() {
         </div>
       )}
 
+      {assignTarget != null && (() => {
+        const target = sources.find((s) => s.index === assignTarget) || {}
+        const targetIsWebcam = target.type === 'webcam'
+        const targetCamera = webcamAssignments[assignTarget]
+        return (
+          <AssignMediaDialog
+            sourceIndex={assignTarget}
+            currentFile={target.file || ''}
+            currentValue={targetIsWebcam ? (targetCamera ? `${WEBCAM_OPTION_PREFIX}${targetCamera.deviceId}` : '') : (target.file || '')}
+            isWebcam={targetIsWebcam}
+            cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label }))}
+            cameraProbing={cameraProbing}
+            cameraError={cameraError}
+            onEnableCameras={enableCameraAccess}
+            tree={mediaTree}
+            // Through the row's select handler, so switching to or away from a camera
+            // closes this tab's publisher and names its session, as the dropdown did.
+            onAssign={(value) => handleSourceSelectChange(assignTarget, value)}
+            onPull={(payload) => pullSource(assignTarget, payload)}
+            onClose={() => setAssignTarget(null)}
+          />
+        )
+      })()}
+
       {bulkStartOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Bulk start streams">
           <div className="modal-card">
             <h3>Bulk Start Streams</h3>
             <p>How many streams do you want to start?</p>
+            <p className="hint">Slots with a custom FPS may take longer to start while renditions are created.</p>
             <div className="bulk-slider-row">
               <input
                 className="bulk-slider"
@@ -3202,6 +3819,34 @@ export default function App() {
             <div className="modal-actions">
               <button onClick={() => setBulkStartOpen(false)}>Cancel</button>
               <button className="btn-tonal" onClick={startSourcesBulk}>Start</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {takeoverSource && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Disconnect external stream">
+          <div className="modal-card">
+            <h3>Disconnect external stream on src{takeoverSource.index}?</h3>
+            <p><code>{externalChipText(takeoverSource.external || {})}</code></p>
+            <p>Readers: {readersText(takeoverSource.readers)}</p>
+            <p>The publisher and all readers will be disconnected. src{takeoverSource.index} becomes Idle and you can assign a file to it.</p>
+            <div className="modal-actions">
+              <button onClick={() => setTakeoverTarget(null)} disabled={takeoverBusy}>Cancel</button>
+              <button className="danger" onClick={takeOverSource} disabled={takeoverBusy}>Disconnect</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clearRenditionsOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Clear cached renditions">
+          <div className="modal-card">
+            <h3>Clear cached renditions</h3>
+            <p>Delete {renditionUsage.count} cached rendition(s) ({formatBytes(renditionUsage.bytes)})? They are re-created on the next start. Renditions in use by a playing source are kept.</p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setClearRenditionsOpen(false)}>Cancel</button>
+              <button className="btn-ghost danger" onClick={clearRenditions}>Clear</button>
             </div>
           </div>
         </div>

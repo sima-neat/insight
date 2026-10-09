@@ -58,8 +58,8 @@ Repeat this for additional files, or upload an archive when you want to seed a l
 Use this workflow to test an application against a real camera instead of a recorded file. The webcam is attached to the computer running your browser, not to the board: the browser publishes it to Insight, which serves it as an ordinary RTSP source your application consumes exactly like a file.
 
 1. Open Insight over HTTPS and confirm the browser trusts its certificate.
-2. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. Allow access when the browser asks; your cameras then appear in the list.
-3. Go to Streaming Sources and pick your camera from the `src1` dropdown, under the **Cameras** group. The row shows a `[CAM]` marker once the camera is selected.
+2. Go to Streaming Sources, select the file field of `src1`, and switch the **Source for src1** dialog to **Camera**.
+3. Select **Enable camera access** and allow access when the browser asks, then pick your camera and **Assign** it. The row shows a `[CAM]` marker once the camera is assigned.
 4. Start `src1` and confirm the slot reports `Live` and the preview shows the camera.
 5. Run your application against the same RTSP URL a file source would use. Insight normalizes the webcam to the same baseline H.264 with regular keyframes a file source produces, so the board's hardware decoder and GStreamer `rtspsrc` consume it with no extra step — no manual `ffmpeg` and no separate path:
    - Inside the SDK container: `rtsp://127.0.0.1:8554/src1`
@@ -80,6 +80,24 @@ When Insight runs inside the SDK, the browser also needs to reach the `webrtcWhi
 6. Use viewer diagnostics to check for stream bottlenecks. The Stats view is a placeholder in this release and is planned to add runtime bottleneck diagnostics in the next release.
 
 When the application runs outside the SDK container, resolve the RTSP, video UDP, and metadata UDP host ports from `neat --json` before launching the test.
+
+## Stream from an external tool
+
+1. Open Streaming Sources and pick a slot that shows Idle.
+2. Publish to it from the host, e.g. `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`.
+3. The slot turns External. Select it and turn the preview on to check the picture; the first frame appears at the publisher's next keyframe, so keep the keyframe interval short (`-g 30` above).
+4. Run the application against the slot's RTSP URL as with any other source.
+5. To reuse the slot for a file, stop the external tool or press Take over.
+
+`sima-ai/tool-mediasources` (`mediasrc.sh`) starts its own MediaMTX on the same RTSP port and numbers streams from `src0`; run it on a different port or use Insight's slots instead of running both.
+
+## Pull an IP camera into a slot
+
+1. Open Streaming Sources and click the file button of a slot that shows Idle.
+2. Switch the dialog to **Stream URL**, enter the camera's RTSP URL (for example `rtsp://192.168.1.10:554/h264Preview_01_main`) and its username and password, then press **Pull**.
+3. The slot shows Connecting…, then Pulled with the codec, resolution and frame rate. Unreachable means the camera did not answer (Insight keeps retrying). If the camera rejects the username or password when you press Pull, the dialog shows the message and the slot is unchanged; Auth failed on the row means the camera started rejecting them later (for example after being unreachable at first): press Stop and pull again.
+4. Run the application against the slot's RTSP URL as with any other source. Only H.264, H.265 and MJPEG cameras can be decoded by Neat pipelines; the codec cell turns amber otherwise.
+5. Press Stop on the row to release the slot.
 
 ## Configure application endpoints from the SDK port map
 

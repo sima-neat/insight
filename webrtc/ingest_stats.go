@@ -186,7 +186,8 @@ type MetadataSnapshot struct {
 }
 
 // MetadataCorrelationSnapshot reports metadata outcomes and retained frame-map
-// lifecycle. The two Pending fields are instantaneous depths; the other six are
+// lifecycle. The two Pending fields are instantaneous depths, the three
+// VideoFirstLag fields describe the most recent matches, and the other six are
 // cumulative. Every timestamped message leaves through exactly one of matched,
 // expired, or evicted, or is still counted in PendingMetadata. Frame mappings
 // remain reusable after a match, so their expiry and eviction are neutral buffer
@@ -200,6 +201,12 @@ type MetadataCorrelationSnapshot struct {
 	ExpiredMetadata      uint64 `json:"expired_metadata"`
 	EvictedVideo         uint64 `json:"evicted_video"`
 	EvictedMetadata      uint64 `json:"evicted_metadata"`
+	// How long after its frame a video-first message reached Insight, over the
+	// most recent matches. A lag above the viewer's video sync buffer means the
+	// browser has already presented the frame when the message arrives.
+	VideoFirstLagRecentMedianMS *float64 `json:"video_first_lag_recent_median_ms,omitempty"`
+	VideoFirstLagRecentMaxMS    *float64 `json:"video_first_lag_recent_max_ms,omitempty"`
+	VideoFirstLagSamples        uint64   `json:"video_first_lag_samples"`
 	// Diagnostics only; no behaviour correlates on it.
 	FrameID json.RawMessage `json:"frame_id,omitempty"`
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  camerasFromDevices,
   closeAllWebcamSessions,
   recordWebcamStopsOnExit,
   sessionIdFromResponse,
@@ -546,4 +547,31 @@ test("recordWebcamStopsOnExit swallows a fetch that throws as the page unloads",
   const sessions = new Map([[1, { sessionId: "sess-1" }]]);
   const fetchRequest = () => { throw new Error("page is going away"); };
   assert.deepEqual(recordWebcamStopsOnExit(sessions, fetchRequest), [1]);
+});
+
+test("camerasFromDevices lists a multi-sensor camera once, under its first name", () => {
+  // As Chrome on Linux reported a laptop's RGB + IR camera and a USB webcam.
+  const devices = [
+    { kind: "audioinput", deviceId: "mic", label: "Microphone" },
+    { kind: "videoinput", deviceId: "hp", groupId: "g1", label: "HP 5MP Camera: HP 5MP Camera" },
+    { kind: "videoinput", deviceId: "hp", groupId: "g1", label: "HP 5MP Camera: HP IR Camera" },
+    { kind: "videoinput", deviceId: "rapoo", groupId: "g2", label: "Rapoo Camera: Rapoo Camera" },
+  ];
+  assert.deepEqual(camerasFromDevices(devices), [
+    { deviceId: "hp", label: "HP 5MP Camera: HP 5MP Camera" },
+    { deviceId: "rapoo", label: "Rapoo Camera: Rapoo Camera" },
+  ]);
+});
+
+test("camerasFromDevices skips entries without an id and numbers unnamed cameras", () => {
+  const devices = [
+    { kind: "videoinput", deviceId: "", label: "" }, // before permission is granted
+    { kind: "videoinput", deviceId: "a", label: "" },
+    { kind: "videoinput", deviceId: "b", label: "" },
+  ];
+  assert.deepEqual(camerasFromDevices(devices), [
+    { deviceId: "a", label: "Camera 1" },
+    { deviceId: "b", label: "Camera 2" },
+  ]);
+  assert.deepEqual(camerasFromDevices(undefined), []);
 });

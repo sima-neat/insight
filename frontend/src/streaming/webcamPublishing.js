@@ -22,6 +22,23 @@ export function describeWebcamError(error) {
   return error?.message || 'Webcam publishing failed.'
 }
 
+// The cameras a user can pick, from enumerateDevices(). A browser can only open a
+// camera by deviceId, and Chrome on Linux reports one id for every sensor of a
+// multi-sensor USB camera (e.g. "HP 5MP Camera" and "HP IR Camera"): whichever
+// entry is picked, the same device opens. So each id is listed once, under the
+// first name it was reported with. Entries without an id (no permission yet) are
+// skipped.
+export function camerasFromDevices(devices) {
+  const cameras = []
+  const seen = new Set()
+  for (const device of devices || []) {
+    if (device.kind !== 'videoinput' || !device.deviceId || seen.has(device.deviceId)) continue
+    seen.add(device.deviceId)
+    cameras.push({ deviceId: device.deviceId, label: device.label || `Camera ${cameras.length + 1}` })
+  }
+  return cameras
+}
+
 // MediaMTX returns the session resource in Location; DELETE on it releases the
 // path immediately instead of waiting for the peer connection to time out. A
 // malformed or absent value is not worth failing the publish over — closing the
