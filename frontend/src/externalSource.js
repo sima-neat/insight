@@ -90,3 +90,46 @@ export function readersText(readers) {
   if (list.length === 0) return '0'
   return `${list.length} · ${list.map((r) => r.label || r.address || r.protocol).join(', ')}`
 }
+
+const PULL_STATUS = {
+  connecting: { label: 'Connecting…', className: 'connecting' },
+  live: { label: 'Pulled', className: '' },
+  unreachable: { label: 'Unreachable', className: 'warn' },
+  auth_failed: { label: 'Auth failed', className: 'failed' },
+}
+
+export function isPulled(src) {
+  return src?.state === 'pulled'
+}
+
+function pullStatus(pull) {
+  return PULL_STATUS[pull?.status] || PULL_STATUS.connecting
+}
+
+export function pullStatusLabel(pull) {
+  return pullStatus(pull).label
+}
+
+export function pullStatusClass(pull) {
+  return pullStatus(pull).className
+}
+
+export function pullChipText(pull) {
+  const parts = [protocolLabel(pull?.scheme), pull?.host || '-']
+  const status = pull?.status
+  if (status === 'live') {
+    const dims = dimensionsText(pull)
+    if (dims) parts.push(dims)
+  } else if (status === 'unreachable') {
+    parts.push(pull.error ? `retrying… (${pull.error})` : 'retrying…')
+  } else if (status === 'auth_failed') {
+    parts.push(pull.error || 'Auth failed')
+  } else {
+    parts.push('connecting…')
+  }
+  return `⇠ ${parts.join(' · ')}`
+}
+
+export function pullSourceText(pull) {
+  return `${pull?.scheme || 'rtsp'}://${pull?.host || ''}${pull?.path || ''}`
+}

@@ -80,8 +80,8 @@ class MediamtxIntegrationTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-    def _publish(self, query="", path="src2"):
-        url = f"rtsp://127.0.0.1:{self.rtsp_port}/{path}" + (f"?{query}" if query else "")
+    def _publish_to(self, name, query=""):
+        url = f"rtsp://127.0.0.1:{self.rtsp_port}/{name}" + (f"?{query}" if query else "")
         cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
                "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "15", "-pix_fmt", "yuv420p",
                "-f", "rtsp", "-rtsp_transport", "tcp", url]
@@ -89,9 +89,93 @@ class MediamtxIntegrationTests(unittest.TestCase):
         self.procs.append(proc)
         return proc
 
+    def _publish(self, query="", path="src2"):
+        return self._publish_to(path, query)
+
     def _fresh(self):
         self.client._snapshot_at = None
         return self.client.snapshot()
+
+    CAMERA_CONFIG = """logLevel: info
+logDestinations: [stdout]
+rtsp: yes
+rtspAddress: :{rtsp_port}
+rtspTransports: [tcp]
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+api: no
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+  - user: camuser
+    pass: campass
+    ips: []
+    permissions:
+      - action: read
+        path: cam
+paths:
+  cam: {{}}
+"""
+
+    def _start_camera(self):
+        """A second mediamtx that behaves like an IP camera: one authenticated path fed by ffmpeg."""
+        port = _free_port()
+        cfg_path = Path(self.tmp.name) / "camera.yml"
+        cfg_path.write_text(self.CAMERA_CONFIG.format(rtsp_port=port), encoding="utf-8")
+        proc = subprocess.Popen([MTX_BINARY, str(cfg_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.procs.append(proc)
+        self.assertTrue(_wait_port(port), "camera mediamtx never opened its RTSP port")
+        url = f"rtsp://127.0.0.1:{port}/cam"
+        cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=15",
+               "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "15", "-pix_fmt", "yuv420p",
+               "-f", "rtsp", "-rtsp_transport", "tcp", url]
+        self.procs.append(subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        return port
+
+    def test_pull_from_an_authenticated_camera_then_stop(self):
+        from neat_insight import pull_sources
+        cam_port = self._start_camera()
+        wrong = f"rtsp://camuser:WRONG@127.0.0.1:{cam_port}/cam"
+        right = f"rtsp://camuser:campass@127.0.0.1:{cam_port}/cam"
+        self.assertTrue(_wait_until(lambda: pull_sources.probe_rtsp(right).status == "ok"), "camera stream never came up")
+        self.assertEqual(pull_sources.probe_rtsp(wrong).status, "auth_failed")
+        self.assertEqual(pull_sources.probe_rtsp(f"rtsp://127.0.0.1:{cam_port}/cam").status, "auth_failed")
+
+        self.client.set_pull_source("src1", wrong)
+        time.sleep(2)
+        path = self._fresh()["src1"]
+        self.assertTrue(path.pulled)
+        self.assertFalse(path.ready)
+        self.assertFalse(path.external)
+
+        self.client.set_pull_source("src1", right)
+        self.assertTrue(_wait_until(lambda: self._fresh().get("src1", mediamtx.PathInfo("src1")).ready), "pull never became ready")
+        path = self._fresh()["src1"]
+        self.assertEqual(path.codec, "h264")
+        self.assertFalse(path.external)
+        mediamtx.RTSP_BASE_URL = f"rtsp://127.0.0.1:{self.rtsp_port}"
+        try:
+            info = self.client.pull_info(path)
+        finally:
+            mediamtx.RTSP_BASE_URL = "rtsp://127.0.0.1:8554"
+        self.assertEqual((info["width"], info["height"]), (320, 240))
+        self.assertTrue(info["codec_supported"])
+        self.assertIsNotNone(info["since"])
+        # A publisher is refused while the pull is configured.
+        rejected = self._publish_to("src1")
+        self.assertNotEqual(rejected.wait(timeout=6), 0)
+
+        self.client.clear_pull_source("src1")
+        self.assertTrue(_wait_until(lambda: not self._fresh().get("src1", mediamtx.PathInfo("src1", ready=True)).ready))
+        self.assertFalse(self._fresh()["src1"].pulled)
+        accepted = self._publish_to("src1", PUBLISHER_TAG)
+        self.assertTrue(_wait_until(lambda: self._fresh().get("src1", mediamtx.PathInfo("src1")).ready), "publisher not accepted after clearing the pull")
+        self.assertIsNone(accepted.poll())
 
     def test_api_rejects_requests_without_credentials(self):
         # mediamtx's default lets any loopback client (and, via CORS, any web page open on

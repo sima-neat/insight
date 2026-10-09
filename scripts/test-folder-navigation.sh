@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Folder-navigation end-to-end suite for issue #113.
+# Streaming Sources end-to-end suite: folder navigation (issue #113) and pulling a network stream (issue #127).
 #
 # Default: start a throwaway neat-insight on :19900 with a temporary HOME (which isolates the
 # developer's slot assignments and certificates, not the media library), run the Playwright suite
