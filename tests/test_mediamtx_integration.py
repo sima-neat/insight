@@ -6,8 +6,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from neat_insight import mediamtx
+from neat_insight import mediamtx, mediasrc
 from neat_insight.mediasrc import PUBLISHER_TAG
 
 REPO = Path(__file__).resolve().parent.parent
@@ -98,6 +99,14 @@ class MediamtxIntegrationTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(f"http://127.0.0.1:{self.api_port}/v3/paths/list", timeout=2)
         self.assertEqual(ctx.exception.code, 401)
+
+    def test_webcam_status_requests_are_authenticated(self):
+        # The webcam routes ask the API whether a browser is publishing; a 401 there
+        # would mark every webcam as unreachable.
+        self._publish()
+        self.assertTrue(_wait_until(lambda: self._fresh().get("src2", mediamtx.PathInfo("src2")).ready))
+        with mock.patch.object(mediasrc, "MEDIAMTX_API_BASE_URL", f"http://127.0.0.1:{self.api_port}"):
+            self.assertIn("src2", mediasrc.webcam_ready_paths())
 
     def test_first_publisher_holds_slot_and_second_is_rejected(self):
         first = self._publish()

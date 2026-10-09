@@ -10,11 +10,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-from neat_insight.mediamtx import PUBLISHER_TAG
+from neat_insight.mediamtx import API_PORT, PUBLISHER_TAG, api_auth_headers
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
 # Loopback-only control API (webrtc/mediamtx.yml apiAddress); never published.
-MEDIAMTX_API_PORT = 9997
+MEDIAMTX_API_PORT = API_PORT
 MEDIAMTX_API_BASE_URL = f"http://127.0.0.1:{MEDIAMTX_API_PORT}"
 WEBCAM_WHIP_PORT = 8889
 # Key that the SDK port map uses for the WHIP listener above. The SDK may
@@ -484,7 +484,7 @@ def _mediamtx_request(path: str, method: str = "GET"):
     Returns the decoded body, or _MEDIAMTX_NOT_FOUND when MediaMTX answered 404.
     Raises MediaServerUnreachable for anything else.
     """
-    request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method)
+    request = urllib.request.Request(f"{MEDIAMTX_API_BASE_URL}{path}", method=method, headers=api_auth_headers())
     try:
         with urllib.request.urlopen(request, timeout=1.0) as response:
             body = response.read()

@@ -2284,6 +2284,8 @@ class WebcamPublishStateTests(unittest.TestCase):
         # Ongoing liveness and session identity key off the ingest path instead.
         self.assertIn("/v3/paths/get/src1", request.full_url)
         self.assertEqual(request.get_method(), "GET")
+        # The API accepts only Insight's own per-run user (see webrtc/mediamtx.yml).
+        self.assertEqual(request.get_header("Authorization"), mediamtx.api_auth_headers()["Authorization"])
 
     def test_reports_not_publishing_when_the_path_is_not_ready(self):
         urlopen = self._urlopen_returning({"name": "src1", "ready": False})

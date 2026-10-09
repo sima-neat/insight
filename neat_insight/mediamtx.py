@@ -173,9 +173,14 @@ def render_config(text: str, password: str) -> str:
     return text.replace(API_PASSWORD_PLACEHOLDER, f'"{password}"')
 
 
-def _default_request(method: str, url: str):
+def api_auth_headers() -> dict:
+    """Credentials for this run's API user; mediamtx answers 401 to a request without them."""
     credentials = base64.b64encode(f"{API_USER}:{API_PASSWORD}".encode()).decode()
-    req = urllib.request.Request(url, method=method, headers={"Authorization": f"Basic {credentials}"})
+    return {"Authorization": f"Basic {credentials}"}
+
+
+def _default_request(method: str, url: str):
+    req = urllib.request.Request(url, method=method, headers=api_auth_headers())
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
             return resp.status, resp.read()
