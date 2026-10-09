@@ -468,6 +468,23 @@ def _safe_media_path(rel_path: str) -> Path:
     return abs_path
 
 
+def _media_link_path(rel_path: str) -> Optional[Path]:
+    """The library entry itself, unresolved, when it is a symlink; None when it is not.
+
+    _safe_media_path resolves the last component too, which for a link names its
+    target: deleting that would remove the real file or folder the link points at.
+    Only the link's own location has to lie inside MEDIA_DIR.
+    """
+    candidate = MEDIA_DIR / rel_path
+    if not candidate.is_symlink():
+        return None
+    root = MEDIA_DIR.resolve()
+    parent = candidate.parent.resolve()
+    if parent != root and root not in parent.parents:
+        raise ValueError("Invalid path")
+    return parent / candidate.name
+
+
 def _with_metrics_compat(metrics_payload):
     metrics_payload.setdefault("pipeline_status", {})
     return metrics_payload
@@ -2081,25 +2098,35 @@ def delete_media():
         return _json_error("Missing 'path' in request")
 
     try:
-        full_path = _safe_media_path(requested_path)
+        # A symlink is removed as a link, never through it (see _media_link_path).
+        link_path = _media_link_path(requested_path)
+        full_path = link_path or _safe_media_path(requested_path)
     except ValueError:
         return _json_error("Invalid file path", 403)
 
-    if not full_path.exists():
+    if link_path is None and not full_path.exists():
         return _json_error("File or directory not found", 404)
 
     try:
-        if full_path.is_file():
-            removed_files = [full_path]
+        link_prefix = None
+        if link_path is not None:
+            link_name = os.path.relpath(link_path, MEDIA_DIR.resolve()).replace(os.path.sep, "/")
+            removed_names = {link_name}
+            link_prefix = f"{link_name}/"  # slots assigned a file reached through a linked folder
+        elif full_path.is_file():
+            removed_names = {os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")}
         else:
             removed_files = [Path(root) / name for root, _dirs, names in os.walk(full_path) for name in names]
-        removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
+            removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
 
         with _sources_lock:
             sources = load_sources()
             modified = False
             for src in sources:
-                if (src.get("file") or "").replace(os.path.sep, "/") in removed_names:
+                assigned = (src.get("file") or "").replace(os.path.sep, "/")
+                if link_prefix and assigned.startswith(link_prefix):
+                    removed_names.add(assigned)
+                if assigned in removed_names:
                     _bump_slot(src["index"])
                     stop_media_stream(src["index"])
                     src["file"] = ""
@@ -2111,7 +2138,9 @@ def delete_media():
 
         # Unlink first, then forget renditions: an encode that publishes before the unlink is
         # cleaned up by remove_source, and one that publishes after it finds no source and aborts.
-        if full_path.is_file():
+        if link_path is not None:
+            link_path.unlink()
+        elif full_path.is_file():
             full_path.unlink()
         else:
             shutil.rmtree(full_path)

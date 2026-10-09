@@ -155,5 +155,84 @@ class MediaTreeTests(unittest.TestCase):
         self.assertNotIn("__MACOSX/junk.mp4", listed)
 
 
+@unittest.skipUnless(hasattr(os, "symlink"), "symlinks unsupported")
+class DeleteMediaSymlinkTests(unittest.TestCase):
+    """Codex review: deleting a symlinked entry must remove the link, never what it points at."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        self.media_dir = self.root / "media"
+        self.media_dir.mkdir()
+        self.sources_file = self.root / "media_sources.json"
+        self.sources_file.write_text("[]", encoding="utf-8")
+        self.old = (app_module.MEDIA_DIR, app_module.MEDIA_SRC_DATA_FILE, app_module.RENDITIONS_INDEX_FILE)
+        app_module.MEDIA_DIR = self.media_dir
+        app_module.MEDIA_SRC_DATA_FILE = self.sources_file
+        app_module.RENDITIONS_INDEX_FILE = self.root / "renditions.json"
+        app_module.app.config.update(TESTING=True)
+        self.client = app_module.app.test_client()
+
+    def tearDown(self):
+        app_module.MEDIA_DIR, app_module.MEDIA_SRC_DATA_FILE, app_module.RENDITIONS_INDEX_FILE = self.old
+        self.tmpdir.cleanup()
+
+    def link(self, name, target, is_dir):
+        try:
+            (self.media_dir / name).symlink_to(target, target_is_directory=is_dir)
+        except OSError:
+            self.skipTest("symlinks unsupported")
+
+    def delete(self, path):
+        return self.client.post("/api/delete-media", json={"path": path})
+
+    def test_deleting_a_linked_folder_removes_only_the_link(self):
+        touch(self.media_dir / "dataset" / "clip.mp4")
+        self.link("alias", self.media_dir / "dataset", is_dir=True)
+        response = self.delete("alias")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertFalse((self.media_dir / "alias").is_symlink())
+        self.assertTrue((self.media_dir / "dataset" / "clip.mp4").is_file(), "the real folder survives")
+
+    def test_deleting_a_link_to_a_folder_outside_the_library_keeps_that_folder(self):
+        touch(self.root / "elsewhere" / "clip.mp4")
+        self.link("external", self.root / "elsewhere", is_dir=True)
+        response = self.delete("external")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertFalse((self.media_dir / "external").is_symlink())
+        self.assertTrue((self.root / "elsewhere" / "clip.mp4").is_file())
+
+    def test_deleting_a_linked_file_removes_only_the_link(self):
+        touch(self.media_dir / "real.mp4")
+        self.link("alias.mp4", self.media_dir / "real.mp4", is_dir=False)
+        response = self.delete("alias.mp4")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertFalse((self.media_dir / "alias.mp4").is_symlink())
+        self.assertTrue((self.media_dir / "real.mp4").is_file(), "the target file survives")
+
+    def test_deleting_a_dangling_link_succeeds(self):
+        self.link("gone", self.media_dir / "missing", is_dir=True)
+        self.assertEqual(self.delete("gone").status_code, 200)
+        self.assertFalse((self.media_dir / "gone").is_symlink())
+
+    def test_slots_assigned_through_a_deleted_link_are_cleared(self):
+        touch(self.media_dir / "dataset" / "clip.mp4")
+        self.link("alias", self.media_dir / "dataset", is_dir=True)
+        sources = app_module.load_sources()
+        sources[0]["file"] = "alias/clip.mp4"
+        sources[1]["file"] = "dataset/clip.mp4"
+        app_module.save_sources(sources)
+        self.assertEqual(self.delete("alias").status_code, 200)
+        after = app_module.load_sources()
+        self.assertEqual(after[0]["file"], "", "the slot reading through the link is unassigned")
+        self.assertEqual(after[1]["file"], "dataset/clip.mp4", "the slot reading the real file keeps it")
+
+    def test_a_link_outside_the_library_is_refused(self):
+        touch(self.root / "outside.mp4")
+        (self.root / "escape").symlink_to(self.root / "outside.mp4")
+        self.assertEqual(self.delete("../escape").status_code, 403)
+        self.assertTrue((self.root / "escape").is_symlink())
+
+
 if __name__ == "__main__":
     unittest.main()
