@@ -189,19 +189,25 @@ type BrowserDataChannelState struct {
 }
 
 type BrowserSynchronizationStats struct {
-	VideoSyncBufferMS             uint64  `json:"video_sync_buffer_ms"`
-	MetadataRetentionMS           uint64  `json:"metadata_retention_ms"`
-	JitterBufferTargetSupported   bool    `json:"jitter_buffer_target_supported"`
-	JitterBufferTargetApplied     bool    `json:"jitter_buffer_target_applied"`
-	JitterBufferTargetMS          float64 `json:"jitter_buffer_target_ms"`
-	TimestampMatches              uint64  `json:"timestamp_matches"`
-	ArrivalFallbacks              uint64  `json:"arrival_fallbacks"`
-	FrameMisses                   uint64  `json:"frame_misses"`
-	MetadataExpired               uint64  `json:"metadata_expired"`
-	MetadataEvicted               uint64  `json:"metadata_evicted"`
-	UntimestampedMetadataReceived uint64  `json:"untimestamped_metadata_received"`
-	TimestampedMetadataPending    uint64  `json:"timestamped_metadata_pending"`
-	ArrivalMetadataPending        uint64  `json:"arrival_metadata_pending"`
+	VideoSyncBufferMS           uint64  `json:"video_sync_buffer_ms"`
+	MetadataRetentionMS         uint64  `json:"metadata_retention_ms"`
+	JitterBufferTargetSupported bool    `json:"jitter_buffer_target_supported"`
+	JitterBufferTargetApplied   bool    `json:"jitter_buffer_target_applied"`
+	JitterBufferTargetMS        float64 `json:"jitter_buffer_target_ms"`
+	TimestampMatches            uint64  `json:"timestamp_matches"`
+	ArrivalFallbacks            uint64  `json:"arrival_fallbacks"`
+	FrameMisses                 uint64  `json:"frame_misses"`
+	MetadataExpired             uint64  `json:"metadata_expired"`
+	MetadataEvicted             uint64  `json:"metadata_evicted"`
+	// Late metadata reached the browser after its frame had been presented. A
+	// climbing count means the video sync buffer is smaller than the producer's
+	// metadata lag, not that anything was lost on the way.
+	MetadataLate                   uint64   `json:"metadata_late"`
+	MetadataLatenessRecentMedianMS *float64 `json:"metadata_lateness_recent_median_ms,omitempty"`
+	MetadataLatenessRecentMaxMS    *float64 `json:"metadata_lateness_recent_max_ms,omitempty"`
+	UntimestampedMetadataReceived  uint64   `json:"untimestamped_metadata_received"`
+	TimestampedMetadataPending     uint64   `json:"timestamped_metadata_pending"`
+	ArrivalMetadataPending         uint64   `json:"arrival_metadata_pending"`
 }
 
 func NewEgressStats(channel int) *EgressStats {
