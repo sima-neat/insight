@@ -158,6 +158,16 @@ If the sender runs on a DevKit or another external machine, use the mapped `vide
 
 The viewer can render metadata overlays for common vision outputs, including object detection, classification, pose estimation, segmentation, and tracking. Viewer settings let you tune overlay behavior such as confidence thresholds, ROI display, tracking history, and synchronization buffering. Metadata timestamps use source PTS milliseconds and are omitted when unavailable.
 
+### Global and channel settings
+
+Viewer settings exist in two scopes. The settings button of the viewer page opens the global settings. The button at the right end of a tile's status bar opens the settings of that channel; the dialog's title names the channel.
+
+A channel follows the global settings. To give a channel its own value, open its settings, switch on **Own value** next to the setting, set the value and select **Save**. A value that a channel sets itself takes precedence over the global value. Switching **Own value** off again makes the channel follow the global value. Class colors work per entry: the channel's dialog shows the global entries as **from global**, and **Override** copies one into an entry of the channel.
+
+The global dialog lists, under each setting, the channels that set their own value. **Use global value** removes a channel's own value at once, without **Save**. **Reset all channels to the global settings…** removes the own values of every channel; regions of interest are kept.
+
+Settings are stored in the browser. They are not shared between browsers or machines.
+
 ### Metadata colors
 
 Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when more than 20 identities need a color at once: classes across all channels, or tracks or poses on one channel. Each metadata type defines what identity means:
@@ -175,6 +185,32 @@ A color is allocated the first time an identity appears. Class labels share one 
 Tracks and poses without an `id` draw in one neutral color. Senders that want per-person or per-track colors must include `id`.
 
 Object detection and segmentation settings hold optional per-class overrides. An entry for a label fixes that class's color and line style. An entry labelled `default` fixes the color of every class without its own entry. Without any entries, all classes are colored automatically.
+
+### Late metadata
+
+An overlay is drawn only if its metadata has reached the browser by the time the video frame is shown. The viewer holds video back by the video sync buffer (350 ms by default) to give metadata that time. An application that sends metadata later than the buffer allows loses its overlays, even though video and message rate look healthy.
+
+When at least half of the recent messages arrive after their frame, the tile shows a **Metadata late** chip in its status bar. Select it to see:
+
+| Value | Meaning |
+|---|---|
+| Arrives after its frame | How long after the frame was shown its metadata arrived, as measured by this browser. |
+| Video sync buffer | The buffer in effect for this channel. |
+| Late messages | Share of recent messages that arrived too late to be drawn. |
+
+The panel offers two ways to raise the buffer to a value that covers the measured lateness:
+
+| Button | Effect |
+|---|---|
+| **Raise for this channel to N ms** | Sets the video sync buffer of this channel only. Other channels keep their setting. |
+| **Raise globally to N ms** | Sets the global video sync buffer. It applies to every channel that has no value of its own. If this channel had its own value, that value is removed. |
+| **Use global value (V ms)** | Shown instead of **Raise globally to N ms** when the global video sync buffer already covers the measured lateness. Removes this channel's own value; the global value is not changed. |
+
+The video of every affected channel is delayed by the additional time. The viewer never changes the buffer by itself, and the panel never lowers the global buffer. After a change, the viewer waits a few seconds before it judges lateness again, because the browser moves to a larger buffer gradually.
+
+The chip disappears once fewer than a tenth of the messages are late. If the buffer needed would exceed the maximum of 4000 ms, the panel offers no button: the application has to send its metadata sooner. If the lateness could not be measured, because the metadata does not belong to the frames that were shown, the panel says so and offers no button either.
+
+Applications that forward the encoded input stream unchanged and send metadata only after decode and inference are the typical case, because their video does not wait for inference.
 
 Use the Video Viewer to confirm:
 

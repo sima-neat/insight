@@ -46,6 +46,47 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
+  // A browser can pair this script with an older cached settings resolver, an older
+  // cached viewer page, or a page that does not load settings-scope.js. Without what
+  // the scope UI needs the dialog works as before: no switches or notes, each scope
+  // loaded and saved as a whole. Decided once, so no path calls a missing function
+  // or touches a missing element.
+  const scopeUiModule = window.viewerSettingsScopeUi;
+  const scopeUiCauses = [];
+  if (!scopeUiModule) {
+    scopeUiCauses.push("viewerSettingsScopeUi is not loaded (an older viewer.html or a missing settings-scope.js)");
+  } else {
+    const missing = scopeUiModule.missingRequirements(settingsApi);
+    if (missing.functions.length > 0) {
+      scopeUiCauses.push(`viewerSettingsApi lacks ${missing.functions.join(", ")} (an older viewer-settings-resolver.js)`);
+    }
+    if (missing.elements.length > 0) {
+      scopeUiCauses.push(`the page lacks the elements ${missing.elements.join(", ")} (an older viewer.html)`);
+    }
+  }
+  if (scopeUiCauses.length > 0) {
+    console.warn(
+      `${scopeUiCauses.join("; ")}; the settings dialog cannot give a channel its own value per setting. ` +
+        "Reload the page to update it."
+    );
+  }
+  const scopeUi =
+    scopeUiCauses.length === 0
+      ? scopeUiModule.create({
+          settingsApi,
+          createObjectEntry: (metadataType, entry) =>
+            (metadataType === "segmentation" ? createSegmentationEntry : createObjectEntry)(
+              entry.label,
+              entry.color,
+              entry.style,
+              entry.width
+            ),
+          readObjectEntries: (metadataType) =>
+            metadataType === "segmentation" ? getSegmentationEntries() : getObjectEntries(),
+          dispatchSettingsChanged
+        })
+      : null;
+
   settingsApi.metadataTypes.forEach((metadataType) => {
     const option = document.createElement("option");
     option.value = metadataType.value;
@@ -75,19 +116,19 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   confidenceSlider.addEventListener("input", () => {
-    confidenceDisplay.textContent = confidenceSlider.value;
+    showFraction(confidenceSlider, confidenceDisplay);
   });
 
   segmentationConfidenceSlider.addEventListener("input", () => {
-    segmentationConfidenceDisplay.textContent = segmentationConfidenceSlider.value;
+    showFraction(segmentationConfidenceSlider, segmentationConfidenceDisplay);
   });
 
   segmentationOpacitySlider.addEventListener("input", () => {
-    segmentationOpacityDisplay.textContent = segmentationOpacitySlider.value;
+    showFraction(segmentationOpacitySlider, segmentationOpacityDisplay);
   });
 
   trackingConfidenceSlider.addEventListener("input", () => {
-    trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
+    showFraction(trackingConfidenceSlider, trackingConfidenceDisplay);
   });
 
   trackTrailLengthSlider.addEventListener("input", () => {
@@ -116,6 +157,23 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   saveViewerSettings.addEventListener("click", () => {
+    if (scopeUi && scopeUi.isChannelDialog()) {
+      // A channel stores exactly the settings whose switch is on and its own entries.
+      const stored = settingsApi.writeScopeOwnSettings(scope, scopeUi.collectOwnValues(), scopeUi.collectOwnObjects());
+      if (!stored) {
+        console.error(`The settings of ${scope} could not be stored.`);
+        return;
+      }
+    } else {
+      settingsApi.writeScopeSettings(scope, readAllSettings());
+    }
+    viewerSettingsOverlay.classList.add("hidden");
+    dispatchSettingsChanged(scope);
+  });
+
+  // The whole scope as the controls show it: what the global dialog stores, and
+  // what every dialog stores without the scope UI.
+  function readAllSettings() {
     const settings = settingsApi.readScopeSettings(scope);
     settings.general.videoSyncBufferMs = parseInt(videoSyncBufferSlider.value, 10);
     settings.general.metadataRetentionMs = parseInt(metadataRetentionSlider.value, 10);
@@ -132,18 +190,24 @@ document.addEventListener("DOMContentLoaded", () => {
       trailLength: parseInt(trackTrailLengthSlider.value, 10),
       lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
     };
+    return settings;
+  }
 
-    settingsApi.writeScopeSettings(scope, settings);
-    viewerSettingsOverlay.classList.add("hidden");
+  function dispatchSettingsChanged(targetScope) {
     window.dispatchEvent(
       new CustomEvent("viewer-settings-changed", {
         detail: {
-          scope,
+          scope: targetScope,
           metadataType: metadataTypeSelector.value
         }
       })
     );
-  });
+  }
+
+  // A value between 0 and 1 as the dialog shows it, and as the notes quote it.
+  function showFraction(slider, display) {
+    display.textContent = Number(slider.value).toFixed(2);
+  }
 
   let selectedRow = null;
 
@@ -167,7 +231,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateViewerTitle(value) {
     const viewerSettingsTitle = document.getElementById("viewerSettingsTitle");
     viewerSettingsTitle.textContent =
-      "Viewer Configuration" + (value === "global" ? " (Global)" : ` (${value})`);
+      "Viewer Configuration" + (value === "global" ? " (Global)" : ` (Channel ${scopeToIndex(value)})`);
   }
 
   function updateMetadataTypeSection() {
@@ -191,6 +255,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateTrackHistoryControls() {
+    if (scopeUi) {
+      // The scope UI also locks controls whose switch is off.
+      scopeUi.refreshControls();
+      return;
+    }
     const enabled = trackHistoryToggle.checked;
     trackHistoryDependentRows.forEach((row) => {
       row.classList.toggle("is-disabled", !enabled);
@@ -232,9 +301,12 @@ document.addEventListener("DOMContentLoaded", () => {
       event.stopPropagation();
       row.remove();
       if (selectedRow === row) selectedRow = null;
+      // A deleted own entry can reveal the global entry it overrode.
+      if (scopeUi) scopeUi.refreshInherited();
     });
 
     objectTableBody.appendChild(row);
+    return row;
   }
 
   function getObjectEntries() {
@@ -292,9 +364,12 @@ document.addEventListener("DOMContentLoaded", () => {
       event.stopPropagation();
       row.remove();
       if (selectedRow === row) selectedRow = null;
+      // A deleted own entry can reveal the global entry it overrode.
+      if (scopeUi) scopeUi.refreshInherited();
     });
 
     segmentationObjectTableBody.appendChild(row);
+    return row;
   }
 
   function getSegmentationEntries() {
@@ -328,13 +403,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
 
     confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
-    confidenceDisplay.textContent = confidenceSlider.value;
+    showFraction(confidenceSlider, confidenceDisplay);
     segmentationConfidenceSlider.value = segmentationTypeSettings.confidenceThreshold ?? 0;
-    segmentationConfidenceDisplay.textContent = segmentationConfidenceSlider.value;
+    showFraction(segmentationConfidenceSlider, segmentationConfidenceDisplay);
     segmentationOpacitySlider.value = segmentationTypeSettings.maskOpacity ?? settingsApi.defaults.types.segmentation.maskOpacity;
-    segmentationOpacityDisplay.textContent = segmentationOpacitySlider.value;
+    showFraction(segmentationOpacitySlider, segmentationOpacityDisplay);
     trackingConfidenceSlider.value = trackingTypeSettings.confidenceThreshold ?? 0;
-    trackingConfidenceDisplay.textContent = trackingConfidenceSlider.value;
+    showFraction(trackingConfidenceSlider, trackingConfidenceDisplay);
     trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
     lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
     videoSyncBufferSlider.value = settings.general.videoSyncBufferMs ?? 350;
@@ -354,6 +429,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const supportedType = settingsApi.metadataTypes.some((metadataType) => metadataType.value === lastMetadataType);
     metadataTypeSelector.value = supportedType ? lastMetadataType : "object-detection";
     updateMetadataTypeSection();
+    // A channel dialog then shows its own values or the followed ones, per switch.
+    if (scopeUi) scopeUi.load(scope);
   }
 
   addViewerObjectBtn?.addEventListener("click", () => {
