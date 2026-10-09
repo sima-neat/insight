@@ -10,6 +10,7 @@ import {
   cameraDeviceId,
   cameraSelectable,
   cameraSubtitle,
+  noUsableCameraNotice,
   cameraSummaryLine,
   cameraTierPill,
   CONNECTED_PILL,
@@ -500,6 +501,21 @@ test('stepwise and continuous format ranges keep their bounds and steps visible'
     min_width: 16, min_height: 16, max_width: 1920, max_height: 1080, step_width: 16, step_height: 16
   })] })[0]
   assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
+})
+
+test('when no detected camera can be used, the panel says which and why', () => {
+  assert.equal(noUsableCameraNotice([usb, imx477]), null, 'an Available camera means something can be selected')
+  assert.equal(noUsableCameraNotice([]), null)
+  assert.deepEqual(noUsableCameraNotice([usb]), {
+    title: 'HD Webcam C270 cannot be used with Neat',
+    reasons: [{ reason: USB_REASON, names: ['HD Webcam C270'] }],
+    hint: 'Connect a MIPI camera (power the board off first), then Refresh.'
+  })
+  const both = noUsableCameraNotice([usb, imx568])
+  assert.equal(both.title, 'No camera on this board can be used with Neat')
+  // In list order: MIPI cameras come before USB ones.
+  assert.deepEqual(both.reasons.map((r) => r.reason), [NOT_IN_OVERLAYS, USB_REASON])
+  assert.match(both.hint, /camera overlay/)
 })
 
 test('every camera row shows its verdict pill, and only Available cameras can be selected', () => {
