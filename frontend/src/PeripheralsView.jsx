@@ -4,7 +4,6 @@ import KindIcon from './peripherals/KindIcon.jsx'
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
-  availabilityInfo,
   cameraTierPill,
   changeSummary,
   countLabel,
@@ -149,7 +148,6 @@ function CameraList({ groups, selectedId, onSelect }) {
         <div key={group.id} className="periph-group" role="group" aria-labelledby={`periph-group-${group.id}`}>
           <div id={`periph-group-${group.id}`} className="periph-group-title" role="presentation">{group.label}</div>
           {group.items.map((camera) => {
-            const availability = availabilityInfo(camera.availability)
             const tier = cameraTierPill(camera)
             return (
               <div
@@ -165,10 +163,7 @@ function CameraList({ groups, selectedId, onSelect }) {
                 {/* An empty subtitle must not render: the row is a grid, and a blank span would
                     leave this row taller than its neighbours. */}
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
-                <span className="periph-pills">
-                  <Pill tone={availability.tone}>{availability.label}</Pill>
-                  {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
-                </span>
+                {tier && <span className="periph-pills"><Pill tone={tier.tone}>{tier.label}</Pill></span>}
               </div>
             )
           })}

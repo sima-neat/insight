@@ -1,5 +1,4 @@
 import {
-  availabilityInfo,
   blockedFormatSummary,
   cameraSubtitle,
   cameraTierPill,
@@ -95,7 +94,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
 }
 
 export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
-  const availability = availabilityInfo(camera.availability)
   const tier = cameraTierPill(camera)
   const summary = cameraSummaryLine(camera)
 
@@ -106,10 +104,7 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
           <h3 id="periph-detail-title">{camera.name}</h3>
           {cameraSubtitle(camera) && <p className="hint">{cameraSubtitle(camera)}</p>}
         </div>
-        <span className="periph-pills">
-          <Pill tone={availability.tone}>{availability.label}</Pill>
-          {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
-        </span>
+        {tier && <span className="periph-pills"><Pill tone={tier.tone}>{tier.label}</Pill></span>}
       </div>
 
       {summary && (

@@ -100,16 +100,6 @@ export function boardIndicator(board) {
   return { label, state, title: `${target.label} — ${state.label}. Open board settings.` }
 }
 
-export function availabilityInfo(availability) {
-  const reason = availability?.reason || ''
-  if (availability?.state === 'available') return { label: 'Available', tone: 'ok', reason }
-  if (availability?.state === 'in_use') {
-    const users = (availability.users || []).map((u) => `${u.command || 'unknown process'} (pid ${u.pid})`)
-    return { label: users.length ? `In use by ${users.join(', ')}` : 'In use', tone: 'warn', reason }
-  }
-  return { label: 'Availability unknown', tone: '', reason }
-}
-
 export function defaultTargetText(defaults) {
   if (defaults?.on_board) return 'this board (Insight is running on it)'
   const env = defaults?.sdk_env
@@ -349,15 +339,11 @@ export function groupOptions(options) {
 // One visible explanation line per camera state, chosen by priority, so the
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
-  const availability = availabilityInfo(camera?.availability)
-  if (camera?.availability?.state === 'in_use') {
-    return `${availability.label}. Stop that process on the board before an application can open this camera.`
-  }
   // A USB camera is Unsupported because USB cameras have no camera overlay; its pill says enough.
   if (camera?.support && cameraTierPill(camera)) return camera.connection === 'usb' ? '' : camera.support.reason || 'Unsupported.'
-  if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
   // An Available camera gets no sentence at all: every mode menu already labels each entry
-  // Available or Unsupported, so a paragraph repeating that only adds text.
+  // Available or Unsupported, so a paragraph repeating that only adds text. Whether another
+  // program holds the camera is found out, and said, when a preview tries to start.
   return ''
 }
 

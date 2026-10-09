@@ -3,7 +3,6 @@ import test from 'node:test'
 
 import {
   apiError,
-  availabilityInfo,
   blockedFormatSummary,
   boardCameraSetup,
   boardIndicator,
@@ -282,13 +281,10 @@ test('a snapshot is stale only when it was scanned for another board generation'
   assert.equal(isSnapshotStale(null, snapshot), false)
 })
 
-test('labels for tiers, availability, sources, and defaults', () => {
+test('labels for tiers, sources, and defaults', () => {
   assert.deepEqual(tierInfo('available'), { label: 'Available', tone: 'ok' })
   assert.deepEqual(tierInfo('unsupported'), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(tierInfo('bogus'), tierInfo('unsupported'), 'every mode is one of the two states')
-  assert.equal(availabilityInfo(inUse.availability).label, 'In use by gst-launch-1.0 (pid 812)')
-  assert.deepEqual(availabilityInfo(imx568.availability), { label: 'Availability unknown', tone: '', reason: 'fuser is not installed on the board.' })
-  assert.equal(availabilityInfo(available).label, 'Available')
   assert.equal(sourceLabel('on-board'), 'On this board')
   assert.equal(sourceLabel('sdk-env'), 'SDK DevKit')
   assert.equal(sourceLabel('manual'), 'Manual')
@@ -503,26 +499,23 @@ test('stepwise and continuous format ranges keep their bounds and steps visible'
   assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
-test('the camera pill appears only for an Unsupported camera, beside its availability', () => {
-  assert.equal(cameraTierPill(imx477), null, 'an Available camera shows only its availability pill')
-  assert.equal(availabilityInfo(imx477.availability).label, 'Available')
+test('the camera pill appears only for an Unsupported camera', () => {
+  assert.equal(cameraTierPill(imx477), null, 'an Available camera shows no pill; its modes carry the labels')
   assert.deepEqual(cameraTierPill(imx568), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill(usb), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill({ ...imx477, support: support('unsupported', NO_BOARD) }), { label: 'Unsupported', tone: 'periph-danger' })
 })
 
 test('the detail pane shows one explanation line, chosen by priority', () => {
-  assert.match(cameraSummaryLine(inUse), /^In use by gst-launch-1\.0 \(pid 812\)\. Stop that process/)
-  assert.equal(cameraSummaryLine(imx568), NOT_IN_OVERLAYS, 'the Unsupported reason wins over unknown availability')
+  assert.equal(cameraSummaryLine(imx568), NOT_IN_OVERLAYS)
   assert.equal(cameraSummaryLine({ ...imx477, support: support('unsupported', NO_BOARD) }), NO_BOARD)
   // An Available camera says nothing: the mode menus carry the Available/Unsupported labels.
   assert.equal(cameraSummaryLine(imx477), '')
-  assert.equal(
-    cameraSummaryLine({ ...imx477, availability: imx568.availability }),
-    'Availability unknown: fuser is not installed on the board.'
-  )
+  // Whether another program holds the camera is not a scan fact: Sentinel's availability is passed
+  // through untouched and never becomes a sentence; a preview that cannot open the camera says so.
+  assert.equal(cameraSummaryLine(inUse), '')
+  assert.equal(cameraSummaryLine({ ...imx477, availability: imx568.availability }), '')
   assert.equal(cameraSummaryLine(usb), '', 'an unsupported USB camera gets no sentence; its pill says it')
-  assert.match(cameraSummaryLine({ ...usb, availability: inUse.availability }), /^In use by gst-launch-1\.0/)
   assert.equal(cameraSummaryLine({}), '')
 })
 
