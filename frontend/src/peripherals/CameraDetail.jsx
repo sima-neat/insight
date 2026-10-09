@@ -1,16 +1,14 @@
 import {
   blockedFormatSummary,
   cameraSubtitle,
-  cameraTierPill,
   cameraSummaryLine,
   deviceRows,
   formatOptions,
   groupOptions,
-  optionTier,
   sizeKey,
   sizeOptions
 } from './model.js'
-import { Callout, ErrorNotice, Pill } from './ui.jsx'
+import { Callout, ErrorNotice } from './ui.jsx'
 
 export { cameraSubtitle }
 
@@ -32,13 +30,8 @@ function BlockedFormats({ options }) {
   )
 }
 
-function FieldHead({ title, tier }) {
-  return (
-    <span className="periph-field-head">
-      {title}
-      {tier && <Pill tone={tier.tone}>{tier.label}</Pill>}
-    </span>
-  )
+function FieldHead({ title }) {
+  return <span className="periph-field-head">{title}</span>
 }
 
 function ModeOptions({ options }) {
@@ -70,13 +63,13 @@ function ModePicker({ camera, selection, notice, onChange }) {
       <legend>Input mode</legend>
       <div className="periph-mode-fields">
         <label>
-          <FieldHead title="Pixel format" tier={optionTier(formats, selection.format)} />
+          <FieldHead title="Pixel format" />
           <select value={selection.format} onChange={(e) => onChange({ format: e.target.value })}>
             <ModeOptions options={formats} />
           </select>
         </label>
         <label>
-          <FieldHead title="Resolution" tier={optionTier(sizes, sizeKey(selection.width, selection.height))} />
+          <FieldHead title="Resolution" />
           <select
             value={sizeKey(selection.width, selection.height)}
             onChange={(e) => {
@@ -94,7 +87,6 @@ function ModePicker({ camera, selection, notice, onChange }) {
 }
 
 export default function CameraDetail({ camera, selection, selectionNotice, onSelectionChange }) {
-  const tier = cameraTierPill(camera)
   const summary = cameraSummaryLine(camera)
 
   return (
@@ -104,7 +96,7 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
           <h3 id="periph-detail-title">{camera.name}</h3>
           {cameraSubtitle(camera) && <p className="hint">{cameraSubtitle(camera)}</p>}
         </div>
-        {tier && <span className="periph-pills"><Pill tone={tier.tone}>{tier.label}</Pill></span>}
+
       </div>
 
       {summary && (

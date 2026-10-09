@@ -369,16 +369,28 @@ def _formats(modes: list, usb: bool, reason: str) -> list:
     return formats
 
 
+DEFAULT_WIDTH = 1920
+
+
 def _default(formats: list) -> Optional[dict]:
-    """The first Available mode; None when no mode is Available."""
+    """The mode to preselect: 1920 wide when a size that wide is Available, else the widest Available size
+    narrower than that, else the smallest Available one; None when no mode is Available. A 3.0 sensor lists
+    sizes from 1280 wide up, and starting a developer at the smallest is not a useful default."""
+    candidates = []
     for fmt in formats:
         if not fmt["exportable"]:
             continue
         for size in fmt["sizes"]:
             for choice in size["fps"]:
                 if choice["tier"] == "available":
-                    return _selection(fmt["format"], size, choice["value"])
-    return None
+                    candidates.append((fmt["format"], size, choice["value"]))
+                    break
+    if not candidates:
+        return None
+    preferred = [c for c in candidates if c[1]["width"] <= DEFAULT_WIDTH]
+    fmt, size, fps = max(preferred, key=lambda c: (c[1]["width"], c[1]["height"])) if preferred \
+        else min(candidates, key=lambda c: (c[1]["width"], c[1]["height"]))
+    return _selection(fmt, size, fps)
 
 
 def _issues(catalog: dict, items: list) -> list:
