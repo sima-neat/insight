@@ -144,7 +144,12 @@ def _camera_reason(camera: dict, board: Optional[dict]) -> str:
 
 
 def _classified(mode: dict, camera_reason: str) -> dict:
-    """A Sentinel mode with its state: `available` True or False, and why it is not (`reason`)."""
+    """A Sentinel mode with its state: `available` True or False, and why it is not (`reason`). A Sentinel that
+    decides this itself (sentinel#43, the same rule, and the only one that knows a Platform 3.0 sensor size) says so
+    on the mode; older ones leave it to the rule below."""
+    if isinstance(mode.get("available"), bool):
+        reason = "" if mode["available"] else str(mode.get("reason") or camera_reason or NOT_ISP_SIZE_REASON)
+        return dict(mode, available=mode["available"], reason=reason)
     if camera_reason:
         return dict(mode, available=False, reason=camera_reason)
     if mode.get("isp_output") is not True:
@@ -315,8 +320,9 @@ def _verdict(modes: list, reason: str) -> dict:
         return _support("available", "")
     if reason or not modes:
         return _support("unsupported", reason or NO_MODES_REASON)
-    # The sensor is supported: either the ISP outputs none of these sizes, or none it outputs is in NV12.
-    isp_sizes = any(mode.get("isp_output") is True for mode in modes)
+    # The sensor is supported: either the ISP outputs none of these sizes, or none it outputs is in NV12. On a
+    # Platform 3.0 ISP the sizes are the sensor's (`sensor_mode`).
+    isp_sizes = any(mode.get("isp_output") is True or mode.get("sensor_mode") is True for mode in modes)
     return _support("unsupported", FORMAT_REASON if isp_sizes else NO_ISP_SIZE_REASON)
 
 
