@@ -345,6 +345,37 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(fmt_of(camera, "NV12")["support"]["reason"], cameras.NO_ISP_SIZE_REASON)
         self.assertIsNone(camera["default_selection"])
 
+    def test_a_sentinel_verdict_decides_each_mode(self):
+        """A Sentinel that decides availability itself (sentinel#43) is followed. On Platform 3.0 the modes are the
+        sensor's sizes, marked `sensor_mode` and not `isp_output` (as the 3.0 DevKit's IMX477 reports them)."""
+        def sensor_mode(fmt, width, height, available, reason=None):
+            mode = {"format": fmt, "width": width, "height": height, "sensor_mode": True, "available": available}
+            return dict(mode, reason=reason) if reason else mode
+
+        doc = imx477()
+        doc["isp"]["sizing"] = "runtime"
+        doc["modes"] = [
+            sensor_mode("NV12", 1920, 1080, True),
+            sensor_mode("NV12", 2028, 1520, True),
+            sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON),
+        ]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        nv12 = fmt_of(camera, "NV12")
+        self.assertEqual((camera["support"]["tier"], nv12["exportable"], nv12["support"]["tier"]),
+                         ("available", True, "available"))
+        self.assertEqual(states(size_of(nv12, 2028, 1520)["fps"]), [(30, "available", None)])
+        self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
+                         [(30, "unsupported", cameras.FORMAT_REASON)])
+
+        # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its sizes available,
+        # a 3.0 camera is unsupported for the format, not for the ISP.
+        doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), available=False, reason="Not set up for this mode."),
+                        sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON)]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]),
+                         [(30, "unsupported", "Not set up for this mode.")])
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
+
     def test_a_sensor_missing_from_the_boards_overlays_is_unsupported(self):
         cases = {
             "sensor not in the overlays": {**board_block(), "supported_sensors": [
