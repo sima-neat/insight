@@ -1986,9 +1986,11 @@ class WebcamSourceTests(unittest.TestCase):
         running = {"value": False}
 
         def probe_then_started_elsewhere(*args, **kwargs):
-            # Another tab starts clip.mp4 on slot 1 while this probe runs.
-            self._write_file_slot(1, "clip.mp4", state="playing")
-            running["value"] = True
+            # Another tab starts clip.mp4 on slot 1 while the first probe runs; the
+            # restart probes again, and nothing else happens by then.
+            if not running["value"]:
+                self._write_file_slot(1, "clip.mp4", state="playing")
+                running["value"] = True
             return ("rtsp", "h264", ["rtsp"])
 
         with mock.patch.object(app_module, "_derive_source_stream_settings", side_effect=probe_then_started_elsewhere):
