@@ -71,6 +71,26 @@ export function cameraSelectable(camera) {
   return tierOf(camera?.support?.tier) === 'available'
 }
 
+// What the detail panel says when the board has cameras but none can be used: each one's reason, once.
+export function noUsableCameraNotice(items) {
+  const cameras = groupCameras(items).flatMap((group) => group.items)
+  if (!cameras.length || cameras.some(cameraSelectable)) return null
+  const reasons = []
+  for (const camera of cameras) {
+    const reason = camera.support?.reason || 'Unsupported.'
+    const entry = reasons.find((r) => r.reason === reason)
+    if (entry) entry.names.push(camera.name)
+    else reasons.push({ reason, names: [camera.name] })
+  }
+  return {
+    title: cameras.length === 1 ? `${cameras[0].name} cannot be used with Neat` : 'No camera on this board can be used with Neat',
+    reasons,
+    hint: cameras.every((c) => c.connection === 'usb')
+      ? 'Connect a MIPI camera (power the board off first), then Refresh.'
+      : 'Apply a camera overlay that supports the sensor, reboot the board, then Refresh.'
+  }
+}
+
 export function severityInfo(severity) {
   return SEVERITY[severity] || SEVERITY.info
 }

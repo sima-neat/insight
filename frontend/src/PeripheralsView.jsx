@@ -10,6 +10,7 @@ import {
   cameraTierPill,
   changeSummary,
   CONNECTED_PILL,
+  noUsableCameraNotice,
   countLabel,
   deviceTabs,
   groupCameras,
@@ -442,6 +443,8 @@ export default function PeripheralsView({
   const scannedAt = snapshot?.scanned_at
   const changes = changeSummary(snapshot?.changes)
   const removedName = snapshot?.changes?.removed?.find((item) => item.id === activeId)?.name || 'The selected camera'
+  const removed = Boolean(activeId && snapshot?.changes?.removed?.some((item) => item.id === activeId))
+  const noUsable = !camera && !removed ? noUsableCameraNotice(snapshot?.items) : null
 
   let body = null
   if (loading || (boardLoading && !board)) body = <p className="hint">Loading peripherals…</p>
@@ -486,6 +489,15 @@ export default function PeripheralsView({
             onPreviewStreamError={streamEnded}
             onOpenBoardPanel={onOpenBoardPanel}
           />
+        ) : noUsable ? (
+          <div className="periph-detail">
+            <Callout title={noUsable.title}>
+              {noUsable.reasons.map((entry) => (
+                <p key={entry.reason}>{noUsable.reasons.length > 1 || entry.names.length > 1 ? `${entry.names.join(', ')}: ` : ''}{entry.reason}</p>
+              ))}
+              <p>{noUsable.hint}</p>
+            </Callout>
+          </div>
         ) : (
           <div className="periph-detail">
             <Callout title={`${removedName} is no longer detected`}>
