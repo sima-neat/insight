@@ -39,6 +39,7 @@ import ipaddress
 import socket
 
 from neat_insight.mediasrc import MEDIAMTX_API_PORT, WEBCAM_WHIP_ICE_PORT, WEBCAM_WHIP_PORT
+from neat_insight import mediamtx
 
 CERT_FILE = "cert.pem"
 KEY_FILE = "key.pem"
@@ -199,6 +200,7 @@ def init_environment():
 
 processes = []
 process_logs = []
+runtime_files = []
 _cleanup_done = False
 webssh_proc = None
 
@@ -291,6 +293,21 @@ def _terminate_conflicting_ports(webcam_ice_port=None):
     _terminate_conflicting_port_specs(port_specs)
 
 
+def _write_mediamtx_runtime_config(mtx_config):
+    # The shipped config holds an unusable API password; mediamtx runs from a private copy
+    # carrying this run's password (mkstemp creates the file readable by the owner only).
+    with open(mtx_config, encoding="utf-8") as handle:
+        text = handle.read()
+    try:
+        rendered = mediamtx.render_config(text, mediamtx.API_PASSWORD)
+    except mediamtx.MediamtxError as exc:
+        raise RuntimeError(f"Invalid mediamtx config at {mtx_config}: {exc}. Rebuild package with build.sh.") from exc
+    fd, path = tempfile.mkstemp(prefix="neat-insight-mediamtx-", suffix=".yml")
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(rendered)
+    return path
+
+
 def start_processes(ssl_context, webcam_ice_port=None):
     _terminate_conflicting_ports(webcam_ice_port)
     bin_dir = os.path.join(os.path.dirname(__file__), "bin")
@@ -357,8 +374,10 @@ def start_processes(ssl_context, webcam_ice_port=None):
     elif host_ip:
         print(f"⚠️ Ignoring invalid or internal CONTAINER_HOST_IP for MediaMTX: {host_ip!r}")
 
+    mtx_runtime_config = _write_mediamtx_runtime_config(mtx_config)
+    runtime_files.append(mtx_runtime_config)
     mtx_proc = subprocess.Popen(
-        [mtx, mtx_config],
+        [mtx, mtx_runtime_config],
         stdout=mtx_log,
         stderr=subprocess.STDOUT,
         env=mtx_env,
@@ -516,6 +535,13 @@ def cleanup_processes(signum=None, frame=None, exit_process=True):
         except Exception:
             pass
     process_logs.clear()
+
+    for path in list(runtime_files):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    runtime_files.clear()
 
     if exit_process:
         sys.exit(0)

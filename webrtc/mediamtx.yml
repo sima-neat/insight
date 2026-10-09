@@ -37,11 +37,27 @@ webrtcLocalUDPAddress: :8189
 webrtcTrackGatherTimeout: 10s
 
 # Backs the "is this webcam actually publishing" status Insight polls per
-# source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,
-# never exposed outside the container/host.
+# source (see neat_insight/mediasrc.py webcam_is_publishing) and the detection
+# of external publishers (neat_insight/mediamtx.py); loopback-only, never
+# exposed outside the container/host.
 api: yes
 apiAddress: 127.0.0.1:9997
-
+apiAllowOrigin: 'http://127.0.0.1'
+# Replaces mediamtx's default, which gives every loopback client the API without credentials.
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+  - user: insight
+    # Unusable placeholder: Insight writes a per-run password into its own copy at launch.
+    pass: sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    ips: ['127.0.0.1', '::1']
+    permissions:
+      - action: api
+pathDefaults:
+  overridePublisher: no
 
 # Webcam ingest + normalization. A browser WHIP-publishes its camera to
 # cam{N} (see neat_insight/mediasrc.py webcam_ingest_path_name), NOT to src{N}. A
