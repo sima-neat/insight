@@ -411,8 +411,6 @@ select:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .periph-stage-starting,
-  .periph-stage-error,
   .periph-preview-frame,
   .periph-spinner,
   .periph-live-dot,
@@ -4043,7 +4041,7 @@ button:disabled {
   color: #8f2f45;
 }
 
-/* The stage: one 16:9 tile that always shows something — a Start button, progress, video, or the error. */
+/* The live video: the one element that takes the full width, with its chip and Stop overlaid. */
 .periph-stage {
   position: relative;
   width: 100%;
@@ -4052,32 +4050,20 @@ button:disabled {
   border-radius: var(--radius-sm);
   background: #0e1923;
   overflow: hidden;
-  display: grid;
-  place-items: center;
-  color: #e6edf5;
 }
 
-.periph-stage-starting,
-.periph-stage-error {
-  display: grid;
-  justify-items: center;
-  gap: 10px;
-  padding: 16px;
-  text-align: center;
-  animation: periph-stage-in 200ms ease both;
-}
-
-.periph-stage-starting {
-  color: #b9c6d4;
+.periph-preview-progress {
+  align-items: center;
+  color: var(--ink-soft);
   font-size: 13px;
 }
 
 .periph-spinner {
-  width: 28px;
-  height: 28px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.15);
-  border-top-color: #6ea8ff;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
   animation: periph-spin 0.9s linear infinite;
 }
 
@@ -4135,25 +4121,6 @@ button:disabled {
 
 .periph-stage-stop:hover {
   background: rgba(0, 0, 0, 0.75);
-}
-
-.periph-stage-starting .btn-ghost {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #e6edf5;
-}
-
-.periph-stage-error {
-  position: absolute;
-  inset: 0;
-  align-content: center;
-  overflow: auto;
-}
-
-.periph-stage-error .periph-callout {
-  width: min(560px, 100%);
-  text-align: left;
-  color: var(--ink);
 }
 
 @keyframes periph-stage-in { from { opacity: 0 } to { opacity: 1 } }
