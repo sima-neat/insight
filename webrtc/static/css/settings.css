@@ -257,8 +257,28 @@
   opacity: 0.45;
 }
 
-.settings-slider {
-  width: 160px;
+/* Spinners for the numeric settings; underlined like the dialog's other fields. The
+   focus line is a shadow, not a thicker border, so focusing moves nothing. */
+.settings-number {
+  width: 6em;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid #888;
+  background: transparent;
+  color: inherit;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-number:focus {
+  outline: none;
+  border-bottom-color: var(--accent-blue);
+  box-shadow: 0 1px 0 var(--accent-blue);
+}
+
+.settings-unit {
+  margin-left: 6px;
 }
 
 .metadata-type-row {

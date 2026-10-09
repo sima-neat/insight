@@ -32,10 +32,9 @@
             <div id="objectDetectionSettings" class="metadata-type-section">
               <table class="filter-table metadata-filter-table">
                 <tr>
-                  <td><label for="confidenceSlider">Confidence Threshold</label></td>
+                  <td><label for="confidenceInput">Confidence Threshold</label></td>
                   <td>
-                    <input type="range" id="confidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
-                    <span id="confidenceDisplay">0</span>
+                    <input type="number" id="confidenceInput" class="settings-number" min="0" max="1" step="0.01" value="0">
                   </td>
                 </tr>
               </table>
@@ -55,17 +54,15 @@
             <div id="segmentationSettings" class="metadata-type-section">
               <table class="filter-table metadata-filter-table">
                 <tr>
-                  <td><label for="segmentationConfidenceSlider">Confidence Threshold</label></td>
+                  <td><label for="segmentationConfidenceInput">Confidence Threshold</label></td>
                   <td>
-                    <input type="range" id="segmentationConfidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
-                    <span id="segmentationConfidenceDisplay">0</span>
+                    <input type="number" id="segmentationConfidenceInput" class="settings-number" min="0" max="1" step="0.01" value="0">
                   </td>
                 </tr>
                 <tr>
-                  <td><label for="segmentationOpacitySlider">Mask Opacity</label></td>
+                  <td><label for="segmentationOpacityInput">Mask Opacity</label></td>
                   <td>
-                    <input type="range" id="segmentationOpacitySlider" class="settings-slider" min="0" max="1" step="0.05" value="0.4">
-                    <span id="segmentationOpacityDisplay">0.4</span>
+                    <input type="number" id="segmentationOpacityInput" class="settings-number" min="0" max="1" step="0.05" value="0.4">
                   </td>
                 </tr>
               </table>
@@ -85,10 +82,9 @@
             <div id="trackingSettings" class="metadata-type-section">
               <table class="filter-table">
                 <tr>
-                  <td><label for="trackingConfidenceSlider">Confidence Threshold</label></td>
+                  <td><label for="trackingConfidenceInput">Confidence Threshold</label></td>
                   <td>
-                    <input type="range" id="trackingConfidenceSlider" class="settings-slider" min="0" max="1" step="0.01" value="0">
-                    <span id="trackingConfidenceDisplay">0</span>
+                    <input type="number" id="trackingConfidenceInput" class="settings-number" min="0" max="1" step="0.01" value="0">
                   </td>
                 </tr>
                 <tr>
@@ -98,17 +94,17 @@
                   </td>
                 </tr>
                 <tr class="track-history-dependent">
-                  <td><label for="trackTrailLengthSlider">Trail Length</label></td>
+                  <td><label for="trackTrailLengthInput">Trail Length</label></td>
                   <td>
-                    <input type="range" id="trackTrailLengthSlider" class="settings-slider" min="1" max="60" step="1" value="10">
-                    <span id="trackTrailLengthDisplay">10 positions</span>
+                    <input type="number" id="trackTrailLengthInput" class="settings-number" min="1" max="60" step="1" value="10">
+                    <span class="settings-unit">positions</span>
                   </td>
                 </tr>
                 <tr class="track-history-dependent">
-                  <td><label for="lostTrackTtlSlider">Keep Lost Tracks For</label></td>
+                  <td><label for="lostTrackTtlInput">Keep Lost Tracks For</label></td>
                   <td>
-                    <input type="range" id="lostTrackTtlSlider" class="settings-slider" min="0" max="10000" step="250" value="2000">
-                    <span id="lostTrackTtlDisplay">2.0 s</span>
+                    <input type="number" id="lostTrackTtlInput" class="settings-number" min="0" max="10000" step="250" value="2000">
+                    <span class="settings-unit">ms</span>
                   </td>
                 </tr>
               </table>
@@ -156,17 +152,17 @@
           <div id="viewer-general" class="settings-tab-section">
             <table class="filter-table">
               <tr>
-                <td><label for="videoSyncBufferSlider">Video Sync Buffer (msec)</label></td>
+                <td><label for="videoSyncBufferInput">Video Sync Buffer</label></td>
                 <td>
-                  <input type="range" id="videoSyncBufferSlider" class="settings-slider" min="0" max="4000" step="50" value="350">
-                  <span id="videoSyncBufferDisplay">350</span>
+                  <input type="number" id="videoSyncBufferInput" class="settings-number" min="0" max="4000" step="50" value="350">
+                  <span class="settings-unit">ms</span>
                 </td>
               </tr>
               <tr>
-                <td><label for="metadataRetentionSlider">Metadata Retention (msec, 0 = no expiry)</label></td>
+                <td><label for="metadataRetentionInput">Metadata Retention (0 = no expiry)</label></td>
                 <td>
-                  <input type="range" id="metadataRetentionSlider" class="settings-slider" min="0" max="30000" step="250" value="0">
-                  <span id="metadataRetentionDisplay">0</span>
+                  <input type="number" id="metadataRetentionInput" class="settings-number" min="0" max="30000" step="250" value="0">
+                  <span class="settings-unit">ms</span>
                 </td>
               </tr>
             </table>

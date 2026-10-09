@@ -516,7 +516,7 @@
 
   // A channel dialog's save stores a general key as the channel's own if the channel
   // had its own value at load, or if the control now holds something else than the
-  // dialog loaded into it. Values compare strictly (integers for sliders, booleans
+  // dialog loaded into it. Values compare strictly (numbers for spinners, booleans
   // for toggles). Each key appears once, in order of first appearance.
   function generalKeysToStore(ownKeys, loadedValues, currentValues) {
     const keys = [];

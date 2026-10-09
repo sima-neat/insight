@@ -6,28 +6,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const viewerSettingsClose = document.getElementById("viewerSettingsClose");
   const saveViewerSettings = document.getElementById("saveViewerSettings");
   const metadataTypeSelector = document.getElementById("metadataTypeSelector");
-  const confidenceSlider = document.getElementById("confidenceSlider");
-  const trackingConfidenceSlider = document.getElementById("trackingConfidenceSlider");
-  const trackTrailLengthSlider = document.getElementById("trackTrailLengthSlider");
-  const lostTrackTtlSlider = document.getElementById("lostTrackTtlSlider");
-  const videoSyncBufferSlider = document.getElementById("videoSyncBufferSlider");
-  const metadataRetentionSlider = document.getElementById("metadataRetentionSlider");
-  const confidenceDisplay = document.getElementById("confidenceDisplay");
-  const trackingConfidenceDisplay = document.getElementById("trackingConfidenceDisplay");
-  const trackTrailLengthDisplay = document.getElementById("trackTrailLengthDisplay");
-  const lostTrackTtlDisplay = document.getElementById("lostTrackTtlDisplay");
-  const videoSyncBufferDisplay = document.getElementById("videoSyncBufferDisplay");
-  const metadataRetentionDisplay = document.getElementById("metadataRetentionDisplay");
+  const confidenceInput = document.getElementById("confidenceInput");
+  const trackingConfidenceInput = document.getElementById("trackingConfidenceInput");
+  const trackTrailLengthInput = document.getElementById("trackTrailLengthInput");
+  const lostTrackTtlInput = document.getElementById("lostTrackTtlInput");
+  const videoSyncBufferInput = document.getElementById("videoSyncBufferInput");
+  const metadataRetentionInput = document.getElementById("metadataRetentionInput");
   const tabButtons = document.querySelectorAll(".settings-tab-link");
   const tabSections = document.querySelectorAll(".settings-tab-section");
   const objectList = document.getElementById("viewerObjectList");
   const metadataTab = document.getElementById("viewer-metadata");
   const addViewerObjectBtn = document.getElementById("addViewerObject");
   const objectTableBody = document.getElementById("viewerObjectTableBody");
-  const segmentationConfidenceSlider = document.getElementById("segmentationConfidenceSlider");
-  const segmentationConfidenceDisplay = document.getElementById("segmentationConfidenceDisplay");
-  const segmentationOpacitySlider = document.getElementById("segmentationOpacitySlider");
-  const segmentationOpacityDisplay = document.getElementById("segmentationOpacityDisplay");
+  const segmentationConfidenceInput = document.getElementById("segmentationConfidenceInput");
+  const segmentationOpacityInput = document.getElementById("segmentationOpacityInput");
   const segmentationObjectList = document.getElementById("segmentationObjectList");
   const addSegmentationObjectBtn = document.getElementById("addSegmentationObject");
   const segmentationObjectTableBody = document.getElementById("segmentationObjectTableBody");
@@ -115,40 +107,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  confidenceSlider.addEventListener("input", () => {
-    showFraction(confidenceSlider, confidenceDisplay);
-  });
-
-  segmentationConfidenceSlider.addEventListener("input", () => {
-    showFraction(segmentationConfidenceSlider, segmentationConfidenceDisplay);
-  });
-
-  segmentationOpacitySlider.addEventListener("input", () => {
-    showFraction(segmentationOpacitySlider, segmentationOpacityDisplay);
-  });
-
-  trackingConfidenceSlider.addEventListener("input", () => {
-    showFraction(trackingConfidenceSlider, trackingConfidenceDisplay);
-  });
-
-  trackTrailLengthSlider.addEventListener("input", () => {
-    updateTrackTrailLengthDisplay();
-  });
-
-  lostTrackTtlSlider.addEventListener("input", () => {
-    updateLostTrackTtlDisplay();
-  });
+  [
+    confidenceInput,
+    segmentationConfidenceInput,
+    segmentationOpacityInput,
+    trackingConfidenceInput,
+    trackTrailLengthInput,
+    lostTrackTtlInput,
+    videoSyncBufferInput,
+    metadataRetentionInput
+  ].forEach(keepInRange);
 
   trackHistoryToggle.addEventListener("change", () => {
     updateTrackHistoryControls();
-  });
-
-  videoSyncBufferSlider.addEventListener("input", () => {
-    videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
-  });
-
-  metadataRetentionSlider.addEventListener("input", () => {
-    metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
   });
 
   metadataTypeSelector.addEventListener("change", () => {
@@ -175,20 +146,20 @@ document.addEventListener("DOMContentLoaded", () => {
   // what every dialog stores without the scope UI.
   function readAllSettings() {
     const settings = settingsApi.readScopeSettings(scope);
-    settings.general.videoSyncBufferMs = parseInt(videoSyncBufferSlider.value, 10);
-    settings.general.metadataRetentionMs = parseInt(metadataRetentionSlider.value, 10);
+    settings.general.videoSyncBufferMs = parseInt(videoSyncBufferInput.value, 10);
+    settings.general.metadataRetentionMs = parseInt(metadataRetentionInput.value, 10);
     settings.general.showRoi = roiToggle.checked;
     settings.general.applyRoiFiltering = roiFilteringToggle.checked;
-    settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceSlider.value);
+    settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceInput.value);
     settings.types["object-detection"].objects = getObjectEntries();
-    settings.types.segmentation.confidenceThreshold = parseFloat(segmentationConfidenceSlider.value);
-    settings.types.segmentation.maskOpacity = parseFloat(segmentationOpacitySlider.value);
+    settings.types.segmentation.confidenceThreshold = parseFloat(segmentationConfidenceInput.value);
+    settings.types.segmentation.maskOpacity = parseFloat(segmentationOpacityInput.value);
     settings.types.segmentation.objects = getSegmentationEntries();
-    settings.types.tracking.confidenceThreshold = parseFloat(trackingConfidenceSlider.value);
+    settings.types.tracking.confidenceThreshold = parseFloat(trackingConfidenceInput.value);
     settings.types.tracking.history = {
       enabled: trackHistoryToggle.checked,
-      trailLength: parseInt(trackTrailLengthSlider.value, 10),
-      lostTrackTtlMs: parseInt(lostTrackTtlSlider.value, 10)
+      trailLength: parseInt(trackTrailLengthInput.value, 10),
+      lostTrackTtlMs: parseInt(lostTrackTtlInput.value, 10)
     };
     return settings;
   }
@@ -204,9 +175,23 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
-  // A value between 0 and 1 as the dialog shows it, and as the notes quote it.
-  function showFraction(slider, display) {
-    display.textContent = Number(slider.value).toFixed(2);
+  // A typed value is kept within the spinner's range, whole numbers stay whole, and an
+  // empty or unreadable entry goes back to the value the field had before the edit.
+  function keepInRange(input) {
+    let before = input.value;
+    input.addEventListener("focus", () => {
+      before = input.value;
+    });
+    input.addEventListener("change", () => {
+      let value = parseFloat(input.value);
+      if (!Number.isFinite(value)) {
+        input.value = before;
+        return;
+      }
+      if (Number.isInteger(parseFloat(input.step))) value = Math.round(value);
+      input.value = String(Math.min(Math.max(value, parseFloat(input.min)), parseFloat(input.max)));
+      before = input.value;
+    });
   }
 
   let selectedRow = null;
@@ -241,17 +226,6 @@ document.addEventListener("DOMContentLoaded", () => {
     trackingSettings.style.display = selectedType === "tracking" ? "flex" : "none";
     metadataNoSettings.style.display =
       selectedType !== "object-detection" && selectedType !== "segmentation" && selectedType !== "tracking" ? "flex" : "none";
-  }
-
-  function updateTrackTrailLengthDisplay() {
-    const value = parseInt(trackTrailLengthSlider.value, 10);
-    trackTrailLengthDisplay.textContent = `${Number.isFinite(value) ? value : 10} positions`;
-  }
-
-  function updateLostTrackTtlDisplay() {
-    const value = parseInt(lostTrackTtlSlider.value, 10);
-    const seconds = Number.isFinite(value) ? (value / 1000).toFixed(1) : "2.0";
-    lostTrackTtlDisplay.textContent = `${seconds} s`;
   }
 
   function updateTrackHistoryControls() {
@@ -402,25 +376,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const trackingTypeSettings = settings.types.tracking;
     const trackingHistorySettings = trackingTypeSettings.history || settingsApi.defaults.types.tracking.history;
 
-    confidenceSlider.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
-    showFraction(confidenceSlider, confidenceDisplay);
-    segmentationConfidenceSlider.value = segmentationTypeSettings.confidenceThreshold ?? 0;
-    showFraction(segmentationConfidenceSlider, segmentationConfidenceDisplay);
-    segmentationOpacitySlider.value = segmentationTypeSettings.maskOpacity ?? settingsApi.defaults.types.segmentation.maskOpacity;
-    showFraction(segmentationOpacitySlider, segmentationOpacityDisplay);
-    trackingConfidenceSlider.value = trackingTypeSettings.confidenceThreshold ?? 0;
-    showFraction(trackingConfidenceSlider, trackingConfidenceDisplay);
-    trackTrailLengthSlider.value = trackingHistorySettings.trailLength ?? 10;
-    lostTrackTtlSlider.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
-    videoSyncBufferSlider.value = settings.general.videoSyncBufferMs ?? 350;
-    videoSyncBufferDisplay.textContent = videoSyncBufferSlider.value;
-    metadataRetentionSlider.value = settings.general.metadataRetentionMs ?? 0;
-    metadataRetentionDisplay.textContent = metadataRetentionSlider.value;
+    confidenceInput.value = objectDetectionTypeSettings.confidenceThreshold ?? 0;
+    segmentationConfidenceInput.value = segmentationTypeSettings.confidenceThreshold ?? 0;
+    segmentationOpacityInput.value = segmentationTypeSettings.maskOpacity ?? settingsApi.defaults.types.segmentation.maskOpacity;
+    trackingConfidenceInput.value = trackingTypeSettings.confidenceThreshold ?? 0;
+    trackTrailLengthInput.value = trackingHistorySettings.trailLength ?? 10;
+    lostTrackTtlInput.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
+    videoSyncBufferInput.value = settings.general.videoSyncBufferMs ?? 350;
+    metadataRetentionInput.value = settings.general.metadataRetentionMs ?? 0;
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
-    updateTrackTrailLengthDisplay();
-    updateLostTrackTtlDisplay();
     updateTrackHistoryControls();
     loadObjectEntries(objectDetectionTypeSettings.objects || settingsApi.defaults.types["object-detection"].objects);
     loadSegmentationEntries(segmentationTypeSettings.objects || settingsApi.defaults.types.segmentation.objects);

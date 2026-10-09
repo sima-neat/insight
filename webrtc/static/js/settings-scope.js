@@ -45,19 +45,18 @@
     return control.checked;
   }
 
-  // Writing goes through the event the user's own input would fire, so settings.js
-  // updates the display next to the control exactly as it does for the user.
-  function writeRange(control, value) {
+  function writeNumber(control, value) {
     control.value = value;
-    control.dispatchEvent(new Event("input"));
   }
 
+  // Writing goes through the event the user's own click would fire, so settings.js
+  // updates the controls that depend on it exactly as it does for the user.
   function writeChecked(control, value) {
     control.checked = value !== false;
     control.dispatchEvent(new Event("change"));
   }
 
-  // The values as the dialog shows them next to each control, with their unit.
+  // The values as the notes quote them, with their unit.
   function describeMs(value) {
     return `${value} ms`;
   }
@@ -78,81 +77,68 @@
     return `${value} positions`;
   }
 
-  function describeSeconds(value) {
-    return `${(Number(value) / 1000).toFixed(1)} s`;
-  }
-
-  const RANGE = { write: writeRange };
+  const NUMBER = { write: writeNumber };
   const CHECKBOX = { read: readChecked, write: writeChecked };
 
-  // The one table: each scalar setting id with its control, its display element,
-  // and how its value is read, written and described. Switches, notes, locking
+  // The one table: each scalar setting id with its control and how its value is
+  // read, written and described. Switches, notes, locking
   // and saving are all driven by it.
   const SCALAR_CONTROLS = {
     "general.videoSyncBufferMs": {
-      control: "videoSyncBufferSlider",
-      display: "videoSyncBufferDisplay",
-      ...RANGE,
+      control: "videoSyncBufferInput",
+      ...NUMBER,
       read: readInteger,
       describe: describeMs
     },
     "general.metadataRetentionMs": {
-      control: "metadataRetentionSlider",
-      display: "metadataRetentionDisplay",
-      ...RANGE,
+      control: "metadataRetentionInput",
+      ...NUMBER,
       read: readInteger,
       describe: describeRetention
     },
-    "general.showRoi": { control: "toggleRoiVisibility", display: null, ...CHECKBOX, describe: describeOnOff },
-    "general.applyRoiFiltering": { control: "toggleRoiFiltering", display: null, ...CHECKBOX, describe: describeOnOff },
+    "general.showRoi": { control: "toggleRoiVisibility", ...CHECKBOX, describe: describeOnOff },
+    "general.applyRoiFiltering": { control: "toggleRoiFiltering", ...CHECKBOX, describe: describeOnOff },
     "types.object-detection.confidenceThreshold": {
-      control: "confidenceSlider",
-      display: "confidenceDisplay",
-      ...RANGE,
+      control: "confidenceInput",
+      ...NUMBER,
       read: readFraction,
       describe: describeFraction
     },
     "types.segmentation.confidenceThreshold": {
-      control: "segmentationConfidenceSlider",
-      display: "segmentationConfidenceDisplay",
-      ...RANGE,
+      control: "segmentationConfidenceInput",
+      ...NUMBER,
       read: readFraction,
       describe: describeFraction
     },
     "types.segmentation.maskOpacity": {
-      control: "segmentationOpacitySlider",
-      display: "segmentationOpacityDisplay",
-      ...RANGE,
+      control: "segmentationOpacityInput",
+      ...NUMBER,
       read: readFraction,
       describe: describeFraction
     },
     "types.tracking.confidenceThreshold": {
-      control: "trackingConfidenceSlider",
-      display: "trackingConfidenceDisplay",
-      ...RANGE,
+      control: "trackingConfidenceInput",
+      ...NUMBER,
       read: readFraction,
       describe: describeFraction
     },
     "types.tracking.history.enabled": {
       control: "toggleTrackHistory",
-      display: null,
       ...CHECKBOX,
       describe: describeOnOff
     },
     "types.tracking.history.trailLength": {
-      control: "trackTrailLengthSlider",
-      display: "trackTrailLengthDisplay",
-      ...RANGE,
+      control: "trackTrailLengthInput",
+      ...NUMBER,
       read: readInteger,
       describe: describePositions,
       dependsOnTrackHistory: true
     },
     "types.tracking.history.lostTrackTtlMs": {
-      control: "lostTrackTtlSlider",
-      display: "lostTrackTtlDisplay",
-      ...RANGE,
+      control: "lostTrackTtlInput",
+      ...NUMBER,
       read: readInteger,
-      describe: describeSeconds,
+      describe: describeMs,
       dependsOnTrackHistory: true
     }
   };
@@ -195,7 +181,6 @@
     Object.values(SCALAR_CONTROLS).forEach((entry) => {
       const control = document.getElementById(entry.control);
       if (!control || !settingContainer(control)) elements.push(entry.control);
-      if (entry.display && !document.getElementById(entry.display)) elements.push(entry.display);
     });
     if (functions.length === 0) {
       // Both sides must name the same settings, or a switch would save nothing.
