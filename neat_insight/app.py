@@ -45,6 +45,7 @@ from neat_insight.mediasrc import (
     WEBCAM_WHIP_PORT_MAP_NAME,
     http_mjpeg_command,
     http_snapshot_command,
+    media_stream_file,
     media_stream_identity,
     media_stream_is_running,
     normalize_codec,
@@ -66,6 +67,7 @@ from neat_insight.mediasrc import (
 from neat_insight import mediasrc
 from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound, PREVIEW_READER_TAG
 from neat_insight.api_docs import api_docs_bp
+from neat_insight import renditions
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
     get_remote_metrics,
@@ -107,6 +109,7 @@ PREVIEW_MAX_STREAMS = 4
 PREVIEW_IDLE_TIMEOUT_SECONDS = 15
 _preview_lock = threading.Lock()
 _preview_count = 0
+RENDITIONS_INDEX_FILE = Path(env["NEAT_INSIGHT_DATA"]) / "renditions.json"
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
@@ -271,6 +274,7 @@ def _default_source(index: int):
         "transport": DEFAULT_TRANSPORT,
         "codec": DEFAULT_CODEC,
         "type": SOURCE_TYPE_FILE,
+        "fps": None,
     }
 
 
@@ -297,6 +301,7 @@ def _normalize_source(src, index: Optional[int] = None):
             "transport": DEFAULT_TRANSPORT,
             "codec": DEFAULT_CODEC,
             "type": SOURCE_TYPE_WEBCAM,
+            "fps": None,
         }
 
     raw_codec = src.get("codec")
@@ -316,6 +321,7 @@ def _normalize_source(src, index: Optional[int] = None):
         "transport": transport,
         "codec": codec,
         "type": SOURCE_TYPE_FILE,
+        "fps": renditions.coerce_fps(src.get("fps")),
     }
 
 
@@ -394,6 +400,66 @@ def _update_source_slot(index, expect, apply):
                 save_sources(sources)
                 return src
         return None
+
+
+# Per-slot generation, bumped under _sources_lock by every user action that changes a
+# slot (assign, stop, reset, delete, ...). Starting a file slot can encode an FPS
+# rendition for minutes outside the lock; it captures the generation first and
+# abandons the start if the slot moved on meanwhile. The (type, file) identity check
+# alone cannot see that: a Stop during the encode leaves the identity unchanged.
+_slot_generations: dict[int, int] = {}
+
+
+def _bump_slot(index) -> None:
+    with _sources_lock:
+        _slot_generations[index] = _slot_generations.get(index, 0) + 1
+
+
+def _slot_generation(index) -> int:
+    with _sources_lock:
+        return _slot_generations.get(index, 0)
+
+
+def _persist_slot(src) -> None:
+    """Write one slot into a freshly loaded source list.
+
+    Starting a slot can block for minutes while a rendition encodes, and other
+    requests keep editing sources meanwhile. Saving the whole pre-encode
+    snapshot would overwrite those edits, so only the started slot is written.
+    """
+    with _sources_lock:
+        sources = load_sources()
+        for position, existing in enumerate(sources):
+            if existing.get("index") == src.get("index"):
+                sources[position] = src
+                break
+        else:
+            sources.append(src)
+        save_sources(sources)
+
+
+def _slot_changed_since(src, generation: int) -> bool:
+    """True when the slot was touched (stop, assign, delete, ...) or no longer holds the file slot `src` started with."""
+    with _sources_lock:
+        if _slot_generation(src.get("index")) != generation:
+            return True
+        current = next((s for s in load_sources() if s.get("index") == src.get("index")), None)
+    if current is None:
+        return True
+    return (
+        current.get("type") != SOURCE_TYPE_FILE
+        or (current.get("file") or "") != (src.get("file") or "")
+        or renditions.coerce_fps(current.get("fps")) != renditions.coerce_fps(src.get("fps"))
+    )
+
+
+def _persist_slot_if_current(src, generation: int) -> bool:
+    """Persist `src` unless the slot moved on since `generation`; returns whether it was written."""
+    with _sources_lock:
+        if _slot_changed_since(src, generation):
+            return False
+        _persist_slot(src)
+        return True
 
 
 def _safe_media_path(rel_path: str) -> Path:
@@ -1997,21 +2063,36 @@ def delete_media():
 
     try:
         if full_path.is_file():
-            file_name = os.path.relpath(full_path, MEDIA_DIR)
-            with _sources_lock:
-                sources = load_sources()
-                modified = False
-                for src in sources:
-                    if src.get("file") == file_name:
-                        stop_media_stream(src["index"])
-                        src["file"] = ""
-                        src["state"] = "stopped"
-                        modified = True
-                if modified:
-                    save_sources(sources)
+            removed_files = [full_path]
+        else:
+            removed_files = [Path(root) / name for root, _dirs, names in os.walk(full_path) for name in names]
+        removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
+
+        with _sources_lock:
+            sources = load_sources()
+            modified = False
+            for src in sources:
+                if (src.get("file") or "").replace(os.path.sep, "/") in removed_names:
+                    _bump_slot(src["index"])
+                    stop_media_stream(src["index"])
+                    src["file"] = ""
+                    src["state"] = "stopped"
+                    src["fps"] = None
+                    modified = True
+            if modified:
+                save_sources(sources)
+
+        # Unlink first, then forget renditions: an encode that publishes before the unlink is
+        # cleaned up by remove_source, and one that publishes after it finds no source and aborts.
+        if full_path.is_file():
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
+        for file_name in sorted(removed_names):
+            try:
+                renditions.remove_source(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name)
+            except Exception as exc:
+                logging.warning("Failed to remove renditions for %s: %s", file_name, exc)
         return {"message": "Deleted successfully"}
     except Exception as exc:
         return _json_error(str(exc), 500)
@@ -2133,8 +2214,11 @@ def list_video_files():
 
 def _collect_video_files():
     video_files = []
-    for root, _, files in os.walk(MEDIA_DIR):
+    for root, dirs, files in os.walk(MEDIA_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         for fname in files:
+            if fname.startswith("."):
+                continue
             if Path(fname).suffix.lower() in ALLOWED_EXTENSIONS:
                 full_path = Path(root) / fname
                 rel = os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")
@@ -2247,11 +2331,12 @@ def _index_error(index):
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
 
 
+def _external_conflict_message(index, path) -> str:
+    return f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it."
+
+
 def _external_conflict_error(index, path):
-    return _json_error(
-        f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it.",
-        409,
-    )
+    return _json_error(_external_conflict_message(index, path), 409)
 
 
 def _skipped_suffix(skipped_external, phrase="Skipped external"):
@@ -2260,12 +2345,58 @@ def _skipped_suffix(skipped_external, phrase="Skipped external"):
     return f" {phrase}: " + ", ".join(f"src{i}" for i in skipped_external) + "."
 
 
-def _source_with_urls(src, snapshot=None):
+def _source_native_fps(file_name: str) -> Optional[int]:
+    if not file_name:
+        return None
+    try:
+        _safe_media_path(file_name)
+        return renditions.source_info(RENDITIONS_INDEX_FILE, MEDIA_DIR, file_name).get("native_fps")
+    except Exception as exc:
+        logging.debug("Failed to detect the frame rate of %s: %s", file_name, exc)
+        return None
+
+
+def _active_stream_file(index: Optional[int]) -> Optional[str]:
+    if index is None:
+        return None
+    file_path = media_stream_file(index)
+    if not file_path:
+        return None
+    try:
+        return os.path.relpath(file_path, MEDIA_DIR).replace(os.path.sep, "/")
+    except ValueError:
+        return file_path
+
+
+def _native_fps_by_file(sources) -> dict[str, dict]:
+    """One cached probe pass for every assigned file in `sources`; {} when the index cannot be read."""
+    files = []
+    for src in sources:
+        file_name = src.get("file") or ""
+        if not file_name:
+            continue
+        try:
+            _safe_media_path(file_name)
+        except ValueError:
+            continue
+        files.append(file_name)
+    try:
+        return renditions.source_infos(RENDITIONS_INDEX_FILE, MEDIA_DIR, files)
+    except Exception as exc:
+        logging.debug("Failed to detect the frame rates of the assigned media sources: %s", exc)
+        return {}
+
+
+def _source_with_urls(src, snapshot=None, native_fps_by_file: Optional[dict] = None):
     enriched = dict(src)
     if src.get("type") == SOURCE_TYPE_WEBCAM:
         enriched["transport"] = DEFAULT_TRANSPORT
         enriched["codec"] = DEFAULT_CODEC
         enriched["allowed_transports"] = ["rtsp"]
+        # A webcam publishes at whatever rate the browser captures; there is no file to re-encode.
+        enriched["fps"] = None
+        enriched["native_fps"] = None
+        enriched["active_file"] = None
         enriched["urls"] = {
             "rtsp": _source_url(src, "rtsp"),
             "whip": _webcam_whip_url(src),
@@ -2284,6 +2415,13 @@ def _source_with_urls(src, snapshot=None):
     enriched["transport"] = transport
     enriched["codec"] = codec
     enriched["allowed_transports"] = allowed_transports
+    enriched["fps"] = renditions.coerce_fps(src.get("fps"))
+    file_name = src.get("file") or ""
+    if native_fps_by_file is None:
+        enriched["native_fps"] = _source_native_fps(file_name)
+    else:
+        enriched["native_fps"] = native_fps_by_file.get(file_name, {}).get("native_fps")
+    enriched["active_file"] = _active_stream_file(src.get("index"))
     urls = {}
     if "rtsp" in allowed_transports:
         urls["rtsp"] = _source_url(src, "rtsp")
@@ -2566,13 +2704,14 @@ def get_sources():
     """Return persisted media-source objects, including index, assigned file path, and playback state."""
     sources = _sync_source_runtime_states(load_sources())
     snapshot = _path_snapshot()
-    return jsonify([_source_with_urls(src, snapshot) for src in sources])
+    native = _native_fps_by_file(sources)
+    return jsonify([_source_with_urls(src, snapshot, native_fps_by_file=native) for src in sources])
 
 
 # API: assign or clear a media file for one RTSP source slot.
 @app.post("/api/mediasrc/assign")
 def assign_source():
-    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str}; update and restart if already playing."""
+    """Accept JSON {'index': int, 'file': str, 'transport': str, 'codec': str, 'fps': int|null}; update and restart if already playing. Changing the file resets fps."""
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
@@ -2583,6 +2722,13 @@ def assign_source():
     if holder:
         return _external_conflict_error(index, holder)
     requested_transport = data.get("transport")
+    fps_requested = "fps" in data
+    requested_fps = None
+    if fps_requested and data.get("fps") not in (None, ""):
+        try:
+            requested_fps = renditions.validate_fps(data.get("fps"))
+        except ValueError as exc:
+            return _json_error(str(exc))
 
     snapshot = next((src for src in load_sources() if src["index"] == index), None)
     if snapshot is None:
@@ -2624,32 +2770,29 @@ def assign_source():
         # from the snapshot: the same file can have been started by another
         # tab during the probe, and that process is the one to replace. (A
         # webcam slot has no ffmpeg; its playing state does not carry over.)
-        was_playing = media_stream_is_running(index)
+        _bump_slot(index)
+        was_playing = src.get("state") == "playing" and media_stream_is_running(index)
         stop_media_stream(index)
+        file_changed = src.get("type") != SOURCE_TYPE_FILE or file_name != (src.get("file") or "")
         src["type"] = SOURCE_TYPE_FILE
         src["file"] = file_name
+        if fps_requested:
+            src["fps"] = requested_fps
+        elif file_changed:
+            src["fps"] = None  # an fps override belongs to the clip it was chosen for
         src["transport"] = transport
         src["codec"] = codec
-        # Nothing is playing on the slot now; only a restart below says otherwise.
+        # Nothing is playing on the slot now; only the restart below says otherwise.
         src["state"] = "stopped"
-        if was_playing and file_name:
-            if not _allowed_transports:
-                src["state"] = "stopped"
-                save_sources(sources)
-                return _json_error(_codec_detection_error(file_name), 400)
-            file_path = MEDIA_DIR / file_name
-            ok, err, _identity = start_media_stream(
-                index,
-                str(file_path),
-                src.get("transport"),
-                src.get("codec"),
-                _source_media_codec(file_name),
-            )
-            if not ok:
-                return _json_error(err, 500)
-            src["state"] = "playing"
+        # Persisted before the restart: preparing its input may encode for minutes,
+        # outside this lock, and the restart abandons the slot if it moves on meanwhile.
         save_sources(sources)
-        return {"success": True}
+        generation = _slot_generation(index)
+    if was_playing and file_name:
+        ok, err, status = _start_source_slot(dict(src), generation=generation)
+        if not ok:
+            return _json_error(err, status)
+    return {"success": True}
 
 
 # API: register one RTSP source slot to accept a browser-published webcam.
@@ -2686,12 +2829,14 @@ def assign_webcam_source():
         # persisted as playing. Also covers the same file restarted during
         # the release above, which the identity check cannot see. Idempotent,
         # so no need to ask first.
+        _bump_slot(index)
         stop_media_stream(index)
         slot["type"] = SOURCE_TYPE_WEBCAM
         slot["file"] = ""
         slot["transport"] = DEFAULT_TRANSPORT
         slot["codec"] = DEFAULT_CODEC
         slot["state"] = "stopped"
+        slot["fps"] = None
 
     # Applied to a fresh copy: the release above can take a second, and a slot
     # that changed meanwhile holds a stream this request never released.
@@ -2734,7 +2879,7 @@ def auto_assign_all_sources():
             # (an HTTP/MJPEG one) is stopped, like every other active source.
             plan[source_index] = {
                 "was": (src.get("type"), src.get("file")),
-                **{key: src.get(key) for key in ("type", "file", "transport", "codec")},
+                **{key: src.get(key) for key in ("type", "file", "transport", "codec", "fps")},
                 "state": "stopped",
             }
             continue
@@ -2755,12 +2900,15 @@ def auto_assign_all_sources():
         if file_name:
             next_file += 1
         transport, codec, _allowed_transports = _derive_source_stream_settings(file_name)
+        same_clip = src.get("type") == SOURCE_TYPE_FILE and file_name == (src.get("file") or "")
         plan[source_index] = {
             "was": (src.get("type"), src.get("file")),
             "type": SOURCE_TYPE_FILE,
             "file": file_name,
             "transport": transport,
             "codec": codec,
+            # An fps override belongs to the clip it was chosen for.
+            "fps": src.get("fps") if same_clip else None,
             "state": "stopped",
         }
 
@@ -2784,8 +2932,9 @@ def auto_assign_all_sources():
                 continue
             # File streams are stopped here, after the identity check, so a
             # file another tab assigned meanwhile is neither killed nor overwritten.
+            _bump_slot(src["index"])
             stop_media_stream(src["index"])
-            for key in ("type", "file", "transport", "codec", "state"):
+            for key in ("type", "file", "transport", "codec", "fps", "state"):
                 src[key] = outcome[key]
         save_sources(fresh)
 
@@ -2818,11 +2967,215 @@ def auto_assign_all_sources():
     }
 
 
+def _resolve_stream_input(src) -> tuple[Optional[Path], Optional[str], Optional[str], int]:
+    """Return (input path, rendition rel path or None, error, http status). Encodes a missing rendition synchronously."""
+    file_name = src.get("file") or ""
+    fps = renditions.coerce_fps(src.get("fps"))
+    if fps is None:
+        return MEDIA_DIR / file_name, None, None, 200
+    result = None
+    try:
+        for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, _source_media_codec(file_name)):
+            if event.get("event") == "done":
+                result = event
+    except renditions.UnsupportedRendition as exc:
+        return None, None, str(exc), 400
+    except (renditions.RenditionError, OSError) as exc:
+        # OSError covers a failing stat/read of the source or the rendition directory.
+        return None, None, f"Encoding {file_name} at {fps} fps failed: {exc}", 500
+    if not result:
+        return None, None, "Rendition preparation ended unexpectedly", 500
+    return Path(result["path"]), result.get("rendition"), None, 200
+
+
+def _start_source_slot(src, generation: Optional[int] = None) -> tuple[bool, Optional[str], int]:
+    """Derive stream settings, prepare the input (source or FPS rendition), start the file slot and persist it.
+
+    Mutates src; returns (ok, error, http status). Preparing the input can encode for
+    minutes outside _sources_lock, so the slot is checked again afterwards: if another
+    request stopped, reassigned, reset or unassigned it meanwhile, the start is abandoned
+    (409) and nothing is persisted. `generation` is the slot generation the caller
+    observed while it still held the lock; a caller that captured none lets this read it now.
+    """
+    file_name = src.get("file") or ""
+    index = src["index"]
+    if generation is None:
+        generation = _slot_generation(index)
+    stale = (False, "Source changed while its rendition was being prepared; start it again", 409)
+    read_transport, read_codec = src.get("transport"), src.get("codec")
+    transport, codec, allowed_transports = _derive_source_stream_settings(file_name, src.get("transport"))
+    src["transport"] = transport
+    src["codec"] = codec
+    if not allowed_transports:
+        if not _persist_slot_if_current(src, generation):
+            return stale
+        return False, _codec_detection_error(file_name), 400
+    for attempt in range(2):
+        input_path, rendition, error, status = _resolve_stream_input(src)
+        if error:
+            # A failed encode must not write the pre-encode snapshot back over a slot that was
+            # stopped, reassigned or cleared meanwhile (delete-media makes the encode fail this way).
+            if not _persist_slot_if_current(src, generation):
+                return stale
+            return False, error, status
+        # Asked before the lock, which must not wait on MediaMTX (see _sources_lock): an
+        # external publisher that took the slot during the encode makes this a conflict,
+        # not a launch that mediamtx's first-publisher-wins rejects only after the fact.
+        holder = _external_holder(index)
+        if holder:
+            return False, _external_conflict_message(index, holder), 409
+        # The final check, the launch and the persist are one step under the lock, so a stop or
+        # reassignment cannot slip in between the check and the process being registered.
+        with _sources_lock:
+            current = next((s for s in load_sources() if s.get("index") == index), None)
+            same_input = current is not None and current.get("type") == SOURCE_TYPE_FILE \
+                and (current.get("file") or "") == file_name \
+                and renditions.coerce_fps(current.get("fps")) == renditions.coerce_fps(src.get("fps"))
+            if same_input and current.get("state") == "playing" and media_stream_is_running(index):
+                # A concurrent start already launched this same file/fps and persisted it as playing.
+                # Repeated starts are idempotent; do not write this request's older snapshot back.
+                # A different file or fps running here means this request was superseded (409 below).
+                return True, None, 200
+            if _slot_changed_since(src, generation):
+                return stale
+            if rendition and not input_path.is_file():
+                # Clear renditions ran between the cache lookup and this launch; prepare again.
+                if attempt == 0:
+                    logging.info("Rendition %s was cleared before src%s could start; preparing it again", rendition, index)
+                    continue
+                return False, f"Rendition {rendition} was removed before the stream could start", 500
+            # A rendition keeps the source codec, so passing the source codec here lets mediasrc stream-copy it (-c:v copy).
+            ok, err, mine = start_media_stream(
+                index,
+                str(input_path),
+                transport,
+                codec,
+                _source_media_codec(file_name),
+                rendition=rendition,
+            )
+            if not ok:
+                # Nothing was started, so nothing of this request's is recorded: "Already
+                # running" can mean a concurrent start persisted playing, which must survive.
+                return False, err, 500
+
+            # Record the start only if the slot still holds the file, fps, transport and
+            # codec this request read. The file alone is not enough: the same file
+            # reassigned with a different transport replaces our stream, and recording
+            # ours over it would report RTSP for a live HTTP stream. If the slot moved
+            # on, stop only the stream this request started.
+            def still_ours(slot):
+                return (
+                    slot.get("type") == SOURCE_TYPE_FILE
+                    and (slot.get("file") or "") == file_name
+                    and renditions.coerce_fps(slot.get("fps")) == renditions.coerce_fps(src.get("fps"))
+                    and slot.get("transport") == read_transport
+                    and slot.get("codec") == read_codec
+                )
+
+            def mark_playing(slot):
+                slot["transport"] = transport
+                slot["codec"] = codec
+                slot["state"] = "playing"
+
+            if _update_source_slot(index, still_ours, mark_playing) is None:
+                stop_media_stream_if(index, mine)
+                return False, "Source changed while it was being started", 410
+            src["state"] = "playing"
+            _bump_slot(index)  # invalidate any other request's pre-launch snapshot of this slot
+        return True, None, 200
+    return False, "Rendition preparation did not settle", 500  # unreachable: the loop returns on every path
+
+
+# API: create or reuse the FPS rendition for one source slot, streaming progress.
+@app.post("/api/mediasrc/prepare")
+def prepare_source():
+    """Accept JSON {'index': int}; stream plain-text progress while the slot's FPS rendition is created or reused."""
+    data = request.get_json() or {}
+    index = data.get("index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+
+    src = next((s for s in load_sources() if s["index"] == index), None)
+    if src is None:
+        return _json_error("Source not found", 404)
+    file_name = src.get("file") or ""
+    if not file_name:
+        return _json_error("No file assigned to source")
+
+    fps = renditions.coerce_fps(src.get("fps"))
+    source_codec = _source_media_codec(file_name)
+    native_fps = _source_native_fps(file_name)
+    needs_rendition = fps is not None and fps != native_fps
+    if needs_rendition and source_codec == "mjpeg":
+        return _json_error("FPS changes are not supported for MJPEG sources")
+    if needs_rendition and source_codec not in renditions.PROFILES:
+        return _json_error(_codec_detection_error(file_name))
+
+    def generate():
+        if fps is None:
+            yield "Source frame rate matches; no rendition needed.\n"
+            return
+        try:
+            for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, source_codec):
+                kind = event.get("event")
+                if kind == "encoding":
+                    yield f"Encoding {event['file']} at {event['fps']} fps ({event['encoder']})...\n"
+                elif kind == "progress":
+                    total = event.get("total")
+                    if total is not None:
+                        yield f"progress {event['seconds']:.1f}/{total:.1f}\n"
+                    else:
+                        yield f"progress {event['seconds']:.1f}\n"
+                elif kind == "done":
+                    if event.get("native"):
+                        yield "Source frame rate matches; no rendition needed.\n"
+                    elif event.get("reused"):
+                        yield f"Reusing rendition: {event['rendition']}\n"
+                    else:
+                        yield f"Rendition ready: {event['rendition']}\n"
+        except Exception as exc:
+            logging.warning("Rendition preparation failed for %s: %s", file_name, exc)
+            yield f"Error: {exc}\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/plain")
+
+
+# API: report cached FPS rendition disk usage.
+@app.get("/api/mediasrc/renditions")
+def get_rendition_usage():
+    """Return {'count': int, 'bytes': int} for every currently stored FPS rendition."""
+    count, total_bytes = renditions.rendition_usage(RENDITIONS_INDEX_FILE, MEDIA_DIR)
+    return jsonify({"count": count, "bytes": total_bytes})
+
+
+# API: delete cached FPS renditions that no playing source is using.
+@app.post("/api/mediasrc/renditions/clear")
+def clear_rendition_cache():
+    """Delete every rendition file and record except ones a playing source is currently streaming.
+    Returns {'removed': int, 'freed_bytes': int, 'kept': [rel paths]}."""
+    try:
+        # The keep set comes from the process registry, not the persisted state: a slot whose
+        # process was just launched still reads "stopped" on disk until the start persists it.
+        # Holding the lock keeps launches out of the window between listing and deleting.
+        with _sources_lock:
+            keep = set()
+            for src in load_sources():
+                active_file = _active_stream_file(src.get("index"))
+                if active_file and active_file.startswith(f"{renditions.RENDITIONS_DIRNAME}/"):
+                    keep.add(active_file)
+            removed, freed_bytes = renditions.clear_renditions(RENDITIONS_INDEX_FILE, MEDIA_DIR, keep)
+        return jsonify({"removed": len(removed), "freed_bytes": freed_bytes, "kept": sorted(keep)})
+    except Exception as exc:
+        return _json_error(str(exc), 500)
+
+
 # API: start streaming one assigned media source.
 @app.post("/api/mediasrc/start")
 def start_source():
     """Accept JSON {'index': int, 'expect_type'?: 'webcam'|'file'}; start the assigned
-    source and mark its state as playing.
+    source (for a file with an fps override, its FPS rendition, encoding it first if
+    missing) and mark its state as playing.
 
     A webcam start is confirmed over several /start polls (the browser waits for
     MediaMTX to see the path). `expect_type` lets the caller name what it believes
@@ -2838,7 +3191,9 @@ def start_source():
     if holder:
         return _external_conflict_error(index, holder)
 
-    sources = load_sources()
+    with _sources_lock:  # snapshot and generation belong together; a stop after this is detected
+        sources = load_sources()
+        generation = _slot_generation(index)
     for src in sources:
         if src["index"] == index:
             # Early, cross-poll guard (the per-type merges below still re-check
@@ -2870,58 +3225,11 @@ def start_source():
                     return _json_error("Source changed while it was being started", 410)
                 return {"success": True}
 
-            filename = src.get("file")
-            if not filename:
+            if not src.get("file"):
                 return _json_error("No file assigned to source")
-            transport, codec, allowed_transports = _derive_source_stream_settings(filename, src.get("transport"))
-            identity = (SOURCE_TYPE_FILE, filename)
-
-            def matches_file(slot):
-                return (slot.get("type"), slot.get("file")) == identity
-
-            def record(state):
-                def apply(slot):
-                    slot["transport"] = transport
-                    slot["codec"] = codec
-                    if state:
-                        slot["state"] = state
-                return apply
-
-            if not allowed_transports:
-                # No stream started on this path, so revalidate on file only.
-                _update_source_slot(index, matches_file, record(None))
-                return _json_error(_codec_detection_error(filename), 400)
-            ok, err, mine = start_media_stream(
-                index,
-                str(MEDIA_DIR / filename),
-                transport,
-                codec,
-                _source_media_codec(filename),
-            )
+            ok, err, status = _start_source_slot(src, generation=generation)
             if not ok:
-                return _json_error(err, 500)
-
-            # Record the start only if the slot still holds this file with the
-            # transport/codec we started. Matching the file alone is not enough:
-            # another request can reassign the same file with a different
-            # transport in the window, which stops our stream, starts its own,
-            # and persists its transport — recording ours over it would report
-            # e.g. RTSP for a live HTTP stream, a state runtime sync never
-            # repairs (an HTTP entry counts as running). Codec cannot drift on
-            # its own (same file), but it is cheap to include.
-            def still_ours(slot):
-                return (
-                    matches_file(slot)
-                    and slot.get("transport") == transport
-                    and slot.get("codec") == codec
-                )
-
-            if _update_source_slot(index, still_ours, record("playing")) is None:
-                # The slot was reassigned in the window; the stream we started
-                # belongs to nothing now. Stop only ours (a no-op if a
-                # replacement already took the slot) and abandon this start.
-                stop_media_stream_if(index, mine)
-                return _json_error("Source changed while it was being started", 410)
+                return _json_error(err, status)
             return {"success": True}
 
     return _json_error("Source not found", 404)
@@ -2957,77 +3265,31 @@ def start_sources_bulk():
 
     targets = assigned_sources[:count]
     started = []
-    started_identity = {}
     already_running = []
     errors = []
 
-    for src in targets:
-        source_index = src["index"]
+    # Each slot is started and persisted on its own by _start_source_slot, which checks
+    # it is still what this request read and records only its own outcome; saving the
+    # snapshot loaded above would undo whatever another tab changed meanwhile.
+    for target in targets:
+        source_index = target["index"]
+        # Re-read the slot: an earlier target may have encoded for minutes, and the
+        # slot's file or fps may have changed in the meantime.
+        with _sources_lock:  # snapshot and generation belong together; a stop after this is detected
+            src = next((s for s in load_sources() if s.get("index") == source_index), None)
+            generation = _slot_generation(source_index)
+        if src is None or src.get("type") != SOURCE_TYPE_FILE or not src.get("file"):
+            errors.append({"index": source_index, "error": "No file assigned to source"})
+            continue
         if src.get("state") == "playing" and media_stream_is_running(source_index):
             already_running.append(source_index)
             continue
-        transport, codec, allowed_transports = _derive_source_stream_settings(src["file"], src.get("transport"))
-        src["transport"] = transport
-        src["codec"] = codec
-        if not allowed_transports:
-            errors.append({"index": source_index, "error": _codec_detection_error(src["file"])})
-            continue
-        ok, err, identity = start_media_stream(
-            source_index,
-            str(MEDIA_DIR / src["file"]),
-            src.get("transport"),
-            src.get("codec"),
-            _source_media_codec(src["file"]),
-        )
+        ok, err, _status = _start_source_slot(src, generation=generation)
         if ok:
-            src["state"] = "playing"
             started.append(source_index)
-            # The identity captured by start_media_stream itself, not a re-read
-            # that could name a replacement started on this slot in between.
-            started_identity[source_index] = identity
         else:
             errors.append({"index": source_index, "error": err or "Unknown error"})
 
-    # Every start above spawned a process, and between the load at the top and
-    # here another tab may have assigned or started something. Saving the
-    # snapshot would rewrite the whole file with it and silently undo that.
-    # Re-read, and apply only this request's outcomes, only to slots that are
-    # still what they were when the request began.
-    outcomes = {src["index"]: src for src in targets}
-    with _sources_lock:
-        fresh = load_sources()
-        for slot in fresh:
-            result = outcomes.get(slot.get("index"))
-            if result is None:
-                continue
-            if result["index"] not in started:
-                # This request did not start this slot — it was already
-                # running, errored, or failed codec detection. Its snapshot
-                # outcome is stale: another request may have started the same
-                # file in the meantime and persisted "playing", so writing this
-                # request's "stopped" back would hide a live stream. Leave the
-                # fresh state alone.
-                continue
-            if (
-                slot.get("type") != SOURCE_TYPE_FILE
-                or slot.get("file") != result.get("file")
-                or slot.get("transport") != result.get("transport")
-                or slot.get("codec") != result.get("codec")
-            ):
-                # The slot changed hands while it was being started — a different
-                # file, or the same file reassigned with a different transport
-                # (which replaced our stream and persisted its own transport).
-                # Either way the stream this request started belongs to nothing
-                # now; stop only ours (a no-op if a replacement already took the
-                # slot) and leave the fresh state as it is.
-                stop_media_stream_if(result["index"], started_identity.get(result["index"]))
-                started.remove(result["index"])
-                errors.append({"index": result["index"], "error": "Source changed while it was being started"})
-                continue
-            slot["transport"] = result.get("transport")
-            slot["codec"] = result.get("codec")
-            slot["state"] = "playing"
-        save_sources(fresh)
     started_or_running = len(started) + len(already_running)
     return {
         "success": len(errors) == 0,
@@ -3087,6 +3349,7 @@ def stop_source():
     # stopped or marked stopped on the strength of one that is gone. So the
     # file slot's ffmpeg is stopped only here, after the identity check.
     def mark_stopped(slot):
+        _bump_slot(index)  # also abandons a start still preparing its rendition
         stop_media_stream(index)
         slot["state"] = "stopped"
 
@@ -3160,6 +3423,7 @@ def stop_all_sources():
             # file restarted by another tab while later slots were being
             # released. (A webcam re-published on the same slot cannot be seen
             # without asking MediaMTX, which does not belong inside the lock.)
+            _bump_slot(source_index)
             stop_media_stream(source_index)
             if src.get("state") == "playing":
                 stopped_count += 1
@@ -3236,6 +3500,7 @@ def reset_all_sources():
                 continue
             # File streams are stopped here, after the identity check, so a
             # file another tab assigned meanwhile is neither killed nor reset.
+            _bump_slot(source_index)
             stop_media_stream(source_index)
             default = _default_source(source_index)
             if source_index in unconfirmed:

@@ -43,6 +43,16 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
+別のフレームレートでストリーミングするには、アサインメントに `fps` を含めます。必要に応じて、エンコードの進行状況を確認することもできます。
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare` は `progress <seconds>/<total>` 形式の行をストリーミングし、最後に `Rendition ready: …`、`Reusing rendition: …`、または `Error: …` を出力します。`prepare` を省略した場合は、`start` が同じ準備処理を出力なしで実行します。`GET /api/mediasrc/renditions` はキャッシュされたレンディションのディスク使用量を返します。`POST /api/mediasrc/renditions/clear` は、再生中のソースが使用していないキャッシュ済みのレンディションを削除します。
+
 アサインメントや再生状態を変更する前に、`/api/mediasrc` をお読みください。可能な場合は、メディアを削除する前に、アクティブなソースを停止してください。
 
 Insight 以外から配信されているスロットは、`state: "external"` と `external` オブジェクト（プロトコル、アドレス、配信開始時刻、コーデックのサポート状況、映像サイズ、ビットレート）を返します。また、すべてのスロットが現在の `readers` を一覧表示します。このようなスロットに対して `start` と `assign` は `409` を返し、Insight 自身のストリームがそのスロットに残っていない場合は `stop` も同様です。`POST /api/mediasrc/takeover` は配信元を切断します。一括操作は外部ストリームを実行したままにし、そのスロットを `skipped_external` に列挙します。`reset` は引き続き、すべてのスロットの保存済みレコードをクリアします。`GET /stream/preview/src<N>.mjpg` は、ライブ状態の任意のスロットの MJPEG プレビューをソースのフレームレートでレンダリングします。

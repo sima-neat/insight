@@ -43,6 +43,16 @@ curl -k -H "Content-Type: application/json" \
   https://<INSIGHT_HOST>:9900/api/mediasrc/start
 ```
 
+Щоб транслювати з іншою частотою кадрів, додайте `fps` до призначення та за бажанням стежте за кодуванням:
+
+```sh
+curl -k -H "Content-Type: application/json" -d '{"index":1,"file":"person_clip.mp4","fps":15}' https://localhost:9900/api/mediasrc/assign
+curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/prepare
+curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
+```
+
+`prepare` передає потоком рядки `progress <seconds>/<total>` і завершується рядком `Rendition ready: …`, `Reusing rendition: …` або `Error: …`. Якщо `prepare` пропущено, `start` виконує ту саму підготовку без виводу. `GET /api/mediasrc/renditions` повідомляє, скільки місця на диску займають кешовані перекодовані версії; `POST /api/mediasrc/renditions/clear` видаляє кешовані перекодовані версії, які не використовує жодне джерело, що відтворюється.
+
 Перед зміною завдань або стану відтворення, перегляньте `/api/mediasrc`. За можливості, зупиніть активні джерела, перш ніж видаляти їхні медіафайли.
 
 Слот, у який публікує потік не Insight, а інший застосунок, повідомляє `state: "external"` з об’єктом `external` (протокол, адреса, час початку публікації, підтримка кодека, розміри кадру, бітрейт); кожен слот також містить список своїх поточних `readers`. Для такого слота `start` і `assign` повертають `409`, так само як і `stop`, коли на слоті не залишилося жодного власного потоку Insight; `POST /api/mediasrc/takeover` від’єднує відправника. Групові операції залишають зовнішній потік запущеним і перелічують такі слоти в `skipped_external`; `reset` однаково очищає збережений запис кожного слота. `GET /stream/preview/src<N>.mjpg` відтворює попередній перегляд MJPEG будь-якого активного слота з частотою кадрів джерела.
