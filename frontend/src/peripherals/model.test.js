@@ -8,9 +8,11 @@ import {
   boardIndicator,
   cameraSetupRows,
   cameraDeviceId,
+  cameraSelectable,
   cameraSubtitle,
   cameraSummaryLine,
   cameraTierPill,
+  CONNECTED_PILL,
   changeSummary,
   createBoardSync,
   createFocusReturn,
@@ -267,7 +269,8 @@ test('a selection that disappears after refresh falls back instead of clearing',
 
 test('the selected camera id survives refreshes and removals', () => {
   assert.equal(resolveCameraId(snapshot, null), imx477.id)
-  assert.equal(resolveCameraId(snapshot, usb.id), usb.id)
+  // An Unsupported camera cannot be selected, so a stale selection of one falls back to the first usable camera.
+  assert.equal(resolveCameraId(snapshot, usb.id), imx477.id)
   assert.equal(resolveCameraId(snapshot, 'mipi:gone'), 'mipi:gone', 'removed cameras stay selected so the UI can explain')
   assert.equal(resolveCameraId(snapshot, 'usb:unknown'), imx477.id)
   assert.equal(resolveCameraId({ items: [] }, 'usb:unknown'), null)
@@ -499,9 +502,13 @@ test('stepwise and continuous format ranges keep their bounds and steps visible'
   assert.match(option.reason, /Reported range: 16–1920×16–1080 in 16×16 steps\./)
 })
 
-test('the camera pill appears only for an Unsupported camera', () => {
-  assert.equal(cameraTierPill(imx477), null, 'an Available camera shows no pill; its modes carry the labels')
+test('every camera row shows its verdict pill, and only Available cameras can be selected', () => {
+  assert.deepEqual(cameraTierPill(imx477), { label: 'Available', tone: 'ok' })
   assert.deepEqual(cameraTierPill(imx568), { label: 'Unsupported', tone: 'periph-danger' })
+  assert.equal(cameraSelectable(imx477), true)
+  assert.equal(cameraSelectable(imx568), false)
+  assert.equal(cameraSelectable(usb), false)
+  assert.deepEqual(CONNECTED_PILL, { label: 'Connected', tone: '' })
   assert.deepEqual(cameraTierPill(usb), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill({ ...imx477, support: support('unsupported', NO_BOARD) }), { label: 'Unsupported', tone: 'periph-danger' })
 })
