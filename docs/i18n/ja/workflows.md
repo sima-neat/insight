@@ -81,7 +81,7 @@ Insight が SDK 内で動作する場合、ブラウザーはアプリケーシ�
 
 アプリケーションがSDKコンテナー外で実行される場合、テストを開始する前に、`neat --json`からRTSP、ビデオUDP、およびメタデータUDPのホストポートを解決してください。
 
-## 外部ツールまたはウェブカメラからストリーミングする
+## 外部ツールからストリーミングする
 
 1. ストリーミングソースを開き、アイドルと表示されているスロットを選択します。
 2. ホストからそのスロットに配信します。例：`ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`

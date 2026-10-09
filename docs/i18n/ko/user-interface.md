@@ -108,14 +108,14 @@ Insight는 할당된 미디어에서 코덱 및 전송 옵션을 선택합니다
 
 ### 외부 스트림
 
-RTSP, WebRTC(WHIP) 또는 SRT 도구라면 무엇이든 소스 슬롯에 직접 게시할 수 있습니다. 예를 들어 호스트의 웹캠은 다음과 같이 게시합니다.
+RTSP, WebRTC(WHIP) 또는 SRT 도구라면 무엇이든 소스 슬롯에 직접 게시할 수 있습니다. 예를 들어 ffmpeg로 호스트의 카메라를 캡처해 다음과 같이 게시합니다.
 
 ```bash
 ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p \
   -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2
 ```
 
-기본적으로 SDK 컨테이너 밖으로 매핑되는 포트는 RTSP 포트(8554)뿐입니다. WHIP 및 SRT 게시자는 컨테이너 내부 또는 DevKit 네이티브 설치 환경에서 실행해야 합니다.
+SDK 컨테이너는 RTSP 포트(8554)와 WHIP 포트(`webrtcWhip`, 8889)를 매핑합니다. SRT 게시자는 컨테이너 내부 또는 DevKit 네이티브 설치 환경에서 실행해야 합니다.
 
 Insight는 약 2초 이내에 이러한 슬롯을 **외부**로 표시합니다. 행은 읽기 전용이 되고, 칩에는 프로토콜, 게시자 주소, 그리고 프로브가 끝나면 해상도와 프레임 속도가 표시됩니다. 스트림이 Neat 파이프라인에서 디코딩할 수 없는 코덱(H.264, H.265, MJPEG 이외의 코덱)을 사용하면 코덱 셀이 호박색으로 바뀌고 경고가 표시됩니다. URL 복사는 계속 사용할 수 있으며, 애플리케이션은 게시 프로토콜과 관계없이 평소처럼 `rtsp://…/srcN`을 읽습니다.
 

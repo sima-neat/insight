@@ -108,14 +108,14 @@ Insight 會從已指派的媒體中選擇編解碼器和傳輸選項：
 
 ### 外部串流
 
-任何 RTSP、WebRTC（WHIP）或 SRT 工具都可以直接發布到來源插槽，例如從主機發布網路攝影機畫面：
+任何 RTSP、WebRTC（WHIP）或 SRT 工具都可以直接發布到來源插槽，例如在主機上以 ffmpeg 擷取相機畫面：
 
 ```bash
 ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p \
   -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2
 ```
 
-預設只有 RTSP 連接埠（8554）會對應到 SDK 容器外部；WHIP 和 SRT 發布端必須在容器內或原生安裝於 DevKit 的環境中執行。
+SDK 容器會對應 RTSP 連接埠（8554）和 WHIP 連接埠（`webrtcWhip`，8889）；SRT 發布端必須在容器內或原生安裝於 DevKit 的環境中執行。
 
 Insight 會在約兩秒內將此類插槽顯示為**外部**：該列變為唯讀，標籤會列出通訊協定、發布端位址，並在探測完成後列出解析度和幀率。當串流使用 Neat 管線無法解碼的編解碼器（H.264、H.265 或 MJPEG 以外的任何編解碼器）時，編解碼器欄位會變為琥珀色並顯示警告。「複製網址」仍可使用；無論使用何種發布通訊協定，應用程式都照常讀取 `rtsp://…/srcN`。
 

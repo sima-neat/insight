@@ -81,7 +81,7 @@ Insight가 SDK 안에서 실행되면 브라우저는 애플리케이션의 RTSP
 
 애플리케이션이 SDK 컨테이너 외부에서 실행될 때, 테스트를 시작하기 전에 `neat --json`에서 RTSP, 비디오 UDP 및 메타데이터 UDP 호스트 포트를 확인합니다.
 
-## 외부 도구 또는 웹캠에서 스트리밍
+## 외부 도구에서 스트리밍
 
 1. 스트리밍 소스를 열고 유휴 상태로 표시된 슬롯을 선택합니다.
 2. 호스트에서 해당 슬롯으로 게시합니다. 예: `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`

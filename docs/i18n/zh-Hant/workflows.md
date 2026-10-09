@@ -81,7 +81,7 @@ Insight 在 SDK 內執行時，除了應用程式使用的 RTSP 連接埠，瀏�
 
 當應用程式在 SDK 容器外部執行時，請在啟動測試之前，從 `neat --json` 中解析 RTSP、視訊 UDP 和中繼資料 UDP 的主機連接埠。
 
-## 從外部工具或網路攝影機串流
+## 從外部工具串流
 
 1. 開啟「串流來源」，並選擇一個顯示為閒置的插槽。
 2. 從主機發布到該插槽，例如 `ffmpeg -f v4l2 -i /dev/video0 -c:v libx264 -preset veryfast -tune zerolatency -g 30 -pix_fmt yuv420p -f rtsp -rtsp_transport tcp rtsp://<insight-host>:8554/src2`。
