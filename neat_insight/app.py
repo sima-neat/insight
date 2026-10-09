@@ -185,7 +185,6 @@ server_ssl_context = None
 DEFAULT_DEVKIT_SSH_USERNAME = "sima"
 DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
 
-ALLOWED_EXTENSIONS = STREAMABLE_MEDIA_EXTENSIONS
 ALLOWED_LOGS = {"EV74": "simaai_EV74.log", "syslog": "syslog"}
 LOG_DIR = "/var/log"
 
@@ -469,6 +468,23 @@ def _safe_media_path(rel_path: str) -> Path:
     return abs_path
 
 
+def _media_link_path(rel_path: str) -> Optional[Path]:
+    """The library entry itself, unresolved, when it is a symlink; None when it is not.
+
+    _safe_media_path resolves the last component too, which for a link names its
+    target: deleting that would remove the real file or folder the link points at.
+    Only the link's own location has to lie inside MEDIA_DIR.
+    """
+    candidate = MEDIA_DIR / rel_path
+    if not candidate.is_symlink():
+        return None
+    root = MEDIA_DIR.resolve()
+    parent = candidate.parent.resolve()
+    if parent != root and root not in parent.parents:
+        raise ValueError("Invalid path")
+    return parent / candidate.name
+
+
 def _with_metrics_compat(metrics_payload):
     metrics_payload.setdefault("pipeline_status", {})
     return metrics_payload
@@ -625,37 +641,65 @@ def _proxy_vf_stats(path: str, label: str):
         return _json_error(f"{label} unavailable: {exc}", 502)
 
 
+def _is_streamable_media(name: str) -> bool:
+    """Return whether the media-source streamer accepts this file, judged by its suffix."""
+    return Path(name).suffix.lower() in STREAMABLE_MEDIA_EXTENSIONS
+
+
+def build_media_tree(base_path: Path, rel_path: str = "") -> list:
+    """Return the visible entries under base_path/rel_path as tree nodes.
+
+    Folders come first, then files, both ordered case-insensitively. Hidden entries and macOS
+    archive metadata are skipped. File nodes carry ``streamable``; folder nodes carry
+    ``streamable_count``, the number of streamable files anywhere beneath them (issue #113).
+    """
+    result = []
+    full_path = base_path / rel_path
+    try:
+        entries = [e for e in os.listdir(full_path) if not e.startswith(".") and e != "__MACOSX"]
+    except (OSError, RecursionError):
+        return result
+    entries.sort(key=lambda e: (not (os.path.isdir(full_path / e) and not os.path.islink(full_path / e)), e.lower()))
+    for entry in entries:
+        abs_entry_path = full_path / entry
+        rel_entry_path = os.path.join(rel_path, entry).replace(os.path.sep, "/")
+        if abs_entry_path.is_dir() and not abs_entry_path.is_symlink():
+            try:
+                children = build_media_tree(base_path, rel_entry_path)
+            except RecursionError:
+                children = []
+            count = sum(
+                child["streamable_count"] if child["type"] == "folder" else int(child["streamable"])
+                for child in children
+            )
+            result.append(
+                {
+                    "name": "/" + entry,
+                    "path": rel_entry_path,
+                    "type": "folder",
+                    "streamable_count": count,
+                    "children": children,
+                }
+            )
+        else:
+            result.append(
+                {
+                    "name": entry,
+                    "path": rel_entry_path,
+                    "type": "file",
+                    "streamable": _is_streamable_media(entry) and not abs_entry_path.is_dir(),
+                }
+            )
+    return result
+
+
 # API: enumerate uploaded media as a folder tree for the Media Sources UI.
 @app.get("/api/media-files")
 def list_media_files():
-    """Return a recursive tree of files under MEDIA_DIR, excluding hidden files and macOS archive metadata."""
-    def build_tree(base_path: Path, rel_path: str = ""):
-        result = []
-        full_path = base_path / rel_path
-        try:
-            entries = [e for e in os.listdir(full_path) if not e.startswith(".") and not e.startswith("__MACOSX")]
-            entries.sort(key=lambda e: (not os.path.isdir(full_path / e), e.lower()))
-            for entry in entries:
-                abs_entry_path = full_path / entry
-                rel_entry_path = os.path.join(rel_path, entry)
-                if abs_entry_path.is_dir():
-                    result.append(
-                        {
-                            "name": "/" + entry,
-                            "path": rel_entry_path,
-                            "type": "folder",
-                            "children": build_tree(base_path, rel_entry_path),
-                        }
-                    )
-                else:
-                    result.append({"name": entry, "path": rel_entry_path, "type": "file"})
-        except Exception:
-            pass
-        return result
-
+    """Return a recursive tree of files under MEDIA_DIR with streamable flags and per-folder streamable counts."""
     if not MEDIA_DIR.exists():
         return jsonify([])
-    return jsonify(build_tree(MEDIA_DIR))
+    return jsonify(build_media_tree(MEDIA_DIR))
 
 
 # API: report whether optional media inspection/streaming tools are installed.
@@ -2054,25 +2098,35 @@ def delete_media():
         return _json_error("Missing 'path' in request")
 
     try:
-        full_path = _safe_media_path(requested_path)
+        # A symlink is removed as a link, never through it (see _media_link_path).
+        link_path = _media_link_path(requested_path)
+        full_path = link_path or _safe_media_path(requested_path)
     except ValueError:
         return _json_error("Invalid file path", 403)
 
-    if not full_path.exists():
+    if link_path is None and not full_path.exists():
         return _json_error("File or directory not found", 404)
 
     try:
-        if full_path.is_file():
-            removed_files = [full_path]
+        link_prefix = None
+        if link_path is not None:
+            link_name = os.path.relpath(link_path, MEDIA_DIR.resolve()).replace(os.path.sep, "/")
+            removed_names = {link_name}
+            link_prefix = f"{link_name}/"  # slots assigned a file reached through a linked folder
+        elif full_path.is_file():
+            removed_names = {os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")}
         else:
             removed_files = [Path(root) / name for root, _dirs, names in os.walk(full_path) for name in names]
-        removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
+            removed_names = {os.path.relpath(path, MEDIA_DIR).replace(os.path.sep, "/") for path in removed_files}
 
         with _sources_lock:
             sources = load_sources()
             modified = False
             for src in sources:
-                if (src.get("file") or "").replace(os.path.sep, "/") in removed_names:
+                assigned = (src.get("file") or "").replace(os.path.sep, "/")
+                if link_prefix and assigned.startswith(link_prefix):
+                    removed_names.add(assigned)
+                if assigned in removed_names:
                     _bump_slot(src["index"])
                     stop_media_stream(src["index"])
                     src["file"] = ""
@@ -2084,7 +2138,9 @@ def delete_media():
 
         # Unlink first, then forget renditions: an encode that publishes before the unlink is
         # cleaned up by remove_source, and one that publishes after it finds no source and aborts.
-        if full_path.is_file():
+        if link_path is not None:
+            link_path.unlink()
+        elif full_path.is_file():
             full_path.unlink()
         else:
             shutil.rmtree(full_path)
@@ -2215,11 +2271,11 @@ def list_video_files():
 def _collect_video_files():
     video_files = []
     for root, dirs, files in os.walk(MEDIA_DIR):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "__MACOSX"]
         for fname in files:
             if fname.startswith("."):
                 continue
-            if Path(fname).suffix.lower() in ALLOWED_EXTENSIONS:
+            if _is_streamable_media(fname):
                 full_path = Path(root) / fname
                 rel = os.path.relpath(full_path, MEDIA_DIR).replace(os.path.sep, "/")
                 video_files.append(rel)

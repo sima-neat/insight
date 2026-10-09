@@ -37,6 +37,8 @@ Supported video formats include common container formats such as `mp4`, `mov`, `
 
 After importing media, you can filter the file list, preview a selected file, inspect its basic metadata, or delete files that are no longer needed. Use Media Sources before configuring streaming sources so you know which files are available, which codec Insight detected, and whether they are readable.
 
+The library is shown as folders. Folder rows open the folder and list its subfolders and videos; each folder row shows how many streamable files it holds. Use **Back** to return to the parent folder, **Media Root** to jump to the top of the library, and the breadcrumb to see where you are or jump to any level. The filter searches the current folder and everything beneath it and shows matches with their path relative to the current folder. Files Insight cannot stream are listed greyed with a **Not streamable** tag so you can still preview or delete them; the assign dialog in Streaming Sources hides them. Folder names are ordinary labels you choose, for example `30FPS/` or `120FPS-720p-h264/`; Insight never reads video settings from them. In the Neat SDK the library lives at `/workspace/.insight-media/`, so it survives SDK restarts. Uploads always land at the top of the library.
+
 ![Insight Media Sources view showing a selected video preview and media metadata.](images/insight-media-library.png)
 
 Media Sources combines importing, file selection, preview, metadata inspection, and delete actions in one view. Imported catalog assets are stored under `catalog/`, and YouTube clips are stored under `youtube/`, so you can identify how files entered the library.
@@ -61,7 +63,7 @@ Insight selects codec and transport options from the assigned media:
 
 The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
 
-You can assign media to a source, start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
+Select the file field of a source row to open **Source for srcN**. Its **Video file** tab has the same folder browser as Media Sources; pick a video, then **Assign**, or **Clear** to unassign. Its **Camera** tab assigns one of your cameras instead. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
@@ -73,19 +75,9 @@ The Streaming Sources view lets you assign media files to source slots, start or
 
 A webcam attached to the computer running your browser can be used as a live source, so you can test an application against a real camera without copying a file onto the board first.
 
-1. Go to Media Sources and, under **Local cameras**, select **Enable camera access**. The browser asks for camera permission; Insight cannot grant it for you.
-2. After you allow access, your cameras appear in each source dropdown under a **Cameras** group, above your video files:
-
-   ```text
-   Not assigned
-   Cameras
-     Integrated Camera
-     USB Camera
-   Video files
-     catalog/parking_garage_cars/parking_garage_cars_1080p.mp4
-   ```
-
-3. Select a camera for a source slot, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
+1. Select the file field of a source slot and switch the **Source for srcN** dialog to **Camera**.
+2. Select **Enable camera access**, there or under **Local cameras** in Media Sources. The browser asks for camera permission; Insight cannot grant it for you. After you allow access, your cameras are listed in the tab.
+3. Select a camera and **Assign** it, then select **Start**. The row shows a `[CAM]` badge (video files show `[VID]`), the browser publishes the camera to Insight, and the slot reports `Live`.
 4. Use **Copy URL** to get the RTSP URL and point your application at it, exactly as you would for a file source.
 
 The camera list updates as cameras are connected and disconnected. Webcam sources publish video only, as H.264.
