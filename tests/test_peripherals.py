@@ -369,6 +369,21 @@ class SnapshotTests(unittest.TestCase):
                          [(30, "unsupported", "Not set up for this mode.")])
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
 
+    def test_the_default_mode_is_1920_wide_when_the_camera_offers_it(self):
+        """The first Available size in sort order is the smallest (1280x990 on a 3.0 IMX477), not a useful start."""
+        def doc_with(sizes):
+            doc = imx477()
+            doc["isp"]["sizing"] = "runtime"
+            doc["modes"] = [{"format": "NV12", "width": w, "height": h, "sensor_mode": True, "available": True}
+                            for w, h in sizes]
+            return item(snapshot_of(catalog(doc, board=board_block())), IMX477)["default_selection"]
+        imx477_30 = [(1280, 990), (1332, 990), (1920, 1080), (2028, 1080), (2028, 1520), (2048, 1080), (3840, 2160)]
+        self.assertEqual(doc_with(imx477_30), {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        # No 1920-wide size: the widest Available size under 1920 wide.
+        self.assertEqual(doc_with([(1280, 990), (1332, 990), (2028, 1520)]), {"format": "NV12", "width": 1332, "height": 990, "fps": 30})
+        # Nothing under 1920 wide: the smallest Available size.
+        self.assertEqual(doc_with([(3840, 2160), (2028, 1520)]), {"format": "NV12", "width": 2028, "height": 1520, "fps": 30})
+
     def test_a_sensor_missing_from_the_boards_overlays_is_unsupported(self):
         cases = {
             "sensor not in the overlays": {**board_block(), "supported_sensors": [
