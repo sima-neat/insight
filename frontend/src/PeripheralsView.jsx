@@ -6,8 +6,10 @@ import {
   CONNECTION_ERROR_CODES,
   PREVIEW_IDLE,
   adoptedSelection,
+  cameraSelectable,
   cameraTierPill,
   changeSummary,
+  CONNECTED_PILL,
   countLabel,
   deviceTabs,
   groupCameras,
@@ -143,7 +145,8 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
 
 function CameraList({ groups, selectedId, onSelect }) {
   const rowRefs = useRef(new Map())
-  const order = groups.flatMap((group) => group.items.map((camera) => camera.id))
+  // Keyboard order skips Unsupported rows, which cannot be selected.
+  const order = groups.flatMap((group) => group.items.filter(cameraSelectable).map((camera) => camera.id))
   const focusId = order.includes(selectedId) ? selectedId : order[0]
 
   function onKeyDown(event) {
@@ -163,21 +166,29 @@ function CameraList({ groups, selectedId, onSelect }) {
           <div id={`periph-group-${group.id}`} className="periph-group-title" role="presentation">{group.label}</div>
           {group.items.map((camera) => {
             const tier = cameraTierPill(camera)
+            const selectable = cameraSelectable(camera)
+            const classes = ['periph-camera-row', camera.id === selectedId && 'active', !selectable && 'disabled']
             return (
               <div
                 key={camera.id}
                 ref={(node) => (node ? rowRefs.current.set(camera.id, node) : rowRefs.current.delete(camera.id))}
                 role="option"
                 aria-selected={camera.id === selectedId}
+                aria-disabled={selectable ? undefined : 'true'}
                 tabIndex={camera.id === focusId ? 0 : -1}
-                className={camera.id === selectedId ? 'periph-camera-row active' : 'periph-camera-row'}
-                onClick={() => onSelect(camera.id)}
+                className={classes.filter(Boolean).join(' ')}
+                onClick={() => selectable && onSelect(camera.id)}
               >
                 <span className="periph-camera-name">{camera.name}</span>
                 {/* An empty subtitle must not render: the row is a grid, and a blank span would
                     leave this row taller than its neighbours. */}
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
-                {tier && <span className="periph-pills"><Pill tone={tier.tone}>{tier.label}</Pill></span>}
+                {/* The reason an Unsupported camera cannot be used, since its row cannot be opened. */}
+                {!selectable && camera.support?.reason && <span className="periph-camera-id">{camera.support.reason}</span>}
+                <span className="periph-pills">
+                  <Pill tone={CONNECTED_PILL.tone}>{CONNECTED_PILL.label}</Pill>
+                  <Pill tone={tier.tone}>{tier.label}</Pill>
+                </span>
               </div>
             )
           })}

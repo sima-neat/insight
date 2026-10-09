@@ -59,8 +59,16 @@ export function tierInfo(tier) {
 
 // The camera's own pill. Its availability pill already reads "Available" for a camera no process holds,
 // so an Available camera gets no second "Available"; its mode menus carry that state.
+// Every detected camera is, by being listed, connected: the pill says so in the one state vocabulary.
+export const CONNECTED_PILL = { label: 'Connected', tone: '' }
+
 export function cameraTierPill(camera) {
-  return tierOf(camera?.support?.tier) === 'available' ? null : TIERS.unsupported
+  return tierOf(camera?.support?.tier) === 'available' ? TIERS.available : TIERS.unsupported
+}
+
+// An Unsupported camera has nothing to pick or preview, so its row is shown but cannot be selected.
+export function cameraSelectable(camera) {
+  return tierOf(camera?.support?.tier) === 'available'
 }
 
 export function severityInfo(severity) {
@@ -340,7 +348,7 @@ export function groupOptions(options) {
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
   // A USB camera is Unsupported because USB cameras have no camera overlay; its pill says enough.
-  if (camera?.support && cameraTierPill(camera)) return camera.connection === 'usb' ? '' : camera.support.reason || 'Unsupported.'
+  if (camera?.support && !cameraSelectable(camera)) return camera.connection === 'usb' ? '' : camera.support.reason || 'Unsupported.'
   // An Available camera gets no sentence at all: every mode menu already labels each entry
   // Available or Unsupported, so a paragraph repeating that only adds text. Whether another
   // program holds the camera is found out, and said, when a preview tries to start.
@@ -391,7 +399,7 @@ export function previewNeedsRestart(state, cameraId, next) {
 }
 
 export function resolveCameraId(snapshot, previousId) {
-  const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items)
+  const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items).filter(cameraSelectable)
   if (previousId && cameras.some((c) => c.id === previousId)) return previousId
   if (previousId && snapshot?.changes?.removed?.some((r) => r.id === previousId)) return previousId
   return cameras[0]?.id || null
