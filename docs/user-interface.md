@@ -63,7 +63,7 @@ Insight selects codec and transport options from the assigned media:
 
 The codec is determined by the selected media and is not manually changed in the UI. MJPEG over RTSP is encoded into RTP-compatible MJPEG, while HTTP MJPEG can preserve MJPEG frames for camera-style HTTP testing.
 
-Select the file field of a source row to open **Source for srcN**. Its **Video file** tab has the same folder browser as Media Sources; pick a video, then **Assign**, or **Clear** to unassign. Its **Camera** tab assigns one of your cameras instead. You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
+Select the file field of a source row to open **Source for srcN**. Its **Video file** tab has the same folder browser as Media Sources; pick a video, then **Assign**, or **Clear** to unassign. Its **Camera** tab assigns one of your cameras instead, and its **Stream URL** tab pulls a network stream (see below). You can start and stop individual sources, auto-assign unique files across source slots, bulk start sources, stop all streams, and copy stream URLs for use by applications or test harnesses.
 
 This view is useful when you need repeatable input streams for an object detection, segmentation, tracking, classification, or GenAI vision application.
 
@@ -120,6 +120,16 @@ Auto Assign, Bulk Start, Stop All and Reset never touch an External stream; the 
 ![Insight Streaming Sources view with two External slots, one of them flagged for an unsupported codec.](images/insight-external-source.png)
 
 External slots show the publisher, its address and the probed stream format; the codec cell turns amber when Neat pipelines cannot decode the stream.
+
+### Pulled streams
+
+A stream that already exists on the network, typically an IP camera, can be pulled into a slot. Click the file button of an Idle slot, switch the dialog to **Stream URL**, enter the camera's `rtsp://` or `rtsps://` URL and, if the camera needs them, its username and password, then press **Pull**. Insight configures mediamtx to pull the stream and forward it unchanged to `rtsp://…:8554/srcN`; nothing is decoded or re-encoded, and applications read the slot like any other.
+
+The row shows **Pulled** in teal once frames arrive, with the source host, resolution and frame rate in the chip and the codec in the codec cell. Before that it shows **Connecting…**. If the camera cannot be reached the row turns amber, **Unreachable**, with the reason; mediamtx keeps retrying and the row returns to Pulled by itself when the camera is back. If the camera rejects the username or password when you press **Pull**, the dialog shows the message and the slot is unchanged. The row shows **Auth failed** in red only if the camera starts rejecting the credentials later, for example after it was unreachable at first, and stays there: press **Stop** and pull again with the right credentials. A password is only ever kept in memory; Insight never writes it to disk, shows it again, or logs it, and a pulled slot is not restored after Insight restarts.
+
+**Stop** on the row releases the pull and the slot returns to Idle with its previous file assignment. Assigning a file, starting, or taking over a pulled slot is rejected. Auto Assign, Bulk Start, Stop All and Reset skip pulled slots like External ones and list them in the result message.
+
+The Source Preview panel works for pulled slots exactly like for External ones (preview off by default). An `rtsps://` camera with a self-signed certificate is reported as unreachable with a certificate message in this release.
 
 ### Frame rate
 
