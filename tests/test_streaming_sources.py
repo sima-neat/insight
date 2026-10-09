@@ -531,6 +531,32 @@ class StreamingSourceTests(_SourceFixture):
         self.assertTrue(src["external"]["codec_supported"])
         self.assertEqual(src["readers"], [{"protocol": "rtsp", "address": "10.0.0.9"}])
 
+    def test_get_sources_reports_external_publisher_on_a_webcam_slot(self):
+        # Codex review: an idle webcam slot taken by another sender must offer Take over,
+        # since every route refuses it as externally held.
+        self.sources_file.write_text('[{"index": 2, "file": "", "state": "stopped", "type": "webcam"}]', encoding="utf-8")
+        self.mtx.paths["src2"] = external_path(2)
+
+        src = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"}).get_json()[1]
+
+        self.assertEqual((src["type"], src["state"]), ("webcam", "external"))
+        self.assertEqual(src["urls"], {"rtsp": "rtsp://localhost:8554/src2"})
+        self.assertEqual(src["external"]["address"], "172.19.0.1")
+        self.assertEqual(self.client.post("/api/mediasrc/takeover", json={"index": 2}).status_code, 200)
+        self.assertEqual(self.mtx.kicked, [("rtspSession", "ext-2")])
+        src = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"}).get_json()[1]
+        self.assertEqual((src["type"], src["state"]), ("webcam", "stopped"))
+        self.assertIn("whip", src["urls"])
+
+    def test_webcam_slot_with_its_own_stream_is_not_external(self):
+        self.sources_file.write_text('[{"index": 2, "file": "", "state": "playing", "type": "webcam"}]', encoding="utf-8")
+        self.mtx.paths["src2"] = insight_path(2)
+
+        src = self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"}).get_json()[1]
+
+        self.assertEqual((src["type"], src["state"]), ("webcam", "playing"))
+        self.assertNotIn("external", src)
+
     def test_insight_owned_live_slot_is_not_classified_external(self):
         # mediamtx may report a ready path before the publisher session (and its
         # ?publisher=insight query) resolves; our own live process wins that race.
