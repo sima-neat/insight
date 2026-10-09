@@ -2658,8 +2658,13 @@ def assign_webcam_source():
     """Accept JSON {'index': int}; mark the slot as a webcam source and return its WHIP publish URL."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    # mediamtx refuses a second publisher on src{N}, so the webcam could never go live there.
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
 
     snapshot = next((src for src in load_sources() if src["index"] == index), None)
     if snapshot is None:

@@ -614,12 +614,15 @@ class StreamingSourceTests(unittest.TestCase):
     def test_start_assign_stop_on_external_slot_return_409(self):
         (self.media_dir / "clip.mp4").write_bytes(b"x")
         self.mtx.paths["src2"] = external_path(2)
-        for route, body in (("start", {"index": 2}), ("assign", {"index": 2, "file": "clip.mp4"}), ("stop", {"index": 2})):
+        routes = (("start", {"index": 2}), ("assign", {"index": 2, "file": "clip.mp4"}), ("stop", {"index": 2}),
+                  ("assign-webcam", {"index": 2}))
+        for route, body in routes:
             with self.subTest(route=route):
                 response = self.client.post(f"/api/mediasrc/{route}", json=body)
                 self.assertEqual(response.status_code, 409)
                 self.assertIn("Use Take over to disconnect it", response.get_json()["error"])
         self.assertNotIn("clip.mp4", self.sources_file.read_text(encoding="utf-8"))
+        self.assertNotIn("webcam", self.sources_file.read_text(encoding="utf-8"))
 
     def test_start_bulk_skips_external_and_fills_requested_count(self):
         for name in ("a.mp4", "b.mp4", "c.mp4"):

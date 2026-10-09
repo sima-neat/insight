@@ -554,7 +554,7 @@
           },
           "400": {"$ref": "#/components/responses/BadRequest"},
           "404": {"$ref": "#/components/responses/NotFound"},
-          "409": {"$ref": "#/components/responses/WebcamStopSuperseded"},
+          "409": {"description": "Nothing was changed: an external publisher holds the slot and Insight has no stream of its own on it (use `/api/mediasrc/takeover` first); or, for a webcam slot, the released session no longer publishes to it or the slot changed kind while this request was waiting on MediaMTX (reload the source list and retry).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
           "500": {"$ref": "#/components/responses/InternalError"},
           "502": {"$ref": "#/components/responses/WebcamNotConfirmedStopped"}
         }
@@ -1019,9 +1019,7 @@
       "Forbidden": {"description": "The requested path escapes the allowed root.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "NotFound": {"description": "The requested resource was not found.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "Conflict": {"description": "The request conflicts with current runtime state, for example a slot that is not running or is held by an external publisher.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "WebcamNotPublishing": {"description": "The webcam slot exists but the browser is not publishing to it yet.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "SourceChangedWhileStarting": {"description": "The slot was reassigned while Insight was confirming a webcam publisher or starting a file, so the start was not recorded (a file stream started this way is stopped again). Unlike 409, not worth retrying: reload the source list.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "WebcamStopSuperseded": {"description": "Nothing was changed, for one of two reasons: the released session no longer publishes to this slot and a different session does; or the slot changed kind (file to webcam or back) while this request was waiting on MediaMTX. Reload the source list and retry.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "WebcamNotConfirmedStopped": {"description": "Insight could not reach MediaMTX to verify the slot's publisher, so nothing was changed. If the camera has in fact stopped, the slot updates on its own once MediaMTX is reachable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "InternalError": {"description": "A local operation failed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
       "BadGateway": {"description": "A required backend command, vf, DevKit, or remote catalog service failed or returned an invalid response.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
