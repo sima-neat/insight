@@ -148,7 +148,7 @@ The viewer can render metadata overlays for common vision outputs, including obj
 
 ### Metadata colors
 
-Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when a channel shows more than 20 identities at once. Each metadata type defines what identity means:
+Overlays pick colors from one shared palette of 40 colors so that different identities stay apart on a crowded frame. The first 20 colors are the most distinct; the other 20 are only used when more than 20 identities need a color at once: classes across all channels, or tracks or poses on one channel. Each metadata type defines what identity means:
 
 | Metadata type | Colored by | Parts that share the color |
 |---|---|---|
@@ -158,7 +158,7 @@ Overlays pick colors from one shared palette of 40 colors so that different iden
 | `tracking` | track `id` | box, label, history trail |
 | `pose-estimation` | pose `id` | keypoints, skeleton, keypoint names, box, label |
 
-Colors are allocated per channel the first time an identity appears and stay fixed for as long as the channel stays connected. Class labels share one allocation on a channel, so `person` looks the same in detection, segmentation and classification. Overrides are per metadata type: an object-detection entry for `person` does not recolor `person` in segmentation or classification. Tracks and poses are allocated separately. An identity keeps its color while it is on screen. Once it has been gone for more than 5 seconds, its color can be handed to a new identity. When more identities are on screen than the palette holds, new identities share the color of the one drawn longest ago rather than taking a color from anything visible.
+A color is allocated the first time an identity appears. Class labels share one allocation across all channels, so `bicycle` has the same color on every tile and `person` looks the same in detection, segmentation and classification. Overrides are per metadata type: an object-detection entry for `person` does not recolor `person` in segmentation or classification. Tracks and poses are allocated per channel, because an `id` is only unique within one stream; their colors start over when the channel reconnects. An identity keeps its color while it is on screen on any channel. Once it has been gone for more than 5 seconds, its color can be handed to a new identity. When more identities are on screen than the palette holds, new identities share the color of the one drawn longest ago rather than taking a color from anything visible.
 
 Tracks and poses without an `id` draw in one neutral color. Senders that want per-person or per-track colors must include `id`.
 

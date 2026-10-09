@@ -65,14 +65,43 @@ test("allocator keeps the same color for the same identity and differs across id
   assert.equal(allocator.colorFor(0, "track", 7, 4), first, "numeric and string ids are the same identity");
 });
 
-test("allocator maps are separate per channel and per namespace", () => {
+test("allocator maps are separate per namespace, and track and pose maps per channel", () => {
   const { createColorAllocator, PALETTE } = loadColors();
   const allocator = createColorAllocator();
   assert.equal(allocator.colorFor(0, "track", "1", 1), PALETTE[0]);
   assert.equal(allocator.colorFor(1, "track", "x", 1), PALETTE[0]);
   assert.equal(allocator.colorFor(0, "pose", "y", 1), PALETTE[0]);
+  assert.equal(allocator.colorFor(1, "pose", "z", 1), PALETTE[0]);
   assert.equal(allocator.colorFor(0, "class", "person", 1), PALETTE[0]);
   assert.equal(allocator.colorFor(0, "class", "car", 1), PALETTE[1]);
+});
+
+test("a class gets the same color on every channel, whichever tile sees it first", () => {
+  const { createColorAllocator, PALETTE } = loadColors();
+  // Each viewer tile owns its allocator; classes must still agree across tiles.
+  const tile0 = createColorAllocator();
+  const tile3 = createColorAllocator();
+  const light = tile0.colorFor(0, "class", "traffic light", 1);
+  tile0.colorFor(0, "class", "car", 1);
+  const bicycle = tile3.colorFor(3, "class", "bicycle", 2);
+  assert.equal(bicycle, PALETTE[2], "bicycle takes the next free slot, not the first one of channel 3");
+  assert.equal(tile3.colorFor(3, "class", "traffic light", 3), light);
+  assert.equal(tile0.colorFor(0, "class", "bicycle", 4), bicycle);
+  assert.equal(tile3.size(3, "class"), 3);
+});
+
+test("a class seen on another channel stays live there", () => {
+  const { createColorAllocator, PALETTE, RELEASE_AFTER_MS } = loadColors();
+  const tile0 = createColorAllocator();
+  const tile1 = createColorAllocator();
+  const size = PALETTE.length;
+  const colors = [];
+  for (let i = 0; i < size; i += 1) colors.push(tile0.colorFor(0, "class", `c${i}`, 0));
+  const later = RELEASE_AFTER_MS + 100;
+  // Channel 1 keeps drawing c0; channel 0 has not drawn anything since.
+  tile1.colorFor(1, "class", "c0", later);
+  assert.notEqual(tile0.colorFor(0, "class", "new", later), colors[0], "c0 is live on channel 1 and keeps its slot");
+  assert.equal(tile1.colorFor(1, "class", "c0", later + 1), colors[0]);
 });
 
 test("allocator hands a stale identity's slot to a newcomer, the one absent longest first", () => {
@@ -199,14 +228,19 @@ test("allocator shares the slots inserted first when every identity is live", ()
   assert.equal(allocator.colorFor(0, "track", "t5", 43), PALETTE[5]);
 });
 
-test("allocator clear drops all state", () => {
+test("allocator clear drops its track and pose state but keeps the shared class colors", () => {
   const { createColorAllocator, PALETTE } = loadColors();
   const allocator = createColorAllocator();
+  const other = createColorAllocator();
   allocator.colorFor(0, "track", "a", 1);
   allocator.colorFor(0, "track", "b", 2);
+  allocator.colorFor(0, "class", "person", 2);
+  const car = other.colorFor(1, "class", "car", 2);
   allocator.clear();
   assert.equal(allocator.size(0, "track"), 0);
   assert.equal(allocator.colorFor(0, "track", "b", 3), PALETTE[0]);
+  assert.equal(allocator.colorFor(0, "class", "person", 3), PALETTE[0], "a reconnecting tile keeps its class colors");
+  assert.equal(other.colorFor(1, "class", "car", 3), car, "other tiles keep theirs");
 });
 
 test("resolveColor prefers overrides, then neutral for missing identity, then the allocator", () => {

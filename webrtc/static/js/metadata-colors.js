@@ -27,25 +27,38 @@
   // An identity that has not been drawn for this long no longer holds its slot.
   const RELEASE_AFTER_MS = 5000;
 
-  // One map per (channel, namespace): identity -> { slot, lastSeen, order }.
+  // A class label names the same thing on every channel, so every allocator on the page
+  // shares one map per class namespace and a class looks the same on every tile. Track
+  // and pose ids are only unique within one stream, so their maps stay per allocator and
+  // per channel. Every tile draws with the page's performance.now(), so lastSeen values
+  // from different tiles compare correctly.
+  const SHARED_NAMESPACES = new Set(["class"]);
+  const sharedMaps = new Map();
+  let insertCounter = 0;
+
+  function mapFrom(store, key) {
+    let map = store.get(key);
+    if (!map) {
+      map = new Map();
+      store.set(key, map);
+    }
+    return map;
+  }
+
+  // One map per (channel, namespace), or per namespace when it is shared:
+  // identity -> { slot, lastSeen, order }.
   // A new identity takes the lowest free slot. When every slot is held, it takes the
   // slot whose holders have all been absent for longer than RELEASE_AFTER_MS, the one
   // absent longest first. An identity drawn more recently than that is live, and a live
   // identity never loses its slot: when every slot is live, the newcomer shares the slot
   // drawn longest ago. Ties go to the identity inserted first. Each map is independent;
-  // timestamps on one channel/namespace do not affect another.
+  // timestamps in one map do not affect another.
   function createColorAllocator() {
     const maps = new Map();
-    let insertCounter = 0;
 
     function mapFor(channelIndex, namespace) {
-      const key = `${channelIndex}:${namespace}`;
-      let map = maps.get(key);
-      if (!map) {
-        map = new Map();
-        maps.set(key, map);
-      }
-      return map;
+      if (SHARED_NAMESPACES.has(namespace)) return mapFrom(sharedMaps, namespace);
+      return mapFrom(maps, `${channelIndex}:${namespace}`);
     }
 
     function isStale(entry, now) {
@@ -154,14 +167,14 @@
       return PALETTE[slot];
     }
 
+    // Drops this allocator's per-channel state. Shared class colors stay: other tiles may
+    // be drawing them, and they release after RELEASE_AFTER_MS like any identity.
     function clear() {
       maps.clear();
     }
 
     function size(channelIndex, namespace) {
-      const key = `${channelIndex}:${namespace}`;
-      const map = maps.get(key);
-      return map ? map.size : 0;
+      return mapFor(channelIndex, namespace).size;
     }
 
     return { colorFor, clear, size };
