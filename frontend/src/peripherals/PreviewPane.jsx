@@ -43,7 +43,9 @@ function ModeBadges({ mode, fps = null, label }) {
   )
 }
 
-export default function PreviewPane({ camera, selection, stale, target, state: paneState, onStart, onStop, onStreamError, onOpenBoardPanel }) {
+// `elapsed` is how many seconds the current start has taken; the view keeps the clock, since this
+// component renders from props alone.
+export default function PreviewPane({ camera, selection, stale, target, state: paneState, elapsed = 0, onStart, onStop, onStreamError, onOpenBoardPanel }) {
   // A session kept for another camera (its stop failed when the user switched) is not this camera's
   // video: this camera reads as idle, blocked by that preview, with the failure; the owner's pane keeps Stop.
   const foreign = Boolean(paneState?.session?.camera_id) && paneState.session.camera_id !== camera?.id && paneState.status !== 'stopping'
@@ -53,15 +55,20 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
   const session = state?.session || null
   const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
   const streamUrl = state?.status === 'live' ? previewStreamUrl(session) : null
+  // A retained error belongs to the camera that owns the session; another camera reads idle with the
+  // reason it is blocked, so its Start stays in reach.
+  const errorInfo = foreign ? null : previewErrorInfo(state?.error)
+  const stage = state?.status === 'live' && streamUrl ? 'live'
+    : state?.status === 'starting' || state?.status === 'stopping' || (state?.status === 'live' && !streamUrl) ? 'starting'
+      : errorInfo ? 'error'
+        : 'idle'
 
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
       <div className="periph-preview-head">
         <h4 id="periph-preview-title">Video Preview</h4>
-        <span className="periph-pills">
-          {running && <ModeBadges mode={session?.mode} fps={session?.camera_fps} label="Streaming" />}
-          <Pill tone={status.tone}>{status.label}</Pill>
-        </span>
+        {/* The stage shows the state; the pill names it only while something is happening. */}
+        {(running || errorInfo) && <Pill tone={status.tone}>{status.label}</Pill>}
       </div>
 
       <p className="sr-only" role="status">
@@ -74,7 +81,8 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
               : ''}
       </p>
 
-      {!running && (
+      {/* Idle takes no more room than a row: the stage appears only when there is something to show on it. */}
+      {stage === 'idle' && (
         <>
           <div className="periph-actions">
             <button
@@ -92,34 +100,49 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
         </>
       )}
 
-      {running && (
-        <>
-          {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
-              describes a state the reader cannot walk away from. */}
-          <div className="periph-actions">
+      {stage !== 'idle' && <div className={`periph-stage periph-stage-${stage}`} data-stage={stage}>
+        {stage === 'starting' && (
+          <div className="periph-stage-starting" role="status">
+            <span className="periph-spinner" aria-hidden="true" />
+            <span>
+              {state?.status === 'stopping'
+                ? 'Stopping the preview…'
+                : state?.status === 'live'
+                  ? 'The preview stream could not be opened. Stop the preview and report it with the board label.'
+                  : `Starting the camera on the board… ${elapsed} s`}
+            </span>
             <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
               {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
             </button>
           </div>
-          {streamUrl ? (
-            // The backend relays the board's JPEG frames as multipart/x-mixed-replace, which an <img> plays.
+        )}
+
+        {stage === 'live' && (
+          <>
+            {/* The backend relays the board's JPEG frames as multipart/x-mixed-replace, which an <img> plays. */}
             <img
               className="periph-preview-frame"
               alt={`Live preview of ${camera?.name || 'the camera'}`}
               src={streamUrl}
               onError={() => onStreamError?.(session?.id)}
             />
-          ) : state?.status === 'live' ? (
-            <Callout tone="danger" title="The preview stream could not be opened">
-              <p>Insight returned a preview address this browser will not load. Stop the preview and report it with the board label.</p>
-            </Callout>
-          ) : (
-            <p className="periph-preview-placeholder" role="status">Waiting for the board to start the camera…</p>
-          )}
-        </>
-      )}
+            <span className="periph-stage-chip">
+              <i className="periph-live-dot" aria-hidden="true" />
+              <ModeBadges mode={session?.mode} fps={session?.camera_fps} label="Streaming" />
+            </span>
+            {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
+                describes a state the reader cannot walk away from. */}
+            <button type="button" className="btn-ghost periph-stage-stop" onClick={onStop}>Stop preview</button>
+          </>
+        )}
 
-      <PreviewError error={state?.error} onOpenBoardPanel={onOpenBoardPanel} />
+        {stage === 'error' && (
+          <div className="periph-stage-error">
+            <PreviewError error={state?.error} onOpenBoardPanel={onOpenBoardPanel} />
+            <button type="button" className="btn-tonal" onClick={() => onStart()} disabled={block.blocked}>Try again</button>
+          </div>
+        )}
+      </div>}
     </section>
   )
 }

@@ -425,12 +425,18 @@ export default function PeripheralsView({
     return watchPreview(requestJson, liveSessionId, dispatchPreview)
   }, [liveSessionId])
 
+  const previewStarting = preview.status === 'starting'
+  const [previewStartedAt, setPreviewStartedAt] = useState(null)
   useEffect(() => {
-    // Only the "Scanning… N s" counter needs a clock now that nothing on the page shows a relative time.
-    if (!scanning) return undefined
+    setPreviewStartedAt(previewStarting ? Date.now() : null)
+  }, [previewStarting])
+
+  useEffect(() => {
+    // The "Scanning… N s" and "Starting the camera… N s" counters are the only clocks on the page.
+    if (!scanning && !previewStarting) return undefined
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [scanning])
+  }, [scanning, previewStarting])
 
   const elapsed = Math.max(0, Math.round((now - scanStartedAt) / 1000))
   const scannedAt = snapshot?.scanned_at
@@ -474,6 +480,7 @@ export default function PeripheralsView({
             selectionNotice={selectionNotice}
             onSelectionChange={changeSelection}
             preview={preview}
+            previewElapsed={previewStartedAt ? Math.max(0, Math.round((now - previewStartedAt) / 1000)) : 0}
             onStartPreview={startPreview}
             onStopPreview={() => stopPreview()}
             onPreviewStreamError={streamEnded}

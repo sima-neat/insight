@@ -95,6 +95,7 @@ export default function CameraDetail({
   selectionNotice,
   onSelectionChange,
   preview,
+  previewElapsed = 0,
   onStartPreview,
   onStopPreview,
   onPreviewStreamError,
@@ -149,6 +150,7 @@ export default function CameraDetail({
         stale={stale}
         target={target}
         state={preview}
+        elapsed={previewElapsed}
         onStart={onStartPreview}
         onStop={onStopPreview}
         onStreamError={onPreviewStreamError}
