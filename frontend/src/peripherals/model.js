@@ -579,6 +579,7 @@ const PREVIEW_ERROR_ACTIONS = {
   camera_in_use: 'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
   preview_active: 'Stop the preview that is already running, then start this one.',
   invalid_request: 'Choose a mode Insight lists as Available; this one was rejected.',
+  mode_adjusted: 'Pick the size libcamera streams at. The board lists the requested size, but its libcamera pipeline does not output it.',
   command_failed: 'The preview pipeline could not start on the board. The board output below says why.',
   stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.'
 }

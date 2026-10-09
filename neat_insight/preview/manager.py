@@ -40,6 +40,11 @@ _CAMERA_BUSY = re.compile(r"Failed to acquire camera|Device or resource busy|Dev
 _PID = re.compile(rb"^" + gst.PID_TAG.encode() + rb"([0-9]{1,10})$", re.M)
 _PID_LINE = re.compile("^" + re.escape(gst.PID_TAG) + "[0-9]+\n?", re.M)
 _NO_ELEMENT = re.compile(r'no element "(\w+)"')
+# libcamera's Modalix pipeline logs the stream it configured; when that differs from the size the
+# pipeline asked for, libcamerasrc cannot negotiate its caps and stops ("not-negotiated"). GStreamer's
+# error text can land on stderr a moment after the frame read gives up, so the configured size alone,
+# with no frame delivered, is the signal.
+_CONFIGURED = re.compile(r"configuring streams: \(0\) (\d+)x(\d+)-|Applying neutral DV Timings for \S+ \((\d+)x(\d+)\)")
 
 
 def _kill_script(pid: int) -> str:
@@ -72,10 +77,15 @@ def _unknown_session() -> BoardError:
     return BoardError("not_found", "That preview session is not running.", hint="Start the preview again.")
 
 
-def _stderr_detail(stream, wait: float = 0) -> str:
-    """The pipeline's stderr without the PID line the shell writes; `wait` lets an exiting one finish it."""
+def _stderr_text(stream, wait: float = 0) -> str:
+    """The pipeline's whole stderr without the PID line the shell writes; `wait` lets an exiting one finish it."""
     text = stream.stderr(wait).decode("utf-8", errors="replace")
-    return _PID_LINE.sub("", text).strip()[-1000:]
+    return _PID_LINE.sub("", text).strip()
+
+
+def _stderr_detail(stream, wait: float = 0) -> str:
+    """The tail of the pipeline's stderr, bounded for an error response."""
+    return _stderr_text(stream, wait)[-1000:]
 
 
 class _Relay:
@@ -141,7 +151,7 @@ class PreviewManager:
         stream = board_session.transport.stream(gst.board_command(arguments), timeout=START_TIMEOUT_SEC)
         parser = gst.FrameParser()
         try:
-            frames = self._first_frames(stream, parser, item["name"])
+            frames = self._first_frames(stream, parser, item["name"], (mode["width"], mode["height"]))
             pid = self._pid(stream)
         except Exception:
             stream.close()
@@ -224,7 +234,7 @@ class PreviewManager:
             raise _camera_in_use(item["name"], users)
 
     @staticmethod
-    def _first_frames(stream, parser, name: str) -> list:
+    def _first_frames(stream, parser, name: str, size: tuple) -> list:
         """Read until the pipeline writes its first complete frame; raise why it did not."""
         deadline = time.monotonic() + FIRST_FRAME_TIMEOUT_SEC
         chunk = None
@@ -241,10 +251,24 @@ class PreviewManager:
             if chunk == b"":
                 break  # The pipeline exited.
         ended = chunk == b""
-        detail = _stderr_detail(stream, STDERR_WAIT_SEC if ended else 0)
-        if _CAMERA_BUSY.search(detail):
+        text = _stderr_text(stream, STDERR_WAIT_SEC if ended else 0)
+        detail = text[-1000:]
+        if _CAMERA_BUSY.search(text):
             raise _camera_in_use(name, [], detail)
-        missing = _NO_ELEMENT.search(detail)
+        configured = _CONFIGURED.search(text)
+        if configured:
+            width, height = int(configured[1] or configured[3]), int(configured[2] or configured[4])
+            if (width, height) != tuple(size):
+                raise BoardError(
+                    "mode_adjusted",
+                    f"libcamera streams {name} at {width}x{height}, not {size[0]}x{size[1]}.",
+                    hint=f"Pick {width}x{height}. The board lists {size[0]}x{size[1]} as a sensor size, but its "
+                         "libcamera pipeline does not output it.",
+                    width=width,
+                    height=height,
+                    detail=detail,
+                )
+        missing = _NO_ELEMENT.search(text)
         if missing:
             raise BoardError(
                 "tool_missing",
