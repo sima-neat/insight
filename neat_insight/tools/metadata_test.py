@@ -15,17 +15,11 @@ FRAME_HEIGHT = 720
 
 
 def generate_object_detection():
-    locations = [
-        [100, 100, 100, 80],
-        [1080, 100, 100, 80],
-        [100, 540, 100, 80],
-        [1080, 540, 100, 80],
-    ]
-    person_boxes = [
-        [200, 100, 60, 120],
-        [1020, 100, 60, 120],
-        [200, 500, 60, 120],
-        [1020, 500, 60, 120],
+    detections = [
+        ("obj_1", "car", [100, 100, 100, 80], (0.7, 0.99)),
+        ("obj_2", "person", [1020, 100, 60, 120], (0.85, 0.99)),
+        ("obj_3", "bicycle", [100, 540, 90, 70], (0.6, 0.95)),
+        ("obj_4", "dog", [1020, 540, 70, 60], (0.6, 0.95)),
     ]
     return {
         "type": "object-detection",
@@ -33,17 +27,12 @@ def generate_object_detection():
         "data": {
             "objects": [
                 {
-                    "id": "obj_1",
-                    "label": "car",
-                    "confidence": round(random.uniform(0.7, 0.99), 2),
-                    "bbox": random.choice(locations),
-                },
-                {
-                    "id": "obj_2",
-                    "label": "person",
-                    "confidence": round(random.uniform(0.85, 0.99), 2),
-                    "bbox": random.choice(person_boxes),
-                },
+                    "id": object_id,
+                    "label": label,
+                    "confidence": round(random.uniform(*confidence_range), 2),
+                    "bbox": [bbox[0] + random.randint(-6, 6), bbox[1] + random.randint(-6, 6), bbox[2], bbox[3]],
+                }
+                for object_id, label, bbox, confidence_range in detections
             ]
         },
     }
@@ -63,45 +52,40 @@ def generate_classification():
     }
 
 
+POSE_TEMPLATE = {
+    "nose": (0, 0),
+    "left_eye": (-10, -10),
+    "right_eye": (10, -10),
+    "left_shoulder": (-20, 50),
+    "right_shoulder": (20, 50),
+    "left_hip": (-15, 130),
+    "right_hip": (15, 130),
+}
+
+POSE_ORIGINS = [("pose_1", 240, 180), ("pose_2", 640, 200), ("pose_3", 1040, 180)]
+
+
 def generate_pose_estimation():
-    pose_templates = [
-        {
-            "nose": (200, 150),
-            "left_eye": (190, 140),
-            "right_eye": (210, 140),
-            "left_shoulder": (180, 200),
-            "right_shoulder": (220, 200),
-        },
-        {
-            "nose": (1080, 570),
-            "left_eye": (1070, 560),
-            "right_eye": (1090, 560),
-            "left_shoulder": (1060, 620),
-            "right_shoulder": (1100, 620),
-        },
-    ]
-    selected_pose = random.choice(pose_templates)
-    return {
-        "type": "pose-estimation",
-        "timestamp": time.time(),
-        "data": {
-            "poses": [
-                {
-                    "id": "pose_1",
-                    "label": "person",
-                    "keypoints": [
-                        {
-                            "name": name,
-                            "x": x,
-                            "y": y,
-                            "confidence": round(random.uniform(0.85, 1.0), 2),
-                        }
-                        for name, (x, y) in selected_pose.items()
-                    ],
-                }
-            ]
-        },
-    }
+    poses = []
+    for pose_id, origin_x, origin_y in POSE_ORIGINS:
+        jitter_x = random.randint(-6, 6)
+        jitter_y = random.randint(-6, 6)
+        poses.append(
+            {
+                "id": pose_id,
+                "label": "person",
+                "keypoints": [
+                    {
+                        "name": name,
+                        "x": origin_x + dx + jitter_x,
+                        "y": origin_y + dy + jitter_y,
+                        "confidence": round(random.uniform(0.85, 1.0), 2),
+                    }
+                    for name, (dx, dy) in POSE_TEMPLATE.items()
+                ],
+            }
+        )
+    return {"type": "pose-estimation", "timestamp": time.time(), "data": {"poses": poses}}
 
 
 def _ellipse_rle(mask_h, mask_w):
@@ -134,8 +118,8 @@ RLE_MASK = _ellipse_rle(mask_h=60, mask_w=40)
 
 def _generate_segments():
     segments = []
-    labels = ["person", "car"]
-    for index in range(random.randint(2, 4)):
+    labels = ["person", "car", "truck"]
+    for index in range(random.randint(3, 4)):
         w = random.randint(120, 320)
         h = random.randint(120, 320)
         x = random.randint(0, FRAME_WIDTH - w)

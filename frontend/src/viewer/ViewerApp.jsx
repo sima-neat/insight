@@ -90,6 +90,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
   const heldOverlaysRef = useRef(new Map());
   const trackHistoryRef = useRef(new Map());
+  const colorAllocatorRef = useRef(null);
+  if (colorAllocatorRef.current === null) {
+    colorAllocatorRef.current = window.metadataColors?.createColorAllocator() ?? null;
+  }
   const rtcpRef = useRef({
     lastBytes: null,
     lastTs: null,
@@ -193,6 +197,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       auxiliaryPanelRef.current?.reset();
       heldOverlaysRef.current.clear();
       trackHistoryRef.current.clear();
+      colorAllocatorRef.current?.clear();
       rtcpRef.current = {
         lastBytes: null,
         lastTs: null,
@@ -325,6 +330,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               const drawContext = {
                 settings: resolvedSettings,
                 trackHistory: trackHistoryRef.current,
+                colorAllocator: colorAllocatorRef.current ?? undefined,
                 now,
                 frameState,
                 held: candidate.held === true,
@@ -337,6 +343,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
           heldOverlaysRef.current.clear();
           trackHistoryRef.current.clear();
           auxiliaryPanelRef.current?.clearFrame();
+          colorAllocatorRef.current?.clear();
         }
       };
 
@@ -403,6 +410,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               heldOverlaysRef.current.clear();
               trackHistoryRef.current.clear();
               auxiliaryPanelRef.current?.clearFrame();
+              colorAllocatorRef.current?.clear();
             }
             setBanner(
               formatChannelStatus({
