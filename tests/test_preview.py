@@ -337,10 +337,11 @@ class PreviewTests(unittest.TestCase):
             self.assertIsNone(self.manager.current(1))
 
     def test_a_size_libcamera_streams_differently_is_reported_with_the_size_that_works(self):
-        """Transcribed from a 3.0 DevKit (B1859): asked for 4056x3040, libcamera configured 4032x3040 and
-        libcamerasrc stopped with not-negotiated. The sensor lists 4056 wide; the libcamera pipeline does not."""
-        detail = (b"[1:37:08.150] [3009]  INFO Camera camera.cpp:1216 configuring streams: (0) 4032x3040-NV12/Unset\n"
-                  b"[1:37:08.150] [3009]  INFO Modalix modalix.cpp:2992 Applying neutral DV Timings for imx477 (4032x3040) on CSI: csidev-40c3000.csi\n"
+        """Transcribed from a 3.0 DevKit (B1859): asked for one size, libcamera configured another and
+        libcamerasrc stopped with not-negotiated. The sizes Insight itself hides (wider than
+        MAX_SENSOR_WIDTH) never reach the pipeline; this covers any other adjustment libcamera makes."""
+        detail = (b"[1:37:08.150] [3009]  INFO Camera camera.cpp:1216 configuring streams: (0) 4000x3040-NV12/Unset\n"
+                  b"[1:37:08.150] [3009]  INFO Modalix modalix.cpp:2992 Applying neutral DV Timings for imx477 (4000x3040) on CSI: csidev-40c3000.csi\n"
                   b"ERROR: from element /GstPipeline:pipeline0/GstLibcameraSrc:libcamerasrc0: Internal data stream error.\n"
                   b"Additional debug info:\n"
                   b"../src/gstreamer/gstlibcamerasrc.cpp(911): gst_libcamera_src_task_enter (): /GstPipeline:pipeline0/GstLibcameraSrc:libcamerasrc0:\n"
@@ -349,16 +350,17 @@ class PreviewTests(unittest.TestCase):
         doc = imx477()
         doc["isp"]["sizing"] = "runtime"
         doc["modes"] = [{"format": "NV12", "width": w, "height": h, "sensor_mode": True, "available": True}
-                        for w, h in ((4056, 3040), (4032, 3040), (1920, 1080))]
+                        for w, h in ((4032, 3040), (1920, 1080))]
         imx477_30 = item_of(scanned(doc, c920()), IMX477)
+        mode = {"format": "NV12", "width": 4032, "height": 3040, "fps": 30}
         stream = FakeStream([], stderr=PID_LINE + detail)
         session = fake_session(FakeTransport(stream=stream))
         with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode={"format": "NV12", "width": 4056, "height": 3040, "fps": 30})
+            self.start(session, imx477_30, mode=mode)
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("mode_adjusted", 409))
-        self.assertEqual(ctx.exception.message, "libcamera streams imx477 5-001a at 4032x3040, not 4056x3040.")
-        self.assertEqual((ctx.exception.extra["width"], ctx.exception.extra["height"]), (4032, 3040))
-        self.assertIn("Pick 4032x3040.", ctx.exception.hint)
+        self.assertEqual(ctx.exception.message, "libcamera streams imx477 5-001a at 4000x3040, not 4032x3040.")
+        self.assertEqual((ctx.exception.extra["width"], ctx.exception.extra["height"]), (4000, 3040))
+        self.assertIn("Pick 4000x3040.", ctx.exception.hint)
         self.assertEqual(len(session.transport.kills()), 1)
         # As the board really logs it: a long libcamera log whose early "configuring streams" line falls
         # outside the 1000-character detail; the DV-timings line still names the configured size.
@@ -366,7 +368,7 @@ class PreviewTests(unittest.TestCase):
         long = detail.replace(b"Applying neutral", padding + b"Applying neutral")
         session = fake_session(FakeTransport(stream=FakeStream([], stderr=PID_LINE + long)))
         with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode={"format": "NV12", "width": 4056, "height": 3040, "fps": 30})
+            self.start(session, imx477_30, mode=mode)
         self.assertEqual(ctx.exception.code, "mode_adjusted")
         self.assertEqual(len(ctx.exception.extra["detail"]), 1000)
         self.assertNotIn("configuring streams", ctx.exception.extra["detail"])
@@ -375,13 +377,13 @@ class PreviewTests(unittest.TestCase):
         early = detail[: detail.index(b"ERROR: from element")]
         session = fake_session(FakeTransport(stream=FakeStream([], stderr=PID_LINE + early)))
         with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode={"format": "NV12", "width": 4056, "height": 3040, "fps": 30})
+            self.start(session, imx477_30, mode=mode)
         self.assertEqual(ctx.exception.code, "mode_adjusted")
         # The same configured size as requested is not an adjustment: the generic failure stays.
-        same = detail.replace(b"4032x3040-NV12", b"4056x3040-NV12").replace(b"imx477 (4032x3040)", b"imx477 (4056x3040)")
+        same = detail.replace(b"4000x3040", b"4032x3040")
         session = fake_session(FakeTransport(stream=FakeStream([], stderr=PID_LINE + same)))
         with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode={"format": "NV12", "width": 4056, "height": 3040, "fps": 30})
+            self.start(session, imx477_30, mode=mode)
         self.assertEqual(ctx.exception.code, "command_failed")
 
     def test_a_pipeline_that_fails_or_sends_no_frame_is_stopped_with_its_output(self):

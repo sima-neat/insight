@@ -157,7 +157,7 @@ Select **Refresh** to scan the board: Insight asks SiMa Sentinel to rescan and w
 | State | Meaning |
 | --- | --- |
 | Available | The board's camera overlays support the camera's sensor, the ISP outputs the mode's size, and its pixel format is NV12. |
-| Unsupported | Any of those fails. The pill's reason says which: USB cameras have no camera overlay on the board; the sensor is not in the board's camera overlays; the ISP cannot output the size; or the format is not NV12. A Sentinel too old to report the board's camera overlays leaves every mode Unsupported until you update it. |
+| Unsupported | Any of those fails. The pill's reason says which: USB cameras have no camera overlay on the board; the sensor is not in the board's camera overlays; the ISP cannot output the size; the format is not NV12; or, on a board whose ISP takes the sensor's sizes at run time (Platform 3.0), the size is wider than libcamera streams (4032 pixels on the IMX477). A Sentinel too old to report the board's camera overlays leaves every mode Unsupported until you update it. |
 
 Insight decides this from SiMa Sentinel's report alone. The overlay check matches the sensor Sentinel links to the camera in the board's device tree against the sensors the overlays installed under `/boot` support. The NV12 condition is a fixed fact about Neat's `CameraInput`, which outputs NV12; Insight does not query Neat on the board. A camera with no Available mode shows an **Unsupported** pill and, for a MIPI camera, its reason; a camera with an Available mode shows no pill. Insight does not say whether another program is using a camera: it finds that out when a preview tries to open the camera, and reports it there.
 
