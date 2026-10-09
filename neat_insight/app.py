@@ -2512,6 +2512,16 @@ def _native_fps_by_file(sources) -> dict[str, dict]:
         return {}
 
 
+def _show_external(enriched, src, path) -> None:
+    """Report the slot as held by the external publisher on `path`, whatever is assigned to it."""
+    enriched["state"] = "external"
+    enriched["transport"] = "rtsp"
+    enriched["codec"] = path.codec
+    enriched["allowed_transports"] = ["rtsp"]
+    enriched["urls"] = {"rtsp": _source_url(src, "rtsp")}
+    enriched["external"] = mediamtx_client.external_info(path)
+
+
 def _source_with_urls(src, snapshot=None, native_fps_by_file: Optional[dict] = None):
     enriched = dict(src)
     if src.get("type") == SOURCE_TYPE_WEBCAM:
@@ -2526,6 +2536,12 @@ def _source_with_urls(src, snapshot=None, native_fps_by_file: Optional[dict] = N
             "rtsp": _source_url(src, "rtsp"),
             "whip": _webcam_whip_url(src),
         }
+        # While the browser is not publishing, another sender can take srcN. Every route
+        # then refuses the slot as externally held, so the row must say so and offer Take over.
+        holder = _external_holder(src.get("index"), snapshot)
+        if holder:
+            enriched["readers"] = list(holder.readers)
+            _show_external(enriched, src, holder)
         return enriched
 
     stored_codec = src.get("codec")
@@ -2566,12 +2582,7 @@ def _source_with_urls(src, snapshot=None, native_fps_by_file: Optional[dict] = N
         return enriched
     is_external = bool(path and path.external and not _insight_publishes_rtsp(src.get("index")))
     if is_external:
-        enriched["state"] = "external"
-        enriched["transport"] = "rtsp"
-        enriched["codec"] = path.codec
-        enriched["allowed_transports"] = ["rtsp"]
-        enriched["urls"] = {"rtsp": _source_url(src, "rtsp")}
-        enriched["external"] = mediamtx_client.external_info(path)
+        _show_external(enriched, src, path)
     return enriched
 
 
