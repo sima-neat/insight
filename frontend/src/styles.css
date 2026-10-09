@@ -3684,15 +3684,6 @@ button:disabled {
 }
 
 /* An Unsupported camera: listed, with its reason, but not openable. */
-.periph-camera-row.disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.periph-camera-row.disabled:hover {
-  border-color: var(--line);
-}
-
 .periph-camera-row:focus-visible,
 .periph-code:focus-visible,
 .periph-identity summary:focus-visible {

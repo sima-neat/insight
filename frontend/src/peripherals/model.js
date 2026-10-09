@@ -66,31 +66,6 @@ export function cameraTierPill(camera) {
   return tierOf(camera?.support?.tier) === 'available' ? TIERS.available : TIERS.unsupported
 }
 
-// An Unsupported camera has nothing to pick or preview, so its row is shown but cannot be selected.
-export function cameraSelectable(camera) {
-  return tierOf(camera?.support?.tier) === 'available'
-}
-
-// What the detail panel says when the board has cameras but none can be used: each one's reason, once.
-export function noUsableCameraNotice(items) {
-  const cameras = groupCameras(items).flatMap((group) => group.items)
-  if (!cameras.length || cameras.some(cameraSelectable)) return null
-  const reasons = []
-  for (const camera of cameras) {
-    const reason = camera.support?.reason || 'Unsupported.'
-    const entry = reasons.find((r) => r.reason === reason)
-    if (entry) entry.names.push(camera.name)
-    else reasons.push({ reason, names: [camera.name] })
-  }
-  return {
-    title: cameras.length === 1 ? `${cameras[0].name} cannot be used with Neat` : 'No camera on this board can be used with Neat',
-    reasons,
-    hint: cameras.every((c) => c.connection === 'usb')
-      ? 'Connect a MIPI camera (power the board off first), then Refresh.'
-      : 'Apply a camera overlay that supports the sensor, reboot the board, then Refresh.'
-  }
-}
-
 export function severityInfo(severity) {
   return SEVERITY[severity] || SEVERITY.info
 }
@@ -367,8 +342,8 @@ export function groupOptions(options) {
 // One visible explanation line per camera state, chosen by priority, so the
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
-  // A USB camera is Unsupported because USB cameras have no camera overlay; its pill says enough.
-  if (camera?.support && !cameraSelectable(camera)) return camera.connection === 'usb' ? '' : camera.support.reason || 'Unsupported.'
+  // An Unsupported camera's panel carries no pill, so it says why the camera cannot be used.
+  if (camera?.support && tierOf(camera.support.tier) !== 'available') return camera.support.reason || 'Unsupported.'
   // An Available camera gets no sentence at all: every mode menu already labels each entry
   // Available or Unsupported, so a paragraph repeating that only adds text. Whether another
   // program holds the camera is found out, and said, when a preview tries to start.
@@ -419,7 +394,7 @@ export function previewNeedsRestart(state, cameraId, next) {
 }
 
 export function resolveCameraId(snapshot, previousId) {
-  const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items).filter(cameraSelectable)
+  const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items)
   if (previousId && cameras.some((c) => c.id === previousId)) return previousId
   if (previousId && snapshot?.changes?.removed?.some((r) => r.id === previousId)) return previousId
   return cameras[0]?.id || null
