@@ -45,6 +45,8 @@ curl -k -H "Content-Type: application/json" \
 
 在變更指定內容或播放狀態之前，請先閱讀 `/api/mediasrc`。如果可能，在刪除媒體內容之前，請先停止正在使用的來源。
 
+由 Insight 以外的程式發布的插槽會回報 `state: "external"` 以及 `external` 物件（通訊協定、位址、開始發布時間、編解碼器支援情況、畫面尺寸、位元率）；每個插槽也會列出其目前的 `readers`。對於這類插槽，`start` 和 `assign` 會回傳 `409`；當插槽上已沒有 Insight 自己的串流時，`stop` 也會如此。`POST /api/mediasrc/takeover` 會中斷發布端的連線。批次作業會讓外部串流繼續執行，並在 `skipped_external` 中列出這些插槽；`reset` 仍會清除每個插槽的已儲存記錄。`GET /stream/preview/src<N>.mjpg` 會以來源幀率呈現任何即時插槽的 MJPEG 預覽。
+
 ## 回應和串流協定
 
 - 大多數端點都會傳回 JSON。錯誤通常會使用 `{"error": "message"}`，並搭配 HTTP 錯誤狀態碼。

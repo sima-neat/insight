@@ -49,6 +49,8 @@ from neat_insight.mediasrc import (
     media_stream_is_running,
     normalize_codec,
     normalize_transport,
+    preview_command,
+    RTSP_PUBLISH_BASE_URL,
     start_media_stream,
     stop_media_stream,
     MediaServerUnreachable,
@@ -61,6 +63,8 @@ from neat_insight.mediasrc import (
     webcam_publisher_sessions,
     stop_media_stream_if,
 )
+from neat_insight import mediasrc
+from neat_insight.mediamtx import MediamtxClient, MediamtxError, MediamtxNotFound, PREVIEW_READER_TAG
 from neat_insight.api_docs import api_docs_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
 from neat_insight.remote_devkit import (
@@ -96,6 +100,13 @@ env = init_environment()
 MEDIA_DIR = env["MEDIA_DIR"]
 MEDIA_SRC_DATA_FILE = env["MEDIA_SRC_DATA_FILE"]
 DEFAULT_SOURCE_COUNT = env["DEFAULT_SOURCE_COUNT"]
+mediamtx_client = MediamtxClient()
+PREVIEW_MAX_STREAMS = 4
+# Longest the preview ffmpeg may stay silent (connecting, waiting for a keyframe, or a
+# stalled publisher) before it is killed and its slot released.
+PREVIEW_IDLE_TIMEOUT_SECONDS = 15
+_preview_lock = threading.Lock()
+_preview_count = 0
 OPTIMIZABLE_VIDEO_EXTENSIONS = {".mp4"}
 STREAMABLE_MEDIA_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".mjpeg", ".mjpg", ".jpg", ".jpeg"}
 PASSTHROUGH_UPLOAD_CODECS = {"h265", "mjpeg"}
@@ -2191,7 +2202,65 @@ def _webcam_whip_url(src):
     )
 
 
-def _source_with_urls(src):
+def _path_snapshot():
+    return mediamtx_client.snapshot() or {}
+
+
+def _insight_publishes_rtsp(index):
+    """True while Insight itself has a live RTSP publisher on that slot.
+
+    Only an RTSP publisher of ours can own a mediamtx path; an HTTP/MJPEG slot streams
+    straight to the browser and must never mask an external publisher on the same index.
+    """
+    if index is None:
+        return False
+    with mediasrc.registry_lock:
+        stream = mediasrc.pipeline_registry.get(int(index) - 1)
+        if not stream or stream.transport != "rtsp":
+            return False
+        return bool(stream.process and stream.process.poll() is None)
+
+
+def _external_holder(index, snapshot=None):
+    snapshot = _path_snapshot() if snapshot is None else snapshot
+    path = snapshot.get(f"src{index}")
+    # A live process of our own always wins: mediamtx can report a ready path before the
+    # publisher session (and its ?publisher=insight query) is resolvable.
+    return path if path and path.external and not _insight_publishes_rtsp(index) else None
+
+
+def _index_error(index):
+    """Error response for a request index that names no slot, or None when it is usable.
+
+    2.0 and true compare equal to a slot index yet build a different "src<index>" snapshot
+    key, which would slip past the external-publisher guard.
+    """
+    if index is None:
+        return _json_error("Missing index")
+    if isinstance(index, bool) or not isinstance(index, int):
+        return _json_error("index must be an integer")
+    if not 1 <= index <= DEFAULT_SOURCE_COUNT:
+        return _json_error("Source not found", 404)
+    return None
+
+
+EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
+
+
+def _external_conflict_error(index, path):
+    return _json_error(
+        f"src{index} is in use by an external publisher ({path.protocol} {path.address}). Use Take over to disconnect it.",
+        409,
+    )
+
+
+def _skipped_suffix(skipped_external, phrase="Skipped external"):
+    if not skipped_external:
+        return ""
+    return f" {phrase}: " + ", ".join(f"src{i}" for i in skipped_external) + "."
+
+
+def _source_with_urls(src, snapshot=None):
     enriched = dict(src)
     if src.get("type") == SOURCE_TYPE_WEBCAM:
         enriched["transport"] = DEFAULT_TRANSPORT
@@ -2221,6 +2290,16 @@ def _source_with_urls(src):
     if "http" in allowed_transports:
         urls["http_mjpeg"] = _source_url(src, "http")
     enriched["urls"] = urls
+    path = (snapshot if snapshot is not None else _path_snapshot()).get(f"src{src.get('index')}")
+    enriched["readers"] = list(path.readers) if path and path.ready else []
+    is_external = bool(path and path.external and not _insight_publishes_rtsp(src.get("index")))
+    if is_external:
+        enriched["state"] = "external"
+        enriched["transport"] = "rtsp"
+        enriched["codec"] = path.codec
+        enriched["allowed_transports"] = ["rtsp"]
+        enriched["urls"] = {"rtsp": _source_url(src, "rtsp")}
+        enriched["external"] = mediamtx_client.external_info(path)
     return enriched
 
 
@@ -2486,7 +2565,8 @@ def _find_source(index: int):
 def get_sources():
     """Return persisted media-source objects, including index, assigned file path, and playback state."""
     sources = _sync_source_runtime_states(load_sources())
-    return jsonify([_source_with_urls(src) for src in sources])
+    snapshot = _path_snapshot()
+    return jsonify([_source_with_urls(src, snapshot) for src in sources])
 
 
 # API: assign or clear a media file for one RTSP source slot.
@@ -2496,8 +2576,12 @@ def assign_source():
     data = request.get_json() or {}
     index = data.get("index")
     file_name = data.get("file") or ""
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
     requested_transport = data.get("transport")
 
     snapshot = next((src for src in load_sources() if src["index"] == index), None)
@@ -2574,8 +2658,13 @@ def assign_webcam_source():
     """Accept JSON {'index': int}; mark the slot as a webcam source and return its WHIP publish URL."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    # mediamtx refuses a second publisher on src{N}, so the webcam could never go live there.
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
 
     snapshot = next((src for src in load_sources() if src["index"] == index), None)
     if snapshot is None:
@@ -2631,10 +2720,24 @@ def auto_assign_all_sources():
     # consume a video with it, so the file cursor advances only on assignment.
     # The plan is made against the snapshot; the releases and media probes in
     # this loop can take seconds, so it is applied to a fresh copy afterwards.
+    snapshot = _path_snapshot()
+    skipped_external = [src.get("index") for src in sources if _external_holder(src.get("index"), snapshot)]
+    # An external slot keeps its file, so that file is not available to the other slots.
+    kept = {src.get("file") for src in sources if src.get("index") in skipped_external}
+    video_files = [name for name in video_files if name not in kept]
     next_file = 0
     plan = {}
     for src in sources:
         source_index = src.get("index")
+        if source_index in skipped_external:
+            # Keeps its assignment; only a stream of Insight's own that shares the index
+            # (an HTTP/MJPEG one) is stopped, like every other active source.
+            plan[source_index] = {
+                "was": (src.get("type"), src.get("file")),
+                **{key: src.get(key) for key in ("type", "file", "transport", "codec")},
+                "state": "stopped",
+            }
+            continue
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
@@ -2686,7 +2789,9 @@ def auto_assign_all_sources():
                 src[key] = outcome[key]
         save_sources(fresh)
 
-    assigned_count = sum(1 for i, outcome in plan.items() if outcome["file"] and i not in changed)
+    assigned_count = sum(
+        1 for i, outcome in plan.items() if outcome["file"] and i not in changed and i not in skipped_external
+    )
     message = f"Assigned {assigned_count} source(s) with unique media file(s)."
     if unconfirmed:
         message += (
@@ -2700,11 +2805,13 @@ def auto_assign_all_sources():
             + ", ".join(str(i) for i in changed)
             + " were reassigned while this ran and were left as they are now."
         )
+    message += _skipped_suffix(skipped_external)
     return {
         "success": True,
         "assigned_count": assigned_count,
         "source_count": len(sources),
         "available_files": len(video_files),
+        "skipped_external": skipped_external,
         "unconfirmed_webcams": unconfirmed,
         "changed_sources": changed,
         "message": message,
@@ -2724,8 +2831,12 @@ def start_source():
     webcam confirm could launch a file a second tab assigned to the slot."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    holder = _external_holder(index)
+    if holder:
+        return _external_conflict_error(index, holder)
 
     sources = load_sources()
     for src in sources:
@@ -2833,8 +2944,15 @@ def start_sources_bulk():
         return _json_error("Count must be greater than 0")
 
     sources = sorted(load_sources(), key=lambda src: src.get("index", 0))
-    assigned_sources = [src for src in sources if src.get("file")]
-    if not assigned_sources:
+    snapshot = _path_snapshot()
+    # Only slots with a file are candidates; an external publisher on an unassigned slot
+    # is neither skipped nor a reason to suppress the "nothing assigned" error.
+    candidates = [src for src in sources if src.get("file")]
+    skipped_external = [src["index"] for src in candidates if _external_holder(src["index"], snapshot)]
+    assigned_sources = [src for src in candidates if src["index"] not in skipped_external]
+    # A run where every assigned slot is external still answers in the result shape, so
+    # a client can tell that apart from "nothing assigned".
+    if not candidates:
         return _json_error("No assigned sources available to start")
 
     targets = assigned_sources[:count]
@@ -2918,9 +3036,10 @@ def start_sources_bulk():
         "started": started,
         "already_running": already_running,
         "errors": errors,
+        "skipped_external": skipped_external,
         "message": (
             f"Started {len(started)} source(s), {len(already_running)} already running, "
-            f"{len(errors)} failed."
+            f"{len(errors)} failed." + _skipped_suffix(skipped_external)
         ),
         "started_or_running": started_or_running,
     }
@@ -2932,8 +3051,14 @@ def stop_source():
     """Accept JSON {'index': int}; stop the source process and persist its state as stopped."""
     data = request.get_json() or {}
     index = data.get("index")
-    if index is None:
-        return _json_error("Missing index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    # Insight's own HTTP/MJPEG stream can share an index with an external publisher; it
+    # stays stoppable, and only a slot holding nothing of ours is a conflict.
+    holder = _external_holder(index)
+    if holder and not media_stream_is_running(index):
+        return _external_conflict_error(index, holder)
 
     released_session = _released_session_from(data)
     snapshot = next((src for src in load_sources() if src["index"] == index), None)
@@ -2984,12 +3109,18 @@ def stop_all_sources():
     released = _released_sessions_from(data)
 
     sources = load_sources()
+    snapshot = _path_snapshot()
+    skipped_external = []
     stopped_count = 0
     unconfirmed = []
     stopped = {}
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
+        # Classify before stopping: _external_holder only discounts a path while our own
+        # publisher is alive, so stopping first would report our just-stopped slot as external.
+        if _external_holder(source_index, snapshot):
+            skipped_external.append(source_index)
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
         ):
@@ -3050,9 +3181,11 @@ def stop_all_sources():
             + ", ".join(str(i) for i in changed)
             + " were reassigned while stopping and were left as they are now."
         )
+    message += _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)
     return {
         "success": True,
         "stopped_count": stopped_count,
+        "skipped_external": skipped_external,
         "unconfirmed_webcams": unconfirmed,
         "changed_sources": changed,
         "message": message,
@@ -3067,11 +3200,18 @@ def reset_all_sources():
     released = _released_sessions_from(data)
 
     sources = load_sources()
+    snapshot = _path_snapshot()
+    skipped_external = []
     unconfirmed = []
     identities = {}
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
+        # Classify before stopping: _external_holder only discounts a path while our own
+        # publisher is alive, so stopping first would report our just-stopped slot as external.
+        # Reset clears every stored record; the external stream itself is never touched.
+        if _external_holder(source_index, snapshot):
+            skipped_external.append(source_index)
         identities[source_index] = (src.get("type"), src.get("file"))
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
             source_index, released.get(source_index)
@@ -3122,7 +3262,37 @@ def reset_all_sources():
             + ", ".join(str(i) for i in changed)
             + " were reassigned while this ran and were left as they are now."
         )
-    return {"success": True, "unconfirmed_webcams": unconfirmed, "changed_sources": changed, "message": message}
+    message += _skipped_suffix(skipped_external, EXTERNAL_LEFT_RUNNING)
+    return {"success": True, "skipped_external": skipped_external, "unconfirmed_webcams": unconfirmed,
+            "changed_sources": changed, "message": message}
+
+
+# API: disconnect an external publisher so the slot can be assigned again.
+@app.post("/api/mediasrc/takeover")
+def takeover_source():
+    """Accept JSON {'index': int}; kick the external publisher holding that slot via the mediamtx API."""
+    data = request.get_json() or {}
+    index = data.get("index")
+    index_error = _index_error(index)
+    if index_error:
+        return index_error
+    if not _find_source(index):
+        return _json_error("Source not found", 404)
+    if mediamtx_client.snapshot() is None:
+        return _json_error("mediamtx API is unreachable; cannot disconnect the publisher", 502)
+    holder = _external_holder(index)
+    if not holder:
+        return _json_error(f"src{index} is not held by an external publisher", 409)
+    try:
+        mediamtx_client.kick(holder.source_type, holder.source_id)
+    except MediamtxNotFound:
+        pass
+    except MediamtxError as exc:
+        return _json_error(f"Could not disconnect src{index}: {exc}", 502)
+    current = _external_holder(index)
+    if current and current.source_id != holder.source_id:
+        return _json_error(f"A new external publisher took src{index} ({current.protocol} {current.address})", 409)
+    return {"success": True, "index": index}
 
 
 def _http_mjpeg_source_or_error(index: int):
@@ -3210,6 +3380,82 @@ def snapshot_http_mjpeg(index):
         detail = result.stderr.decode("utf-8", errors="replace").strip() or "Failed to read source frame"
         return _json_error(detail, 500)
     return Response(result.stdout, mimetype="image/jpeg", headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@app.get("/stream/preview/src<int:index>.mjpg")
+def stream_preview_mjpeg(index):
+    """Return a multipart MJPEG preview of whatever is live on one source slot."""
+    global _preview_count
+    if not 1 <= index <= DEFAULT_SOURCE_COUNT:
+        return _json_error("Source not found", 404)
+    path = _path_snapshot().get(f"src{index}")
+    if not path or not path.ready:
+        return _json_error("Source is not live", 409)
+    if shutil.which("ffmpeg") is None:
+        return _json_error("ffmpeg is not installed", 503)
+    cmd = preview_command(f"{RTSP_PUBLISH_BASE_URL}/src{index}?{PREVIEW_READER_TAG}")
+    with _preview_lock:
+        if _preview_count >= PREVIEW_MAX_STREAMS:
+            return _json_error("Too many previews open", 429)
+        _preview_count += 1
+    released = False
+
+    def release():
+        # Idempotent: runs from the generator's finally and from call_on_close, and a
+        # response closed before its iterator starts only ever reaches the latter.
+        nonlocal released
+        global _preview_count
+        with _preview_lock:
+            if not released:
+                released = True
+                _preview_count -= 1
+
+    def generate():
+        process = None
+        finished = threading.Event()
+        reaping = threading.Lock()
+        last_output = [time.monotonic()]
+
+        def watch():
+            # A client disconnect only surfaces on the next yield, and a silent ffmpeg
+            # never gets there: killing it makes the blocked read return.
+            while not finished.wait(min(1.0, PREVIEW_IDLE_TIMEOUT_SECONDS)):
+                if time.monotonic() - last_output[0] > PREVIEW_IDLE_TIMEOUT_SECONDS:
+                    # Never signal while the generator reaps: a kill after wait() would
+                    # land on whatever process inherited the pid.
+                    with reaping:
+                        if not finished.is_set() and process.poll() is None:
+                            process.kill()
+                    return
+
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+            threading.Thread(target=watch, daemon=True).start()
+            while True:
+                chunk = process.stdout.read(64 * 1024) if process.stdout else b""
+                if not chunk:
+                    break
+                last_output[0] = time.monotonic()
+                yield chunk
+        finally:
+            with reaping:
+                finished.set()
+                if process and process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except Exception:
+                        process.kill()
+                        process.wait()
+            release()
+
+    response = Response(
+        stream_with_context(generate()),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+    response.call_on_close(release)
+    return response
 
 
 # API: expose environment flags used by the frontend.
