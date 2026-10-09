@@ -22,7 +22,7 @@ Insight uses several ports during normal operation. The default ports are the po
 | `webrtcWhipIce` | `8189` | UDP | ICE media for browser webcam publishing. Signalling uses `webrtcWhip`; the video itself arrives here, so both must be reachable. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
-Insight also runs the mediamtx control API on `127.0.0.1:9997` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself, to confirm webcam sources and to detect external publishers, so it needs no port mapping. Like the other mediamtx ports, it is freed at startup if another process holds it.
+Insight also runs the mediamtx control API on `127.0.0.1:9997` (TCP). It is loopback-only, password-protected with a password generated on every start, and used only by Insight itself, to confirm webcam sources, to detect external publishers and to set up pulled streams, so it needs no port mapping. Like the other mediamtx ports, it is freed at startup if another process holds it.
 
 ## Find the actual SDK port map
 

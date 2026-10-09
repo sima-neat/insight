@@ -23,6 +23,10 @@ class FakeMediamtx:
         self.paths = {}
         self.available = True
         self.kicked = []
+        self.pull_sources = {}
+        self.cleared = []
+        self.fail_patch = False
+        self.fail_after_apply = False
 
     def snapshot(self):
         return dict(self.paths) if self.available else None
@@ -32,9 +36,35 @@ class FakeMediamtx:
                 "codec_supported": path.codec in {"h264", "h265", "mjpeg"},
                 "width": None, "height": None, "fps": None, "bitrate_bps": None}
 
+    def pull_info(self, path):
+        return {"since": path.since if path.ready else None, "codec_supported": path.ready and path.codec in {"h264", "h265", "mjpeg"},
+                "width": 1280 if path.ready else None, "height": 720 if path.ready else None,
+                "fps": 25 if path.ready else None, "bitrate_bps": 2_000_000 if path.ready else None}
+
     def kick(self, source_type, session_id):
         self.kicked.append((source_type, session_id))
         self.paths = {name: p for name, p in self.paths.items() if p.source_id != session_id}
+
+    def set_pull_source(self, name, url):
+        if self.fail_patch:
+            raise mediamtx.MediamtxError("connection refused")
+        self.pull_sources[name] = url
+        self.paths[name] = pulled_path(int(name[3:]), ready=False)
+        if self.fail_after_apply:
+            raise mediamtx.MediamtxError("timed out")  # mediamtx applied the PATCH but answered too late
+
+    def clear_pull_source(self, name):
+        if self.fail_patch:
+            raise mediamtx.MediamtxError("connection refused")
+        self.cleared.append(name)
+        self.pull_sources.pop(name, None)
+        self.paths.pop(name, None)
+
+
+def pulled_path(index, ready=True, codec="h264"):
+    return PathInfo(name=f"src{index}", ready=ready, since="2026-09-24T15:16:24Z" if ready else None,
+                    source_type="rtspSource", source_id="", protocol="rtspSource", address=None, query="",
+                    codec=codec if ready else "none", bytes_received=10 if ready else 0, readers=[])
 
 
 def external_path(index, codec="h264", protocol="rtsp", source_type="rtspSession", readers=None):
@@ -49,7 +79,7 @@ def insight_path(index, readers=None):
                     codec="h264", bytes_received=10, readers=readers or [])
 
 
-class StreamingSourceTests(unittest.TestCase):
+class _SourceFixture(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmpdir.name)
@@ -75,14 +105,24 @@ class StreamingSourceTests(unittest.TestCase):
         self.mtx = FakeMediamtx()
         self._mtx_patch = mock.patch.object(app_module, "mediamtx_client", self.mtx)
         self._mtx_patch.start()
+        app_module.pull_registry = app_module.pull_sources.PullRegistry()
+        app_module.pull_probe_async = False
+        self.probe_results = {}
+        self._probe_patch = mock.patch.object(
+            app_module, "probe_rtsp",
+            lambda url, timeout=2.0: self.probe_results.get(url, app_module.pull_sources.ProbeResult("ok")))
+        self._probe_patch.start()
 
     def tearDown(self):
+        self._probe_patch.stop()
         self._mtx_patch.stop()
         mediasrc.pipeline_registry.clear()
         app_module.MEDIA_DIR = self.old_media_dir
         app_module.MEDIA_SRC_DATA_FILE = self.old_sources_file
         self.tmpdir.cleanup()
 
+
+class StreamingSourceTests(_SourceFixture):
     def test_load_sources_migrates_old_state_defaults(self):
         self.sources_file.write_text('[{"index": 1, "file": "sample.mp4", "state": "playing"}]', encoding="utf-8")
 
@@ -2525,6 +2565,272 @@ class WebcamNormalizationTests(unittest.TestCase):
         input_url = "-i rtsp://127.0.0.1:8554/$MTX_PATH"
         self.assertIn(low_latency_input, text)
         self.assertLess(text.index(low_latency_input), text.index(input_url))
+
+
+CAM = "rtsp://172.18.51.40:554/h264Preview_01_main"
+
+
+class PullSourceTests(_SourceFixture):
+    def _pull(self, index=3, url=CAM, **extra):
+        return self.client.post("/api/mediasrc/pull", json={"index": index, "url": url, **extra})
+
+    def _slot(self, index):
+        return next(s for s in self.client.get("/api/mediasrc", headers={"Host": "localhost:9900"}).get_json() if s["index"] == index)
+
+    def test_pull_configures_mediamtx_and_reports_connecting(self):
+        response = self._pull(username="admin", password="s3cret")
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()
+        self.assertEqual(body["state"], "pulled")
+        self.assertEqual(body["pull"]["status"], "connecting")
+        self.assertEqual((body["pull"]["scheme"], body["pull"]["host"], body["pull"]["path"]), ("rtsp", "172.18.51.40:554", "/h264Preview_01_main"))
+        self.assertEqual((body["transport"], body["allowed_transports"], body["urls"]), ("rtsp", ["rtsp"], {"rtsp": "rtsp://localhost:8554/src3"}))
+        self.assertEqual(self.mtx.pull_sources, {"src3": "rtsp://admin:s3cret@172.18.51.40:554/h264Preview_01_main"})
+        self.assertNotIn("s3cret", json.dumps(body))
+        self.assertNotIn("admin", json.dumps(body))
+
+    def test_pulled_slot_is_live_with_stats_when_the_path_is_ready(self):
+        self._pull()
+        self.mtx.paths["src3"] = pulled_path(3, codec="h265")
+        slot = self._slot(3)
+        self.assertEqual((slot["state"], slot["codec"], slot["pull"]["status"]), ("pulled", "h265", "live"))
+        self.assertEqual((slot["pull"]["width"], slot["pull"]["height"], slot["pull"]["fps"], slot["pull"]["bitrate_bps"]), (1280, 720, 25, 2_000_000))
+        self.assertEqual(slot["pull"]["since"], "2026-09-24T15:16:24Z")
+        self.assertIsNone(slot["pull"]["error"])
+        self.assertTrue(slot["pull"]["codec_supported"])
+
+    def test_pulled_slot_keeps_its_stored_file_and_nothing_is_persisted(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        before = self.sources_file.read_text(encoding="utf-8")
+        self._pull()
+        slot = self._slot(3)
+        self.assertEqual((slot["state"], slot["file"]), ("pulled", "clip.mp4"))
+        self.assertEqual(self.sources_file.read_text(encoding="utf-8"), before)
+        self.assertNotIn("172.18.51.40", self.sources_file.read_text(encoding="utf-8"))
+
+    def test_unreachable_probe_still_configures_and_reports_unreachable(self):
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("unreachable", "Connection refused")
+        response = self._pull()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((response.get_json()["pull"]["status"], response.get_json()["pull"]["error"]), ("unreachable", "Connection refused"))
+        self.assertIn("src3", self.mtx.pull_sources)
+
+    def test_auth_failed_probe_rejects_and_configures_nothing(self):
+        url = "rtsp://admin:bad@172.18.51.40:554/h264Preview_01_main"
+        self.probe_results[url] = app_module.pull_sources.ProbeResult("auth_failed", "The camera rejected the username or password")
+        response = self._pull(username="admin", password="bad")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json(), {"error": "The camera rejected the username or password", "reason": "auth_failed"})
+        self.assertEqual(self.mtx.pull_sources, {})
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_bad_url_is_400(self):
+        for url, fragment in (("http://cam/x.m3u8", "rtsp://"), ("rtsp:///x", "host"), ("", "rtsp://")):
+            with self.subTest(url=url):
+                response = self._pull(url=url)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(fragment, response.get_json()["error"])
+
+    def test_index_errors(self):
+        self.assertEqual(self.client.post("/api/mediasrc/pull", json={"url": CAM}).status_code, 400)
+        self.assertEqual(self._pull(index=0).status_code, 404)
+        self.assertEqual(self._pull(index="3").status_code, 400)
+
+    def test_pull_into_external_slot_is_409(self):
+        self.mtx.paths["src3"] = external_path(3)
+        response = self._pull()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("external publisher", response.get_json()["error"])
+        self.assertEqual(self.mtx.pull_sources, {})
+
+    def test_pull_into_live_slot_is_409(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "playing", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        process = mock.Mock()
+        process.poll.return_value = None
+        mediasrc.pipeline_registry[2] = mediasrc.MediaStream(index=2, file_path=str(self.media_dir / "clip.mp4"), transport="rtsp", codec="h264", process=process)
+        response = self._pull()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "src3 is streaming. Stop it first.")
+
+    def test_pull_into_pulled_slot_is_409(self):
+        self._pull()
+        response = self._pull(url="rtsp://10.0.0.9/other")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "src3 is pulling from 172.18.51.40:554. Stop it first.")
+
+    def test_pull_into_a_webcam_slot_is_409(self):
+        # Pointing the path at a camera URL would cut off the browser publishing to it.
+        self.client.post("/api/mediasrc/assign-webcam", json={"index": 3}, headers={"Host": "localhost:9900"})
+        response = self._pull()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "src3 is a webcam source. Clear it first.")
+        self.assertIsNone(app_module.pull_registry.get(3))
+        self.assertEqual(self.mtx.pull_sources, {}, "mediamtx was never told to pull")
+
+    def test_assign_webcam_to_a_pulled_slot_is_409(self):
+        self._pull()
+        response = self.client.post("/api/mediasrc/assign-webcam", json={"index": 3}, headers={"Host": "localhost:9900"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["error"], "src3 is pulling from 172.18.51.40:554. Stop it first.")
+        self.assertEqual(app_module.load_sources()[2]["type"], "file")
+
+    def test_mediamtx_patch_failure_is_502(self):
+        self.mtx.fail_patch = True
+        response = self._pull()
+        self.assertEqual(response.status_code, 502)
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_patch_failure_after_mediamtx_applied_it_clears_the_source(self):
+        self.mtx.fail_after_apply = True
+        response = self._pull()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertEqual(self.mtx.pull_sources, {})
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_background_probe_that_raises_releases_the_record(self):
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        record.probing = True
+
+        def boom(url, timeout=2.0):
+            raise RuntimeError("unexpected")
+
+        with mock.patch.object(app_module, "probe_rtsp", boom):
+            with self.assertRaises(RuntimeError):
+                app_module._run_pull_probe(record)
+        self.assertFalse(record.probing)
+
+    def test_pull_bumps_generation_so_an_in_flight_start_abandons(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        src = app_module.load_sources()[0]
+        generation = app_module._slot_generation(3)
+        self._pull()
+        self.assertTrue(app_module._slot_changed_since(src, generation))
+
+    def test_background_probe_marks_unreachable_then_recovers_to_connecting(self):
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("unreachable", "Timed out after 2 s")
+        record.probed_at = 0.0
+        self.assertEqual(self._slot(3)["pull"]["status"], "unreachable")   # the list request ran the due probe
+        self.assertEqual(self._slot(3)["pull"]["error"], "Timed out after 2 s")
+        self.probe_results.pop(CAM)
+        record.probed_at = 0.0
+        self.assertEqual(self._slot(3)["pull"]["status"], "connecting")
+
+    def test_background_probe_is_not_run_while_ready_or_within_interval(self):
+        self._pull()
+        calls = []
+        with mock.patch.object(app_module, "probe_rtsp", lambda url, timeout=2.0: calls.append(url) or app_module.pull_sources.ProbeResult("ok")):
+            self._slot(3)                          # probed_at was just set by the pull: not due
+            self.assertEqual(calls, [])
+            self.mtx.paths["src3"] = pulled_path(3, ready=True)
+            app_module.pull_registry.get(3).probed_at = 0.0
+            self._slot(3)                          # ready: never probed
+            self.assertEqual(calls, [])
+
+    def test_background_auth_failure_clears_the_source_and_sticks(self):
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("auth_failed", "The camera rejected the username or password")
+        record.probed_at = 0.0
+        slot = self._slot(3)
+        self.assertEqual((slot["state"], slot["pull"]["status"]), ("pulled", "auth_failed"))
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.probe_results.pop(CAM)
+        record.probed_at = 0.0
+        self.assertEqual(self._slot(3)["pull"]["status"], "auth_failed")  # not re-probed
+
+    def test_stop_then_pull_replaces_record(self):
+        self._pull()
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
+        self.assertEqual(self._pull(url="rtsp://10.0.0.9:554/b").status_code, 200)
+        self.assertEqual(app_module.pull_registry.get(3).host, "10.0.0.9:554")
+
+    def test_stop_releases_the_pull_and_restores_the_stored_file(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull()
+        self.mtx.paths["src3"] = pulled_path(3)
+        response = self.client.post("/api/mediasrc/stop", json={"index": 3})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertIsNone(app_module.pull_registry.get(3))
+        slot = self._slot(3)
+        self.assertEqual((slot["state"], slot["file"]), ("stopped", "clip.mp4"))
+        self.assertNotIn("pull", slot)
+
+    def test_stop_keeps_the_pull_when_mediamtx_fails_so_stop_can_be_retried(self):
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        self.mtx.fail_patch = True
+        response = self.client.post("/api/mediasrc/stop", json={"index": 3})
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("Try Stop again", response.get_json()["error"])
+        self.assertIs(app_module.pull_registry.get(3), record)
+        self.assertEqual(self._slot(3)["state"], "pulled")
+        self.mtx.fail_patch = False
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
+        self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_background_auth_failure_never_clears_a_newer_pull(self):
+        self._pull()
+        old = app_module.pull_registry.get(3)
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("auth_failed", "The camera rejected the username or password")
+        # A Stop and a new Pull land after the old probe's apply_probe but before its clear.
+        newer = app_module.pull_sources.PullRecord(index=3, url="rtsp://10.0.0.9:554/b", scheme="rtsp",
+                                                   host="10.0.0.9:554", path="/b", started_at=0.0)
+        app_module.pull_registry.put(newer)
+        with mock.patch.object(app_module.pull_registry, "apply_probe", return_value=True):
+            app_module._run_pull_probe(old)
+        self.assertEqual(self.mtx.cleared, [])
+        self.assertIs(app_module.pull_registry.get(3), newer)
+
+    def test_assign_start_prepare_and_takeover_are_409_on_a_pulled_slot(self):
+        self.sources_file.write_text('[{"index": 3, "file": "clip.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull()
+        expected = "src3 is pulling from 172.18.51.40:554. Stop it first."
+        for endpoint, payload in (("assign", {"index": 3, "file": "clip.mp4"}), ("start", {"index": 3}),
+                                  ("prepare", {"index": 3}), ("takeover", {"index": 3})):
+            with self.subTest(endpoint=endpoint):
+                response = self.client.post(f"/api/mediasrc/{endpoint}", json=payload)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.get_json()["error"], expected)
+
+    def test_bulk_endpoints_skip_pulled_slots(self):
+        (self.media_dir / "a.mp4").write_bytes(b"x")
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},'
+            ' {"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull(index=2)
+        with mock.patch.object(app_module, "_collect_video_files", return_value=["a.mp4", "b.mp4"]), \
+             mock.patch.object(app_module, "_start_source_slot", return_value=(True, None, 200)), \
+             mock.patch.object(app_module, "_derive_source_stream_settings", return_value=("rtsp", "h264", ["rtsp"])):
+            auto = self.client.post("/api/mediasrc/auto-assign-all").get_json()
+            self.assertEqual(auto["skipped_pulled"], [2])
+            self.assertIn("Skipped pulled: src2.", auto["message"])
+            self.assertEqual(self._slot(2)["file"], "b.mp4")      # untouched
+            bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).get_json()
+            self.assertEqual((bulk["started"], bulk["skipped_pulled"]), ([1], [2]))
+            self.assertIn("Skipped pulled: src2.", bulk["message"])
+            stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
+            self.assertEqual(stop_all["skipped_pulled"], [2])
+            self.assertIn("Pulled stream(s) left running: src2.", stop_all["message"])
+            reset = self.client.post("/api/mediasrc/reset").get_json()
+            self.assertEqual(reset["skipped_pulled"], [2])
+        self.assertEqual(self.mtx.cleared, [])
+        self.assertEqual(self._slot(2)["state"], "pulled")
+        self.assertEqual(self._slot(2)["file"], "")             # reset still clears the stored record
+
+    def test_bulk_start_with_only_a_pulled_slot_answers_in_result_shape(self):
+        (self.media_dir / "b.mp4").write_bytes(b"x")
+        self.sources_file.write_text('[{"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull(index=2)
+        bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 1})
+        self.assertEqual(bulk.status_code, 200)
+        self.assertEqual((bulk.get_json()["targeted"], bulk.get_json()["skipped_pulled"]), (0, [2]))
 
 
 if __name__ == "__main__":

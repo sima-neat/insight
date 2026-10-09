@@ -44,6 +44,8 @@ PROBE_TIMEOUT_SECONDS = 5
 MAX_CONCURRENT_PROBES = 4
 PAGE_SIZE = 1000
 
+PULL_SOURCE_TYPES = {"rtspSource", "rtspsSource"}  # a path whose `source:` config points at a camera
+
 # path source.type -> (session list/kick endpoint, protocol label)
 SESSION_KINDS = {
     "rtspSession": ("rtspsessions", "rtsp"),
@@ -92,8 +94,22 @@ class PathInfo:
         return urllib.parse.parse_qs(self.query).get(PUBLISHER_KEY) == [PUBLISHER_VALUE]
 
     @property
+    def pulled(self) -> bool:
+        return self.source_type in PULL_SOURCE_TYPES
+
+    @property
     def external(self) -> bool:
-        return self.ready and self.source_id is not None and not self.owned_by_insight
+        # A pulled path reports source.id "" and is Insight's own configuration, never a foreign publisher.
+        return self.ready and self.source_id is not None and not self.owned_by_insight and not self.pulled
+
+
+def stream_key(path: PathInfo) -> Optional[str]:
+    """Cache key for bitrate and probe results: the publisher session, or the pull's current connection."""
+    if path.source_id:
+        return path.source_id
+    if path.pulled and path.ready:
+        return f"pull:{path.name}:{path.since}"
+    return None
 
 
 def track_codec(tracks) -> str:
@@ -183,8 +199,13 @@ def api_auth_headers() -> dict:
     return {"Authorization": f"Basic {credentials}"}
 
 
-def _default_request(method: str, url: str):
-    req = urllib.request.Request(url, method=method, headers=api_auth_headers())
+def _default_request(method: str, url: str, body: Optional[dict] = None):
+    headers = api_auth_headers()
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, method=method, headers=headers, data=data)
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
             return resp.status, resp.read()
@@ -295,58 +316,62 @@ class MediamtxClient:
     def _update_rates(self, now: float) -> None:
         live = {}
         for path in self._snapshot.values():
-            if path.source_id:
-                live[path.source_id] = path.bytes_received
-        for session_id, received in live.items():
-            previous = self._bytes.get(session_id)
+            key = stream_key(path)
+            if key:
+                live[key] = path.bytes_received
+        for key, received in live.items():
+            previous = self._bytes.get(key)
             if previous and now > previous[1]:
-                self._bitrate[session_id] = (received - previous[0]) * 8 / (now - previous[1])
-            self._bytes[session_id] = (received, now)
+                self._bitrate[key] = (received - previous[0]) * 8 / (now - previous[1])
+            self._bytes[key] = (received, now)
         for cache in (self._bytes, self._bitrate, self._probes):
-            for session_id in list(cache):
-                if session_id not in live:
-                    del cache[session_id]
+            for key in list(cache):
+                if key not in live:
+                    del cache[key]
 
-    def external_info(self, path: PathInfo) -> dict:
-        session_id = path.source_id
+    def _stream_stats(self, path: PathInfo) -> dict:
+        key = stream_key(path)
+        if key is None:
+            return {"width": None, "height": None, "fps": None, "bitrate_bps": None}
         token = None
         with self._lock:
-            if session_id not in self._probes:
+            if key not in self._probes:
                 token = object()  # per-attempt token: only this attempt may write its result back
-                self._probes[session_id] = token
-            bitrate = self._bitrate.get(session_id)
+                self._probes[key] = token
+            bitrate = self._bitrate.get(key)
         if token is not None:
             if self._probe_async:
-                threading.Thread(target=self._run_probe, args=(session_id, path.name, token), daemon=True).start()
+                threading.Thread(target=self._run_probe, args=(key, path.name, token), daemon=True).start()
             else:
-                self._run_probe(session_id, path.name, token)
+                self._run_probe(key, path.name, token)
         with self._lock:
-            probe = self._probes.get(session_id)
+            probe = self._probes.get(key)
         dims = probe if isinstance(probe, dict) else {}
-        return {
-            "protocol": path.protocol,
-            "address": path.address,
-            "since": path.since,
-            "codec_supported": path.codec in SUPPORTED_CODECS,
-            "width": dims.get("width"),
-            "height": dims.get("height"),
-            "fps": dims.get("fps"),
-            "bitrate_bps": None if bitrate is None else int(bitrate),
-        }
+        return {"width": dims.get("width"), "height": dims.get("height"), "fps": dims.get("fps"),
+                "bitrate_bps": None if bitrate is None else int(bitrate)}
 
-    def _run_probe(self, session_id: str, path_name: str, token: object) -> None:
+    def external_info(self, path: PathInfo) -> dict:
+        return {"protocol": path.protocol, "address": path.address, "since": path.since,
+                "codec_supported": path.codec in SUPPORTED_CODECS, **self._stream_stats(path)}
+
+    def pull_info(self, path: PathInfo) -> dict:
+        return {"since": path.since if path.ready else None,
+                "codec_supported": path.ready and path.codec in SUPPORTED_CODECS,
+                **self._stream_stats(path)}
+
+    def _run_probe(self, key: str, path_name: str, token: object) -> None:
         with self._probe_slots:
             with self._lock:
-                # The session may have ended while this probe waited for a slot.
-                if self._probes.get(session_id) is not token:
+                # The connection may have ended while this probe waited for a slot.
+                if self._probes.get(key) is not token:
                     return
             result = self._probe(f"{RTSP_BASE_URL}/{path_name}?{PROBE_READER_TAG}")
         with self._lock:
             # Only write back if this attempt's token is still the current one for the
-            # session: if the session was evicted and reissued while probing, or a newer
+            # connection: if it was evicted and reissued while probing, or a newer
             # probe attempt started, a stale in-flight result must not overwrite it.
-            if self._probes.get(session_id) is token:
-                self._probes[session_id] = result
+            if self._probes.get(key) is token:
+                self._probes[key] = result
 
     def kick(self, source_type: str, session_id: str) -> None:
         kind = SESSION_KINDS.get(source_type)
@@ -363,6 +388,27 @@ class MediamtxClient:
             raise MediamtxNotFound(session_id)
         if status != 200:
             raise MediamtxError(f"kick returned {status}")
+
+    def _patch_path_config(self, name: str, body: dict, missing_ok: bool = False) -> None:
+        self._invalidate()
+        try:
+            status, _ = self._request("PATCH", f"{self._base_url}/config/paths/patch/{name}", body=body)
+        except (OSError, http.client.HTTPException) as exc:
+            raise MediamtxError(str(exc)) from exc
+        finally:
+            self._invalidate()
+        if status == 404 and missing_ok:
+            return
+        if status != 200:
+            raise MediamtxError(f"path config patch returned {status}")
+
+    def set_pull_source(self, name: str, url: str) -> None:
+        """Point the path at a camera; mediamtx pulls, forwards unchanged and reconnects on its own."""
+        self._patch_path_config(name, {"source": url, "sourceOnDemand": False, "rtspTransport": "tcp"})
+
+    def clear_pull_source(self, name: str) -> None:
+        """Restore the path to accept publishers ("" is rejected by mediamtx; "publisher" is the default)."""
+        self._patch_path_config(name, {"source": "publisher"}, missing_ok=True)
 
     def _invalidate(self) -> None:
         with self._lock:

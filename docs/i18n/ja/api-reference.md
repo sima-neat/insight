@@ -57,6 +57,8 @@ curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9
 
 Insight 以外から配信されているスロットは、`state: "external"` と `external` オブジェクト（プロトコル、アドレス、配信開始時刻、コーデックのサポート状況、映像サイズ、ビットレート）を返します。また、すべてのスロットが現在の `readers` を一覧表示します。このようなスロットに対して `start` と `assign` は `409` を返し、Insight 自身のストリームがそのスロットに残っていない場合は `stop` も同様です。`POST /api/mediasrc/takeover` は配信元を切断します。一括操作は外部ストリームを実行したままにし、そのスロットを `skipped_external` に列挙します。`reset` は引き続き、すべてのスロットの保存済みレコードをクリアします。`GET /stream/preview/src<N>.mjpg` は、ライブ状態の任意のスロットの MJPEG プレビューをソースのフレームレートでレンダリングします。
 
+`POST /api/mediasrc/pull` に `{"index": 3, "url": "rtsp://192.168.1.10:554/stream1", "username": "admin", "password": "…"}` を指定すると、既存の RTSP/RTSPS ストリームをスロットにプルします。その後、スロットは `state: "pulled"` と `pull` オブジェクト（`connecting`、`live`、`unreachable`、`auth_failed` のいずれかの `status` に加え、スキーム、ホスト、パス、エラー、開始時刻、コーデックのサポート状況、映像サイズ、フレームレート、ビットレート。認証情報は含まれません）を返します。認証情報が拒否された場合は `"reason": "auth_failed"` とともに `400` を返し、ストリーミング中、外部、ウェブカメラソース、またはすでにプル済みのスロットは `409` を返し、`502` は mediamtx が設定を拒否したか mediamtx に接続できなかったことを意味します。`stop` はプルを解除します。プルしたスロットに対して `assign`、`assign-webcam`、`start`、`prepare`、`takeover` は `409` を返し、一括操作はそのスロットをスキップして `skipped_pulled` に列挙します。プルはセッション中のみ有効です。
+
 ## レスポンスとストリーミングに関する規則
 
 - ほとんどのエンドポイントは、JSON形式でデータを返します。エラーが発生した場合は、通常、HTTPエラーステータスとともに`{"error": "message"}`が表示されます。
