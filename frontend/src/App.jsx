@@ -2061,6 +2061,8 @@ export default function App() {
         })
       }
       await loadSources().catch(() => {})
+      // Reported above; rejecting keeps the assign dialog open to retry.
+      throw e
     } finally {
       setWebcamBusy((prev) => {
         const next = { ...prev }
@@ -2070,8 +2072,8 @@ export default function App() {
     }
   }
 
-  // Returns the assignment's promise: the assign dialog waits on it, and a file
-  // assignment rejects (after reporting) so the dialog stays open to retry.
+  // Returns the assignment's promise: the assign dialog waits on it, and a failed
+  // camera or file assignment rejects (after reporting) so the dialog stays open to retry.
   function handleSourceSelectChange(index, value) {
     if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
       const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
