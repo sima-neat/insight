@@ -59,7 +59,7 @@ curl -k -F "file=@${tmpdir}/video01.mp4" \
 
 1. 透過 HTTPS 開啟 Insight，並確認瀏覽器信任其憑證。
 2. 前往 Media Sources，在 **本機相機** 下選取 **啟用相機存取**。瀏覽器詢問時允許存取；相機隨即出現在清單中。
-3. 前往 Streaming Sources，在 `src1` 下拉選單的 **相機** 群組選取相機。選取後該列顯示 `[CAM]` 標記。
+3. 前往 Streaming Sources，選取 `src1` 的檔案欄位，並在 **指派媒體給 src1** 對話方塊的 **相機** 下選取相機。指派相機後該列顯示 `[CAM]` 標記。
 4. 啟動 `src1`，確認槽位顯示 `Live` 且預覽顯示相機畫面。
 5. 讓應用程式使用與檔案來源相同的 RTSP URL。Insight 會將網路攝影機正規化為與檔案來源相同、具有規律關鍵影格的 baseline H.264，因此板端硬體解碼器及 GStreamer `rtspsrc` 不需要額外步驟即可使用；無須手動執行 `ffmpeg`，也沒有獨立處理路徑：
    - SDK 容器內：`rtsp://127.0.0.1:8554/src1`

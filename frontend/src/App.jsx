@@ -4,6 +4,9 @@ import {
   previewSrc, protocolLabel, readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
 import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import FolderBrowser from './media/FolderBrowser.jsx'
+import AssignMediaDialog from './media/AssignMediaDialog.jsx'
+import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
 
 import {
   closeAllWebcamSessions,
@@ -125,14 +128,6 @@ const ONBOARDING_STEPS = [
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
   }
 ]
-
-function flattenFiles(tree, acc = []) {
-  for (const node of tree || []) {
-    if (node.type === 'file') acc.push(node.path)
-    if (node.type === 'folder') flattenFiles(node.children || [], acc)
-  }
-  return acc
-}
 
 function prettyKey(key) {
   if (key === 'duration_ms') return 'Duration'
@@ -776,6 +771,8 @@ export default function App() {
   const [routeWorkspacePath, setRouteWorkspacePath] = useState(() => initialRoute.workspacePath)
   const [mediaTree, setMediaTree] = useState([])
   const [mediaFilter, setMediaFilter] = useState('')
+  const [mediaFolder, setMediaFolder] = useState('')
+  const mediaFolderRef = useRef('') // so async reloads read the current folder, not a stale closure
   const [sources, setSources] = useState([])
   const [webcamDevices, setWebcamDevices] = useState([])
   // Explicit camera opt-in lives on the Media Sources tab (a camera is a kind
@@ -803,6 +800,7 @@ export default function App() {
   const [mediaInfo, setMediaInfo] = useState(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [bulkStartOpen, setBulkStartOpen] = useState(false)
+  const [assignTarget, setAssignTarget] = useState(null) // slot index while the assign dialog is open
   const [bulkStartCount, setBulkStartCount] = useState('1')
   const [renditionUsage, setRenditionUsage] = useState({ count: 0, bytes: 0 })
   const [clearRenditionsOpen, setClearRenditionsOpen] = useState(false)
@@ -877,13 +875,10 @@ export default function App() {
   const sourcePollBusy = useRef(false)
   sourcesRef.current = sources
 
-  const allFiles = useMemo(() => flattenFiles(mediaTree), [mediaTree])
-  const videoFiles = useMemo(() => allFiles.filter((p) => /\.(mp4|mov|avi|mkv|webm|mjpeg|mjpg|jpg|jpeg)$/i.test(p)), [allFiles])
-  const filteredFiles = useMemo(() => {
-    const q = mediaFilter.trim().toLowerCase()
-    if (!q) return allFiles
-    return allFiles.filter((f) => f.toLowerCase().includes(q))
-  }, [allFiles, mediaFilter])
+  // Streamable files drive assignment and Bulk Start; the library also lists the rest greyed (issue #113).
+  const allFiles = useMemo(() => streamableFiles(mediaTree), [mediaTree])
+  const allMediaPaths = useMemo(() => allFilePaths(mediaTree), [mediaTree])
+  const videoFiles = allFiles // streamable files only; Bulk Start needs at least one
   const catalogSources = useMemo(() => Array.isArray(catalog?.sources) ? catalog.sources : [], [catalog])
   const catalogAssets = useMemo(() => Array.isArray(catalog?.assets) ? catalog.assets : [], [catalog])
   const catalogSourcesById = useMemo(() => {
@@ -974,14 +969,36 @@ export default function App() {
   async function loadMedia(forceSelectFirst = false) {
     const data = await fetchJson('/api/media-files')
     setMediaTree(data)
-    const flat = flattenFiles(data)
+    // A folder can vanish between loads (its last file deleted); fall back to the nearest ancestor.
+    const current = mediaFolderRef.current
+    const folder = nearestExistingFolder(data, current)
+    if (folder !== current) {
+      setMediaFolder(folder)
+      setMediaFilter('')
+    }
     if (forceSelectFirst) {
-      setSelectedFile(flat[0] || '')
+      // Prefer something the user can see: the first streamable file in the folder they are in.
+      const here = listFolder(data, folder).files.find((f) => f.streamable)
+      setSelectedFile(here ? here.path : '')
       return
     }
-    if (!selectedFile && flat.length > 0) {
-      setSelectedFile(flat[0])
+    if (!selectedFile) {
+      const flat = streamableFiles(data)
+      if (flat.length > 0) setSelectedFile(flat[0])
     }
+  }
+
+  function navigateMediaFolder(path) {
+    setMediaFolder(path)
+    setMediaFilter('') // a scoped search never silently carries over to another folder
+  }
+
+  // Show the folder that holds `path` and select it (imports and uploads land outside the
+  // folder the user is browsing).
+  function revealMediaFile(path) {
+    setMediaFolder(parentPath(path))
+    setMediaFilter('')
+    setSelectedFile(path)
   }
 
   async function loadSources() {
@@ -1076,6 +1093,10 @@ export default function App() {
   }
 
   useEffect(() => {
+    mediaFolderRef.current = mediaFolder
+  }, [mediaFolder])
+
+  useEffect(() => {
     Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
   }, [])
 
@@ -1165,12 +1186,12 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedMediaPaths.length) return
-    const available = new Set(allFiles)
+    const available = new Set(allMediaPaths)
     const next = selectedMediaPaths.filter((path) => available.has(path))
     if (next.length !== selectedMediaPaths.length) {
       setSelectedMediaPaths(next)
     }
-  }, [allFiles, selectedMediaPaths])
+  }, [allMediaPaths, selectedMediaPaths])
 
   useEffect(() => {
     if (!selectedCatalogSource) {
@@ -1444,7 +1465,7 @@ export default function App() {
       const savedLine = text.split(/\r?\n/).find((line) => line.startsWith('Saved YouTube media to '))
       const savedPath = savedLine ? savedLine.replace(/^Saved YouTube media to\s+/, '').trim() : ''
       await loadMedia()
-      if (savedPath) setSelectedFile(savedPath)
+      if (savedPath) revealMediaFile(savedPath)
       setUploadProgress(null)
       setUploadStatus('Imported YouTube video.')
       setImportDialogOpen(false)
@@ -1515,7 +1536,7 @@ export default function App() {
         if (savedPath) lastSavedPath = savedPath
       }
       await loadMedia()
-      if (lastSavedPath) setSelectedFile(lastSavedPath)
+      if (lastSavedPath) revealMediaFile(lastSavedPath)
       setUploadProgress(null)
       setUploadStatus(`Imported ${assetsToImport.length} catalog asset(s).`)
       setImportDialogOpen(false)
@@ -1603,6 +1624,8 @@ export default function App() {
       }
 
       await loadMedia()
+      // Uploads always land at the top of the library, so show it if we are browsing elsewhere.
+      if (mediaFolderRef.current) navigateMediaFolder('')
       if (!failed.length) {
         setUploadProgress(null)
         setUploadStatus(`Uploaded and prepared ${okCount} file(s).`)
@@ -2047,6 +2070,8 @@ export default function App() {
     }
   }
 
+  // Returns the assignment's promise: the assign dialog waits on it, and a file
+  // assignment rejects (after reporting) so the dialog stays open to retry.
   function handleSourceSelectChange(index, value) {
     if (value.startsWith(WEBCAM_OPTION_PREFIX)) {
       const deviceId = value.slice(WEBCAM_OPTION_PREFIX.length)
@@ -2056,8 +2081,7 @@ export default function App() {
       // the replacement is rejected because the path already has a publisher.
       const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
       teardownWebcamSession(index)
-      assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
-      return
+      return assignWebcamToSource(index, deviceId, device?.label || 'Webcam', claim)
     }
     const claim = releaseClaimFor(webcamSessionsRef.current.get(index))
     if (webcamAssignments[index]) {
@@ -2071,7 +2095,7 @@ export default function App() {
     // Closing our own publisher above released the camera, so the backend does
     // not need MediaMTX to confirm it before converting the slot to a file —
     // provided we can name the session, so a stale claim cannot hit another's.
-    assignFileToSource(index, value, claim)
+    return assignFileToSource(index, value, claim)
   }
 
   // A file selection is a server write like a camera selection, and just as
@@ -2090,6 +2114,7 @@ export default function App() {
     } catch (e) {
       setError(e.message)
       await loadSources().catch(() => {})
+      throw e
     } finally {
       setWebcamBusy((prev) => {
         const next = { ...prev }
@@ -2686,8 +2711,6 @@ export default function App() {
                   <span className="sr-only">Import Media</span>
                 </button>
               </div>
-              <p className="meta-count">{filteredFiles.length} files</p>
-
               <div className="camera-optin">
                 <div className="camera-optin-head">
                   <span className="camera-optin-title">Local cameras</span>
@@ -2716,35 +2739,26 @@ export default function App() {
                 )}
               </div>
 
-              <div className="media-toolbar">
-                <input className="search-input" placeholder="Filter files..." value={mediaFilter} onChange={(e) => setMediaFilter(e.target.value)} />
-              </div>
-
-              <div className="media-list">
-                {filteredFiles.map((path) => {
-                  const checked = selectedMediaPaths.includes(path)
-                  const className = [
-                    'media-row',
-                    path === selectedFile ? 'active' : '',
-                    checked ? 'selected' : ''
-                  ].filter(Boolean).join(' ')
-                  return (
-                    <div key={path} className={className}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelectedMediaPath(path)}
-                        aria-label={`Select ${path} for deletion`}
-                      />
-                      <button type="button" className="media-row-preview" onClick={() => setSelectedFile(path)}>
-                        <span className="media-name">{path}</span>
-                        <span className="media-ext">{path.split('.').pop()?.toUpperCase() || 'FILE'}</span>
-                      </button>
-                    </div>
-                  )
-                })}
-                {filteredFiles.length === 0 && <p className="empty">No files match the filter.</p>}
-              </div>
+              <FolderBrowser
+                tree={mediaTree}
+                folder={mediaFolder}
+                onNavigate={navigateMediaFolder}
+                filter={mediaFilter}
+                onFilterChange={setMediaFilter}
+                selectedPath={selectedFile}
+                onSelect={setSelectedFile}
+                showUnsupported
+                fileRowClass={(path) => (selectedMediaPaths.includes(path) ? 'selected' : '')}
+                renderFileLead={(path) => (
+                  <input
+                    type="checkbox"
+                    checked={selectedMediaPaths.includes(path)}
+                    onChange={() => toggleSelectedMediaPath(path)}
+                    aria-label={`Select ${path} for deletion`}
+                  />
+                )}
+                idPrefix="library"
+              />
             </section>
 
             <section className="panel">
@@ -2879,9 +2893,9 @@ export default function App() {
                       // converting a just-assigned webcam back to a file). Hold
                       // every mutating control on the row, not just the select.
                       const rowBusy = Boolean(webcamBusy[src.index])
-                      const selectValue = isWebcam
-                        ? (webcamAssignment ? `${WEBCAM_OPTION_PREFIX}${webcamAssignment.deviceId}` : '')
-                        : (src.file || '')
+                      const assignLabel = isWebcam
+                        ? (webcamAssignment ? webcamAssignment.label : 'Select a camera')
+                        : (src.file || 'Not assigned')
                       return (
                         <>
                           <span className="src-label">
@@ -2896,32 +2910,17 @@ export default function App() {
                             {encodeProgress[src.index] ? 'Encoding' : (src.state === 'playing' ? 'Live' : 'Idle')}
                           </span>
                           <span className="src-file-cell">
-                          <select
-                            value={selectValue}
-                            disabled={rowBusy || Boolean(encodeProgress[src.index])}
-                            onChange={(e) => handleSourceSelectChange(src.index, e.target.value)}
-                          >
-                            <option value="">Not assigned</option>
-                            {/* Grouped so a camera reads differently from a file
-                                at a glance; the selected type shows as a
-                                [CAM]/[VID] badge on the row (per review feedback). */}
-                            {webcamDevices.length > 0 && (
-                              <optgroup label="Cameras">
-                                {webcamDevices.map((device) => (
-                                  <option key={device.deviceId} value={`${WEBCAM_OPTION_PREFIX}${device.deviceId}`}>
-                                    {device.label}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {videoFiles.length > 0 && (
-                              <optgroup label="Video files">
-                                {videoFiles.map((file) => (
-                                  <option key={file} value={file}>{file}</option>
-                                ))}
-                              </optgroup>
-                            )}
-                          </select>
+                            <button
+                              type="button"
+                              className={src.file || webcamAssignment ? 'source-file-btn' : 'source-file-btn unassigned'}
+                              onClick={(e) => { e.stopPropagation(); selectSource(src.index); setAssignTarget(src.index) }}
+                              disabled={rowBusy || Boolean(encodeProgress[src.index])}
+                              aria-label={`Assign media to src${src.index}`}
+                              title={rowBusy ? 'Waiting for the current change to finish' : assignLabel}
+                              data-testid={`source-file-${src.index}`}
+                            >
+                              {assignLabel}
+                            </button>
                             {src.fps != null && (
                               <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
                             )}
@@ -3707,6 +3706,26 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {assignTarget != null && (() => {
+        const target = sources.find((s) => s.index === assignTarget) || {}
+        const targetIsWebcam = target.type === 'webcam'
+        const targetCamera = webcamAssignments[assignTarget]
+        return (
+          <AssignMediaDialog
+            sourceIndex={assignTarget}
+            currentFile={target.file || ''}
+            currentValue={targetIsWebcam ? (targetCamera ? `${WEBCAM_OPTION_PREFIX}${targetCamera.deviceId}` : '') : (target.file || '')}
+            clearable={targetIsWebcam || Boolean(target.file)}
+            cameras={webcamDevices.map((device) => ({ value: `${WEBCAM_OPTION_PREFIX}${device.deviceId}`, label: device.label }))}
+            tree={mediaTree}
+            // Through the row's select handler, so switching to or away from a camera
+            // closes this tab's publisher and names its session, as the dropdown did.
+            onAssign={(value) => handleSourceSelectChange(assignTarget, value)}
+            onClose={() => setAssignTarget(null)}
+          />
+        )
+      })()}
 
       {bulkStartOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Bulk start streams">
