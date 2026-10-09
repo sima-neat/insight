@@ -2986,9 +2986,10 @@ def assign_webcam_source():
 
     # Applied to a fresh copy: the release above can take a second, and a slot
     # that changed meanwhile holds a stream this request never released.
+    # A pull keeps the stored (type, file), so one that landed meanwhile is checked for apart.
     identity = (source_type, snapshot.get("file"))
     updated = _update_source_slot(
-        index, lambda slot: (slot.get("type"), slot.get("file")) == identity, register
+        index, lambda slot: (slot.get("type"), slot.get("file")) == identity and not _pull_record(index), register
     )
     if updated is None:
         return _json_error("Source changed while it was being reassigned; reload and try again", 409)
@@ -3804,7 +3805,10 @@ def pull_source():
             try:  # a slow reply may arrive after mediamtx already applied the PATCH
                 mediamtx_client.clear_pull_source(f"src{index}")
             except MediamtxError:
-                pass
+                # mediamtx may be pulling; keep the record so the row shows it and Stop retries the clear.
+                record.status, record.error = "unreachable", f"Could not confirm the configuration: {exc}"
+                _bump_slot(index)
+                pull_registry.put(record)
             return _json_error(f"Could not configure src{index}: {exc}", 502)
         _bump_slot(index)
         pull_registry.put(record)

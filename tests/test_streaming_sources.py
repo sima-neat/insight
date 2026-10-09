@@ -27,6 +27,7 @@ class FakeMediamtx:
         self.cleared = []
         self.fail_patch = False
         self.fail_after_apply = False
+        self.fail_clear = False
 
     def snapshot(self):
         return dict(self.paths) if self.available else None
@@ -54,7 +55,7 @@ class FakeMediamtx:
             raise mediamtx.MediamtxError("timed out")  # mediamtx applied the PATCH but answered too late
 
     def clear_pull_source(self, name):
-        if self.fail_patch:
+        if self.fail_patch or self.fail_clear:
             raise mediamtx.MediamtxError("connection refused")
         self.cleared.append(name)
         self.pull_sources.pop(name, None)
@@ -2683,6 +2684,24 @@ class PullSourceTests(_SourceFixture):
         self.assertEqual(response.get_json()["error"], "src3 is pulling from 172.18.51.40:554. Stop it first.")
         self.assertEqual(app_module.load_sources()[2]["file"], "", "the stored assignment was not changed")
 
+    def test_assign_webcam_rechecks_for_a_pull_under_the_lock(self):
+        # Codex review: a pull installed after assign-webcam's first check must not be overwritten.
+        real_snapshot = app_module.load_sources
+        landed = []
+
+        def pull_lands_after_the_first_check():
+            if not landed:  # the snapshot read, right after the first pull check
+                landed.append(True)
+                self._pull()
+            return real_snapshot()
+
+        with mock.patch.object(app_module, "load_sources", side_effect=pull_lands_after_the_first_check):
+            response = self.client.post("/api/mediasrc/assign-webcam", json={"index": 3}, headers={"Host": "localhost:9900"})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Source changed", response.get_json()["error"])
+        self.assertEqual(app_module.load_sources()[2]["type"], "file")
+        self.assertEqual(self._slot(3)["state"], "pulled")
+
     def test_pull_is_abandoned_when_the_slot_changes_during_the_probe(self):
         # Codex review: a Stop, Reset or reassignment during the camera probe leaves no record,
         # process or holder, so the generation is what must turn the late pull into a 409.
@@ -2708,13 +2727,29 @@ class PullSourceTests(_SourceFixture):
         self.mtx.fail_patch = True
         response = self._pull()
         self.assertEqual(response.status_code, 502)
-        self.assertIsNone(app_module.pull_registry.get(3))
+        # The cleanup failed too, so whether mediamtx pulls is unknown: Stop stays available.
+        self.assertEqual(app_module.pull_registry.get(3).status, "unreachable")
 
     def test_patch_failure_after_mediamtx_applied_it_clears_the_source(self):
         self.mtx.fail_after_apply = True
         response = self._pull()
         self.assertEqual(response.status_code, 502)
         self.assertEqual(self.mtx.cleared, ["src3"])
+        self.assertEqual(self.mtx.pull_sources, {})
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_unconfirmed_cleanup_keeps_the_pull_stoppable(self):
+        # Codex review: when the PATCH times out after being applied and the cleanup fails too,
+        # mediamtx may be pulling, so the slot must stay pulled with a Stop that retries the clear.
+        self.mtx.fail_after_apply = True
+        self.mtx.fail_clear = True
+        response = self._pull()
+        self.assertEqual(response.status_code, 502)
+        slot = self._slot(3)
+        self.assertEqual((slot["state"], slot["pull"]["status"]), ("pulled", "unreachable"))
+        self.assertIn("Could not confirm the configuration", slot["pull"]["error"])
+        self.mtx.fail_clear = False
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
         self.assertEqual(self.mtx.pull_sources, {})
         self.assertIsNone(app_module.pull_registry.get(3))
 
