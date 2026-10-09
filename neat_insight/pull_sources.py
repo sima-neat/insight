@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 SUPPORTED_SCHEMES = ("rtsp", "rtsps")
-DEFAULT_PORT = 554
+DEFAULT_PORTS = {"rtsp": 554, "rtsps": 322}  # RFC 7826
+INVALID_PORT_MESSAGE = "The port in the stream URL is invalid"
 UNSUPPORTED_SCHEME_MESSAGE = "Only rtsp:// and rtsps:// stream URLs are supported"
 
 
@@ -24,14 +25,16 @@ class PullTarget:
     url: str      # full URL, credentials embedded; never leaves the process
     scheme: str   # "rtsp" | "rtsps"
     host: str     # "host:port", port always present; safe to show and log
-    path: str     # "/path?query"; safe to show
+    path: str     # "/path?name=***", query values masked; safe to show
+
+
+def _port(parsed) -> int:
+    """The URL's port, or the scheme's default; raises ValueError for a malformed or out-of-range port."""
+    return parsed.port or DEFAULT_PORTS[parsed.scheme.lower()]
 
 
 def _host_with_port(parsed) -> str:
-    try:
-        port = parsed.port or DEFAULT_PORT
-    except ValueError:
-        port = DEFAULT_PORT
+    port = _port(parsed)
     hostname = parsed.hostname or ""
     if ":" in hostname:
         hostname = f"[{hostname}]"
@@ -47,6 +50,10 @@ def normalize_pull_url(url: str, username: str = "", password: str = "") -> Pull
         raise ValueError(UNSUPPORTED_SCHEME_MESSAGE)
     if not parsed.hostname:
         raise ValueError("The stream URL needs a host, for example rtsp://192.168.1.10:554/stream1")
+    try:
+        host = _host_with_port(parsed)
+    except ValueError:
+        raise ValueError(INVALID_PORT_MESSAGE) from None
     username = (username or "").strip()
     password = password or ""
     if username:
@@ -59,9 +66,18 @@ def normalize_pull_url(url: str, username: str = "", password: str = "") -> Pull
     netloc = f"{userinfo}@{hostport}" if userinfo else hostport
     path = parsed.path or ""
     if parsed.query:
-        path += "?" + parsed.query
+        path += "?" + _masked_query(parsed.query)
     final = urllib.parse.urlunsplit((scheme, netloc, parsed.path, parsed.query, ""))
-    return PullTarget(url=final, scheme=scheme, host=_host_with_port(parsed), path=path)
+    return PullTarget(url=final, scheme=scheme, host=host, path=path)
+
+
+def _masked_query(query: str) -> str:
+    """Keep the parameter names, mask every value: some cameras take a token in the query."""
+    parts = []
+    for part in query.split("&"):
+        name, sep, _value = part.partition("=")
+        parts.append(f"{name}=***" if sep else "***")
+    return "&".join(parts)
 
 
 PROBE_TIMEOUT_SECONDS = 2.0
@@ -169,9 +185,9 @@ def probe_rtsp(url: str, timeout: float = PROBE_TIMEOUT_SECONDS) -> ProbeResult:
     hostport = parsed.netloc.rpartition("@")[2]
     uri = urllib.parse.urlunsplit((parsed.scheme, hostport, parsed.path or "/", parsed.query, ""))
     try:
-        port = parsed.port or DEFAULT_PORT
+        port = _port(parsed)
     except ValueError:
-        return ProbeResult("unreachable", "Invalid port in the stream URL")
+        return ProbeResult("unreachable", INVALID_PORT_MESSAGE)
     try:
         sock = socket.create_connection((parsed.hostname, port), timeout=timeout)
     except socket.gaierror:

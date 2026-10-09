@@ -17,7 +17,25 @@ class NormalizeUrlTests(unittest.TestCase):
     def test_explicit_port_and_query_are_kept(self):
         target = pull_sources.normalize_pull_url("rtsps://cam.local:8554/live?ch=1")
         self.assertEqual(target.url, "rtsps://cam.local:8554/live?ch=1")
-        self.assertEqual((target.scheme, target.host, target.path), ("rtsps", "cam.local:8554", "/live?ch=1"))
+        self.assertEqual((target.scheme, target.host, target.path), ("rtsps", "cam.local:8554", "/live?ch=***"))
+
+    def test_query_values_are_masked_in_the_shown_path(self):
+        target = pull_sources.normalize_pull_url("rtsp://10.0.0.5/live?token=s3cret&ch=2&bare")
+        self.assertEqual(target.url, "rtsp://10.0.0.5/live?token=s3cret&ch=2&bare")
+        self.assertEqual(target.path, "/live?token=***&ch=***&***")
+        self.assertNotIn("s3cret", target.host + target.path)
+
+    def test_rtsps_defaults_to_port_322(self):
+        target = pull_sources.normalize_pull_url("rtsps://cam.local/live")
+        self.assertEqual(target.host, "cam.local:322")
+        self.assertEqual(target.url, "rtsps://cam.local/live")
+
+    def test_rejects_an_invalid_port(self):
+        for url in ("rtsp://10.0.0.5:99999/x", "rtsp://10.0.0.5:abc/x", "rtsps://10.0.0.5:-1/x"):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError) as ctx:
+                    pull_sources.normalize_pull_url(url)
+                self.assertEqual(str(ctx.exception), pull_sources.INVALID_PORT_MESSAGE)
 
     def test_form_credentials_are_embedded(self):
         target = pull_sources.normalize_pull_url("rtsp://10.0.0.5:554/h264", "admin", "secret")
@@ -228,6 +246,16 @@ class ProbeTests(unittest.TestCase):
         result = pull_sources.probe_rtsp(f"rtsp://127.0.0.1:{server.port}/x", timeout=2)
         self.assertEqual(result.status, "unreachable")
         self.assertEqual(result.error, "The camera closed the connection")
+
+    def test_portless_rtsps_is_probed_on_322(self):
+        with mock.patch.object(pull_sources.socket, "create_connection", side_effect=ConnectionRefusedError) as connect:
+            result = pull_sources.probe_rtsp("rtsps://cam.local/x", timeout=1)
+        self.assertEqual(connect.call_args.args[0], ("cam.local", 322))
+        self.assertEqual(result.status, "unreachable")
+
+    def test_invalid_port_is_unreachable(self):
+        result = pull_sources.probe_rtsp("rtsp://10.0.0.5:99999/x", timeout=1)
+        self.assertEqual((result.status, result.error), ("unreachable", pull_sources.INVALID_PORT_MESSAGE))
 
     def test_timeout_is_unreachable(self):
         server = self._server(mode="hang")

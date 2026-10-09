@@ -1346,7 +1346,7 @@
           "status": {"type": "string", "enum": ["connecting", "live", "unreachable", "auth_failed"], "description": "`live` while mediamtx receives the stream; `unreachable` retries by itself; `auth_failed` stays until the slot is stopped and pulled again with other credentials."},
           "scheme": {"type": "string", "enum": ["rtsp", "rtsps"]},
           "host": {"type": "string", "description": "`host:port` of the source."},
-          "path": {"type": "string", "description": "Path and query of the source URL."},
+          "path": {"type": "string", "description": "Path and query of the source URL, with every query value shown as ***."},
           "error": {"type": ["string", "null"], "description": "Short explanation for `unreachable` and `auth_failed`."},
           "since": {"type": ["string", "null"], "description": "RFC 3339 time the path became ready; null until live."},
           "codec_supported": {"type": "boolean"},
