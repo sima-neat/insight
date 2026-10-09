@@ -23,6 +23,15 @@ NOT_IN_OVERLAYS_REASON = "{name} is not in this board's camera overlays."
 NOT_ISP_SIZE_REASON = "The ISP cannot output this size."
 NO_ISP_SIZE_REASON = "The ISP cannot output any size this camera reports."
 FORMAT_REASON = f"Neat's CameraInput outputs {CAMERAINPUT_FORMAT} only."
+# On a board whose ISP takes the sensor's sizes at run time (Platform 3.0), the ISP's RAW-input DMA needs a
+# 32-byte line stride, so the sensor mode libcamera's Modalix pipeline picks must be 64 pixels wide at
+# 12-bit RAW (128 at 10-bit, 32 at 8-bit): isp.ko rounds a 4056-wide RAW12 try-format to 4032, and the
+# imx477 driver ships a 4032x3040 crop mode for that reason. libcamera still advertises the IMX477's
+# 4056-wide sizes and silently serves them at 4032 wide (observed on 3.0.0_develop_B1859). Smaller sizes
+# are served from a larger aligned sensor mode, so for the IMX477 the usable widths are those up to its
+# widest aligned 12-bit mode, 4032. Sentinel reports the sensor's sizes as the kernel lists them.
+MAX_SENSOR_WIDTH = 4032
+MAX_WIDTH_REASON = f"libcamera streams this camera at most {MAX_SENSOR_WIDTH} pixels wide on this board."
 NO_MODES_REASON = "SiMa Sentinel reported no modes for this camera."
 NO_BY_ID_NOTE = "No /dev/v4l/by-id link was found; /dev/videoN numbering can change across reboots and replugs."
 # Sentinel names a MIPI camera after its sensor entity in the kernel media graph.
@@ -113,7 +122,9 @@ def _classified(mode: dict, camera_reason: str) -> dict:
     on the mode; older ones leave it to the rule below."""
     if isinstance(mode.get("available"), bool):
         reason = "" if mode["available"] else str(mode.get("reason") or camera_reason or NOT_ISP_SIZE_REASON)
-        return dict(mode, available=mode["available"], reason=reason)
+        if not reason and mode.get("sensor_mode") is True and (mode.get("width") or 0) > MAX_SENSOR_WIDTH:
+            reason = MAX_WIDTH_REASON
+        return dict(mode, available=not reason, reason=reason)
     if camera_reason:
         return dict(mode, available=False, reason=camera_reason)
     if mode.get("isp_output") is not True:

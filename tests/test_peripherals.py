@@ -340,6 +340,9 @@ class SnapshotTests(unittest.TestCase):
         doc["modes"] = [
             sensor_mode("NV12", 1920, 1080, True),
             sensor_mode("NV12", 2028, 1520, True),
+            sensor_mode("NV12", 4032, 3040, True),
+            sensor_mode("NV12", 4056, 3040, True),
+            sensor_mode("NV12", 4056, 2160, True),
             sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON),
         ]
         camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
@@ -347,6 +350,13 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual((camera["support"]["tier"], nv12["exportable"], nv12["support"]["tier"]),
                          ("available", True, "available"))
         self.assertEqual(states(size_of(nv12, 2028, 1520)["fps"]), [(30, "available", None)])
+        # Sentinel marks the sensor's 4056-wide sizes available, but libcamera streams them at 4032 wide on
+        # this board (3.0.0_develop_B1859), so Insight does not offer them; 4032 itself is fine.
+        self.assertEqual(states(size_of(nv12, 4032, 3040)["fps"]), [(30, "available", None)])
+        for width, height in ((4056, 3040), (4056, 2160)):
+            self.assertEqual(states(size_of(nv12, width, height)["fps"]),
+                             [(30, "unsupported", cameras.MAX_WIDTH_REASON)], f"{width}x{height}")
+        self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
                          [(30, "unsupported", cameras.FORMAT_REASON)])
 
