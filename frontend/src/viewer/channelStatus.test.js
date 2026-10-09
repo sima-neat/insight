@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { channelLabel, formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
+import { channelLabel, formatChannelStatus, resolveCodecLabel, tileState } from "./channelStatus.js";
+
+test("a tile that receives video is playing", () => {
+  assert.equal(tileState(true, true), "playing");
+});
+
+test("a tile that has never shown a frame is empty", () => {
+  assert.equal(tileState(false, false), "empty");
+});
+
+test("a tile that showed frames and receives none any more is stopped", () => {
+  assert.equal(tileState(false, true), "stopped");
+});
+
+test("a tile counted active before its first frame still shows as empty", () => {
+  // Playback can start on a track that has not delivered a frame yet.
+  assert.equal(tileState(true, false), "empty");
+});
 
 function statsWith(codecId, codecReport) {
   return new Map([[codecId, codecReport]]);
