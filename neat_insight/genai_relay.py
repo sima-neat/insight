@@ -15,6 +15,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import ssl
 import tempfile
 import urllib.parse
@@ -51,7 +52,9 @@ _LONG_TIMEOUT_S = 900.0
 _STREAM_CHUNK = 64 * 1024
 
 _REQUEST_HEADERS = ("Content-Type", "Accept", "Last-Event-ID")
-_RESPONSE_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control")
+_RESPONSE_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control", "Content-Length")
+# Control characters and spaces: http.client refuses them in a host.
+_BAD_HOST_CHARS = re.compile(r"[\x00-\x20\x7f]")
 
 
 def _cfg_path() -> Path:
@@ -62,16 +65,30 @@ def _json_error(message: str, status: int, reason: str):
     return jsonify({"error": message, "reason": reason}), status
 
 
-def _read_cfg() -> dict:
+class CfgUnreadable(Exception):
+    """cfg.json exists but could not be read as a JSON object."""
+
+
+def _read_cfg(strict: bool = False) -> dict:
+    """The parsed cfg.json; {} when it does not exist. An unreadable or
+    malformed file also reads as {} unless ``strict``, which raises
+    CfgUnreadable so a caller about to write does not overwrite data
+    (cfg.json also holds the remote-devkit settings)."""
     path = _cfg_path()
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except FileNotFoundError:
         return {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise CfgUnreadable(f"{path}: {exc}") from exc
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        if strict:
+            raise CfgUnreadable(f"{path}: not a JSON object")
+        return {}
+    return data
 
 
 def _write_cfg(data: dict) -> None:
@@ -94,8 +111,19 @@ def _write_cfg(data: dict) -> None:
 
 
 def _section() -> dict:
-    section = _read_cfg().get(CFG_SECTION)
+    """The genai settings. Raises CfgUnreadable when cfg.json exists but cannot
+    be read: falling back to the default board could send prompts and audio
+    to a device other than the configured one."""
+    section = _read_cfg(strict=True).get(CFG_SECTION)
     return section if isinstance(section, dict) else {}
+
+
+def _cfg_unreadable(exc: Exception):
+    return _json_error(
+        f"Insight's settings file could not be read: {exc}. Fix or remove it, then set the board address again.",
+        500,
+        "cfg-unreadable",
+    )
 
 
 def default_board_url() -> str:
@@ -112,19 +140,41 @@ def default_board_url() -> str:
     return ""
 
 
-def board_url() -> str:
+def _configured_url() -> str:
     configured = _section().get("url")
-    return configured if isinstance(configured, str) and configured else default_board_url()
+    return configured if isinstance(configured, str) else ""
+
+
+def board_url() -> str:
+    """The board address in use: the configured one when it is valid, the
+    derived default when none is configured, else "" (a stored address that
+    does not parse, from a hand edit or an older build, is not used)."""
+    configured = _configured_url()
+    if configured:
+        return _normalize_url(configured) or ""
+    return default_board_url()
 
 
 def _normalize_url(raw: str) -> Optional[str]:
     """``scheme://host[:port]`` for an http(s) URL with a host, else None."""
-    parts = urllib.parse.urlsplit(raw.strip())
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return None
-    if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
-        return None
+    # urlsplit and .port raise ValueError for a malformed authority such as
+    # "https://[foo": that is a bad address, not a server error.
     try:
+        # Checked before parsing: urlsplit silently drops tabs and newlines.
+        if _BAD_HOST_CHARS.search(raw.strip()):
+            return None
+        parts = urllib.parse.urlsplit(raw.strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return None
+        # The encoding http.client applies to the host: it rejects empty DNS
+        # labels such as "https://.example" (UnicodeError is a ValueError).
+        parts.hostname.encode("idna")
+        if parts.port == 0:      # would silently become the default port
+            return None
+        # Any userinfo ("user@", ":secret@", or a bare "@") is refused: it is
+        # never used for the connection and would be echoed in messages.
+        if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
+            return None
         parts.port
     except ValueError:
         return None
@@ -144,7 +194,10 @@ def is_allowed_path(subpath: str) -> bool:
 @genai_bp.get("/api/genai/settings")
 def get_genai_settings():
     """Board address in use, and whether it was configured or derived."""
-    section = _section()
+    try:
+        section = _section()
+    except CfgUnreadable as exc:
+        return _cfg_unreadable(exc)
     configured = section.get("url") if isinstance(section.get("url"), str) else ""
     return jsonify(
         {
@@ -162,7 +215,10 @@ def set_genai_settings():
     if not isinstance(payload, dict):
         return _json_error("Expected a JSON object.", 400, "bad-request")
 
-    data = _read_cfg()
+    try:
+        data = _read_cfg(strict=True)
+    except CfgUnreadable as exc:
+        return _cfg_unreadable(exc)
     section = data.get(CFG_SECTION) if isinstance(data.get(CFG_SECTION), dict) else {}
 
     if "url" in payload:
@@ -182,7 +238,10 @@ def set_genai_settings():
             section.pop("url", None)
 
     data[CFG_SECTION] = section
-    _write_cfg(data)
+    try:
+        _write_cfg(data)
+    except OSError as exc:
+        return _json_error(f"Insight's settings file could not be saved: {exc}.", 500, "cfg-unwritable")
     return get_genai_settings()
 
 
@@ -192,7 +251,17 @@ def relay_to_board(subpath: str):
     if not is_allowed_path(subpath):
         return _json_error(f"/{subpath} is not a GenAI Studio API path Insight relays.", 404, "not-relayed")
 
-    base = board_url()
+    try:
+        base = board_url()
+        configured = _configured_url()
+    except CfgUnreadable as exc:
+        return _cfg_unreadable(exc)
+    if not base and configured:
+        return _json_error(
+            "The saved board address is not valid. Set it again in the GenAI tab's settings.",
+            503,
+            "invalid-address",
+        )
     if not base:
         return _json_error(
             "No GenAI Studio board is configured. Set its address in the GenAI tab's settings.",
@@ -201,7 +270,7 @@ def relay_to_board(subpath: str):
         )
 
     target = urllib.parse.urlsplit(base)
-    path = "/" + subpath
+    path = "/" + urllib.parse.quote(subpath, safe="/")
     if request.query_string:
         path += "?" + request.query_string.decode("latin-1")
 
@@ -213,31 +282,39 @@ def relay_to_board(subpath: str):
         # The Studio's certificate is self-signed per board; trust is placed in the
         # configured address, as for Insight's local vf stats.
         conn = http.client.HTTPSConnection(
-            target.hostname, target.port or 443, timeout=timeout, context=ssl._create_unverified_context()
+            target.hostname, 443 if target.port is None else target.port, timeout=timeout, context=ssl._create_unverified_context()
         )
     else:
-        conn = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=timeout)
+        conn = http.client.HTTPConnection(target.hostname, 80 if target.port is None else target.port, timeout=timeout)
 
     try:
         conn.request(request.method, path, body=body, headers=headers)
         upstream = conn.getresponse()
-    except (OSError, http.client.HTTPException) as exc:
+    except (OSError, http.client.HTTPException, UnicodeError) as exc:
+        # UnicodeError: a host stored before addresses were validated.
         conn.close()
         return _json_error(f"GenAI Studio backend unreachable at {base}: {exc}", 502, "unreachable")
 
     def stream():
+        complete = False
         try:
             while True:
                 chunk = upstream.read1(_STREAM_CHUNK)
                 if not chunk:
                     break
                 yield chunk
+            # read1 also returns b"" at a premature end; http.client still counts
+            # the bytes a Content-Length promised (a short chunked body raises).
+            complete = not upstream.length
         except (OSError, http.client.HTTPException):
-            # The board went away mid-stream; end the response so the tab can
-            # notice the truncation and poll /health.
-            return
+            pass
         finally:
             conn.close()
+        if not complete:
+            # The board went away mid-response. Abort the connection instead of
+            # ending normally, so the client sees a truncated response rather
+            # than a complete 200 and the tab can poll /health.
+            raise ConnectionAbortedError(f"GenAI Studio backend at {base} closed /{subpath} early")
 
     response = Response(stream_with_context(stream()), status=upstream.status, direct_passthrough=True)
     for name in _RESPONSE_HEADERS:
@@ -248,4 +325,5 @@ def relay_to_board(subpath: str):
         if name.lower().startswith("x-"):
             response.headers[name] = value
     response.headers["X-Accel-Buffering"] = "no"
+    response.call_on_close(conn.close)
     return response

@@ -18,6 +18,8 @@ Insight 在正常運作期間會使用多個埠。預設埠是 SDK 容器內部�
 | `videoUDP` | `9000-9079` | UDP | 將影片導入至觀眾頻道 `0-79`，以供 RTP 播放。 |
 | `metadataUDP` | `9100-9179` | UDP | 中繼資料 JSON 用於觀眾頻道 `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC 媒體和中繼資料 DataChannel 從虛擬顯示器傳輸到瀏覽器。 |
+| `webrtcWhip` | `8889` | HTTPS/TCP | 透過 WHIP 將瀏覽器網路攝影機發布至 MediaMTX，再發布為 RTSP 來源。 |
+| `webrtcWhipIce` | `8189` | UDP | 瀏覽器網路攝影機發布所用的 ICE 媒體。訊號傳遞使用 `webrtcWhip`；影片本身在此接收，因此兩者都必須可連線。 |
 | `webSSH` | `8022` | HTTPS/TCP | 如果有的話，將瀏覽器外殼與配對的 DevKit 連接。 |
 
 ## 找到實際的 SDK 連接埠對應表。
@@ -39,6 +41,8 @@ neat --json
     {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
     {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
   ],
   "insight": {
