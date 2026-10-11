@@ -168,6 +168,12 @@ class GenaiRelayTests(unittest.TestCase):
                 self.assertEqual(response.get_json()["reason"], "cfg-unreadable")
                 self.assertEqual(self.cfg.read_text(), broken)
 
+    def test_a_failed_save_answers_json_not_a_server_page(self):
+        with mock.patch("neat_insight.genai_relay._write_cfg", side_effect=PermissionError("read-only")):
+            response = self.client.post("/api/genai/settings", json={"url": self.board})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()["reason"], "cfg-unwritable")
+
     # --- relay --------------------------------------------------------------
 
     def test_relays_health_from_the_board(self):
@@ -241,6 +247,20 @@ class GenaiRelayTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 with self.assertRaises(ConnectionAbortedError):
                     response.get_data()
+
+    def test_a_saved_address_that_does_not_parse_is_refused_as_json(self):
+        for stored in ("https://[foo", "https://board:abc", "board:5000"):
+            with self.subTest(url=stored):
+                self.cfg.write_text(json.dumps({"genai": {"url": stored}}))
+                response = self.client.get("/api/genai/health")
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["reason"], "invalid-address")
+
+    def test_encoded_paths_reach_the_board_encoded(self):
+        self._configure(url=self.board)
+        response = self.client.get("/api/genai/v1/a%20b")
+        self.assertEqual(response.status_code, 404)   # the board answered
+        self.assertEqual(_FakeStudio.requests[-1]["path"], "/v1/a%20b")
 
     def test_reports_an_unreachable_board(self):
         with socket_closed_port() as port:

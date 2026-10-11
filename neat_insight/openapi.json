@@ -785,7 +785,8 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000"}}}},
         "responses": {
           "200": {"description": "Settings after the update.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"}
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "500": {"description": "Insight's `cfg.json` could not be read (`cfg-unreadable`; nothing is changed) or written (`cfg-unwritable`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       }
     },
@@ -800,7 +801,7 @@
           "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
           "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "503": {"description": "No board address is configured or derivable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       },
       "post": {
@@ -813,7 +814,7 @@
           "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
           "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "503": {"description": "No board address is configured or derivable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       }
     },
@@ -1056,7 +1057,7 @@
         "type": "object",
         "description": "Error from the GenAI relay itself (not from the board), with a machine-readable reason.",
         "required": ["error", "reason"],
-        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "unreachable", "bad-request"]}},
+        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "invalid-address", "unreachable", "bad-request", "cfg-unreadable", "cfg-unwritable"]}},
         "example": {"error": "GenAI Studio backend unreachable at https://192.168.2.3:5000: [Errno 61] Connection refused", "reason": "unreachable"}
       },
       "GenaiSettings": {

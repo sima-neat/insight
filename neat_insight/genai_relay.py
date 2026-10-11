@@ -129,9 +129,19 @@ def default_board_url() -> str:
     return ""
 
 
-def board_url() -> str:
+def _configured_url() -> str:
     configured = _section().get("url")
-    return configured if isinstance(configured, str) and configured else default_board_url()
+    return configured if isinstance(configured, str) else ""
+
+
+def board_url() -> str:
+    """The board address in use: the configured one when it is valid, the
+    derived default when none is configured, else "" (a stored address that
+    does not parse, from a hand edit or an older build, is not used)."""
+    configured = _configured_url()
+    if configured:
+        return _normalize_url(configured) or ""
+    return default_board_url()
 
 
 def _normalize_url(raw: str) -> Optional[str]:
@@ -215,7 +225,10 @@ def set_genai_settings():
             section.pop("url", None)
 
     data[CFG_SECTION] = section
-    _write_cfg(data)
+    try:
+        _write_cfg(data)
+    except OSError as exc:
+        return _json_error(f"Insight's settings file could not be saved: {exc}.", 500, "cfg-unwritable")
     return get_genai_settings()
 
 
@@ -226,6 +239,12 @@ def relay_to_board(subpath: str):
         return _json_error(f"/{subpath} is not a GenAI Studio API path Insight relays.", 404, "not-relayed")
 
     base = board_url()
+    if not base and _configured_url():
+        return _json_error(
+            "The saved board address is not valid. Set it again in the GenAI tab's settings.",
+            503,
+            "invalid-address",
+        )
     if not base:
         return _json_error(
             "No GenAI Studio board is configured. Set its address in the GenAI tab's settings.",
@@ -234,7 +253,7 @@ def relay_to_board(subpath: str):
         )
 
     target = urllib.parse.urlsplit(base)
-    path = "/" + subpath
+    path = "/" + urllib.parse.quote(subpath, safe="/")
     if request.query_string:
         path += "?" + request.query_string.decode("latin-1")
 
@@ -289,4 +308,5 @@ def relay_to_board(subpath: str):
         if name.lower().startswith("x-"):
             response.headers[name] = value
     response.headers["X-Accel-Buffering"] = "no"
+    response.call_on_close(conn.close)
     return response
