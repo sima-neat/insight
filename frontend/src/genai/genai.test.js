@@ -72,6 +72,12 @@ test('backend state: a board that answers with an error is running, not down', (
 
 test('backend state: no board selected needs no extra button, the settings open on their own', () => {
   assert.equal(deriveBackendState({ health: { httpStatus: 503, body: { reason: 'not-configured' } } }).action, null)
+  const badAddress = deriveBackendState({ health: { httpStatus: 503, body: { reason: 'invalid-address' } } })
+  assert.equal(badAddress.state, 'unconfigured')
+  assert.equal(badAddress.action, 'settings')
+  const cfg = deriveBackendState({ health: { httpStatus: 500, body: { reason: 'cfg-unreadable', error: "Insight's settings file could not be read" } } })
+  assert.equal(cfg.title, "Insight's settings file can't be used")
+  assert.match(cfg.detail, /could not be read/)
 })
 
 function respondWith(status, body, contentType = 'text/plain') {
@@ -308,6 +314,10 @@ test('voice engines that failed to load become plain warnings', () => {
   assert.match(warning.message, /Supertonic voice didn't load: the accelerator was busy or unavailable/)
   const [missingFile] = voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false, error: 'RuntimeError: model file missing' }]))
   assert.match(missingFile.message, /model file missing/)
+  const [busy] = voiceEngineWarnings(health([{ key: 'supertonic', loaded: false, error: 'accelerator-unavailable' }]))
+  assert.match(busy.message, /the accelerator was busy or unavailable/)
+  const [failed] = voiceEngineWarnings(health([{ key: 'supertonic', loaded: false, error: 'load-failed' }]))
+  assert.match(failed.message, /failed to load \(the details are in GenAI Studio's log/)
   assert.deepEqual(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false }])), [])
   assert.deepEqual(voiceEngineWarnings(null), [])
 })
