@@ -67,6 +67,25 @@ class _FakeStudio(BaseHTTPRequestHandler):
             )
         elif self.path == "/models/load":
             self._send_json(409, {"error": "Another model is loading"})
+        elif self.path == "/v1/audio/speech":
+            # Promise 100 bytes, send 10, hang up: the board dying mid-reply.
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"RIFF012345")
+            self.wfile.flush()
+            self.close_connection = True
+        elif self.path == "/v1/chat/completions":
+            # A chunked stream that stops without its final chunk.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            event = b"data: partial\n\n"
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(event), event))
+            self.wfile.flush()
+            self.close_connection = True
         else:
             self._send_json(200, {"echo": json.loads(body or b"{}")})
 
@@ -133,7 +152,8 @@ class GenaiRelayTests(unittest.TestCase):
 
     def test_settings_reject_addresses_that_are_not_a_plain_origin(self):
         for bad in ("ftp://board", "board:5000", "https://board:5000/v1", "https://user@board", 5,
-                    "https://[not-ip]", "https://[foo", "https://board:99999"):
+                    "https://[not-ip]", "https://[foo", "https://board:99999",
+                    "https://board name:5000", "https://board\tx"):
             with self.subTest(url=bad):
                 response = self.client.post("/api/genai/settings", json={"url": bad})
                 self.assertEqual(response.status_code, 400)
@@ -202,6 +222,16 @@ class GenaiRelayTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json(), {"error": "Another model is loading"})
+
+    def test_a_board_that_hangs_up_mid_reply_is_not_passed_on_as_complete(self):
+        self._configure(url=self.board)
+        for path, payload in (("/api/genai/v1/audio/speech", {"input": "hi"}),
+                              ("/api/genai/v1/chat/completions", {"stream": True})):
+            with self.subTest(path=path):
+                response = self.client.post(path, json=payload)
+                self.assertEqual(response.status_code, 200)
+                with self.assertRaises(ConnectionAbortedError):
+                    response.get_data()
 
     def test_reports_an_unreachable_board(self):
         with socket_closed_port() as port:

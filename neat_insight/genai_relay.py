@@ -15,6 +15,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import ssl
 import tempfile
 import urllib.parse
@@ -51,7 +52,9 @@ _LONG_TIMEOUT_S = 900.0
 _STREAM_CHUNK = 64 * 1024
 
 _REQUEST_HEADERS = ("Content-Type", "Accept", "Last-Event-ID")
-_RESPONSE_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control")
+_RESPONSE_HEADERS = ("Content-Type", "Content-Disposition", "Cache-Control", "Content-Length")
+# Control characters and spaces: http.client refuses them in a host.
+_BAD_HOST_CHARS = re.compile(r"[\x00-\x20\x7f]")
 
 
 def _cfg_path() -> Path:
@@ -122,6 +125,9 @@ def _normalize_url(raw: str) -> Optional[str]:
     # urlsplit and .port raise ValueError for a malformed authority such as
     # "https://[foo": that is a bad address, not a server error.
     try:
+        # Checked before parsing: urlsplit silently drops tabs and newlines.
+        if _BAD_HOST_CHARS.search(raw.strip()):
+            return None
         parts = urllib.parse.urlsplit(raw.strip())
         if parts.scheme not in ("http", "https") or not parts.hostname:
             return None
@@ -228,18 +234,25 @@ def relay_to_board(subpath: str):
         return _json_error(f"GenAI Studio backend unreachable at {base}: {exc}", 502, "unreachable")
 
     def stream():
+        complete = False
         try:
             while True:
                 chunk = upstream.read1(_STREAM_CHUNK)
                 if not chunk:
                     break
                 yield chunk
+            # read1 also returns b"" at a premature end; http.client still counts
+            # the bytes a Content-Length promised (a short chunked body raises).
+            complete = not upstream.length
         except (OSError, http.client.HTTPException):
-            # The board went away mid-stream; end the response so the tab can
-            # notice the truncation and poll /health.
-            return
+            pass
         finally:
             conn.close()
+        if not complete:
+            # The board went away mid-response. Abort the connection instead of
+            # ending normally, so the client sees a truncated response rather
+            # than a complete 200 and the tab can poll /health.
+            raise ConnectionAbortedError(f"GenAI Studio backend at {base} closed /{subpath} early")
 
     response = Response(stream_with_context(stream()), status=upstream.status, direct_passthrough=True)
     for name in _RESPONSE_HEADERS:
