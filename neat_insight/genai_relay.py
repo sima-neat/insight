@@ -160,7 +160,9 @@ def _normalize_url(raw: str) -> Optional[str]:
         parts.hostname.encode("idna")
         if parts.port == 0:      # would silently become the default port
             return None
-        if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
+        # Any userinfo ("user@", ":secret@", or a bare "@") is refused: it is
+        # never used for the connection and would be echoed in messages.
+        if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
             return None
         parts.port
     except ValueError:

@@ -153,7 +153,8 @@ class GenaiRelayTests(unittest.TestCase):
     def test_settings_reject_addresses_that_are_not_a_plain_origin(self):
         for bad in ("ftp://board", "board:5000", "https://board:5000/v1", "https://user@board", 5,
                     "https://[not-ip]", "https://[foo", "https://board:99999",
-                    "https://board name:5000", "https://board\tx", "https://.example:5000", "https://a..b", "https://board:0", "http://board:0"):
+                    "https://board name:5000", "https://board\tx", "https://.example:5000", "https://a..b", "https://board:0", "http://board:0",
+                    "https://:secret@board", "https://@board"):
             with self.subTest(url=bad):
                 response = self.client.post("/api/genai/settings", json={"url": bad})
                 self.assertEqual(response.status_code, 400)
