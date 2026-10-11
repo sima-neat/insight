@@ -111,8 +111,19 @@ def _write_cfg(data: dict) -> None:
 
 
 def _section() -> dict:
-    section = _read_cfg().get(CFG_SECTION)
+    """The genai settings. Raises CfgUnreadable when cfg.json exists but cannot
+    be read: falling back to the default board could send prompts and audio
+    to a device other than the configured one."""
+    section = _read_cfg(strict=True).get(CFG_SECTION)
     return section if isinstance(section, dict) else {}
+
+
+def _cfg_unreadable(exc: Exception):
+    return _json_error(
+        f"Insight's settings file could not be read: {exc}. Fix or remove it, then set the board address again.",
+        500,
+        "cfg-unreadable",
+    )
 
 
 def default_board_url() -> str:
@@ -183,7 +194,10 @@ def is_allowed_path(subpath: str) -> bool:
 @genai_bp.get("/api/genai/settings")
 def get_genai_settings():
     """Board address in use, and whether it was configured or derived."""
-    section = _section()
+    try:
+        section = _section()
+    except CfgUnreadable as exc:
+        return _cfg_unreadable(exc)
     configured = section.get("url") if isinstance(section.get("url"), str) else ""
     return jsonify(
         {
@@ -204,12 +218,7 @@ def set_genai_settings():
     try:
         data = _read_cfg(strict=True)
     except CfgUnreadable as exc:
-        return _json_error(
-            f"Insight's settings file could not be read, so nothing was changed: {exc}. "
-            "Fix or remove it, then save the board address again.",
-            500,
-            "cfg-unreadable",
-        )
+        return _cfg_unreadable(exc)
     section = data.get(CFG_SECTION) if isinstance(data.get(CFG_SECTION), dict) else {}
 
     if "url" in payload:
@@ -242,8 +251,12 @@ def relay_to_board(subpath: str):
     if not is_allowed_path(subpath):
         return _json_error(f"/{subpath} is not a GenAI Studio API path Insight relays.", 404, "not-relayed")
 
-    base = board_url()
-    if not base and _configured_url():
+    try:
+        base = board_url()
+        configured = _configured_url()
+    except CfgUnreadable as exc:
+        return _cfg_unreadable(exc)
+    if not base and configured:
         return _json_error(
             "The saved board address is not valid. Set it again in the GenAI tab's settings.",
             503,

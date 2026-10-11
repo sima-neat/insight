@@ -169,6 +169,14 @@ class GenaiRelayTests(unittest.TestCase):
                 self.assertEqual(response.get_json()["reason"], "cfg-unreadable")
                 self.assertEqual(self.cfg.read_text(), broken)
 
+    def test_an_unreadable_settings_file_stops_the_relay_instead_of_using_another_board(self):
+        self.cfg.write_text("{not json")
+        with mock.patch("neat_insight.genai_relay.default_board_url", return_value=self.board):
+            for response in (self.client.get("/api/genai/health"), self.client.get("/api/genai/settings")):
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(response.get_json()["reason"], "cfg-unreadable")
+        self.assertEqual(_FakeStudio.requests, [])   # nothing reached the default board
+
     def test_a_failed_save_answers_json_not_a_server_page(self):
         with mock.patch("neat_insight.genai_relay._write_cfg", side_effect=PermissionError("read-only")):
             response = self.client.post("/api/genai/settings", json={"url": self.board})

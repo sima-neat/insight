@@ -774,7 +774,8 @@
         "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`).",
         "operationId": "getGenaiSettings",
         "responses": {
-          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}}
+          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       },
       "post": {
@@ -801,6 +802,7 @@
           "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
           "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       },
@@ -814,6 +816,7 @@
           "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
           "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       }
