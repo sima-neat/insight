@@ -346,9 +346,12 @@ jobs:
 
   publish-vulcan-artifacts:
     name: Publish to Vulcan
+    # Unit tests gate publication: a build whose tests fail is never published
+    # or promoted, even when its smoke tests pass.
     needs:
       - resolve-vulcan-config
       - smoke-linux
+      - test
     uses: sima-neat/.github/.github/workflows/vulcan-publish-artifacts.yml@main
     with:
       aws_region: ${{ needs.resolve-vulcan-config.outputs.aws_region }}
