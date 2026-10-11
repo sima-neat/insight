@@ -158,6 +158,8 @@ def _normalize_url(raw: str) -> Optional[str]:
         # The encoding http.client applies to the host: it rejects empty DNS
         # labels such as "https://.example" (UnicodeError is a ValueError).
         parts.hostname.encode("idna")
+        if parts.port == 0:      # would silently become the default port
+            return None
         if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
             return None
         parts.port
@@ -265,10 +267,10 @@ def relay_to_board(subpath: str):
         # The Studio's certificate is self-signed per board; trust is placed in the
         # configured address, as for Insight's local vf stats.
         conn = http.client.HTTPSConnection(
-            target.hostname, target.port or 443, timeout=timeout, context=ssl._create_unverified_context()
+            target.hostname, 443 if target.port is None else target.port, timeout=timeout, context=ssl._create_unverified_context()
         )
     else:
-        conn = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=timeout)
+        conn = http.client.HTTPConnection(target.hostname, 80 if target.port is None else target.port, timeout=timeout)
 
     try:
         conn.request(request.method, path, body=body, headers=headers)
