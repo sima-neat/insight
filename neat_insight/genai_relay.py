@@ -65,16 +65,30 @@ def _json_error(message: str, status: int, reason: str):
     return jsonify({"error": message, "reason": reason}), status
 
 
-def _read_cfg() -> dict:
+class CfgUnreadable(Exception):
+    """cfg.json exists but could not be read as a JSON object."""
+
+
+def _read_cfg(strict: bool = False) -> dict:
+    """The parsed cfg.json; {} when it does not exist. An unreadable or
+    malformed file also reads as {} unless ``strict``, which raises
+    CfgUnreadable so a caller about to write does not overwrite data
+    (cfg.json also holds the remote-devkit settings)."""
     path = _cfg_path()
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except FileNotFoundError:
         return {}
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise CfgUnreadable(f"{path}: {exc}") from exc
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        if strict:
+            raise CfgUnreadable(f"{path}: not a JSON object")
+        return {}
+    return data
 
 
 def _write_cfg(data: dict) -> None:
@@ -131,6 +145,9 @@ def _normalize_url(raw: str) -> Optional[str]:
         parts = urllib.parse.urlsplit(raw.strip())
         if parts.scheme not in ("http", "https") or not parts.hostname:
             return None
+        # The encoding http.client applies to the host: it rejects empty DNS
+        # labels such as "https://.example" (UnicodeError is a ValueError).
+        parts.hostname.encode("idna")
         if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
             return None
         parts.port
@@ -170,7 +187,15 @@ def set_genai_settings():
     if not isinstance(payload, dict):
         return _json_error("Expected a JSON object.", 400, "bad-request")
 
-    data = _read_cfg()
+    try:
+        data = _read_cfg(strict=True)
+    except CfgUnreadable as exc:
+        return _json_error(
+            f"Insight's settings file could not be read, so nothing was changed: {exc}. "
+            "Fix or remove it, then save the board address again.",
+            500,
+            "cfg-unreadable",
+        )
     section = data.get(CFG_SECTION) if isinstance(data.get(CFG_SECTION), dict) else {}
 
     if "url" in payload:
@@ -229,7 +254,8 @@ def relay_to_board(subpath: str):
     try:
         conn.request(request.method, path, body=body, headers=headers)
         upstream = conn.getresponse()
-    except (OSError, http.client.HTTPException) as exc:
+    except (OSError, http.client.HTTPException, UnicodeError) as exc:
+        # UnicodeError: a host stored before addresses were validated.
         conn.close()
         return _json_error(f"GenAI Studio backend unreachable at {base}: {exc}", 502, "unreachable")
 
