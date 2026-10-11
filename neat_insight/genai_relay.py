@@ -119,12 +119,14 @@ def board_url() -> str:
 
 def _normalize_url(raw: str) -> Optional[str]:
     """``scheme://host[:port]`` for an http(s) URL with a host, else None."""
-    parts = urllib.parse.urlsplit(raw.strip())
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return None
-    if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
-        return None
+    # urlsplit and .port raise ValueError for a malformed authority such as
+    # "https://[foo": that is a bad address, not a server error.
     try:
+        parts = urllib.parse.urlsplit(raw.strip())
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return None
+        if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
+            return None
         parts.port
     except ValueError:
         return None
