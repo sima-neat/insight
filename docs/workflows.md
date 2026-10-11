@@ -6,7 +6,7 @@ sidebar_position: 4
 
 # Common Workflows
 
-## Import standard test videos
+## Import standard test videos {#import-standard-test-videos}
 
 Use the standard video sets when you need repeatable media for examples, smoke tests, or multi-stream validation:
 

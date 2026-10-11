@@ -73,6 +73,11 @@ paths:
   # and matches the detector's expected input rate. It must come before -g 30 so
   # the GOP is 30 frames = 1s at the forced rate.
   #
+  # Keep the RTSP input low-latency. FFmpeg's default demux probing and input
+  # buffering add hundreds of milliseconds even though cam{N} is a live stream
+  # carried over container loopback. These options must precede -i so they apply
+  # to the cam{N} input; output-side zerolatency alone does not remove that delay.
+  #
   # The 127.0.0.1:8554 in the command is the container-internal rtspAddress (fixed
   # above), reached over loopback from inside the container — not a browser-facing
   # URL, so it is deliberately NOT resolved through the SDK host port map (which
@@ -80,7 +85,9 @@ paths:
   "~^cam([1-9]|[1-3][0-9]|4[0-8])$":
     runOnReady: >
       ffmpeg -nostdin -hide_banner -loglevel error
-      -rtsp_transport tcp -i rtsp://127.0.0.1:8554/$MTX_PATH -an
+      -rtsp_transport tcp
+      -fflags nobuffer -flags low_delay -analyzeduration 0 -probesize 32
+      -i rtsp://127.0.0.1:8554/$MTX_PATH -an
       -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency
       -pix_fmt yuv420p -r 30 -g 30 -keyint_min 30
       -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/src$G1
