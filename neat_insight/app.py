@@ -68,6 +68,10 @@ from neat_insight.remote_devkit import (
     is_remote_devkit_configured,
     is_remote_devkit_connected,
 )
+from neat_insight.runtime_config import (
+    legacy_runtime_network_config,
+    load_runtime_network_config,
+)
 from neat_insight.remotefs import read_remote_file
 from neat_insight.utils import (
     board_type,
@@ -168,6 +172,7 @@ neat_metrics_broker.start()
 sys_metrics_publisher = None
 sys_metrics_lock = threading.Lock()
 server_ssl_context = None
+runtime_network_config = legacy_runtime_network_config()
 DEFAULT_DEVKIT_SSH_USERNAME = "sima"
 DEFAULT_DEVKIT_SSH_PASSWORD = "edgeai"
 
@@ -215,6 +220,14 @@ def _format_browser_https_url(host, port, path="", query=""):
     host = _bracket_ipv6(host)
 
     url = f"https://{host}:{port}{path}"
+    return f"{url}?{query}" if query else url
+
+
+def _format_public_http_url(path="", query=""):
+    if not runtime_network_config.public_origin:
+        return None
+    normalized_path = f"/{path.lstrip('/')}" if path else ""
+    url = f"{runtime_network_config.public_origin.rstrip('/')}{normalized_path}"
     return f"{url}?{query}" if query else url
 
 
@@ -474,7 +487,16 @@ def ensure_sys_metrics_publisher_started():
 @app.get("/api/health")
 def health():
     """Return service identity, health status, and a UTC timestamp for smoke tests and readiness checks."""
-    return {"status": "ok", "service": "neat-insight", "time": datetime.utcnow().isoformat() + "Z"}
+    return {
+        "status": "ok",
+        "service": "neat-insight",
+        "time": datetime.utcnow().isoformat() + "Z",
+        "network": {
+            "browser_ice_address": runtime_network_config.browser_ice_address,
+            "browser_ice_address_source": runtime_network_config.browser_ice_address_source,
+            "public_origin": runtime_network_config.public_origin,
+        },
+    }
 
 
 # API: retrieve recent board or service log lines by a whitelisted log name.
@@ -2178,12 +2200,18 @@ def _source_url(src, transport: Optional[str] = None):
     selected_transport = normalize_transport(transport or src.get("transport"))
     host = _request_host_name()
     if selected_transport == "http":
+        public_url = _format_public_http_url(f"/stream/http/src{index}.mjpg")
+        if public_url:
+            return public_url
         return f"{request.scheme}://{request.host}/stream/http/src{index}.mjpg"
     return f"rtsp://{_bracket_ipv6(host)}:{_resolve_rtsp_port()}/src{index}"
 
 
 def _webcam_whip_url(src):
     index = int(src.get("index") or 0)
+    public_url = _format_public_http_url(f"/{webcam_ingest_path_name(index)}/whip")
+    if public_url:
+        return public_url
     return _format_browser_https_url(
         _request_host_name(),
         _resolve_webcam_whip_port(),
@@ -3300,8 +3328,9 @@ def viewer_url():
     host_ip = _request_host_name()
     viewer_port = _resolve_video_ui_port()
     query = urllib.parse.urlencode({"mode": mode, "src": src, "max_channels": max_channels})
+    public_url = _format_public_http_url("/static/viewer.html", query)
     return {
-        "url": _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
+        "url": public_url or _format_browser_https_url(host_ip, viewer_port, "/static/viewer.html", query),
         "max_video_channels": max_channels,
         "channel_limit_source": limit_source,
         "sdk_channel_limited": sdk_limited,
@@ -3337,18 +3366,24 @@ def spa(path):
 
 
 def main():
-    global server_ssl_context, sys_metrics_publisher
+    global runtime_network_config, server_ssl_context, sys_metrics_publisher
 
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
     args = parser.parse_args()
+
+    runtime_network_config = load_runtime_network_config()
 
     ensure_sys_metrics_publisher_started()
     reset_sources()
 
     ssl_context = check_and_generate_mkcert_certificate(args.port)
     server_ssl_context = ssl_context
-    start_processes(ssl_context, webcam_ice_port=_resolve_webcam_ice_port())
+    start_processes(
+        ssl_context,
+        webcam_ice_port=_resolve_webcam_ice_port(),
+        browser_ice_address=runtime_network_config.browser_ice_address,
+    )
 
     def _shutdown(signum=None, frame=None):
         if sys_metrics_publisher:
