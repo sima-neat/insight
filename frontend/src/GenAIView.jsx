@@ -226,12 +226,21 @@ export default function GenAIView({ onError, onStatus }) {
 
   // --- polling ---------------------------------------------------------------
 
+  // Polls overlap (the timer, actions, a settings change). A result older than
+  // one already shown is dropped, so a slow reply can't undo a newer one or
+  // bring back the previous board after the address changes.
+  const refreshStarted = useRef(0)
+  const refreshShown = useRef(0)
   const refresh = useCallback(async () => {
+    const id = ++refreshStarted.current
     const nextHealth = await probeHealth()
+    if (id < refreshShown.current) return nextHealth
+    refreshShown.current = id
     setHealth(nextHealth)
     if (nextHealth.httpStatus === 200 && nextHealth.body?.model_server?.reachable) {
       try {
-        setStatus(await getJson('models/status'))
+        const nextStatus = await getJson('models/status')
+        if (id === refreshShown.current) setStatus(nextStatus)
       } catch {
         // A failed status poll keeps the last known catalog.
       }
@@ -280,10 +289,10 @@ export default function GenAIView({ onError, onStatus }) {
 
   // A picture waiting to be sent can't go to a model that doesn't see images.
   useEffect(() => {
-    if (sees || !image) return
+    if (sees || !image || !chatModel) return   // no model known yet (e.g. just after a settings change)
     setImage(null)
     onStatus?.('Removed the picture: the loaded model does not see images.')
-  }, [sees, image])
+  }, [sees, image, chatModel])
 
   useEffect(() => {
     mounted.current = true
@@ -304,7 +313,10 @@ export default function GenAIView({ onError, onStatus }) {
     event.preventDefault()
     try {
       const saved = await saveSettings({ url: addressDraft.trim() })
+      // Polls already on their way went to the previous board: drop them.
+      refreshShown.current = refreshStarted.current + 1
       setSettings(saved)
+      setStatus(null)
       setVoices(null)
       setAddressError('')
       onStatus?.('Board settings saved.')
