@@ -674,3 +674,8 @@ test('questions with documents wait while the documents are rebuilt', () => {
 test('a sources note always says something', () => {
   assert.equal(sourcesNote({ hits: 2, sources: [] }), 'Answered from 2 passages of your documents.')
 })
+
+test('the documents are not rebuilt under a reply that uses them', () => {
+  assert.equal(allowedActions({ ...READY, replying: true, useDocuments: true }).documentTasks, false)
+  assert.equal(allowedActions({ ...READY, replying: true, useDocuments: false }).documentTasks, true)
+})

@@ -42,6 +42,9 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
   const [results, setResults] = useState([])      // [{model, summary, runs, failed}]
   const [note, setNote] = useState('')
   const stopRequested = useRef(false)
+  // The settings the shown results were measured with, fixed when the run
+  // starts: the inputs can change afterwards, the record must not.
+  const [runConfig, setRunConfig] = useState(null)
   // The run's ticket: when it is no longer live (the tab closed, the board
   // changed), the loop ends and nothing more is shown.
   const runTicket = useRef(null)
@@ -124,6 +127,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     stopRequested.current = false
     runTicket.current = ticket()
     runLoaded.current = new Set((status && status.loaded) || [])
+    setRunConfig({ runs, maxTokens, prompt })
     setRunning(true)
     onRunningChange?.(true)
     setResults([])
@@ -158,7 +162,8 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
   const progress = benchProgress(live)
   const rows = comparisonRows(results)
   const last = results.length ? results[results.length - 1] : null
-  const config = { runs, maxTokens, prompt }
+  // Only a run with at least one measured model can be exported.
+  const exportable = results.some((r) => r.summary)
 
   return (
     <div className="genai-bench" role="dialog" aria-modal="true" aria-label="Benchmark">
@@ -225,8 +230,8 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
             <div className="genai-bench-results-head">
               <h3>Results</h3>
               <span className="genai-header-spacer" />
-              <button type="button" className="btn-ghost genai-small" disabled={running} onClick={() => download(benchmarkFilename('csv'), benchmarkCsv(results), 'text/csv')}>Download CSV</button>
-              <button type="button" className="btn-ghost genai-small" disabled={running} onClick={() => download(benchmarkFilename('json'), benchmarkJson(results, config), 'application/json')}>Download JSON</button>
+              <button type="button" className="btn-ghost genai-small" disabled={running || !exportable} onClick={() => download(benchmarkFilename('csv'), benchmarkCsv(results), 'text/csv')}>Download CSV</button>
+              <button type="button" className="btn-ghost genai-small" disabled={running || !exportable} onClick={() => download(benchmarkFilename('json'), benchmarkJson(results, runConfig), 'application/json')}>Download JSON</button>
             </div>
             <div className="genai-bench-bars" aria-label="Tokens per second, mean (higher is better)">
               {rows.filter((r) => !r.failed).map((r) => {

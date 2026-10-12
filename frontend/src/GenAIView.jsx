@@ -208,6 +208,7 @@ export default function GenAIView({ onError, onStatus }) {
   const videoRef = useRef(null)
   const cameraStream = useRef(null)
   const cameraStarting = useRef(false)
+  const [cameraOpening, setCameraOpening] = useState(false)   // the browser may be asking permission
 
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -247,7 +248,8 @@ export default function GenAIView({ onError, onStatus }) {
     hasAsr: Boolean(status?.asrModel),
     hasMessages: messages.length > 0,
     hasDraft: Boolean(draft.trim() || image),
-    cameraOpen,
+    // Opening counts as open: a permission prompt may be pending.
+    cameraOpen: cameraOpen || cameraOpening,
     replying: streaming,
     recording,
     micOpening,
@@ -303,8 +305,12 @@ export default function GenAIView({ onError, onStatus }) {
     }
     if (!board.live() || id < refreshShown.current) return nextHealth
     refreshShown.current = id
+    const healthy = nextHealth.httpStatus === 200 && nextHealth.body?.model_server?.reachable
+    // A board that is down or starting may come back with other models: its
+    // catalog goes now, so recovery offers no model until a fresh one arrives.
+    if (!healthy) setStatus(null)
     setHealth(nextHealth)
-    if (nextHealth.httpStatus === 200 && nextHealth.body?.model_server?.reachable) {
+    if (healthy) {
       try {
         const nextStatus = await getJson('models/status', { signal: board.signal })
         if (board.live() && id === refreshShown.current) setStatus(nextStatus)
@@ -823,6 +829,7 @@ export default function GenAIView({ onError, onStatus }) {
   async function openCamera() {
     if (!allowed.openCamera || cameraStream.current || cameraStarting.current) return
     cameraStarting.current = true
+    setCameraOpening(true)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
       if (!mounted.current) {
@@ -838,6 +845,7 @@ export default function GenAIView({ onError, onStatus }) {
       onError?.(`The camera isn't available (${error.message}). Allow camera access for this page, then try again.`)
     } finally {
       cameraStarting.current = false
+      setCameraOpening(false)
     }
   }
 

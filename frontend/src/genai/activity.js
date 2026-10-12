@@ -53,6 +53,7 @@ export function allowedActions(state) {
     // The benchmark loads and unloads models: the same rule as changing them.
     openBenchmark: modelsQuiet && !s.documentTask,
     toggleDocuments: Boolean(s.documentsAvailable),
-    documentTasks: ready && !s.documentTask
+    // A reply that uses the documents may still be searching them.
+    documentTasks: ready && !s.documentTask && !(s.replying && s.useDocuments)
   }
 }
