@@ -155,9 +155,8 @@ class MediaTreeTests(unittest.TestCase):
         self.assertNotIn("__MACOSX/junk.mp4", listed)
 
 
-@unittest.skipUnless(hasattr(os, "symlink"), "symlinks unsupported")
-class DeleteMediaSymlinkTests(unittest.TestCase):
-    """Codex review: deleting a symlinked entry must remove the link, never what it points at."""
+class MediaLibraryCase(unittest.TestCase):
+    """A media library at <tmp>/media with an empty sources file, served by the test client."""
 
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -177,14 +176,42 @@ class DeleteMediaSymlinkTests(unittest.TestCase):
         app_module.MEDIA_DIR, app_module.MEDIA_SRC_DATA_FILE, app_module.RENDITIONS_INDEX_FILE = self.old
         self.tmpdir.cleanup()
 
+    def delete(self, path):
+        return self.client.post("/api/delete-media", json={"path": path})
+
+
+class MediaPathGuardTests(MediaLibraryCase):
+    """Owner review (O8): a path must lie inside the library, and never be the library itself."""
+
+    def test_a_sibling_folder_sharing_the_library_name_prefix_is_refused(self):
+        touch(self.root / "media-other" / "clip.mp4")
+        self.assertEqual(self.delete("../media-other/clip.mp4").status_code, 403)
+        self.assertTrue((self.root / "media-other" / "clip.mp4").is_file())
+        response = self.client.post("/api/media-info", json={"path": "../media-other/clip.mp4"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_library_itself_cannot_be_deleted(self):
+        touch(self.media_dir / "clip.mp4")
+        for path in (".", "./", "sub/..", self.media_dir.as_posix()):
+            with self.subTest(path=path):
+                self.assertEqual(self.delete(path).status_code, 403)
+                self.assertTrue((self.media_dir / "clip.mp4").is_file())
+
+    def test_a_file_inside_the_library_is_still_deleted(self):
+        touch(self.media_dir / "sub" / "clip.mp4")
+        self.assertEqual(self.delete("sub/clip.mp4").status_code, 200)
+        self.assertFalse((self.media_dir / "sub" / "clip.mp4").exists())
+
+
+@unittest.skipUnless(hasattr(os, "symlink"), "symlinks unsupported")
+class DeleteMediaSymlinkTests(MediaLibraryCase):
+    """Codex review: deleting a symlinked entry must remove the link, never what it points at."""
+
     def link(self, name, target, is_dir):
         try:
             (self.media_dir / name).symlink_to(target, target_is_directory=is_dir)
         except OSError:
             self.skipTest("symlinks unsupported")
-
-    def delete(self, path):
-        return self.client.post("/api/delete-media", json={"path": path})
 
     def test_deleting_a_linked_folder_removes_only_the_link(self):
         touch(self.media_dir / "dataset" / "clip.mp4")
