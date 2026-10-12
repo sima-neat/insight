@@ -194,6 +194,10 @@ class PreviewManager:
         is the rate the camera really runs at. This asks Sentinel directly: Insight records no snapshot
         and runs no refresh, so the preview is not stopped. Any failure leaves `camera_fps` None."""
         fps = None
+        with self._lock:
+            # The preview may already have ended (stopped, or its board deselected): nothing to read for.
+            if self._session is None or self._session["id"] != session_id:
+                return
         try:
             catalog = PeripheralClient(board_session).refresh(timeout=CAMERA_FPS_TIMEOUT_SEC)
             device = next((entry for entry in catalog["devices"] if entry["id"] == camera_id), None)

@@ -635,6 +635,14 @@ class CameraFpsTests(unittest.TestCase):
                 self.manager.stop(self.session, session["id"])
                 self.session = fake_session()
 
+    def test_a_rate_read_for_a_preview_that_already_ended_asks_nothing(self):
+        session, sentinel = self.start_with(catalog(dict(imx477(), max_fps=66.18)))
+        self.manager.stop(self.session, session["id"])
+        sentinel.calls.clear()
+        with mock.patch.object(preview, "PeripheralClient", sentinel):
+            self.manager._read_camera_fps(self.session, session["id"], IMX477)
+        self.assertEqual(sentinel.calls, [])
+
     def test_a_start_that_sends_no_frame_never_asks_sentinel(self):
         self.session.transport.next_stream = FakeStream([], stderr=PID_LINE + b"ERROR: no camera\n")
         sentinel = FakeSentinel(catalog(dict(imx477(), max_fps=66.18)))
@@ -765,6 +773,9 @@ class BoardChangeTests(unittest.TestCase):
         preview_pkg.init_app(app)
         self.app = app
         self.previews = app.extensions["neat_preview"]
+        # The MIPI camera-rate read runs in its own thread and talks to the board; these tests count the
+        # board's commands exactly, so it is left out here (it has its own tests).
+        self.previews._read_camera_fps = lambda *args: None
         self.addCleanup(self.previews.stop_for_board_change)
         self.client = app.test_client()
         item = item_of(scanned(imx477()), IMX477)
@@ -778,8 +789,7 @@ class BoardChangeTests(unittest.TestCase):
         self.assertEqual((old.kills(), old.closed), ([], False))
         closed_at_stop = []
         exec_ = old.exec
-        # Only the stop command counts: the preview's background frame-rate read may also reach the old board.
-        old.exec = lambda argv, **kw: (argv[0] == "sh" and "kill" in argv[-1] and closed_at_stop.append(old.closed)) or exec_(argv, **kw)
+        old.exec = lambda argv, **kw: closed_at_stop.append(old.closed) or exec_(argv, **kw)
         self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
         self.assertEqual((closed_at_stop, old.closed), ([False], True))
         self.assertTrue(old.streams[0][1].closed)

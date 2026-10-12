@@ -904,7 +904,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Stop a camera preview",
-        "description": "Closes the stream and stops the pipeline on the board by its process id (TERM, then KILL after 2 s), which releases the camera. Returns the stopped session, or `null` when that session already ended, so a repeated stop succeeds; an older session id never stops a newer session. A transport failure leaves the session owned so the caller can retry.",
+        "description": "Closes the stream and stops the pipeline on the board by its process id (TERM, then KILL after 2 s), which releases the camera. Returns the stopped session, or `null` when that session already ended, so a repeated stop succeeds; an older session id never stops a newer session. The stream is closed first, so a pipeline whose kill command fails still ends at its next write; the session is kept for a retry only when the stream's own cleanup has not already released it.",
         "operationId": "stopCameraPreview",
         "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {
