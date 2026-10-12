@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -360,6 +360,28 @@ export default function GenAIView({ onError, onStatus }) {
     const box = transcriptBox.current
     if (box && stickToBottom.current) box.scrollTop = box.scrollHeight
   }, [messages])
+
+  // The tab fills the window below Insight's header, as chat apps do: the
+  // conversation takes the space and the composer sits at the bottom. CSS
+  // reads where the tab starts (it moves when the header wraps or in full screen).
+  useLayoutEffect(() => {
+    const el = root.current
+    if (!el) return undefined
+    const place = () => el.style.setProperty('--genai-top', `${Math.max(0, el.getBoundingClientRect().top + window.scrollY)}px`)
+    place()
+    // Also when something above it opens or closes (Insight's tour, a banner):
+    // the page's size changes then. Placing again gives the same value once
+    // settled, so this doesn't loop.
+    const resized = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : null
+    resized?.observe(document.body)
+    window.addEventListener('resize', place)
+    document.addEventListener('fullscreenchange', place)
+    return () => {
+      resized?.disconnect()
+      window.removeEventListener('resize', place)
+      document.removeEventListener('fullscreenchange', place)
+    }
+  }, [])
 
   // First visit: start the tutorial.
   useEffect(() => {
