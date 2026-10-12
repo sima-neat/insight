@@ -51,7 +51,7 @@ curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhos
 curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
 ```
 
-`prepare`는 `progress <seconds>/<total>` 줄을 스트리밍하고 `Rendition ready: …`, `Reusing rendition: …` 또는 `Error: …`로 끝납니다. `prepare`를 건너뛰면 `start`가 같은 준비 작업을 출력 없이 수행합니다. `GET /api/mediasrc/renditions`는 캐시된 렌디션의 디스크 사용량을 보고하고, `POST /api/mediasrc/renditions/clear`는 재생 중인 소스가 사용하지 않는 캐시된 렌디션을 삭제합니다.
+`prepare`는 `progress <seconds>/<total>` 줄을 스트리밍하고(다른 렌디션이 인코딩되는 동안에는 그 앞에 `Waiting for another rendition to finish encoding…` 줄이 반복해서 출력됩니다. Insight는 한 번에 하나씩 인코딩합니다) `Rendition ready: …`, `Reusing rendition: …` 또는 `Error: …`로 끝납니다. `prepare`를 건너뛰면 `start`가 같은 준비 작업을 출력 없이 수행합니다. `GET /api/mediasrc/renditions`는 캐시된 렌디션의 디스크 사용량을 보고하고, `POST /api/mediasrc/renditions/clear`는 재생 중인 소스가 사용하지 않는 캐시된 렌디션을 삭제합니다.
 
 할당 또는 재생 상태를 변경하기 전에 `/api/mediasrc`를 읽으십시오. 가능하면 미디어를 삭제하기 전에 활성 상태의 소스를 중지하십시오.
 
