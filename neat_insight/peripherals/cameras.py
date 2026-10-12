@@ -1,5 +1,6 @@
 """Turn SiMa Sentinel's peripheral catalog into the Peripherals camera snapshot."""
 import math
+from collections import Counter
 import threading
 import time
 from datetime import datetime, timezone
@@ -29,9 +30,11 @@ FORMAT_REASON = f"Neat's CameraInput outputs {CAMERAINPUT_FORMAT} only."
 # imx477 driver ships a 4032x3040 crop mode for that reason. libcamera still advertises the IMX477's
 # 4056-wide sizes and silently serves them at 4032 wide (observed on 3.0.0_develop_B1859). Smaller sizes
 # are served from a larger aligned sensor mode, so for the IMX477 the usable widths are those up to its
-# widest aligned 12-bit mode, 4032. Sentinel reports the sensor's sizes as the kernel lists them.
-MAX_SENSOR_WIDTH = 4032
-MAX_WIDTH_REASON = f"libcamera streams this camera at most {MAX_SENSOR_WIDTH} pixels wide on this board."
+# widest aligned 12-bit mode, 4032. Sentinel reports the sensor's sizes as the kernel lists them. The limit
+# is a property of each sensor's modes, so it is listed per sensor (Sentinel's MIPI `model`, the kernel's
+# sensor name); a sensor not listed keeps Sentinel's verdict.
+SENSOR_MAX_WIDTH = {"imx477": 4032}
+MAX_WIDTH_REASON = "libcamera streams this camera at most {width} pixels wide on this board."
 NO_MODES_REASON = "SiMa Sentinel reported no modes for this camera."
 NO_BY_ID_NOTE = "No /dev/v4l/by-id link was found; /dev/videoN numbering can change across reboots and replugs."
 # Sentinel names a MIPI camera after its sensor entity in the kernel media graph.
@@ -116,14 +119,14 @@ def _camera_reason(camera: dict, board: Optional[dict]) -> str:
     return NOT_IN_OVERLAYS_REASON.format(name=name)
 
 
-def _classified(mode: dict, camera_reason: str) -> dict:
+def _classified(mode: dict, camera_reason: str, max_width: Optional[int] = None) -> dict:
     """A Sentinel mode with its state: `available` True or False, and why it is not (`reason`). A Sentinel that
     decides this itself (sentinel#43, the same rule, and the only one that knows a Platform 3.0 sensor size) says so
     on the mode; older ones leave it to the rule below."""
     if isinstance(mode.get("available"), bool):
         reason = "" if mode["available"] else str(mode.get("reason") or camera_reason or NOT_ISP_SIZE_REASON)
-        if not reason and mode.get("sensor_mode") is True and (mode.get("width") or 0) > MAX_SENSOR_WIDTH:
-            reason = MAX_WIDTH_REASON
+        if not reason and max_width and mode.get("sensor_mode") is True and (mode.get("width") or 0) > max_width:
+            reason = MAX_WIDTH_REASON.format(width=max_width)
         return dict(mode, available=not reason, reason=reason)
     if camera_reason:
         return dict(mode, available=False, reason=camera_reason)
@@ -144,7 +147,8 @@ def build_snapshot(catalog: dict, board: dict, generation: int, previous: Option
     cameras = []
     for device in cameras_of(catalog):
         reason = _camera_reason(device, catalog.get("board"))
-        modes = [_classified(mode, reason) for mode in device.get("modes") or []]
+        max_width = SENSOR_MAX_WIDTH.get(str(device.get("model") or "").lower()) if device.get("backend") == "mipi" else None
+        modes = [_classified(mode, reason, max_width) for mode in device.get("modes") or []]
         cameras.append(_item(device, modes, reason, provider_of(device) in retained))
     items = cameras + microphone_items(catalog, cameras, retained)
     return {
@@ -208,7 +212,9 @@ def _item(camera: dict, modes: list, reason: str, retained: bool) -> dict:
     """`modes` are the camera's classified modes (_classified); `reason` is why none can be Available, if any."""
     connection = _connection(camera)
     usb = connection == "usb"
-    formats = _formats(modes, usb, reason)
+    # A Sentinel that gives each mode a verdict (sentinel#43) also gives the reasons a camera is unusable.
+    decided = any(isinstance(mode.get("available"), bool) for mode in camera.get("modes") or [])
+    formats = _formats(modes, usb, reason, decided)
     notes, errors = [], []
     if usb:
         identity = camera.get("identity") or {}
@@ -258,7 +264,7 @@ def _item(camera: dict, modes: list, reason: str, retained: bool) -> dict:
         "model": camera.get("model") or None,
         "device": info,
         "availability": _availability(camera.get("availability")),
-        "support": _verdict(modes, reason),
+        "support": _verdict(modes, reason, decided),
         "modes_source": "unavailable" if not modes else "previous-scan" if retained else "live",
         "formats": formats,
         "default_selection": _default(formats),
@@ -281,12 +287,20 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     return notes
 
 
-def _verdict(modes: list, reason: str) -> dict:
-    """A camera or format is Available when any of its modes is; `reason` is why none of the camera's can be."""
+def _verdict(modes: list, reason: str, decided: bool = False) -> dict:
+    """A camera or format is Available when any of its modes is; `reason` is why none of the camera's can be.
+
+    When Sentinel decided each mode (`decided`), the reason is the one it gave most often for the NV12 modes
+    (CameraInput's format), else for all modes, rather than one Insight infers."""
     if any(mode["available"] for mode in modes):
         return _support("available", "")
     if reason or not modes:
         return _support("unsupported", reason or NO_MODES_REASON)
+    if decided:
+        wanted = [mode for mode in modes if mode["format"] == CAMERAINPUT_FORMAT] or modes
+        given = Counter(mode["reason"] for mode in wanted if mode.get("reason"))
+        if given:
+            return _support("unsupported", given.most_common(1)[0][0])
     # The sensor is supported: either the ISP outputs none of these sizes, or none it outputs is in NV12. On a
     # Platform 3.0 ISP the sizes are the sensor's (`sensor_mode`).
     isp_sizes = any(mode.get("isp_output") is True or mode.get("sensor_mode") is True for mode in modes)
@@ -348,7 +362,7 @@ def _choices(modes: list, usb: bool) -> list:
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 
-def _formats(modes: list, usb: bool, reason: str) -> list:
+def _formats(modes: list, usb: bool, reason: str, decided: bool = False) -> list:
     grouped = {}
     for mode in modes:
         grouped.setdefault(mode["format"], []).append(mode)
@@ -365,7 +379,7 @@ def _formats(modes: list, usb: bool, reason: str) -> list:
             # A USB driver names its own formats.
             "label": f"{name} ({description})" if usb and description else FORMAT_LABELS.get(name, name),
             "exportable": any(mode["available"] for mode in entries),
-            "support": _verdict(entries, reason),
+            "support": _verdict(entries, reason, decided),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
             "sizes": [{"width": w, "height": h, "fps": _choices(group, usb)} for (w, h), group in sizes.items()],
@@ -401,7 +415,12 @@ def _issues(catalog: dict, items: list) -> list:
     issues = []
     listed = {provider_of(device) for device in catalog["devices"]}
     for error in catalog["errors"]:
-        if error["provider"] == "board":
+        # Sentinel names a board-block error's provider after the field it could not read (`board.<field>`).
+        board_field = error["provider"] == "board" or error["provider"].startswith("board.")
+        if board_field and error["code"] == "platform.unsupported":
+            # The firmware predates MIPI camera support (provider `board.firmware`); Sentinel's reason says which.
+            message = f"SiMa Sentinel: {error['reason']}"
+        elif board_field:
             message = f"SiMa Sentinel could not read part of the board's camera setup: {error['reason']}"
         else:
             message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"

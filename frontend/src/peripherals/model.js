@@ -63,10 +63,14 @@ export function tierInfo(tier) {
   return TIERS[tierOf(tier)]
 }
 
-// The camera's own pill. Its availability pill already reads "Available" for a camera no process holds,
-// so an Available camera gets no second "Available"; its mode menus carry that state.
-// Every detected camera is, by being listed, connected: the pill says so in the one state vocabulary.
+// Every camera the latest scan detected is connected. One kept from a failed provider's last good scan
+// (`modes_source: previous-scan`) may have been unplugged since, so it says where it comes from instead.
 export const CONNECTED_PILL = { label: 'Connected', tone: '' }
+export const LAST_SCAN_PILL = { label: 'Last scan', tone: '' }
+
+export function connectionPill(device) {
+  return device?.modes_source === 'previous-scan' ? LAST_SCAN_PILL : CONNECTED_PILL
+}
 
 export function cameraTierPill(camera) {
   return tierOf(camera?.support?.tier) === 'available' ? TIERS.available : TIERS.unsupported

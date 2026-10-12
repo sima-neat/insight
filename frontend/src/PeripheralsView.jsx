@@ -6,8 +6,8 @@ import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
   cameraTierPill,
+  connectionPill,
   changeSummary,
-  CONNECTED_PILL,
   countLabel,
   deviceTabs,
   groupCameras,
@@ -134,11 +134,11 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
 // Every detected device is connected; a camera also shows its verdict. A microphone carries no verdict,
 // and whether another program holds it is found out when its test starts.
 function cameraPills(camera) {
-  return [CONNECTED_PILL, cameraTierPill(camera)]
+  return [connectionPill(camera), cameraTierPill(camera)]
 }
 
-function microphonePills() {
-  return [CONNECTED_PILL]
+function microphonePills(microphone) {
+  return [connectionPill(microphone)]
 }
 
 // One listbox per device kind: arrow keys, Home and End move the selection; only the selected row is tabbable.

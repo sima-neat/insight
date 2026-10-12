@@ -36,6 +36,15 @@ OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
 CONTRACT_EXAMPLE = Path(__file__).parent / "fixtures" / "sentinel-catalog-example.json"
 
 
+# Catalogs with Sentinel's own per-mode verdict (sentinel#43): its example at 1f4f964 (Platform 2.1.3, fixed ISP
+# sizes, `isp_output`), and a response captured from a Modalix DevKit on 3.0.0_develop_B1859 (IMX477 sensor sizes,
+# `sensor_mode`; C920 camera and microphone), both byte for byte.
+VERDICT_CATALOGS = {
+    "sentinel#43 example": Path(__file__).parent / "fixtures" / "sentinel-catalog-example-43.json",
+    "DevKit 3.0 capture": Path(__file__).parent / "fixtures" / "sentinel-catalog-devkit-3.0.json",
+}
+
+
 def contract_catalog():
     return json.loads(CONTRACT_EXAMPLE.read_text(encoding="utf-8"))
 
@@ -368,6 +377,25 @@ def states(fps):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_every_mode_keeps_sentinels_verdict_on_real_catalogs(self):
+        """Each mode Insight lists has the state and reason Sentinel gave it; the only exception is the IMX477's
+        sensor sizes wider than 4032, which libcamera streams at 4032 wide."""
+        for label, path in VERDICT_CATALOGS.items():
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            snapshot = snapshot_of(doc)
+            for device in (d for d in doc["devices"] if d["type"] == "camera"):
+                camera = item(snapshot, device["id"])
+                for mode in device["modes"]:
+                    with self.subTest(label, camera=device["id"], mode=(mode["format"], mode["width"], mode["height"])):
+                        capped = (mode["available"] and device["model"] == "imx477" and mode.get("sensor_mode") is True
+                                  and mode["width"] > cameras.SENSOR_MAX_WIDTH["imx477"])
+                        tier = "available" if mode["available"] and not capped else "unsupported"
+                        reason = (cameras.MAX_WIDTH_REASON.format(width=4032) if capped
+                                  else None if mode["available"] else mode["reason"])
+                        fps = size_of(fmt_of(camera, mode["format"]), mode["width"], mode["height"])["fps"]
+                        self.assertTrue(fps)
+                        self.assertEqual({(t, r) for _, t, r in states(fps)}, {(tier, reason)})
+
     def test_imx477_nv12_modes_are_available_at_the_isp_sizes_when_the_overlays_support_its_sensor(self):
         camera = item(snapshot_of(catalog(imx477(), board=board_block())), IMX477)
         self.assertEqual((camera["connection"], camera["name"], camera["model"]), ("mipi", "imx477 5-001a", "imx477"))
@@ -490,19 +518,24 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(states(size_of(nv12, 4032, 3040)["fps"]), [(30, "available", None)])
         for width, height in ((4056, 3040), (4056, 2160)):
             self.assertEqual(states(size_of(nv12, width, height)["fps"]),
-                             [(30, "unsupported", cameras.MAX_WIDTH_REASON)], f"{width}x{height}")
+                             [(30, "unsupported", cameras.MAX_WIDTH_REASON.format(width=4032))], f"{width}x{height}")
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        # The 4032 limit is the IMX477's widest aligned mode, not a rule for every sensor: another sensor's wide
+        # sizes keep Sentinel's verdict.
+        other = item(snapshot_of(catalog(dict(doc, model="imx678"), board=board_block())), IMX477)
+        self.assertEqual(states(size_of(fmt_of(other, "NV12"), 4056, 3040)["fps"]), [(30, "available", None)])
         self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
                          [(30, "unsupported", cameras.FORMAT_REASON)])
 
-        # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its sizes available,
-        # a 3.0 camera is unsupported for the format, not for the ISP.
+        # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its modes available,
+        # the camera's reason is the one Sentinel gave its NV12 modes, not one Insight infers.
         doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), available=False, reason="Not set up for this mode."),
                         sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON)]
         camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
         self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]),
                          [(30, "unsupported", "Not set up for this mode.")])
-        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "Not set up for this mode."})
+        self.assertEqual(fmt_of(camera, "RGB3")["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
 
     def test_the_default_mode_is_1920_wide_when_the_camera_offers_it(self):
         """The first Available size in sort order is the smallest (1280x990 on a 3.0 IMX477), not a useful start."""
@@ -658,7 +691,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(issues["io.open"]["severity"], "warning")
 
     def test_a_board_reader_error_names_the_camera_setup(self):
-        error = {"provider": "board", "code": "peripherals.discovery_failed",
+        # Sentinel names the provider after the board field it could not read.
+        error = {"provider": "board.overlays", "code": "peripherals.discovery_failed",
                  "reason": "fw_printenv failed (exit status: 1): Cannot read environment, using default"}
         snapshot = snapshot_of(catalog(imx477(), board=board_block(), errors=[error]))
         self.assertEqual(snapshot["issues"], [{
@@ -667,6 +701,12 @@ class SnapshotTests(unittest.TestCase):
                        "status: 1): Cannot read environment, using default",
             "hint": cameras.STATUS_HINT,
         }])
+        # Firmware older than Sentinel's MIPI support is not a read failure: Sentinel's own reason is shown.
+        old = {"provider": "board.firmware", "code": "platform.unsupported",
+               "reason": "Firmware 2.1.0 is older than 2.1.2; MIPI cameras are not listed."}
+        snapshot = snapshot_of(catalog(c920(), board=board_block(), errors=[old]))
+        self.assertEqual([i["message"] for i in snapshot["issues"]],
+                         ["SiMa Sentinel: Firmware 2.1.0 is older than 2.1.2; MIPI cameras are not listed."])
 
     def test_the_snapshot_passes_sentinels_availability_through_and_never_inspects_processes(self):
         """Whether another program holds a camera is found out when a preview opens it, not during a scan: that
