@@ -129,8 +129,10 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     const final = await waitForRun()
     if (!final) return null
     if (final.error) {
-      postJson('benchmark/stop', {}).catch(() => {})
-      return { model, failed: `lost track of the run: ${final.error}`, stage: 'run' }
+      // The board's run may still be going: stop it and end the benchmark here,
+      // so no next model starts beside it.
+      stopDone.current = stopBoardRun(runTicket.current)
+      return { model, failed: `lost track of the run: ${final.error}`, stage: 'run', abort: true }
     }
     return { model, summary: final.summary || null, runs: final.runs || [], prompt: final.prompt }
   }
@@ -152,17 +154,29 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
       if (!result) break
       done.push(result)
       setResults([...done])
+      if (result.abort) {
+        setNote('The benchmark ended early: the board stopped answering about the run.')
+        break
+      }
     }
     // Unlock only once a Stop has reached the board and its run has ended.
     if (stopDone.current) await stopDone.current
     if (!runTicket.current.live()) return     // the tab closed or the board changed
-    runTicket.current = null
     stopDone.current = null
+    // The run's loads may have changed which model is loaded: fetch that
+    // before the tab unlocks, so nothing is sent to a model that is gone.
+    setPhase('Updating the model list…')
+    try {
+      await onModelsChanged?.()
+    } catch {
+      // The tab's own polling catches up.
+    }
+    if (!runTicket.current.live()) return
+    runTicket.current = null
     setPhase('')
     setRunning(false)
     onRunningChange?.(false)
     if (stopRequested.current) setNote('Benchmark stopped.')
-    onModelsChanged?.()
   }
 
   // Stop: ask the board to stop, then wait (up to about 10 s) until its run has
@@ -172,23 +186,25 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     if (stopRequested.current) return
     stopRequested.current = true
     setPhase('Stopping…')
-    const ticketNow = runTicket.current
-    stopDone.current = (async () => {
+    stopDone.current = stopBoardRun(runTicket.current)
+  }
+
+  // Asks the board to stop its run, then waits (up to about 10 s) until it has.
+  async function stopBoardRun(ticketNow) {
+    try {
+      await postJson('benchmark/stop', {}, { signal: ticketNow ? ticketNow.signal : undefined })
+    } catch {
+      // The board may have finished already.
+    }
+    for (let i = 0; i < 20 && ticketNow && ticketNow.live(); i += 1) {
       try {
-        await postJson('benchmark/stop', {}, { signal: ticketNow ? ticketNow.signal : undefined })
+        const state = await getJson('benchmark/status', { signal: ticketNow.signal })
+        if (!state.running) return
       } catch {
-        // The board may have finished already.
+        return
       }
-      for (let i = 0; i < 20 && ticketNow && ticketNow.live(); i += 1) {
-        try {
-          const state = await getJson('benchmark/status', { signal: ticketNow.signal })
-          if (!state.running) return
-        } catch {
-          return
-        }
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS))
-      }
-    })()
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+    }
   }
 
   const progress = benchProgress(live)
