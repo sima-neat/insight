@@ -253,6 +253,9 @@ class PullRecord:
     error: Optional[str] = None
     probed_at: float = 0.0
     probing: bool = False
+    # A MediaMTX call for this pull (configure, stop or pause) is in flight outside the
+    # source lock; the record holds the slot meanwhile, and Stop asks to retry.
+    changing: bool = False
 
 
 class PullRegistry:
