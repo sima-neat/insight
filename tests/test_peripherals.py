@@ -321,37 +321,15 @@ class BoardCheckTests(unittest.TestCase):
         self.assertNotIn("pyneat", source)
         self.assertFalse(hasattr(board_check, "core_support"))
 
-def states(fps):
-    return [(choice["value"], choice["tier"], choice.get("reason")) for choice in fps]
-
-
-    def test_microphones_get_their_capture_node_checked_and_sound_servers_listed(self):
+    def test_microphones_get_their_capture_node_checked(self):
         held = {"/dev/snd/pcmC2D0c": {4242}, "/dev/snd/controlC2": {77}}
         comm = {"4242": "arecord", "77": "pulseaudio", "78": "pipewire-pulse", "79": "bash"}
         with mock.patch.object(board_check, "which", return_value=None), \
              mock.patch.object(board_check.os, "geteuid", return_value=0), \
              mock.patch.object(board_check, "scan_proc", return_value=held), \
-             mock.patch.object(board_check.os.path, "isdir", return_value=True), \
-             mock.patch.object(board_check.os, "listdir", return_value=["self", *comm]), \
              mock.patch.object(board_check, "_read", side_effect=lambda path: comm.get(path.split("/")[-2])):
             result = board_check.collect({"cameras": {}, "microphones": {YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: []}})
         self.assertEqual(result["users"], {YETI: [{"pid": 4242, "command": "arecord"}], C920_MIC: None})
-        self.assertEqual(result["sound_servers"], ["pipewire-pulse", "pulseaudio"])
-        with mock.patch.object(board_check, "which", return_value=None):
-            self.assertNotIn("sound_servers", board_check.collect({"cameras": {}}))
-
-    def test_an_unlistable_proc_does_not_fail_the_cameras_checked_with_a_microphone(self):
-        # Codex 4189093714: listing sound servers raised and discarded every check in the run.
-        with mock.patch.object(board_check, "which", return_value=None), \
-             mock.patch.object(board_check.os, "geteuid", return_value=0), \
-             mock.patch.object(board_check, "scan_proc", return_value={"/dev/video97": {4242}}), \
-             mock.patch.object(board_check, "_read", return_value="neat-app"), \
-             mock.patch.object(board_check.os.path, "isdir", return_value=True), \
-             mock.patch.object(board_check.os, "listdir", side_effect=PermissionError("denied")):
-            result = board_check.collect({"cameras": {C920: ["/dev/video97"]}, "microphones": {YETI: []}})
-        self.assertEqual(result["users"][C920], [{"pid": 4242, "command": "neat-app"}])
-        self.assertEqual(result["sound_servers"], [])
-
 
     def test_a_capture_pcm_is_read_live_and_only_an_open_one_is_looked_up(self):
         with tempfile.TemporaryDirectory() as proc:
@@ -374,6 +352,10 @@ def states(fps):
         self.assertEqual(result["users"][YETI], [])
         self.assertEqual(result["users"][C920_MIC], [{"pid": 812, "command": "pulseaudio"}])
         self.assertEqual(looked_up, [["/dev/snd/pcmC3D0c"], ["/dev/snd/pcmC9D0c"]])
+
+
+def states(fps):
+    return [(choice["value"], choice["tier"], choice.get("reason")) for choice in fps]
 
 
 class SnapshotTests(unittest.TestCase):
@@ -1226,6 +1208,36 @@ class MicrophoneApiTests(unittest.TestCase):
         mictest._current.thread.join(2)
         self.assertEqual(self.transport.calls[-1][0][0], "arecord")
 
+    def test_a_live_check_that_cannot_run_leaves_the_busy_answer_to_arecord(self):
+        """The check is best effort: when it fails or times out, the test still starts, and the check ran on the
+        raw transport, so its failure never marks the selected board as failing."""
+        self.client.post("/api/peripherals/refresh")
+        for failure in (ExecResult(1, b"", b"Traceback: boom"), BoardError("timeout", "The board did not answer.")):
+            with self.subTest(failure=failure):
+                mictest._current = None
+                raw, reported = [], []
+
+                class Raw:
+                    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
+                        raw.append(argv[0])
+                        if argv[0] == "arecord":
+                            return ExecResult(0, sine(0.5), b"")
+                        if isinstance(failure, Exception):
+                            raise failure
+                        return failure
+
+                class Reporting:
+                    def exec(self, argv, **kwargs):
+                        reported.append(argv[0])
+                        raise AssertionError("a microphone test sent a command through the status-reporting transport")
+
+                session = FakeSession(1, Raw())
+                session.transport = Reporting()
+                self.manager.current = session
+                self.assertEqual(self.start().status_code, 202)
+                mictest._current.thread.join(2)
+                self.assertEqual((raw, reported), (["python3", "arecord"], []))
+
     def test_a_live_holder_refuses_the_test_and_is_named(self):
         self.client.post("/api/peripherals/refresh")
         started = []
@@ -1357,6 +1369,9 @@ class MicrophoneApiTests(unittest.TestCase):
         test.finish(wav=b"RIFF....")
         url = f"/api/peripherals/microphones/test/{test.token}.wav"
         self.assertEqual(self.client.get(url).status_code, 200)
+        # Safari's audio element reads the recording in byte ranges.
+        partial = self.client.get(url, headers={"Range": "bytes=0-3"})
+        self.assertEqual((partial.status_code, partial.data, partial.mimetype), (206, b"RIFF", "audio/wav"))
         self.manager.current = FakeSession(2, self.transport)  # /api/board/select picked another board
         response = self.client.get(url)
         self.assertEqual((response.status_code, response.get_json()["code"]), (404, "not_found"))
@@ -1388,12 +1403,17 @@ class MicrophoneTestTests(unittest.TestCase):
                          {"selector": "plughw:CARD=Nano,DEV=0", "node": "/dev/snd/pcmC2D0c", "rate": 48000, "channels": 2})
         self.assert_refused("stale_snapshot", catalog(yeti(), revision=2))
         self.assert_refused("not_found", catalog(c920_mic()))
-        for selector in ("plughw:CARD=x;rm -rf /,DEV=0", "hw:2,0", "plughw:2,0", None):
+        for selector in ("plughw:CARD=x;rm -rf /,DEV=0", "hw:2,0", "plughw:2,0", "plughw:CARD=1,DEV=0",
+                         "plughw:CARD=12,DEV=0", None):
             hostile = yeti()
             hostile["capture_target"]["selector"] = selector
             with self.subTest(selector=selector):
                 self.assert_refused("peripheral_response", catalog(hostile))
-        # Sentinel's availability is only shown: the live check at test start decides (refuse_if_held).
+        # A three-digit id is a name, not a card number.
+        named = yeti()
+        named["capture_target"]["selector"] = "plughw:CARD=123,DEV=0"
+        self.assertEqual(self.bind(catalog(named))["selector"], "plughw:CARD=123,DEV=0")
+        # Sentinel's availability is not what decides: the live check at test start does (refuse_if_held).
         busy = yeti()
         busy["availability"].update(state="in_use", subdevices_available=0)
         self.assertEqual(self.bind(catalog(busy))["selector"], "plughw:CARD=Nano,DEV=0")
@@ -1428,7 +1448,7 @@ class MicrophoneTestTests(unittest.TestCase):
     def run_test(self, exec_, seconds=30, session=None):
         transport = SimpleNamespace(exec=exec_)
         session = session or FakeSession(1, transport)
-        session.transport = transport
+        session.raw_transport = session.transport = transport
         status = mictest.start(session, YETI, {"selector": "plughw:CARD=Nano,DEV=0", "rate": 48000, "channels": 2}, seconds)
         return status, mictest._current
 
