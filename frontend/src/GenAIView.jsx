@@ -217,6 +217,9 @@ export default function GenAIView({ onError, onStatus }) {
   const usable = canUseModels(backend.state)
   const chatModel = loadedChatModel(status)
   const sees = Boolean(chatModel && chatModel.supportsVision)
+  // Requests in flight are tied to the board they started on, so the address
+  // can't change until they finish (a model load can't be stopped on the board).
+  const boardBusy = streaming || Boolean(busyOp) || recording || transcribing || Boolean(download)
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
 
   const fail = useCallback((message) => {
@@ -311,10 +314,12 @@ export default function GenAIView({ onError, onStatus }) {
 
   async function applySettings(event) {
     event.preventDefault()
+    if (boardBusy) return
     try {
       const saved = await saveSettings({ url: addressDraft.trim() })
       // Polls already on their way went to the previous board: drop them.
       refreshShown.current = refreshStarted.current + 1
+      stopSpeaking()
       setSettings(saved)
       setStatus(null)
       setVoices(null)
@@ -979,8 +984,9 @@ export default function GenAIView({ onError, onStatus }) {
                   aria-describedby={addressError ? 'genai-address-error' : undefined}
                 />
               </label>
-              <button type="submit" className="btn-tonal">Save</button>
+              <button type="submit" className="btn-tonal" disabled={boardBusy}>Save</button>
             </form>
+            {boardBusy && <p className="hint">The address can be changed once the current reply, recording, model operation or download finishes.</p>}
             {addressError && <p id="genai-address-error" className="genai-field-error" role="alert">{addressError}</p>}
             <p className="hint">
               Start GenAI Studio on the board with <code>{START_COMMAND}</code>. Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
@@ -1371,7 +1377,7 @@ function ModelList({ title, models, loadedNames, activeName, disabled, onLoad, o
                 <button type="button" className="btn-ghost genai-small" disabled={disabled} onClick={() => onUnload(m)}>Unload</button>
               )}
               {onUse && !active && (
-                <button type="button" className="btn-ghost genai-small" disabled={disabled} onClick={() => onUse(m)}>Use</button>
+                <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || ''} onClick={() => onUse(m)}>Use</button>
               )}
             </li>
           )
