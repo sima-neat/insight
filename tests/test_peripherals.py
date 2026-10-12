@@ -555,7 +555,8 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(issues["io.open"]["severity"], "warning")
 
     def test_a_board_reader_error_names_the_camera_setup(self):
-        error = {"provider": "board", "code": "peripherals.discovery_failed",
+        # Sentinel names the provider after the board field it could not read.
+        error = {"provider": "board.overlays", "code": "peripherals.discovery_failed",
                  "reason": "fw_printenv failed (exit status: 1): Cannot read environment, using default"}
         snapshot = snapshot_of(catalog(imx477(), board=board_block(), errors=[error]))
         self.assertEqual(snapshot["issues"], [{
@@ -564,6 +565,12 @@ class SnapshotTests(unittest.TestCase):
                        "status: 1): Cannot read environment, using default",
             "hint": cameras.STATUS_HINT,
         }])
+        # Firmware older than Sentinel's MIPI support is not a read failure: Sentinel's own reason is shown.
+        old = {"provider": "board.firmware", "code": "platform.unsupported",
+               "reason": "Firmware 2.1.0 is older than 2.1.2; MIPI cameras are not listed."}
+        snapshot = snapshot_of(catalog(c920(), board=board_block(), errors=[old]))
+        self.assertEqual([i["message"] for i in snapshot["issues"]],
+                         ["SiMa Sentinel: Firmware 2.1.0 is older than 2.1.2; MIPI cameras are not listed."])
 
     def test_the_snapshot_passes_sentinels_availability_through_and_never_inspects_processes(self):
         """Whether another program holds a camera is found out when a preview opens it, not during a scan: that

@@ -400,7 +400,12 @@ def _issues(catalog: dict, items: list) -> list:
     issues = []
     listed = {provider_of(device) for device in catalog["devices"]}
     for error in catalog["errors"]:
-        if error["provider"] == "board":
+        # Sentinel names a board-block error's provider after the field it could not read (`board.<field>`).
+        board_field = error["provider"] == "board" or error["provider"].startswith("board.")
+        if board_field and error["code"] == "platform.unsupported":
+            # The firmware predates MIPI camera support (provider `board.firmware`); Sentinel's reason says which.
+            message = f"SiMa Sentinel: {error['reason']}"
+        elif board_field:
             message = f"SiMa Sentinel could not read part of the board's camera setup: {error['reason']}"
         else:
             message = f"SiMa Sentinel's {error['provider']} provider failed: {error['reason']}"
