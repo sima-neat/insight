@@ -196,9 +196,9 @@ test('size options carry their best state, for the pill beside the menu', () => 
   assert.deepEqual(sizeOptions(imx477, 'RGB888'), [])
 })
 
-test('a USB resolution names the rate the page uses for that mode; a MIPI resolution names none', () => {
-  assert.deepEqual(sizeOptions(usb, 'MJPG').map((o) => o.label), ['1280×720 · 30 fps', '640×480 · 30 fps'])
-  // Highest Available rate, else the highest: what resolveSelection picks for the mode.
+test('a resolution names its size only, for USB and MIPI cameras alike', () => {
+  assert.deepEqual(sizeOptions(usb, 'MJPG').map((o) => o.label), ['1280×720', '640×480'])
+  // The rate is still chosen (highest Available, else highest) and carried in the selection, just not shown.
   const webcam = {
     ...usb,
     formats: [format('YUYV', 'YUYV 4:2:2', true, support('available'), [
@@ -208,7 +208,7 @@ test('a USB resolution names the rate the page uses for that mode; a MIPI resolu
     ])]
   }
   assert.deepEqual(sizeOptions(webcam, 'YUYV').map((o) => [o.value, o.label]),
-    [['640x480', '640×480 · 30 fps'], ['320x240', '320×240 · 30 fps'], ['160x120', '160×120 · 7.5 fps']])
+    [['640x480', '640×480'], ['320x240', '320×240'], ['160x120', '160×120']])
   assert.equal(resolveSelection(webcam, { format: 'YUYV', width: 640, height: 480 }).fps, 30)
   for (const camera of [imx477, imx568]) {
     for (const option of sizeOptions(camera, 'NV12')) assert.doesNotMatch(option.label, /fps/)
@@ -380,11 +380,10 @@ test('API errors keep code, hint, and extra fields', () => {
 test('mode labels and selection equality drive the fallback notice', () => {
   const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
   // A MIPI mode's rate is not known before it runs, so only a USB mode names one.
-  assert.equal(modeLabel(mode, imx477), 'NV12 1920×1080')
+  // No camera's rate is named before it runs, USB included.
   assert.equal(modeLabel(mode), 'NV12 1920×1080')
-  assert.equal(modeLabel(mode, usb), 'NV12 1920×1080 @ 30 fps')
-  assert.equal(modeLabel({ ...mode, fps: 59.94 }, usb), 'NV12 1920×1080 @ 59.94 fps')
-  assert.equal(modeLabel(null, usb), '')
+  assert.equal(modeLabel({ ...mode, fps: 59.94 }), 'NV12 1920×1080')
+  assert.equal(modeLabel(null), '')
   assert.ok(sameSelection(mode, { ...mode, fps: '30' }))
   assert.ok(!sameSelection(mode, { ...mode, width: 1280, height: 720 }))
   assert.ok(!sameSelection(mode, { ...mode, format: 'YUYV' }))

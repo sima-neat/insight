@@ -230,7 +230,7 @@ export default function PeripheralsView({
   const selectionRef = useRef(selection)
   selectionRef.current = selection
   const selectionNotice = selection && wanted?.id === selection.id && !sameSelection(wanted, selection)
-    ? `${modeLabel(wanted, camera)} is no longer offered; showing ${modeLabel(selection, camera)}.`
+    ? `${modeLabel(wanted)} is no longer offered; showing ${modeLabel(selection)}.`
     : ''
   const target = board?.target || null
   const stale = isSnapshotStale(board, snapshot)
