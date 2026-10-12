@@ -11,7 +11,7 @@
     "test:viewer": "node --test src/viewer/*.test.js",
     "test:peripherals": "node --test src/peripherals/*.test.js",
     "test:streaming": "node --test src/streaming/*.test.js",
-    "test": "node --test src/*/*.test.js",
+    "test": "node --test src/*.test.js src/*/*.test.js",
     "test:e2e": "playwright test --config e2e/playwright.config.js",
     "preview": "vite preview"
   },
