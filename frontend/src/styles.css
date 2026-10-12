@@ -4638,16 +4638,6 @@ button:disabled {
   padding: 2px 4px;
 }
 
-.folder-nav-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.folder-nav-actions .btn-ghost {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
 .media-row.folder-row {
   cursor: pointer;
   text-align: left;

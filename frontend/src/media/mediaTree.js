@@ -43,6 +43,11 @@ export function streamableOnly(files) {
   return files.filter((f) => f.streamable)
 }
 
+// Streamable files in `folderPath` and all its subfolders: what a folder's badge shows for it.
+export function playableCount(tree, folderPath) {
+  return streamableFiles(childrenAt(tree, folderPath) || []).length
+}
+
 export function parentPath(folderPath) {
   if (!folderPath) return MEDIA_ROOT
   const index = folderPath.lastIndexOf('/')

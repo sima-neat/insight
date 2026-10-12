@@ -1,4 +1,4 @@
-import { MEDIA_ROOT, breadcrumbs, listFolder, parentPath, searchFolder, streamableOnly } from './mediaTree.js'
+import { breadcrumbs, listFolder, playableCount, searchFolder, streamableOnly } from './mediaTree.js'
 
 function FolderIcon() {
   return (
@@ -26,7 +26,7 @@ function plural(count, word, pluralForm = `${word}s`) {
 //   idPrefix        test-id prefix so the two instances can be told apart
 //   showUnsupported list files Insight cannot stream, greyed and tagged, so they can still be
 //                   previewed or deleted; off by default, because the assign dialog must not
-//                   offer them
+//                   offer them. Without them, a folder with nothing streamable inside is greyed.
 export default function FolderBrowser({
   tree, folder, onNavigate, filter, onFilterChange, selectedPath, onSelect,
   renderFileLead, fileRowClass, idPrefix = 'media', showUnsupported = false,
@@ -34,13 +34,14 @@ export default function FolderBrowser({
   const crumbs = breadcrumbs(folder)
   const query = (filter || '').trim()
   const listing = listFolder(tree, folder)
+  const folders = listing.folders
   const visibleFiles = showUnsupported ? listing.files : streamableOnly(listing.files)
   const found = query ? searchFolder(tree, folder, query) : []
   const matches = showUnsupported ? found : streamableOnly(found)
   const folderLabel = folder ? folder.split('/').pop() : 'Media Root'
   const countText = query
     ? `${plural(matches.length, 'match', 'matches')} in ${folderLabel}`
-    : `${plural(listing.folders.length, 'folder')} · ${plural(visibleFiles.length, 'file')}`
+    : plural(playableCount(tree, folder), 'video')
 
   function fileRow(item, label) {
     const unsupported = item.streamable === false
@@ -81,12 +82,8 @@ export default function FolderBrowser({
             )
           })}
         </nav>
-        <div className="folder-nav-actions">
-          <button type="button" className="btn-ghost" onClick={() => onNavigate(parentPath(folder))} disabled={!folder} aria-label="Back to parent folder">← Back</button>
-          <button type="button" className="btn-ghost" onClick={() => onNavigate(MEDIA_ROOT)} disabled={!folder} aria-label="Go to Media Root">⌂ Media Root</button>
-        </div>
       </div>
-      <p className="meta-count" data-testid={`${idPrefix}-count`}>{countText}</p>
+      <p className="meta-count" data-testid={`${idPrefix}-count`} title={query ? undefined : `Streamable videos in ${folderLabel} and its subfolders`}>{countText}</p>
       <div className="media-toolbar">
         <input
           className="search-input"
@@ -99,23 +96,25 @@ export default function FolderBrowser({
       <div className="media-list">
         {query && matches.map((item) => fileRow(item, item.relative))}
         {query && matches.length === 0 && <p className="empty">No files match the filter.</p>}
-        {!query && listing.folders.map((item) => (
+        {!query && folders.map((item) => (
           <button
             type="button"
             key={item.path}
-            className="media-row folder-row"
+            className={!showUnsupported && item.count === 0 ? 'media-row folder-row unsupported' : 'media-row folder-row'}
+            title={!showUnsupported && item.count === 0 ? 'No video in this folder can be streamed' : undefined}
             onClick={() => onNavigate(item.path)}
             data-testid={`${idPrefix}-folder`}
             data-path={item.path}
+            data-streamable={item.count > 0 ? 'true' : 'false'}
             aria-label={`Open folder ${item.name}`}
           >
             <FolderIcon />
             <span className="media-name">{item.name}</span>
-            <span className="folder-count" title={`${plural(item.count, 'streamable file')} inside`}>{item.count}</span>
+            <span className="folder-count" title={`${plural(item.count, 'streamable video')} in ${item.name} and its subfolders`}>{item.count}</span>
           </button>
         ))}
         {!query && visibleFiles.map((item) => fileRow(item, item.name))}
-        {!query && listing.folders.length === 0 && visibleFiles.length === 0 && (
+        {!query && folders.length === 0 && visibleFiles.length === 0 && (
           <p className="empty" data-testid={`${idPrefix}-empty`}>This folder is empty.</p>
         )}
         {!query && !showUnsupported && listing.hidden > 0 && (
