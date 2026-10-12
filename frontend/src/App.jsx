@@ -4,7 +4,7 @@ import {
   previewSrc, protocolLabel, pullChipText, pullSourceText, pullStatusClass, pullStatusLabel,
   readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
-import { allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import { allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, renditionMayHaveChanged, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
 import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
@@ -1028,17 +1028,24 @@ export default function App() {
     const data = await fetchJson('/api/mediasrc')
     if (!isLatest()) return
     const filled = Array.from({ length: SOURCE_COUNT }, (_, i) => data.find((x) => x.index === i + 1) || { index: i + 1, file: '', state: 'stopped', transport: 'rtsp', codec: 'h264', type: 'file', allowed_transports: ['rtsp'], urls: {}, readers: [] })
+    const startedAtCustomFps = renditionMayHaveChanged(sourcesRef.current, filled)
     setSources(filled)
+    if (startedAtCustomFps) await loadRenditionUsage()
+  }
+
+  // The usage route stats every rendition on disk, so it is asked on load, when the Clear
+  // renditions dialog opens, after a clear or delete, and after a start that may have encoded one.
+  async function loadRenditionUsage() {
     try {
-      await loadRenditionUsage()
+      setRenditionUsage(await fetchJson('/api/mediasrc/renditions'))
     } catch {
-      // A failed usage refresh must never break source loading.
+      // A failed usage refresh must never break the action that asked for it.
     }
   }
 
-  async function loadRenditionUsage() {
-    const data = await fetchJson('/api/mediasrc/renditions')
-    setRenditionUsage(data)
+  function openClearRenditions() {
+    setClearRenditionsOpen(true)
+    loadRenditionUsage()
   }
 
   async function loadViewerUrl() {
@@ -1103,7 +1110,7 @@ export default function App() {
   }, [mediaFolder])
 
   useEffect(() => {
-    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
+    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), loadDevkitShellInfo(), loadRenditionUsage()]).catch((e) => setError(e.message))
   }, [])
 
   useEffect(() => {
@@ -1730,7 +1737,8 @@ export default function App() {
       }
       setDeleteConfirmOpen(false)
       setSelectedMediaPaths([])
-      await Promise.all([loadMedia(true), loadSources()])
+      // Deleting a file deletes its renditions too.
+      await Promise.all([loadMedia(true), loadSources(), loadRenditionUsage()])
       if (failed.length) {
         setError(failed[0])
         setUploadStatus(`Removed ${paths.length - failed.length}/${paths.length} media file(s).`)
@@ -2433,7 +2441,7 @@ export default function App() {
     try {
       const data = await fetchJson('/api/mediasrc/renditions/clear', { method: 'POST' })
       setUploadStatus(`Removed ${data.removed} rendition(s), freed ${formatBytes(data.freed_bytes)}.` + (data.kept.length ? ` ${data.kept.length} kept: in use by a playing source.` : ''))
-      await loadSources()
+      await Promise.all([loadSources(), loadRenditionUsage()])
     } catch (e) {
       setError(e.message)
     } finally {
@@ -2852,7 +2860,7 @@ export default function App() {
                   <button className="btn-ghost" onClick={resetAllSources} disabled={anyWebcamBusy} title={bulkHoldTitle}>
                     Reset
                   </button>
-                  <button className="btn-ghost" onClick={() => setClearRenditionsOpen(true)} disabled={!renditionUsage.count} title="Delete cached FPS renditions; they are re-created on the next start">
+                  <button className="btn-ghost" onClick={openClearRenditions} disabled={!renditionUsage.count} title="Delete cached FPS renditions; they are re-created on the next start">
                     Clear renditions{renditionUsage.count ? ` (${renditionUsage.count} · ${formatBytes(renditionUsage.bytes)})` : ''}
                   </button>
                 </div>

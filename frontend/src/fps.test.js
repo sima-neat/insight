@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { FPS_MIN, FPS_STEP, allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import { FPS_MIN, FPS_STEP, allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, renditionMayHaveChanged, stepFps, withCommittedFps } from './fps.js'
 
 test('constants match the backend minimum', () => {
   assert.equal(FPS_MIN, 1)
@@ -65,4 +65,16 @@ test('allCommitsSucceeded is false as soon as one pending commit failed', () => 
   assert.equal(allCommitsSucceeded([]), true)
   assert.equal(allCommitsSucceeded([{ ok: true, fps: 15 }, { ok: true, fps: 20 }]), true)
   assert.equal(allCommitsSucceeded([{ ok: true, fps: 15 }, { ok: false }]), false)
+})
+
+test('renditionMayHaveChanged spots a slot that started playing at a custom FPS', () => {
+  // Owner review (O9): the 2 s poll asks for rendition usage only when a start may have made one.
+  const slot = (state, fps, file = 'clip.mp4') => ({ index: 1, file, fps, state })
+  assert.equal(renditionMayHaveChanged([slot('stopped', 15)], [slot('playing', 15)]), true)
+  assert.equal(renditionMayHaveChanged([slot('playing', 15)], [slot('playing', 20)]), true, 'restarted at another rate')
+  assert.equal(renditionMayHaveChanged([slot('playing', 15)], [slot('playing', 15, 'other.mp4')]), true, 'restarted with another file')
+  assert.equal(renditionMayHaveChanged([], [slot('playing', 15)]), true, 'first poll')
+  assert.equal(renditionMayHaveChanged([slot('playing', 15)], [slot('playing', 15)]), false, 'still playing')
+  assert.equal(renditionMayHaveChanged([slot('stopped', null)], [slot('playing', null)]), false, 'native rate makes no rendition')
+  assert.equal(renditionMayHaveChanged([slot('playing', 15)], [slot('stopped', 15)]), false, 'a stop keeps the rendition')
 })

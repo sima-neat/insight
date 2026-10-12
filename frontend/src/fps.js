@@ -41,6 +41,15 @@ export function needsRendition(src) {
   return Boolean(src) && src.fps != null && src.fps !== src.native_fps
 }
 
+// True when a slot in `next` plays at a custom FPS it did not play at in `prev`: a start that
+// may have encoded a rendition, from this page, another tab or the API. Rendition usage is
+// fetched only then, not on every sources poll.
+export function renditionMayHaveChanged(prev, next) {
+  const playing = (src) => (src.state === 'playing' && src.fps != null ? `${src.file}@${src.fps}` : null)
+  const before = new Map(prev.map((src) => [src.index, playing(src)]))
+  return next.some((src) => playing(src) != null && playing(src) !== before.get(src.index))
+}
+
 // The row Play should act on once a pending FPS commit has settled: `result` is undefined when
 // nothing was pending, `{ ok: true, fps }` when the commit landed, `{ ok: false }` when it failed
 // (Play then does nothing; the commit already reported its error).
