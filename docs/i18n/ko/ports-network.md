@@ -82,6 +82,21 @@ Neat 개발 환경에서 SDK 컨테이너가 포트를 재매핑할 수 있습�
 
 Insight UI의 시스템 정보를 사용하여 URL이 잘못되었다고 가정하기 전에 실제 노출된 포트를 확인하십시오.
 
+## 선택적 브라우저 연결 구성
+
+호스팅 환경에서는 페어링된 DevKit이 사용하는 주소와 외부 브라우저에 알리는 주소를 분리할 수 있습니다. Insight는 시작 시에만 적용되는 다음 두 개의 선택적 파일을 읽습니다.
+
+| 파일 | 용도 |
+| --- | --- |
+| `/home/docker/.insight-config/browser-ice-address` | vf 뷰어와 MediaMTX WHIP 엔드포인트가 모두 알리는, 브라우저에서 접근 가능한 단일 IPv4 주소입니다. |
+| `/home/docker/.insight-config/launch-url` | 신뢰할 수 있는 하나의 절대 HTTP 또는 HTTPS 시작 URL입니다. Insight는 이 URL의 오리진을 사용하여 뷰어, WHIP 및 HTTP MJPEG URL을 생성합니다. |
+
+`browser-ice-address`가 없으면 Insight는 기존 `CONTAINER_HOST_IP` 동작을 유지합니다. `launch-url`이 없으면 생성된 브라우저 URL은 계속 요청 호스트와 SDK 포트 맵을 사용합니다. 따라서 두 파일은 호스팅 환경 동작을 독립적으로 활성화하며 일반적인 로컬 또는 DevKit 설치에는 영향을 주지 않습니다.
+
+`browser-ice-address`는 vf 또는 MediaMTX가 시작되기 전에 검증됩니다. 비어 있거나 잘못된 브라우저 주소가 있으면 접근할 수 없는 주소를 조용히 알리는 대신 Insight가 준비 상태가 되지 않습니다. `launch-url`은 권고 설정입니다. Insight는 경로, 쿼리 또는 프래그먼트가 포함된 ASCII 호스트 이름의 전체 URL을 허용하지만 HTTP(S) 오리진만 사용합니다. 잘못된 시작 URL은 경고를 기록하고 기존 요청 호스트/포트 맵 URL 생성을 유지합니다. 파일을 원자적으로 교체하고 `insight-admin restart`를 실행한 다음 `/api/health`를 확인하여 새 프로세스에 주소와 공개 오리진이 적용되었는지 확인하십시오.
+
+브라우저 ICE 주소는 로컬 네트워크 인터페이스에 할당될 필요가 없습니다. 퍼블릭 클라우드 IPv4 주소는 일반적으로 1:1 NAT를 통해 호스트에 도달합니다. 그래도 WebRTC 및 `webrtcWhipIce` UDP 포트는 게시되어야 하며 주변 네트워크 정책에서 허용되어야 합니다.
+
 ## 포트 맵을 사용하여 애플리케이션을 구성합니다.
 
 애플리케이션 위치를 기준으로 기본 컨테이너 포트 또는 SDK 호스트에서 노출된 포트를 사용할지 결정합니다.
