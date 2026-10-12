@@ -1,14 +1,13 @@
-const TIER_RANK = { verified: 0, advertised: 1, unsupported: 2 }
-
+// Every camera mode is Available (the board's camera overlays support the sensor, the ISP outputs the size,
+// and the format is NV12) or Unsupported. A camera or format is Available when any of its modes is.
 const TIERS = {
-  verified: { label: 'Verified with Core', short: 'verified', tone: 'ok' },
-  advertised: { label: 'Advertised, unverified', short: 'advertised', tone: 'warn' },
-  unsupported: { label: 'Not supported by Core CameraInput', short: 'unsupported', tone: 'periph-danger' }
+  available: { label: 'Available', tone: 'ok' },
+  unsupported: { label: 'Unsupported', tone: 'periph-danger' }
 }
 
 const CONNECTIONS = [
-  { id: 'mipi', label: 'MIPI (libcamera)' },
-  { id: 'usb', label: 'USB (V4L2)' }
+  { id: 'mipi', label: 'MIPI' },
+  { id: 'usb', label: 'USB' }
 ]
 
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
@@ -50,8 +49,21 @@ const USB_FIELDS = [
 
 export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
 
+function tierOf(tier) {
+  return tier === 'available' ? 'available' : 'unsupported'
+}
+
 export function tierInfo(tier) {
-  return TIERS[tier] || { label: 'Support unknown', short: 'unknown', tone: '' }
+  return TIERS[tierOf(tier)]
+}
+
+// The camera's own pill. Its availability pill already reads "Available" for a camera no process holds,
+// so an Available camera gets no second "Available"; its mode menus carry that state.
+// Every detected camera is, by being listed, connected: the pill says so in the one state vocabulary.
+export const CONNECTED_PILL = { label: 'Connected', tone: '' }
+
+export function cameraTierPill(camera) {
+  return tierOf(camera?.support?.tier) === 'available' ? TIERS.available : TIERS.unsupported
 }
 
 export function severityInfo(severity) {
@@ -89,16 +101,6 @@ export function boardIndicator(board) {
     ? 'This board'
     : `${target.source === 'sdk-env' ? 'DevKit' : 'Board'}: ${target.host}`
   return { label, state, title: `${target.label} — ${state.label}. Open board settings.` }
-}
-
-export function availabilityInfo(availability) {
-  const reason = availability?.reason || ''
-  if (availability?.state === 'available') return { label: 'Available', tone: 'ok', reason }
-  if (availability?.state === 'in_use') {
-    const users = (availability.users || []).map((u) => `${u.command || 'unknown process'} (pid ${u.pid})`)
-    return { label: users.length ? `In use by ${users.join(', ')}` : 'In use', tone: 'warn', reason }
-  }
-  return { label: 'Availability unknown', tone: '', reason }
 }
 
 export function defaultTargetText(defaults) {
@@ -186,7 +188,8 @@ export function cameraDeviceId(camera) {
 }
 
 export function cameraSubtitle(camera) {
-  const deviceId = cameraDeviceId(camera)
+  // A USB camera's kernel path is listed under Device details, not under its name.
+  const deviceId = camera?.connection === 'usb' ? '' : cameraDeviceId(camera)
   // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
@@ -209,7 +212,7 @@ export function deviceRows(camera) {
 }
 
 function rank(tier) {
-  return TIER_RANK[tier] ?? 3
+  return tierOf(tier) === 'available' ? 0 : 1
 }
 
 function best(list, tierOf) {
@@ -220,8 +223,9 @@ function usableSizes(format) {
   return (format?.sizes || []).filter((size) => size.fps?.length)
 }
 
+// Unsupported modes stay in the menus, labelled; only a format without a size and rate cannot be chosen.
 function isSelectable(format) {
-  return Boolean(format?.exportable && usableSizes(format).length)
+  return usableSizes(format).length > 0
 }
 
 function sizeTier(size) {
@@ -254,9 +258,21 @@ export function fpsLabel(value) {
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
 }
 
-export function modeLabel(selection) {
+// A rate the camera runs at, for display: a whole number when within 1% of one (66.18 reads "66 fps"),
+// else fpsLabel. Empty when the rate is unknown.
+export function rateLabel(value) {
+  const n = Number(value)
+  if (value === null || value === undefined || value === '' || !Number.isFinite(n) || n <= 0) return ''
+  const whole = Math.round(n)
+  return `${whole > 0 && Math.abs(n - whole) <= n * 0.01 ? whole : fpsLabel(n)} fps`
+}
+
+// Only a USB camera's rate is named: its driver advertises a rate per mode. A MIPI mode's rate is not
+// known until the camera runs in it, so it is left out rather than shown wrong.
+export function modeLabel(selection, camera) {
   if (!selection) return ''
-  return `${selection.format} ${sizeLabel(selection.width, selection.height)} @ ${fpsLabel(selection.fps)} fps`
+  const mode = `${selection.format} ${sizeLabel(selection.width, selection.height)}`
+  return camera?.connection === 'usb' ? `${mode} @ ${fpsLabel(selection.fps)} fps` : mode
 }
 
 export function formatRangeLabel(range) {
@@ -273,98 +289,64 @@ export function formatOptions(camera) {
   return (camera?.formats || []).map((f) => {
     const selectable = isSelectable(f)
     const range = formatRangeLabel(f.range)
-    const reason = f.exportable ? 'no sizes with a frame rate were reported for it.' : (f.support?.reason || 'it cannot be used.')
     return {
       value: f.format,
       label: f.label || f.format,
-      tier: selectable ? f.support?.tier || '' : 'unsupported',
+      tier: selectable ? tierOf(f.support?.tier) : 'unsupported',
       disabled: !selectable,
-      reason: selectable ? '' : `${reason}${range ? ` Reported range: ${range}.` : ''}`,
+      reason: selectable ? '' : `no sizes with a frame rate were reported for it.${range ? ` Reported range: ${range}.` : ''}`,
       range: f.range || null
     }
   })
 }
 
+// The rate the page uses for a size (resolveSelection's pick): its highest Available rate, else its highest.
+function sizeRate(size) {
+  return best(size?.fps, (f) => f.tier)?.value ?? null
+}
+
+// A USB resolution names the rate the camera runs at in that mode ("1280×720 · 30 fps"); a MIPI one does not
+// (see modeLabel).
 export function sizeOptions(camera, format) {
-  return usableSizes(findFormat(camera, format)).map((s) => ({
-    value: sizeKey(s.width, s.height),
-    width: s.width,
-    height: s.height,
-    label: sizeLabel(s.width, s.height),
-    tier: sizeTier(s)
-  }))
-}
-
-export function fpsOptions(camera, format, width, height) {
-  const size = findSize(findFormat(camera, format), width, height)
-  return (size?.fps || []).map((f) => ({
-    value: String(f.value),
-    label: `${fpsLabel(f.value)} fps`,
-    tier: f.tier
-  }))
-}
-
-// The formats POST /api/peripherals/cameras/export returns, by connection, with its labels.
-const MIPI_EXPORTS = [
-  { id: 'python', label: 'Python (pyneat)' },
-  { id: 'cpp', label: 'C++ (Neat)' },
-  { id: 'json', label: 'JSON' }
-]
-const USB_EXPORTS = [
-  { id: 'yaml', label: 'YAML descriptor' },
-  { id: 'json', label: 'JSON descriptor' }
-]
-
-export function exportChoices(camera) {
-  return camera?.connection === 'usb' ? USB_EXPORTS : MIPI_EXPORTS
-}
-
-// Why the export refuses the selected mode, or '' when it accepts it: a USB mode always exports as a
-// descriptor; a MIPI mode needs a frame rate Neat Core's rules verified.
-export function exportBlockReason(camera, selection) {
-  if (!selection || camera?.connection === 'usb') return ''
-  const rate = findFps(findSize(findFormat(camera, selection.format), selection.width, selection.height), selection.fps)
-  if (rate?.tier === 'verified') return ''
-  return rate?.reason || "Neat Core's support rules do not accept this mode."
+  const usb = camera?.connection === 'usb'
+  return usableSizes(findFormat(camera, format)).map((s) => {
+    const rate = usb ? rateLabel(sizeRate(s)) : ''
+    return {
+      value: sizeKey(s.width, s.height),
+      width: s.width,
+      height: s.height,
+      label: rate ? `${sizeLabel(s.width, s.height)} · ${rate}` : sizeLabel(s.width, s.height),
+      tier: sizeTier(s)
+    }
+  })
 }
 
 // A menu's entries carry no tier suffix, which truncated in a narrow select. The tier is a
 // pill beside the menu for the chosen entry, and the entries are grouped under their tier.
-const TIER_PILLS = {
-  verified: { label: 'Verified', tone: 'ok' },
-  advertised: { label: 'Advertised', tone: 'warn' },
-  unsupported: { label: 'Not usable', tone: 'periph-danger' }
-}
 const TIER_GROUPS = [
-  { id: 'verified', label: 'Verified with Core' },
-  { id: 'advertised', label: 'Advertised by libcamera' },
-  { id: 'unsupported', label: 'Not usable' },
-  { id: '', label: 'Support unknown' }
+  { id: 'available', label: 'Available' },
+  { id: 'unsupported', label: 'Unsupported' }
 ]
 
 export function optionTier(options, value) {
   const option = (options || []).find((o) => o.value === String(value))
-  return option ? TIER_PILLS[option.tier] || null : null
+  return option ? tierInfo(option.tier) : null
 }
 
 export function groupOptions(options) {
   return TIER_GROUPS
-    .map((group) => ({ ...group, options: (options || []).filter((o) => (o.tier || '') === group.id) }))
+    .map((group) => ({ ...group, options: (options || []).filter((o) => tierOf(o.tier) === group.id) }))
     .filter((group) => group.options.length)
 }
 
 // One visible explanation line per camera state, chosen by priority, so the
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
-  const availability = availabilityInfo(camera?.availability)
-  const tier = camera?.support?.tier
-  if (camera?.availability?.state === 'in_use') {
-    return `${availability.label}. Stop that process on the board before an application can open this camera.`
-  }
-  if (tier && tier !== 'verified') return camera.support.reason || `${tierInfo(tier).label}.`
-  if (camera?.availability?.state === 'unknown' && availability.reason) return `Availability unknown: ${availability.reason}`
-  // A working camera gets no sentence at all. Every mode menu already labels each entry
-  // "verified" or "advertised", so a paragraph repeating that distinction only adds text.
+  // An Unsupported camera's panel carries no pill, so it says why the camera cannot be used.
+  if (camera?.support && tierOf(camera.support.tier) !== 'available') return camera.support.reason || 'Unsupported.'
+  // An Available camera gets no sentence at all: every mode menu already labels each entry
+  // Available or Unsupported, so a paragraph repeating that only adds text. Whether another
+  // program holds the camera is found out, and said, when a preview tries to start.
   return ''
 }
 
@@ -405,6 +387,27 @@ export function resolveCameraId(snapshot, previousId) {
 export function isSnapshotStale(board, snapshot) {
   if (!board || !snapshot?.scanned_at) return false
   return Number(board.generation) !== Number(snapshot.generation)
+}
+
+// The camera setup Sentinel read from the board's device tree (`camera_setup` in a snapshot), for the
+// board it scanned: null before a scan, after the selected board changed, or from an older Sentinel.
+export function boardCameraSetup(board, snapshot) {
+  if (!board || !snapshot?.scanned_at || Number(board.generation) !== Number(snapshot.generation)) return null
+  return snapshot.camera_setup || null
+}
+
+// "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo" reads as "modalix-som-waveshare-ARDU-IMX477-1CAM".
+export function overlayName(file) {
+  return String(file || '').split('/').pop().replace(/\.dtbo$/i, '')
+}
+
+// Board fact rows for the camera setup; each row is omitted when Sentinel did not report it.
+export function cameraSetupRows(setup) {
+  const rows = []
+  if (setup?.model) rows.push(['Model', String(setup.model)])
+  const overlays = (setup?.overlays || []).map(overlayName).filter(Boolean)
+  if (overlays.length) rows.push(['Camera setup', overlays.join(', ')])
+  return rows
 }
 
 export function changeSummary(changes) {

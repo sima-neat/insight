@@ -3602,6 +3602,7 @@ button:disabled {
   background: #f1fbfa;
 }
 
+/* An Unsupported camera: listed, with its reason, but not openable. */
 .periph-camera-row:focus-visible,
 .periph-code:focus-visible,
 .periph-identity summary:focus-visible {
@@ -3684,19 +3685,11 @@ button:disabled {
 }
 
 .periph-mode-fields {
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .periph-modes .hint {
   margin: 8px 0 0;
-}
-
-.periph-copy {
-  margin-top: 8px;
-}
-
-.periph-copy select {
-  width: auto;
 }
 
 @media (max-width: 980px) {
@@ -3908,10 +3901,6 @@ button:disabled {
   margin: 8px 0 0;
   font-size: 13px;
   color: var(--ink-soft);
-}
-
-.periph-summary-line .periph-links {
-  color: inherit;
 }
 
 .periph-blocked-disclosure {

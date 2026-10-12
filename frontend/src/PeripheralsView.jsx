@@ -4,8 +4,9 @@ import KindIcon from './peripherals/KindIcon.jsx'
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
-  availabilityInfo,
+  cameraTierPill,
   changeSummary,
+  CONNECTED_PILL,
   countLabel,
   deviceTabs,
   groupCameras,
@@ -17,8 +18,7 @@ import {
   resolveSelection,
   sameSelection,
   severityInfo,
-  sortIssues,
-  tierInfo
+  sortIssues
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
@@ -149,8 +149,7 @@ function CameraList({ groups, selectedId, onSelect }) {
         <div key={group.id} className="periph-group" role="group" aria-labelledby={`periph-group-${group.id}`}>
           <div id={`periph-group-${group.id}`} className="periph-group-title" role="presentation">{group.label}</div>
           {group.items.map((camera) => {
-            const availability = availabilityInfo(camera.availability)
-            const tier = tierInfo(camera.support?.tier)
+            const tier = cameraTierPill(camera)
             return (
               <div
                 key={camera.id}
@@ -166,7 +165,7 @@ function CameraList({ groups, selectedId, onSelect }) {
                     leave this row taller than its neighbours. */}
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
                 <span className="periph-pills">
-                  <Pill tone={availability.tone}>{availability.label}</Pill>
+                  <Pill tone={CONNECTED_PILL.tone}>{CONNECTED_PILL.label}</Pill>
                   <Pill tone={tier.tone}>{tier.label}</Pill>
                 </span>
               </div>
@@ -209,7 +208,7 @@ export default function PeripheralsView({
     return resolved ? { id: camera.id, ...resolved } : null
   }, [camera, wanted])
   const selectionNotice = selection && wanted?.id === selection.id && !sameSelection(wanted, selection)
-    ? `${modeLabel(wanted)} is no longer offered; showing ${modeLabel(selection)}.`
+    ? `${modeLabel(wanted, camera)} is no longer offered; showing ${modeLabel(selection, camera)}.`
     : ''
   const target = board?.target || null
   const stale = isSnapshotStale(board, snapshot)

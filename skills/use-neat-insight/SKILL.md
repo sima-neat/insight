@@ -79,7 +79,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
-- Peripherals never captures video: SiMa Sentinel on the board discovers the cameras (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog and checks which processes hold each camera. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
+- Peripherals never captures video: SiMa Sentinel on the board discovers the cameras (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
 - Board-facing features (Peripherals and Stats) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
@@ -97,7 +97,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health` | Return service identity, status, and UTC timestamp for smoke tests and readiness checks. |
+| `GET` | `/api/health` | Return service identity, status, UTC timestamp, and the startup-scoped browser ICE address/public origin applied by Insight. |
 | `GET` | `/api/metrics` | Return a point-in-time system metrics payload with CPU, memory, disk, temperature, MLA, remote, and `pipeline_status` compatibility fields. |
 | `GET` | `/api/neat-metrics` | Open a server-sent events stream of JSON metrics events from the local metrics broker. |
 | `GET` | `/api/ingest/stats` | Return active vf UDP/RTP ingest streams and compact transport, media, forwarding, and WebRTC stats. |
@@ -409,6 +409,8 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 
 Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
 
+Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both vf and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
+
 ## Board And Peripherals
 
 | Method | Path | Purpose |
@@ -418,10 +420,9 @@ Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge netw
 | `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
 | `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
 | `GET` | `/api/peripherals` | Last camera scan for the selected board, or an empty snapshot with `scanned_at: null`. |
-| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras, use the catalog of the scan Sentinel runs for that refresh, check which processes hold each camera, and ask PyNeat which modes Core `CameraInput` supports. |
-| `POST` | `/api/peripherals/cameras/export` | JSON `{"id", "format", "width", "height", "fps"}`, optionally with `"generation"` and `"scan_id"` from `GET /api/peripherals` to refuse a stale selection (409); return Python, C++, and JSON input configurations without `capture_buffer_count` (Insight does not read the board's `libcamerasrc`, so there is no Apps `config.yaml`). |
+| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras, use the catalog of the scan Sentinel runs for that refresh, and mark each mode Available or Unsupported. |
 
-Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` is `verified` when Neat Core on the board (`pyneat.peripherals.list()`) accepts a mode, `unsupported` with Core's `reason` when it rejects it, and `""` (unknown) when PyNeat is missing or too old to classify camera modes; USB cameras are `unsupported` by `CameraInput` (sima-neat/core#838). Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503; also Sentinel's 429 when 8 refreshes already wait, with a retry hint), `peripheral_version` or `peripheral_response` (502), and `timeout` (504) when Sentinel's refresh scan does not finish within 10 s or the board does not answer. An export whose snapshot predates a target change returns 409 `stale_snapshot`; refresh first.
+Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. `support.tier` is `available` for a mode when Sentinel's `board` block lists the camera's sensor (its `configured_cameras` entry for the camera id) among the sensors the board's camera overlays support, the mode is an ISP output size (`isp_output`), and its format is NV12; otherwise it is `unsupported` with a `reason`. NV12 is a fixed fact about Neat's `CameraInput`, not queried from the board. USB cameras are always `unsupported`, and without Sentinel's `board` block every mode is. A camera or format is `available` when any of its modes is; `exportable` and `default_selection` follow the Available modes. Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503; also Sentinel's 429 when 8 refreshes already wait, with a retry hint), `peripheral_version` or `peripheral_response` (502), and `timeout` (504) when Sentinel's refresh scan does not finish within 10 s or the board does not answer. A request answered after the selected board changed returns 409 `stale_snapshot`; refresh first.
 
 ## Sentinel (Stats)
 
