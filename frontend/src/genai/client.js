@@ -167,6 +167,9 @@ export async function downloadModel({ repoId, signal, onProgress }) {
     }
   })
   if (last && last.state === 'error') throw new GenaiError(last.message || 'Download failed')
+  // A stream that ends without "done" (the Studio restarted, the connection
+  // dropped) is not a finished download.
+  if (!last || last.state !== 'done') throw new GenaiError('The download stopped before it finished.')
   return last
 }
 

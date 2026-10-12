@@ -20,7 +20,7 @@ import {
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
 import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
-import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
+import { REPLY_CUT_OFF, downloadModel, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
@@ -87,6 +87,18 @@ test('backend state: no board selected needs no extra button, the settings open 
 function respondWith(status, body, contentType = 'text/plain') {
   globalThis.fetch = async () => new Response(body, { status, headers: { 'Content-Type': contentType } })
 }
+
+test('a download is finished only when the board says done', async () => {
+  const realFetch = globalThis.fetch
+  try {
+    respondWith(200, '{"state":"downloading","pct":40}\n{"state":"done"}\n', 'application/x-ndjson')
+    assert.equal((await downloadModel({ repoId: 'a/b', onProgress: () => {} })).state, 'done')
+    respondWith(200, '{"state":"downloading","pct":40}\n', 'application/x-ndjson')
+    await assert.rejects(downloadModel({ repoId: 'a/b', onProgress: () => {} }), /stopped before it finished/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
 
 test('a health answer that is not GenAI Studio JSON is flagged instead of shown raw', async () => {
   const realFetch = globalThis.fetch
