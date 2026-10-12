@@ -1,40 +1,17 @@
 name: Tests
 
+# The one test job: pull requests (forks included) run it here, and Vulcan CI calls it on
+# every push and gates its build and publication on it.
 on:
   pull_request:
-  push:
-    branches:
-      - main
-      - develop
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  viewer-tests:
-    name: Viewer tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Run viewer tests
-        working-directory: frontend
-        run: npm run test:viewer
-
-  python-tests:
-    name: Python tests
+  test:
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,11 +22,49 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install package
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install FFmpeg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # The MediaMTX integration tests run against the release build.sh bundles.
+      - name: Download MediaMTX
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^MTX_VERSION="\(.*\)"$/\1/p' build.sh)
+          mkdir -p "$RUNNER_TEMP/mediamtx"
+          curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/v${version}/mediamtx_v${version}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/mediamtx" mediamtx
+          echo "NEAT_INSIGHT_MEDIAMTX=$RUNNER_TEMP/mediamtx/mediamtx" >> "$GITHUB_ENV"
+
+      - name: Install Insight
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Run unit tests
+      - name: Python tests
+        env:
+          # ffmpeg is installed above; a missing one must fail the FPS rendition tests, not skip them.
+          NEAT_INSIGHT_REQUIRE_FFMPEG_TESTS: "1"
         run: python -m unittest discover -s tests -v
+
+      # The frontend steps also run after a Python failure, so one run reports
+      # every failing test; the job still fails.
+      - name: Install frontend dependencies
+        if: ${{ !cancelled() }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend tests
+        if: ${{ !cancelled() }}
+        working-directory: frontend
+        run: npm test

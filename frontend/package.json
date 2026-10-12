@@ -12,7 +12,7 @@
     "test:peripherals": "node --test src/peripherals/*.test.js",
     "test:stats": "node --test src/stats/*.test.js",
     "test:streaming": "node --test src/streaming/*.test.js",
-    "test": "node --test src/*/*.test.js",
+    "test": "node --test src/*.test.js src/*/*.test.js",
     "test:genai": "node --test src/genai/*.test.js",
     "test:e2e": "playwright test --config e2e/playwright.config.js",
     "preview": "vite preview"

@@ -26,54 +26,7 @@ env:
 jobs:
   test:
     name: Unit tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install FFmpeg
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Install Insight
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-
-      - name: Python tests
-        run: python -m unittest discover -s tests -v
-
-      # The frontend steps also run after a Python failure, so one run reports
-      # every failing test; the job still fails.
-      - name: Install frontend dependencies
-        if: ${{ !cancelled() }}
-        working-directory: frontend
-        run: npm ci
-
-      - name: Frontend tests
-        if: ${{ !cancelled() }}
-        working-directory: frontend
-        run: npm test
-
-      - name: Run FPS rendition tests
-        if: ${{ !cancelled() }}
-        run: scripts/test-fps-renditions.sh
+    uses: ./.github/workflows/tests.yml
 
   build:
     name: Build ${{ matrix.target_platform }}
