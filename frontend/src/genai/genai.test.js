@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -418,3 +419,37 @@ test('SiMaSentry apps open on the loaded model through the relay', () => {
   assert.equal(url.searchParams.get('model'), 'Qwen3-VL-4B-Instruct-GPTQ-a16w4')
   assert.equal(new URL(solutionUrl('safety', null), 'http://insight').searchParams.has('model'), false)
 })
+
+// The SiMaSentry apps are plain scripts, each with its own copy of the check;
+// this runs each shipped copy against the same cases.
+function solutionsBaseUrlCheck(mode, origin) {
+  const source = readFileSync(new URL(`../../public/genai-solutions/${mode}/app.js`, import.meta.url), 'utf8')
+  const relay = source.match(/const RELAY_BASE_URL = ["'][^"']+["'];/)
+  const check = source.match(/function safeBaseUrl\(value\) \{[\s\S]*?\n {0,2}\}\n/)
+  assert.ok(relay && check, `${mode}/app.js has no safeBaseUrl`)
+  return new Function('window', `${relay[0]}\n${check[0]}\nreturn safeBaseUrl`)({ location: { origin } })
+}
+
+for (const mode of ['health', 'safety', 'security']) {
+  test(`the ${mode} app talks only to Insight's relay, whatever base_url a link or storage holds`, () => {
+    const safe = solutionsBaseUrlCheck(mode, 'https://insight.local:8443')
+    const relay = '/api/genai/v1/chat/completions'
+    assert.equal(safe(relay), relay)
+    assert.equal(safe('https://insight.local:8443/api/genai/v1/chat/completions'), relay)
+    assert.equal(safe('  /api/genai/v1/chat/completions  '), relay)
+    for (const bad of [
+      'https://evil.example/api/genai/v1/chat/completions',
+      'http://insight.local:8443/api/genai/v1/chat/completions',
+      '//evil.example/api/genai/v1/chat/completions',
+      'http://localhost:11434/v1/chat/completions',
+      '/api/other/v1/chat/completions',
+      '/api/genai',
+      'javascript:alert(1)',
+      '',
+      null,
+      undefined
+    ]) {
+      assert.equal(safe(bad), relay, String(bad))
+    }
+  })
+}

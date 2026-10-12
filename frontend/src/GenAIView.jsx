@@ -78,6 +78,13 @@ async function imageToDataUrl(blob, maxSide = 896) {
   return canvas.toDataURL('image/jpeg', 0.9)
 }
 
+// Model output is untrusted: an image in it would be fetched from wherever the
+// model points (so it is shown as its alt text), and links open outside Insight.
+const MARKDOWN_COMPONENTS = {
+  img: ({ alt }) => (alt ? <span>{alt}</span> : null),
+  a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />
+}
+
 function Icon({ d }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" className="genai-icon">
@@ -154,6 +161,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [lastError, setLastError] = useState(null)
   const [loadProgress, setLoadProgress] = useState(null)
   const [voices, setVoices] = useState(null)
+  const voicesLoading = useRef(false)
 
   const [messages, setMessages] = useState([])
   // Read by callbacks that outlive a render (a recording that finishes later).
@@ -165,6 +173,13 @@ export default function GenAIView({ onError, onStatus }) {
   const [tutorialStep, setTutorialStep] = useState(null)
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
+  // Set synchronously, so two sends before the next render can't both stream.
+  const streamingRef = useRef(false)
+  // Bumped by New chat: a reply still finishing from the old chat is dropped.
+  const chatGeneration = useRef(0)
+  // The latest sendMessage, for a recording that finishes renders later.
+  const sendRef = useRef(null)
+  const mounted = useRef(false)
   const transcriptBox = useRef(null)
   const stickToBottom = useRef(true)
   const composer = useRef(null)
@@ -173,6 +188,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [cameraOpen, setCameraOpen] = useState(false)
   const videoRef = useRef(null)
   const cameraStream = useRef(null)
+  const cameraStarting = useRef(false)
 
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -181,6 +197,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [engine, setEngine] = useState('default')
   const [voice, setVoice] = useState('')
   const recorder = useRef(null)
+  const micStarting = useRef(false)
   const player = useRef(null)
   const speechAbort = useRef(null)
   const [speakingId, setSpeakingId] = useState(null)
@@ -235,10 +252,12 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }, [refresh])
 
+  // health changes on every poll, so a failed fetch is tried again on the next one.
   useEffect(() => {
-    if (!usable || voices) return
-    getJson('v1/audio/voices').then(setVoices).catch(() => {})
-  }, [usable, voices])
+    if (!usable || voices || voicesLoading.current) return
+    voicesLoading.current = true
+    getJson('v1/audio/voices').then(setVoices).catch(() => {}).finally(() => { voicesLoading.current = false })
+  }, [usable, voices, health])
 
   // Follow a streaming reply only while the reader is at the bottom; scrolling
   // up to reread stops following until they scroll back down.
@@ -257,12 +276,16 @@ export default function GenAIView({ onError, onStatus }) {
     if (box) stickToBottom.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40
   }
 
-  useEffect(() => () => {
-    chatAbort.current?.abort()
-    speechAbort.current?.abort()
-    player.current?.pause()
-    cameraStream.current?.getTracks().forEach((t) => t.stop())
-    recorder.current?.stream?.getTracks().forEach((t) => t.stop())
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      chatAbort.current?.abort()
+      speechAbort.current?.abort()
+      player.current?.pause()
+      cameraStream.current?.getTracks().forEach((t) => t.stop())
+      recorder.current?.stream?.getTracks().forEach((t) => t.stop())
+    }
   }, [])
 
   // --- settings ----------------------------------------------------------------
@@ -346,14 +369,15 @@ export default function GenAIView({ onError, onStatus }) {
 
   // Must run inside a click: the browser only lets an element play audio it
   // started during a user gesture.
+  // Call it only once the new reading will really start: it ends the current one.
   function unlockPlayer() {
+    // Ending it settles the piece it is playing and frees that audio, so no
+    // reading waits forever on the handlers detached below.
+    stopSpeaking()
     if (!player.current) player.current = new Audio()
     const audio = player.current
-    // Detach the last reading's handlers: pausing or replacing its audio must not
-    // end the reading that starts now (the same reply, read again, has the same id).
     audio.onended = null
     audio.onpause = null
-    audio.pause()
     audio.src = SILENT_WAV
     audio.play().catch(() => {})
     return audio
@@ -391,6 +415,13 @@ export default function GenAIView({ onError, onStatus }) {
     const rtfs = []
     let engineUsed = null
     let wake = null             // resolves the player loop's wait for audio
+    let settlePlaying = null    // ends the piece playing now
+    // Stopping the reading (Stop speaking, a new reading, leaving the tab) must
+    // also end the piece in flight, or its player loop never finishes.
+    signal.addEventListener('abort', () => {
+      settlePlaying?.()
+      wake?.()
+    })
 
     const isOver = () => finished && !pending.length && !ready.length && !synthesizing
     const end = () => {
@@ -412,12 +443,17 @@ export default function GenAIView({ onError, onStatus }) {
     function playOne({ blob }) {
       return new Promise((resolve) => {
         const url = URL.createObjectURL(blob)
+        let settled = false
         const settle = () => {
+          if (settled) return
+          settled = true
+          settlePlaying = null
           audio.onended = null
           audio.onpause = null
           URL.revokeObjectURL(url)
           resolve()
         }
+        settlePlaying = settle
         audio.src = url
         audio.onended = settle
         audio.onpause = settle
@@ -496,6 +532,8 @@ export default function GenAIView({ onError, onStatus }) {
         wake?.()
       },
       abort() {
+        // Already stopped: the player may be reading something else by now.
+        if (signal.aborted) return
         controller.abort()
         audio.pause()
         end()
@@ -504,7 +542,8 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   // Read aloud on a finished reply.
-  function speakText(text, id, audio = unlockPlayer(), t0 = performance.now()) {
+  function speakText(text, id) {
+    const t0 = performance.now()
     const pieces = speakablePieces(text)
     if (!pieces.length) return
     const support = voiceLanguageFor(text)
@@ -512,7 +551,7 @@ export default function GenAIView({ onError, onStatus }) {
       onStatus?.(`The board's voices can't read ${support.name} aloud yet.`)
       return
     }
-    const reading = startReading(id, audio, t0)
+    const reading = startReading(id, unlockPlayer(), t0)
     for (const piece of pieces) reading.add(piece)
     reading.finish()
   }
@@ -524,9 +563,13 @@ export default function GenAIView({ onError, onStatus }) {
     return content.map((part) => (part.type === 'text' ? { ...part, text: `/no_think ${part.text}` } : part))
   }
 
-  async function sendMessage(text = draft, { replyPlayer = readAloud ? unlockPlayer() : null, heard = null } = {}) {
+  // Returns whether the message was sent. replyPlayer: an already unlocked
+  // player (or null), when the click that asked was earlier than this call.
+  function sendMessage(text = draft, { replyPlayer, heard = null } = {}) {
     const prompt = text.trim()
-    if ((!prompt && !image) || !chatModel || streaming) return
+    if ((!prompt && !image) || !chatModel || streamingRef.current) return false
+    if (replyPlayer === undefined) replyPlayer = readAloud ? unlockPlayer() : null
+    const generation = chatGeneration.current
     const userText = prompt || 'Describe this image.'
     const userContent = image
       ? [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: image } }]
@@ -542,6 +585,7 @@ export default function GenAIView({ onError, onStatus }) {
     setDraft('')
     setImage(null)
     stickToBottom.current = true
+    streamingRef.current = true
     setStreaming(true)
     const controller = new AbortController()
     chatAbort.current = controller
@@ -561,34 +605,49 @@ export default function GenAIView({ onError, onStatus }) {
       }
       if (final) reading.finish()
     }
-    const update = (extra) => setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', id: replyId, content: reply, ...extra }])
-    try {
-      const stats = await streamChat({
-        model: chatModel.name,
-        messages: outgoing,
-        maxTokens: MAX_TOKENS,
-        signal: controller.signal,
-        onDelta: (piece) => {
-          if (tFirst === null) tFirst = performance.now()
-          reply += piece
-          update({ pending: true })
-          speakNew(false)
-        }
-      })
-      update({ metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
-      speakNew(true)
-    } catch (error) {
-      const stopped = error.name === 'AbortError'
-      // Stopping the reply stops its reading; a reply cut off by an error is
-      // still read up to where it stopped.
-      if (stopped) reading?.abort()
-      else speakNew(true)
-      update({ stopped, error: stopped ? null : error.message })
-      if (!stopped) fail(error.message === REPLY_CUT_OFF ? REPLY_CUT_OFF : `The chat model didn't answer: ${error.message}`)
-    } finally {
-      setStreaming(false)
-      chatAbort.current = null
+    const update = (extra) => {
+      if (chatGeneration.current !== generation) return
+      setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', id: replyId, content: reply, ...extra }])
     }
+    streamReply()
+    return true
+
+    async function streamReply() {
+      try {
+        const stats = await streamChat({
+          model: chatModel.name,
+          messages: outgoing,
+          maxTokens: MAX_TOKENS,
+          signal: controller.signal,
+          onDelta: (piece) => {
+            if (tFirst === null) tFirst = performance.now()
+            reply += piece
+            update({ pending: true })
+            speakNew(false)
+          }
+        })
+        update({ metrics: replyMetrics({ t0, tFirst, tEnd: performance.now(), stats }) })
+        speakNew(true)
+      } catch (error) {
+        const stopped = error.name === 'AbortError'
+        // Stopping the reply stops its reading; a reply cut off by an error is
+        // still read up to where it stopped.
+        if (stopped) reading?.abort()
+        else speakNew(true)
+        update({ stopped, error: stopped ? null : error.message })
+        if (!stopped) fail(error.message === REPLY_CUT_OFF ? REPLY_CUT_OFF : `The chat model didn't answer: ${error.message}`)
+      } finally {
+        streamingRef.current = false
+        setStreaming(false)
+        if (chatAbort.current === controller) chatAbort.current = null
+      }
+    }
+  }
+  sendRef.current = sendMessage
+
+  // Typed messages wait while a spoken one is being recorded or transcribed.
+  function sendTyped() {
+    if (!recording && !transcribing) sendMessage()
   }
 
   async function attachImage(file) {
@@ -601,8 +660,14 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   async function openCamera() {
+    if (cameraStream.current || cameraStarting.current) return
+    cameraStarting.current = true
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      if (!mounted.current) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
       cameraStream.current = stream
       setCameraOpen(true)
       requestAnimationFrame(() => {
@@ -610,6 +675,8 @@ export default function GenAIView({ onError, onStatus }) {
       })
     } catch (error) {
       onError?.(`The camera isn't available (${error.message}). Allow camera access for this page, then try again.`)
+    } finally {
+      cameraStarting.current = false
     }
   }
 
@@ -635,19 +702,28 @@ export default function GenAIView({ onError, onStatus }) {
   // --- speech input -----------------------------------------------------------
 
   async function toggleRecording() {
-    if (recording) {
+    if (recording || recorder.current?.state === 'recording') {
       recorder.current?.stop()
       return
     }
+    // A second click while the browser is still opening the microphone.
+    if (micStarting.current || transcribing) return
+    micStarting.current = true
     // Unlocked during this click, so a spoken question can be answered aloud.
     const replyPlayer = readAloud ? unlockPlayer() : null
+    let stream = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!mounted.current) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
       const chunks = []
       const rec = new MediaRecorder(stream)
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop())
+        if (!mounted.current) return
         setRecording(false)
         setTranscribing(true)
         try {
@@ -660,8 +736,8 @@ export default function GenAIView({ onError, onStatus }) {
           } else {
             spokenLanguage.current = result.tts_language || null
             const languageName = result.language ? (languageNames([result.language])[0] || result.language.charAt(0).toUpperCase() + result.language.slice(1)) : null
-            if (chatModel) sendMessage(heard, { replyPlayer, heard: heardMetrics({ ms: heardMs, language: languageName }) })
-            else setDraft(heard)
+            // The latest sendMessage: this one's model and image may be stale.
+            if (!sendRef.current(heard, { replyPlayer, heard: heardMetrics({ ms: heardMs, language: languageName }) })) setDraft(heard)
           }
         } catch (error) {
           fail(`Couldn't transcribe the recording: ${error.message}`)
@@ -673,7 +749,10 @@ export default function GenAIView({ onError, onStatus }) {
       rec.start()
       setRecording(true)
     } catch (error) {
+      stream?.getTracks().forEach((t) => t.stop())
       onError?.(`The microphone isn't available (${error.message}). Allow microphone access for this page, then try again.`)
+    } finally {
+      micStarting.current = false
     }
   }
 
@@ -699,6 +778,7 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   function newChat() {
+    chatGeneration.current += 1
     chatAbort.current?.abort()
     stopSpeaking()
     setSpeechError(null)
@@ -749,7 +829,7 @@ export default function GenAIView({ onError, onStatus }) {
           <p className="genai-tutorial-body">{step.body}</p>
           <div className="genai-actions">
             {step.action && (step.action !== 'camera' || (canChat && sees)) && (
-              <button type="button" className="btn-tonal" onClick={() => tryTutorialAction(step.action)}>Try it</button>
+              <button type="button" className="btn-tonal" disabled={step.action === 'camera' && cameraOpen} onClick={() => tryTutorialAction(step.action)}>Try it</button>
             )}
             <span className="genai-tutorial-spacer" />
             <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
@@ -770,7 +850,7 @@ export default function GenAIView({ onError, onStatus }) {
           <select
             value={chatModel ? chatModel.name : ''}
             onChange={(e) => chooseChatModel(e.target.value)}
-            disabled={!usable || chatModels(status).length === 0}
+            disabled={!usable || streaming || chatModels(status).length === 0}
             title={chatModel ? chatModel.name : ''}
           >
             {!chatModel && <option value="">{chatModels(status).length ? 'Choose a model to load' : 'No models on the board'}</option>}
@@ -967,7 +1047,7 @@ export default function GenAIView({ onError, onStatus }) {
                   Explain what an AI accelerator does
                 </button>
                 {sees && (
-                  <button type="button" className="btn-ghost genai-small" disabled={!canChat} onClick={openCamera}>
+                  <button type="button" className="btn-ghost genai-small" disabled={!canChat || cameraOpen} onClick={openCamera}>
                     What's in front of my camera?
                   </button>
                 )}
@@ -1005,7 +1085,7 @@ export default function GenAIView({ onError, onStatus }) {
                   </details>
                 )}
                 {parts.answer ? (
-                  <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{parts.answer}</ReactMarkdown></div>
+                  <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{parts.answer}</ReactMarkdown></div>
                 ) : (
                   m.pending && !parts.thinking && <p className="hint">Writing…</p>
                 )}
@@ -1058,7 +1138,7 @@ export default function GenAIView({ onError, onStatus }) {
           </p>
         )}
 
-        <form className={`genai-composer${spot('composer')}`} onSubmit={(e) => { e.preventDefault(); sendMessage() }}>
+        <form className={`genai-composer${spot('composer')}`} onSubmit={(e) => { e.preventDefault(); sendTyped() }}>
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => { attachImage(e.target.files[0]); e.target.value = '' }} />
           <textarea
             ref={composer}
@@ -1067,7 +1147,7 @@ export default function GenAIView({ onError, onStatus }) {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                sendMessage()
+                sendTyped()
               }
             }}
             placeholder={canChat ? 'Ask anything, or press the microphone and speak' : (usable ? 'Choose a model at the top first' : backend.title)}
@@ -1101,7 +1181,7 @@ export default function GenAIView({ onError, onStatus }) {
                 <Icon d={ICONS.stop} />
               </button>
             ) : (
-              <button type="submit" className="genai-send" aria-label="Send" title="Send" disabled={!canChat || (!draft.trim() && !image)}>
+              <button type="submit" className="genai-send" aria-label="Send" title="Send" disabled={!canChat || recording || transcribing || (!draft.trim() && !image)}>
                 <Icon d={ICONS.send} />
               </button>
             )}
@@ -1126,6 +1206,40 @@ export default function GenAIView({ onError, onStatus }) {
 function SolutionsOverlay({ model, sees, onClose }) {
   const [open, setOpen] = useState(null)
   const frame = useRef(null)
+  const frameWindow = useRef(null)    // the app's window, while Esc is watched there
+  const backButton = useRef(null)
+  const closeButton = useRef(null)
+
+  // Keys pressed inside the app go to its frame, not to this page.
+  const onFrameKey = useCallback((e) => {
+    if (e.key === 'Escape') setOpen(null)
+  }, [])
+
+  function watchFrameKeys() {
+    unwatchFrameKeys()
+    try {
+      const win = frame.current?.contentWindow
+      win?.addEventListener('keydown', onFrameKey)
+      frameWindow.current = win || null
+    } catch {
+      // Not same-origin after all: Esc works once focus is back on this page.
+    }
+  }
+
+  function unwatchFrameKeys() {
+    try {
+      frameWindow.current?.removeEventListener('keydown', onFrameKey)
+    } catch {
+      // The frame's window is already gone.
+    }
+    frameWindow.current = null
+  }
+
+  // Focus moves into the dialog when it opens and when an app opens or closes.
+  useEffect(() => {
+    (backButton.current || closeButton.current)?.focus()
+    return unwatchFrameKeys
+  }, [open])
 
   useEffect(() => {
     function onKey(e) {
@@ -1158,11 +1272,11 @@ function SolutionsOverlay({ model, sees, onClose }) {
   return (
     <div className="genai-solutions" role="dialog" aria-modal="true" aria-label="SiMaSentry Solutions">
       {open ? (
-        <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" />
+        <iframe ref={frame} className="genai-solutions-frame" title={open.name} src={solutionUrl(open.mode, model)} allow="camera; microphone; fullscreen" onLoad={watchFrameKeys} />
       ) : (
         <div className="genai-solutions-grid">
           <h2>SiMaSentry <span>Solutions</span></h2>
-          <p>Demo apps that run on the board's loaded model, entirely on the device.</p>
+          <p>Demo apps that run on the board's loaded model. Voice input inside them uses the browser's own speech recognition, which may use an online service.</p>
           <p className="genai-solutions-model">
             {model ? <>Using <b>{friendlyModelName(model)}</b>{sees ? '' : ': load a model that sees images for the picture features'}</> : 'No model loaded: choose one in the Model menu first'}
           </p>
@@ -1179,9 +1293,9 @@ function SolutionsOverlay({ model, sees, onClose }) {
         </div>
       )}
       <div className="genai-solutions-actions">
-        {open && <button type="button" className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>}
+        {open && <button type="button" ref={backButton} className="btn-ghost" onClick={() => setOpen(null)} title="Back to the solutions">Back</button>}
         {open && <a className="btn-ghost" href={solutionUrl(open.mode, model)} target="_blank" rel="noopener" title="Open in a new tab">New tab</a>}
-        <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+        <button type="button" ref={closeButton} className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
       </div>
     </div>
   )
