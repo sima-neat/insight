@@ -38,7 +38,8 @@ UNPLUGGED_HINT = "Click Refresh; the microphone may have been unplugged."
 IN_USE_HINT = "Stop the application that is recording from it, then test again. Insight never stops it for you."
 
 # The only device names arecord is given: Sentinel's selector for a card with a safe stable id.
-_SELECTOR_RE = re.compile(r"^plughw:CARD=[A-Za-z0-9_-]{1,64},DEV=(?:0|[1-9][0-9]{0,2})$")
+# A CARD= value of one or two digits is a card number to alsa-lib, which a replug can move, so it is refused.
+_SELECTOR_RE = re.compile(r"^plughw:CARD=(?![0-9]{1,2},)[A-Za-z0-9_-]{1,64},DEV=(?:0|[1-9][0-9]{0,2})$")
 _BUSY_RE = re.compile(r"Device or resource busy|audio open error: Device", re.IGNORECASE)
 
 _lock = threading.Lock()
@@ -100,7 +101,7 @@ def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
             hint="Click Refresh once the device has finished initializing; if this persists, update SiMa Sentinel "
             "with `sima-cli neat install sentinel`.",
         )
-    # Sentinel's availability is from its last scan and only shown; refuse_if_held decides from a live check.
+    # Sentinel's availability is from its last scan and does not decide; refuse_if_held does, from a live check.
     node = (microphone.get("identity") or {}).get("pcm_node")
     return {"selector": selector, "node": node, **choose_format(microphone)}
 
@@ -314,7 +315,9 @@ def _record(session, test: MicTest) -> None:
     command = record_command(test.device, test.rate, test.channels, test.seconds)
     try:
         try:
-            result = session.transport.exec(
+            # The raw transport, like the live check: a capture that stalls is this test's failure, not a
+            # reason to mark the selected board as not answering.
+            result = session.raw_transport.exec(
                 command, timeout=test.seconds + 10, on_stdout=test.on_chunk, cancel_event=test.cancel_event
             )
             pcm = _checked(result)
