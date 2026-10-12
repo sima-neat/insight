@@ -855,8 +855,10 @@ canvas {
   cursor: not-allowed;
 }
 
-/* The ROI tab's two settings: each a group in the row, its note below it. */
+/* The ROI tab's two settings: each a group on its own line under Drawing Mode, its note
+   below it, so a note opening or closing never moves a setting to another line. */
 .roi-scope-setting {
+  flex-basis: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -891,6 +893,14 @@ canvas {
 .settings-scope-note--info {
   padding: 6px 10px;
   border-radius: 6px;
+}
+
+.settings-scope-note--info summary {
+  cursor: pointer;
+}
+
+.settings-scope-note--info[open] summary {
+  margin-bottom: 4px;
 }
 
 .filter-table td.settings-scope-note .settings-scope-note--info,
