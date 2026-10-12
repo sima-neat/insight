@@ -775,7 +775,8 @@ class BoardChangeTests(unittest.TestCase):
         self.assertEqual((old.kills(), old.closed), ([], False))
         closed_at_stop = []
         exec_ = old.exec
-        old.exec = lambda argv, **kw: closed_at_stop.append(old.closed) or exec_(argv, **kw)
+        # Only the stop command counts: the preview's background frame-rate read may also reach the old board.
+        old.exec = lambda argv, **kw: (argv[0] == "sh" and "kill" in argv[-1] and closed_at_stop.append(old.closed)) or exec_(argv, **kw)
         self.assertEqual(self.client.post("/api/board/select", json={"host": "10.1.1.9"}).status_code, 200)
         self.assertEqual((closed_at_stop, old.closed), ([False], True))
         self.assertTrue(old.streams[0][1].closed)
