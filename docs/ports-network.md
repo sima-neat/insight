@@ -82,6 +82,21 @@ This matters most for the Video Viewer. The internal default viewer port is `808
 
 Use System Information in the Insight UI to check the actual exposed ports before assuming a URL is wrong.
 
+## Optional browser-facing configuration
+
+Hosted environments can separate the address used by a paired DevKit from the address advertised to an external browser. Insight reads two optional, startup-scoped files:
+
+| File | Purpose |
+| --- | --- |
+| `/home/docker/.insight-config/browser-ice-address` | One browser-reachable IPv4 address advertised by both the vf viewer and MediaMTX WHIP endpoint. |
+| `/home/docker/.insight-config/launch-url` | One trusted absolute HTTP or HTTPS launch URL. Insight derives its origin for generated viewer, WHIP, and HTTP MJPEG URLs. |
+
+When `browser-ice-address` is absent, Insight keeps the existing `CONTAINER_HOST_IP` behavior. When `launch-url` is absent, generated browser URLs continue to use the request host and SDK port map. The files therefore opt into hosted-environment behavior independently and do not change ordinary local or DevKit installations.
+
+`browser-ice-address` is validated before vf or MediaMTX starts. An empty or malformed browser address prevents Insight from becoming ready instead of silently advertising an unreachable address. `launch-url` is advisory: Insight accepts a full URL with an ASCII hostname, including a path, query, or fragment, and uses only its HTTP(S) origin. An invalid launch URL logs a warning and preserves legacy request-host/port-map URL generation. Replace files atomically, run `insight-admin restart`, and inspect `/api/health` to confirm the address and public origin applied by the new process.
+
+The browser ICE address is not required to be assigned to a local network interface. Public cloud IPv4 addresses commonly reach the host through 1:1 NAT. The WebRTC and `webrtcWhipIce` UDP ports must still be published and allowed by the surrounding network policy.
+
 ## Configure applications with the port map
 
 Use the application location to decide whether to use default container ports or SDK host-exposed ports.

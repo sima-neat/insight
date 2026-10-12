@@ -97,7 +97,7 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health` | Return service identity, status, and UTC timestamp for smoke tests and readiness checks. |
+| `GET` | `/api/health` | Return service identity, status, UTC timestamp, and the startup-scoped browser ICE address/public origin applied by Insight. |
 | `GET` | `/api/metrics` | Return a point-in-time system metrics payload with CPU, memory, disk, temperature, MLA, remote, and `pipeline_status` compatibility fields. |
 | `GET` | `/api/neat-metrics` | Open a server-sent events stream of JSON metrics events from the local metrics broker. |
 | `GET` | `/api/ingest/stats` | Return active vf UDP/RTP ingest streams and compact transport, media, forwarding, and WebRTC stats. |
@@ -408,6 +408,8 @@ Use `/api/mediasrc` to confirm source assignment and playback state after starti
 | `GET` | `/<path:path>` | Serve built frontend assets or fall back to `index.html` for SPA routing. |
 
 Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge networking, or browser viewer access. The viewer URL uses the backend request host and the mapped `videoUI` port when available, falling back to `8081`.
+
+Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both vf and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
 
 ## Board And Peripherals
 
