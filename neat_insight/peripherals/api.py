@@ -1,9 +1,10 @@
+import io
 import json
 import logging
 import time
 from pathlib import Path
 
-from flask import Blueprint, Response, request
+from flask import Blueprint, request, send_file
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.manager import board_summary
@@ -123,4 +124,5 @@ def get_microphone_test_audio(token):
     wav = mictest.audio(token, get_board_manager().session().generation)
     if wav is None:
         raise BoardError("not_found", "This recording is gone; a newer test replaced it.", hint="Test again.")
-    return Response(wav, mimetype="audio/wav")
+    # Range-aware: Safari's audio element asks for byte ranges and does not play a reply that ignores them.
+    return send_file(io.BytesIO(wav), mimetype="audio/wav", conditional=True, max_age=0)
