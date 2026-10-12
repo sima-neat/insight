@@ -18,6 +18,8 @@
 //   modelOp       a model load, unload or speech-model switch runs
 //   benchmarking  the benchmark is running (it loads models and keeps the board busy)
 //   documentTask  a document upload, reset or clear is running
+//   documentsAvailable  the board can answer from documents
+//   useDocuments  questions are sent with the documents
 //   downloading   a model download runs
 export function allowedActions(state) {
   const s = state || {}
@@ -30,7 +32,9 @@ export function allowedActions(state) {
   return {
     listening,
     typeMessage: canChat,
-    send: canChat && !s.replying && !listening && Boolean(s.hasDraft),
+    // While the documents are rebuilt their search is down, so a question
+    // that asks for them waits.
+    send: canChat && !s.replying && !listening && Boolean(s.hasDraft) && !(s.useDocuments && s.documentTask),
     stopReply: Boolean(s.replying),
     attachPicture: canChat && Boolean(s.sees),
     openCamera: canChat && Boolean(s.sees) && !s.cameraOpen,
@@ -46,7 +50,9 @@ export function allowedActions(state) {
     changeBoard: !s.replying && !listening && !s.modelOp && !s.downloading && !s.benchmarking && !s.documentTask,
     searchModels: !s.downloading,
     downloadModel: !s.downloading,
-    openBenchmark: ready && !s.replying && !listening && !s.documentTask,
+    // The benchmark loads and unloads models: the same rule as changing them.
+    openBenchmark: modelsQuiet && !s.documentTask,
+    toggleDocuments: Boolean(s.documentsAvailable),
     documentTasks: ready && !s.documentTask
   }
 }

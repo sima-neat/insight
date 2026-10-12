@@ -662,3 +662,15 @@ test('a search service that stopped is named, not shown as starting', () => {
   assert.match(failed, /stopped/)
   assert.doesNotMatch(failed, /starting/)
 })
+
+test('questions with documents wait while the documents are rebuilt', () => {
+  const rebuilding = { ...READY, documentTask: true, documentsAvailable: true }
+  assert.equal(allowedActions({ ...rebuilding, useDocuments: true }).send, false)
+  assert.equal(allowedActions({ ...rebuilding, useDocuments: false }).send, true)
+  assert.equal(allowedActions({ ...READY, cameraOpen: true }).openBenchmark, false)
+  assert.equal(allowedActions({ ...READY, documentsAvailable: false }).toggleDocuments, false)
+})
+
+test('a sources note always says something', () => {
+  assert.equal(sourcesNote({ hits: 2, sources: [] }), 'Answered from 2 passages of your documents.')
+})

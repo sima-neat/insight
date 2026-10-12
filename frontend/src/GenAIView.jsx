@@ -255,7 +255,9 @@ export default function GenAIView({ onError, onStatus }) {
     modelOp: Boolean(busyOp),
     downloading: Boolean(download),
     benchmarking,
-    documentTask: Boolean(docProgress)
+    documentTask: Boolean(docProgress),
+    documentsAvailable: docs.available,
+    useDocuments: useDocs && docs.available
   })
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
 
@@ -401,6 +403,8 @@ export default function GenAIView({ onError, onStatus }) {
     setVoice('')
     setHubResults(null)
     setDocStatus(null)
+    setUseDocs(false)         // chosen for the previous board's documents
+    setDocsMidChat(false)
   }
 
   async function applySettings(event) {
@@ -980,6 +984,7 @@ export default function GenAIView({ onError, onStatus }) {
     setSpeechError(null)
     setSpeechStats({})
     setMessages([])
+    setDocsMidChat(false)
     composer.current?.focus()
   }
 
@@ -1085,7 +1090,7 @@ export default function GenAIView({ onError, onStatus }) {
           className={`genai-check${docs.available ? '' : ' genai-check-off'}${spot('documents')}`}
           title={docs.available ? 'Answer from the documents on the board (Settings, Documents): the board adds the matching passages to each question.' : docs.reason}
         >
-          <input type="checkbox" checked={docs.available && useDocs} disabled={!docs.available} onChange={(e) => { setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
+          <input type="checkbox" checked={docs.available && useDocs} disabled={!allowed.toggleDocuments} onChange={(e) => { setUseDocs(e.target.checked); setDocsMidChat(e.target.checked && messages.length > 0) }} />
           Use my documents
         </label>
         <span className="genai-header-spacer" />
@@ -1275,7 +1280,7 @@ export default function GenAIView({ onError, onStatus }) {
         {docsMidChat && useDocs && messages.length > 0 && (
           <div className="genai-docs-hint" role="status">
             <span>Earlier replies in this chat can win over your documents. Start a new chat to answer from them.</span>
-            <button type="button" className="btn-tonal genai-small" onClick={newChat}>New chat</button>
+            <button type="button" className="btn-tonal genai-small" onClick={newChat} disabled={!allowed.newChat}>New chat</button>
             <button type="button" className="btn-ghost genai-small" onClick={() => setDocsMidChat(false)}>Keep this chat</button>
           </div>
         )}

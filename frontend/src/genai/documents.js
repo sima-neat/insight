@@ -35,6 +35,7 @@ export function sourcesNote(rag) {
   if (!rag) return ''
   if (!rag.hits) return 'Searched your documents: nothing matched this question.'
   const names = [...new Set(rag.sources.map((s) => s.heading || s.source))]
+  if (!names.length) return `Answered from ${rag.hits} passage${rag.hits === 1 ? '' : 's'} of your documents.`
   return `From your documents: ${names.join('; ')}`
 }
 

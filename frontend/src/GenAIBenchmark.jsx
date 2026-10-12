@@ -83,11 +83,16 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     }
   }
 
+  // What is loaded during a run: the tab's status at the start, then what this
+  // run's own loads change (loading one model can unload the others).
+  const runLoaded = useRef(new Set())
+
   async function benchmarkOne(model) {
-    if (!(status && status.loaded || []).includes(model)) {
+    if (!runLoaded.current.has(model)) {
       setPhase(`Loading ${friendlyModelName(model)}: this takes a few minutes…`)
       try {
         await postJson('models/load', { name: model }, { signal: runTicket.current.signal })
+        runLoaded.current = new Set([model])   // the other chat models may have been unloaded
         onModelsChanged?.()
       } catch (error) {
         if (over()) return null
@@ -98,7 +103,12 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     setPhase(`Benchmarking ${friendlyModelName(model)}`)
     try {
       const started = await postJson('benchmark/run', benchmarkRequest({ model, runs, maxTokens, prompt }), { signal: runTicket.current.signal })
-      if (over()) return null
+      if (over()) {
+        // Stop arrived while the run was starting, so the board's stop found
+        // nothing to stop: stop the run that has now begun.
+        if (stopRequested.current) postJson('benchmark/stop', {}).catch(() => {})
+        return null
+      }
       setLive(started)
     } catch (error) {
       if (over()) return null
@@ -113,6 +123,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     if (!chosen.length || running) return
     stopRequested.current = false
     runTicket.current = ticket()
+    runLoaded.current = new Set((status && status.loaded) || [])
     setRunning(true)
     onRunningChange?.(true)
     setResults([])
