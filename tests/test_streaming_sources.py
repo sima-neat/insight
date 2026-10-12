@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock as mock
 from concurrent.futures import ThreadPoolExecutor
@@ -60,6 +61,22 @@ class FakeMediamtx:
         self.cleared.append(name)
         self.pull_sources.pop(name, None)
         self.paths.pop(name, None)
+
+
+def lock_is_held(lock) -> bool:
+    """True when another thread holds `lock` (probed from a helper thread so RLock re-entrancy cannot mask it)."""
+    result = []
+
+    def probe():
+        got = lock.acquire(blocking=False)
+        result.append(not got)
+        if got:
+            lock.release()
+
+    t = threading.Thread(target=probe)
+    t.start()
+    t.join()
+    return result[0]
 
 
 def pulled_path(index, ready=True, codec="h264"):
@@ -2895,6 +2912,75 @@ class PullSourceTests(_SourceFixture):
         self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
         self.assertEqual(self.mtx.cleared, ["src3"])
         self.assertIsNone(app_module.pull_registry.get(3))
+
+    def spy_lock(self, name, during=None):
+        """Wrap self.mtx.<name> to record whether _sources_lock is held on each call; `during` runs inside the call."""
+        real = getattr(self.mtx, name)
+        held = []
+
+        def spy(*args, **kwargs):
+            held.append(lock_is_held(app_module._sources_lock))
+            if during:
+                during()
+            return real(*args, **kwargs)
+        return mock.patch.object(self.mtx, name, side_effect=spy), held
+
+    def test_pull_talks_to_mediamtx_outside_the_source_lock(self):
+        # Owner review (S3): a slow MediaMTX API must not block assign/start/stop/reset on every
+        # slot, so the pull route asks MediaMTX before taking _sources_lock or after releasing it.
+        snapshot_patch, snapshot_held = self.spy_lock("snapshot")
+        set_patch, set_held = self.spy_lock("set_pull_source")
+        with snapshot_patch, set_patch:
+            self.assertEqual(self._pull().status_code, 200)
+        self.assertTrue(snapshot_held and set_held)
+        self.assertEqual(snapshot_held + set_held, [False] * (len(snapshot_held) + len(set_held)))
+
+    def test_failed_pull_cleanup_runs_outside_the_source_lock(self):
+        self.mtx.fail_after_apply = True
+        clear_patch, held = self.spy_lock("clear_pull_source")
+        with clear_patch:
+            self.assertEqual(self._pull().status_code, 502)
+        self.assertEqual(held, [False])
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_stop_clears_the_pull_outside_the_source_lock(self):
+        self._pull()
+        clear_patch, held = self.spy_lock("clear_pull_source")
+        with clear_patch:
+            self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
+        self.assertEqual(held, [False])
+        self.assertIsNone(app_module.pull_registry.get(3))
+
+    def test_auth_failure_pause_clears_outside_the_source_lock(self):
+        self._pull()
+        record = app_module.pull_registry.get(3)
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("auth_failed", "The camera rejected the username or password")
+        clear_patch, held = self.spy_lock("clear_pull_source")
+        with clear_patch:
+            app_module._run_pull_probe(record)
+        self.assertEqual(held, [False])
+        self.assertEqual(self.mtx.cleared, ["src3"])
+
+    def test_slot_is_reserved_while_the_pull_is_being_configured(self):
+        # Outside the lock the PATCH can overlap other requests; the slot is reserved first, so
+        # they see it as pulled, and Stop asks to retry rather than racing the configuration.
+        replies = {}
+
+        def meanwhile():
+            replies["assign"] = self.client.post("/api/mediasrc/assign", json={"index": 3, "file": "clip.mp4"})
+            replies["stop"] = self.client.post("/api/mediasrc/stop", json={"index": 3})
+            replies["pull"] = self._pull()
+
+        (self.media_dir / "clip.mp4").write_bytes(b"not-a-real-video")
+        set_patch, _held = self.spy_lock("set_pull_source", during=meanwhile)
+        with set_patch:
+            self.assertEqual(self._pull().status_code, 200)
+        self.assertEqual(replies["assign"].status_code, 409)
+        self.assertEqual(replies["stop"].status_code, 409)
+        self.assertIn("being set up", replies["stop"].get_json()["error"])
+        self.assertEqual(replies["pull"].status_code, 409)
+        self.assertEqual(self._slot(3)["state"], "pulled")
+        self.assertEqual(self.client.post("/api/mediasrc/stop", json={"index": 3}).status_code, 200)
 
     def test_background_auth_failure_never_clears_a_newer_pull(self):
         self._pull()

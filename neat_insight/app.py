@@ -2500,14 +2500,19 @@ def _run_pull_probe(record) -> None:
         if result.status == "auth_failed":
             # Stop mediamtx retrying with rejected credentials; the row stays "Auth failed" until Stop.
             with _sources_lock:
-                # A Stop and a new Pull may have replaced this record since apply_probe.
-                if pull_registry.get(record.index) is not record:
+                # A Stop and a new Pull may have replaced this record since apply_probe, and a
+                # Stop or the setup may be talking to MediaMTX for it right now.
+                if pull_registry.get(record.index) is not record or record.changing:
                     return
-                logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
-                try:
-                    mediamtx_client.clear_pull_source(f"src{record.index}")
-                except MediamtxError as exc:
-                    logging.warning("src%s: could not pause the pull: %s", record.index, exc)
+                record.changing = True
+            logging.warning("src%s: camera at %s rejected the credentials; pull paused", record.index, record.host)
+            try:
+                mediamtx_client.clear_pull_source(f"src{record.index}")
+            except MediamtxError as exc:
+                logging.warning("src%s: could not pause the pull: %s", record.index, exc)
+            finally:
+                with _sources_lock:
+                    record.changing = False
     finally:
         record.probing = False  # never leave the record marked in flight, even if the probe raised
 
@@ -3574,17 +3579,25 @@ def stop_source():
     if index_error:
         return index_error
     with _sources_lock:
-        record = pull_registry.remove(index)
+        record = _pull_record(index)
         if record:
+            if record.changing:
+                return _json_error(f"src{index} is still being set up to pull from {record.host}. Try Stop again in a moment.", 409)
+            # The record keeps the slot while MediaMTX is cleared outside the lock.
+            record.changing = True
+    if record:
+        try:
+            mediamtx_client.clear_pull_source(f"src{index}")
+        except MediamtxError as exc:
+            # mediamtx may still be pulling; keep the record so the row stays stoppable.
+            with _sources_lock:
+                record.changing = False
+            return _json_error(f"Could not stop pulling into src{index}: {exc}. Try Stop again.", 502)
+        with _sources_lock:
+            pull_registry.remove(index)
             _bump_slot(index)
-            try:
-                mediamtx_client.clear_pull_source(f"src{index}")
-            except MediamtxError as exc:
-                # mediamtx may still be pulling; keep the record so the row stays stoppable.
-                pull_registry.put(record)
-                return _json_error(f"Could not stop pulling into src{index}: {exc}. Try Stop again.", 502)
-            logging.info("src%s: pull from %s stopped", index, record.host)
-            return {"success": True}
+        logging.info("src%s: pull from %s stopped", index, record.host)
+        return {"success": True}
     # Insight's own HTTP/MJPEG stream can share an index with an external publisher; it
     # stays stoppable, and only a slot holding nothing of ours is a conflict.
     holder = _external_holder(index)
@@ -3854,6 +3867,7 @@ def pull_source():
         target = pull_sources.normalize_pull_url(data.get("url") or "", data.get("username") or "", data.get("password") or "")
     except ValueError as exc:
         return _json_error(str(exc))
+    snapshot = _path_snapshot()  # asked before the lock, which must not wait on MediaMTX
     with _sources_lock:
         src = _find_source(index)
         if not src:
@@ -3861,7 +3875,7 @@ def pull_source():
         if src.get("type") == SOURCE_TYPE_WEBCAM:
             # Pointing the path at a camera URL would cut off the browser publishing to it.
             return _json_error(f"src{index} is a webcam source. Clear it first.", 409)
-        holder = _external_holder(index)
+        holder = _external_holder(index, snapshot)
         if holder:
             return _external_conflict_error(index, holder)
         record = _pull_record(index)
@@ -3878,25 +3892,35 @@ def pull_source():
         return jsonify({"error": result.error, "reason": "auth_failed"}), 400
     now = time.monotonic()
     record = pull_sources.PullRecord(index=index, url=target.url, scheme=target.scheme, host=target.host, path=target.path,
-                                     started_at=now, status=pull_sources.status_from_probe(result), error=result.error, probed_at=now)
+                                     started_at=now, status=pull_sources.status_from_probe(result), error=result.error, probed_at=now,
+                                     changing=True)
+    snapshot = _path_snapshot()
     with _sources_lock:
         became_webcam = any(s.get("index") == index and s.get("type") == SOURCE_TYPE_WEBCAM for s in load_sources())
         moved_on = _slot_generation(index) != generation
-        if moved_on or became_webcam or _pull_record(index) or media_stream_is_running(index) or _external_holder(index):
+        if moved_on or became_webcam or _pull_record(index) or media_stream_is_running(index) or _external_holder(index, snapshot):
             return _json_error(f"src{index} changed while the camera was being checked. Try again.", 409)
-        try:
-            mediamtx_client.set_pull_source(f"src{index}", target.url)
-        except MediamtxError as exc:
-            try:  # a slow reply may arrive after mediamtx already applied the PATCH
-                mediamtx_client.clear_pull_source(f"src{index}")
-            except MediamtxError:
-                # mediamtx may be pulling; keep the record so the row shows it and Stop retries the clear.
-                record.status, record.error = "unreachable", f"Could not confirm the configuration: {exc}"
-                _bump_slot(index)
-                pull_registry.put(record)
-            return _json_error(f"Could not configure src{index}: {exc}", 502)
+        # Reserve the slot: from here every route sees it as pulled, while MediaMTX is
+        # configured outside the lock. Only this request clears `changing` or drops the record.
         _bump_slot(index)
         pull_registry.put(record)
+    try:
+        mediamtx_client.set_pull_source(f"src{index}", target.url)
+    except MediamtxError as exc:
+        try:  # a slow reply may arrive after mediamtx already applied the PATCH
+            mediamtx_client.clear_pull_source(f"src{index}")
+        except MediamtxError:
+            # mediamtx may be pulling; keep the record so the row shows it and Stop retries the clear.
+            with _sources_lock:
+                record.status, record.error = "unreachable", f"Could not confirm the configuration: {exc}"
+                record.changing = False
+        else:
+            with _sources_lock:
+                pull_registry.remove(index)
+                _bump_slot(index)
+        return _json_error(f"Could not configure src{index}: {exc}", 502)
+    with _sources_lock:
+        record.changing = False
     logging.info("src%s: pulling from %s", index, target.host)
     src = _find_source(index)
     return jsonify(_source_with_urls(src))
