@@ -578,6 +578,7 @@ const PREVIEW_STATUS = {
   idle: { label: 'Not running', tone: '' },
   starting: { label: 'Starting…', tone: 'periph-info' },
   live: { label: 'Live', tone: 'ok' },
+  elsewhere: { label: 'In another tab', tone: 'periph-info' },
   stopping: { label: 'Stopping…', tone: 'periph-info' },
   error: { label: 'Could not start', tone: 'periph-danger' }
 }
@@ -737,6 +738,8 @@ export function nextPreviewState(state, event) {
       // A session this browser did not start (page reload, second tab).
       const session = event.session
       if (!session || session.state === 'stopped') return PREVIEW_IDLE
+      // The stream has one viewer: when another page shows it, this one offers Stop, not a second stream.
+      if (session.viewer) return { status: 'elsewhere', session, error: null }
       return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
     }
     case 'session': {
@@ -747,6 +750,7 @@ export function nextPreviewState(state, event) {
       if (current.status === 'idle' || current.status === 'error') return current
       if (session.state === 'stopped') return { status: 'idle', session: null, error: null }
       if (current.status === 'stopping') return { status: 'stopping', session, error: null }
+      if (current.status === 'elsewhere') return { status: 'elsewhere', session, error: null }
       return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
     }
     case 'stopping':
@@ -765,6 +769,8 @@ export function nextPreviewState(state, event) {
     case 'ended':
       // A live preview the backend stopped, with its reason; nothing is left to stop.
       if (outOfDate(current, event)) return current
+      // One shown in another page ended there: this page has nothing to explain.
+      if (current.status === 'elsewhere') return PREVIEW_IDLE
       return { status: 'idle', session: null, error: event.error || null }
     case 'failed':
       if (outOfDate(current, event)) return current

@@ -377,7 +377,8 @@ export default function PeripheralsView({
 
   useEffect(() => () => {
     const session = previewRef.current.session
-    if (session?.id) {
+    // A preview another page shows is that page's to stop.
+    if (session?.id && previewRef.current.status !== 'elsewhere') {
       // Best effort on unmount: there is no UI left to report a failure to, and the backend stops
       // the preview by itself once its stream closes with the page, so a lost stop cannot strand the camera.
       fetch(previewUrl(session.id, 'stop'), { method: 'POST' }).catch((error) => {
@@ -386,15 +387,21 @@ export default function PeripheralsView({
     }
   }, [])
 
-  // Stop the preview when the selected camera, the device kind, or the board changes.
+  // Stop the preview when the selected camera, the device kind, or the board changes. One that another
+  // page shows is only let go of here; that page keeps it and its Stop.
+  function leavePreview(session) {
+    if (previewRef.current.status === 'elsewhere') dispatchPreview({ type: 'reset' })
+    else stopPreview(session.id)
+  }
+
   useEffect(() => {
     const session = previewRef.current.session
-    if (session && activeId && session.camera_id !== activeId) stopPreview(session.id)
+    if (session && activeId && session.camera_id !== activeId) leavePreview(session)
   }, [activeId])
 
   useEffect(() => {
     const session = previewRef.current.session
-    if (session && activeKind !== 'camera') stopPreview(session.id)
+    if (session && activeKind !== 'camera') leavePreview(session)
   }, [activeKind])
 
   useEffect(() => {
@@ -412,7 +419,8 @@ export default function PeripheralsView({
 
   // A stream that ends cleanly fires no <img> error, so while live the page reads whether the backend
   // still runs this preview.
-  const liveSessionId = preview.status === 'live' ? preview.session?.id : null
+  // A preview shown in another page is read too, so this one returns to idle when it ends there.
+  const liveSessionId = preview.status === 'live' || preview.status === 'elsewhere' ? preview.session?.id : null
   useEffect(() => {
     if (!liveSessionId) return undefined
     return watchPreview(requestJson, liveSessionId, dispatchPreview)

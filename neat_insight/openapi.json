@@ -1503,7 +1503,8 @@
           "generation": {"type": "integer"},
           "started_at": {"type": "string", "format": "date-time"},
           "state": {"type": "string", "enum": ["live", "stopped"]},
-          "camera_fps": {"type": ["number", "null"], "description": "The frame rate the camera runs at in this mode, or null while it is unknown. A USB camera's is the mode's rate, which the pipeline requests. A MIPI camera's is SiMa Sentinel's `max_fps` from a rescan Insight requests after the first frame, when the sensor runs in this mode; it stays null when Sentinel does not report it. That rescan records no Insight scan and does not stop the preview.", "example": 66.18}
+          "viewer": {"type": "boolean", "description": "Whether a page already shows this preview's stream, which has one viewer; only `GET /api/peripherals/preview` reports it."},
+          "camera_fps": {"type": ["number", "null"], "description": "The frame rate the camera runs at in this mode, or null while it is unknown. A USB camera's is the mode's rate, which the pipeline requests. A MIPI camera's is the most its sensor delivers in this mode: SiMa Sentinel's `max_fps` (computed at minimum blanking) from a rescan Insight requests after the first frame, when the sensor runs in this mode, so the page shows it as \"up to\"; it stays null when Sentinel does not report it. That rescan records no Insight scan and does not stop the preview.", "example": 66.18}
         }
       },
       "PeripheralCameraSetup": {

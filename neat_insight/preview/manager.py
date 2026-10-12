@@ -120,7 +120,8 @@ class PreviewManager:
             session = self._session
             if session is None or session["generation"] != generation:
                 return None
-            return dict(session)
+            # The stream has one viewer; a page that finds it taken shows the preview as running elsewhere.
+            return dict(session, viewer=bool(self._run and self._run["claimed"]))
 
     def start(self, board_session, item: dict, mode: dict) -> dict:
         """Start one scanned camera's mode; `mode` is {format, width, height, fps, rate, source} (see api)."""

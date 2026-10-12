@@ -19,7 +19,13 @@ function PreviewError({ error, onOpenBoardPanel }) {
         {/* One recovery line: the board's own hint when it sent one, ours otherwise. */}
         {(info.hint || info.action) && <p>{info.hint || info.action}</p>}
         {info.otherCamera && <p>The running preview is on <span className="periph-inline-code">{info.otherCamera}</span>.</p>}
-        {info.detail && <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>}
+        {/* Folded, so a failed start stays one row; the video is the only large element. */}
+        {info.detail && (
+          <details className="periph-preview-detail">
+            <summary>Board output</summary>
+            <pre className="periph-code" tabIndex={0} aria-label="Board output"><code>{info.detail}</code></pre>
+          </details>
+        )}
         {(info.code === 'no_target' || info.code === 'unreachable' || info.code === 'auth_failed' || info.code === 'host_key_changed') && (
           <button type="button" className="btn-ghost" onClick={onOpenBoardPanel}>Open board settings</button>
         )}
@@ -30,10 +36,12 @@ function PreviewError({ error, onOpenBoardPanel }) {
 
 // The mode as tags -- format, size, and the camera's rate once a running preview knows it -- rather
 // than one run of text, so each reads at a glance. Screen readers get the same sentence.
-// The rate is what the camera runs at (`camera_fps`), never a requested one: Insight sets no rate.
-function ModeBadges({ mode, fps = null, label }) {
+// A USB camera's rate is its mode's. A MIPI camera's is the most its sensor delivers in the mode
+// (SiMa Sentinel's `max_fps`), so it reads "up to".
+function ModeBadges({ mode, fps = null, ceiling = false, label }) {
   if (!mode) return null
-  const rate = rateLabel(fps)
+  const known = rateLabel(fps)
+  const rate = known && ceiling ? `up to ${known}` : known
   return (
     <span className="periph-mode-badges" role="group" aria-label={`${label}: ${modeLabel(mode)}${rate ? ` at ${rate}` : ''}`}>
       <span>{mode.format}</span>
@@ -53,7 +61,7 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
   const block = previewBlock({ camera, selection, stale, target, session: state?.session })
   const status = previewStatusInfo(state)
   const session = state?.session || null
-  const running = state?.status === 'starting' || state?.status === 'live' || state?.status === 'stopping'
+  const running = ['starting', 'live', 'stopping', 'elsewhere'].includes(state?.status)
   const streamUrl = state?.status === 'live' ? previewStreamUrl(session) : null
   return (
     <section className="periph-preview" aria-labelledby="periph-preview-title">
@@ -93,11 +101,13 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
       {running && !streamUrl && (
         // Starting and stopping take one row, like idle; the video is the only thing that gets the full width.
         <div className="periph-actions periph-preview-progress" role="status">
-          {state?.status !== 'live' && <span className="periph-spinner" aria-hidden="true" />}
+          {state?.status !== 'live' && state?.status !== 'elsewhere' && <span className="periph-spinner" aria-hidden="true" />}
           <span>
             {state?.status === 'stopping'
               ? 'Stopping the preview…'
-              : state?.status === 'live'
+              : state?.status === 'elsewhere'
+                ? 'This preview is showing in another tab or window.'
+                : state?.status === 'live'
                 ? 'The preview stream could not be opened. Stop the preview and report it with the board label.'
                 : `Starting the camera on the board… ${elapsed} s`}
           </span>
@@ -118,7 +128,7 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
           />
           <span className="periph-stage-chip">
             <i className="periph-live-dot" aria-hidden="true" />
-            <ModeBadges mode={session?.mode} fps={session?.camera_fps} label="Streaming" />
+            <ModeBadges mode={session?.mode} fps={session?.camera_fps} ceiling={camera?.connection === 'mipi'} label="Streaming" />
           </span>
           {/* The mode alone: leaving this tab stops the preview, so a warning about holding the camera
               describes a state the reader cannot walk away from. */}

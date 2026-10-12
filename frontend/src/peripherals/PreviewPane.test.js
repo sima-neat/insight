@@ -159,7 +159,8 @@ test("a running preview's mode chip shows the camera's rate once known, and only
     assert.deepEqual(badgeTexts(pane, 'Streaming'), { aria: 'Streaming: NV12 1920×1080', texts: ['NV12', '1920×1080'] })
   }
   const known = PreviewPane({ ...props, state: { status: 'live', session: { ...session, camera_fps: 66.18 }, error: null } })
-  assert.deepEqual(badgeTexts(known, 'Streaming'), { aria: 'Streaming: NV12 1920×1080 at 66 fps', texts: ['NV12', '1920×1080', '66 fps'] })
+  // A MIPI camera's rate is its sensor's most in this mode (Sentinel's max_fps), not a measured rate.
+  assert.deepEqual(badgeTexts(known, 'Streaming'), { aria: 'Streaming: NV12 1920×1080 at up to 66 fps', texts: ['NV12', '1920×1080', 'up to 66 fps'] })
   const usb = PreviewPane({
     ...props,
     camera: usbCamera,
@@ -178,4 +179,26 @@ test('the mode chip before a preview names no rate: Insight sets none', () => {
     onStart() {}
   })
   assert.deepEqual(badgeTexts(pane, 'Mode'), { aria: 'Mode: NV12 1920×1080', texts: ['NV12', '1920×1080'] })
+})
+
+test('a preview another tab shows is one row with Stop, never a second stream', () => {
+  const session = { id: 's1', camera_id: 'camera:a', mode, stream_url: streamUrl('s1'), state: 'live', viewer: true }
+  const pane = PreviewPane({ camera: camera('camera:a'), selection: { id: 'camera:a', ...mode }, target: { label: 'board' },
+    state: { status: 'elsewhere', session, error: null }, onStart() {}, onStop() {} })
+  assert.equal(find(pane, (n) => n.type === 'img'), null)
+  const row = find(pane, (n) => n.props?.className === 'periph-actions periph-preview-progress')
+  assert.ok(row)
+  assert.ok(find(row, (n) => n.props?.children === 'This preview is showing in another tab or window.'))
+  assert.ok(find(row, (n) => n.type === 'button' && n.props.children === 'Stop preview'))
+})
+
+test("a failed start's board output is folded, so the error stays one row", () => {
+  const error = { message: 'The preview pipeline could not start.', code: 'command_failed', details: { detail: 'ERROR: from element /GstPipeline...' } }
+  const pane = PreviewPane({ camera: camera('camera:a'), selection: { id: 'camera:a', ...mode }, target: { label: 'board' },
+    state: { status: 'error', session: null, error }, onStart() {}, onStop() {} })
+  const block = find(pane, (n) => typeof n.type === 'function' && n.props?.error === error)
+  const details = find(block.type(block.props), (n) => n.type === 'details')
+  assert.ok(details, 'the board output is in a <details>')
+  assert.notEqual(details.props.open, true)
+  assert.ok(find(details, (n) => n.type === 'pre'))
 })

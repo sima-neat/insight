@@ -488,7 +488,10 @@ class PreviewTests(unittest.TestCase):
         self.start()
         stream = self.session.transport.streams[0][1]
         session_id = self.manager.current(1)["id"]
+        self.assertFalse(self.manager.current(1)["viewer"])
         relay = self.manager.relay(self.session, session_id)
+        # A page that loads now learns the stream is taken and does not open a second one.
+        self.assertTrue(self.manager.current(1)["viewer"])
         with self.assertRaises(BoardError) as ctx:
             self.manager.relay(self.session, session_id)
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("preview_active", 409))

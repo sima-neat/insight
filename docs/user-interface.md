@@ -169,7 +169,7 @@ A preview holds the camera, so your application cannot open it until you stop th
 
 A MIPI camera previews its Available modes. On a board whose ISP takes the sensor's sizes at run time (Platform 3.0), a size the sensor lists may still not be one libcamera outputs; the preview then names the size libcamera streams at so you can pick it. A USB camera previews any mode it lists in MJPG or a raw format such as YUYV, even though its modes are Unsupported for Neat's `CameraInput`; Insight opens it by its stable `/dev/v4l/by-id` path when the board has one.
 
-While a preview runs, the mode beside it shows the frame rate the camera runs at, which can be faster than the preview's 15 fps. For a USB camera this is the mode's rate. For a MIPI camera, Insight asks SiMa Sentinel to read the sensor once the first frame arrives, so the rate appears a few seconds after the picture; if Sentinel cannot report it, no rate is shown.
+While a preview runs, the mode beside it shows the camera's frame rate, which can be faster than the preview's 15 fps. The preview asks the camera for the selected mode's rate. For a USB camera the rate shown is that mode's rate. For a MIPI camera it is the most the sensor delivers in this mode, shown as "up to", which Insight asks SiMa Sentinel for once the first frame arrives, so it appears a few seconds after the picture; if Sentinel cannot report it, no rate is shown.
 
 ### Camera setup
 

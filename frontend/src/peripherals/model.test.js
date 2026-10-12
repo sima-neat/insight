@@ -883,6 +883,14 @@ test('preview transitions: failures, reset, and adopting an existing session', (
   assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
   assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: null }), PREVIEW_IDLE)
 
+  // A session another page already shows (its one viewer) is not opened here: the pane offers Stop.
+  const shown = { ...liveSession, viewer: true }
+  const elsewhere = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: shown })
+  assert.equal(elsewhere.status, 'elsewhere')
+  assert.equal(nextPreviewState(elsewhere, { type: 'session', session: shown }).status, 'elsewhere')
+  assert.deepEqual(nextPreviewState(elsewhere, streamEndedEvent(liveSession.id)), PREVIEW_IDLE)
+  assert.equal(nextPreviewState(elsewhere, { type: 'stopping', for: liveSession.id }).status, 'stopping')
+
   const live = nextPreviewState(starting, { type: 'session', session: liveSession })
   const stopping = nextPreviewState(starting, { type: 'stopping', for: liveSession.id, session: liveSession })
   const stopFailed = nextPreviewState(stopping, { type: 'stop-failed', for: liveSession.id, error: { message: 'SSH failed' } })
