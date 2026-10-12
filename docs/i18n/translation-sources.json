@@ -5,7 +5,7 @@
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
     "docs/ports-network.md": "66d43b7e3c3fc26bf9569b98da605efd2a722abb9ca373f5c425ec324bbf2ac2",
-    "docs/user-interface.md": "667ceb32a7ec8a38122f36b2c341d0401be5f169e63a61d041108ea253b1788a",
+    "docs/user-interface.md": "e4b0651e48f29759069eb1eb58f61ef33519d8e7e4ba0698f192f6c542164c26",
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   },
   "ko": {
@@ -14,7 +14,7 @@
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
     "docs/ports-network.md": "66d43b7e3c3fc26bf9569b98da605efd2a722abb9ca373f5c425ec324bbf2ac2",
-    "docs/user-interface.md": "667ceb32a7ec8a38122f36b2c341d0401be5f169e63a61d041108ea253b1788a",
+    "docs/user-interface.md": "e4b0651e48f29759069eb1eb58f61ef33519d8e7e4ba0698f192f6c542164c26",
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   },
   "uk": {
@@ -23,7 +23,7 @@
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
     "docs/ports-network.md": "66d43b7e3c3fc26bf9569b98da605efd2a722abb9ca373f5c425ec324bbf2ac2",
-    "docs/user-interface.md": "667ceb32a7ec8a38122f36b2c341d0401be5f169e63a61d041108ea253b1788a",
+    "docs/user-interface.md": "e4b0651e48f29759069eb1eb58f61ef33519d8e7e4ba0698f192f6c542164c26",
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   },
   "zh-Hant": {
@@ -32,7 +32,7 @@
     "docs/index.md": "d3d7f54a010a3666694f9cbb08395cf779f08b856bcc8733569f6dc47da411df",
     "docs/install-upgrade.md": "380a3e7c91dee9fbb5983ada6f5f478aa262656eac23f61ce574941823f7934e",
     "docs/ports-network.md": "66d43b7e3c3fc26bf9569b98da605efd2a722abb9ca373f5c425ec324bbf2ac2",
-    "docs/user-interface.md": "667ceb32a7ec8a38122f36b2c341d0401be5f169e63a61d041108ea253b1788a",
+    "docs/user-interface.md": "e4b0651e48f29759069eb1eb58f61ef33519d8e7e4ba0698f192f6c542164c26",
     "docs/workflows.md": "188b3b3ef16c225716bc414d2000f5beebb709b96d95975f0404e252780332a3"
   }
 }
