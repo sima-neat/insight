@@ -1089,6 +1089,12 @@ button:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+/* At the source's own rate the note and the rendition hint say nothing new: grayed out. */
+.fps-note.native,
+.fps-hint.native {
+  opacity: 0.5;
+}
+
 /* The stepper's home in the Source Preview panel. */
 .fps-field-row {
   display: flex;

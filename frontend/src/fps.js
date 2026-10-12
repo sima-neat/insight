@@ -1,11 +1,11 @@
-// Pure logic behind the per-slot FPS stepper (issue #111). Keep the range in sync with neat_insight/renditions.py.
+// Pure logic behind the per-slot FPS stepper (issue #111). Keep the minimum in sync with
+// neat_insight/renditions.py; there is no maximum, the backend refuses what no codec level covers.
 export const FPS_MIN = 1
-export const FPS_MAX = 240
 export const FPS_STEP = 5
 
 export function stepFps(value, direction) {
   const next = Number(value) + (direction < 0 ? -FPS_STEP : FPS_STEP)
-  return Math.min(FPS_MAX, Math.max(FPS_MIN, next))
+  return Math.max(FPS_MIN, next)
 }
 
 export function parseFps(text) {
@@ -13,8 +13,13 @@ export function parseFps(text) {
   const trimmed = String(text).trim()
   if (!/^\d+$/.test(trimmed)) return null
   const value = Number(trimmed)
-  if (value < FPS_MIN || value > FPS_MAX) return null
+  if (value < FPS_MIN || !Number.isSafeInteger(value)) return null
   return value
+}
+
+// True when a slot streams at its source's own rate: no override, or one equal to the native rate.
+export function isNativeRate(fps, nativeFps) {
+  return fps == null || (nativeFps != null && fps === nativeFps)
 }
 
 function clock(seconds) {
