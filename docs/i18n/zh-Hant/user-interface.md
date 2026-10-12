@@ -152,14 +152,14 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 
 ### 相機與模式
 
-選取 **Refresh**（重新整理）以掃描開發板：Insight 會要求 SiMa Sentinel 重新掃描並等待結果。Sentinel 會透過媒體圖與 ISP 找到 MIPI 相機，並透過 V4L2 找到 USB 相機。若 Sentinel 未安裝、未執行，或版本過舊而無法回報周邊裝置，頁面會說明這一點；請使用 `sima-cli neat install sentinel` 安裝或更新。對於每部相機，頁面會顯示其身分、連線、裝置識別碼，以及相機回報的像素格式、解析度與影格率。USB 相機的解析度會顯示相機在該模式下執行的影格率。MIPI 相機的影格率取決於其正在執行的感測器模式，因此其解析度不會顯示影格率；其影格率會在預覽執行時顯示。Insight 不會設定影格率。每個模式處於下列兩種狀態之一，狀態會顯示在像素格式與解析度選單旁，這些選單也會依狀態將其項目分組：
+選取 **Refresh**（重新整理）以掃描開發板：Insight 會要求 SiMa Sentinel 重新掃描並等待結果。Sentinel 會透過媒體圖與 ISP 找到 MIPI 相機，並透過 V4L2 找到 USB 相機。若 Sentinel 未安裝、未執行，或版本過舊而無法回報周邊裝置，頁面會說明這一點；請使用 `sima-cli neat install sentinel` 安裝或更新。對於每部相機，頁面會顯示其身分、連線、裝置識別碼，以及相機回報的像素格式、解析度與影格率。USB 相機的解析度會顯示相機在該模式下執行的影格率。MIPI 相機的影格率取決於其正在執行的感測器模式，因此其解析度不會顯示影格率；其影格率會在預覽執行時顯示。Insight 不會設定影格率。每個模式處於下列兩種狀態之一，像素格式與解析度選單會依狀態將其項目分組：
 
 | 狀態 | 意義 |
 | --- | --- |
 | Available（可用） | 開發板的相機 overlay 支援該相機的感測器、ISP 能輸出此模式的尺寸，且其像素格式為 NV12。 |
-| Unsupported（不支援） | 上述任一條件不成立。標籤上的原因會指出是哪一項：USB 相機在開發板上沒有相機 overlay；感測器不在開發板的相機 overlay 中；ISP 無法輸出該尺寸；格式不是 NV12；或在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，尺寸寬於 libcamera 串流的寬度（IMX477 為 4032 像素）。若 Sentinel 版本過舊而無法回報開發板的相機 overlay，則在您更新之前，每個模式都會是 Unsupported（不支援）。 |
+| Unsupported（不支援） | 上述任一條件不成立。原因會指出是哪一項：USB 相機在開發板上沒有相機 overlay；感測器不在開發板的相機 overlay 中；ISP 無法輸出該尺寸；格式不是 NV12；或在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，尺寸寬於 libcamera 串流的寬度（IMX477 為 4032 像素）。若 Sentinel 版本過舊而無法回報開發板的相機 overlay，則在您更新之前，每個模式都會是 Unsupported（不支援）。 |
 
-Insight 僅依據 SiMa Sentinel 的報告做出此判斷。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。沒有任何 Available（可用）模式的相機會顯示 **Unsupported**（不支援）標籤，若為 MIPI 相機還會顯示其原因；具有 Available（可用）模式的相機不會顯示標籤。Insight 不會指出是否有其他程式正在使用相機：這會在預覽嘗試開啟相機時得知，並在該處回報。
+每個模式的狀態由 SiMa Sentinel 判定並附上原因；Insight 顯示該結果。若 Sentinel 版本過舊而無法判定，Insight 會對 Sentinel 的目錄套用相同的規則。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。每部偵測到的相機都會顯示 **Connected**（已連線）標籤及其狀態：只要有任一模式為 Available（可用）即為 **Available**，否則為 **Unsupported**（不支援），相機面板會說明原因。Insight 不會指出是否有其他程式正在使用相機。
 
 ### 預覽相機
 

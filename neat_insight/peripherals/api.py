@@ -1,10 +1,9 @@
 import contextlib
-import logging
 import time
 
 from flask import Blueprint, current_app
 
-from neat_insight.board import BoardError, get_board_manager
+from neat_insight.board import get_board_manager
 from neat_insight.board.manager import board_summary
 from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
 from neat_insight.peripherals.client import PeripheralClient

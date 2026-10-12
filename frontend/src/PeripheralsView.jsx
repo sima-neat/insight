@@ -7,8 +7,8 @@ import {
   PREVIEW_IDLE,
   adoptedSelection,
   cameraTierPill,
+  connectionPill,
   changeSummary,
-  CONNECTED_PILL,
   countLabel,
   deviceTabs,
   groupCameras,
@@ -179,7 +179,7 @@ function CameraList({ groups, selectedId, onSelect }) {
                     leave this row taller than its neighbours. */}
                 {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
                 <span className="periph-pills">
-                  <Pill tone={CONNECTED_PILL.tone}>{CONNECTED_PILL.label}</Pill>
+                  <Pill tone={connectionPill(camera).tone}>{connectionPill(camera).label}</Pill>
                   <Pill tone={tier.tone}>{tier.label}</Pill>
                 </span>
               </div>
