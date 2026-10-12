@@ -201,6 +201,7 @@ export default function GenAIView({ onError, onStatus }) {
   const micStarting = useRef(false)
   const player = useRef(null)
   const speechAbort = useRef(null)
+  const transcribeAbort = useRef(null)
   const [speakingId, setSpeakingId] = useState(null)
   // {id, text}: why the last Read aloud of reply `id` failed, shown under it.
   const [speechError, setSpeechError] = useState(null)
@@ -277,12 +278,20 @@ export default function GenAIView({ onError, onStatus }) {
     if (box) stickToBottom.current = box.scrollHeight - box.scrollTop - box.clientHeight < 40
   }
 
+  // A picture waiting to be sent can't go to a model that doesn't see images.
+  useEffect(() => {
+    if (sees || !image) return
+    setImage(null)
+    onStatus?.('Removed the picture: the loaded model does not see images.')
+  }, [sees, image])
+
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
       chatAbort.current?.abort()
       speechAbort.current?.abort()
+      transcribeAbort.current?.abort()
       player.current?.pause()
       cameraStream.current?.getTracks().forEach((t) => t.stop())
       recorder.current?.stream?.getTracks().forEach((t) => t.stop())
@@ -742,9 +751,12 @@ export default function GenAIView({ onError, onStatus }) {
         if (!mounted.current) return
         setRecording(false)
         setTranscribing(true)
+        const controller = new AbortController()
+        transcribeAbort.current = controller
         try {
           const tStop = performance.now()
-          const result = await transcribe(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), { language })
+          const result = await transcribe(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), { language, signal: controller.signal })
+          if (!mounted.current) return
           const heardMs = performance.now() - tStop
           const heard = (result.text || '').trim()
           if (!heard || result.ignored) {
@@ -756,9 +768,10 @@ export default function GenAIView({ onError, onStatus }) {
             if (!sendRef.current(heard, { replyPlayer, heard: heardMetrics({ ms: heardMs, language: languageName }) })) setDraft(heard)
           }
         } catch (error) {
-          fail(`Couldn't transcribe the recording: ${error.message}`)
+          if (mounted.current) fail(`Couldn't transcribe the recording: ${error.message}`)
         } finally {
-          setTranscribing(false)
+          if (transcribeAbort.current === controller) transcribeAbort.current = null
+          if (mounted.current) setTranscribing(false)
         }
       }
       recorder.current = rec
@@ -994,7 +1007,7 @@ export default function GenAIView({ onError, onStatus }) {
               title="Chat"
               models={chatModels(status)}
               loadedNames={new Set(status?.loaded || [])}
-              disabled={!usable}
+              disabled={!usable || streaming}
               onLoad={(m) => runModelOp(`Loading ${friendlyModelName(m.name)}`, 'models/load', { name: m.name })}
               onUnload={(m) => runModelOp(`Unloading ${friendlyModelName(m.name)}`, 'models/unload', { name: m.name })}
             />
@@ -1002,7 +1015,7 @@ export default function GenAIView({ onError, onStatus }) {
               title="Speech recognition"
               models={speechModels(status)}
               activeName={status?.asrModel}
-              disabled={!usable}
+              disabled={!usable || recording || transcribing}
               onUse={(m) => runModelOp(`Switching speech recognition to ${friendlyModelName(m.name)}`, 'models/asr', { name: m.name })}
             />
           </div>
