@@ -600,7 +600,7 @@ test('benchmark progress and the comparison mark the fastest model', () => {
 test('benchmark exports match the standalone Studio', () => {
   const entries = [
     { model: 'Qwen3-0.6B-Autoround-a16w4', summary: summary(95.4, 38), runs: [{ ttftMs: 38, tps: 95.4, tokens: 128 }] },
-    { model: 'Broken, "quoted"', failed: 'failed to load' }
+    { model: 'Broken, "quoted"', failed: 'failed to load', stage: 'load' }
   ]
   const csv = benchmarkCsv(entries).split('\n')
   assert.equal(csv[0], 'model,tpsMean,tpsMedian,tpsMin,tpsMax,tpsP90,tpsStdev,ttftMeanMs,ttftP90Ms,tokensMean,validRuns,errors')
@@ -684,4 +684,10 @@ test('the documents choice and their rebuilds wait for replies and speech input'
   assert.equal(allowedActions({ ...READY, documentsAvailable: true, replying: true }).toggleDocuments, false)
   assert.equal(allowedActions({ ...READY, recording: true }).documentTasks, false)
   assert.equal(allowedActions({ ...READY, transcribing: true }).documentTasks, false)
+})
+
+test('the benchmark JSON says which step failed and why', () => {
+  const ok = { model: 'a', summary: { count: 1 }, runs: [] }
+  const json = JSON.parse(benchmarkJson([ok, { model: 'b', failed: 'board error', stage: 'run' }, { model: 'c', failed: 'failed to load: x', stage: 'load' }], { runs: 1, maxTokens: 8, prompt: '' }))
+  assert.deepEqual(json.results.map((r) => [r.model, r.loadFailed, r.error]), [['a', false, null], ['b', false, 'board error'], ['c', true, 'failed to load: x']])
 })

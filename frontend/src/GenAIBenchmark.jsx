@@ -13,6 +13,7 @@ import {
 import { getJson, postJson } from './genai/client.js'
 
 const POLL_MS = 500
+const STATUS_FAILURES_MAX = 20     // about 10 s of failing status polls
 
 function download(name, text, type) {
   const link = document.createElement('a')
@@ -70,14 +71,19 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     setChosen((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]))
   }
 
+  // Polls the board's run. A status that keeps failing (about 10 s of errors in
+  // a row) ends the wait with that error instead of "running" forever.
   async function waitForRun() {
+    let failures = 0
     for (;;) {
       if (over()) return null
       let state = null
       try {
         state = await getJson('benchmark/status', { signal: runTicket.current.signal })
-      } catch {
-        state = null
+        failures = 0
+      } catch (error) {
+        failures += 1
+        if (failures >= STATUS_FAILURES_MAX) return { error: error.message }
       }
       if (over()) return null
       if (state) setLive(state)
@@ -102,7 +108,7 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
         // unknown now, so every later model is loaded before its run.
         runLoaded.current = new Set()
         if (over()) return null
-        return { model, failed: `failed to load: ${error.message}` }
+        return { model, failed: `failed to load: ${error.message}`, stage: 'load' }
       }
     }
     if (over()) return null
@@ -118,10 +124,14 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
       setLive(started)
     } catch (error) {
       if (over()) return null
-      return { model, failed: error.message }
+      return { model, failed: error.message, stage: 'run' }
     }
     const final = await waitForRun()
     if (!final) return null
+    if (final.error) {
+      postJson('benchmark/stop', {}).catch(() => {})
+      return { model, failed: `lost track of the run: ${final.error}`, stage: 'run' }
+    }
     return { model, summary: final.summary || null, runs: final.runs || [], prompt: final.prompt }
   }
 
@@ -143,8 +153,11 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
       done.push(result)
       setResults([...done])
     }
+    // Unlock only once a Stop has reached the board and its run has ended.
+    if (stopDone.current) await stopDone.current
     if (!runTicket.current.live()) return     // the tab closed or the board changed
     runTicket.current = null
+    stopDone.current = null
     setPhase('')
     setRunning(false)
     onRunningChange?.(false)
@@ -152,14 +165,30 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
     onModelsChanged?.()
   }
 
-  async function stop() {
+  // Stop: ask the board to stop, then wait (up to about 10 s) until its run has
+  // ended; run() keeps the tab locked until this settles.
+  const stopDone = useRef(null)
+  function stop() {
+    if (stopRequested.current) return
     stopRequested.current = true
     setPhase('Stopping…')
-    try {
-      await postJson('benchmark/stop', {}, { signal: runTicket.current ? runTicket.current.signal : undefined })
-    } catch {
-      // The board may have finished already; the loop stops either way.
-    }
+    const ticketNow = runTicket.current
+    stopDone.current = (async () => {
+      try {
+        await postJson('benchmark/stop', {}, { signal: ticketNow ? ticketNow.signal : undefined })
+      } catch {
+        // The board may have finished already.
+      }
+      for (let i = 0; i < 20 && ticketNow && ticketNow.live(); i += 1) {
+        try {
+          const state = await getJson('benchmark/status', { signal: ticketNow.signal })
+          if (!state.running) return
+        } catch {
+          return
+        }
+        await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+      }
+    })()
   }
 
   const progress = benchProgress(live)

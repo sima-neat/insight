@@ -100,7 +100,14 @@ export function benchmarkJson(entries, { runs, maxTokens, prompt }, now = new Da
       maxNewTokens: clampSetting(maxTokens, BENCH_LIMITS.maxTokens),
       prompt: String(prompt || '').trim() || '(default)'
     },
-    results: entries.map((e) => ({ model: e.model, summary: e.summary || null, runs: e.runs || [], loadFailed: Boolean(e.failed) }))
+    // loadFailed keeps the standalone Studio's field; error says what failed.
+    results: entries.map((e) => ({
+      model: e.model,
+      summary: e.summary || null,
+      runs: e.runs || [],
+      loadFailed: e.stage === 'load',
+      error: e.failed || null
+    }))
   }, null, 2)
 }
 
