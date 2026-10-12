@@ -513,8 +513,13 @@ def _persist_slot_if_current(src, generation: int) -> bool:
 
 
 def _safe_media_path(rel_path: str) -> Path:
+    """`rel_path` resolved inside MEDIA_DIR; ValueError outside it or for MEDIA_DIR itself.
+
+    A string prefix check would let a sibling such as media-other/ through, and the
+    library root is no entry of its own: deleting it would empty the whole library."""
+    root = MEDIA_DIR.resolve()
     abs_path = (MEDIA_DIR / rel_path).resolve()
-    if not str(abs_path).startswith(str(MEDIA_DIR.resolve())):
+    if abs_path == root or not abs_path.is_relative_to(root):
         raise ValueError("Invalid path")
     return abs_path
 
