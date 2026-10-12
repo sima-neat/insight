@@ -355,8 +355,12 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(states(size_of(nv12, 4032, 3040)["fps"]), [(30, "available", None)])
         for width, height in ((4056, 3040), (4056, 2160)):
             self.assertEqual(states(size_of(nv12, width, height)["fps"]),
-                             [(30, "unsupported", cameras.MAX_WIDTH_REASON)], f"{width}x{height}")
+                             [(30, "unsupported", cameras.MAX_WIDTH_REASON.format(width=4032))], f"{width}x{height}")
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        # The 4032 limit is the IMX477's widest aligned mode, not a rule for every sensor: another sensor's wide
+        # sizes keep Sentinel's verdict.
+        other = item(snapshot_of(catalog(dict(doc, model="imx678"), board=board_block())), IMX477)
+        self.assertEqual(states(size_of(fmt_of(other, "NV12"), 4056, 3040)["fps"]), [(30, "available", None)])
         self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
                          [(30, "unsupported", cameras.FORMAT_REASON)])
 
