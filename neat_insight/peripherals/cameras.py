@@ -485,7 +485,9 @@ class ScanCache:
                     "generation": generation,
                     "fingerprint": board.get("fingerprint"),
                     "snapshot": snapshot,
-                    "catalog": {"revision": catalog["revision"]},
+                    # The microphone test binds to the microphone records this scan listed.
+                    "catalog": {"revision": catalog["revision"],
+                                "devices": [device for device in catalog["devices"] if device["type"] == "microphone"]},
                     "completed": time.monotonic(),
                 }
             self._refresh_locks = {g: lock for g, lock in self._refresh_locks.items() if g >= generation}

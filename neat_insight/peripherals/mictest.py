@@ -72,20 +72,21 @@ def find_microphone(snapshot: dict, mic_id: str) -> dict:
 def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
     """The selector and format to record with, from Sentinel's current catalog.
 
-    `scanned` is the `revision` of the catalog the last scan showed: a changed catalog, or a restarted
-    Sentinel, which starts revisions from a random value, can route the same id elsewhere, so either means
-    Refresh first.
+    `scanned` is the catalog the last scan showed. The test records from the device the page listed: when
+    this microphone's capture target or identity changed since (a replug, a restarted Sentinel routing the id
+    elsewhere), Refresh first. Any other change, such as a camera's rate while it previews, does not matter.
     """
-    if catalog.get("revision") != scanned["revision"]:
-        raise BoardError(
-            "stale_snapshot",
-            "SiMa Sentinel's peripheral catalog changed since the last scan.",
-            hint=REFRESH_HINT,
-            current_revision=catalog.get("revision"),
-        )
     microphone = next((item for item in catalog.get("devices", []) if item.get("id") == mic_id), None)
     if not microphone or microphone.get("type") != "microphone":
         raise BoardError("not_found", "That microphone is no longer in SiMa Sentinel's catalog.", hint=UNPLUGGED_HINT)
+    listed = next((item for item in scanned.get("devices", []) if item.get("id") == mic_id), None)
+    if listed is None or any(listed.get(key) != microphone.get(key) for key in ("capture_target", "identity")):
+        raise BoardError(
+            "stale_snapshot",
+            "This microphone changed in SiMa Sentinel's catalog since the last scan.",
+            hint=REFRESH_HINT,
+            current_revision=catalog.get("revision"),
+        )
     # A failed provider's devices are its last successful scan's.
     if any(error.get("provider") == provider_of(microphone) for error in catalog.get("errors", [])):
         raise BoardError(

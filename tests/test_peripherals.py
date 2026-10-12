@@ -1266,9 +1266,11 @@ class MicrophoneApiTests(unittest.TestCase):
         self.reads["catalog"].assert_not_called()
         self.assertEqual(self.transport.calls, [])
 
-    def test_a_changed_sentinel_catalog_never_starts_arecord(self):
+    def test_a_changed_microphone_never_starts_arecord(self):
         self.client.post("/api/peripherals/refresh")
-        self.sentinel = catalog(imx477(), yeti(), revision=2)
+        moved = yeti()
+        moved["identity"]["card_index"] = 3
+        self.sentinel = catalog(imx477(), moved, revision=2)
         with mock.patch.object(mictest, "start") as start:
             response = self.start()
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
@@ -1289,7 +1291,9 @@ class MicrophoneApiTests(unittest.TestCase):
                     return value
                 return read
 
-        self.sentinel = catalog(imx477(), yeti(), revision=2)  # Sentinel now serves the newer catalog
+        reused = yeti()  # Sentinel now serves the newer catalog, the id naming a different card
+        reused["capture_target"].update(card_id="Nano_1", selector="plughw:CARD=Nano_1,DEV=0")
+        self.sentinel = catalog(imx477(), reused, revision=2)
         with mock.patch.object(api, "scans", RefreshAfterFirstRead()), \
                 mock.patch.object(mictest, "start", return_value={}) as start:
             response = self.start()
@@ -1388,7 +1392,7 @@ class MicrophoneTestTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def bind(self, doc, scanned=None, mic_id=YETI):
-        return mictest.bind_microphone(doc, scanned or {"revision": catalog()["revision"]}, mic_id)
+        return mictest.bind_microphone(doc, scanned or doc, mic_id)
 
     def assert_refused(self, code, doc, **kwargs):
         with self.assertRaises(BoardError) as ctx:
@@ -1397,11 +1401,17 @@ class MicrophoneTestTests(unittest.TestCase):
 
     def test_binding_uses_only_sentinel_selector_from_the_scanned_catalog(self):
         example = contract_catalog()
-        self.assertEqual(self.bind(example, {"revision": example["revision"]}, contract_microphone()["id"]),
+        self.assertEqual(self.bind(example, example, contract_microphone()["id"]),
                          {"selector": "plughw:CARD=C920,DEV=0", "node": "/dev/snd/pcmC0D0c", "rate": 32000, "channels": 2})
         self.assertEqual(self.bind(catalog(yeti())),
                          {"selector": "plughw:CARD=Nano,DEV=0", "node": "/dev/snd/pcmC2D0c", "rate": 48000, "channels": 2})
-        self.assert_refused("stale_snapshot", catalog(yeti(), revision=2))
+        # A replug that moved the card, or a restarted Sentinel routing the id elsewhere: Refresh first.
+        moved = yeti()
+        moved["capture_target"].update(card_id="Nano_1", selector="plughw:CARD=Nano_1,DEV=0")
+        self.assert_refused("stale_snapshot", catalog(moved), scanned=catalog(yeti()))
+        # Any other change, such as a camera's rate while it previews, leaves this microphone's test alone.
+        busy_camera = catalog(dict(imx477(), max_fps=125.54), yeti(), revision=2)
+        self.assertEqual(self.bind(busy_camera, scanned=catalog(imx477(), yeti()))["selector"], "plughw:CARD=Nano,DEV=0")
         self.assert_refused("not_found", catalog(c920_mic()))
         for selector in ("plughw:CARD=x;rm -rf /,DEV=0", "hw:2,0", "plughw:2,0", "plughw:CARD=1,DEV=0",
                          "plughw:CARD=12,DEV=0", None):
