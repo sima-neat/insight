@@ -114,6 +114,7 @@ def _valid_interval(interval) -> bool:
         return False
     return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind])
 
+
 # Sentinel's optional `board` block: the board model and the camera setup its device tree declares. It
 # only adds context, so a malformed field or entry is dropped instead of failing the refresh.
 BOARD_LIST_LIMIT = 32
