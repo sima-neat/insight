@@ -54,8 +54,21 @@ test("viewer synchronization settings default to a 300 ms video buffer and unlim
       metadataRetentionMs: 0,
       showRoi: true,
       applyRoiFiltering: true,
+      lineWidth: 3,
     },
   );
+});
+
+test("the global line width is a whole number of pixels from 1 to 10", () => {
+  // Owner review (O4): one width for every overlay line, defaulting to 3 px.
+  const api = loadSettingsApi();
+  const widthOf = (lineWidth) => api.normalizeSettings({ version: 4, general: { lineWidth } }).general.lineWidth;
+
+  assert.equal(widthOf(5), 5);
+  assert.equal(widthOf(2.6), 3);
+  assert.equal(widthOf(0), 1);
+  assert.equal(widthOf(50), 10);
+  assert.equal(widthOf("thick"), 3);
 });
 
 test("viewer synchronization settings preserve configured values", () => {
@@ -567,6 +580,7 @@ test("saving without the option stores every general key as before", () => {
 
   assert.deepEqual(Object.keys(readStored("viewerSettings_channel_1").general).sort(), [
     "applyRoiFiltering",
+    "lineWidth",
     "metadataRetentionMs",
     "showRoi",
     "videoSyncBufferMs"
@@ -757,6 +771,7 @@ test("the scalar settings list has every switchable id, each with its tab and me
   assert.deepEqual(api.scalarSettings(), [
     { id: "general.videoSyncBufferMs", tab: "General", metadataType: null },
     { id: "general.metadataRetentionMs", tab: "General", metadataType: null },
+    { id: "general.lineWidth", tab: "General", metadataType: null },
     { id: "general.showRoi", tab: "ROI", metadataType: null },
     { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null },
     { id: "types.object-detection.confidenceThreshold", tab: "Metadata", metadataType: "object-detection" },
@@ -955,6 +970,7 @@ test("resolving a channel agrees with its own values and the followed values for
     "auxiliary.blazepose-3d.panelMode": "expanded",
     "auxiliary.blazepose-3d.backgroundTransparency": 0.4,
     "general.metadataRetentionMs": 5000,
+    "general.lineWidth": 6,
     "general.applyRoiFiltering": false,
     "types.segmentation.confidenceThreshold": 0.3,
     "types.segmentation.maskOpacity": 0.9,

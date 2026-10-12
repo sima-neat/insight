@@ -265,11 +265,11 @@ const drawingSource = readFileSync(
 
 // Runs the color module and the renderers in one context, the way viewer.html loads them.
 // `settingsByType` is what window.resolveTypeSettings returns per metadata type.
-function loadViewer(settingsByType = {}) {
+function loadViewer(settingsByType = {}, general = {}) {
   const window = {
     resolveTypeSettings: (_index, metadataType) => ({
       metadataType,
-      general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: false, applyRoiFiltering: false },
+      general: { videoSyncBufferMs: 350, metadataRetentionMs: 0, showRoi: false, applyRoiFiltering: false, ...general },
       type: settingsByType[metadataType] || {},
     }),
   };
@@ -298,7 +298,7 @@ function createRecordingContext() {
     measureText: (text) => ({ width: text.length * 7 }),
   };
   ["strokeRect", "fillRect", "fillText", "stroke", "fill", "arc"].forEach((op) => {
-    ctx[op] = (...args) => calls.push({ op, args, strokeStyle: ctx.strokeStyle, fillStyle: ctx.fillStyle });
+    ctx[op] = (...args) => calls.push({ op, args, strokeStyle: ctx.strokeStyle, fillStyle: ctx.fillStyle, lineWidth: ctx.lineWidth });
   });
   return { ctx, calls };
 }
@@ -585,4 +585,47 @@ test("pose bounding box covers the confident keypoints with padding", () => {
   assert.equal(y, 150 - 5 - 8);
   assert.equal(w, 40 + 16);
   assert.equal(h, 95 + 16);
+});
+
+test("every overlay line uses the global line width unless a class row sets its own", () => {
+  // Owner review (O4): boxes, segment outlines, track boxes and trails and pose skeletons
+  // share one width; a class row's Thin/Thick still wins for that class.
+  const window = loadViewer(
+    { "object-detection": { objects: [{ label: "dog", color: "#123456", style: "solid", width: 1 }] }, tracking: { history: { enabled: true } } },
+    { lineWidth: 5 },
+  );
+  const strokes = (calls, op) => calls.filter((call) => call.op === op).map((call) => call.lineWidth);
+
+  const detections = draw(window, "object-detection", { objects: [
+    { label: "cat", confidence: 0.9, bbox: [10, 10, 50, 50] },
+    { label: "dog", confidence: 0.9, bbox: [100, 10, 50, 50] },
+  ] });
+  assert.deepEqual(strokes(detections, "strokeRect"), [5, 1]);
+
+  const segments = draw(window, "segmentation", { segments: [
+    { id: 1, label: "cat", confidence: 0.9, mask_format: "polygon", mask: [[10, 10], [60, 10], [60, 60]] },
+  ] });
+  assert.ok(strokes(segments, "stroke").length > 0);
+  strokes(segments, "stroke").forEach((width) => assert.equal(width, 5));
+
+  const trackHistory = new Map();
+  draw(window, "tracking", { tracks: [{ id: 7, bbox: [10, 10, 50, 50] }] }, { now: 0, drawContext: { trackHistory } });
+  const tracks = draw(window, "tracking", { tracks: [{ id: 7, bbox: [30, 10, 50, 50] }] }, { now: 40, drawContext: { trackHistory } });
+  assert.deepEqual(strokes(tracks, "strokeRect"), [5]);
+  assert.ok(strokes(tracks, "stroke").length > 0, "the trail is drawn");
+  strokes(tracks, "stroke").forEach((width) => assert.equal(width, 5));
+
+  const poses = draw(window, "pose-estimation", { poses: [{ keypoints: [
+    { name: "nose", x: 30, y: 10, confidence: 0.9 },
+    { name: "left_eye", x: 25, y: 5, confidence: 0.9 },
+    { name: "right_eye", x: 35, y: 5, confidence: 0.9 },
+  ] }] });
+  assert.ok(strokes(poses, "stroke").length > 0, "the skeleton is drawn");
+  strokes(poses, "stroke").forEach((width) => assert.equal(width, 5));
+});
+
+test("overlays draw 3 px wide when the settings carry no line width", () => {
+  const window = loadViewer();
+  const calls = draw(window, "object-detection", { objects: [{ label: "cat", confidence: 0.9, bbox: [10, 10, 50, 50] }] });
+  assert.deepEqual(calls.filter((call) => call.op === "strokeRect").map((call) => call.lineWidth), [3]);
 });

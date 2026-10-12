@@ -36,8 +36,14 @@ function overridesFrom(styles) {
   return overrides;
 }
 
-function applyLineStyle(ctx, style) {
-  ctx.lineWidth = style?.width || 2;
+// The settings' global line width; 3 px when they carry none (an older cached resolver).
+function lineWidthFrom(settings) {
+  const width = Number(settings?.general?.lineWidth);
+  return Number.isFinite(width) && width > 0 ? width : 3;
+}
+
+function applyLineStyle(ctx, style, lineWidth) {
+  ctx.lineWidth = style?.width || lineWidth;
   ctx.setLineDash(style?.style === "dashed" ? [6, 4] : style?.style === "dotted" ? [2, 2] : []);
 }
 
@@ -207,12 +213,12 @@ function passesRoiFilter(box, roiPolygons, video, scale, applyRoiFiltering) {
   return insideInclusion && !insideExclusion;
 }
 
-function drawTrackHistoryPath(ctx, points, scale, color, alpha = 0.72) {
+function drawTrackHistoryPath(ctx, points, scale, color, alpha, lineWidth) {
   if (!Array.isArray(points) || points.length < 2) return;
 
   ctx.save();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = lineWidth;
   ctx.globalAlpha = alpha;
   ctx.setLineDash([]);
   ctx.beginPath();
@@ -343,6 +349,7 @@ window.drawStrategies = {
     if (!data?.objects) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "object-detection");
+    const lineWidth = lineWidthFrom(settings);
     const objectStyles = styleLookup(settings.type.objects);
     const overrides = overridesFrom(objectStyles);
     const threshold = settings.type.confidenceThreshold ?? 0;
@@ -367,7 +374,7 @@ window.drawStrategies = {
       const color = identityColor(drawContext, index, "class", obj.label, overrides);
 
       ctx.strokeStyle = color;
-      applyLineStyle(ctx, style);
+      applyLineStyle(ctx, style, lineWidth);
       ctx.font = "14px sans-serif";
       ctx.fillStyle = color;
 
@@ -401,7 +408,7 @@ window.drawStrategies = {
     const KEYPOINT_MIN_CONFIDENCE = 0.3;
     const BOX_PADDING = 8;
 
-    ctx.lineWidth = 2;
+    ctx.lineWidth = lineWidthFrom(settings);
     ctx.setLineDash([]);
     ctx.font = FONT;
 
@@ -461,6 +468,7 @@ window.drawStrategies = {
     if (!Array.isArray(data?.segments)) return;
 
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "segmentation");
+    const lineWidth = lineWidthFrom(settings);
     const objectStyles = styleLookup(settings.type.objects);
     const overrides = overridesFrom(objectStyles);
     const threshold = settings.type.confidenceThreshold ?? 0;
@@ -496,7 +504,7 @@ window.drawStrategies = {
       const color = identityColor(drawContext, index, "class", seg.label, overrides);
 
       ctx.strokeStyle = color;
-      applyLineStyle(ctx, style);
+      applyLineStyle(ctx, style, lineWidth);
       ctx.font = "14px sans-serif";
       ctx.fillStyle = color;
 
@@ -573,6 +581,7 @@ window.drawStrategies = {
     const { scaleX, scaleY, offsetX, offsetY } = scale;
     const trackHistory = drawContext.trackHistory;
     const settings = drawContext.settings || resolveViewerDrawSettings(index, "tracking");
+    const lineWidth = lineWidthFrom(settings);
     const threshold = settings.type.confidenceThreshold ?? 0;
     const historySettings = settings.type.history || {};
     const showTrackHistory = historySettings.enabled !== false;
@@ -620,7 +629,7 @@ window.drawStrategies = {
       trackHistory.forEach((entry, key) => {
         if (Number(key.split(":")[0]) !== index) return;
         const trackId = key.substring(key.indexOf(":") + 1);
-        drawTrackHistoryPath(ctx, entry.points, scale, trackColor(trackId), activeKeys.has(key) ? 0.72 : 0.35);
+        drawTrackHistoryPath(ctx, entry.points, scale, trackColor(trackId), activeKeys.has(key) ? 0.72 : 0.35, lineWidth);
       });
     }
 
@@ -633,7 +642,7 @@ window.drawStrategies = {
       const height = h * scaleY;
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = lineWidth;
       ctx.setLineDash([]);
       ctx.strokeRect(left, top, width, height);
 

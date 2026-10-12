@@ -94,6 +94,10 @@
     return value === false ? "off" : "on";
   }
 
+  function describePixels(value) {
+    return `${value} px`;
+  }
+
   function describePositions(value) {
     return `${value} positions`;
   }
@@ -185,6 +189,12 @@
       ...NUMBER,
       read: readInteger,
       describe: describeRetention
+    },
+    "general.lineWidth": {
+      control: "lineWidthInput",
+      ...NUMBER,
+      read: readInteger,
+      describe: describePixels
     },
     "general.showRoi": { control: "toggleRoiVisibility", ...CHECKBOX, describe: describeOnOff },
     "general.applyRoiFiltering": { control: "toggleRoiFiltering", ...CHECKBOX, describe: describeOnOff },
