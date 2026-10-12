@@ -63,15 +63,16 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     }
   }
   // Something answered, so it is running; it just isn't a healthy GenAI Studio.
-  if (health.httpStatus !== 200) {
-    if (health.unreadable) {
-      return {
-        state: 'error',
-        title: "This address doesn't answer like GenAI Studio",
-        detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
-        action: 'settings'
-      }
+  // A reply that isn't JSON (a web page, even with HTTP 200) is not the Studio.
+  if (health.unreadable) {
+    return {
+      state: 'error',
+      title: "This address doesn't answer like GenAI Studio",
+      detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
+      action: 'settings'
     }
+  }
+  if (health.httpStatus !== 200) {
     return {
       state: 'error',
       title: `GenAI Studio on the board answered with an error (HTTP ${health.httpStatus})`,

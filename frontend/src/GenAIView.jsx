@@ -47,6 +47,7 @@ const BASE_PROMPT =
   'Answer clearly and concisely. Use Markdown formatting when it helps. ' +
   'Answer the question in the language it was asked in.'
 const WITH_IMAGE_PROMPT = `${BASE_PROMPT} The user's current message includes an image. Answer using what you see in it.`
+const EARLIER_IMAGE_PROMPT = `${BASE_PROMPT} An earlier message in this conversation includes an image. Answer questions about it using what you see in it.`
 const WITHOUT_IMAGE_PROMPT =
   `${BASE_PROMPT} No image is attached to the current message. If the user asks about an image, photo, camera or ` +
   'what you see, say that no image was provided and ask them to attach one or use the camera. Never describe an image you were not given.'
@@ -336,6 +337,10 @@ export default function GenAIView({ onError, onStatus }) {
   function chooseChatModel(name) {
     const model = chatModels(status).find((m) => m.name === name)
     if (!model || model === chatModel) return
+    if (model.supported === false) {
+      onError?.(model.unsupportedReason || `${friendlyModelName(model.name)} can't run on this board.`)
+      return
+    }
     const wait = model.estimatedLoadS ? ` It takes about ${formatDuration(model.estimatedLoadS)}.` : ''
     if (!window.confirm(`Load ${friendlyModelName(model.name)}?${wait} The current model is unloaded first.`)) return
     runModelOp(`Loading ${friendlyModelName(model.name)}`, 'models/load', { name: model.name })
@@ -570,13 +575,24 @@ export default function GenAIView({ onError, onStatus }) {
     if ((!prompt && !image) || !chatModel || streamingRef.current) return false
     if (replyPlayer === undefined) replyPlayer = readAloud ? unlockPlayer() : null
     const generation = chatGeneration.current
+    // A detected spoken language applies to the spoken turn only, not to later typed ones.
+    if (!heard) spokenLanguage.current = null
     const userText = prompt || 'Describe this image.'
     const userContent = image
       ? [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: image } }]
       : userText
-    const history = messagesRef.current.map((m) => ({ role: m.role, content: m.role === 'assistant' ? splitThinking(m.content).answer : m.text }))
+    // Requests are stateless: send the most recent earlier image again so
+    // follow-up questions can still see it. Only that one, as several images
+    // make each reply slow on the board; a new image replaces it.
+    const earlier = messagesRef.current
+    const carried = !image && chatModel.supportsVision ? earlier.findLastIndex((m) => m.role === 'user' && m.image) : -1
+    const history = earlier.map((m, i) => {
+      if (m.role === 'assistant') return { role: 'assistant', content: splitThinking(m.content).answer }
+      if (i === carried) return { role: 'user', content: [{ type: 'text', text: m.text }, { type: 'image_url', image_url: { url: m.image } }] }
+      return { role: 'user', content: m.text }
+    })
     const outgoing = [
-      { role: 'system', content: image ? WITH_IMAGE_PROMPT : WITHOUT_IMAGE_PROMPT },
+      { role: 'system', content: image ? WITH_IMAGE_PROMPT : carried >= 0 ? EARLIER_IMAGE_PROMPT : WITHOUT_IMAGE_PROMPT },
       ...history,
       { role: 'user', content: canThink && !thinking ? withNoThink(userContent) : userContent }
     ]
@@ -855,7 +871,9 @@ export default function GenAIView({ onError, onStatus }) {
           >
             {!chatModel && <option value="">{chatModels(status).length ? 'Choose a model to load' : 'No models on the board'}</option>}
             {chatModels(status).map((m) => (
-              <option key={m.name} value={m.name}>{modelLabel(m)}</option>
+              <option key={m.name} value={m.name} disabled={m.supported === false} title={m.unsupportedReason || undefined}>
+                {modelLabel(m)}{m.supported === false ? ' · not supported' : ''}
+              </option>
             ))}
           </select>
         </label>
