@@ -1,5 +1,6 @@
 """Turn SiMa Sentinel's peripheral catalog into the Peripherals camera snapshot."""
 import math
+from collections import Counter
 import threading
 import time
 from datetime import datetime, timezone
@@ -207,7 +208,9 @@ def _item(camera: dict, modes: list, reason: str, retained: bool) -> dict:
     """`modes` are the camera's classified modes (_classified); `reason` is why none can be Available, if any."""
     connection = _connection(camera)
     usb = connection == "usb"
-    formats = _formats(modes, usb, reason)
+    # A Sentinel that gives each mode a verdict (sentinel#43) also gives the reasons a camera is unusable.
+    decided = any(isinstance(mode.get("available"), bool) for mode in camera.get("modes") or [])
+    formats = _formats(modes, usb, reason, decided)
     notes, errors = [], []
     if usb:
         identity = camera.get("identity") or {}
@@ -257,7 +260,7 @@ def _item(camera: dict, modes: list, reason: str, retained: bool) -> dict:
         "model": camera.get("model") or None,
         "device": info,
         "availability": _availability(camera.get("availability")),
-        "support": _verdict(modes, reason),
+        "support": _verdict(modes, reason, decided),
         "modes_source": "unavailable" if not modes else "previous-scan" if retained else "live",
         "formats": formats,
         "default_selection": _default(formats),
@@ -280,12 +283,20 @@ def _mipi_notes(camera: dict, modes: list) -> list:
     return notes
 
 
-def _verdict(modes: list, reason: str) -> dict:
-    """A camera or format is Available when any of its modes is; `reason` is why none of the camera's can be."""
+def _verdict(modes: list, reason: str, decided: bool = False) -> dict:
+    """A camera or format is Available when any of its modes is; `reason` is why none of the camera's can be.
+
+    When Sentinel decided each mode (`decided`), the reason is the one it gave most often for the NV12 modes
+    (CameraInput's format), else for all modes, rather than one Insight infers."""
     if any(mode["available"] for mode in modes):
         return _support("available", "")
     if reason or not modes:
         return _support("unsupported", reason or NO_MODES_REASON)
+    if decided:
+        wanted = [mode for mode in modes if mode["format"] == CAMERAINPUT_FORMAT] or modes
+        given = Counter(mode["reason"] for mode in wanted if mode.get("reason"))
+        if given:
+            return _support("unsupported", given.most_common(1)[0][0])
     # The sensor is supported: either the ISP outputs none of these sizes, or none it outputs is in NV12. On a
     # Platform 3.0 ISP the sizes are the sensor's (`sensor_mode`).
     isp_sizes = any(mode.get("isp_output") is True or mode.get("sensor_mode") is True for mode in modes)
@@ -347,7 +358,7 @@ def _choices(modes: list, usb: bool) -> list:
     return [choices[value] for value in sorted(choices, reverse=True)]
 
 
-def _formats(modes: list, usb: bool, reason: str) -> list:
+def _formats(modes: list, usb: bool, reason: str, decided: bool = False) -> list:
     grouped = {}
     for mode in modes:
         grouped.setdefault(mode["format"], []).append(mode)
@@ -364,7 +375,7 @@ def _formats(modes: list, usb: bool, reason: str) -> list:
             # A USB driver names its own formats.
             "label": f"{name} ({description})" if usb and description else FORMAT_LABELS.get(name, name),
             "exportable": any(mode["available"] for mode in entries),
-            "support": _verdict(entries, reason),
+            "support": _verdict(entries, reason, decided),
             "range": {key: ranged[key] for key in ("min_width", "min_height", "max_width", "max_height", "step_width", "step_height")}
             if ranged else None,
             "sizes": [{"width": w, "height": h, "fps": _choices(group, usb)} for (w, h), group in sizes.items()],

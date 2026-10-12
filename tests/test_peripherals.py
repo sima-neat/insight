@@ -392,14 +392,15 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
                          [(30, "unsupported", cameras.FORMAT_REASON)])
 
-        # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its sizes available,
-        # a 3.0 camera is unsupported for the format, not for the ISP.
+        # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its modes available,
+        # the camera's reason is the one Sentinel gave its NV12 modes, not one Insight infers.
         doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), available=False, reason="Not set up for this mode."),
                         sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON)]
         camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
         self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]),
                          [(30, "unsupported", "Not set up for this mode.")])
-        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "Not set up for this mode."})
+        self.assertEqual(fmt_of(camera, "RGB3")["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
 
     def test_the_default_mode_is_1920_wide_when_the_camera_offers_it(self):
         """The first Available size in sort order is the smallest (1280x990 on a 3.0 IMX477), not a useful start."""
