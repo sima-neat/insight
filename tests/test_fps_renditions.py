@@ -27,16 +27,20 @@ class FpsRuleTests(unittest.TestCase):
         self.assertEqual(renditions.coerce_fps(60.0), 60)
         self.assertEqual(renditions.coerce_fps(240), 240)
         self.assertEqual(renditions.coerce_fps(1), 1)
+        # Owner review (O5): no upper bound; a 300 fps file must be able to go back to 300, and
+        # what the encoder cannot do is refused by the level check when the rendition is made.
+        self.assertEqual(renditions.coerce_fps(300), 300)
+        self.assertEqual(renditions.coerce_fps("1000"), 1000)
 
     def test_coerce_fps_rejects_invalid_values(self):
-        for value in (None, "", "abc", 0, -5, 2.5, "29.97", 241, True, [30]):
+        for value in (None, "", "abc", 0, -5, 2.5, "29.97", float("inf"), True, [30]):
             with self.subTest(value=value):
                 self.assertIsNone(renditions.coerce_fps(value))
 
     def test_validate_fps_raises_with_range_message(self):
         with self.assertRaises(ValueError) as ctx:
             renditions.validate_fps(0)
-        self.assertIn("between 1 and 240", str(ctx.exception))
+        self.assertIn("whole number of at least 1", str(ctx.exception))
         self.assertEqual(renditions.validate_fps("25"), 25)
 
     def test_detect_fps_rounds_avg_frame_rate_and_falls_back(self):
@@ -979,11 +983,23 @@ class SlotFpsTests(RenditionApiTestCase):
         self.assertEqual(json.loads(self.sources_file.read_text())[0]["fps"], 15)
 
     def test_assign_rejects_invalid_fps(self):
-        for value in (0, -5, "abc", 2.5, 999):
+        for value in (0, -5, "abc", 2.5):
             with self.subTest(value=value):
                 response = self.assign(fps=value)
                 self.assertEqual(response.status_code, 400)
-                self.assertIn("between 1 and 240", response.get_json()["error"])
+                self.assertIn("whole number of at least 1", response.get_json()["error"])
+
+    def test_assign_accepts_rates_above_240(self):
+        self.assertEqual(self.assign(fps=999).status_code, 200)
+        self.assertEqual(self.source()["fps"], 999)
+
+    def test_start_refuses_a_rate_beyond_the_highest_codec_level(self):
+        # 320x240 H.264 tops out near 55,000 fps at level 6.2; the start says so instead of encoding.
+        self.assign(fps=100000)
+        with mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
+            response = self.client.post("/api/mediasrc/start", json={"index": 1})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("exceeds the highest h264 level", response.get_json()["error"])
 
     def test_changing_file_resets_fps_but_changing_transport_keeps_it(self):
         make_test_clip(self.media_dir / "other.mp4", fps=25)

@@ -19,8 +19,9 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Optional
 
+# There is no upper bound: a source can be faster than any fixed limit (and must be able to go
+# back to its own rate), and what the encoder cannot do is refused by video_level.
 FPS_MIN = 1
-FPS_MAX = 240
 FPS_STEP = 5
 RENDITIONS_DIRNAME = ".renditions"
 INDEX_SCHEMA = "sima.neat.insight.renditions.v1"
@@ -46,7 +47,7 @@ def coerce_fps(value: Any) -> Optional[int]:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    if not number.is_integer() or not FPS_MIN <= number <= FPS_MAX:
+    if not number.is_integer() or number < FPS_MIN:
         return None
     return int(number)
 
@@ -54,7 +55,7 @@ def coerce_fps(value: Any) -> Optional[int]:
 def validate_fps(value: Any) -> int:
     fps = coerce_fps(value)
     if fps is None:
-        raise ValueError(f"FPS must be a whole number between {FPS_MIN} and {FPS_MAX}")
+        raise ValueError(f"FPS must be a whole number of at least {FPS_MIN}")
     return fps
 
 
@@ -118,8 +119,8 @@ def video_level(codec: str, width: int, height: int, fps: int) -> str:
     """Lowest level whose picture-size and throughput limits cover `width`x`height` at `fps`.
 
     The catalog builder keyed the level on the resolution tier alone, which was
-    enough for its fixed fps grid; any fps from FPS_MIN..FPS_MAX needs the real
-    limits. Levels below 3.0 are never used, matching the catalog.
+    enough for its fixed fps grid; any fps from FPS_MIN up needs the real
+    limits, and an fps no level covers is refused here. Levels below 3.0 are never used, matching the catalog.
     """
     if codec == "h264":
         axes = (-(-width // 16), -(-height // 16))

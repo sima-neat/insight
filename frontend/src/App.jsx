@@ -4,7 +4,7 @@ import {
   previewSrc, protocolLabel, pullChipText, pullSourceText, pullStatusClass, pullStatusLabel,
   readPreviewEnabled, readersText, writePreviewEnabled,
 } from './externalSource.js'
-import { allCommitsSucceeded, formatFpsProgress, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
+import { allCommitsSucceeded, formatFpsProgress, isNativeRate, needsRendition, parseFps, stepFps, withCommittedFps } from './fps.js'
 import FolderBrowser from './media/FolderBrowser.jsx'
 import AssignMediaDialog from './media/AssignMediaDialog.jsx'
 import { allFilePaths, listFolder, nearestExistingFolder, parentPath, streamableFiles } from './media/mediaTree.js'
@@ -3036,7 +3036,9 @@ export default function App() {
                               {assignLabel}
                             </button>
                             {src.fps != null && (
-                              <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
+                              isNativeRate(src.fps, src.native_fps)
+                                ? <span className="fps-note native" title={`Streams at the source's own ${src.fps} fps; change it in the Source Preview panel`}>· {src.fps} fps</span>
+                                : <span className="fps-note" title={`Streams at ${src.fps} fps (source ${src.native_fps ?? '?'} fps); change it in the Source Preview panel`}>· {src.fps} fps</span>
                             )}
                           </span>
                           <select
@@ -3117,6 +3119,9 @@ export default function App() {
                   const panelCanStream = Boolean(info.file) && panelTransports.length > 0
                   const effectiveFps = info.fps ?? info.native_fps ?? null
                   const customFps = info.fps != null && info.native_fps != null && info.fps !== info.native_fps
+                  const nativeRate = isNativeRate(info.fps, info.native_fps)
+                  const fpsDisabled = !info.file || !panelCanStream || info.codec === 'mjpeg'
+                  const fpsLocked = info.state === 'playing' || Boolean(progress)
                   const streamingRendition = info.state === 'playing' && info.active_file && info.active_file !== info.file
                   const fileDetail = info.file ? [info.file, info.native_fps != null ? `${info.native_fps} fps` : null].filter(Boolean).join(' · ') : 'Not assigned'
                   let outputDetail = `${info.transport ? info.transport.toUpperCase() : '-'} / ${codecLabel(info.codec)}`
@@ -3151,13 +3156,22 @@ export default function App() {
                         <FpsStepper
                           value={info.fps ?? null}
                           nativeFps={info.native_fps ?? null}
-                          disabled={!info.file || !panelCanStream || info.codec === 'mjpeg'}
-                          locked={info.state === 'playing' || Boolean(progress)}
+                          disabled={fpsDisabled}
+                          locked={fpsLocked}
                           title={!info.file ? 'Assign media before choosing a frame rate' : (info.codec === 'mjpeg' ? 'FPS changes are not supported for MJPEG sources' : (info.state === 'playing' ? 'Stop the source to change its frame rate' : `Output frame rate for src${info.index} (source ${info.native_fps ?? '?'} fps)`))}
                           onCommit={(fps) => commitFps(info.index, fps)}
                           onInvalidChange={(bad) => setFpsInvalid((prev) => (prev[info.index] === bad ? prev : { ...prev, [info.index]: bad }))}
                         />
-                        <span className="hint muted-text">{info.native_fps != null ? `Native ${info.native_fps} fps. A different rate creates a rendition on start.` : 'A rate other than the native one creates a rendition on start.'}</span>
+                        <button
+                          type="button"
+                          className="btn-ghost fps-native"
+                          disabled={fpsDisabled || fpsLocked || nativeRate}
+                          onClick={() => commitFps(info.index, null)}
+                          title={nativeRate ? 'Already streaming at the source frame rate' : 'Stream at the source frame rate again'}
+                        >
+                          {info.native_fps != null ? `Native (${info.native_fps} fps)` : 'Native'}
+                        </button>
+                        <span className={nativeRate ? 'hint muted-text fps-hint native' : 'hint muted-text fps-hint'}>{info.native_fps != null ? `Native ${info.native_fps} fps. A different rate creates a rendition on start.` : 'A rate other than the native one creates a rendition on start.'}</span>
                       </div>
                       <p className="hint">
                         Output: {outputDetail}

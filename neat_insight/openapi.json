@@ -1498,8 +1498,7 @@
               "fps": {
                 "type": ["integer", "null"],
                 "minimum": 1,
-                "maximum": 240,
-                "description": "Output frame rate for the slot. Omit to keep the current value; send null to stream at the source frame rate. Changing `file` without `fps` resets it to null."
+                "description": "Output frame rate for the slot, any whole number from 1; a rate no codec level covers for the source's resolution is refused when the slot starts or is prepared. Omit to keep the current value; send null to stream at the source frame rate. Changing `file` without `fps` resets it to null."
               }
             }
           }
@@ -1532,7 +1531,6 @@
           "fps": {
             "type": ["integer", "null"],
             "minimum": 1,
-            "maximum": 240,
             "description": "Requested output frame rate for this slot, or null to stream at the source frame rate."
           },
           "native_fps": {
