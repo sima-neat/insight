@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { allFilePaths, breadcrumbs, childrenAt, listFolder, nearestExistingFolder, parentPath, searchFolder, streamableFiles, streamableOnly } from './mediaTree.js'
+import { allFilePaths, breadcrumbs, childrenAt, listFolder, nearestExistingFolder, parentPath, playableCount, searchFolder, streamableFiles, streamableOnly } from './mediaTree.js'
 
 const file = (path, streamable = true) => ({ name: path.split('/').pop(), path, type: 'file', streamable })
 const folder = (path, children) => ({
@@ -48,6 +48,17 @@ test('listFolder lists folders with counts, then every file, and counts the unsu
   ])
   assert.equal(indoor.hidden, 1)
   assert.deepEqual(listFolder(tree, 'nope'), { folders: [], files: [], hidden: 0 })
+})
+
+test('playableCount counts the streamable files in a folder and all its subfolders, like a folder badge', () => {
+  // Owner review (O6): the line under the breadcrumb and the folder badges count the same thing.
+  assert.equal(playableCount(tree, ''), 5)
+  assert.equal(playableCount(tree, '30FPS'), 3)
+  assert.equal(playableCount(tree, '30FPS/indoor'), 2)
+  assert.equal(playableCount(tree, 'empty'), 0)
+  assert.equal(playableCount(tree, 'nope'), 0)
+  const badges = Object.fromEntries(listFolder(tree, '').folders.map((f) => [f.path, f.count]))
+  assert.equal(badges['30FPS'], playableCount(tree, '30FPS'))
 })
 
 test('streamableOnly keeps the files Insight can play and drops the rest', () => {
