@@ -31,6 +31,8 @@ import {
   transcribe
 } from './genai/client.js'
 import { languageNames, readAloudSupport } from './genai/speech.js'
+import { allowedActions } from './genai/activity.js'
+import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
@@ -219,11 +221,21 @@ export default function GenAIView({ onError, onStatus }) {
   const usable = canUseModels(backend.state)
   const chatModel = loadedChatModel(status)
   const sees = Boolean(chatModel && chatModel.supportsVision)
-  // Requests in flight are tied to the board they started on, so the address
-  // can't change until they finish (a model load can't be stopped on the board).
-  const boardBusy = streaming || Boolean(busyOp) || recording || transcribing || Boolean(download)
-  // While speech input runs, nothing may change the model or clear the chat.
-  const listening = recording || transcribing
+  // What the user may do now: every control and action reads this one table.
+  const allowed = allowedActions({
+    usable,
+    hasChatModel: Boolean(chatModel),
+    sees,
+    hasAsr: Boolean(status?.asrModel),
+    hasMessages: messages.length > 0,
+    hasDraft: Boolean(draft.trim() || image),
+    cameraOpen,
+    replying: streaming,
+    recording,
+    transcribing,
+    modelOp: Boolean(busyOp),
+    downloading: Boolean(download)
+  })
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
 
   const fail = useCallback((message) => {
@@ -231,29 +243,54 @@ export default function GenAIView({ onError, onStatus }) {
     onError?.(message)
   }, [onError])
 
+  // Every request to the board takes a ticket from the board session
+  // (genai/boardSession.js): a new address or leaving the tab ends the
+  // session, aborting its requests and marking their results stale.
+  const boardSession = useRef(null)
+  const ticket = useCallback((own) => {
+    // After the tab is gone (a finally block refreshing, say), nothing more
+    // goes to the board.
+    return boardSession.current ? boardSession.current.ticket(own) : closedTicket()
+  }, [])
+  // Declared before the polling effect: effects run in order, also when
+  // React mounts the tab a second time in development.
+  useEffect(() => {
+    boardSession.current = createBoardSession()
+    return () => {
+      boardSession.current.close()
+      boardSession.current = null
+    }
+  }, [])
+
   // --- polling ---------------------------------------------------------------
 
-  // Polls overlap (the timer, actions, a settings change). A result older than
-  // one already shown is dropped, so a slow reply can't undo a newer one or
-  // bring back the previous board after the address changes.
+  // Polls also overlap on one board (the timer, actions): a result older than
+  // one already shown is dropped, so a slow reply can't undo a newer one.
   const refreshStarted = useRef(0)
   const refreshShown = useRef(0)
   const refresh = useCallback(async () => {
     const id = ++refreshStarted.current
-    const nextHealth = await probeHealth()
-    if (id < refreshShown.current) return nextHealth
+    const board = ticket()
+    let nextHealth
+    try {
+      nextHealth = await probeHealth(board.signal)
+    } catch (error) {
+      if (isAbort(error)) return null
+      throw error
+    }
+    if (!board.live() || id < refreshShown.current) return nextHealth
     refreshShown.current = id
     setHealth(nextHealth)
     if (nextHealth.httpStatus === 200 && nextHealth.body?.model_server?.reachable) {
       try {
-        const nextStatus = await getJson('models/status')
-        if (id === refreshShown.current) setStatus(nextStatus)
+        const nextStatus = await getJson('models/status', { signal: board.signal })
+        if (board.live() && id === refreshShown.current) setStatus(nextStatus)
       } catch {
         // A failed status poll keeps the last known catalog.
       }
     }
     return nextHealth
-  }, [])
+  }, [ticket])
 
   useEffect(() => {
     let cancelled = false
@@ -271,17 +308,15 @@ export default function GenAIView({ onError, onStatus }) {
   }, [refresh])
 
   // health changes on every poll, so a failed fetch is tried again on the next one.
-  // boardId changes with the board address; a reply from the previous board is dropped.
-  const boardId = useRef(0)
   useEffect(() => {
     if (!usable || voices || voicesLoading.current) return
-    const board = boardId.current
+    const board = ticket()
     voicesLoading.current = true
-    getJson('v1/audio/voices')
-      .then((v) => { if (board === boardId.current) setVoices(v) })
+    getJson('v1/audio/voices', { signal: board.signal })
+      .then((v) => { if (board.live()) setVoices(v) })
       .catch(() => {})
-      .finally(() => { if (board === boardId.current) voicesLoading.current = false })
-  }, [usable, voices, health])
+      .finally(() => { if (board.live()) voicesLoading.current = false })
+  }, [usable, voices, health, ticket])
 
   // Follow a streaming reply only while the reader is at the bottom; scrolling
   // up to reread stops following until they scroll back down.
@@ -324,12 +359,11 @@ export default function GenAIView({ onError, onStatus }) {
 
   async function applySettings(event) {
     event.preventDefault()
-    if (boardBusy) return
+    if (!allowed.changeBoard) return
     try {
       const saved = await saveSettings({ url: addressDraft.trim() })
-      // Polls already on their way went to the previous board: drop them.
-      refreshShown.current = refreshStarted.current + 1
-      boardId.current += 1
+      // Everything still on its way to the previous board ends here.
+      boardSession.current?.restart()
       voicesLoading.current = false
       stopSpeaking()
       setSettings(saved)
@@ -360,13 +394,13 @@ export default function GenAIView({ onError, onStatus }) {
     setLastError(null)
     const progress = new AbortController()
     if (path === 'models/load') {
-      followLoadProgress({ signal: progress.signal, onProgress: setLoadProgress }).catch(() => {})
+      followLoadProgress({ signal: ticket(progress.signal).signal, onProgress: setLoadProgress }).catch(() => {})
     }
     try {
-      await postJson(path, body)
+      await postJson(path, body, { signal: ticket().signal })
       onStatus?.(`${label}: done.`)
     } catch (error) {
-      fail(`${label} failed: ${error.message}`)
+      if (!isAbort(error)) fail(`${label} failed: ${error.message}`)
     } finally {
       progress.abort()
       setLoadProgress(null)
@@ -376,40 +410,55 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }
 
+  function loadChatModel(model) {
+    if (allowed.changeChatModel && model.supported !== false) runModelOp(`Loading ${friendlyModelName(model.name)}`, 'models/load', { name: model.name })
+  }
+
+  function unloadChatModel(model) {
+    if (allowed.changeChatModel) runModelOp(`Unloading ${friendlyModelName(model.name)}`, 'models/unload', { name: model.name })
+  }
+
+  function switchSpeechModel(model) {
+    if (allowed.changeSpeechModel && model.supported !== false) runModelOp(`Switching speech recognition to ${friendlyModelName(model.name)}`, 'models/asr', { name: model.name })
+  }
+
   function chooseChatModel(name) {
     const model = chatModels(status).find((m) => m.name === name)
-    if (!model || model === chatModel || streaming || listening) return
+    if (!model || model === chatModel || !allowed.changeChatModel) return
     if (model.supported === false) {
       onError?.(model.unsupportedReason || `${friendlyModelName(model.name)} can't run on this board.`)
       return
     }
     const wait = model.estimatedLoadS ? ` It takes about ${formatDuration(model.estimatedLoadS)}.` : ''
     if (!window.confirm(`Load ${friendlyModelName(model.name)}?${wait} The current model is unloaded first.`)) return
-    runModelOp(`Loading ${friendlyModelName(model.name)}`, 'models/load', { name: model.name })
+    loadChatModel(model)
   }
 
+  // Only the latest search is shown.
   const hubSearchId = useRef(0)
   async function searchHub(event) {
     event.preventDefault()
+    if (!allowed.searchModels) return
     const id = ++hubSearchId.current
-    const board = boardId.current
+    const board = ticket()
     try {
       const query = hubQuery.trim() ? `?q=${encodeURIComponent(hubQuery.trim())}` : ''
-      const results = await getJson(`models/hub/search${query}`)
-      if (id === hubSearchId.current && board === boardId.current) setHubResults(results)
+      const results = await getJson(`models/hub/search${query}`, { signal: board.signal })
+      if (id === hubSearchId.current && board.live()) setHubResults(results)
     } catch (error) {
-      if (id === hubSearchId.current) onError?.(`Search failed: ${error.message}`)
+      if (id === hubSearchId.current && board.live() && !isAbort(error)) onError?.(`Search failed: ${error.message}`)
     }
   }
 
   async function startDownload(repoId) {
+    if (!allowed.downloadModel) return
     setDownload({ repoId, state: 'resolving', pct: null })
     try {
-      await downloadModel({ repoId, onProgress: (item) => setDownload({ repoId, ...item }) })
+      await downloadModel({ repoId, signal: ticket().signal, onProgress: (item) => setDownload({ repoId, ...item }) })
       onStatus?.(`Downloaded ${repoId}.`)
       setHubResults(null)
     } catch (error) {
-      onError?.(`Download of ${repoId} failed: ${error.message}`)
+      if (!isAbort(error)) onError?.(`Download of ${repoId} failed: ${error.message}`)
     } finally {
       setDownload(null)
       refresh()
@@ -543,7 +592,7 @@ export default function GenAIView({ onError, onStatus }) {
       try {
         while (pending.length && !signal.aborted) {
           const { text, language: pieceLanguage } = pending.shift()
-          const result = await speak({ text, model: engine, voice: voice || undefined, language: pieceLanguage, signal })
+          const result = await speak({ text, model: engine, voice: voice || undefined, language: pieceLanguage, signal: ticket(signal).signal })
           const rtf = Number(result.rtf)
           if (Number.isFinite(rtf) && rtf > 0) rtfs.push(rtf)
           engineUsed = engineUsed || result.engine
@@ -597,6 +646,7 @@ export default function GenAIView({ onError, onStatus }) {
 
   // Read aloud on a finished reply.
   function speakText(text, id) {
+    if (!allowed.readAloud) return
     const t0 = performance.now()
     const pieces = speakablePieces(text)
     if (!pieces.length) return
@@ -683,7 +733,7 @@ export default function GenAIView({ onError, onStatus }) {
           model: chatModel.name,
           messages: outgoing,
           maxTokens: MAX_TOKENS,
-          signal: controller.signal,
+          signal: ticket(controller.signal).signal,
           onDelta: (piece) => {
             if (tFirst === null) tFirst = performance.now()
             reply += piece
@@ -712,7 +762,7 @@ export default function GenAIView({ onError, onStatus }) {
 
   // Typed messages wait while a spoken one is being recorded or transcribed.
   function sendTyped() {
-    if (!recording && !transcribing) sendMessage()
+    if (allowed.send) sendMessage()
   }
 
   async function attachImage(file) {
@@ -725,7 +775,7 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   async function openCamera() {
-    if (cameraStream.current || cameraStarting.current) return
+    if (!allowed.openCamera || cameraStream.current || cameraStarting.current) return
     cameraStarting.current = true
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
@@ -772,7 +822,7 @@ export default function GenAIView({ onError, onStatus }) {
       return
     }
     // A second click while the browser is still opening the microphone.
-    if (micStarting.current || transcribing) return
+    if (micStarting.current || !allowed.startRecording) return
     micStarting.current = true
     // Unlocked during this click, so a spoken question can be answered aloud.
     // Unlocked during this click only if there is no player yet (so nothing is
@@ -797,7 +847,7 @@ export default function GenAIView({ onError, onStatus }) {
         transcribeAbort.current = controller
         try {
           const tStop = performance.now()
-          const result = await transcribe(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), { language, signal: controller.signal })
+          const result = await transcribe(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), { language, signal: ticket(controller.signal).signal })
           if (!mounted.current) return
           const heardMs = performance.now() - tStop
           const heard = (result.text || '').trim()
@@ -851,7 +901,7 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   function newChat() {
-    if (listening) return
+    if (!allowed.newChat) return
     chatGeneration.current += 1
     chatAbort.current?.abort()
     stopSpeaking()
@@ -896,7 +946,6 @@ export default function GenAIView({ onError, onStatus }) {
   }, [engines, engine])
   const voiceWarnings = usable ? voiceEngineWarnings(health) : []
   const needsAttention = backend.state !== 'ready' || voiceWarnings.length > 0
-  const canChat = usable && Boolean(chatModel)
 
   // --- render -----------------------------------------------------------------
 
@@ -908,8 +957,8 @@ export default function GenAIView({ onError, onStatus }) {
           <p className="genai-tutorial-title">{step.title}</p>
           <p className="genai-tutorial-body">{step.body}</p>
           <div className="genai-actions">
-            {step.action && (step.action !== 'camera' || (canChat && sees)) && (
-              <button type="button" className="btn-tonal" disabled={step.action === 'camera' && cameraOpen} onClick={() => tryTutorialAction(step.action)}>Try it</button>
+            {step.action && (step.action !== 'camera' || allowed.attachPicture) && (
+              <button type="button" className="btn-tonal" disabled={step.action === 'camera' ? !allowed.openCamera : step.action.startsWith('example') && !allowed.typeMessage} onClick={() => tryTutorialAction(step.action)}>Try it</button>
             )}
             <span className="genai-tutorial-spacer" />
             <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
@@ -930,7 +979,7 @@ export default function GenAIView({ onError, onStatus }) {
           <select
             value={chatModel ? chatModel.name : ''}
             onChange={(e) => chooseChatModel(e.target.value)}
-            disabled={!usable || streaming || listening || chatModels(status).length === 0}
+            disabled={!allowed.changeChatModel || chatModels(status).length === 0}
             title={chatModel ? chatModel.name : ''}
           >
             {!chatModel && <option value="">{chatModels(status).length ? 'Choose a model to load' : 'No models on the board'}</option>}
@@ -943,7 +992,7 @@ export default function GenAIView({ onError, onStatus }) {
         </label>
         {/* The tooltip sits on a wrapper: browsers show none on a disabled button. */}
         <span className="genai-tooltip-wrap" title="New chat">
-          <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={messages.length === 0 || listening} aria-label="New chat">
+          <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={!allowed.newChat} aria-label="New chat">
             <Icon d={ICONS.newChat} />
           </button>
         </span>
@@ -1015,9 +1064,9 @@ export default function GenAIView({ onError, onStatus }) {
                   aria-describedby={addressError ? 'genai-address-error' : undefined}
                 />
               </label>
-              <button type="submit" className="btn-tonal" disabled={boardBusy}>Save</button>
+              <button type="submit" className="btn-tonal" disabled={!allowed.changeBoard}>Save</button>
             </form>
-            {boardBusy && <p className="hint">The address can be changed once the current reply, recording, model operation or download finishes.</p>}
+            {!allowed.changeBoard && <p className="hint">The address can be changed once the current reply, recording, model operation or download finishes.</p>}
             {addressError && <p id="genai-address-error" className="genai-field-error" role="alert">{addressError}</p>}
             <p className="hint">
               Start GenAI Studio on the board with <code>{START_COMMAND}</code>. Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
@@ -1059,16 +1108,16 @@ export default function GenAIView({ onError, onStatus }) {
               title="Chat"
               models={chatModels(status)}
               loadedNames={new Set(status?.loaded || [])}
-              disabled={!usable || streaming || listening}
-              onLoad={(m) => runModelOp(`Loading ${friendlyModelName(m.name)}`, 'models/load', { name: m.name })}
-              onUnload={(m) => runModelOp(`Unloading ${friendlyModelName(m.name)}`, 'models/unload', { name: m.name })}
+              disabled={!allowed.changeChatModel}
+              onLoad={loadChatModel}
+              onUnload={unloadChatModel}
             />
             <ModelList
               title="Speech recognition"
               models={speechModels(status)}
               activeName={status?.asrModel}
-              disabled={!usable || recording || transcribing}
-              onUse={(m) => runModelOp(`Switching speech recognition to ${friendlyModelName(m.name)}`, 'models/asr', { name: m.name })}
+              disabled={!allowed.changeSpeechModel}
+              onUse={switchSpeechModel}
             />
           </div>
 
@@ -1077,7 +1126,7 @@ export default function GenAIView({ onError, onStatus }) {
               <h3>Get more models</h3>
               <form className="genai-row" onSubmit={searchHub}>
                 <input className="search-input" value={hubQuery} onChange={(e) => setHubQuery(e.target.value)} placeholder="Qwen, Whisper, Llama" aria-label="Search Hugging Face models" />
-                <button type="submit" className="btn-ghost" disabled={Boolean(download)}>Search Hugging Face</button>
+                <button type="submit" className="btn-ghost" disabled={!allowed.searchModels}>Search Hugging Face</button>
               </form>
               {download && (
                 <div>
@@ -1095,7 +1144,7 @@ export default function GenAIView({ onError, onStatus }) {
                       {r.alreadyInCatalog ? (
                         <span className="hint">on the board</span>
                       ) : (
-                        <button type="button" className="btn-ghost genai-small" disabled={Boolean(download) || Boolean(r.unsupportedReason)} title={r.unsupportedReason || r.repoId} onClick={() => startDownload(r.repoId)}>
+                        <button type="button" className="btn-ghost genai-small" disabled={!allowed.downloadModel || Boolean(r.unsupportedReason)} title={r.unsupportedReason || r.repoId} onClick={() => startDownload(r.repoId)}>
                           Download
                         </button>
                       )}
@@ -1126,18 +1175,18 @@ export default function GenAIView({ onError, onStatus }) {
               </p>
               <div className="genai-examples" aria-label="Examples to try">
                 <span className="hint">Try:</span>
-                <button type="button" className="btn-ghost genai-small" disabled={!canChat} onClick={() => tryPrompt('Explain what an AI accelerator does, in simple terms.')}>
+                <button type="button" className="btn-ghost genai-small" disabled={!allowed.typeMessage} onClick={() => tryPrompt('Explain what an AI accelerator does, in simple terms.')}>
                   Explain what an AI accelerator does
                 </button>
                 {sees && (
-                  <button type="button" className="btn-ghost genai-small" disabled={!canChat || cameraOpen} onClick={openCamera}>
+                  <button type="button" className="btn-ghost genai-small" disabled={!allowed.openCamera} onClick={openCamera}>
                     What's in front of my camera?
                   </button>
                 )}
-                <button type="button" className="btn-ghost genai-small" disabled={!canChat} onClick={() => tryPrompt("Translate 'good morning, how are you?' into Spanish.")}>
+                <button type="button" className="btn-ghost genai-small" disabled={!allowed.typeMessage} onClick={() => tryPrompt("Translate 'good morning, how are you?' into Spanish.")}>
                   Translate into Spanish
                 </button>
-                <button type="button" className="btn-ghost genai-small" disabled={!usable || !status?.asrModel} onClick={toggleRecording}>
+                <button type="button" className="btn-ghost genai-small" disabled={!allowed.startRecording && !allowed.stopRecording} onClick={toggleRecording}>
                   Ask by voice
                 </button>
               </div>
@@ -1187,7 +1236,7 @@ export default function GenAIView({ onError, onStatus }) {
                   <button type="button" className="btn-ghost genai-small" onClick={stopSpeaking}>Stop speaking</button>
                 ) : (
                   support && support.supported && (
-                    <button type="button" className="btn-ghost genai-small" onClick={() => speakText(parts.answer, m.id)} disabled={!usable} title={usable ? 'Read this reply aloud' : backend.title}>
+                    <button type="button" className="btn-ghost genai-small" onClick={() => speakText(parts.answer, m.id)} disabled={!allowed.readAloud} title={allowed.readAloud ? 'Read this reply aloud' : backend.title}>
                       Read aloud
                     </button>
                   )
@@ -1233,17 +1282,17 @@ export default function GenAIView({ onError, onStatus }) {
                 sendTyped()
               }
             }}
-            placeholder={canChat ? 'Ask anything, or press the microphone and speak' : (usable ? 'Choose a model at the top first' : backend.title)}
+            placeholder={allowed.typeMessage ? 'Ask anything, or press the microphone and speak' : (usable ? 'Choose a model at the top first' : backend.title)}
             aria-label="Message"
             rows={1}
-            disabled={!canChat}
+            disabled={!allowed.typeMessage}
           />
           <div className="genai-composer-tools">
             <span className={`genai-composer-media${spot('media')}`}>
-              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!canChat || !sees} onClick={() => fileInput.current?.click()}>
+              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!allowed.attachPicture} onClick={() => fileInput.current?.click()}>
                 <Icon d={ICONS.photo} />
               </button>
-              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!canChat || !sees || cameraOpen} onClick={openCamera}>
+              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!allowed.openCamera} onClick={openCamera}>
                 <Icon d={ICONS.camera} />
               </button>
             </span>
@@ -1254,7 +1303,7 @@ export default function GenAIView({ onError, onStatus }) {
               aria-label={recording ? 'Stop recording' : 'Speak your question'}
               aria-pressed={recording}
               title={recording ? 'Stop recording' : 'Speak your question'}
-              disabled={!recording && (!usable || !status?.asrModel || transcribing)}
+              disabled={!allowed.startRecording && !allowed.stopRecording}
               onClick={toggleRecording}
             >
               <Icon d={ICONS.mic} />
@@ -1264,7 +1313,7 @@ export default function GenAIView({ onError, onStatus }) {
                 <Icon d={ICONS.stop} />
               </button>
             ) : (
-              <button type="submit" className="genai-send" aria-label="Send" title="Send" disabled={!canChat || recording || transcribing || (!draft.trim() && !image)}>
+              <button type="submit" className="genai-send" aria-label="Send" title="Send" disabled={!allowed.send}>
                 <Icon d={ICONS.send} />
               </button>
             )}

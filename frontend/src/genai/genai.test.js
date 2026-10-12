@@ -24,6 +24,8 @@ import { REPLY_CUT_OFF, downloadModel, probeHealth, streamChat } from './client.
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
+import { allowedActions } from './activity.js'
+import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -486,3 +488,76 @@ for (const mode of ['health', 'safety', 'security']) {
     }
   })
 }
+
+// --- one rule table and one board session --------------------------------------
+
+const READY = { usable: true, hasChatModel: true, sees: true, hasAsr: true, hasMessages: true, hasDraft: true }
+
+test('nothing changes models, clears the chat or switches boards while speech input runs', () => {
+  for (const busy of [{ recording: true }, { transcribing: true }]) {
+    const a = allowedActions({ ...READY, ...busy })
+    assert.equal(a.listening, true)
+    for (const action of ['send', 'newChat', 'changeChatModel', 'changeSpeechModel', 'changeBoard', 'startRecording']) {
+      assert.equal(a[action], false, `${action} while ${Object.keys(busy)[0]}`)
+    }
+  }
+  assert.equal(allowedActions({ ...READY, recording: true }).stopRecording, true)
+})
+
+test('a reply in progress blocks model and board changes but not a spoken question', () => {
+  const a = allowedActions({ ...READY, replying: true })
+  assert.deepEqual([a.send, a.changeChatModel, a.changeSpeechModel, a.changeBoard], [false, false, false, false])
+  assert.deepEqual([a.stopReply, a.startRecording, a.newChat, a.typeMessage], [true, true, true, true])
+})
+
+test('a model operation or a download holds what depends on it', () => {
+  const op = allowedActions({ ...READY, modelOp: true })
+  for (const action of ['send', 'typeMessage', 'startRecording', 'readAloud', 'changeChatModel', 'changeSpeechModel', 'changeBoard']) {
+    assert.equal(op[action], false, `${action} during a model operation`)
+  }
+  const dl = allowedActions({ ...READY, downloading: true })
+  assert.deepEqual([dl.changeBoard, dl.searchModels, dl.downloadModel], [false, false, false])
+  assert.equal(dl.send, true)
+})
+
+test('capabilities gate their controls when idle', () => {
+  assert.equal(allowedActions(READY).changeBoard, true)
+  assert.equal(allowedActions({ ...READY, sees: false }).attachPicture, false)
+  assert.equal(allowedActions({ ...READY, cameraOpen: true }).openCamera, false)
+  assert.equal(allowedActions({ ...READY, hasAsr: false }).startRecording, false)
+  assert.equal(allowedActions({ ...READY, hasDraft: false }).send, false)
+  assert.equal(allowedActions({ ...READY, hasChatModel: false }).typeMessage, false)
+  assert.equal(allowedActions({ ...READY, usable: false }).readAloud, false)
+})
+
+test('a new board ends the previous session: its requests abort and its results are stale', () => {
+  const session = createBoardSession()
+  const own = new AbortController()
+  const before = session.ticket(own.signal)
+  const plain = session.ticket()
+  session.restart()
+  assert.equal(before.signal.aborted, true)
+  assert.equal(plain.live(), false)
+  const after = session.ticket()
+  assert.equal(after.live(), true)
+  assert.equal(after.signal.aborted, false)
+  session.close()
+  assert.equal(after.live(), false)
+})
+
+test('an operation can still stop itself within a live session', () => {
+  const session = createBoardSession()
+  const own = new AbortController()
+  const t = session.ticket(own.signal)
+  own.abort()
+  assert.equal(t.signal.aborted, true)
+  assert.equal(t.live(), true)
+  const merged = anySignal([new AbortController().signal, AbortSignal.abort()])
+  assert.equal(merged.aborted, true)
+})
+
+test('a tab that is gone gets tickets that are already over', () => {
+  const t = closedTicket()
+  assert.equal(t.signal.aborted, true)
+  assert.equal(t.live(), false)
+})
