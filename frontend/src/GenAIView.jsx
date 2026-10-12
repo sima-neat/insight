@@ -147,6 +147,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [solutionsOpen, setSolutionsOpen] = useState(false)
   const root = useRef(null)
   const [addressDraft, setAddressDraft] = useState('')
+  const [addressError, setAddressError] = useState('')   // shown under the address until it is edited
   const [health, setHealth] = useState(null)
   const [status, setStatus] = useState(null)
   const [busyOp, setBusyOp] = useState(null)
@@ -272,10 +273,18 @@ export default function GenAIView({ onError, onStatus }) {
       const saved = await saveSettings({ url: addressDraft.trim() })
       setSettings(saved)
       setVoices(null)
+      setAddressError('')
       onStatus?.('Board settings saved.')
       refresh()
     } catch (error) {
-      onError?.(error.message)
+      // A rejected address is shown next to the field, where the user is
+      // typing; anything else also goes to Insight's error popup.
+      if (error.status === 400) {
+        setAddressError("That isn't a board address. Use https://<board address>:5000, for example https://192.168.1.20:5000.")
+      } else {
+        setAddressError(error.message)
+        onError?.(error.message)
+      }
     }
   }
 
@@ -770,9 +779,12 @@ export default function GenAIView({ onError, onStatus }) {
             ))}
           </select>
         </label>
-        <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={messages.length === 0} aria-label="New chat" title="New chat: start over, the model forgets this conversation">
-          <Icon d={ICONS.newChat} />
-        </button>
+        {/* The tooltip sits on a wrapper: browsers show none on a disabled button. */}
+        <span className="genai-tooltip-wrap" title="New chat">
+          <button type="button" className="btn-ghost genai-tool genai-new-chat" onClick={newChat} disabled={messages.length === 0} aria-label="New chat">
+            <Icon d={ICONS.newChat} />
+          </button>
+        </span>
         <label className={`genai-check${spot('read-aloud')}`} title="Read every reply aloud with the board's speech engine">
           <input type="checkbox" checked={readAloud} onChange={(e) => setReadAloud(e.target.checked)} />
           Read replies aloud
@@ -833,10 +845,17 @@ export default function GenAIView({ onError, onStatus }) {
             <form className="genai-form" onSubmit={applySettings}>
               <label>
                 <span>Board address</span>
-                <input value={addressDraft} onChange={(e) => setAddressDraft(e.target.value)} placeholder={settings?.defaultUrl || 'https://192.168.1.20:5000'} />
+                <input
+                  value={addressDraft}
+                  onChange={(e) => { setAddressDraft(e.target.value); setAddressError('') }}
+                  placeholder={settings?.defaultUrl || 'https://192.168.1.20:5000'}
+                  aria-invalid={addressError ? 'true' : undefined}
+                  aria-describedby={addressError ? 'genai-address-error' : undefined}
+                />
               </label>
               <button type="submit" className="btn-tonal">Save</button>
             </form>
+            {addressError && <p id="genai-address-error" className="genai-field-error" role="alert">{addressError}</p>}
             <p className="hint">
               Start GenAI Studio on the board with <code>{START_COMMAND}</code>. Leave the address empty to use {settings?.defaultUrl || 'the paired DevKit'}.
             </p>
