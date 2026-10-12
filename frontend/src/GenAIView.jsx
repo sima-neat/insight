@@ -287,8 +287,10 @@ export default function GenAIView({ onError, onStatus }) {
       try {
         const nextStatus = await getJson('models/status', { signal: board.signal })
         if (board.live() && id === refreshShown.current) setStatus(nextStatus)
-      } catch {
-        // A failed status poll keeps the last known catalog.
+      } catch (error) {
+        // An unknown catalog offers no model: a stale one could send to a
+        // model that is no longer loaded. The next poll brings it back.
+        if (!isAbort(error) && board.live() && id === refreshShown.current) setStatus(null)
       }
     }
     return nextHealth

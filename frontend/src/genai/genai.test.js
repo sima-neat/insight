@@ -561,3 +561,8 @@ test('a tab that is gone gets tickets that are already over', () => {
   assert.equal(t.signal.aborted, true)
   assert.equal(t.live(), false)
 })
+
+test('an open camera preview holds model changes', () => {
+  const a = allowedActions({ ...READY, cameraOpen: true })
+  assert.deepEqual([a.changeChatModel, a.changeSpeechModel], [false, false])
+})

@@ -22,8 +22,9 @@ export function allowedActions(state) {
   const listening = Boolean(s.recording || s.micOpening || s.transcribing)
   const ready = Boolean(s.usable && !s.modelOp)
   const canChat = ready && Boolean(s.hasChatModel)
-  // Models change only when nothing is using them.
-  const modelsQuiet = ready && !s.replying && !listening
+  // Models change only when nothing is using them (an open camera preview is
+  // about to give the current model a picture).
+  const modelsQuiet = ready && !s.replying && !listening && !s.cameraOpen
   return {
     listening,
     typeMessage: canChat,
