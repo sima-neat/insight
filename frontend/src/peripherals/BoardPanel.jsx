@@ -91,7 +91,7 @@ export default function BoardPanel({
             cameraSetup={boardCameraSetup(board, snapshot)}
             loading={loading}
             error={error}
-            description="Insight discovers peripherals and reads device statistics over this connection."
+            description="Insight discovers peripherals over this connection."
             onBoardChange={onBoardChange}
             onRetry={onRetry}
             onReload={onReload}
