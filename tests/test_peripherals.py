@@ -29,6 +29,15 @@ OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
 CONTRACT_EXAMPLE = Path(__file__).parent / "fixtures" / "sentinel-catalog-example.json"
 
 
+# Catalogs with Sentinel's own per-mode verdict (sentinel#43): its example at 1f4f964 (Platform 2.1.3, fixed ISP
+# sizes, `isp_output`), and a response captured from a Modalix DevKit on 3.0.0_develop_B1859 (IMX477 sensor sizes,
+# `sensor_mode`; C920 camera and microphone), both byte for byte.
+VERDICT_CATALOGS = {
+    "sentinel#43 example": Path(__file__).parent / "fixtures" / "sentinel-catalog-example-43.json",
+    "DevKit 3.0 capture": Path(__file__).parent / "fixtures" / "sentinel-catalog-devkit-3.0.json",
+}
+
+
 def contract_catalog():
     return json.loads(CONTRACT_EXAMPLE.read_text(encoding="utf-8"))
 
@@ -240,6 +249,25 @@ def states(fps):
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_every_mode_keeps_sentinels_verdict_on_real_catalogs(self):
+        """Each mode Insight lists has the state and reason Sentinel gave it; the only exception is the IMX477's
+        sensor sizes wider than 4032, which libcamera streams at 4032 wide."""
+        for label, path in VERDICT_CATALOGS.items():
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            snapshot = snapshot_of(doc)
+            for device in (d for d in doc["devices"] if d["type"] == "camera"):
+                camera = item(snapshot, device["id"])
+                for mode in device["modes"]:
+                    with self.subTest(label, camera=device["id"], mode=(mode["format"], mode["width"], mode["height"])):
+                        capped = (mode["available"] and device["model"] == "imx477" and mode.get("sensor_mode") is True
+                                  and mode["width"] > cameras.SENSOR_MAX_WIDTH["imx477"])
+                        tier = "available" if mode["available"] and not capped else "unsupported"
+                        reason = (cameras.MAX_WIDTH_REASON.format(width=4032) if capped
+                                  else None if mode["available"] else mode["reason"])
+                        fps = size_of(fmt_of(camera, mode["format"]), mode["width"], mode["height"])["fps"]
+                        self.assertTrue(fps)
+                        self.assertEqual({(t, r) for _, t, r in states(fps)}, {(tier, reason)})
+
     def test_imx477_nv12_modes_are_available_at_the_isp_sizes_when_the_overlays_support_its_sensor(self):
         camera = item(snapshot_of(catalog(imx477(), board=board_block())), IMX477)
         self.assertEqual((camera["connection"], camera["name"], camera["model"]), ("mipi", "imx477 5-001a", "imx477"))
