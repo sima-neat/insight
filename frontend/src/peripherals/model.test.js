@@ -19,7 +19,6 @@ import {
   createBoardSync,
   createFocusReturn,
   defaultTargetText,
-  deviceRows,
   deviceTabs,
   formatDuration,
   formatOptions,
@@ -30,7 +29,6 @@ import {
   groupMicrophones,
   initialBoardForm,
   isSnapshotStale,
-  microphoneRows,
   microphoneSubtitle,
   micLevelNotice,
   micStartMayHaveRun,
@@ -356,21 +354,15 @@ test('labels for tiers, sources, and defaults', () => {
   assert.equal(defaultTargetText({ on_board: false, sdk_env: null }), '')
 })
 
-test('identity rows list only known device fields', () => {
+test('a camera id prefers the stable name', () => {
   assert.equal(cameraDeviceId(imx477), imx477.device.camera_name)
   assert.equal(cameraDeviceId(usb), usb.device.by_id)
-  const rows = Object.fromEntries(deviceRows(usb))
-  assert.equal(rows['USB ID'], '046d:0825')
-  assert.equal(rows['USB speed'], '480 Mb/s')
-  assert.equal('Serial' in rows, false)
-  assert.equal('Media device' in rows, false)
-  assert.equal(Object.fromEntries(deviceRows(imx568))['Name source'], 'media-graph')
 })
 
 test('a subtitle never repeats what the name already says', () => {
   // "imx477 5-001a" carries the model, so the subtitle beneath it must not read "imx477" again.
   assert.equal(cameraSubtitle(imx477), '')
-  // The USB camera reports its product string as both name and model, and its kernel path stays in Device details.
+  // The USB camera reports its product string as both name and model, and its kernel path is not shown.
   assert.equal(cameraSubtitle(usb), '')
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
@@ -730,25 +722,9 @@ test('the selected microphone survives refreshes and removals', () => {
   assert.equal(resolveMicrophoneId(items, imx477.id), yeti.id, 'a camera id is not a microphone selection')
 })
 
-test('the real Yeti Nano reads as capture tags and device detail rows', () => {
-  assert.equal(microphoneSubtitle(yeti), '', 'the ALSA name lives in Device details, not under the title')
+test('the real Yeti Nano reads as capture tags', () => {
+  assert.equal(microphoneSubtitle(yeti), '', 'the ALSA name is not shown under the title')
   assert.deepEqual(captureModes(yeti), [{ key: '0-S24_3LE-2-24', badges: ['S24_3LE', '2 ch', '24-bit', '32 · 44.1 · 48 kHz'] }])
-  assert.deepEqual(microphoneRows(yeti), [
-    ['Connection', 'USB (ALSA)'],
-    ['ALSA device', 'hw:CARD=Nano,DEV=0'],
-    ['Card', 'Nano, card 0'],
-    ['Card name', 'Yeti Nano'],
-    ['Driver', 'USB-Audio'],
-    ['Device node', '/dev/snd/pcmC0D0c'],
-    ['By-path link', yeti.device.by_path],
-    ['By-id link', yeti.device.by_id],
-    ['USB ID', 'b58e:0005'],
-    ['Manufacturer', 'Blue Microphones'],
-    ['Product', 'Yeti Nano'],
-    ['Serial', '2127SG00CBA8_888-000441040606'],
-    ['USB bus path', '1-3.1'],
-    ['USB speed', '12 Mb/s']
-  ])
 })
 
 test('capture tags cover mono, several formats, single rates and continuous ranges', () => {
@@ -772,31 +748,20 @@ test('capture tags cover mono, several formats, single rates and continuous rang
   assert.equal(sampleRateLabel(22050), '22.05 kHz')
 })
 
-test('a card without readable capabilities and a device without USB strings omit what is missing', () => {
+test('a card without readable capabilities omits its capture modes', () => {
   assert.equal(captureModes(onboardMic), null)
   assert.deepEqual(captureModes({ capture: [] }), [])
-  const rows = microphoneRows(onboardMic)
-  assert.deepEqual(rows.map(([label]) => label), ['Connection', 'ALSA device', 'Card', 'Card name', 'Driver', 'Device node'])
-  assert.equal(rows[0][1], 'On-board (ALSA)')
   const bare = {
     ...yeti,
     name: 'USB Device 0x1234:0x5678',
     device: { card_index: 3, pcm_device: 0, pcm_node: '/dev/snd/pcmC3D0c', usb: { vendor_id: '1234', product_id: '5678', manufacturer: null, product: null, serial: null, bus_path: '1-2', speed_mbps: null } }
   }
-  assert.deepEqual(microphoneRows(bare), [
-    ['Connection', 'USB (ALSA)'],
-    ['Card', 'card 3'],
-    ['Device node', '/dev/snd/pcmC3D0c'],
-    ['USB ID', '1234:5678'],
-    ['USB bus path', '1-2']
-  ])
   assert.equal(microphoneSubtitle(bare), '')
 })
 
 test('a webcam microphone names the camera it is part of', () => {
   const webcamMic = { ...yeti, device: { ...yeti.device, alsa_name: 'hw:CARD=C920,DEV=0', part_of: { id: usb.id, name: 'HD Pro Webcam C920' } } }
   assert.equal(microphoneSubtitle(webcamMic), 'Part of HD Pro Webcam C920')
-  assert.deepEqual(microphoneRows(webcamMic)[1], ['Part of', 'HD Pro Webcam C920'])
 })
 
 test('microphone test: record, play back, replay, and never a late answer out of turn', () => {

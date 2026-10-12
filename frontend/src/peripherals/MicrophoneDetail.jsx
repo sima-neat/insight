@@ -12,7 +12,6 @@ import {
   micTestErrorAction,
   micTestToResume,
   meterSegments,
-  microphoneRows,
   microphoneSubtitle,
   nextMicTestState,
   normalizeError,
@@ -304,25 +303,6 @@ export default function MicrophoneDetail({ mic }) {
       {(mic.errors || []).map((error, index) => (
         <ErrorNotice key={`${error.code || 'error'}-${index}`} error={error} />
       ))}
-
-      <details className="periph-identity">
-        <summary>Device details</summary>
-        <table className="sysinfo-table key-value">
-          <tbody>
-            {microphoneRows(mic).map(([label, value]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td>{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {mic.notes?.length > 0 && (
-          <ul className="periph-notes">
-            {mic.notes.map((note, index) => <li key={index}>{note}</li>)}
-          </ul>
-        )}
-      </details>
 
       <CaptureModes modes={captureModes(mic)} />
       <MicTest key={mic.id} mic={mic} />

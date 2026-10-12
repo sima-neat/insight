@@ -36,23 +36,6 @@ const SEVERITY = {
   info: { label: 'Info', tone: 'periph-info', rank: 2 }
 }
 
-const DEVICE_FIELDS = [
-  ['camera_name', 'Camera name'],
-  ['camera_name_source', 'Name source'],
-  ['media_device', 'Media device'],
-  ['bus_info', 'Bus info'],
-  ['csi', 'CSI receiver'],
-  ['video_node', 'Video node'],
-  ['by_id', 'Stable path']
-]
-
-const USB_FIELDS = [
-  ['manufacturer', 'Manufacturer'],
-  ['product', 'Product'],
-  ['serial', 'Serial'],
-  ['bus_path', 'USB bus path']
-]
-
 export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
 
 function tierOf(tier) {
@@ -82,10 +65,6 @@ export function severityInfo(severity) {
 
 export function sourceLabel(source) {
   return SOURCES[source] || ''
-}
-
-export function connectionLabel(connection) {
-  return CONNECTIONS.find((c) => c.id === connection)?.label || String(connection || 'Unknown')
 }
 
 export function connectionStateInfo(status) {
@@ -206,60 +185,18 @@ export function cameraDeviceId(camera) {
 }
 
 export function cameraSubtitle(camera) {
-  // A USB camera's kernel path is listed under Device details, not under its name.
+  // A USB camera's kernel path is not shown under its name.
   const deviceId = camera?.connection === 'usb' ? '' : cameraDeviceId(camera)
   // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
 }
 
-export function deviceRows(camera) {
-  const rows = [['Connection', connectionLabel(camera.connection)]]
-  if (camera.model) rows.push(['Model', camera.model])
-  const device = camera.device || {}
-  for (const [key, label] of DEVICE_FIELDS) {
-    if (device[key] !== undefined && device[key] !== null && device[key] !== '') rows.push([label, String(device[key])])
-  }
-  return [...rows, ...usbRows(device.usb)]
-}
-
-function usbRows(usb) {
-  if (!usb) return []
-  const rows = []
-  if (usb.vendor_id && usb.product_id) rows.push(['USB ID', `${usb.vendor_id}:${usb.product_id}`])
-  for (const [key, label] of USB_FIELDS) if (usb[key]) rows.push([label, String(usb[key])])
-  if (Number.isFinite(usb.speed_mbps)) rows.push(['USB speed', `${usb.speed_mbps} Mb/s`])
-  return rows
-}
-
-function present(value) {
-  return value !== undefined && value !== null && value !== ''
-}
-
-// The ALSA device name stays in Device details; the subtitle only ties a webcam's or headset's
-// microphone to the camera item the same USB device produced.
+// The subtitle only ties a webcam's or headset's microphone
+// to the camera item the same USB device produced.
 export function microphoneSubtitle(mic) {
   const name = mic?.device?.part_of?.name
   return name ? `Part of ${name}` : ''
-}
-
-export function microphoneRows(mic) {
-  const device = mic?.device || {}
-  const card = present(device.card_id) || present(device.card_index)
-    ? [device.card_id, present(device.card_index) ? `card ${device.card_index}` : ''].filter(present).join(', ')
-    : ''
-  const rows = [
-    ['Connection', MIC_CONNECTIONS.find((c) => c.id === mic?.connection)?.label || String(mic?.connection || 'Unknown')],
-    ['Part of', device.part_of?.name],
-    ['ALSA device', device.alsa_name],
-    ['Card', card],
-    ['Card name', device.card_name],
-    ['Driver', device.card_driver],
-    ['Device node', device.pcm_node],
-    ['By-path link', device.by_path],
-    ['By-id link', device.by_id]
-  ].filter(([, value]) => present(value)).map(([label, value]) => [label, String(value)])
-  return [...rows, ...usbRows(device.usb)]
 }
 
 export function sampleRateLabel(hz) {
