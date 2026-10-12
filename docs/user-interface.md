@@ -188,6 +188,8 @@ Tracks and poses without an `id` draw in one neutral color. Senders that want pe
 
 Object detection and segmentation settings hold optional per-class overrides. An entry for a label fixes that class's color and line style. An entry labelled `default` fixes the color of every class without its own entry. Without any entries, all classes are colored automatically.
 
+**Line Width** on the General tab sets how wide every overlay line is drawn: detection boxes, segment outlines, track boxes and trails, and pose skeletons. It is 3 px by default and can be set from 1 to 10 px. A per-class entry's **Thin** or **Thick** still sets the width for its own class. Like the other settings, a channel can use its own value.
+
 ### Late metadata
 
 An overlay is drawn only if its metadata has reached the browser by the time the video frame is shown. The viewer holds video back by the video sync buffer (300 ms by default) to give metadata that time. An application that sends metadata later than the buffer allows loses its overlays, even though video and message rate look healthy.

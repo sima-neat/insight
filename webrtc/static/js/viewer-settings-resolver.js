@@ -47,7 +47,10 @@
     videoSyncBufferMs: 300,
     metadataRetentionMs: 0,
     showRoi: true,
-    applyRoiFiltering: true
+    applyRoiFiltering: true,
+    // Width in px of every overlay line (boxes, segment outlines, tracks, poses); a class
+    // row's own width still wins for that class.
+    lineWidth: 3
   };
   const AUXILIARY_DEFAULTS = {
     "blazepose-3d": {
@@ -66,6 +69,7 @@
   const SCALAR_SETTINGS = [
     { id: "general.videoSyncBufferMs", tab: "General", metadataType: null, path: ["general", "videoSyncBufferMs"] },
     { id: "general.metadataRetentionMs", tab: "General", metadataType: null, path: ["general", "metadataRetentionMs"] },
+    { id: "general.lineWidth", tab: "General", metadataType: null, path: ["general", "lineWidth"] },
     { id: "general.showRoi", tab: "ROI", metadataType: null, path: ["general", "showRoi"] },
     { id: "general.applyRoiFiltering", tab: "ROI", metadataType: null, path: ["general", "applyRoiFiltering"] },
     {
@@ -263,6 +267,9 @@
       general.metadataRetentionMs = Math.round(
         clampNumber(rawGeneral.metadataRetentionMs, 0, 30000, GENERAL_DEFAULTS.metadataRetentionMs)
       );
+    }
+    if (Object.prototype.hasOwnProperty.call(rawGeneral, "lineWidth")) {
+      general.lineWidth = Math.round(clampNumber(rawGeneral.lineWidth, 1, 10, GENERAL_DEFAULTS.lineWidth));
     }
     if (Object.prototype.hasOwnProperty.call(rawGeneral, "showRoi")) {
       general.showRoi = rawGeneral.showRoi !== false;

@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const lostTrackTtlInput = document.getElementById("lostTrackTtlInput");
   const videoSyncBufferInput = document.getElementById("videoSyncBufferInput");
   const metadataRetentionInput = document.getElementById("metadataRetentionInput");
+  const lineWidthInput = document.getElementById("lineWidthInput");
   const tabButtons = document.querySelectorAll(".settings-tab-link");
   const tabSections = document.querySelectorAll(".settings-tab-section");
   const objectList = document.getElementById("viewerObjectList");
@@ -146,7 +147,8 @@ document.addEventListener("DOMContentLoaded", () => {
     trackTrailLengthInput,
     lostTrackTtlInput,
     videoSyncBufferInput,
-    metadataRetentionInput
+    metadataRetentionInput,
+    lineWidthInput
   ].forEach(keepInRange);
 
   trackHistoryToggle.addEventListener("change", () => {
@@ -217,6 +219,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const settings = settingsApi.readScopeSettings(scope);
     settings.general.videoSyncBufferMs = parseInt(videoSyncBufferInput.value, 10);
     settings.general.metadataRetentionMs = parseInt(metadataRetentionInput.value, 10);
+    settings.general.lineWidth = parseInt(lineWidthInput.value, 10);
     settings.general.showRoi = roiToggle.checked;
     settings.general.applyRoiFiltering = roiFilteringToggle.checked;
     settings.types["object-detection"].confidenceThreshold = parseFloat(confidenceInput.value);
@@ -508,6 +511,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lostTrackTtlInput.value = trackingHistorySettings.lostTrackTtlMs ?? 2000;
     videoSyncBufferInput.value = settings.general.videoSyncBufferMs ?? 300;
     metadataRetentionInput.value = settings.general.metadataRetentionMs ?? 0;
+    lineWidthInput.value = settings.general.lineWidth ?? settingsApi.defaults.general.lineWidth;
     roiToggle.checked = settings.general.showRoi !== false;
     roiFilteringToggle.checked = settings.general.applyRoiFiltering !== false;
     trackHistoryToggle.checked = trackingHistorySettings.enabled !== false;
