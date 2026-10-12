@@ -544,7 +544,7 @@ test('the detail pane shows one explanation line, chosen by priority', () => {
   // through untouched and never becomes a sentence; a preview that cannot open the camera says so.
   assert.equal(cameraSummaryLine(inUse), '')
   assert.equal(cameraSummaryLine({ ...imx477, availability: imx568.availability }), '')
-  assert.equal(cameraSummaryLine(usb), USB_REASON, 'the panel carries no pill, so it says why')
+  assert.equal(cameraSummaryLine(usb), '', 'a USB camera is always Unsupported, so it gets no sentence')
   assert.equal(cameraSummaryLine({}), '')
 })
 
