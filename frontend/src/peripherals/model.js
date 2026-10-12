@@ -309,6 +309,8 @@ export function groupOptions(options) {
 // One visible explanation line per camera state, chosen by priority, so the
 // detail pane never stacks four near-identical sentences.
 export function cameraSummaryLine(camera) {
+  // A USB camera is always Unsupported (no camera overlay), so a sentence saying so adds nothing.
+  if (camera?.connection === 'usb') return ''
   // An Unsupported camera's panel carries no pill, so it says why the camera cannot be used.
   if (camera?.support && tierOf(camera.support.tier) !== 'available') return camera.support.reason || 'Unsupported.'
   // An Available camera gets no sentence at all: every mode menu already labels each entry
