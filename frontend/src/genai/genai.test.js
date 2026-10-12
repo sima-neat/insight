@@ -18,7 +18,7 @@ import {
   speechModels
 } from './backendState.js'
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
-import { languageNames, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
+import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
 import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
@@ -266,9 +266,27 @@ test('read aloud support says plainly when a language has no voice', () => {
   assert.deepEqual(readAloudSupport('ఒక యువతి', VOICE_LANGUAGES), { supported: false, language: 'te', name: 'Telugu' })
   assert.deepEqual(readAloudSupport('नमस्ते', VOICE_LANGUAGES), { supported: true, language: 'hi' })
   assert.deepEqual(readAloudSupport('Привет, как дела?', VOICE_LANGUAGES), { supported: true, language: 'uk' })
-  assert.deepEqual(readAloudSupport('Hello there', VOICE_LANGUAGES, 'de'), { supported: true, language: 'de' })
+  assert.deepEqual(readAloudSupport('Hello there', VOICE_LANGUAGES, 'de'), { supported: true, language: 'en' })
+  assert.deepEqual(readAloudSupport('Tokyo, Osaka', VOICE_LANGUAGES, 'de'), { supported: true, language: 'de' })
   assert.deepEqual(readAloudSupport('ఒక యువతి', null), { supported: true, language: 'te' })
   assert.deepEqual(languageNames(['zh', 'en', 'na']), ['Chinese', 'English'])
+})
+
+test('Latin-script replies are read in their own language when it is clear', () => {
+  assert.equal(latinLanguage('Buenos días, ¿cómo estás?'), 'es')
+  assert.equal(latinLanguage('Bonjour, comment allez-vous aujourd\'hui ?'), 'fr')
+  assert.equal(latinLanguage('Guten Morgen, wie geht es dir heute?'), 'de')
+  assert.equal(latinLanguage('Buongiorno, come stai?'), 'it')
+  assert.equal(latinLanguage('Bom dia, tudo bem com você?'), 'pt')
+  assert.equal(latinLanguage('The weather is lovely today, and the park is open.'), 'en')
+  assert.equal(latinLanguage('Hello there'), 'en')
+  assert.equal(latinLanguage('Tokyo'), null)                      // nothing to go on
+  assert.equal(latinLanguage('Die Hard is great'), null)          // a tie is not a guess
+  const withSpanish = ['de', 'en', 'es']
+  assert.deepEqual(readAloudSupport('Buenos días, ¿cómo estás?', withSpanish, 'en'), { supported: true, language: 'es' })
+  // No voice for the guessed language: the fallback, as before.
+  assert.deepEqual(readAloudSupport('Buenos días, ¿cómo estás?', ['de', 'en'], 'en'), { supported: true, language: 'en' })
+  assert.deepEqual(readAloudSupport('Tokyo', withSpanish, 'de'), { supported: true, language: 'de' })
 })
 
 test('thinking is offered only for models that have a reasoning mode', () => {

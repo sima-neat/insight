@@ -436,7 +436,7 @@ export default function GenAIView({ onError, onStatus }) {
     let finished = false        // no more pieces will be added
     let synthesizing = false
     let playing = false
-    let language = null         // decided by the first piece
+    let language = null         // the reply's language, decided by the first piece
     let firstAudio = null
     const rtfs = []
     let engineUsed = null
@@ -517,8 +517,8 @@ export default function GenAIView({ onError, onStatus }) {
       synthesizing = true
       try {
         while (pending.length && !signal.aborted) {
-          const text = pending.shift()
-          const result = await speak({ text, model: engine, voice: voice || undefined, language, signal })
+          const { text, language: pieceLanguage } = pending.shift()
+          const result = await speak({ text, model: engine, voice: voice || undefined, language: pieceLanguage, signal })
           const rtf = Number(result.rtf)
           if (Number.isFinite(rtf) && rtf > 0) rtfs.push(rtf)
           engineUsed = engineUsed || result.engine
@@ -548,7 +548,10 @@ export default function GenAIView({ onError, onStatus }) {
           setSpeakingId(id)
           playLoop()
         }
-        pending.push(piece)
+        // A piece in another language ("Here is the translation: Buenos días")
+        // gets its own voice language; otherwise the reply's.
+        const own = readAloudSupport(piece, voices ? voices.languages : null, language)
+        pending.push({ text: piece, language: own.supported ? own.language : language })
         synthLoop()
         return true
       },
