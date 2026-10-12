@@ -7,10 +7,9 @@ from flask import Blueprint, Response, request
 
 from neat_insight.board import BoardError, get_board_manager
 from neat_insight.board.manager import board_summary
-from neat_insight.peripherals import export, mictest
-from neat_insight.peripherals.cameras import ScanCache, camera_nodes, cameras_of, empty_snapshot
+from neat_insight.peripherals import mictest
+from neat_insight.peripherals.cameras import ScanCache, empty_snapshot
 from neat_insight.peripherals.client import PeripheralClient
-from neat_insight.peripherals.microphones import check_nodes, microphones_of
 
 peripherals_bp = Blueprint("peripherals", __name__)
 
@@ -24,21 +23,6 @@ scans = ScanCache()
 def _no_store(response):
     response.headers["Cache-Control"] = "no-store"
     return response
-
-
-def _check_board(session, catalog: dict):
-    """Run the read-only peripheral check on the board in one command; None when it cannot run.
-
-    Availability is an extra on top of Sentinel's catalog, so a failure here degrades it to unknown
-    instead of failing the scan.
-    """
-    cameras, microphones = cameras_of(catalog), microphones_of(catalog)
-    if not cameras and not microphones:
-        return {"tools": {}, "availability_method": None, "users": {}, "failures": []}
-    payload = {"cameras": {device["id"]: camera_nodes(device) for device in cameras}, "support": True}
-    if microphones:
-        payload["microphones"] = {device["id"]: check_nodes(device) for device in microphones}
-    return _run_check(session, payload)
 
 
 def _run_check(session, payload: dict):
@@ -89,42 +73,11 @@ def refresh_peripherals():
         board = board_summary(session, session.identity())
         started = time.monotonic()
         catalog = PeripheralClient(session).refresh()
-        check = _check_board(session, catalog)
         scan_ms = int((time.monotonic() - started) * 1000)
         session.require_current()
-        snapshot = scans.record(session.generation, board, catalog, check, scan_ms)
+        snapshot = scans.record(session.generation, board, catalog, scan_ms)
         session.require_current()
         return snapshot
-
-
-# API: render an input configuration for one camera mode from the last scan.
-@peripherals_bp.post("/api/peripherals/cameras/export")
-def export_camera():
-    """Return code and config for one cached MIPI mode, or V4L2 descriptors for USB; never touches the board."""
-    selection = export.parse_request(request.get_json(silent=True))
-    session = get_board_manager().session()
-    if selection["generation"] is not None and selection["generation"] != session.generation:
-        raise BoardError(
-            "stale_snapshot",
-            "The camera selection belongs to an earlier board scan.",
-            hint="Click Refresh, then export again.",
-        )
-    snapshot = scans.snapshot(session.generation)
-    if snapshot is None:
-        raise BoardError(
-            "stale_snapshot",
-            "There is no camera scan for the selected board; it was never scanned or has changed since the scan.",
-            hint="Click Refresh, then export again.",
-        )
-    if selection["scan_id"] is not None and selection["scan_id"] != snapshot["scan_id"]:
-        raise BoardError(
-            "stale_snapshot",
-            "The camera selection belongs to an earlier peripheral scan.",
-            hint="Click Refresh, then export again.",
-        )
-    rendered = export.render(snapshot, selection)
-    session.require_current()
-    return rendered
 
 
 # API: start recording from one microphone; the page polls for the level.

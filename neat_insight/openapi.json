@@ -27,7 +27,7 @@
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, export a camera input configuration, and test a microphone. Sentinel discovers the devices; Insight adds which processes hold each one. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a microphone test records, and only while it runs. Each camera and mode states whether Core `CameraInput` supports it, as Neat Core on the board classifies it (unknown without Neat Core); Core has no audio input node, so microphones have nothing to export."}
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, and test a microphone. Sentinel discovers the devices and Insight reads its catalog. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a microphone test records, and only while it runs. Each camera mode is Available or Unsupported, decided from Sentinel's report: its sensor is in the board's camera overlays, the ISP outputs its size, and its format is NV12 (a fixed fact about Neat's `CameraInput`, not queried from the board). Core has no audio input node, so microphones carry no verdict."}
   ],
   "x-tagGroups": [
     {
@@ -80,7 +80,7 @@
       "get": {
         "tags": ["Service and system"],
         "summary": "Check service readiness",
-        "description": "A lightweight readiness probe with no dependency on vf, a DevKit, or media tools. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests.",
+        "description": "A lightweight readiness probe that also reports the startup-scoped browser network configuration applied to vf and MediaMTX. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests. A present but invalid `browser-ice-address` configuration prevents Insight from starting. A full HTTP(S) `launch-url` is reduced to its origin; an invalid launch URL preserves legacy request-host/port-map URL generation.",
         "operationId": "getHealth",
         "x-codeSamples": [
           {
@@ -95,7 +95,7 @@
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/Health"},
-                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z"}
+                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z", "network": {"browser_ice_address": "54.12.34.56", "browser_ice_address_source": "browser-ice-address", "public_origin": "https://insight.example.com/"}}
               }
             }
           }
@@ -841,7 +841,7 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Scan the selected board for cameras and microphones",
-        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Insight then runs one read-only `python3` check on the board that lists the processes holding each camera's device nodes and how many of each microphone's capture substreams are open now (from `/proc/asound`; the holders are looked up only when one is open), and which sound servers run, and asks PyNeat (`pyneat.peripherals.list()`) which camera modes Core `CameraInput` supports; without a PyNeat that classifies camera modes, support is unknown (tier `\"\"`). Microphone availability comes from that live count; Sentinel's counts, which can still show a sound server's brief open after hot-plug, are used only when the check cannot run, and camera availability is then `unknown`. Microphones are Sentinel's ALSA capture devices, read from `/proc/asound` and sysfs without opening a sound device. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists devices added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Each mode's `support` comes from Sentinel's catalog alone (see `SupportTier`). Microphones are Sentinel's ALSA capture devices, read from `/proc/asound` and sysfs without opening a sound device; their `availability` is Sentinel's own, passed through. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists devices added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
         "operationId": "refreshPeripherals",
         "responses": {
           "200": {"description": "New peripheral snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
@@ -849,21 +849,6 @@
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
           "503": {"$ref": "#/components/responses/BoardErrorResponse"},
           "504": {"$ref": "#/components/responses/BoardErrorResponse"}
-        }
-      }
-    },
-    "/api/peripherals/cameras/export": {
-      "post": {
-        "tags": ["Peripherals"],
-        "summary": "Export a camera input configuration",
-        "description": "Renders one mode from the identified peripheral scan without contacting the board. A MIPI mode must be one Neat Core accepts. MIPI cameras produce Python (`pyneat.CameraInputOptions`), C++, and JSON, always with an explicit `camera_name` and without `capture_buffer_count`, because Insight does not read the board's `libcamerasrc`; no Apps `config.yaml` `camera:` block is produced. A MIPI rate Neat Core rejects, or whose support is unknown, returns `400` with the reason. USB cameras produce YAML and JSON V4L2 descriptors only, because Core `CameraInput` does not support them (sima-neat/core#838). Returns `409 stale_snapshot` when the selected board was never scanned, and, when the optional `generation` and `scan_id` are sent, when the selected board or peripheral scan changed since the selection was read.",
-        "operationId": "exportCameraInput",
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExportRequest"}, "example": {"generation": 7, "scan_id": "1791164913635:2026-10-05T01:48:33.635147447Z", "id": "camera:imx477 5-001a", "format": "NV12", "width": 1920, "height": 1080, "fps": 30}}}},
-        "responses": {
-          "200": {"description": "Rendered configurations with the mode's support tier and warnings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CameraExport"}}}},
-          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
@@ -949,7 +934,7 @@
       "get": {
         "tags": ["Viewer"],
         "summary": "Build a browser-reachable vf viewer URL",
-        "description": "Constructs the vf HTTPS viewer URL on port `8081` using the current request host, selected color mode, and zero-based channel selection. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
+        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
         "operationId": "getViewerUrl",
         "parameters": [
           {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
@@ -1179,11 +1164,21 @@
       "Health": {
         "type": "object",
         "description": "Readiness result for the Insight Flask backend.",
-        "required": ["status", "service", "time"],
+        "required": ["status", "service", "time", "network"],
         "properties": {
           "status": {"type": "string", "const": "ok", "description": "Fixed readiness state returned when the backend can serve requests."},
           "service": {"type": "string", "const": "neat-insight", "description": "Stable service identifier for automated probes."},
-          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."}
+          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."},
+          "network": {
+            "type": "object",
+            "description": "Startup-scoped browser networking values applied by this Insight process.",
+            "required": ["browser_ice_address", "browser_ice_address_source", "public_origin"],
+            "properties": {
+              "browser_ice_address": {"type": ["string", "null"], "description": "Address advertised to browsers by vf and MediaMTX, or null when no override is active. The opt-in browser-ice-address file accepts IPv4; a legacy CONTAINER_HOST_IP fallback can also be IPv6."},
+              "browser_ice_address_source": {"type": "string", "enum": ["browser-ice-address", "CONTAINER_HOST_IP", "none"], "description": "Configuration source used for the effective browser ICE address."},
+              "public_origin": {"type": ["string", "null"], "format": "uri", "description": "Trusted browser-facing HTTP origin used for viewer, WHIP, and MJPEG URLs, or null for request-host and port-map behavior."}
+            }
+          }
         }
       },
       "MediaTreeNode": {
@@ -1311,8 +1306,8 @@
             "description": "Client URLs for the selected source and transports.",
             "properties": {
               "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
-              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."},
-              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots."}
+              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available. Uses the configured public origin when present."},
+              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots. Uses the configured public origin when present."}
             }
           }
         }
@@ -1446,12 +1441,11 @@
       },
       "SupportTier": {
         "type": "object",
-        "description": "Whether Core `CameraInput` can use a camera, format, or mode, as Neat Core on the board classifies it. `verified`: Core accepts it. `unsupported`: Core rejects it, and `reason` is Core's. `\"\"` (unknown): Neat Core is not installed, cannot classify camera modes, or did not classify this mode or frame rate.",
+        "description": "Whether a camera mode is usable, decided from SiMa Sentinel's catalog alone. `available`: Sentinel's `board` block lists the camera's sensor (the `configured_cameras` entry whose `camera_id` is the camera's id) among the sensors the board's camera overlays support (`supported_sensors`), the mode is an ISP output size (`isp_output`), and its format is NV12, which Neat's `CameraInput` outputs (a fixed fact, not queried from the board). `unsupported`: anything else, with `reason`: a USB camera, a sensor not in the board's camera overlays (also when no configured camera matches), a size the ISP cannot output, a format other than NV12, or a Sentinel that sends no `board` block (every mode). A camera or format is `available` when any of its modes is; otherwise its `reason` says why none is.",
         "required": ["tier", "reason"],
         "properties": {
-          "tier": {"type": "string", "enum": ["verified", "unsupported", ""]},
-          "reason": {"type": "string"},
-          "links": {"type": "array", "items": {"type": "object", "properties": {"label": {"type": "string"}, "url": {"type": "string", "format": "uri"}}}}
+          "tier": {"type": "string", "enum": ["available", "unsupported"]},
+          "reason": {"type": "string", "description": "Empty when `available`."}
         }
       },
       "PeripheralCamera": {
@@ -1464,11 +1458,11 @@
           "name": {"type": "string"},
           "model": {"type": ["string", "null"]},
           "device": {"type": "object", "description": "Known identifiers from Sentinel: `camera_name`, `camera_name_source` (`media-graph`: the sensor entity Sentinel names the camera after), `media_device`, `bus_info`, and `csi` (CSI receiver) for MIPI; `video_node`, `by_id` (the /dev/v4l/by-id link), and `usb` identity (`vendor_id`, `product_id`, `manufacturer`, `serial`, `product`, `bus_path`, `speed_mbps`) for USB.", "additionalProperties": true},
-          "availability": {"type": "object", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
+          "availability": {"type": "object", "description": "SiMa Sentinel's own availability fact, passed through. Insight does not inspect the board's processes; a camera another program holds is reported when a preview tries to open it (`camera_in_use`).", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
           "support": {"$ref": "#/components/schemas/SupportTier"},
           "modes_source": {"type": "string", "enum": ["live", "previous-scan", "unavailable"]},
-          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean"}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["verified", "unsupported", ""]}, "reason": {"type": "string", "description": "Why Neat Core rejects this rate (`unsupported`) or why its support is unknown (`\"\"`)."}}}}}}}}}},
-          "default_selection": {"type": ["object", "null"]},
+          "formats": {"type": "array", "items": {"type": "object", "properties": {"format": {"type": "string"}, "label": {"type": "string"}, "exportable": {"type": "boolean", "description": "Whether the format has an Available mode."}, "support": {"$ref": "#/components/schemas/SupportTier"}, "range": {"type": ["object", "null"]}, "sizes": {"type": "array", "items": {"type": "object", "properties": {"width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "number"}, "framerate_num": {"type": "integer", "description": "The exact rate as a fraction: value is framerate_num / framerate_den, rounded for display."}, "framerate_den": {"type": "integer"}, "tier": {"type": "string", "enum": ["available", "unsupported"], "description": "The state of the mode this rate belongs to."}, "reason": {"type": "string", "description": "Why the mode is Unsupported; absent when it is Available."}}}}}}}}}},
+          "default_selection": {"type": ["object", "null"], "description": "The first Available mode (`format`, `width`, `height`, `fps`); null when no mode is Available."},
           "notes": {"type": "array", "items": {"type": "string"}},
           "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
         }
@@ -1487,7 +1481,7 @@
             "description": "`card_index`, `card_id`, `card_name`, `card_driver`, `pcm_device`, `pcm_node` (`/dev/snd/pcmC<card>D<device>c`), `alsa_name` (`hw:CARD=<id>,DEV=<device>`), the card's `by_path` and `by_id` links when udev made them, `usb` identity and `part_of` (`id`, `name`) when the same USB device is also a camera item.",
             "additionalProperties": true
           },
-          "availability": {"type": "object", "description": "`in_use` when a process holds the capture PCM or the kernel counts an open capture substream; a holder of only the card's `controlC` mixer node does not count.", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
+          "availability": {"type": "object", "description": "SiMa Sentinel's own availability fact, passed through. Insight does not inspect the board's processes during a scan; a microphone another program has open is reported when its test starts (`409 microphone_in_use`).", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
           "capture": {
             "type": ["array", "null"],
             "description": "Each capture format, channel count, bit depth and rate set Sentinel reads from the USB-audio `/proc/asound/card<N>/stream<M>` file; `null` for other drivers, whose formats cannot be read without opening the device.",
@@ -1533,41 +1527,25 @@
       },
       "PeripheralsSnapshot": {
         "type": "object",
-        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "platform"],
+        "required": ["board", "generation", "scan_id", "scanned_at", "items", "issues", "changes", "camera_setup"],
         "properties": {
           "board": {"type": "object", "description": "Label, source, host name, machine, build version, and fingerprint of the scanned board."},
           "generation": {"type": "integer", "description": "Board generation the scan belongs to; compare with `GET /api/board`."},
-          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan. Send it back when exporting a camera mode."},
+          "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
-          "platform": {"type": ["object", "null"], "description": "Tools the on-board check found and how camera and microphone users were detected."},
           "items": {"type": "array", "items": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCamera"}, {"$ref": "#/components/schemas/PeripheralMicrophone"}], "discriminator": {"propertyName": "kind"}}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
-          "changes": {"type": ["object", "null"], "description": "`added` and `removed` devices (`id`, `name`) compared with the previous refresh of the same board."}
+          "changes": {"type": ["object", "null"], "description": "`added` and `removed` devices (`id`, `name`) compared with the previous refresh of the same board."},
+          "camera_setup": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCameraSetup"}, {"type": "null"}], "description": "The board's camera setup from its device tree, as SiMa Sentinel reports it; null before the first scan or when Sentinel is too old to report it."}
         }
       },
-      "CameraExportRequest": {
+      "PeripheralCameraSetup": {
         "type": "object",
-        "required": ["id", "format", "width", "height", "fps"],
+        "required": ["model", "overlays"],
         "properties": {
-          "generation": {"type": "integer", "minimum": 1, "description": "Optional. Generation from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a different selected board returns `409 stale_snapshot`."},
-          "scan_id": {"type": "string", "minLength": 1, "description": "Optional. Opaque scan identifier from the `PeripheralsSnapshot` that supplied the camera and mode; when sent, a newer scan returns `409 stale_snapshot`."},
-          "id": {"type": "string"},
-          "format": {"type": "string", "example": "NV12"},
-          "width": {"type": "integer"},
-          "height": {"type": "integer"},
-          "fps": {"type": "number"}
-        }
-      },
-      "CameraExport": {
-        "type": "object",
-        "required": ["camera_id", "selection", "support", "warnings", "exports"],
-        "properties": {
-          "camera_id": {"type": "string"},
-          "selection": {"type": "object"},
-          "support": {"$ref": "#/components/schemas/SupportTier"},
-          "warnings": {"type": "array", "items": {"type": "string"}},
-          "exports": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "enum": ["python", "cpp", "yaml", "json"]}, "label": {"type": "string"}, "filename": {"type": "string"}, "language": {"type": "string"}, "content": {"type": "string"}}}}
+          "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]}
         }
       }
     }

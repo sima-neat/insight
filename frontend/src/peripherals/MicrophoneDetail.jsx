@@ -3,11 +3,9 @@ import { readMicrophoneTest, startMicrophoneTest, stopMicrophoneTest } from './a
 import {
   MIC_TEST_IDLE,
   apiError,
-  availabilityInfo,
   captureModes,
   formatClock,
   micLevelNotice,
-  micTestBlock,
   micTestAction,
   micStartMayHaveRun,
   micTestAfterFailedStart,
@@ -16,12 +14,11 @@ import {
   meterSegments,
   microphoneRows,
   microphoneSubtitle,
-  microphoneSummaryLine,
   nextMicTestState,
   normalizeError,
   segmentTone
 } from './model.js'
-import { ErrorNotice, Pill } from './ui.jsx'
+import { ErrorNotice } from './ui.jsx'
 
 export { microphoneSubtitle }
 
@@ -249,7 +246,6 @@ function MicTest({ mic }) {
   const status = state.status
   const recording = status === 'recording'
   const playing = status === 'playing'
-  const block = micTestBlock(mic, state)
   const notice = status === 'done' ? micLevelNotice(state.test?.level) : ''
   const button = micTestAction(status, stopping)
   const onButton = { record, stop: stopRecording, 'stop-playing': stopPlaying }[button.action]
@@ -270,7 +266,6 @@ function MicTest({ mic }) {
           className="btn-tonal periph-mic-button"
           onClick={onButton}
           disabled={button.disabled}
-          aria-describedby={block ? 'periph-mic-test-block' : undefined}
         >
           {button.label}
         </button>
@@ -282,7 +277,6 @@ function MicTest({ mic }) {
         </span>
       </div>
 
-      {block && <p className="hint" id="periph-mic-test-block">{block}</p>}
       {notice && <p className="hint periph-mic-warning" role="alert">{notice}</p>}
       {status === 'error' && <ErrorNotice error={{ ...state.error, hint: micTestErrorAction(state.error) }} />}
 
@@ -294,10 +288,8 @@ function MicTest({ mic }) {
 }
 
 // Neat Core has no audio input node, so there is no mode to pick and nothing to export: the pane
-// shows what the board reports, whether a process holds the device, and a recording to listen to.
+// shows what the board reports and a recording to listen to; a busy device is reported when its test starts.
 export default function MicrophoneDetail({ mic }) {
-  const availability = availabilityInfo(mic.availability)
-  const summary = microphoneSummaryLine(mic)
   const subtitle = microphoneSubtitle(mic)
 
   return (
@@ -307,12 +299,7 @@ export default function MicrophoneDetail({ mic }) {
           <h3 id="periph-detail-title">{mic.name}</h3>
           {subtitle && <p className="hint">{subtitle}</p>}
         </div>
-        <span className="periph-pills">
-          <Pill tone={availability.tone}>{availability.label}</Pill>
-        </span>
       </div>
-
-      {summary && <p className="periph-summary-line">{summary}</p>}
 
       {(mic.errors || []).map((error, index) => (
         <ErrorNotice key={`${error.code || 'error'}-${index}`} error={error} />

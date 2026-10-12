@@ -91,6 +91,51 @@ class PeripheralClientTests(unittest.TestCase):
         with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(before_first_scan))):
             self.assertEqual(PeripheralClient(FakeSession()).catalog(), before_first_scan)
 
+    def test_board_block_is_kept_with_malformed_fields_and_entries_dropped(self):
+        overlay = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
+        good = {
+            "model": "SiMa.ai Modalix SoM 16Gig Board",
+            "overlays": ["pcie-8rc.dtbo", overlay],
+            "configured_cameras": [{
+                "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
+                "data_lanes": 2, "camera_id": "camera:imx477 5-001a",
+            }],
+            "supported_sensors": [{"compatible": "sony,imx477", "overlays": [overlay]}],
+        }
+        malformed = {
+            "model": 7,
+            "overlays": [overlay, 3, "", "x" * 300],
+            "configured_cameras": [
+                {"compatible": "sony,imx477", "i2c_device": ["5-001a"], "data_lanes": True, "camera_id": None},
+                {"i2c_device": "5-001a"},
+                "imx477",
+            ],
+            "supported_sensors": {"compatible": "sony,imx477"},
+        }
+        cleaned = {
+            "overlays": [overlay],
+            "configured_cameras": [{"compatible": "sony,imx477"}],
+            "supported_sensors": [],
+        }
+        many = {"supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": [7]} for i in range(300)]}
+        for name, block, expected in (
+            ("good", good, good),
+            ("malformed", malformed, cleaned),
+            # A list Sentinel could not read is absent, not empty.
+            ("overlays not a list", {"overlays": "a.dtbo"}, {"configured_cameras": [], "supported_sensors": []}),
+            ("bounded", many, {"configured_cameras": [],
+                               "supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": []}
+                                                     for i in range(client_module.SUPPORTED_SENSORS_LIMIT)]}),
+        ):
+            with self.subTest(name), mock.patch.object(
+                socket_client, "request", return_value=(200, json.dumps(camera_catalog(board=block)))
+            ):
+                self.assertEqual(PeripheralClient(FakeSession()).catalog()["board"], expected)
+        older = {key: value for key, value in camera_catalog().items() if key != "board"}
+        for name, response in (("missing", older), ("not an object", camera_catalog(board=[1]))):
+            with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
+                self.assertNotIn("board", PeripheralClient(FakeSession()).catalog())
+
     def test_provider_errors_are_kept_for_the_snapshot(self):
         errors = [{"provider": "camera.mipi", "code": "io.open", "reason": "could not open /dev/media0"},
                   {"provider": "hotplug", "code": "hotplug.unavailable", "reason": "uevents are unavailable"}]

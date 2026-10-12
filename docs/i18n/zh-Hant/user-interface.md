@@ -136,7 +136,7 @@ metadata: UDP 9100 + N
 
 ## 周邊裝置
 
-「周邊裝置」會列出連接到開發板的相機，並顯示每部相機回報的模式。由開發板上的 SiMa Sentinel 探索這些相機；Insight 讀取 Sentinel 的目錄。探索只會讀取裝置資訊：它絕不會開啟相機或從相機串流，因此相機仍可供您的應用程式使用。相機匯出 API 會使用最近一次掃描的結果運作，不會接觸開發板。
+Peripherals（周邊裝置）會列出連接到開發板的相機，並顯示每部相機回報的模式。由開發板上的 SiMa Sentinel 探索這些相機；Insight 讀取 Sentinel 的目錄。探索只會讀取裝置資訊：它絕不會開啟相機或從相機串流，因此相機仍可供您的應用程式使用。
 
 ### 選取的開發板
 
@@ -152,27 +152,24 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 
 ### 相機與模式
 
-選取 **Refresh**（重新整理）以掃描開發板：Insight 會要求 SiMa Sentinel 重新掃描並等待結果。Sentinel 會透過媒體圖與 ISP 找到 MIPI 相機，並透過 V4L2 找到 USB 相機。若 Sentinel 未安裝、未執行，或版本過舊而無法回報周邊裝置，頁面會說明這一點；請使用 `sima-cli neat install sentinel` 安裝或更新。對於每部相機，頁面會顯示其身分、連線、裝置識別碼、可用性，以及相機回報的像素格式、解析度與影格率。每部相機與每個模式都有一個支援等級：
+選取 **Refresh**（重新整理）以掃描開發板：Insight 會要求 SiMa Sentinel 重新掃描並等待結果。Sentinel 會透過媒體圖與 ISP 找到 MIPI 相機，並透過 V4L2 找到 USB 相機。若 Sentinel 未安裝、未執行，或版本過舊而無法回報周邊裝置，頁面會說明這一點；請使用 `sima-cli neat install sentinel` 安裝或更新。對於每部相機，頁面會顯示其身分、連線、裝置識別碼，以及相機回報的像素格式、解析度與影格率。USB 相機的解析度會顯示相機在該模式下執行的影格率。MIPI 相機的影格率取決於其正在執行的感測器模式，因此其解析度不會顯示影格率。Insight 不會設定影格率。每個模式處於下列兩種狀態之一，狀態會顯示在像素格式與解析度選單旁，這些選單也會依狀態將其項目分組：
 
-| 等級 | 意義 |
+| 狀態 | 意義 |
 | --- | --- |
-| 已驗證（Verified） | 開發板上的 Neat Core 接受此模式用於 Core `CameraInput`。 |
-| 不支援（Not supported） | Neat Core 拒絕此模式，例如 USB 相機與 NV12 以外的格式；頁面會顯示 Core 的原因。 |
-| 支援狀態未知（Support unknown） | 開發板上未安裝 Neat Core，或其版本過舊而無法分類相機模式；請使用 `sima-cli neat install core` 安裝或更新。 |
+| Available（可用） | 開發板的相機 overlay 支援該相機的感測器、ISP 能輸出此模式的尺寸，且其像素格式為 NV12。 |
+| Unsupported（不支援） | 上述任一條件不成立。標籤上的原因會指出是哪一項：USB 相機在開發板上沒有相機 overlay；感測器不在開發板的相機 overlay 中；ISP 無法輸出該尺寸；格式不是 NV12；或在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，尺寸寬於 libcamera 串流的寬度（IMX477 為 4032 像素）。若 Sentinel 版本過舊而無法回報開發板的相機 overlay，則在您更新之前，每個模式都會是 Unsupported（不支援）。 |
 
-Sentinel 只回報硬體提供的能力。在重新整理期間，Insight 會透過 PyNeat 詢問開發板上的 Neat Core，`CameraInput` 支援哪些模式。可用性同樣由 Insight 判斷：重新整理期間，它會檢查哪些程序持有每部相機的裝置節點，並指出持有相機的程序；只有在 Insight 以 root 身分執行，或開發板允許無密碼 `sudo` 時，它才能看到其他使用者的程序，否則會回報 **Unknown**（未知）。
+Insight 僅依據 SiMa Sentinel 的報告做出此判斷。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。沒有任何 Available（可用）模式的相機會顯示 **Unsupported**（不支援）標籤，若為 MIPI 相機還會顯示其原因；具有 Available（可用）模式的相機不會顯示標籤。Insight 不會指出是否有其他程式正在使用相機：這會在預覽嘗試開啟相機時得知，並在該處回報。
 
-### 相機設定 API
+### Camera setup（相機設定）
 
-在模式選單下方選擇格式，然後選取 **Copy configuration**（複製設定），即可將所選模式的匯出內容（如下所述）複製到剪貼簿。對於 MIPI 相機，除非 Neat Core 已驗證所選模式，否則此按鈕會停用；其工具提示會說明原因。API 客戶端可以將選取的模式 POST 到 `/api/peripherals/cameras/export`，並取得 Python（`pyneat.CameraInputOptions`）、C++ 與 JSON 表示法。由於 Insight 不會讀取開發板的 `libcamerasrc`，匯出內容不會設定擷取緩衝區數量，也不包含 Apps `config.yaml` 的 `camera:` 區塊。匯出內容一律明確指定相機。對於 USB 相機，API 會傳回裝置描述元，而非 `CameraInput` 設定。
-
-在 Modalix DevKit 上量測到的兩種行為決定了匯出內容。它允許 CPU 後備（`allow_cpu_fallback = True`），因為嚴格零複製在該裝置上無法啟動。此外，相機會以 libcamera 所選感測器模式的影格率傳送，而非所要求的速率：要求 15 或 30 fps 時，1920×1080 的 IMX477 實際傳送約 66 fps。若需要較少的影格，請在應用程式中捨棄影格。
+讀取開發板裝置樹的 Sentinel 也會回報開發板針對相機的設定方式。執行 Refresh（重新整理）後，開發板設定會顯示開發板的 **Model**（型號），以及一行 **Camera setup**（相機設定），列出開發板所載入、用於設定相機感測器的 overlay。若使用較舊的 Sentinel，則不會顯示這些詳細資料。
 
 ### 麥克風
 
-重新整理也會列出 SiMa Sentinel 回報的每個 ALSA 擷取裝置，無論是 USB 或板載裝置。對於每個麥克風，Insight 會顯示其名稱、用來開啟它的 ALSA 裝置名稱（例如 `hw:CARD=Nano,DEV=0`）、可用性，以及（對於 USB 音訊裝置）它可擷取的取樣格式、聲道數、位元深度與取樣率。板載音效卡不會回報這些資訊，頁面會說明這一點。
+重新整理也會列出 SiMa Sentinel 回報的每個 ALSA 擷取裝置，無論是 USB 或板載裝置。對於每個麥克風，Insight 會顯示其名稱、用來開啟它的 ALSA 裝置名稱（例如 `hw:CARD=Nano,DEV=0`），以及（對於 USB 音訊裝置）它可擷取的取樣格式、聲道數、位元深度與取樣率。板載音效卡不會回報這些資訊，頁面會說明這一點。
 
-探索絕不會開啟音效裝置：Sentinel 會讀取 `/proc/asound` 與 sysfs。當核心回報麥克風的擷取裝置已開啟時，該麥克風會標示為 **In use**（使用中），而 Insight 在能看到時會指出該程序。只持有音效卡混音器的音效伺服器（例如 PulseAudio）不計入。USB 麥克風拔除後再插回同一個連接埠時，會保持相同的身分，即使其音效卡編號改變亦然；插到其他連接埠時，則視為不同的麥克風。
+探索絕不會開啟音效裝置：Sentinel 會讀取 `/proc/asound` 與 sysfs。USB 麥克風拔除後再插回同一個連接埠時，會保持相同的身分，即使其音效卡編號改變亦然；插到其他連接埠時，則視為不同的麥克風。
 
 若要聆聽麥克風，請選取 **Test microphone**（測試麥克風）並說話；音量表會顯示麥克風收到的聲音。完成後選取 **Stop recording**（停止錄音）（測試會在 30 秒後自行停止），Insight 會在頁面中播放錄音。**Stop playing**（停止播放）會結束播放。若錄音一直低於約 -60 dBFS，頁面會說明未收到任何聲音；請檢查麥克風的靜音按鈕與增益。只有測試會開啟裝置，而且只在錄音期間開啟。錄音前，Insight 會重新讀取 Sentinel 的目錄，並只從 Sentinel 指定的裝置錄音；若自上次掃描以來開發板的裝置有所變更，頁面會要求您先重新整理。若另一個應用程式已開啟麥克風，測試會遭拒，且不會干擾該應用程式。Insight 不會設定音訊輸入：Core 沒有音訊輸入。
 

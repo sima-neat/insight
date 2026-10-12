@@ -18,7 +18,7 @@ from typing import Optional
 
 from neat_insight.board import BoardError
 from neat_insight.board.transport import CommandCancelled
-from neat_insight.peripherals.cameras import _availability, provider_of
+from neat_insight.peripherals.cameras import provider_of
 from neat_insight.peripherals.microphones import KERNEL_IN_USE_REASON
 
 # The longest a test records when nobody presses Stop.
@@ -111,8 +111,9 @@ def refuse_if_held(check: Optional[dict], mic_id: str) -> None:
     users = ((check or {}).get("users") or {}).get(mic_id)
     opened = ((check or {}).get("capture_open") or {}).get(mic_id)
     if users or opened:
-        # The same words the page shows for an in-use microphone.
-        reason = _availability(users, None, None)["reason"] if users else KERNEL_IN_USE_REASON
+        # Name the holders when the check can see them; the kernel count alone says only that it is open.
+        holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users or [])
+        reason = f"Open in {holders}." if holders else KERNEL_IN_USE_REASON
         raise BoardError("microphone_in_use", reason, hint=IN_USE_HINT, users=users or [])
 
 

@@ -1,13 +1,11 @@
 """Read-only peripheral check, executed on the board as ``python3 - REQUEST``.
 
 Stdlib only and Python 3.8 compatible. SiMa Sentinel discovers the cameras and
-microphones; this adds what Sentinel does not report and the Peripherals page
-shows: which processes hold each device's nodes, how many of a microphone's capture
-substreams are open now, which sound servers run, and which camera modes Neat
-Core's CameraInput supports. It never opens a camera or a sound device. REQUEST is
-JSON ``{"cameras": {id: [device nodes]}, "microphones": {id: [capture PCM node]},
-"support": bool}``; a media device brings every node of its media graph, and
-``support`` asks PyNeat for Neat Core's verdicts. It prints one JSON document.
+microphones; this adds what Sentinel does not report: which processes hold each
+device's nodes, and how many of a microphone's capture substreams are open now. It
+never opens a camera or a sound device. REQUEST is JSON ``{"cameras": {id: [device
+nodes]}, "microphones": {id: [capture PCM node]}}``; a media device brings every
+node of its media graph. It prints one JSON document.
 """
 import json
 import os
@@ -18,36 +16,6 @@ import sys
 
 PROC_ROOT = "/proc"
 COMMAND_TIMEOUT = 10
-CORE_TIMEOUT = 20
-PYNEAT_PYTHON = os.path.join(os.environ.get("PYNEAT_VENV_DIR") or os.path.expanduser("~/pyneat"), "bin", "python")
-# Run by PyNeat's python: Neat Core's verdict on each camera mode, as one JSON document.
-CORE_PROBE = r"""
-import json
-try:
-    import pyneat
-except ImportError as exc:
-    print(json.dumps({"state": "not_installed", "reason": str(exc)}))
-    raise SystemExit
-if not hasattr(pyneat, "peripherals"):
-    print(json.dumps({"state": "outdated", "reason": "This PyNeat has no peripherals module."}))
-    raise SystemExit
-try:
-    catalog = pyneat.peripherals.list()
-except Exception as exc:
-    print(json.dumps({"state": "failed", "reason": str(exc)}))
-    raise SystemExit
-cameras = {}
-for device in catalog:
-    if device.camera is not None:
-        cameras[device.id] = [{
-            "format": mode.format, "width": mode.width, "height": mode.height,
-            "size_range": {key: getattr(mode.size_range, key) for key in (
-                "min_width", "min_height", "max_width", "max_height")} if mode.size_range else None,
-            "framerate_num": mode.framerate_num, "framerate_den": mode.framerate_den,
-            "supported": mode.supported, "reason": mode.reason,
-        } for mode in device.camera.modes]
-print(json.dumps({"state": "ok", "cameras": cameras}))
-"""
 TOOLS = ("media-ctl", "fuser", "sudo")
 SEARCH_PATH = os.pathsep.join(
     [os.environ.get("PATH") or "/usr/bin:/bin", "/usr/local/bin", "/usr/sbin", "/sbin"]
@@ -55,8 +23,6 @@ SEARCH_PATH = os.pathsep.join(
 COMMAND_ENV = dict(os.environ, PATH=SEARCH_PATH, LC_ALL="C")
 _MEDIA_RE = re.compile(r"/dev/media[0-9]+")
 _PCM_RE = re.compile(r"/dev/snd/pcmC([0-9]+)D([0-9]+)c")
-# Process names (/proc/<pid>/comm) of sound servers that usually own the capture devices.
-SOUND_SERVERS = ("pulseaudio", "pipewire", "pipewire-pulse")
 
 
 def which(name):
@@ -167,15 +133,6 @@ def user_checker(method, tools):
     return lambda nodes: None
 
 
-def sound_servers():
-    # Best-effort like scan_proc: an unlistable /proc must not fail the cameras' checks in the same run.
-    try:
-        pids = [pid for pid in os.listdir(PROC_ROOT) if pid.isdigit()]
-    except OSError:
-        pids = []
-    return sorted({name for name in (_read(os.path.join(PROC_ROOT, pid, "comm")) for pid in pids) if name in SOUND_SERVERS})
-
-
 def capture_open(node):
     """How many substreams of a capture PCM are open now, from /proc/asound; None when unreadable.
 
@@ -214,20 +171,6 @@ def camera_nodes(nodes, tools, failures):
     return found, complete
 
 
-def core_support():
-    """Neat Core's camera mode verdicts from PyNeat (its per-user venv, else this python); a state otherwise."""
-    python = PYNEAT_PYTHON if os.access(PYNEAT_PYTHON, os.X_OK) else sys.executable
-    code, out, err = run([python, "-c", CORE_PROBE], timeout=CORE_TIMEOUT)
-    try:
-        result = json.loads(out)
-    except ValueError:
-        result = None
-    if code != 0 or not isinstance(result, dict):
-        detail = "timed out after %d s" % CORE_TIMEOUT if code is None else _tail(err) or "no output"
-        return {"state": "failed", "reason": detail}
-    return result
-
-
 def collect(request):
     tools = {name: which(name) for name in TOOLS}
     failures = []
@@ -253,11 +196,9 @@ def collect(request):
         "availability_method": method,
         "users": users,
         "failures": failures,
-        "support": core_support() if cameras and request.get("support") else None,
     }
     if "microphones" in request:
         result["capture_open"] = opened
-        result["sound_servers"] = sound_servers()
     return result
 
 

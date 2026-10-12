@@ -5,8 +5,9 @@ import MicrophoneDetail, { microphoneSubtitle } from './peripherals/MicrophoneDe
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
-  availabilityInfo,
+  cameraTierPill,
   changeSummary,
+  CONNECTED_PILL,
   countLabel,
   deviceTabs,
   groupCameras,
@@ -20,8 +21,7 @@ import {
   resolveSelection,
   sameSelection,
   severityInfo,
-  sortIssues,
-  tierInfo
+  sortIssues
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
 
@@ -131,14 +131,14 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
   )
 }
 
+// Every detected camera is connected, plus its verdict. A microphone carries no verdict, and whether
+// another program holds it is found out when its test starts.
 function cameraPills(camera) {
-  const availability = availabilityInfo(camera.availability)
-  const tier = tierInfo(camera.support?.tier)
-  return [availability, tier]
+  return [CONNECTED_PILL, cameraTierPill(camera)]
 }
 
-function microphonePills(mic) {
-  return [availabilityInfo(mic.availability)]
+function microphonePills() {
+  return []
 }
 
 // One listbox per device kind: arrow keys, Home and End move the selection; only the selected row is tabbable.
@@ -178,9 +178,11 @@ function DeviceList({ label, groups, selectedId, onSelect, subtitle, pills }) {
                 {/* An empty subtitle must not render: the row is a grid, and a blank span would
                     leave this row taller than its neighbours. */}
                 {text && <span className="periph-camera-id">{text}</span>}
-                <span className="periph-pills">
-                  {pills(device).map((pill) => <Pill key={pill.label} tone={pill.tone}>{pill.label}</Pill>)}
-                </span>
+                {pills(device).length > 0 && (
+                  <span className="periph-pills">
+                    {pills(device).map((pill) => <Pill key={pill.label} tone={pill.tone}>{pill.label}</Pill>)}
+                  </span>
+                )}
               </div>
             )
           })}
@@ -224,7 +226,7 @@ export default function PeripheralsView({
     return resolved ? { id: camera.id, ...resolved } : null
   }, [camera, wanted])
   const selectionNotice = selection && wanted?.id === selection.id && !sameSelection(wanted, selection)
-    ? `${modeLabel(wanted)} is no longer offered; showing ${modeLabel(selection)}.`
+    ? `${modeLabel(wanted, camera)} is no longer offered; showing ${modeLabel(selection, camera)}.`
     : ''
   const target = board?.target || null
   const stale = isSnapshotStale(board, snapshot)

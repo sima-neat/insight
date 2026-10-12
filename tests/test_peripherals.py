@@ -11,7 +11,6 @@ import threading
 import time
 import unittest
 import unittest.mock as mock
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,22 +18,16 @@ from flask import Flask
 
 from neat_insight.board import BoardError, ExecResult, board_bp
 from neat_insight.board.transport import CommandCancelled, MAX_OUTPUT_BYTES
-from neat_insight.peripherals import api, board_check, cameras, export, microphones, mictest
+from neat_insight.peripherals import api, board_check, cameras, microphones, mictest
 from neat_insight.peripherals.api import peripherals_bp
 from neat_insight.peripherals.client import PeripheralClient
 
 IMX477 = "camera:imx477 5-001a"
 C920 = "camera:v4l2:421bbe426738013b"
-BACKEND_REASON = "CameraInput currently accepts MIPI cameras only; direct V4L2 capture is not supported."
-FORMAT_REASON = "CameraInput's current camera-memory path supports NV12 output only."
-NOT_INSTALLED = "Neat Core is not installed, so CameraInput support for this mode is unknown."
-TRACKED = " USB support is tracked in core#838."
 ISP_NOTE = (
     "Only sizes the ISP can output (1920x1080, 2048x1080, 2432x2048) are offered; libcamera also advertises "
     "sizes the ISP cannot produce, which fail to start (core#883)."
 )
-NO_RATES_NOTE = "The camera reports no frame rates, so only CameraInput's default 30 fps is offered for those modes."
-NO_BUFFER_COUNT = "Insight does not read libcamerasrc's properties on the board, so the code omits capture_buffer_count."
 C920_BY_ID = "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0"
 OBSERVED_AT = "2026-10-05T01:48:33.635147447Z"
 # Sentinel's published contract example, copied byte for byte from sima-neat/sentinel
@@ -163,54 +156,41 @@ def onboard_mic():
     ])
 
 
+IMX477_OVERLAY = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
+
+
+def board_block(camera_id=IMX477, **camera):
+    """Sentinel's `board` block for a Modalix SoM whose device tree configures one IMX477 (as client.board_block
+    returns it); camera_id None is a configured camera no catalog camera is linked to. U-Boot also applies a PCIe overlay,
+    which configures no camera sensor."""
+    configured = {
+        "compatible": "sony,imx477", "dt_node": "/i2cmux@0/i2c@0/imx477@1a", "i2c_device": "5-001a",
+        "data_lanes": 2, **camera,
+    }
+    if camera_id:
+        configured["camera_id"] = camera_id
+    return {
+        "model": "SiMa.ai Modalix SoM 16Gig Board",
+        "overlays": ["pcie-8rc.dtbo", IMX477_OVERLAY],
+        "configured_cameras": [configured],
+        "supported_sensors": [
+            {"compatible": "sony,imx477", "overlays": [IMX477_OVERLAY]},
+            {"compatible": "onnn,ar0234", "overlays": ["modalix-som-ar0234.dtbo"]},
+        ],
+    }
+
+
 def catalog(*devices, **extra):
     return {"revision": 1791164913635, "observed_at": OBSERVED_AT, "devices": list(devices), "errors": [], **extra}
 
 
-def _fastest(mode):
-    """The fastest rate a mode advertises, as Core derives it; None when it advertises none."""
-    rates = []
-    for entry in mode.get("frame_intervals") or []:
-        for interval in entry["intervals"]:
-            period = interval if interval["type"] == "discrete" else interval["minimum"]
-            rates.append(Fraction(period["denominator"], period["numerator"]))
-    return max(rates, default=None)
-
-
-def core_of(*catalogs):
-    """Synthetic PyNeat verdicts, as board_check reports them (Core's classifier is not merged yet): CameraInput
-    accepts NV12 on MIPI cameras and rejects USB cameras and other formats."""
-    cameras = {}
-    for doc in catalogs:
-        for device in cameras_in(doc):
-            for mode in device["modes"]:
-                if device["backend"] != "mipi":
-                    supported, reason = False, BACKEND_REASON
-                else:
-                    supported, reason = mode["format"] == "NV12", "" if mode["format"] == "NV12" else FORMAT_REASON
-                rate = _fastest(mode)
-                cameras.setdefault(device["id"], []).append({
-                    "format": mode["format"], "width": mode.get("width", 0), "height": mode.get("height", 0),
-                    "size_range": mode.get("size_range"),
-                    "framerate_num": rate.numerator if rate else 0, "framerate_den": rate.denominator if rate else 1,
-                    "supported": supported, "reason": reason,
-                })
-    return {"state": "ok", "cameras": cameras}
-
-
-def cameras_in(doc):
-    return [device for device in doc["devices"] if device["type"] == "camera"]
-
-
 def check(**extra):
-    """board_check output for a board where Insight runs as root, nothing holds a camera and PyNeat classifies
-    the standard fixtures."""
+    """board_check output for a board where Insight runs as root and nothing holds a camera."""
     return {
         "tools": {"media-ctl": True, "fuser": True},
         "availability_method": "proc-root",
         "users": {IMX477: [], C920: []},
         "failures": [],
-        "support": core_of(catalog(imx477(), c920())),
         **extra,
     }
 
@@ -218,9 +198,8 @@ def check(**extra):
 BOARD = {"label": "sima@192.168.2.2", "source": "manual", "hostname": "modalix", "fingerprint": "fp-1"}
 
 
-def snapshot_of(doc, board_facts=None, previous=None):
-    facts = check(support=core_of(doc)) if board_facts is None else board_facts
-    return cameras.build_snapshot(doc, facts, BOARD, 1, previous, 5)
+def snapshot_of(doc, previous=None):
+    return cameras.build_snapshot(doc, BOARD, 1, previous, 5)
 
 
 def item(snapshot, item_id):
@@ -235,32 +214,9 @@ def size_of(fmt, width, height):
     return next(s for s in fmt["sizes"] if (s["width"], s["height"]) == (width, height))
 
 
-def parse_yaml_block(text: str) -> dict:
-    lines = [line for line in text.splitlines() if line and not line.startswith("#")]
-    assert lines[0] == "camera:", lines[0]
-    values = {}
-    for line in lines[1:]:
-        assert line.startswith("  ") and ": " in line, line
-        key, raw = line[2:].split(": ", 1)
-        values[key] = json.loads(raw)
-    return values
-
-
 class BoardCheckTests(unittest.TestCase):
     def test_source_parses_as_python_38(self):
         ast.parse(Path(board_check.__file__).read_text(encoding="utf-8"), feature_version=(3, 8))
-
-    def test_mipi_availability_checks_media_and_every_isp_output(self):
-        camera = imx477()
-        camera["isp"] = {
-            "state": "available",
-            "device_path": "/dev/video0out",
-            "device_paths": ["/dev/video0out", "/dev/video1out"],
-        }
-        self.assertEqual(
-            cameras.camera_nodes(camera),
-            ["/dev/media0", "/dev/video0out", "/dev/video1out"],
-        )
 
     def test_media_graph_nodes_and_fuser_output(self):
         text = "- entity 1: csi2 (2 pads)\n\t\tdevice node name /dev/v4l-subdev0\n- entity 5: vid\n\t\tdevice node name /dev/video0\n"
@@ -319,8 +275,6 @@ class BoardCheckTests(unittest.TestCase):
                 result = board_check.collect({"cameras": {IMX477: ["/dev/media0"], C920: ["/dev/video97"]}})
             self.assertEqual(result["availability_method"], "proc-root")
             self.assertEqual(result["users"], {IMX477: None, C920: []})
-            availability = item(snapshot_of(catalog(imx477(), c920()), result), IMX477)["availability"]
-            self.assertEqual(availability["state"], "unknown")
 
     def test_an_unreadable_proc_leaves_availability_unknown_not_available(self):
         # Codex 4188915681: root without a listable /proc used to report every camera as available.
@@ -330,8 +284,6 @@ class BoardCheckTests(unittest.TestCase):
             result = board_check.collect({"cameras": {C920: ["/dev/video97"]}})
         self.assertEqual(result["availability_method"], "proc-root")
         self.assertEqual(result["users"], {C920: None})
-        availability = item(snapshot_of(catalog(imx477(), c920()), result), C920)["availability"]
-        self.assertEqual(availability["state"], "unknown")
 
     def test_a_holder_of_the_media_device_is_reported_even_without_the_graph(self):
         held = {"/dev/media0": {4242}}
@@ -343,71 +295,25 @@ class BoardCheckTests(unittest.TestCase):
         self.assertEqual(result["users"], {IMX477: [{"pid": 4242, "command": "neat-app"}]})
 
     def test_runs_as_a_program_and_prints_json(self):
-        request = json.dumps({"cameras": {"camera:x": ["/dev/no-such-node"]}, "support": True})
-        env = dict(os.environ, PYNEAT_VENV_DIR="/nonexistent")
-        env.pop("PYTHONPATH", None)
+        request = json.dumps({"cameras": {"camera:x": ["/dev/no-such-node"]}})
         done = subprocess.run(
             [sys.executable, "-I", "-", request], input=Path(board_check.__file__).read_bytes(),
-            capture_output=True, timeout=60, env=env,
+            capture_output=True, timeout=60,
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         result = json.loads(done.stdout)
         self.assertEqual(result["users"], {"camera:x": []})
         self.assertIn(result["availability_method"], ("proc-root", "sudo-fuser", "proc-user"))
-        # This python has no PyNeat, so Neat Core's verdicts are unknown rather than a failed check.
-        self.assertEqual(result["support"]["state"], "not_installed")
+        self.assertEqual(set(result), {"tools", "availability_method", "users", "failures"})
 
-    def test_neat_core_is_asked_only_when_the_request_wants_support(self):
-        with mock.patch.object(board_check, "core_support", return_value={"state": "ok", "cameras": {}}) as core, \
-                mock.patch.object(board_check, "which", return_value=None):
-            self.assertIsNone(board_check.collect({"cameras": {C920: ["/dev/no-such-node"]}})["support"])
-            core.assert_not_called()
-            self.assertEqual(board_check.collect({"cameras": {C920: ["/dev/no-such-node"]}, "support": True})["support"],
-                             {"state": "ok", "cameras": {}})
+    def test_the_check_never_asks_neat_core_about_camera_modes(self):
+        """Mode support comes from Sentinel's board block, so the check does not run PyNeat or Neat Core."""
+        source = Path(board_check.__file__).read_text(encoding="utf-8").lower()
+        self.assertNotIn("pyneat", source)
+        self.assertFalse(hasattr(board_check, "core_support"))
 
-    def core_probe(self, pyneat_source):
-        """Run the Core probe against a stand-in pyneat package (synthetic; PyNeat's peripherals API is not merged)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "pyneat.py").write_text(pyneat_source, encoding="utf-8")
-            with mock.patch.object(board_check, "PYNEAT_PYTHON", "/nonexistent/bin/python"), \
-                    mock.patch.dict(board_check.COMMAND_ENV, PYTHONPATH=tmp):
-                return board_check.core_support()
-
-    def test_core_probe_reports_pyneat_verdicts_per_camera_mode(self):
-        result = self.core_probe(
-            "from types import SimpleNamespace as N\n"
-            "def _list():\n"
-            "    discrete = N(format='NV12', width=1920, height=1080, size_range=None, framerate_num=0, framerate_den=1,"
-            " supported=True, reason='')\n"
-            "    ranged = N(format='YUYV', width=0, height=0, size_range=N(min_width=160, min_height=120, max_width=1920,"
-            " max_height=1080, step_width=16, step_height=8), framerate_num=30, framerate_den=1, supported=False,"
-            " reason='USB')\n"
-            "    return [N(id='camera:imx477 5-001a', camera=N(modes=[discrete, ranged])),"
-            " N(id='microphone:alsa:1', camera=None)]\n"
-            "peripherals = N(list=_list)\n"
-        )
-        self.assertEqual(result, {"state": "ok", "cameras": {IMX477: [
-            {"format": "NV12", "width": 1920, "height": 1080, "size_range": None, "framerate_num": 0,
-             "framerate_den": 1, "supported": True, "reason": ""},
-            {"format": "YUYV", "width": 0, "height": 0,
-             "size_range": {"min_width": 160, "min_height": 120, "max_width": 1920, "max_height": 1080},
-             "framerate_num": 30, "framerate_den": 1, "supported": False, "reason": "USB"},
-        ]}})
-
-    def test_core_probe_names_why_verdicts_are_unknown(self):
-        cases = {
-            "outdated": "__version__ = '0.4.0'\n",
-            "failed": "class peripherals:\n    @staticmethod\n    def list():\n"
-                      "        raise RuntimeError('SiMa Sentinel is not running')\n",
-        }
-        for state, source in cases.items():
-            with self.subTest(state):
-                self.assertEqual(self.core_probe(source)["state"], state)
-        self.assertIn("SiMa Sentinel is not running", self.core_probe(cases["failed"])["reason"])
-        with mock.patch.object(board_check, "run", return_value=(None, "", "")):
-            self.assertEqual(board_check.core_support(), {"state": "failed", "reason": "timed out after 20 s"})
-        with mock.patch.object(board_check, "run", return_value=(1, "", "Segmentation fault")):
-            self.assertEqual(board_check.core_support(), {"state": "failed", "reason": "Segmentation fault"})
+def states(fps):
+    return [(choice["value"], choice["tier"], choice.get("reason")) for choice in fps]
 
 
     def test_microphones_get_their_capture_node_checked_and_sound_servers_listed(self):
@@ -462,33 +368,40 @@ class BoardCheckTests(unittest.TestCase):
 
 
 class SnapshotTests(unittest.TestCase):
-    def test_imx477_tiers_formats_and_default_come_from_neat_core(self):
-        camera = item(snapshot_of(catalog(imx477())), IMX477)
+    def test_imx477_nv12_modes_are_available_at_the_isp_sizes_when_the_overlays_support_its_sensor(self):
+        camera = item(snapshot_of(catalog(imx477(), board=board_block())), IMX477)
         self.assertEqual((camera["connection"], camera["name"], camera["model"]), ("mipi", "imx477 5-001a", "imx477"))
-        self.assertEqual(camera["support"]["tier"], "verified")
-        self.assertEqual(camera["support"]["links"], [cameras.CORE_883])
+        self.assertEqual(camera["support"], {"tier": "available", "reason": ""})
         self.assertEqual(camera["device"], {
             "camera_name": "imx477 5-001a", "camera_name_source": "media-graph",
             "media_device": "/dev/media0", "bus_info": "platform:csi2video@1",
         })
+        # CameraInput outputs NV12 only, a fixed Neat fact; the ISP's other formats are Unsupported.
+        self.assertEqual(cameras.FORMAT_REASON, "Neat's CameraInput outputs NV12 only.")
+        self.assertEqual([(f["format"], f["label"], f["exportable"], f["support"]) for f in camera["formats"]], [
+            ("NV12", "NV12 (YUV 4:2:0)", True, {"tier": "available", "reason": ""}),
+            ("AR24", "AR24 (packed 32-bit)", False, {"tier": "unsupported", "reason": cameras.FORMAT_REASON}),
+            ("RGB3", "RGB3 (packed 24-bit)", False, {"tier": "unsupported", "reason": cameras.FORMAT_REASON}),
+        ])
+        self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 1920, 1080)["fps"]),
+                         [(30, "unsupported", cameras.FORMAT_REASON)])
         nv12 = fmt_of(camera, "NV12")
-        self.assertEqual((nv12["label"], nv12["exportable"], nv12["support"]["tier"]), ("NV12 (YUV 4:2:0)", True, "verified"))
         self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
-        self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"}])
-        rgb = fmt_of(camera, "RGB3")
-        self.assertEqual((rgb["exportable"], rgb["support"]["tier"], rgb["support"]["reason"]), (False, "unsupported", FORMAT_REASON))
+        self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "available"}])
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertEqual(camera["availability"], {"state": "available", "users": [], "reason": None})
+        self.assertEqual(camera["availability"], {"state": "unknown", "users": [], "reason": "Discovery never opens a stream."})
         self.assertEqual(camera["modes_source"], "live")
-        self.assertEqual(camera["notes"], [NO_RATES_NOTE, ISP_NOTE])
+        self.assertEqual(camera["notes"], [ISP_NOTE])
 
-    def test_sentinels_contract_example_lists_both_cameras_with_neat_core_verdicts(self):
+    def test_sentinels_contract_example_makes_the_imx477_available_and_the_c920_unsupported(self):
         doc = contract_catalog()
         snapshot = snapshot_of(doc)
         self.assertEqual(snapshot["scan_id"], f"{doc['revision']}:{doc['observed_at']}")
         mic_id = doc["devices"][2]["id"]
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920, mic_id])
         self.assertEqual(snapshot["issues"], [])
+        # Sentinel's published example carries the board block, which links its IMX477 to the camera overlay.
+        self.assertEqual(snapshot["camera_setup"], {"model": "SiMa.ai Modalix SoM 16Gig Board", "overlays": [IMX477_OVERLAY]})
         mic = item(snapshot, mic_id)
         self.assertEqual((mic["kind"], mic["connection"], mic["name"]), ("microphone", "usb", "HD Pro Webcam C920"))
         self.assertEqual(mic["device"]["part_of"], {"id": C920, "name": "HD Pro Webcam C920"})
@@ -497,60 +410,157 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([m["format"] for m in mic["capture"]], [m["format"] for m in doc["devices"][2]["modes"]])
 
         mipi = item(snapshot, IMX477)
-        self.assertEqual((mipi["connection"], mipi["support"]["tier"]), ("mipi", "verified"))
+        self.assertEqual((mipi["connection"], mipi["support"]), ("mipi", {"tier": "available", "reason": ""}))
         self.assertEqual(mipi["device"]["csi"], "csidev-40c3000.csi")
         self.assertEqual([(f["format"], f["exportable"], f["support"]["tier"]) for f in mipi["formats"]],
-                         [("AR24", False, "unsupported"), ("NV12", True, "verified"), ("RGB3", False, "unsupported")])
-        nv12 = fmt_of(mipi, "NV12")
-        self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
-        for size in nv12["sizes"]:
-            self.assertEqual(size["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "verified"}])
+                         [("AR24", False, "unsupported"), ("NV12", True, "available"), ("RGB3", False, "unsupported")])
+        for fmt in mipi["formats"]:
+            self.assertEqual([(s["width"], s["height"]) for s in fmt["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
+            state = (30, "available", None) if fmt["format"] == "NV12" else (30, "unsupported", cameras.FORMAT_REASON)
+            for size in fmt["sizes"]:
+                self.assertEqual(states(size["fps"]), [state])
+        # The first Available mode in Sentinel's order.
         self.assertEqual(mipi["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertEqual(mipi["notes"], [
-            "The sensor reports 66.18 fps for its fastest mode. The delivered frame rate follows the sensor mode "
-            "libcamera picks and can differ from the requested rate.",
-            ISP_NOTE,
-        ])
+        self.assertEqual(mipi["notes"], [ISP_NOTE])
 
         usb = item(snapshot, C920)
-        self.assertEqual((usb["connection"], usb["name"], usb["support"]["tier"]), ("usb", "HD Pro Webcam C920", "unsupported"))
+        self.assertEqual((usb["connection"], usb["name"]), ("usb", "HD Pro Webcam C920"))
+        self.assertEqual(usb["support"], {"tier": "unsupported", "reason": cameras.USB_REASON})
         self.assertEqual(usb["device"]["usb"]["bus_path"], doc["devices"][1]["identity"]["topology"])
-        self.assertEqual([(f["format"], len(f["sizes"])) for f in usb["formats"]], [("MJPG", 1), ("YUYV", 1)])
-        self.assertEqual([c["value"] for c in size_of(fmt_of(usb, "MJPG"), 1920, 1080)["fps"]], [30, 24, 20, 15, 10, 7.5, 5])
+        self.assertEqual([(f["format"], f["exportable"], f["support"]["tier"], len(f["sizes"])) for f in usb["formats"]],
+                         [("MJPG", False, "unsupported", 1), ("YUYV", False, "unsupported", 1)])
+        self.assertEqual(states(size_of(fmt_of(usb, "MJPG"), 1920, 1080)["fps"]),
+                         [(value, "unsupported", cameras.USB_REASON) for value in (30, 24, 20, 15, 10, 7.5, 5)])
         self.assertEqual([c["value"] for c in size_of(fmt_of(usb, "YUYV"), 2560, 1472)["fps"]], [2])
-        self.assertEqual(usb["default_selection"], {"format": "MJPG", "width": 1920, "height": 1080, "fps": 30})
+        self.assertIsNone(usb["default_selection"])
 
-    def test_without_a_neat_core_verdict_support_is_unknown_and_the_page_says_why(self):
-        unknown = {
-            "not_installed": NOT_INSTALLED,
-            "outdated": cameras.SUPPORT_UNKNOWN["outdated"][2],
-            "failed": cameras.SUPPORT_UNKNOWN["failed"][2],
+    def test_a_size_the_isp_cannot_output_is_unsupported(self):
+        doc = imx477()
+        doc["modes"] = [
+            mipi_mode("NV12", 1920, 1080),
+            dict(mipi_mode("NV12", 4056, 3040), isp_output=False),
+            {"format": "NV12", "width": 1332, "height": 990},  # a Sentinel that does not say is not an ISP size
+        ]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        nv12 = fmt_of(camera, "NV12")
+        self.assertEqual((camera["support"]["tier"], nv12["exportable"], nv12["support"]["tier"]),
+                         ("available", True, "available"))
+        self.assertEqual(states(size_of(nv12, 1920, 1080)["fps"]), [(30, "available", None)])
+        for width, height in ((4056, 3040), (1332, 990)):
+            self.assertEqual(states(size_of(nv12, width, height)["fps"]), [(30, "unsupported", cameras.NOT_ISP_SIZE_REASON)])
+        self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+
+        doc["modes"] = doc["modes"][1:]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.NO_ISP_SIZE_REASON})
+        self.assertEqual((fmt_of(camera, "NV12")["exportable"], camera["default_selection"]), (False, None))
+
+    def test_a_camera_whose_isp_sizes_are_not_nv12_is_unsupported_for_the_format(self):
+        doc = imx477()
+        doc["modes"] = [mipi_mode("RGB3", 1920, 1080), dict(mipi_mode("NV12", 4056, 3040), isp_output=False)]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
+        self.assertEqual(fmt_of(camera, "NV12")["support"]["reason"], cameras.NO_ISP_SIZE_REASON)
+        self.assertIsNone(camera["default_selection"])
+
+    def test_a_sentinel_verdict_decides_each_mode(self):
+        """A Sentinel that decides availability itself (sentinel#43) is followed. On Platform 3.0 the modes are the
+        sensor's sizes, marked `sensor_mode` and not `isp_output` (as the 3.0 DevKit's IMX477 reports them)."""
+        def sensor_mode(fmt, width, height, available, reason=None):
+            mode = {"format": fmt, "width": width, "height": height, "sensor_mode": True, "available": available}
+            return dict(mode, reason=reason) if reason else mode
+
+        doc = imx477()
+        doc["isp"]["sizing"] = "runtime"
+        doc["modes"] = [
+            sensor_mode("NV12", 1920, 1080, True),
+            sensor_mode("NV12", 2028, 1520, True),
+            sensor_mode("NV12", 4032, 3040, True),
+            sensor_mode("NV12", 4056, 3040, True),
+            sensor_mode("NV12", 4056, 2160, True),
+            sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON),
+        ]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        nv12 = fmt_of(camera, "NV12")
+        self.assertEqual((camera["support"]["tier"], nv12["exportable"], nv12["support"]["tier"]),
+                         ("available", True, "available"))
+        self.assertEqual(states(size_of(nv12, 2028, 1520)["fps"]), [(30, "available", None)])
+        # Sentinel marks the sensor's 4056-wide sizes available, but libcamera streams them at 4032 wide on
+        # this board (3.0.0_develop_B1859), so Insight does not offer them; 4032 itself is fine.
+        self.assertEqual(states(size_of(nv12, 4032, 3040)["fps"]), [(30, "available", None)])
+        for width, height in ((4056, 3040), (4056, 2160)):
+            self.assertEqual(states(size_of(nv12, width, height)["fps"]),
+                             [(30, "unsupported", cameras.MAX_WIDTH_REASON)], f"{width}x{height}")
+        self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
+                         [(30, "unsupported", cameras.FORMAT_REASON)])
+
+        # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its sizes available,
+        # a 3.0 camera is unsupported for the format, not for the ISP.
+        doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), available=False, reason="Not set up for this mode."),
+                        sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON)]
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]),
+                         [(30, "unsupported", "Not set up for this mode.")])
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
+
+    def test_the_default_mode_is_1920_wide_when_the_camera_offers_it(self):
+        """The first Available size in sort order is the smallest (1280x990 on a 3.0 IMX477), not a useful start."""
+        def doc_with(sizes):
+            doc = imx477()
+            doc["isp"]["sizing"] = "runtime"
+            doc["modes"] = [{"format": "NV12", "width": w, "height": h, "sensor_mode": True, "available": True}
+                            for w, h in sizes]
+            return item(snapshot_of(catalog(doc, board=board_block())), IMX477)["default_selection"]
+        imx477_30 = [(1280, 990), (1332, 990), (1920, 1080), (2028, 1080), (2028, 1520), (2048, 1080), (3840, 2160)]
+        self.assertEqual(doc_with(imx477_30), {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+        # No 1920-wide size: the widest Available size under 1920 wide.
+        self.assertEqual(doc_with([(1280, 990), (1332, 990), (2028, 1520)]), {"format": "NV12", "width": 1332, "height": 990, "fps": 30})
+        # Nothing under 1920 wide: the smallest Available size.
+        self.assertEqual(doc_with([(3840, 2160), (2028, 1520)]), {"format": "NV12", "width": 2028, "height": 1520, "fps": 30})
+
+    def test_a_sensor_missing_from_the_boards_overlays_is_unsupported(self):
+        cases = {
+            "sensor not in the overlays": {**board_block(), "supported_sensors": [
+                {"compatible": "onnn,ar0234", "overlays": ["modalix-som-ar0234.dtbo"]}]},
+            # The device tree configures the IMX477, but Sentinel did not link it to this camera.
+            "no configured camera with this id": board_block(None),
+            "another camera's id": board_block("camera:imx477 6-001a"),
+            "no configured cameras": {**board_block(), "configured_cameras": []},
         }
-        for state, reason in unknown.items():
-            with self.subTest(state):
-                snapshot = snapshot_of(catalog(imx477()), check(support={"state": state, "reason": "Sentinel is down."}))
-                camera = item(snapshot, IMX477)
-                self.assertEqual(camera["support"], {"tier": "", "reason": reason, "links": []})
-                # Unknown is not "not usable": every format stays selectable, but nothing is verified to export.
-                self.assertTrue(all(f["exportable"] and f["support"]["tier"] == "" for f in camera["formats"]))
-                self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"], [
-                    {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "", "reason": reason},
-                ])
+        reason = "IMX477 is not in this board's camera overlays."
+        for name, block in cases.items():
+            with self.subTest(name):
+                camera = item(snapshot_of(catalog(imx477(), board=block)), IMX477)
+                self.assertEqual(camera["support"], {"tier": "unsupported", "reason": reason})
+                self.assertEqual({(f["exportable"], f["support"]["reason"]) for f in camera["formats"]}, {(False, reason)})
+                self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]), [(30, "unsupported", reason)])
                 self.assertIsNone(camera["default_selection"])
-                issue = next(i for i in snapshot["issues"] if i["code"] == "support_unknown")
-                # Only a failure carries a detail worth showing; the other states say all there is.
-                detail = " Sentinel is down." if state == "failed" else ""
-                self.assertEqual((issue["severity"], issue["message"]), ("warning", cameras.SUPPORT_UNKNOWN[state][0] + detail))
-        missed = snapshot_of(catalog(imx477()), check(support={"state": "ok", "cameras": {}}))
-        self.assertEqual(item(missed, IMX477)["support"]["reason"], cameras.UNCLASSIFIED_REASON)
-        self.assertNotIn("support_unknown", [i["code"] for i in missed["issues"]])
+        # The configured sensor names the camera when Sentinel links it; another vendor's IMX477 is not this one.
+        econ = board_block(compatible="econ,imx477")
+        self.assertEqual(item(snapshot_of(catalog(imx477(), board=econ)), IMX477)["support"]["reason"], reason)
+        nameless = dict(imx477(), model=None)
+        self.assertEqual(item(snapshot_of(catalog(nameless, board=board_block(None))), IMX477)["support"]["reason"],
+                         "imx477 5-001a is not in this board's camera overlays.")
 
-    def test_usb_camera_is_unsupported_with_core_reason_and_every_advertised_rate(self):
-        camera = item(snapshot_of(catalog(c920())), C920)
+    def test_without_sentinels_board_block_every_mode_is_unsupported_and_says_to_update_sentinel(self):
+        snapshot = snapshot_of(catalog(imx477(), c920()))
+        camera = item(snapshot, IMX477)
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.NO_BOARD_REASON})
+        self.assertEqual(cameras.NO_BOARD_REASON, "This board's SiMa Sentinel does not report camera overlays; update Sentinel.")
+        self.assertEqual({(f["exportable"], f["support"]["tier"]) for f in camera["formats"]}, {(False, "unsupported")})
+        for fmt in camera["formats"]:
+            for size in fmt["sizes"]:
+                self.assertEqual(states(size["fps"]), [(30, "unsupported", cameras.NO_BOARD_REASON)])
+        self.assertIsNone(camera["default_selection"])
+        # A USB camera has no overlay whatever Sentinel reports, so it keeps its own reason.
+        self.assertEqual(item(snapshot, C920)["support"]["reason"], cameras.USB_REASON)
+        self.assertEqual(snapshot["issues"], [])
+
+    def test_usb_camera_is_unsupported_and_offers_every_advertised_rate(self):
+        camera = item(snapshot_of(catalog(c920(), board=board_block())), C920)
         self.assertEqual((camera["connection"], camera["name"]), ("usb", "HD Pro Webcam C920"))
-        self.assertEqual(
-            camera["support"], {"tier": "unsupported", "reason": BACKEND_REASON + TRACKED, "links": [cameras.CORE_838]}
-        )
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "USB cameras have no camera overlay on this board."})
         self.assertEqual(camera["device"], {
             "video_node": "/dev/video97",
             "by_id": C920_BY_ID,
@@ -558,16 +568,12 @@ class SnapshotTests(unittest.TestCase):
                     "product": "HD Pro Webcam C920", "bus_path": "1-3.1", "speed_mbps": 480},
         })
         mjpg = fmt_of(camera, "MJPG")
-        self.assertEqual((mjpg["label"], mjpg["exportable"]), ("MJPG (Motion-JPEG)", True))
-        self.assertEqual(mjpg["support"]["links"], [cameras.CORE_838, cameras.CORE_903])
-        self.assertIn("core#903", mjpg["support"]["reason"])
-        yuyv = fmt_of(camera, "YUYV")
-        self.assertEqual(yuyv["label"], "YUYV (YUYV 4:2:2)")
-        self.assertEqual(yuyv["support"]["links"], [cameras.CORE_838, cameras.INTERNALS_244])
-        fps = size_of(mjpg, 640, 480)["fps"]
-        self.assertEqual([c["value"] for c in fps], [30, 24, 20, 15, 10, 7.5, 5])
-        self.assertEqual({(c["tier"], c["reason"]) for c in fps}, {("unsupported", BACKEND_REASON)})
-        self.assertEqual(camera["default_selection"], {"format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertEqual((mjpg["label"], mjpg["exportable"]), ("MJPG (Motion-JPEG)", False))
+        self.assertEqual(mjpg["support"], {"tier": "unsupported", "reason": cameras.USB_REASON})
+        self.assertEqual(fmt_of(camera, "YUYV")["label"], "YUYV (YUYV 4:2:2)")
+        self.assertEqual(states(size_of(mjpg, 640, 480)["fps"]),
+                         [(value, "unsupported", cameras.USB_REASON) for value in (30, 24, 20, 15, 10, 7.5, 5)])
+        self.assertIsNone(camera["default_selection"])
         self.assertEqual(camera["notes"], [])
 
     def test_usb_identity_rows_degrade_when_sysfs_omits_them(self):
@@ -604,25 +610,23 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual([c["value"] for c in size_of(yuyv, 640, 480)["fps"]], [30, 25, 20, 15, 10])
 
     def test_camerainput_default_rate_is_offered_for_mipi_modes_only(self):
-        """A USB mode exports as a V4L2 descriptor, so a mode without frame intervals offers no rate."""
+        """A USB mode is not a CameraInput mode, so a mode without frame intervals offers no rate."""
         usb = c920()
         usb["modes"] = [{"format": "MJPG", "width": 640, "height": 480}]
         mjpg = fmt_of(item(snapshot_of(catalog(usb)), C920), "MJPG")
         self.assertEqual(size_of(mjpg, 640, 480)["fps"], [])
-        unknown = item(snapshot_of(catalog(usb), check(support={"state": "not_installed", "reason": "x"})), C920)
-        self.assertEqual(size_of(fmt_of(unknown, "MJPG"), 640, 480)["fps"], [])
         mipi = item(snapshot_of(catalog(imx477())), IMX477)
         self.assertEqual([c["value"] for c in size_of(fmt_of(mipi, "NV12"), 1920, 1080)["fps"]], [30])
 
-    def test_isp_rates_offer_the_rate_core_classified_as_verified_and_the_rest_as_unknown(self):
+    def test_every_rate_sentinel_reports_for_an_available_mode_is_available(self):
         doc = imx477()
         doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), frame_intervals=[{"width": 1920, "height": 1080, "intervals": [
             {"type": "discrete", "numerator": 1, "denominator": 60}, {"type": "discrete", "numerator": 1, "denominator": 30},
         ]}])]
-        camera = item(snapshot_of(catalog(doc)), IMX477)
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
         self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"], [
-            {"value": 60, "framerate_num": 60, "framerate_den": 1, "tier": "verified"},
-            {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": ""},
+            {"value": 60, "framerate_num": 60, "framerate_den": 1, "tier": "available"},
+            {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "available"},
         ])
         self.assertEqual(camera["notes"], [
             "Only sizes the ISP can output (1920x1080) are offered; libcamera also advertises sizes the ISP "
@@ -632,10 +636,10 @@ class SnapshotTests(unittest.TestCase):
     def test_unreadable_isp_leaves_no_modes_and_says_why(self):
         doc = imx477()
         doc.update(modes=[], isp={"state": "unavailable", "reason": "no ISP output node was found"})
-        camera = item(snapshot_of(catalog(doc)), IMX477)
+        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
         self.assertEqual((camera["modes_source"], camera["formats"], camera["default_selection"]), ("unavailable", [], None))
         self.assertIn("no ISP output node was found", camera["errors"][0]["message"])
-        self.assertEqual(camera["support"]["tier"], "unsupported")
+        self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.NO_MODES_REASON})
 
     def test_a_failed_provider_keeps_its_last_records_marked_as_an_earlier_scan(self):
         errors = [
@@ -653,27 +657,32 @@ class SnapshotTests(unittest.TestCase):
                          "SiMa Sentinel's hotplug provider failed: kernel uevents cannot be received")
         self.assertEqual(issues["io.open"]["severity"], "warning")
 
-    def test_availability_names_holders_and_degrades_to_unknown(self):
-        holder = [{"pid": 4242, "command": "gst-launch-1.0"}]
-        busy = item(snapshot_of(catalog(imx477()), check(users={IMX477: holder})), IMX477)["availability"]
-        self.assertEqual(busy, {"state": "in_use", "users": holder, "reason": "Open in gst-launch-1.0 (pid 4242)."})
+    def test_a_board_reader_error_names_the_camera_setup(self):
+        error = {"provider": "board", "code": "peripherals.discovery_failed",
+                 "reason": "fw_printenv failed (exit status: 1): Cannot read environment, using default"}
+        snapshot = snapshot_of(catalog(imx477(), board=board_block(), errors=[error]))
+        self.assertEqual(snapshot["issues"], [{
+            "severity": "warning", "code": "peripherals.discovery_failed",
+            "message": "SiMa Sentinel could not read part of the board's camera setup: fw_printenv failed (exit "
+                       "status: 1): Cannot read environment, using default",
+            "hint": cameras.STATUS_HINT,
+        }])
 
-        snapshot = snapshot_of(catalog(imx477()), check(availability_method="proc-user"))
-        self.assertEqual(item(snapshot, IMX477)["availability"]["reason"], cameras.UNKNOWN_USERS_REASON)
-        self.assertIn(("info", "availability_limited"), [(i["severity"], i["code"]) for i in snapshot["issues"]])
-
-        unchecked = cameras.build_snapshot(catalog(imx477()), None, BOARD, 1, None, 5)
-        self.assertEqual(item(unchecked, IMX477)["availability"],
-                         {"state": "unknown", "users": [], "reason": "Discovery never opens a stream."})
-        self.assertIn("availability_limited", [i["code"] for i in unchecked["issues"]])
-        self.assertNotIn("libcamerasrc", unchecked["platform"])
-
-    def test_missing_board_tools_are_reported(self):
-        facts = check(tools={"media-ctl": False, "fuser": True})
-        codes = [(i["severity"], i["code"]) for i in snapshot_of(catalog(imx477()), facts)["issues"]]
-        self.assertEqual(codes, [("warning", "tool_missing")])
-        # Tool issues are about MIPI cameras; a USB-only board does not need them.
-        self.assertEqual(snapshot_of(catalog(c920()), facts)["issues"], [])
+    def test_the_snapshot_passes_sentinels_availability_through_and_never_inspects_processes(self):
+        """Whether another program holds a camera is found out when a preview opens it, not during a scan: that
+        needed root (or passwordless sudo) to be right and showed "unknown" with a root banner otherwise."""
+        snapshot = snapshot_of(catalog(imx477(), c920()))
+        for camera_id in (IMX477, C920):
+            self.assertEqual(item(snapshot, camera_id)["availability"],
+                             {"state": "unknown", "users": [], "reason": "Discovery never opens a stream."})
+        self.assertEqual([i["code"] for i in snapshot["issues"]], [])
+        self.assertNotIn("platform", snapshot)
+        self.assertFalse(hasattr(cameras, "AVAILABILITY_ISSUES"))
+        self.assertFalse(hasattr(cameras, "TOOL_ISSUES"))
+        doc = imx477()
+        doc["availability"] = {"state": "in_use", "reason": "Open in neat-app."}
+        self.assertEqual(item(snapshot_of(catalog(doc)), IMX477)["availability"],
+                         {"state": "in_use", "users": [], "reason": "Open in neat-app."})
 
     def test_changes_are_reported_against_the_previous_refresh(self):
         first = snapshot_of(catalog(imx477(), c920()))
@@ -681,14 +690,33 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(second["changes"], {"added": [], "removed": [{"id": C920, "name": "HD Pro Webcam C920"}]})
         self.assertIsNone(first["changes"])
 
+    def test_camera_setup_names_the_model_and_camera_overlays(self):
+        setup = snapshot_of(catalog(imx477(), board=board_block()))["camera_setup"]
+        self.assertEqual(setup, {"model": "SiMa.ai Modalix SoM 16Gig Board", "overlays": [IMX477_OVERLAY]})
+        self.assertEqual([cameras.sensor_name(c) for c in ("sony,imx477", "imx219", "sony,")], ["IMX477", "IMX219", "SONY,"])
+        # Only overlays that configure a sensor are shown, in U-Boot's order; none without supported sensors.
+        both = {**board_block(), "overlays": [IMX477_OVERLAY, "pcie-8rc.dtbo", "modalix-som-ar0234.dtbo"]}
+        self.assertEqual(snapshot_of(catalog(imx477(), board=both))["camera_setup"]["overlays"],
+                         [IMX477_OVERLAY, "modalix-som-ar0234.dtbo"])
+        unsupported = {**board_block(), "supported_sensors": []}
+        self.assertEqual(snapshot_of(catalog(imx477(), board=unsupported))["camera_setup"]["overlays"], [])
+        sparse = {"configured_cameras": [{"compatible": "imx219"}]}
+        self.assertEqual(snapshot_of(catalog(board=sparse))["camera_setup"], {"model": None, "overlays": []})
+
+    def test_an_older_sentinel_without_a_board_block_adds_no_camera_setup(self):
+        snapshot = snapshot_of(catalog(imx477()))
+        self.assertIsNone(snapshot["camera_setup"])
+        self.assertEqual(snapshot["issues"], [])
+        self.assertIsNone(cameras.empty_snapshot(BOARD, 1)["camera_setup"])
+
     def test_only_cameras_and_microphones_are_listed(self):
         other = {"id": "future:1", "type": "future_sensor", "backend": "future"}
         self.assertEqual([i["id"] for i in snapshot_of(catalog(other, yeti(), imx477()))["items"]], [IMX477, YETI])
 
 
 def mic_check(**extra):
-    """board_check output with microphones requested: root, nobody holds anything, no sound server."""
-    return check(**{"users": {}, "sound_servers": [], **extra})
+    """board_check output with microphones requested: root, nobody holds anything."""
+    return check(**{"users": {}, **extra})
 
 
 def contract_microphone():
@@ -698,7 +726,7 @@ def contract_microphone():
 class MicrophoneSnapshotTests(unittest.TestCase):
     def test_sentinels_contract_microphone_maps_to_the_approved_page_fields(self):
         record = contract_microphone()
-        mic = item(snapshot_of(contract_catalog(), mic_check()), record["id"])
+        mic = item(snapshot_of(contract_catalog()), record["id"])
         self.assertEqual(mic, {
             "id": record["id"], "kind": "microphone", "connection": "usb", "name": "HD Pro Webcam C920",
             "device": {
@@ -714,7 +742,7 @@ class MicrophoneSnapshotTests(unittest.TestCase):
         })
 
     def test_yeti_nano_maps_to_the_approved_page_fields(self):
-        mic = item(snapshot_of(catalog(yeti()), mic_check()), YETI)
+        mic = item(snapshot_of(catalog(yeti())), YETI)
         self.assertEqual(mic, {
             "id": YETI, "kind": "microphone", "connection": "usb", "name": "Yeti Nano",
             "device": {
@@ -731,55 +759,45 @@ class MicrophoneSnapshotTests(unittest.TestCase):
         })
 
     def test_a_webcam_microphone_is_part_of_its_camera(self):
-        snapshot = snapshot_of(catalog(c920(), c920_mic()), mic_check())
+        snapshot = snapshot_of(catalog(c920(), c920_mic()))
         mic = item(snapshot, C920_MIC)
         self.assertEqual((mic["name"], mic["device"]["part_of"]), ("HD Pro Webcam C920", {"id": C920, "name": "HD Pro Webcam C920"}))
         self.assertEqual(mic["capture"][0]["rates"], [16000, 24000, 32000])
         # Sentinel's real camera topology is a sysfs path; ALSA names the USB device by its last part.
         camera = c920()
         camera["identity"]["topology"] = "devices/platform/xhci-hcd.1.auto/usb1/1-3/1-3.1"
-        self.assertEqual(item(snapshot_of(catalog(camera, c920_mic()), mic_check()), C920_MIC)["device"]["part_of"]["id"], C920)
-        self.assertNotIn("part_of", item(snapshot_of(catalog(c920_mic()), mic_check()), C920_MIC)["device"])
+        self.assertEqual(item(snapshot_of(catalog(camera, c920_mic())), C920_MIC)["device"]["part_of"]["id"], C920)
+        self.assertNotIn("part_of", item(snapshot_of(catalog(c920_mic())), C920_MIC)["device"])
 
     def test_a_mono_microphone_keeps_its_continuous_rate_range_and_degrades_without_usb_strings(self):
-        mic = item(snapshot_of(catalog(mono_mic()), mic_check()), MONO_MIC)
+        mic = item(snapshot_of(catalog(mono_mic())), MONO_MIC)
         self.assertEqual(mic["name"], "USB PnP Sound Device")
         self.assertEqual(mic["capture"], [{"format": "S16_LE", "channels": 1, "bits": 16, "rates": [],
                                            "rate_range": {"min": 8000, "max": 48000}, "channel_map": None}])
         self.assertNotIn("by_id", mic["device"])
 
     def test_an_onboard_device_without_formats_says_so_once(self):
-        mic = item(snapshot_of(catalog(onboard_mic()), None), ONBOARD_MIC)
+        mic = item(snapshot_of(catalog(onboard_mic())), ONBOARD_MIC)
         self.assertEqual((mic["connection"], mic["capture"]), ("onboard", None))
         self.assertEqual(mic["notes"], [microphones.NO_CAPABILITIES_NOTE,
                                         "ALSA did not report valid capture subdevice availability."])
-        self.assertEqual(mic["availability"], {"state": "unknown", "users": [], "reason": cameras.UNCHECKED_REASON})
+        self.assertEqual(mic["availability"], {"state": "unknown", "users": [], "reason": None})
         self.assertNotIn("usb", mic["device"])
 
-    def test_availability_combines_the_kernel_counts_with_insight_process_check(self):
-        holder = [{"pid": 4242, "command": "arecord"}]
+    def test_availability_is_sentinels_own_and_the_scan_inspects_no_process(self):
         busy = yeti()
         busy["availability"] = {"state": "in_use", "subdevices": 1, "subdevices_available": 0}
-        named = item(snapshot_of(catalog(busy), mic_check(users={YETI: holder})), YETI)["availability"]
-        self.assertEqual(named, {"state": "in_use", "users": holder, "reason": "Open in arecord (pid 4242)."})
-        hidden = item(snapshot_of(catalog(busy), mic_check(availability_method="proc-user", users={YETI: []})), YETI)
-        self.assertEqual(hidden["availability"], {"state": "in_use", "users": [], "reason": microphones.KERNEL_IN_USE_REASON})
-        # The live substream count wins over Sentinel's counts from its last scan.
-        live_free = item(snapshot_of(catalog(busy), mic_check(users={YETI: []}, capture_open={YETI: 0})), YETI)
-        self.assertEqual(live_free["availability"], {"state": "available", "users": [], "reason": None})
-        # Free by the kernel's counts needs no process check, even when that check could not run.
-        self.assertEqual(item(snapshot_of(catalog(yeti()), None), YETI)["availability"]["state"], "available")
+        self.assertEqual(item(snapshot_of(catalog(busy)), YETI)["availability"], {"state": "in_use", "users": [], "reason": None})
+        self.assertEqual(item(snapshot_of(catalog(yeti())), YETI)["availability"]["state"], "available")
 
-    def test_sound_servers_and_a_failed_provider_are_noted(self):
+    def test_a_failed_provider_is_noted(self):
         snapshot = snapshot_of(
             catalog(yeti(), errors=[{"provider": MIC_PROVIDER, "code": "peripherals.discovery_failed",
                                      "reason": "ALSA scan failed"}]),
-            mic_check(sound_servers=["pipewire", "pipewire-pulse", "pulseaudio"]),
         )
         notes = item(snapshot, YETI)["notes"]
+        self.assertEqual(len(notes), 1)
         self.assertIn(f"its {MIC_PROVIDER} provider failed", notes[0])
-        self.assertTrue(notes[1].startswith("PipeWire is running") and notes[2].startswith("PulseAudio is running"))
-        self.assertEqual(len(notes), 3)
 
     def test_sentinel_microphone_records_are_validated_before_they_are_mapped(self):
         def validate(doc):
@@ -829,8 +847,8 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, "peripheral_response")
 
     def test_changes_include_microphones(self):
-        first = snapshot_of(catalog(imx477(), yeti()), mic_check())
-        second = snapshot_of(catalog(imx477()), mic_check(), previous=first)
+        first = snapshot_of(catalog(imx477(), yeti()))
+        second = snapshot_of(catalog(imx477()), previous=first)
         self.assertEqual(second["changes"]["removed"], [{"id": YETI, "name": "Yeti Nano"}])
 
 
@@ -903,10 +921,9 @@ class PeripheralsApiTests(unittest.TestCase):
             raise response
         return copy.deepcopy(response)
 
-    def use(self, *catalogs, checks=(), generation: int = 1, fingerprint: str = "fp-1") -> CheckTransport:
+    def use(self, *catalogs, generation: int = 1, fingerprint: str = "fp-1") -> CheckTransport:
         self.catalogs = list(catalogs) or [catalog(imx477(), c920())]
-        known = [doc for doc in self.catalogs if isinstance(doc, dict)]
-        transport = CheckTransport(*checks, default=check(support=core_of(*known)))
+        transport = CheckTransport()
         self.manager.current = FakeSession(generation, transport, fingerprint)
         return transport
 
@@ -915,19 +932,6 @@ class PeripheralsApiTests(unittest.TestCase):
         if response.status_code == 200:
             self.scan_id = response.get_json()["scan_id"]
         return response
-
-    def export(self, **body):
-        body = {
-            "generation": self.manager.current.generation,
-            "scan_id": self.scan_id,
-            "id": IMX477,
-            "format": "NV12",
-            "width": 1920,
-            "height": 1080,
-            "fps": 30,
-            **body,
-        }
-        return self.client.post("/api/peripherals/cameras/export", json=body)
 
     def test_scan_responses_are_not_cached(self):
         self.use()
@@ -939,63 +943,44 @@ class PeripheralsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertEqual(
-            (body["scan_id"], body["scanned_at"], body["items"], body["changes"], body["platform"]),
-            (None, None, [], None, None),
+            (body["scan_id"], body["scanned_at"], body["items"], body["changes"]),
+            (None, None, [], None),
         )
         self.assertEqual(body["board"]["label"], "sima@192.168.2.2")
         self.assertEqual(transport.calls, [])
         self.sentinel.assert_not_called()
 
-    def test_refresh_asks_sentinel_then_runs_one_board_check(self):
+    def test_refresh_asks_sentinel_and_runs_nothing_else_on_the_board(self):
         transport = self.use()
         response = self.refresh()
         self.assertEqual(response.status_code, 200)
         self.sentinel.assert_called_once()
-        self.assertEqual(len(transport.calls), 1)
-        argv, timeout, stdin = transport.calls[0]
-        self.assertEqual(argv[:2], ["python3", "-"])
-        self.assertEqual(
-            json.loads(argv[2]),
-            {"cameras": {IMX477: ["/dev/media0", "/dev/video0out"], C920: ["/dev/video97"]}, "support": True},
-        )
-        self.assertEqual(stdin, Path(board_check.__file__).read_bytes())
+        # No process check during a scan: whether a camera is busy is reported when a preview opens it.
+        self.assertEqual(transport.calls, [])
         snapshot = response.get_json()
         self.assertEqual(snapshot["board"]["fingerprint"], "fp-1")
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920])
         self.assertIsNone(snapshot["changes"])
         self.assertEqual(self.client.get("/api/peripherals").get_json(), snapshot)
 
-    def test_sentinels_contract_example_refreshes_and_exports_both_cameras(self):
+    def test_sentinels_contract_example_refreshes_both_cameras(self):
         self.use(contract_catalog())
         snapshot = self.refresh().get_json()
         self.assertEqual([i["id"] for i in snapshot["items"]], [IMX477, C920, contract_microphone()["id"]])
-        mipi = self.export().get_json()
-        self.assertEqual(json.loads(mipi["exports"][2]["content"])["options"]["camera_name"], "imx477 5-001a")
-        usb = self.export(id=C920, format="MJPG", width=1920, height=1080, fps=30).get_json()
-        self.assertEqual(json.loads(usb["exports"][1]["content"])["device"],
-                         "/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_BE998CAF-video-index0")
+        self.assertEqual([(i["id"], i["support"]["tier"]) for i in snapshot["items"] if i["kind"] == "camera"],
+                         [(IMX477, "available"), (C920, "unsupported")])
 
     def test_a_board_without_cameras_needs_no_board_check(self):
         transport = self.use(catalog())
         self.assertEqual(self.refresh().get_json()["items"], [])
         self.assertEqual(transport.calls, [])
 
-    def test_a_failed_board_check_degrades_availability_instead_of_failing(self):
-        for failure in (ExecResult(127, b"", b"sh: python3: not found"), ExecResult(0, b"Traceback", b""),
-                        BoardError("timeout", "timed out")):
-            with self.subTest(failure=failure):
-                self.use(checks=[failure])
-                response = self.refresh()
-                self.assertEqual(response.status_code, 200)
-                camera = response.get_json()["items"][0]
-                self.assertEqual(camera["availability"]["state"], "unknown")
-
-    def test_a_failed_board_check_does_not_use_the_status_reporting_transport(self):
-        raw = self.use(checks=[BoardError("timeout", "timed out")])
+    def test_a_refresh_runs_nothing_on_the_board_beyond_sentinels_rescan(self):
+        raw = self.use()
         reporting = mock.Mock()
         self.manager.current.transport = reporting
         self.assertEqual(self.refresh().status_code, 200)
-        self.assertEqual(len(raw.calls), 1)
+        self.assertEqual(raw.calls, [])
         reporting.exec.assert_not_called()
 
     def test_refresh_reflects_removal_and_reconnection(self):
@@ -1012,58 +997,6 @@ class PeripheralsApiTests(unittest.TestCase):
         self.use(catalog(), fingerprint="fp-2")
         self.assertIsNone(self.refresh().get_json()["changes"])
 
-    def test_in_use_warning_names_the_holding_processes(self):
-        holder = [{"pid": 4242, "command": "gst-launch-1.0"}]
-        self.use(checks=[check(users={IMX477: holder, C920: []})])
-        self.assertEqual(self.refresh().get_json()["items"][0]["availability"]["state"], "in_use")
-        self.assertIn(
-            "The camera is in use by gst-launch-1.0 (pid 4242); CameraInput cannot acquire it until it is released.",
-            self.export().get_json()["warnings"],
-        )
-
-    def test_export_mipi_renders_core_shapes(self):
-        self.use()
-        self.refresh()
-        response = self.export()
-        self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertEqual(body["selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
-        self.assertEqual(body["support"]["tier"], "verified")
-        self.assertIn("Validated with Core CameraInput", body["support"]["reason"])
-        warnings = body["warnings"]
-        self.assertIn("delivered about 66 fps", warnings[0])
-        self.assertEqual(warnings[1:], [NO_BUFFER_COUNT])
-        exports = {e["id"]: e for e in body["exports"]}
-        self.assertEqual(list(exports), ["python", "cpp", "json"])
-
-        python = exports["python"]["content"]
-        compile(python, "camera_input.py", "exec")
-        for line in (
-            "camera.camera_name = 'imx477 5-001a'",
-            "camera.framerate_num = 30",
-            "camera.framerate_den = 1",
-            "camera.buffer_name = 'camera0'",
-            "camera.allow_cpu_fallback = True",
-            "graph.add(pyneat.nodes.camera_input(camera))",
-        ):
-            self.assertIn(line, python)
-
-        cpp = exports["cpp"]["content"]
-        self.assertEqual(cpp.count("{"), cpp.count("}"))
-        self.assertIn('camera.camera_name = "imx477 5-001a";', cpp)
-        self.assertIn("graph.add(neat::nodes::CameraInput(camera));", cpp)
-        descriptor = json.loads(exports["json"]["content"])
-        self.assertEqual((descriptor["kind"], descriptor["version"], descriptor["camera_id"]), ("neat.camera-input", 1, IMX477))
-        self.assertEqual(descriptor["options"]["camera_name"], "imx477 5-001a")
-        self.assertEqual((descriptor["support_tier"], descriptor["capture_buffer_count"]), ("verified", 0))
-
-    def test_export_of_a_supported_mode_without_evidence_has_no_measured_rate(self):
-        self.use()
-        self.refresh()
-        body = self.export(width=2048).get_json()
-        self.assertEqual(body["support"], {"tier": "verified", "reason": "Neat Core accepts this mode.", "links": []})
-        self.assertEqual(body["warnings"], [NO_BUFFER_COUNT])
-
     def test_stepwise_intervals_offer_only_rates_on_their_step(self):
         doc = c920()
         doc["modes"] = [dict(usb_mode("YUYV", 640, 480, [(1, 30)]), frame_intervals=[{
@@ -1077,170 +1010,6 @@ class PeripheralsApiTests(unittest.TestCase):
         self.use(catalog(doc))
         camera = item(self.refresh().get_json(), C920)
         self.assertEqual([choice["value"] for choice in size_of(fmt_of(camera, "YUYV"), 640, 480)["fps"]], [30, 15, 10, 5])
-        self.assertEqual(self.export(id=C920, format="YUYV", width=640, height=480, fps=25).status_code, 400)
-
-    def test_export_keeps_a_fractional_catalog_rate_exact(self):
-        mipi = imx477()
-        for mode in mipi["modes"]:
-            mode["frame_intervals"] = [{"width": mode["width"], "height": mode["height"], "intervals": [
-                {"type": "discrete", "numerator": 1001, "denominator": 30000}]}]
-        usb = c920()
-        usb["modes"] = [usb_mode("YUYV", 640, 480, [(1001, 30000), (1, 15)])]
-        self.use(catalog(mipi, usb))
-        self.refresh()
-        descriptor = json.loads(self.export(fps=29.97).get_json()["exports"][2]["content"])
-        self.assertEqual((descriptor["options"]["framerate_num"], descriptor["options"]["framerate_den"]), (30000, 1001))
-        body = self.export(id=C920, format="YUYV", width=640, height=480, fps=29.97).get_json()
-        descriptor = json.loads(body["exports"][1]["content"])
-        self.assertEqual((descriptor["framerate_num"], descriptor["framerate_den"]), (30000, 1001))
-
-    def test_export_escapes_device_strings(self):
-        doc = imx477()
-        hostile = 'cam"\n\\ 5-001a'
-        doc.update(camera_name=hostile, model=None)
-        self.use(catalog(doc))
-        self.refresh()
-        body = self.export().get_json()
-        exports = {e["id"]: e["content"] for e in body["exports"]}
-        self.assertEqual(list(exports), ["python", "cpp", "json"])
-        namespace = {}
-        code = compile(exports["python"].replace("import pyneat", ""), "export", "exec")
-        exec(code, {"pyneat": _FakePyneat()}, namespace)
-        self.assertEqual(namespace["camera"].camera_name, hostile)
-        self.assertTrue(namespace["camera"].allow_cpu_fallback)
-        self.assertIn("neat::nodes::CameraInput(camera)", exports["cpp"])
-        self.assertNotIn("\n\\ 5", exports["cpp"])
-
-    def test_export_usb_emits_descriptors_only(self):
-        self.use()
-        self.refresh()
-        response = self.export(id=C920, format="MJPG", width=1280, height=720, fps=7.5)
-        self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertEqual([e["id"] for e in body["exports"]], ["yaml", "json"])
-        self.assertEqual(body["support"]["tier"], "unsupported")
-        descriptor = json.loads(body["exports"][1]["content"])
-        self.assertEqual((descriptor["kind"], descriptor["core_support"]), ("v4l2-camera", "unsupported"))
-        self.assertEqual(descriptor["device"], C920_BY_ID)
-        self.assertEqual((descriptor["vendor_id"], descriptor["product_id"], descriptor["serial"]), ("046d", "08e5", "BE998CAF"))
-        self.assertEqual((descriptor["framerate_num"], descriptor["framerate_den"]), (15, 2))
-        yaml_values = parse_yaml_block(body["exports"][0]["content"])
-        self.assertEqual((yaml_values["core_support"], yaml_values["format"]), ("unsupported", "MJPG"))
-        self.assertTrue(any("core#903" in w for w in body["warnings"]))
-        self.assertFalse(any("not stable" in w for w in body["warnings"]))
-
-        doc = c920()
-        doc.pop("by_id_path")
-        self.use(catalog(doc))
-        self.refresh()
-        body = self.export(id=C920, format="YUYV", width=640, height=480, fps=30).get_json()
-        self.assertEqual(json.loads(body["exports"][1]["content"])["device"], "/dev/video97")
-        self.assertTrue(any("internals#244" in w for w in body["warnings"]))
-        self.assertTrue(any("not stable" in w for w in body["warnings"]))
-
-        # Codex 4189173487: with neither path the descriptor's device was null, which nothing can open.
-        doc.pop("device_path")
-        self.use(catalog(doc))
-        self.refresh()
-        response = self.export(id=C920, format="YUYV", width=640, height=480, fps=30)
-        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
-        self.assertIn("no device path", response.get_json()["error"])
-
-    def test_export_refuses_modes_sentinel_did_not_report_or_core_did_not_verify(self):
-        self.use()
-        self.refresh()
-        for width, height in ((1280, 720), (3840, 2160)):
-            with self.subTest(size=f"{width}x{height}"):
-                response = self.export(width=width, height=height)
-                self.assertEqual(response.status_code, 400)
-                body = response.get_json()
-                self.assertEqual((body["code"], body["hint"]), ("invalid_request", export.MODE_HINT))
-                self.assertIn(f"{width}x{height} at 30 fps is not a mode this camera reported", body["error"])
-        self.assertIn(FORMAT_REASON, self.export(format="RGB3").get_json()["error"])
-        self.use(checks=[check(support={"state": "not_installed", "reason": "No module named 'pyneat'"})])
-        self.refresh()
-        response = self.export()
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(f"at 30 fps cannot be exported: {NOT_INSTALLED}", response.get_json()["error"])
-
-    def test_export_rejects_invalid_requests(self):
-        self.use()
-        self.refresh()
-        cases = (
-            ({"generation": 0}, 400),
-            ({"scan_id": ""}, 400),
-            ({"scan_id": 7}, 400),
-            ({"generation": True}, 400),
-            ({"generation": 1.5}, 400),
-            ({"fps": None}, 400),
-            ({"width": True}, 400),
-            ({"format": "AR24"}, 400),
-            ({"width": 1234}, 400),
-            ({"fps": 60}, 400),
-            ({"id": "camera:nope"}, 404),
-        )
-        for body, status in cases:
-            with self.subTest(body=body):
-                response = self.export(**body)
-                self.assertEqual(response.status_code, status)
-                self.assertIn(response.get_json()["code"], {"invalid_request", "not_found"})
-        self.assertEqual(self.export(generation=1.0).status_code, 200)
-
-    def test_export_rejects_a_frame_rate_that_is_not_a_finite_number(self):
-        # Codex 4188993845: an integer too large for a float overflowed against a fractional rate (a 500).
-        from neat_insight.peripherals import export
-
-        page = {"id": C920, "format": "MJPG", "width": 1920, "height": 1080}
-        for fps in (10**400, float("nan"), float("inf")):
-            with self.subTest(fps=str(fps)[:12]), self.assertRaises(BoardError) as ctx:
-                export.parse_request(dict(page, fps=fps))
-            self.assertEqual(ctx.exception.code, "invalid_request")
-        self.assertEqual(export.parse_request(dict(page, fps=7.5))["fps"], 7.5)
-
-    def test_the_pages_export_request_without_scan_tokens_uses_the_current_scan(self):
-        """The Peripherals page sends only the mode; the optional tokens are checked only when sent."""
-        self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))
-        page = {"id": IMX477, "format": "NV12", "width": 1920, "height": 1080, "fps": 30}
-        post = lambda: self.client.post("/api/peripherals/cameras/export", json=page)
-        self.assertEqual((post().status_code, post().get_json()["code"]), (409, "stale_snapshot"))
-        self.refresh()
-        self.assertEqual(post().status_code, 200)
-        self.refresh()
-        self.assertEqual(post().status_code, 200, "a later scan of the same board still serves the page")
-        self.use(generation=2)
-        self.assertEqual(post().status_code, 409, "a newly selected board without a scan has nothing to export")
-
-    def test_export_is_stale_after_another_scan_of_the_same_board(self):
-        self.use(catalog(imx477()), catalog(imx477(), observed_at="2026-10-05T01:49:00Z"))
-        first = self.refresh().get_json()
-        old_scan_id = first["scan_id"]
-        self.refresh()
-        response = self.export(scan_id=old_scan_id)
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
-
-    def test_export_is_stale_after_the_board_changes(self):
-        self.use()
-        self.assertEqual(self.export().status_code, 409)
-        self.refresh()
-        self.use(generation=2)
-        response = self.export()
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
-        self.assertEqual(self.client.get("/api/peripherals").get_json()["scanned_at"], None)
-
-    def test_export_rejects_an_old_tab_after_the_new_board_is_scanned(self):
-        self.use()
-        old_generation = self.refresh().get_json()["generation"]
-        self.use(generation=2)
-        self.refresh()
-        response = self.export(generation=old_generation)
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
-
-    def test_export_is_refused_when_the_board_changes_before_it_returns(self):
-        self.use()
-        self.refresh()
-        self.manager.current.stale = True
-        response = self.export()
-        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
 
     def test_get_is_refused_when_the_board_changes_before_it_returns(self):
         self.use()
@@ -1386,12 +1155,11 @@ class MicrophoneApiTests(unittest.TestCase):
     def start(self, mic_id=YETI, **body):
         return self.client.post("/api/peripherals/microphones/test", json={"id": mic_id, **body})
 
-    def test_refresh_checks_every_microphone_live(self):
+    def test_refresh_runs_no_board_check(self):
+        """A scan only reads Sentinel: whether a microphone is held is checked when its test starts."""
         self.sentinel = catalog(yeti(), c920_mic(), onboard_mic())
         self.assertEqual(self.client.post("/api/peripherals/refresh").status_code, 200)
-        argv, _, _ = self.transport.calls[0]
-        self.assertEqual(json.loads(argv[2]), {"cameras": {}, "support": True, "microphones": {
-            YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: ["/dev/snd/pcmC3D0c"], ONBOARD_MIC: ["/dev/snd/pcmC0D0c"]}})
+        self.assertEqual(self.transport.calls, [])
 
     def answer_checks(self, live, record=None):
         """Board check calls get `live`; arecord goes to `record`."""
@@ -1444,7 +1212,7 @@ class MicrophoneApiTests(unittest.TestCase):
         for body in ({"seconds": 0}, {"seconds": 31}, {"seconds": True}, {"id": ""}):
             self.assertEqual(self.start(**body).status_code, 400)
         self.reads["catalog"].assert_not_called()
-        self.assertEqual(len(self.transport.calls), 1)
+        self.assertEqual(self.transport.calls, [])
 
     def test_a_changed_sentinel_catalog_never_starts_arecord(self):
         self.client.post("/api/peripherals/refresh")
@@ -1465,7 +1233,7 @@ class MicrophoneApiTests(unittest.TestCase):
             def __getattr__(self, name):
                 def read(*args):
                     value = getattr(cache, name)(*args)
-                    cache.record(1, BOARD, refreshed, mic_check(), 5)
+                    cache.record(1, BOARD, refreshed, 5)
                     return value
                 return read
 
@@ -1693,23 +1461,5 @@ class MicrophoneTestTests(unittest.TestCase):
         _, test = self.run_test(switched, session=session)
         test.thread.join(2)
         self.assertEqual((test.status()["state"], test.status()["error"]["code"]), ("failed", "stale_snapshot"))
-
-
-class _FakePyneat:
-    """Just enough of pyneat to execute the exported Python."""
-
-    class CameraInputOptions(SimpleNamespace):
-        pass
-
-    class Graph:
-        def __init__(self, name):
-            self.nodes = []
-
-        def add(self, node):
-            self.nodes.append(node)
-
-    nodes = SimpleNamespace(camera_input=lambda options, capture_buffer_count=0: (options, capture_buffer_count))
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-import { apiError, exportChoices } from './model.js'
+import { apiError } from './model.js'
 
 export async function requestJson(url, { method = 'GET', body } = {}) {
   let res
@@ -65,24 +65,6 @@ export async function copyText(text) {
     focused?.focus?.({ preventScroll: true })
   }
   if (!copied) throw new Error(failure)
-}
-
-// Copies one export of the selected mode. The request starts and the clipboard write is handed its pending
-// text in the same call, inside the click, before anything awaits. `isCurrent` reports whether the selection
-// is still the one clicked, so a late response for an older mode is never copied.
-export function copyCameraExport({ camera, selection, exportId, isCurrent = () => true }) {
-  const { format, width, height, fps } = selection
-  const label = exportChoices(camera).find((choice) => choice.id === exportId)?.label || exportId
-  const text = requestJson('/api/peripherals/cameras/export', {
-    method: 'POST',
-    body: { id: camera.id, format, width, height, fps }
-  }).then((data) => {
-    if (!isCurrent()) throw new Error('The selection changed; nothing was copied.')
-    const item = (data.exports || []).find((entry) => entry.id === exportId)
-    if (!item) throw new Error(`${label} is not available for this mode.`)
-    return item.content
-  })
-  return copyText(text)
 }
 
 export function downloadText(filename, content) {
