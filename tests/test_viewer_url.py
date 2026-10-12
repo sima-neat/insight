@@ -23,7 +23,11 @@ class ViewerUrlTests(unittest.TestCase):
             {"name": "videoUI", "hostPortStart": 18081, "protocol": "tcp"},
         ]
 
-        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports):
+        # Only the exposed ports come from this port map. The channel capacity stays the default whatever port map
+        # the test machine has: an SDK one may cap it (#149), which the configured-capacity test below covers.
+        with mock.patch.object(app_module, "_read_exposed_ports_from_port_map", return_value=ports), \
+             mock.patch.object(app_module, "_read_neat_port_map", return_value={}), \
+             mock.patch.object(app_module, "is_sima_board", return_value=False):
             response = self.client.get("/api/viewer-url?mode=dark&src=0,1", headers={"Host": "192.168.1.25:19900"})
 
         self.assertEqual(response.status_code, 200)
