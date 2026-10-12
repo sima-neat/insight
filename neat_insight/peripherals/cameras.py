@@ -457,9 +457,9 @@ class ScanCache:
         return entry["snapshot"] if entry and entry["generation"] == generation else None
 
     def scan(self, generation: int) -> tuple:
-        """The last scan of this board as (snapshot, catalog revision), read together; (None, None) without one.
+        """The last scan of this board as (snapshot, Sentinel catalog), read together; (None, None) without one.
 
-        One read keeps a refresh that lands in between from pairing one scan's snapshot with another's revision.
+        One read keeps a refresh that lands in between from pairing one scan's snapshot with another's catalog.
         """
         with self._lock:
             entry = self._entry

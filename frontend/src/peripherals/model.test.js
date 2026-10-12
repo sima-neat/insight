@@ -156,7 +156,7 @@ const usb = {
 
 // The Blue Yeti Nano item exactly as the real DevKit scan returned it.
 const yeti = {
-  id: 'usb:b58e:0005:1-3.1:c0',
+  id: 'microphone:alsa:3ff3d77bf791d455',
   kind: 'microphone',
   connection: 'usb',
   name: 'Yeti Nano',
@@ -182,12 +182,12 @@ const yeti = {
   },
   availability: available,
   capture: [{ format: 'S24_3LE', channels: 2, bits: 24, rates: [32000, 44100, 48000], rate_range: null, channel_map: ['FL', 'FR'] }],
-  notes: ['PulseAudio is running: applications usually record through it, so this microphone can look free here while a sound-server client is using it.'],
+  notes: [],
   errors: []
 }
 
 const onboardMic = {
-  id: 'alsa:simaaudio:c0',
+  id: 'microphone:alsa:0a1b2c3d4e5f6071',
   kind: 'microphone',
   connection: 'onboard',
   name: 'sima-audio',
