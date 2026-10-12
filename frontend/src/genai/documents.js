@@ -46,7 +46,9 @@ export function documentsSummary(status) {
   const meta = status.meta || {}
   const file = String(meta.input || '').split('/').pop() || 'a document'
   const sections = typeof meta.chunks === 'number' ? `${meta.chunks} section${meta.chunks === 1 ? '' : 's'} from ` : ''
-  const state = status.service === 'ok' ? '' : ' (the search service is starting)'
+  const state = status.service === 'ok' ? ''
+    : status.service === 'failed' ? ' (the search service stopped: restart GenAI Studio on the board)'
+      : ' (the search service is starting)'
   return `${sections}${file}${state}`
 }
 

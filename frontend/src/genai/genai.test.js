@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -17,13 +18,15 @@ import {
   speechModels
 } from './backendState.js'
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
-import { languageNames, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
+import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
-import { REPLY_CUT_OFF, probeHealth, streamChat } from './client.js'
+import { REPLY_CUT_OFF, downloadModel, errorMessage, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
 import { documentsSummary, documentsSupport, parseSources, progressOutcome, sourcesNote } from './documents.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
+import { allowedActions } from './activity.js'
+import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
 import { benchProgress, benchmarkCsv, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
@@ -65,6 +68,9 @@ test('backend state: a board that answers with an error is running, not down', (
   assert.equal(studioError.state, 'error')
   assert.match(studioError.title, /answered with an error \(HTTP 500\)/)
   assert.equal(studioError.detail, 'Internal error in GenAI Studio')
+  const htmlPage = deriveBackendState({ health: { httpStatus: 200, body: {}, unreadable: true } })
+  assert.equal(htmlPage.state, 'error')
+  assert.equal(htmlPage.action, 'settings')
   const notStudio = deriveBackendState({ health: { httpStatus: 404, body: {}, unreadable: true } })
   assert.equal(notStudio.state, 'error')
   assert.match(notStudio.title, /doesn't answer like GenAI Studio/)
@@ -74,11 +80,29 @@ test('backend state: a board that answers with an error is running, not down', (
 
 test('backend state: no board selected needs no extra button, the settings open on their own', () => {
   assert.equal(deriveBackendState({ health: { httpStatus: 503, body: { reason: 'not-configured' } } }).action, null)
+  const badAddress = deriveBackendState({ health: { httpStatus: 503, body: { reason: 'invalid-address' } } })
+  assert.equal(badAddress.state, 'unconfigured')
+  assert.equal(badAddress.action, 'settings')
+  const cfg = deriveBackendState({ health: { httpStatus: 500, body: { reason: 'cfg-unreadable', error: "Insight's settings file could not be read" } } })
+  assert.equal(cfg.title, "Insight's settings file can't be used")
+  assert.match(cfg.detail, /could not be read/)
 })
 
 function respondWith(status, body, contentType = 'text/plain') {
   globalThis.fetch = async () => new Response(body, { status, headers: { 'Content-Type': contentType } })
 }
+
+test('a download is finished only when the board says done', async () => {
+  const realFetch = globalThis.fetch
+  try {
+    respondWith(200, '{"state":"downloading","pct":40}\n{"state":"done"}\n', 'application/x-ndjson')
+    assert.equal((await downloadModel({ repoId: 'a/b', onProgress: () => {} })).state, 'done')
+    respondWith(200, '{"state":"downloading","pct":40}\n', 'application/x-ndjson')
+    await assert.rejects(downloadModel({ repoId: 'a/b', onProgress: () => {} }), /stopped before it finished/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
 
 test('a health answer that is not GenAI Studio JSON is flagged instead of shown raw', async () => {
   const realFetch = globalThis.fetch
@@ -259,9 +283,27 @@ test('read aloud support says plainly when a language has no voice', () => {
   assert.deepEqual(readAloudSupport('ఒక యువతి', VOICE_LANGUAGES), { supported: false, language: 'te', name: 'Telugu' })
   assert.deepEqual(readAloudSupport('नमस्ते', VOICE_LANGUAGES), { supported: true, language: 'hi' })
   assert.deepEqual(readAloudSupport('Привет, как дела?', VOICE_LANGUAGES), { supported: true, language: 'uk' })
-  assert.deepEqual(readAloudSupport('Hello there', VOICE_LANGUAGES, 'de'), { supported: true, language: 'de' })
+  assert.deepEqual(readAloudSupport('Hello there', VOICE_LANGUAGES, 'de'), { supported: true, language: 'en' })
+  assert.deepEqual(readAloudSupport('Tokyo, Osaka', VOICE_LANGUAGES, 'de'), { supported: true, language: 'de' })
   assert.deepEqual(readAloudSupport('ఒక యువతి', null), { supported: true, language: 'te' })
   assert.deepEqual(languageNames(['zh', 'en', 'na']), ['Chinese', 'English'])
+})
+
+test('Latin-script replies are read in their own language when it is clear', () => {
+  assert.equal(latinLanguage('Buenos días, ¿cómo estás?'), 'es')
+  assert.equal(latinLanguage('Bonjour, comment allez-vous aujourd\'hui ?'), 'fr')
+  assert.equal(latinLanguage('Guten Morgen, wie geht es dir heute?'), 'de')
+  assert.equal(latinLanguage('Buongiorno, come stai?'), 'it')
+  assert.equal(latinLanguage('Bom dia, tudo bem com você?'), 'pt')
+  assert.equal(latinLanguage('The weather is lovely today, and the park is open.'), 'en')
+  assert.equal(latinLanguage('Hello there'), 'en')
+  assert.equal(latinLanguage('Tokyo'), null)                      // nothing to go on
+  assert.equal(latinLanguage('Die Hard is great'), null)          // a tie is not a guess
+  const withSpanish = ['de', 'en', 'es']
+  assert.deepEqual(readAloudSupport('Buenos días, ¿cómo estás?', withSpanish, 'en'), { supported: true, language: 'es' })
+  // No voice for the guessed language: the fallback, as before.
+  assert.deepEqual(readAloudSupport('Buenos días, ¿cómo estás?', ['de', 'en'], 'en'), { supported: true, language: 'en' })
+  assert.deepEqual(readAloudSupport('Tokyo', withSpanish, 'de'), { supported: true, language: 'de' })
 })
 
 test('thinking is offered only for models that have a reasoning mode', () => {
@@ -311,6 +353,10 @@ test('voice engines that failed to load become plain warnings', () => {
   assert.match(warning.message, /Supertonic voice didn't load: the accelerator was busy or unavailable/)
   const [missingFile] = voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false, error: 'RuntimeError: model file missing' }]))
   assert.match(missingFile.message, /model file missing/)
+  const [busy] = voiceEngineWarnings(health([{ key: 'supertonic', loaded: false, error: 'accelerator-unavailable' }]))
+  assert.match(busy.message, /the accelerator was busy or unavailable/)
+  const [failed] = voiceEngineWarnings(health([{ key: 'supertonic', loaded: false, error: 'load-failed' }]))
+  assert.match(failed.message, /failed to load \(the details are in GenAI Studio's log/)
   assert.deepEqual(voiceEngineWarnings(health([{ key: 'piper-plus', loaded: false }])), [])
   assert.deepEqual(voiceEngineWarnings(null), [])
 })
@@ -412,6 +458,118 @@ test('SiMaSentry apps open on the loaded model through the relay', () => {
   assert.equal(new URL(solutionUrl('safety', null), 'http://insight').searchParams.has('model'), false)
 })
 
+// The SiMaSentry apps are plain scripts, each with its own copy of the check;
+// this runs each shipped copy against the same cases.
+function solutionsBaseUrlCheck(mode, origin) {
+  const source = readFileSync(new URL(`../../public/genai-solutions/${mode}/app.js`, import.meta.url), 'utf8')
+  const relay = source.match(/const RELAY_BASE_URL = ["'][^"']+["'];/)
+  const check = source.match(/function safeBaseUrl\(value\) \{[\s\S]*?\n {0,2}\}\n/)
+  assert.ok(relay && check, `${mode}/app.js has no safeBaseUrl`)
+  return new Function('window', `${relay[0]}\n${check[0]}\nreturn safeBaseUrl`)({ location: { origin } })
+}
+
+for (const mode of ['health', 'safety', 'security']) {
+  test(`the ${mode} app talks only to Insight's relay, whatever base_url a link or storage holds`, () => {
+    const safe = solutionsBaseUrlCheck(mode, 'https://insight.local:8443')
+    const relay = '/api/genai/v1/chat/completions'
+    assert.equal(safe(relay), relay)
+    assert.equal(safe('https://insight.local:8443/api/genai/v1/chat/completions'), relay)
+    assert.equal(safe('  /api/genai/v1/chat/completions  '), relay)
+    for (const bad of [
+      'https://evil.example/api/genai/v1/chat/completions',
+      'http://insight.local:8443/api/genai/v1/chat/completions',
+      '//evil.example/api/genai/v1/chat/completions',
+      'http://localhost:11434/v1/chat/completions',
+      '/api/other/v1/chat/completions',
+      '/api/genai',
+      'javascript:alert(1)',
+      '',
+      null,
+      undefined
+    ]) {
+      assert.equal(safe(bad), relay, String(bad))
+    }
+  })
+}
+
+// --- one rule table and one board session --------------------------------------
+
+const READY = { usable: true, hasChatModel: true, sees: true, hasAsr: true, hasMessages: true, hasDraft: true }
+
+test('nothing changes models, clears the chat or switches boards while speech input runs', () => {
+  for (const busy of [{ recording: true }, { micOpening: true }, { transcribing: true }]) {
+    const a = allowedActions({ ...READY, ...busy })
+    assert.equal(a.listening, true)
+    for (const action of ['send', 'newChat', 'changeChatModel', 'changeSpeechModel', 'changeBoard', 'startRecording']) {
+      assert.equal(a[action], false, `${action} while ${Object.keys(busy)[0]}`)
+    }
+  }
+  assert.equal(allowedActions({ ...READY, recording: true }).stopRecording, true)
+})
+
+test('a reply in progress blocks model and board changes but not a spoken question', () => {
+  const a = allowedActions({ ...READY, replying: true })
+  assert.deepEqual([a.send, a.changeChatModel, a.changeSpeechModel, a.changeBoard], [false, false, false, false])
+  assert.deepEqual([a.stopReply, a.startRecording, a.newChat, a.typeMessage], [true, true, true, true])
+})
+
+test('a model operation or a download holds what depends on it', () => {
+  const op = allowedActions({ ...READY, modelOp: true })
+  for (const action of ['send', 'typeMessage', 'startRecording', 'readAloud', 'changeChatModel', 'changeSpeechModel', 'changeBoard']) {
+    assert.equal(op[action], false, `${action} during a model operation`)
+  }
+  const dl = allowedActions({ ...READY, downloading: true })
+  assert.deepEqual([dl.changeBoard, dl.searchModels, dl.downloadModel], [false, false, false])
+  assert.equal(dl.send, true)
+})
+
+test('capabilities gate their controls when idle', () => {
+  assert.equal(allowedActions(READY).changeBoard, true)
+  assert.equal(allowedActions({ ...READY, sees: false }).attachPicture, false)
+  assert.equal(allowedActions({ ...READY, cameraOpen: true }).openCamera, false)
+  assert.equal(allowedActions({ ...READY, hasAsr: false }).startRecording, false)
+  assert.equal(allowedActions({ ...READY, hasDraft: false }).send, false)
+  assert.equal(allowedActions({ ...READY, hasChatModel: false }).typeMessage, false)
+  assert.equal(allowedActions({ ...READY, usable: false }).readAloud, false)
+})
+
+test('a new board ends the previous session: its requests abort and its results are stale', () => {
+  const session = createBoardSession()
+  const own = new AbortController()
+  const before = session.ticket(own.signal)
+  const plain = session.ticket()
+  session.restart()
+  assert.equal(before.signal.aborted, true)
+  assert.equal(plain.live(), false)
+  const after = session.ticket()
+  assert.equal(after.live(), true)
+  assert.equal(after.signal.aborted, false)
+  session.close()
+  assert.equal(after.live(), false)
+})
+
+test('an operation can still stop itself within a live session', () => {
+  const session = createBoardSession()
+  const own = new AbortController()
+  const t = session.ticket(own.signal)
+  own.abort()
+  assert.equal(t.signal.aborted, true)
+  assert.equal(t.live(), true)
+  const merged = anySignal([new AbortController().signal, AbortSignal.abort()])
+  assert.equal(merged.aborted, true)
+})
+
+test('a tab that is gone gets tickets that are already over', () => {
+  const t = closedTicket()
+  assert.equal(t.signal.aborted, true)
+  assert.equal(t.live(), false)
+})
+
+test('an open camera preview holds model changes', () => {
+  const a = allowedActions({ ...READY, cameraOpen: true })
+  assert.deepEqual([a.changeChatModel, a.changeSpeechModel], [false, false])
+})
+
 // A summary as GenAI Studio's model manager returns it (_benchmark_summary).
 const stats = (mean, extra = {}) => ({ mean, median: mean, min: mean - 1, max: mean + 1, stdev: 0.5, cv: 1, p90: mean + 0.5, p95: mean + 0.8, ...extra })
 const summary = (tps, ttft, tokens = 128) => ({ count: 5, errors: 0, ttftMs: stats(ttft), tps: stats(tps), tokens: stats(tokens), totalTokens: tokens * 5 })
@@ -479,4 +637,28 @@ test('documents: the database in words, and upload progress', () => {
   })
   assert.equal(progressOutcome('📚 Creating...\n❌ RAG document upload failed.\n').ok, false)
   assert.equal(progressOutcome('⏳ Starting...\n').done, false)
+})
+
+test('a benchmark or a document task holds what would disturb it', () => {
+  const bench = allowedActions({ ...READY, benchmarking: true })
+  for (const action of ['send', 'changeChatModel', 'changeBoard', 'documentTasks', 'openBenchmark']) {
+    assert.equal(bench[action], false, `${action} while benchmarking`)
+  }
+  const docs = allowedActions({ ...READY, documentTask: true })
+  assert.deepEqual([docs.changeBoard, docs.documentTasks, docs.openBenchmark], [false, false, false])
+  assert.equal(docs.send, true)
+  assert.equal(allowedActions(READY).openBenchmark, true)
+})
+
+test('board errors read in both shapes GenAI Studio uses', () => {
+  assert.equal(errorMessage({ error: 'RAG is disabled' }, 409), 'RAG is disabled')
+  assert.equal(errorMessage({ error: { message: 'messages must be a non-empty list', param: 'messages' } }, 400), 'messages must be a non-empty list')
+  assert.equal(errorMessage({}, 502), 'HTTP 502')
+  assert.equal(errorMessage({ error: { code: 'x' } }, 500), 'HTTP 500')
+})
+
+test('a search service that stopped is named, not shown as starting', () => {
+  const failed = documentsSummary({ enabled: true, database: true, service: 'failed', meta: { input: 'neat.md', chunks: 8 } })
+  assert.match(failed, /stopped/)
+  assert.doesNotMatch(failed, /starting/)
 })

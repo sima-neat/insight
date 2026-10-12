@@ -167,14 +167,14 @@ The status label, and a banner when something needs attention, show the backend'
 Under each reply, Insight shows how fast it was produced, measured in the browser:
 
 - **First token**: from sending to the first text of the reply.
-- **Speed** and **Tokens**: tokens per second and the reply's length, as reported by the board.
+- **Speed** and **Tokens**: tokens per second and the reply's length. Speed comes from the board when it reports it; otherwise Insight calculates it in the browser.
 - **Total**: from sending to the end of the reply.
 - **First audio**, **RTF** and **Voice**, when the reply is read aloud: the time until it started playing, the real-time factor (seconds of compute per second of speech; below 1 is faster than real time), and the speech engine.
 - **Transcribed** and **Language**, under a spoken question: the time from the end of the recording to the text, and the language heard.
 
 **Export chat** saves the conversation as a `.log` text file (`neat-chat-<date>-<time>.log`) with the export time and model at the top, then each turn; pictures appear as `[image]`.
 
-**SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
+**SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. The models run on the board, but voice input inside these apps uses the browser's own speech recognition, which may send audio to an online service (Chrome does). An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
 
 **Benchmark** measures the board's chat models. Choose one or more models, the number of runs (1 to 50), the reply length in tokens (8 to 2048) and, optionally, a prompt, then **Run benchmark**. Each model runs in turn; a model that isn't loaded is loaded first, which can unload the chat model, so reload it from the **Model** menu afterwards. Progress and the reply appear while it runs, and **Stop** ends it. The results compare tokens per second (mean, p90 and standard deviation), time to first token and reply length, with the fastest values highlighted; **Each run** lists the runs of the last model. **Download CSV** and **Download JSON** save the results.
 

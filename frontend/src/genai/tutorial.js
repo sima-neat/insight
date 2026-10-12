@@ -77,7 +77,9 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     body:
       'The shield opens SiMaSentry Solutions: three demo apps that run on the loaded model. SiMaSentry-Med ' +
       'reviews medical images and symptoms, SiMaSentry-Safe checks PPE and hazards, and SiMaSentry-Sec ' +
-      'analyses security footage. Load a model that sees images for their picture features.',
+      'analyses security footage. Load a model that sees images for their picture features. Their models ' +
+      "run on the board, but voice input inside these apps uses the browser's own speech recognition, " +
+      'which may use an online service.',
     target: 'solutions',
     action: null
   })

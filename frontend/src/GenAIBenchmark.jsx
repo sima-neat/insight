@@ -27,7 +27,9 @@ function download(name, text, type) {
 // The standalone Studio's benchmark: time to first token and tokens per second
 // for one or more chat models on the board, run one model at a time. A model
 // that isn't loaded is loaded first, which unloads others the board can't keep.
-export default function GenAIBenchmark({ status, onClose, onModelsChanged }) {
+// ticket: the tab's board session (genai/boardSession.js); leaving the tab or
+// changing boards ends the run. onRunningChange tells the tab's rule table.
+export default function GenAIBenchmark({ status, ticket, onClose, onModelsChanged, onRunningChange }) {
   const models = chatModels(status)
   const loaded = new Set((status && status.loaded) || [])
   const [chosen, setChosen] = useState(() => models.filter((m) => loaded.has(m.name)).map((m) => m.name).slice(0, 1))
@@ -40,6 +42,18 @@ export default function GenAIBenchmark({ status, onClose, onModelsChanged }) {
   const [results, setResults] = useState([])      // [{model, summary, runs, failed}]
   const [note, setNote] = useState('')
   const stopRequested = useRef(false)
+  // The run's ticket: when it is no longer live (the tab closed, the board
+  // changed), the loop ends and nothing more is shown.
+  const runTicket = useRef(null)
+  const over = () => stopRequested.current || !runTicket.current || !runTicket.current.live()
+
+  // Closing the panel or leaving the tab mid-run stops the board's benchmark too.
+  useEffect(() => () => {
+    if (runTicket.current && !stopRequested.current) {
+      stopRequested.current = true
+      postJson('benchmark/stop', {}).catch(() => {})
+    }
+  }, [])
 
   useEffect(() => {
     function onKey(e) {
@@ -55,13 +69,14 @@ export default function GenAIBenchmark({ status, onClose, onModelsChanged }) {
 
   async function waitForRun() {
     for (;;) {
-      if (stopRequested.current) return null
+      if (over()) return null
       let state = null
       try {
-        state = await getJson('benchmark/status')
+        state = await getJson('benchmark/status', { signal: runTicket.current.signal })
       } catch {
         state = null
       }
+      if (over()) return null
       if (state) setLive(state)
       if (state && !state.running) return state
       await new Promise((resolve) => setTimeout(resolve, POLL_MS))
@@ -72,17 +87,21 @@ export default function GenAIBenchmark({ status, onClose, onModelsChanged }) {
     if (!(status && status.loaded || []).includes(model)) {
       setPhase(`Loading ${friendlyModelName(model)}: this takes a few minutes…`)
       try {
-        await postJson('models/load', { name: model })
+        await postJson('models/load', { name: model }, { signal: runTicket.current.signal })
         onModelsChanged?.()
       } catch (error) {
+        if (over()) return null
         return { model, failed: `failed to load: ${error.message}` }
       }
     }
-    if (stopRequested.current) return null
+    if (over()) return null
     setPhase(`Benchmarking ${friendlyModelName(model)}`)
     try {
-      setLive(await postJson('benchmark/run', benchmarkRequest({ model, runs, maxTokens, prompt })))
+      const started = await postJson('benchmark/run', benchmarkRequest({ model, runs, maxTokens, prompt }), { signal: runTicket.current.signal })
+      if (over()) return null
+      setLive(started)
     } catch (error) {
+      if (over()) return null
       return { model, failed: error.message }
     }
     const final = await waitForRun()
@@ -93,19 +112,24 @@ export default function GenAIBenchmark({ status, onClose, onModelsChanged }) {
   async function run() {
     if (!chosen.length || running) return
     stopRequested.current = false
+    runTicket.current = ticket()
     setRunning(true)
+    onRunningChange?.(true)
     setResults([])
     setNote('')
     const done = []
     for (const model of chosen) {
-      if (stopRequested.current) break
+      if (over()) break
       const result = await benchmarkOne(model)
       if (!result) break
       done.push(result)
       setResults([...done])
     }
+    if (!runTicket.current.live()) return     // the tab closed or the board changed
+    runTicket.current = null
     setPhase('')
     setRunning(false)
+    onRunningChange?.(false)
     if (stopRequested.current) setNote('Benchmark stopped.')
     onModelsChanged?.()
   }
@@ -114,7 +138,7 @@ export default function GenAIBenchmark({ status, onClose, onModelsChanged }) {
     stopRequested.current = true
     setPhase('Stopping…')
     try {
-      await postJson('benchmark/stop', {})
+      await postJson('benchmark/stop', {}, { signal: runTicket.current ? runTicket.current.signal : undefined })
     } catch {
       // The board may have finished already; the loop stops either way.
     }

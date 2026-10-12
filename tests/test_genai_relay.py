@@ -67,6 +67,25 @@ class _FakeStudio(BaseHTTPRequestHandler):
             )
         elif self.path == "/models/load":
             self._send_json(409, {"error": "Another model is loading"})
+        elif self.path == "/v1/audio/speech":
+            # Promise 100 bytes, send 10, hang up: the board dying mid-reply.
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b"RIFF012345")
+            self.wfile.flush()
+            self.close_connection = True
+        elif self.path == "/v1/chat/completions":
+            # A chunked stream that stops without its final chunk.
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            event = b"data: partial\n\n"
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(event), event))
+            self.wfile.flush()
+            self.close_connection = True
         else:
             self._send_json(200, {"echo": json.loads(body or b"{}")})
 
@@ -132,11 +151,37 @@ class GenaiRelayTests(unittest.TestCase):
         self.assertIsNone(cleared["configuredUrl"])
 
     def test_settings_reject_addresses_that_are_not_a_plain_origin(self):
-        for bad in ("ftp://board", "board:5000", "https://board:5000/v1", "https://user@board", 5):
+        for bad in ("ftp://board", "board:5000", "https://board:5000/v1", "https://user@board", 5,
+                    "https://[not-ip]", "https://[foo", "https://board:99999",
+                    "https://board name:5000", "https://board\tx", "https://.example:5000", "https://a..b", "https://board:0", "http://board:0",
+                    "https://:secret@board", "https://@board"):
             with self.subTest(url=bad):
                 response = self.client.post("/api/genai/settings", json={"url": bad})
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(response.get_json()["reason"], "bad-request")
+
+    def test_an_unreadable_settings_file_is_not_overwritten(self):
+        for broken in ("{not json", "[1, 2]"):
+            with self.subTest(content=broken):
+                self.cfg.write_text(broken)
+                response = self.client.post("/api/genai/settings", json={"url": self.board})
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(response.get_json()["reason"], "cfg-unreadable")
+                self.assertEqual(self.cfg.read_text(), broken)
+
+    def test_an_unreadable_settings_file_stops_the_relay_instead_of_using_another_board(self):
+        self.cfg.write_text("{not json")
+        with mock.patch("neat_insight.genai_relay.default_board_url", return_value=self.board):
+            for response in (self.client.get("/api/genai/health"), self.client.get("/api/genai/settings")):
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(response.get_json()["reason"], "cfg-unreadable")
+        self.assertEqual(_FakeStudio.requests, [])   # nothing reached the default board
+
+    def test_a_failed_save_answers_json_not_a_server_page(self):
+        with mock.patch("neat_insight.genai_relay._write_cfg", side_effect=PermissionError("read-only")):
+            response = self.client.post("/api/genai/settings", json={"url": self.board})
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_json()["reason"], "cfg-unwritable")
 
     # --- relay --------------------------------------------------------------
 
@@ -207,6 +252,30 @@ class GenaiRelayTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json(), {"error": "Another model is loading"})
+
+    def test_a_board_that_hangs_up_mid_reply_is_not_passed_on_as_complete(self):
+        self._configure(url=self.board)
+        for path, payload in (("/api/genai/v1/audio/speech", {"input": "hi"}),
+                              ("/api/genai/v1/chat/completions", {"stream": True})):
+            with self.subTest(path=path):
+                response = self.client.post(path, json=payload)
+                self.assertEqual(response.status_code, 200)
+                with self.assertRaises(ConnectionAbortedError):
+                    response.get_data()
+
+    def test_a_saved_address_that_does_not_parse_is_refused_as_json(self):
+        for stored in ("https://[foo", "https://board:abc", "board:5000"):
+            with self.subTest(url=stored):
+                self.cfg.write_text(json.dumps({"genai": {"url": stored}}))
+                response = self.client.get("/api/genai/health")
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.get_json()["reason"], "invalid-address")
+
+    def test_encoded_paths_reach_the_board_encoded(self):
+        self._configure(url=self.board)
+        response = self.client.get("/api/genai/v1/a%20b")
+        self.assertEqual(response.status_code, 404)   # the board answered
+        self.assertEqual(_FakeStudio.requests[-1]["path"], "/v1/a%20b")
 
     def test_reports_an_unreachable_board(self):
         with socket_closed_port() as port:

@@ -18,6 +18,8 @@ Insightは、通常動作中に複数のポートを使用します。デフォ�
 | `videoUDP` | `9000-9079` | UDP | 動画 RTP 視聴者向けチャンネルに配信 `0-79`. |
 | `metadataUDP` | `9100-9179` | UDP | メタデータ JSON 視聴者向けチャンネルに配信 `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC：メディアおよびメタデータ。vfからブラウザへのDataChannelによるデータ送信。 |
+| `webrtcWhip` | `8889` | HTTPS/TCP | WHIP を介してブラウザーのウェブカメラを MediaMTX に配信し、RTSP ソースとして再配信します。 |
+| `webrtcWhipIce` | `8189` | UDP | ブラウザーのウェブカメラ配信用の ICE メディアです。シグナリングは `webrtcWhip` を使い、ビデオ自体はここへ届くため、両方に接続できる必要があります。 |
 | `webSSH` | `8022` | HTTPS/TCP | 利用可能な場合は、ペアリングされた DevKit にブラウザシェルを接続します。 |
 
 ## 実際の SDK ポートマップを見つけてください。
@@ -39,6 +41,8 @@ neat --json
     {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
     {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
   ],
   "insight": {

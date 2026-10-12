@@ -17,6 +17,15 @@ async function readJson(response) {
   }
 }
 
+// A board error's message, in either shape GenAI Studio uses: the OpenAI one
+// on chat ({"error": {"message": ...}}) or a plain string elsewhere.
+export function errorMessage(body, status) {
+  const error = body && body.error
+  if (typeof error === 'string' && error) return error
+  if (error && typeof error.message === 'string' && error.message) return error.message
+  return `HTTP ${status}`
+}
+
 export class GenaiError extends Error {
   constructor(message, { status = 0, body = {} } = {}) {
     super(message)
@@ -46,14 +55,14 @@ async function request(path, { method = 'GET', json, form, headers = {}, signal 
 export async function getJson(path, options) {
   const response = await request(path, options)
   const body = await readJson(response)
-  if (!response.ok) throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+  if (!response.ok) throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   return body
 }
 
 export async function postJson(path, json, options = {}) {
   const response = await request(path, { ...options, method: 'POST', json })
   const body = await readJson(response)
-  if (!response.ok) throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+  if (!response.ok) throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   return body
 }
 
@@ -82,7 +91,7 @@ export async function saveSettings(update) {
     body: JSON.stringify(update)
   })
   const body = await readJson(response)
-  if (!response.ok) throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+  if (!response.ok) throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   return body
 }
 
@@ -116,7 +125,7 @@ export async function streamChat({ model, messages, maxTokens, useDocuments = fa
   })
   if (!response.ok) {
     const body = await readJson(response)
-    throw new GenaiError(body.error?.message || body.error || `HTTP ${response.status}`, { status: response.status, body })
+    throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   }
   const parser = createSseParser()
   let finished = false
@@ -150,7 +159,7 @@ async function postTextStream(path, { form, signal, onText } = {}) {
   const response = await request(path, { method: 'POST', form, signal })
   if (!response.ok) {
     const body = await readJson(response)
-    throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+    throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   }
   let text = ''
   await readStream(response, (piece) => {
@@ -198,7 +207,7 @@ export async function downloadModel({ repoId, signal, onProgress }) {
   const response = await request('models/hub/download', { method: 'POST', json: { repoId }, signal })
   if (!response.ok) {
     const body = await readJson(response)
-    throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+    throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   }
   const parser = createJsonLinesParser()
   let last = null
@@ -209,6 +218,9 @@ export async function downloadModel({ repoId, signal, onProgress }) {
     }
   })
   if (last && last.state === 'error') throw new GenaiError(last.message || 'Download failed')
+  // A stream that ends without "done" (the Studio restarted, the connection
+  // dropped) is not a finished download.
+  if (!last || last.state !== 'done') throw new GenaiError('The download stopped before it finished.')
   return last
 }
 
@@ -221,7 +233,7 @@ export async function transcribe(blob, { language = 'auto', signal } = {}) {
   if (language && language !== 'auto') form.append('language', language)
   const response = await request('v1/audio/transcriptions', { method: 'POST', form, signal })
   const body = await readJson(response)
-  if (!response.ok) throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+  if (!response.ok) throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   return { ...body, model: response.headers.get('X-ASR-Model') || body.model }
 }
 
@@ -233,7 +245,7 @@ export async function speak({ text, model = 'default', voice, language, signal }
   })
   if (!response.ok) {
     const body = await readJson(response)
-    throw new GenaiError(body.error || `HTTP ${response.status}`, { status: response.status, body })
+    throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
   }
   return {
     audio: await response.blob(),

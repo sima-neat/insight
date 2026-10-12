@@ -83,9 +83,25 @@ const PROVIDER_DEFAULTS = {
   },
 };
 
+// Insight serves this app and relays its chat requests to the board, so the
+// only endpoint it may use is Insight's own relay. A base_url from a link or
+// from storage that points anywhere else (another site that would receive the
+// user's questions and pictures) is ignored, never stored.
+const RELAY_BASE_URL = '/api/genai/v1/chat/completions';
+function safeBaseUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return RELAY_BASE_URL;
+  try {
+    const url = new URL(value.trim(), window.location.origin);
+    if (url.origin === window.location.origin && url.pathname.startsWith('/api/genai/')) {
+      return url.pathname + url.search;
+    }
+  } catch { /* not a URL */ }
+  return RELAY_BASE_URL;
+}
+
 const DEFAULT_SETTINGS = Object.freeze({
   provider: 'ollama',
-  baseUrl: PROVIDER_DEFAULTS.ollama.baseUrl,
+  baseUrl: RELAY_BASE_URL,
   apiKey: '',
   model: PROVIDER_DEFAULTS.ollama.model,
   language: 'en-US',
@@ -286,6 +302,11 @@ class SecurityConsole {
       const stored = this.safeStorageGet(STORAGE_KEYS[key]);
       if (stored !== null) fromStorage[key] = this.coerce(key, stored);
     }
+    // Also replaces a bad address an earlier version stored.
+    if (fromStorage.baseUrl !== undefined && fromStorage.baseUrl !== safeBaseUrl(fromStorage.baseUrl)) {
+      fromStorage.baseUrl = safeBaseUrl(fromStorage.baseUrl);
+      this.safeStorageSet(STORAGE_KEYS.baseUrl, fromStorage.baseUrl);
+    }
     const fromUrl = this.parseUrlParams();
     this.removeLegacyApiKeyParams();
     this.settings = { ...DEFAULT_SETTINGS, ...fromStorage, ...fromUrl };
@@ -305,6 +326,8 @@ class SecurityConsole {
         this.settings.sttDisabled = true;
       }
     }
+
+    this.settings.baseUrl = safeBaseUrl(this.settings.baseUrl);
 
     // Persist resolved settings so reload-without-params keeps the kiosk preset.
     if (Object.keys(fromUrl).length > 0 || modeBundleApplied) this.saveSettings();
@@ -365,6 +388,7 @@ class SecurityConsole {
   }
 
   saveSettings() {
+    this.settings.baseUrl = safeBaseUrl(this.settings.baseUrl);
     for (const [key, value] of Object.entries(this.settings)) {
       if (key === 'apiKey') {
         this.safeStorageRemove(STORAGE_KEYS[key]);
@@ -1019,9 +1043,11 @@ class SecurityConsole {
           }
         }
       }
-      // Stream ended without [DONE] — process any remainder as a final event.
-      if (buffer.trim()) flushEvent(buffer);
+      // Stream ended without [DONE]: a remainder may still carry the end;
+      // otherwise the reply is incomplete and is reported, not shown as whole.
+      const ended = buffer.trim() ? flushEvent(buffer) === 'done' : false;
       finalCommit();
+      if (!ended) throw new Error('The reply was cut off before it finished (the board or the connection closed early).');
     } finally {
       try { reader.releaseLock(); } catch { /* */ }
     }
@@ -2365,7 +2391,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'sima-sentry:home' }, '*');
       } else {
-        window.location.assign('../index.html');
+        window.location.assign('/genai');
       }
     });
   }
@@ -2400,7 +2426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.parent && window.parent !== window) {
           window.parent.postMessage({ type: 'sima-sentry:home' }, '*');
         } else {
-          window.location.assign('../index.html');
+          window.location.assign('/genai');
         }
       });
     }

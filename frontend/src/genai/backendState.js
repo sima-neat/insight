@@ -37,6 +37,23 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
       action: null
     }
   }
+  // Insight's own relay errors (sima-neat/insight#153), not the board's.
+  if (health.httpStatus === 503 && body.reason === 'invalid-address') {
+    return {
+      state: 'unconfigured',
+      title: 'The saved board address is not valid',
+      detail: 'Enter the board address again, for example https://192.168.1.20:5000.',
+      action: 'settings'
+    }
+  }
+  if (health.httpStatus === 500 && (body.reason === 'cfg-unreadable' || body.reason === 'cfg-unwritable')) {
+    return {
+      state: 'error',
+      title: "Insight's settings file can't be used",
+      detail: body.error || "Fix or remove Insight's cfg.json, then set the board address again.",
+      action: 'settings'
+    }
+  }
   if (health.networkError || health.httpStatus === 502 || health.httpStatus === 504) {
     return {
       state: 'unavailable',
@@ -46,15 +63,16 @@ export function deriveBackendState({ health, status = null, busyOp = null, lastE
     }
   }
   // Something answered, so it is running; it just isn't a healthy GenAI Studio.
-  if (health.httpStatus !== 200) {
-    if (health.unreadable) {
-      return {
-        state: 'error',
-        title: "This address doesn't answer like GenAI Studio",
-        detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
-        action: 'settings'
-      }
+  // A reply that isn't JSON (a web page, even with HTTP 200) is not the Studio.
+  if (health.unreadable) {
+    return {
+      state: 'error',
+      title: "This address doesn't answer like GenAI Studio",
+      detail: `It answered HTTP ${health.httpStatus} with something other than GenAI Studio's reply. Check the board address: GenAI Studio listens on port 5000, for example https://192.168.1.20:5000.`,
+      action: 'settings'
     }
+  }
+  if (health.httpStatus !== 200) {
     return {
       state: 'error',
       title: `GenAI Studio on the board answered with an error (HTTP ${health.httpStatus})`,
@@ -207,9 +225,13 @@ export function voiceEngineWarnings(health) {
     .map((e) => {
       const name = ENGINE_NAMES[e.key] || e.key
       const raw = String(e.error)
-      const cause = /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
+      // The board reports a fixed reason (apps#561); older boards sent the
+      // exception text.
+      const cause = raw === 'accelerator-unavailable' || /dispatcher_unavailable|accelerator runtime is not available/i.test(raw)
         ? 'the accelerator was busy or unavailable when it started'
-        : raw.split('\n')[0].replace(/^\w*Error:\s*/, '').replace(/^\[[^\]]+\]\s*/, '').slice(0, 160)
+        : raw === 'load-failed'
+          ? 'it failed to load (the details are in GenAI Studio\'s log on the board)'
+          : raw.split('\n')[0].replace(/^\w*Error:\s*/, '').replace(/^\[[^\]]+\]\s*/, '').slice(0, 160)
       return {
         key: e.key,
         message: `The ${name} voice didn't load: ${cause}. Other voices still work, and the board tries ${name} again on the next spoken reply.`

@@ -3786,6 +3786,21 @@ button:disabled {
   padding: 9px;
 }
 
+.genai-field-error {
+  margin: 6px 0 0;
+  color: var(--danger, #b42318);
+  font-size: 0.9em;
+}
+
+.genai-tooltip-wrap {
+  display: inline-flex;
+}
+
+/* Let the wrapper receive the hover (and show "New chat") while the button is disabled. */
+.genai-tooltip-wrap > button:disabled {
+  pointer-events: none;
+}
+
 .genai-new-chat {
   display: inline-flex;
   align-items: center;

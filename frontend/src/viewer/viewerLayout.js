@@ -1,6 +1,6 @@
 export const MAX_CHANNELS = 80;
 export const DEFAULT_VISIBLE_PER_PAGE = 4;
-export const PAGE_SIZE_PRESETS = Object.freeze([1, 4, 9, 16, 24, 36, 48]);
+export const PAGE_SIZE_PRESETS = Object.freeze([1, 4, 9, 16, 24, 36, 48, 64, 72, 80]);
 
 export function normalizeMaxChannels(value) {
   const requested = Number(value);
@@ -35,6 +35,7 @@ export function pageSizePresetsForLimit(maxChannels = MAX_CHANNELS) {
 export function gridDimensions(count) {
   if (count === 24) return { columns: 6, rows: 4 };
   if (count === 48) return { columns: 8, rows: 6 };
+  if (count === 72 || count === 80) return { columns: 8, rows: count / 8 };
 
   const columns = Math.ceil(Math.sqrt(count));
   return { columns, rows: Math.ceil(count / columns) };

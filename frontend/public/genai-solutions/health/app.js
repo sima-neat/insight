@@ -48,6 +48,22 @@
     },
   };
 
+    // Insight serves these apps and relays their chat requests to the board, so
+  // the only endpoint they may use is Insight's own relay. A base_url from a
+  // link or from storage that points anywhere else (another site that would
+  // receive the user's questions and pictures) is ignored, never stored.
+  const RELAY_BASE_URL = "/api/genai/v1/chat/completions";
+  function safeBaseUrl(value) {
+    if (typeof value !== "string" || !value.trim()) return RELAY_BASE_URL;
+    try {
+      const url = new URL(value.trim(), window.location.origin);
+      if (url.origin === window.location.origin && url.pathname.startsWith("/api/genai/")) {
+        return url.pathname + url.search;
+      }
+    } catch { /* not a URL */ }
+    return RELAY_BASE_URL;
+  }
+
   const STORAGE_KEY = "medical-ai-harness:settings";
 
   // Recognized URL params (and their canonical setting key).
@@ -76,6 +92,7 @@
     update(patch, { persist = true, fromUrl = false } = {}) {
       const before = this.values;
       this.values = { ...before, ...patch };
+      this.values.baseUrl = safeBaseUrl(this.values.baseUrl);
       if (persist) this._persist();
       this.dispatchEvent(new CustomEvent("change", {
         detail: { before, after: this.values, patch, fromUrl },
@@ -130,6 +147,8 @@
       }
 
       // Persist non-sensitive settings only. The API key stays in memory.
+      // Also replaces a bad address an earlier version stored.
+      final.baseUrl = safeBaseUrl(final.baseUrl);
       this._persistValues(final);
 
       // Remove legacy credential parameters without consuming them.
@@ -388,6 +407,8 @@
       }
       const tail = filter.finish();
       if (tail) yield tail;
+      // Ended without [DONE] or a stop token: the reply is incomplete.
+      if (!stopped) throw new Error("The reply was cut off before it finished (the board or the connection closed early).");
     }
   }
 
@@ -1905,7 +1926,7 @@
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: "sima-sentry:home" }, "*");
       } else {
-        window.location.assign("../index.html");
+        window.location.assign("/genai");
       }
     });
   }
@@ -1940,7 +1961,7 @@
         if (window.parent && window.parent !== window) {
           window.parent.postMessage({ type: 'sima-sentry:home' }, '*');
         } else {
-          window.location.assign('../index.html');
+          window.location.assign('/genai');
         }
       });
     }

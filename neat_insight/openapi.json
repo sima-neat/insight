@@ -26,7 +26,7 @@
     {"name": "Viewer", "description": "Generate a vf viewer URL that is reachable from the current browser and bounded to the configured channel capacity. Viewer channel indexes are zero-based even though media-source slots are one-based."},
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
-    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh --backend-only`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address and Reset MLA token once, then call the Studio's own API under `/api/genai/`."}
+    {"name": "GenAI Studio", "description": "Reach the GenAI Studio backend running on a board (`run.sh --backend-only`, port 5000 by default) through Insight, so the browser never calls the board directly. Configure the board address once, then call the Studio's own API under `/api/genai/`."}
   ],
   "x-tagGroups": [
     {
@@ -75,7 +75,7 @@
       "get": {
         "tags": ["Service and system"],
         "summary": "Check service readiness",
-        "description": "A lightweight readiness probe with no dependency on vf, a DevKit, or media tools. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests.",
+        "description": "A lightweight readiness probe that also reports the startup-scoped browser network configuration applied to vf and MediaMTX. Call this first from automation; a `200` response confirms that the Flask backend can accept subsequent API requests. A present but invalid `browser-ice-address` configuration prevents Insight from starting. A full HTTP(S) `launch-url` is reduced to its origin; an invalid launch URL preserves legacy request-host/port-map URL generation.",
         "operationId": "getHealth",
         "x-codeSamples": [
           {
@@ -90,7 +90,7 @@
             "content": {
               "application/json": {
                 "schema": {"$ref": "#/components/schemas/Health"},
-                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z"}
+                "example": {"status": "ok", "service": "neat-insight", "time": "2026-08-17T20:15:00Z", "network": {"browser_ice_address": "54.12.34.56", "browser_ice_address_source": "browser-ice-address", "public_origin": "https://insight.example.com/"}}
               }
             }
           }
@@ -771,10 +771,11 @@
       "get": {
         "tags": ["GenAI Studio"],
         "summary": "Get the GenAI Studio board settings",
-        "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`), and whether a Reset MLA token is stored. The token itself is never returned.",
+        "description": "Returns the board address Insight relays GenAI calls to, whether it was configured or derived (`127.0.0.1` on a board, otherwise the paired DevKit's `DEVKIT_SYNC_DEVKIT_IP`).",
         "operationId": "getGenaiSettings",
         "responses": {
-          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}}
+          "200": {"description": "Board address in use and stored settings.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}, "example": {"url": "https://192.168.2.3:5000", "configuredUrl": null, "defaultUrl": "https://192.168.2.3:5000"}}}},
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       },
       "post": {
@@ -785,7 +786,8 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettingsUpdate"}, "example": {"url": "https://192.168.2.3:5000"}}}},
         "responses": {
           "200": {"description": "Settings after the update.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiSettings"}}}},
-          "400": {"$ref": "#/components/responses/BadRequest"}
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "500": {"description": "Insight's `cfg.json` could not be read (`cfg-unreadable`; nothing is changed) or written (`cfg-unwritable`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       }
     },
@@ -800,20 +802,22 @@
           "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
           "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "503": {"description": "No board address is configured or derivable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       },
       "post": {
         "tags": ["GenAI Studio"],
         "summary": "Relay a POST to the board's GenAI Studio backend",
-        "description": "Forwards the request body as sent (JSON or multipart audio uploads) to the configured board and streams the response back, so streamed chat replies arrive token by token. For `models/reset-mla`, the stored Reset MLA token is added when the caller sends none.",
+        "description": "Forwards the request body as sent (JSON or multipart audio uploads) to the configured board and streams the response back, so streamed chat replies arrive token by token.",
         "operationId": "relayGenaiPost",
         "requestBody": {"required": false, "content": {"*/*": {"schema": {}}}},
         "responses": {
           "200": {"description": "The board's response, passed through.", "content": {"*/*": {"schema": {}}}},
           "404": {"description": "Not a path Insight relays.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
           "502": {"description": "The board could not be reached.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
-          "503": {"description": "No board address is configured or derivable.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
+          "500": {"description": "Insight's `cfg.json` exists but could not be read (`cfg-unreadable`); nothing is relayed rather than falling back to another board.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}},
+          "503": {"description": "No board address is configured or derivable (`not-configured`), or the saved address is not valid (`invalid-address`).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenaiError"}}}}
         }
       }
     },
@@ -845,7 +849,7 @@
       "get": {
         "tags": ["Viewer"],
         "summary": "Build a browser-reachable vf viewer URL",
-        "description": "Constructs the vf HTTPS viewer URL on port `8081` using the current request host, selected color mode, and zero-based channel selection. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
+        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
         "operationId": "getViewerUrl",
         "parameters": [
           {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
@@ -1056,7 +1060,7 @@
         "type": "object",
         "description": "Error from the GenAI relay itself (not from the board), with a machine-readable reason.",
         "required": ["error", "reason"],
-        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "unreachable", "bad-request"]}},
+        "properties": {"error": {"type": "string"}, "reason": {"type": "string", "enum": ["not-relayed", "not-configured", "invalid-address", "unreachable", "bad-request", "cfg-unreadable", "cfg-unwritable"]}},
         "example": {"error": "GenAI Studio backend unreachable at https://192.168.2.3:5000: [Errno 61] Connection refused", "reason": "unreachable"}
       },
       "GenaiSettings": {
@@ -1098,11 +1102,21 @@
       "Health": {
         "type": "object",
         "description": "Readiness result for the Insight Flask backend.",
-        "required": ["status", "service", "time"],
+        "required": ["status", "service", "time", "network"],
         "properties": {
           "status": {"type": "string", "const": "ok", "description": "Fixed readiness state returned when the backend can serve requests."},
           "service": {"type": "string", "const": "neat-insight", "description": "Stable service identifier for automated probes."},
-          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."}
+          "time": {"type": "string", "format": "date-time", "description": "Backend UTC time when the response was created."},
+          "network": {
+            "type": "object",
+            "description": "Startup-scoped browser networking values applied by this Insight process.",
+            "required": ["browser_ice_address", "browser_ice_address_source", "public_origin"],
+            "properties": {
+              "browser_ice_address": {"type": ["string", "null"], "description": "Address advertised to browsers by vf and MediaMTX, or null when no override is active. The opt-in browser-ice-address file accepts IPv4; a legacy CONTAINER_HOST_IP fallback can also be IPv6."},
+              "browser_ice_address_source": {"type": "string", "enum": ["browser-ice-address", "CONTAINER_HOST_IP", "none"], "description": "Configuration source used for the effective browser ICE address."},
+              "public_origin": {"type": ["string", "null"], "format": "uri", "description": "Trusted browser-facing HTTP origin used for viewer, WHIP, and MJPEG URLs, or null for request-host and port-map behavior."}
+            }
+          }
         }
       },
       "MediaTreeNode": {
@@ -1230,8 +1244,8 @@
             "description": "Client URLs for the selected source and transports.",
             "properties": {
               "rtsp": {"type": "string", "format": "uri", "description": "RTSP URL when RTSP output is available."},
-              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available."},
-              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots."}
+              "http_mjpeg": {"type": "string", "format": "uri", "description": "HTTP multipart MJPEG URL when HTTP output is available. Uses the configured public origin when present."},
+              "whip": {"type": "string", "format": "uri", "description": "WHIP publish URL for a `webcam` slot; absent for `file` slots. Uses the configured public origin when present."}
             }
           }
         }
