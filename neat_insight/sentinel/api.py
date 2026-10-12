@@ -1,4 +1,5 @@
 """HTTP API for Sentinel telemetry on the selected board."""
+from contextlib import contextmanager
 from threading import Lock
 
 from flask import Blueprint, g, jsonify, request
@@ -22,7 +23,26 @@ cache = BoardCache()
 # Serializes trace lifecycle changes made through this server. Sentinel performs an expected-id
 # stop atomically under its cross-process run-store lock.
 _TRACE_LOCK = Lock()
-_METRICS_LOCK = Lock()
+# One telemetry read at a time per board cache key, so a board that stops answering does not hold
+# up the first read of the board selected after it. An entry lives only while a read holds or
+# waits for it.
+_METRICS_LOCKS_GUARD = Lock()
+_METRICS_LOCKS = {}
+
+
+@contextmanager
+def _metrics_lock(key):
+    with _METRICS_LOCKS_GUARD:
+        entry = _METRICS_LOCKS.setdefault(key, [Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            yield
+    finally:
+        with _METRICS_LOCKS_GUARD:
+            entry[1] -= 1
+            if not entry[1]:
+                del _METRICS_LOCKS[key]
 
 
 @sentinel_bp.after_request
@@ -240,7 +260,7 @@ def get_metrics():
     """Return Sentinel's metric definitions joined with the latest sample, and optional recent history."""
     limit = _history_limit(request.args.get("history"))
     context = _Context()
-    with _METRICS_LOCK:
+    with _metrics_lock(context.key):
         return _get_metrics(context, limit)
 
 

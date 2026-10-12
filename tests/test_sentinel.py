@@ -985,16 +985,52 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(install.invocation_id(board), "inv-9")
         self.assertEqual(self.transport.calls[-1][0], ["systemctl", "show", "simaai-sentinel", "-p", "InvocationID", "--value"])
 
-    def test_telemetry_reads_hold_the_metrics_lock(self):
+    def test_telemetry_reads_hold_the_board_metrics_lock(self):
         held = []
 
         def latest(client):
-            held.append(api._METRICS_LOCK.locked())
+            lock, users = api._METRICS_LOCKS[(1, "fp-1")]
+            held.append((lock.locked(), users))
             return client.get("/v1/samples/latest")
 
         with mock.patch.object(api.SentinelClient, "latest", latest):
             self.get("/api/sentinel/metrics")
-        self.assertEqual(held, [True])
+        self.assertEqual(held, [(True, 1)])
+        self.assertEqual(api._METRICS_LOCKS, {}, "the lock is dropped once no read holds it")
+
+    def test_a_board_that_stops_answering_does_not_hold_up_the_next_board(self):
+        board_a = self.session
+        board_b = FakeSession(FakeSentinel(), generation=2, fingerprint="fp-2")
+        reading_a, release_a, answers = threading.Event(), threading.Event(), {}
+        latest_once = api.SentinelClient.latest
+
+        def latest(client):
+            if client.session is board_a:
+                reading_a.set()
+                answers["a released"] = release_a.wait(10)
+            return latest_once(client)
+
+        def read_a():
+            response = client_a.get("/api/sentinel/metrics")
+            answers["a"] = (response.status_code, response.get_json()["generation"])
+            response.close()
+
+        client_a = self.client.application.test_client()
+        with mock.patch.object(api.SentinelClient, "latest", latest):
+            first = threading.Thread(target=read_a)
+            first.start()
+            self.addCleanup(first.join, 10)
+            self.addCleanup(release_a.set)
+            self.assertTrue(reading_a.wait(10))
+            self.manager.current = board_b
+            response = self.get("/api/sentinel/metrics")
+            self.assertEqual((response.status_code, response.get_json()["generation"]), (200, 2))
+            self.assertNotIn("a", answers, "board B answered while board A's read was still blocked")
+            self.assertEqual(list(api._METRICS_LOCKS), [(1, "fp-1")])
+            release_a.set()
+            first.join(10)
+        self.assertEqual(answers, {"a released": True, "a": (200, 1)})
+        self.assertEqual(api._METRICS_LOCKS, {})
 
     def test_telemetry_recovers_after_the_board_clock_moves_backward(self):
         key = (1, "fp-1")
