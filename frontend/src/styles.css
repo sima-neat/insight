@@ -3652,7 +3652,6 @@ button:disabled {
 }
 
 .periph-group-title,
-.periph-identity summary,
 .periph-modes legend {
   font-size: 11px;
   font-weight: 700;
@@ -3683,8 +3682,7 @@ button:disabled {
 
 /* An Unsupported camera: listed, with its reason, but not openable. */
 .periph-camera-row:focus-visible,
-.periph-code:focus-visible,
-.periph-identity summary:focus-visible {
+.periph-code:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
   border-color: var(--accent);
@@ -3731,24 +3729,6 @@ button:disabled {
 
 .periph-detail-head .hint {
   margin: 2px 0 8px;
-}
-
-.periph-identity {
-  margin: 8px 0;
-}
-
-.periph-identity summary {
-  width: max-content;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.periph-identity table {
-  margin-top: 8px;
-}
-
-.periph-detail .sysinfo-table.key-value tbody th {
-  width: 140px;
 }
 
 .periph-modes {
