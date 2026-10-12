@@ -494,7 +494,7 @@ for (const mode of ['health', 'safety', 'security']) {
 const READY = { usable: true, hasChatModel: true, sees: true, hasAsr: true, hasMessages: true, hasDraft: true }
 
 test('nothing changes models, clears the chat or switches boards while speech input runs', () => {
-  for (const busy of [{ recording: true }, { transcribing: true }]) {
+  for (const busy of [{ recording: true }, { micOpening: true }, { transcribing: true }]) {
     const a = allowedActions({ ...READY, ...busy })
     assert.equal(a.listening, true)
     for (const action of ['send', 'newChat', 'changeChatModel', 'changeSpeechModel', 'changeBoard', 'startRecording']) {

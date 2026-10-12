@@ -378,8 +378,10 @@
             if (terminated) return;
           }
         }
-        // Stream ended without [DONE] or stop token — flush the held-back tail.
+        // Stream ended without [DONE] or a stop token: the reply is incomplete.
+        // Show what arrived, then report it rather than present it as whole.
         if (pending) yield pending;
+        throw new Error("The reply was cut off before it finished (the board or the connection closed early).");
       } finally {
         try { reader.releaseLock(); } catch { /* ok */ }
       }

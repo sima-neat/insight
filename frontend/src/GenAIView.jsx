@@ -202,7 +202,8 @@ export default function GenAIView({ onError, onStatus }) {
   const [engine, setEngine] = useState('default')
   const [voice, setVoice] = useState('')
   const recorder = useRef(null)
-  const micStarting = useRef(false)
+  const micStarting = useRef(false)   // set at once, so a double click can't open it twice
+  const [micOpening, setMicOpening] = useState(false)   // drives the rule table while the browser asks
   const player = useRef(null)
   const speechAbort = useRef(null)
   const transcribeAbort = useRef(null)
@@ -232,6 +233,7 @@ export default function GenAIView({ onError, onStatus }) {
     cameraOpen,
     replying: streaming,
     recording,
+    micOpening,
     transcribing,
     modelOp: Boolean(busyOp),
     downloading: Boolean(download)
@@ -357,21 +359,30 @@ export default function GenAIView({ onError, onStatus }) {
 
   // --- settings ----------------------------------------------------------------
 
+  // Everything that describes or came from the previous board, in one place:
+  // requests still on their way end, and its state goes, so nothing of it
+  // (an error, a catalog, voices, search results) shows against the new one.
+  function forgetBoard() {
+    boardSession.current?.restart()
+    voicesLoading.current = false
+    stopSpeaking()
+    setHealth(null)
+    setStatus(null)
+    setLastError(null)
+    setLoadProgress(null)
+    setVoices(null)
+    setEngine('default')      // the new board may not have the chosen engine or voice
+    setVoice('')
+    setHubResults(null)
+  }
+
   async function applySettings(event) {
     event.preventDefault()
     if (!allowed.changeBoard) return
     try {
       const saved = await saveSettings({ url: addressDraft.trim() })
-      // Everything still on its way to the previous board ends here.
-      boardSession.current?.restart()
-      voicesLoading.current = false
-      stopSpeaking()
       setSettings(saved)
-      setStatus(null)
-      setVoices(null)
-      setEngine('default')      // the new board may not have the chosen engine or voice
-      setVoice('')
-      setHubResults(null)
+      forgetBoard()
       setAddressError('')
       onStatus?.('Board settings saved.')
       refresh()
@@ -404,7 +415,10 @@ export default function GenAIView({ onError, onStatus }) {
     } finally {
       progress.abort()
       setLoadProgress(null)
-      // Unlock once the new catalog is in, or a send could still go to the old model.
+      // Unlock with a catalog fetched after the operation: the old one is
+      // dropped first, so if the fetch fails no model is offered until the
+      // next poll brings the real one (a send can't go to an unloaded model).
+      setStatus(null)
       await refresh().catch(() => {})
       setBusyOp(null)
     }
@@ -824,8 +838,8 @@ export default function GenAIView({ onError, onStatus }) {
     // A second click while the browser is still opening the microphone.
     if (micStarting.current || !allowed.startRecording) return
     micStarting.current = true
-    // Unlocked during this click, so a spoken question can be answered aloud.
-    // Unlocked during this click only if there is no player yet (so nothing is
+    setMicOpening(true)
+    // Unlocked during this click (so a spoken question can be answered aloud) only if there is no player yet (so nothing is
     // playing to cut off); an existing one was unlocked by an earlier click.
     const replyPlayer = readAloud && !player.current ? unlockPlayer() : undefined
     let stream = null
@@ -876,6 +890,7 @@ export default function GenAIView({ onError, onStatus }) {
       onError?.(`The microphone isn't available (${error.message}). Allow microphone access for this page, then try again.`)
     } finally {
       micStarting.current = false
+      setMicOpening(false)
     }
   }
 

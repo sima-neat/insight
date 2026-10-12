@@ -13,12 +13,13 @@
 //   cameraOpen    the camera preview is open
 //   replying      a reply is streaming
 //   recording     the microphone is recording
+//   micOpening    the browser is opening the microphone (it may be asking permission)
 //   transcribing  a recording is being turned into text
 //   modelOp       a model load, unload or speech-model switch runs
 //   downloading   a model download runs
 export function allowedActions(state) {
   const s = state || {}
-  const listening = Boolean(s.recording || s.transcribing)
+  const listening = Boolean(s.recording || s.micOpening || s.transcribing)
   const ready = Boolean(s.usable && !s.modelOp)
   const canChat = ready && Boolean(s.hasChatModel)
   // Models change only when nothing is using them.

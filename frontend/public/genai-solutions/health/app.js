@@ -407,6 +407,8 @@
       }
       const tail = filter.finish();
       if (tail) yield tail;
+      // Ended without [DONE] or a stop token: the reply is incomplete.
+      if (!stopped) throw new Error("The reply was cut off before it finished (the board or the connection closed early).");
     }
   }
 

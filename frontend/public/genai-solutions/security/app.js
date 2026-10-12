@@ -1043,9 +1043,11 @@ class SecurityConsole {
           }
         }
       }
-      // Stream ended without [DONE] — process any remainder as a final event.
-      if (buffer.trim()) flushEvent(buffer);
+      // Stream ended without [DONE]: a remainder may still carry the end;
+      // otherwise the reply is incomplete and is reported, not shown as whole.
+      const ended = buffer.trim() ? flushEvent(buffer) === 'done' : false;
       finalCommit();
+      if (!ended) throw new Error('The reply was cut off before it finished (the board or the connection closed early).');
     } finally {
       try { reader.releaseLock(); } catch { /* */ }
     }
