@@ -51,7 +51,7 @@ curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhos
 curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
 ```
 
-`prepare` 會串流輸出 `progress <seconds>/<total>` 行，最後以 `Rendition ready: …`、`Reusing rendition: …` 或 `Error: …` 結束。若略過 `prepare`，`start` 會在不輸出訊息的情況下執行相同的準備工作。`GET /api/mediasrc/renditions` 會回報快取轉碼版本的磁碟使用量；`POST /api/mediasrc/renditions/clear` 會刪除未被播放中來源使用的快取轉碼版本。
+`prepare` 會串流輸出 `progress <seconds>/<total>` 行（若另一個轉碼版本正在編碼，之前會重複輸出 `Waiting for another rendition to finish encoding…` 行；Insight 一次只編碼一個），最後以 `Rendition ready: …`、`Reusing rendition: …` 或 `Error: …` 結束。若略過 `prepare`，`start` 會在不輸出訊息的情況下執行相同的準備工作。`GET /api/mediasrc/renditions` 會回報快取轉碼版本的磁碟使用量；`POST /api/mediasrc/renditions/clear` 會刪除未被播放中來源使用的快取轉碼版本。
 
 在變更指派內容或播放狀態之前，請先讀取 `/api/mediasrc`。如果可能，在刪除媒體內容之前，請先停止正在使用該媒體的來源。
 

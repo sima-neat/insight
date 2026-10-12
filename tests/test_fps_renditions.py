@@ -521,6 +521,66 @@ class RenditionEncodeTests(unittest.TestCase):
         self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
         self.assertEqual(renditions.load_index(self.index_path)["renditions"], [])
 
+    def assert_encoder_is_free(self, fps):
+        # One step only: with a leaked encoder a full drain would wait forever.
+        gen = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", fps, "h264")
+        self.assertEqual(next(gen)["event"], "encoding")
+        gen.close()
+
+    def test_a_second_encode_waits_until_the_first_finishes(self):
+        # Owner review (S1): renditions are encoded one at a time, so repeated FPS changes
+        # or several clients cannot start one ffmpeg each and saturate the DevKit.
+        first = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264")
+        self.assertEqual(next(first)["event"], "encoding")
+        self.assertEqual(next(first)["event"], "progress")  # ffmpeg is running
+        second = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 20, "h264")
+        with mock.patch.object(renditions, "ENCODER_WAIT_SECONDS", 0.05):
+            self.assertEqual(next(second), {"event": "waiting", "file": "demo.mp4", "fps": 20})
+            self.assertEqual(next(second)["event"], "waiting")  # still busy: a heartbeat, not an encode
+        drain(first)
+        events, done = drain(second)
+        self.assertEqual(events[0]["event"], "encoding")
+        self.assertTrue(done["rendition"].endswith("_20fps_h264.mp4"))
+
+    def test_an_abandoned_waiting_encode_leaves_the_encoder_free(self):
+        first = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264")
+        next(first)
+        next(first)
+        second = renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 20, "h264")
+        self.assertEqual(next(second)["event"], "waiting")
+        second.close()
+        first.close()
+        self.assert_encoder_is_free(25)
+
+    def test_a_failed_encode_releases_the_encoder(self):
+        def broken_command(source, output, fps, codec, width, height):
+            return ["ffmpeg", "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-i", str(self.media_dir / "missing.mp4"), "-progress", "pipe:1", "-nostats", str(output)]
+
+        with mock.patch.object(renditions, "encode_command", side_effect=broken_command):
+            with self.assertRaises(renditions.RenditionError):
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        self.assert_encoder_is_free(15)
+
+    def test_refuses_to_encode_without_room_for_the_rendition_and_a_margin(self):
+        # Owner review (S1): an encode must not fill the data volume. It needs the
+        # rendition's expected size (encode bitrate x duration) plus a fixed margin free.
+        expected = renditions.expected_rendition_bytes(240, 15, 2.0)
+        self.assertGreater(expected, 0)
+        needed = expected + renditions.FREE_SPACE_MARGIN_BYTES
+        with mock.patch.object(renditions.shutil, "disk_usage", return_value=mock.Mock(free=needed - 1)), \
+             mock.patch.object(renditions, "encode_command", side_effect=AssertionError("must not encode")):
+            with self.assertRaises(renditions.RenditionError) as ctx:
+                drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        self.assertIn("free", str(ctx.exception))
+        rend_dir = self.media_dir / ".renditions"
+        self.assertEqual([p.name for p in rend_dir.iterdir()] if rend_dir.exists() else [], [])
+        self.assert_encoder_is_free(15)
+
+        with mock.patch.object(renditions.shutil, "disk_usage", return_value=mock.Mock(free=needed)):
+            _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
+        self.assertTrue(done["rendition"].endswith("_15fps_h264.mp4"))
+
     def test_validate_rendition_rejects_wrong_fps(self):
         _events, done = drain(renditions.ensure_rendition(self.media_dir, self.index_path, "demo.mp4", 15, "h264"))
         with self.assertRaises(renditions.RenditionError) as ctx:
@@ -1169,6 +1229,17 @@ class PrepareEndpointTests(RenditionApiTestCase):
         self.assertTrue(self.lines(self.client.post("/api/mediasrc/prepare", json={"index": 1}))[-1].startswith("Reusing rendition:"))
         self.assign(fps=30)
         self.assertEqual(self.lines(self.client.post("/api/mediasrc/prepare", json={"index": 1}))[-1], "Source frame rate matches; no rendition needed.")
+
+    def test_prepare_reports_waiting_for_another_encode(self):
+        self.assign(fps=15)
+
+        def waiting_then_ready(media_dir, index_path, rel_path, fps, source_codec):
+            yield {"event": "waiting", "file": rel_path, "fps": fps}
+            yield {"event": "done", "path": str(media_dir / ".renditions/x.mp4"), "rendition": ".renditions/x.mp4", "reused": True, "native": False}
+
+        with mock.patch.object(renditions, "ensure_rendition", side_effect=waiting_then_ready):
+            lines = self.lines(self.client.post("/api/mediasrc/prepare", json={"index": 1}))
+        self.assertEqual(lines, ["Waiting for another rendition to finish encoding…", "Reusing rendition: .renditions/x.mp4"])
 
     def test_prepare_validation_errors(self):
         self.assertEqual(self.client.post("/api/mediasrc/prepare", json={}).status_code, 400)

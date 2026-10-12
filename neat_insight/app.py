@@ -3358,7 +3358,10 @@ def prepare_source():
         try:
             for event in renditions.ensure_rendition(MEDIA_DIR, RENDITIONS_INDEX_FILE, file_name, fps, source_codec):
                 kind = event.get("event")
-                if kind == "encoding":
+                if kind == "waiting":
+                    # Repeated while another rendition encodes; the frontend shows it as the label.
+                    yield "Waiting for another rendition to finish encoding…\n"
+                elif kind == "encoding":
                     yield f"Encoding {event['file']} at {event['fps']} fps ({event['encoder']})...\n"
                 elif kind == "progress":
                     total = event.get("total")

@@ -51,7 +51,7 @@ curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhos
 curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
 ```
 
-`prepare` は `progress <seconds>/<total>` 形式の行をストリーミングし、最後に `Rendition ready: …`、`Reusing rendition: …`、または `Error: …` を出力します。`prepare` を省略した場合は、`start` が同じ準備処理を出力なしで実行します。`GET /api/mediasrc/renditions` はキャッシュされたレンディションのディスク使用量を返します。`POST /api/mediasrc/renditions/clear` は、再生中のソースが使用していないキャッシュ済みのレンディションを削除します。
+`prepare` は `progress <seconds>/<total>` 形式の行をストリーミングし（別のレンディションのエンコード中は、その前に `Waiting for another rendition to finish encoding…` 行が繰り返し出力されます。Insight は一度に 1 つずつエンコードします）、最後に `Rendition ready: …`、`Reusing rendition: …`、または `Error: …` を出力します。`prepare` を省略した場合は、`start` が同じ準備処理を出力なしで実行します。`GET /api/mediasrc/renditions` はキャッシュされたレンディションのディスク使用量を返します。`POST /api/mediasrc/renditions/clear` は、再生中のソースが使用していないキャッシュ済みのレンディションを削除します。
 
 割り当てや再生状態を変更する前に、`/api/mediasrc` を読み取ってください。可能であれば、メディアを削除する前に、そのメディアを使用しているアクティブなソースを停止してください。
 

@@ -663,10 +663,44 @@ _PROGRESS_LINE = re.compile(r"[a-z_][a-z0-9_]*=")
 _key_locks: dict[str, threading.Lock] = {}
 _key_locks_guard = threading.Lock()
 
+# One encode at a time across all keys: the per-key locks only de-duplicate, and every
+# distinct FPS change or client would otherwise start its own ffmpeg on the DevKit.
+_encoder = threading.Lock()
+# How often a waiting encode reports that it is still waiting. Each report is a chance
+# for a disconnected client to end the wait (GeneratorExit at the yield).
+ENCODER_WAIT_SECONDS = 1.0
+# Free space an encode leaves behind at the least, on top of the rendition's expected size.
+FREE_SPACE_MARGIN_BYTES = 1_000_000_000
+
 
 def _lock_for(key: str) -> threading.Lock:
     with _key_locks_guard:
         return _key_locks.setdefault(key, threading.Lock())
+
+
+def expected_rendition_bytes(height: int, fps: int, duration: Optional[float]) -> int:
+    """Rough size of a rendition: its encode bitrate over the source duration; 0 when the duration is unknown."""
+    if not duration:
+        return 0
+    return int(_bitrate_bits(video_bitrate(height, fps)) * duration / 8)
+
+
+def _check_free_space(directory: Path, expected: int) -> None:
+    free = shutil.disk_usage(directory).free
+    needed = expected + FREE_SPACE_MARGIN_BYTES
+    if free < needed:
+        raise RenditionError(
+            f"Not enough free disk space for this rendition: it needs about {_format_bytes(needed)} "
+            f"free (about {_format_bytes(expected)} for the file plus {_format_bytes(FREE_SPACE_MARGIN_BYTES)} to spare), "
+            f"{_format_bytes(free)} is free. Clear renditions or free up space, then try again."
+        )
+
+
+def _format_bytes(value: int) -> str:
+    for unit, size in (("GB", 1_000_000_000), ("MB", 1_000_000)):
+        if value >= size:
+            return f"{value / size:.1f} {unit}"
+    return f"{max(value, 0) / 1_000:.0f} kB"
 
 
 def _terminate(process: subprocess.Popen) -> None:
@@ -716,103 +750,114 @@ def ensure_rendition(media_dir: Path, index_path: Path, rel_path: str, fps: Any,
         rel_out = rendition_rel_path(rel_path, digest, fps, source_codec)
         output = media_dir / rel_out
         output.parent.mkdir(parents=True, exist_ok=True)
-        tmp = output.with_name(f".{output.stem}.tmp{output.suffix}")
-        tmp.unlink(missing_ok=True)
-        total = _float_or_none(info.get("duration"))
-        yield {
-            "event": "encoding",
-            "file": rel_path,
-            "fps": fps,
-            "codec": source_codec,
-            "encoder": f"{ENCODER_NAMES[source_codec]} {PROFILES[source_codec]}",
-            "total": total,
-        }
-
-        cmd = encode_command(source_path, tmp, fps, source_codec, width, height)
+        if not _encoder.acquire(blocking=False):
+            while True:
+                yield {"event": "waiting", "file": rel_path, "fps": fps}
+                if _encoder.acquire(timeout=ENCODER_WAIT_SECONDS):
+                    break
         try:
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        except FileNotFoundError as exc:
-            raise RenditionError("ffmpeg is not installed; install FFmpeg and ensure ffmpeg is on PATH.") from exc
-
-        diagnostics: list[str] = []
-        last_progress_at = 0.0
-        try:
-            if process.stdout:
-                for raw_line in process.stdout:
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    if not _PROGRESS_LINE.match(line):
-                        diagnostics.append(line)
-                        diagnostics = diagnostics[-8:]
-                        continue
-                    key_name, value = line.split("=", 1)
-                    seconds = parse_progress_seconds(key_name, value)
-                    if seconds is None:
-                        continue
-                    now = time.monotonic()
-                    if now - last_progress_at < 1.0:
-                        continue
-                    last_progress_at = now
-                    yield {"event": "progress", "seconds": seconds, "total": total}
-            return_code = process.wait()
-        except BaseException:
-            # GeneratorExit when the client disconnects, or any other interruption.
-            _terminate(process)
+            tmp = output.with_name(f".{output.stem}.tmp{output.suffix}")
             tmp.unlink(missing_ok=True)
-            raise
-        finally:
-            if process.stdout:
-                process.stdout.close()
+            total = _float_or_none(info.get("duration"))
+            _check_free_space(output.parent, expected_rendition_bytes(height, fps, total))
+            yield {
+                "event": "encoding",
+                "file": rel_path,
+                "fps": fps,
+                "codec": source_codec,
+                "encoder": f"{ENCODER_NAMES[source_codec]} {PROFILES[source_codec]}",
+                "total": total,
+            }
 
-        if return_code != 0:
-            tmp.unlink(missing_ok=True)
-            raise RenditionError("; ".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}")
-        try:
-            validate_rendition(tmp, fps, source_codec, width, height)
-        except BaseException:
-            tmp.unlink(missing_ok=True)
-            raise
-
-        # On POSIX an unlinked source stays readable through ffmpeg's open descriptor, so the
-        # encode succeeds even if delete-media (or a replacement upload) ran meanwhile. The final
-        # source check, the rename and the record insertion happen as one step under the index
-        # lock: delete-media unlinks first and then takes the same lock to remove records, so a
-        # publish that wins the race is cleaned up by that removal and one that loses sees no file.
-        digest_of_output = sha256_file(tmp)
-        with _index_lock:
+            cmd = encode_command(source_path, tmp, fps, source_codec, width, height)
             try:
-                current = source_path.stat()
-            except OSError:
-                current = None
-            if current is None or (current.st_size, current.st_mtime_ns) != (info.get("size"), info.get("mtime_ns")):
-                tmp.unlink(missing_ok=True)
-                raise RenditionError(f"{rel_path} was removed or replaced while its rendition was being encoded")
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            except FileNotFoundError as exc:
+                raise RenditionError("ffmpeg is not installed; install FFmpeg and ensure ffmpeg is on PATH.") from exc
 
-            tmp.replace(output)
+            diagnostics: list[str] = []
+            last_progress_at = 0.0
             try:
-                record = {
-                    "key": key,
-                    "source_file": rel_path,
-                    "source_files": [rel_path],
-                    "source_sha256": digest,
-                    "fps": fps,
-                    "codec": source_codec,
-                    "profile": PROFILES[source_codec],
-                    "path": rel_out,
-                    "sha256": digest_of_output,
-                    "bytes": output.stat().st_size,
-                    "width": info.get("width"),
-                    "height": height,
-                    "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                }
-                add_rendition(index_path, record, media_dir)
+                if process.stdout:
+                    for raw_line in process.stdout:
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        if not _PROGRESS_LINE.match(line):
+                            diagnostics.append(line)
+                            diagnostics = diagnostics[-8:]
+                            continue
+                        key_name, value = line.split("=", 1)
+                        seconds = parse_progress_seconds(key_name, value)
+                        if seconds is None:
+                            continue
+                        now = time.monotonic()
+                        if now - last_progress_at < 1.0:
+                            continue
+                        last_progress_at = now
+                        yield {"event": "progress", "seconds": seconds, "total": total}
+                return_code = process.wait()
             except BaseException:
-                # Usage and Clear renditions only see indexed files, so a rendition that was
-                # renamed into place but never recorded (e.g. the volume filled while writing
-                # renditions.json) would be unreclaimable. Take the file down with the failure.
-                output.unlink(missing_ok=True)
+                # GeneratorExit when the client disconnects, or any other interruption.
+                _terminate(process)
+                tmp.unlink(missing_ok=True)
                 raise
+            finally:
+                if process.stdout:
+                    process.stdout.close()
+
+            if return_code != 0:
+                tmp.unlink(missing_ok=True)
+                raise RenditionError("; ".join(diagnostics[-4:]) or f"ffmpeg exited with status {return_code}")
+            try:
+                validate_rendition(tmp, fps, source_codec, width, height)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+
+            # On POSIX an unlinked source stays readable through ffmpeg's open descriptor, so the
+            # encode succeeds even if delete-media (or a replacement upload) ran meanwhile. The final
+            # source check, the rename and the record insertion happen as one step under the index
+            # lock: delete-media unlinks first and then takes the same lock to remove records, so a
+            # publish that wins the race is cleaned up by that removal and one that loses sees no file.
+            digest_of_output = sha256_file(tmp)
+            with _index_lock:
+                try:
+                    current = source_path.stat()
+                except OSError:
+                    current = None
+                if current is None or (current.st_size, current.st_mtime_ns) != (info.get("size"), info.get("mtime_ns")):
+                    tmp.unlink(missing_ok=True)
+                    raise RenditionError(f"{rel_path} was removed or replaced while its rendition was being encoded")
+
+                tmp.replace(output)
+                try:
+                    record = {
+                        "key": key,
+                        "source_file": rel_path,
+                        "source_files": [rel_path],
+                        "source_sha256": digest,
+                        "fps": fps,
+                        "codec": source_codec,
+                        "profile": PROFILES[source_codec],
+                        "path": rel_out,
+                        "sha256": digest_of_output,
+                        "bytes": output.stat().st_size,
+                        "width": info.get("width"),
+                        "height": height,
+                        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    }
+                    add_rendition(index_path, record, media_dir)
+                except BaseException:
+                    # Usage and Clear renditions only see indexed files, so a rendition that was
+                    # renamed into place but never recorded (e.g. the volume filled while writing
+                    # renditions.json) would be unreclaimable. Take the file down with the failure.
+                    output.unlink(missing_ok=True)
+                    raise
+        finally:
+            # Released before 'done' is handed out, so a caller that keeps the finished
+            # generator around does not hold up the next encode.
+            _encoder.release()
         yield {"event": "done", "path": str(output), "rendition": rel_out, "reused": False, "native": False}
 
 

@@ -51,7 +51,7 @@ curl -k -N -H "Content-Type: application/json" -d '{"index":1}' https://localhos
 curl -k -H "Content-Type: application/json" -d '{"index":1}' https://localhost:9900/api/mediasrc/start
 ```
 
-`prepare` передає потоком рядки `progress <seconds>/<total>` і завершується рядком `Rendition ready: …`, `Reusing rendition: …` або `Error: …`. Якщо `prepare` пропущено, `start` виконує ту саму підготовку без виводу. `GET /api/mediasrc/renditions` повідомляє, скільки місця на диску займають кешовані перекодовані версії; `POST /api/mediasrc/renditions/clear` видаляє кешовані перекодовані версії, які не використовує жодне джерело, що відтворюється.
+`prepare` передає потоком рядки `progress <seconds>/<total>` (поки кодується інша перекодована версія, перед ними повторюються рядки `Waiting for another rendition to finish encoding…`; Insight кодує лише одну версію за раз) і завершується рядком `Rendition ready: …`, `Reusing rendition: …` або `Error: …`. Якщо `prepare` пропущено, `start` виконує ту саму підготовку без виводу. `GET /api/mediasrc/renditions` повідомляє, скільки місця на диску займають кешовані перекодовані версії; `POST /api/mediasrc/renditions/clear` видаляє кешовані перекодовані версії, які не використовує жодне джерело, що відтворюється.
 
 Перш ніж змінювати призначення або стан відтворення, прочитайте `/api/mediasrc`. За можливості зупиняйте активні джерела, перш ніж видаляти їхні медіафайли.
 
