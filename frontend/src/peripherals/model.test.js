@@ -17,7 +17,6 @@ import {
   createBoardSync,
   createFocusReturn,
   defaultTargetText,
-  deviceRows,
   deviceTabs,
   formatDuration,
   formatOptions,
@@ -294,21 +293,15 @@ test('labels for tiers, sources, and defaults', () => {
   assert.equal(defaultTargetText({ on_board: false, sdk_env: null }), '')
 })
 
-test('identity rows list only known device fields', () => {
+test('a camera id prefers the stable name', () => {
   assert.equal(cameraDeviceId(imx477), imx477.device.camera_name)
   assert.equal(cameraDeviceId(usb), usb.device.by_id)
-  const rows = Object.fromEntries(deviceRows(usb))
-  assert.equal(rows['USB ID'], '046d:0825')
-  assert.equal(rows['USB speed'], '480 Mb/s')
-  assert.equal('Serial' in rows, false)
-  assert.equal('Media device' in rows, false)
-  assert.equal(Object.fromEntries(deviceRows(imx568))['Name source'], 'media-graph')
 })
 
 test('a subtitle never repeats what the name already says', () => {
   // "imx477 5-001a" carries the model, so the subtitle beneath it must not read "imx477" again.
   assert.equal(cameraSubtitle(imx477), '')
-  // The USB camera reports its product string as both name and model, and its kernel path stays in Device details.
+  // The USB camera reports its product string as both name and model, and its kernel path is not shown.
   assert.equal(cameraSubtitle(usb), '')
   assert.equal(cameraSubtitle({ name: 'C270', model: 'C270' }), '')
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')

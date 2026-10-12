@@ -2,7 +2,6 @@ import {
   blockedFormatSummary,
   cameraSubtitle,
   cameraSummaryLine,
-  deviceRows,
   formatOptions,
   groupOptions,
   sizeKey,
@@ -108,25 +107,6 @@ export default function CameraDetail({ camera, selection, selectionNotice, onSel
       {(camera.errors || []).map((error, index) => (
         <ErrorNotice key={`${error.code || 'error'}-${index}`} error={error} />
       ))}
-
-      <details className="periph-identity">
-        <summary>Device details</summary>
-        <table className="sysinfo-table key-value">
-          <tbody>
-            {deviceRows(camera).map(([label, value]) => (
-              <tr key={label}>
-                <th scope="row">{label}</th>
-                <td>{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {camera.notes?.length > 0 && (
-          <ul className="periph-notes">
-            {camera.notes.map((note, index) => <li key={index}>{note}</li>)}
-          </ul>
-        )}
-      </details>
 
       <ModePicker camera={camera} selection={selection} notice={selectionNotice} onChange={onSelectionChange} />
     </section>
