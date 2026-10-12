@@ -443,13 +443,20 @@
       setting.note.box.hidden = !isOwn;
     }
 
-    function renderGlobalNote(setting) {
+    // Collapsed to one summary line, so a long list cannot push the settings apart; `open`
+    // keeps it expanded when it is re-rendered after a "Use global value" click.
+    function renderGlobalNote(setting, open = false) {
       const overrides = settingsApi.listChannelOverrides(setting.id);
       setting.note.content.replaceChildren();
       setting.note.box.hidden = overrides.length === 0;
       if (overrides.length === 0) return;
-      const box = document.createElement("div");
+      const box = document.createElement("details");
       box.className = "settings-scope-note--info";
+      box.open = open;
+      const summary = document.createElement("summary");
+      summary.textContent =
+        overrides.length === 1 ? "1 channel uses its own value" : `${overrides.length} channels use their own value`;
+      box.appendChild(summary);
       overrides.forEach(({ channel, value }) => {
         box.appendChild(
           createNoteLine(
@@ -469,7 +476,7 @@
       const channelScope = `channel_${channel}`;
       if (!settingsApi.clearScopeOwnValue(channelScope, setting.id)) return;
       dispatchSettingsChanged(channelScope);
-      renderGlobalNote(setting);
+      renderGlobalNote(setting, true);
       renderResetLink();
       // The button is gone; keep the focus on this setting.
       const nextLink = setting.note.content.querySelector(".settings-scope-link");
@@ -609,7 +616,7 @@
     // have changed: notes, inherited entries, locks, scope line and reset link.
     function render() {
       if (inChannelDialog()) settings.forEach(renderChannelNote);
-      else settings.forEach(renderGlobalNote);
+      else settings.forEach((setting) => renderGlobalNote(setting)); // collapsed: forEach's index is no `open`
       refreshInherited();
       refreshControls();
       renderScopeLine();

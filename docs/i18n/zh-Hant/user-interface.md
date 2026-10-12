@@ -166,7 +166,7 @@ metadata: UDP 9100 + N
 
 頻道會沿用全域設定。若要為頻道設定自己的值，請開啟其設定，開啟該設定旁的 **Own value**，設定值後選取 **Save**。頻道自行設定的值優先於全域值。再次關閉 **Own value** 後，頻道會沿用全域值。類別顏色依項目分別處理：頻道對話方塊會將全域項目標示為 **from global**，而 **Override** 會將其中一個項目複製為該頻道的項目。
 
-全域對話方塊會在每項設定下方列出自行設定值的頻道。**Use global value** 會立即移除頻道自己的值，無需按 **Save**。**Reset all channels to the global settings…** 會移除所有頻道自己的值；ROI 會保留。
+全域對話方塊會在每項設定下方顯示有多少頻道自行設定值；展開該行即可列出這些頻道。**Use global value** 會立即移除頻道自己的值，無需按 **Save**。**Reset all channels to the global settings…** 會移除所有頻道自己的值；ROI 會保留。
 
 設定儲存在瀏覽器中。這些設定不會在不同的瀏覽器或電腦之間共用。
 
