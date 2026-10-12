@@ -98,6 +98,9 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
         runLoaded.current = new Set([model])   // the other chat models may have been unloaded
         onModelsChanged?.()
       } catch (error) {
+        // A failed load may already have unloaded others: what is loaded is
+        // unknown now, so every later model is loaded before its run.
+        runLoaded.current = new Set()
         if (over()) return null
         return { model, failed: `failed to load: ${error.message}` }
       }

@@ -679,3 +679,9 @@ test('the documents are not rebuilt under a reply that uses them', () => {
   assert.equal(allowedActions({ ...READY, replying: true, useDocuments: true }).documentTasks, false)
   assert.equal(allowedActions({ ...READY, replying: true, useDocuments: false }).documentTasks, true)
 })
+
+test('the documents choice and their rebuilds wait for replies and speech input', () => {
+  assert.equal(allowedActions({ ...READY, documentsAvailable: true, replying: true }).toggleDocuments, false)
+  assert.equal(allowedActions({ ...READY, recording: true }).documentTasks, false)
+  assert.equal(allowedActions({ ...READY, transcribing: true }).documentTasks, false)
+})

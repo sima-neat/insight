@@ -52,8 +52,10 @@ export function allowedActions(state) {
     downloadModel: !s.downloading,
     // The benchmark loads and unloads models: the same rule as changing them.
     openBenchmark: modelsQuiet && !s.documentTask,
-    toggleDocuments: Boolean(s.documentsAvailable),
+    // Fixed for the length of a reply: the reply was sent with or without them.
+    toggleDocuments: Boolean(s.documentsAvailable) && !s.replying,
     // A reply that uses the documents may still be searching them.
-    documentTasks: ready && !s.documentTask && !(s.replying && s.useDocuments)
+    // ... and a spoken question may be about to ask them.
+    documentTasks: ready && !s.documentTask && !(s.replying && s.useDocuments) && !listening
   }
 }
