@@ -13,6 +13,7 @@ import {
 } from './streaming/webcamPublishing.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
+const GenAIView = lazy(() => import('./GenAIView.jsx'))
 
 const SOURCE_COUNT = 48
 const WEBCAM_OPTION_PREFIX = '__webcam__:'
@@ -34,7 +35,8 @@ const TABS = [
   { id: 'media', label: 'Media Sources', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
-  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
+  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' },
+  { id: 'genai', label: 'GenAI Studio', icon: '/icons/genai.svg' }
 ]
 const YOUTUBE_IMPORT_TARGETS = [
   { value: '1080p30', label: '1080p30' },
@@ -54,21 +56,23 @@ const ROUTE_TO_TAB = {
   rtsp: 'rtsp',
   viewer: 'viewer',
   stats: 'visualizer',
-  visualizer: 'visualizer'
+  visualizer: 'visualizer',
+  genai: 'genai'
 }
 const TAB_TO_ROUTE = {
   workspace: '/workspace',
   media: '/media',
   rtsp: '/streaming',
   viewer: '/viewer',
-  visualizer: '/stats'
+  visualizer: '/stats',
+  genai: '/genai'
 }
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
 const ONBOARDING_STEPS = [
   {
     id: 'intro',
     tab: null,
-    eyebrow: 'Step 1 of 6',
+    eyebrow: 'Step 1 of 7',
     title: 'What is Insight?',
     summary: 'Insight helps developers inspect a workspace, set up test streams, view inference results, and watch system performance while they test an application.',
     details:
@@ -77,7 +81,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'workspace',
     tab: 'workspace',
-    eyebrow: 'Step 2 of 6',
+    eyebrow: 'Step 2 of 7',
     title: 'Explore the Workspace',
     summary: 'Workspace is for browsing the shared files a developer works with across the SDK container, host, and paired DevKit.',
     details:
@@ -86,7 +90,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'media',
     tab: 'media',
-    eyebrow: 'Step 3 of 6',
+    eyebrow: 'Step 3 of 7',
     title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
@@ -95,7 +99,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'rtsp',
     tab: 'rtsp',
-    eyebrow: 'Step 4 of 6',
+    eyebrow: 'Step 4 of 7',
     title: 'Set up streaming sources',
     summary: 'This tab turns files from the library into live source slots such as src1, src2, and src3.',
     details:
@@ -104,7 +108,7 @@ const ONBOARDING_STEPS = [
   {
     id: 'viewer',
     tab: 'viewer',
-    eyebrow: 'Step 5 of 6',
+    eyebrow: 'Step 5 of 7',
     title: 'Live viewer',
     summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
     details:
@@ -113,11 +117,20 @@ const ONBOARDING_STEPS = [
   {
     id: 'visualizer',
     tab: 'visualizer',
-    eyebrow: 'Step 6 of 6',
+    eyebrow: 'Step 6 of 7',
     title: 'Check system stats',
     summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
     details:
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
+  },
+  {
+    id: 'genai',
+    tab: 'genai',
+    eyebrow: 'Step 7 of 7',
+    title: 'Try generative AI on the board',
+    summary: 'GenAI Studio runs language, vision and speech models on the board; this tab is where you use them.',
+    details:
+      'Start the backend on the board with ./run.sh --backend-only from the GenAI Studio app, then load a model here, chat with text, images or your camera, transcribe speech, and hear replies. The tab shows when the board is busy or unavailable and how to recover.'
   }
 ]
 
@@ -2298,6 +2311,12 @@ export default function App() {
                 routePath={routeWorkspacePath}
                 onNavigate={(path) => selectTab('workspace', path)}
               />
+            </Suspense>
+          )}
+
+          {tab === 'genai' && (
+            <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading GenAI Studio...</p></section>}>
+              <GenAIView onError={setError} onStatus={setUploadStatus} />
             </Suspense>
           )}
 
