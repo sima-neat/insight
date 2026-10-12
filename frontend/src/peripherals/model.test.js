@@ -12,6 +12,7 @@ import {
   cameraSummaryLine,
   cameraTierPill,
   CONNECTED_PILL,
+  connectionPill,
   changeSummary,
   createBoardSync,
   createFocusReturn,
@@ -504,6 +505,8 @@ test('every camera row shows its verdict pill beside Connected', () => {
   assert.deepEqual(cameraTierPill(imx477), { label: 'Available', tone: 'ok' })
   assert.deepEqual(cameraTierPill(imx568), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(CONNECTED_PILL, { label: 'Connected', tone: '' })
+  assert.equal(connectionPill({ modes_source: 'live' }), CONNECTED_PILL)
+  assert.deepEqual(connectionPill({ modes_source: 'previous-scan' }), { label: 'Last scan', tone: '' })
   assert.deepEqual(cameraTierPill(usb), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(cameraTierPill({ ...imx477, support: support('unsupported', NO_BOARD) }), { label: 'Unsupported', tone: 'periph-danger' })
 })
