@@ -402,7 +402,7 @@ Codec and transport are derived from the assigned media:
 | Method | Path | Request | Behavior |
 | --- | --- | --- | --- |
 | `GET` | `/api/mediasrc/videos` | None | Return sorted relative media paths accepted by the media-source streamer. |
-| `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. |
+| `GET` | `/api/mediasrc` | None | Return persisted source assignments, playback states, transport/codec data, allowed transports, and generated stream URLs. `native_fps` is null until the assigned file has been probed; the listing never waits for a probe but starts one in the background, so a later call shows it. |
 | `POST` | `/api/mediasrc/assign` | JSON `{"index": 1, "file": "video.mp4", "transport": "rtsp", "fps": 15}` | Assign or clear one source; if it was playing, restart with the new file. Transport is honored only when compatible with the detected codec. `fps` (whole number 1–240, or null for the source rate) selects the output frame rate; changing `file` without `fps` resets it. Returns 409 for an external slot. |
 | `POST` | `/api/mediasrc/auto-assign-all` | None | Stop active sources, assign unique available videos to source slots in index order, and persist stopped assignments. Slots whose file changes lose their `fps` override. |
 | `POST` | `/api/mediasrc/start` | JSON `{"index": 1}` | Start one assigned source and mark it `playing`. Returns 409 for an external slot, or if the slot was stopped, reassigned, reset or unassigned while its FPS rendition was being prepared (start it again). |

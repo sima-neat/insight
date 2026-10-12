@@ -640,6 +640,15 @@ class RenditionApiTestCase(unittest.TestCase):
     def source(self, index=1):
         return next(s for s in self.client.get("/api/mediasrc").get_json() if s["index"] == index)
 
+    def probed_source(self, index=1, timeout=10.0):
+        """The slot once its file's background probe has landed (the listing itself never waits for one)."""
+        deadline = time.monotonic() + timeout
+        while True:
+            src = self.source(index)
+            if src.get("native_fps") is not None or time.monotonic() > deadline:
+                return src
+            time.sleep(0.02)
+
 
 def lock_is_held(lock) -> bool:
     """True when another thread holds `lock` (probed from a helper thread so RLock re-entrancy cannot mask it)."""
@@ -958,7 +967,7 @@ class SlotFpsTests(RenditionApiTestCase):
 
     def test_default_slot_has_null_fps_and_reports_native_fps(self):
         self.assertEqual(self.assign().status_code, 200)
-        src = self.source()
+        src = self.probed_source()
         self.assertIsNone(src["fps"])
         self.assertEqual(src["native_fps"], 30)
         self.assertIsNone(src["active_file"])
@@ -982,7 +991,7 @@ class SlotFpsTests(RenditionApiTestCase):
         self.assign(file="demo.mp4", transport="rtsp")
         self.assertEqual(self.source()["fps"], 15)
         self.assign(file="other.mp4")
-        src = self.source()
+        src = self.probed_source()
         self.assertIsNone(src["fps"])
         self.assertEqual(src["native_fps"], 25)
 
@@ -1056,15 +1065,52 @@ class SlotFpsTests(RenditionApiTestCase):
         with mock.patch.object(renditions, "probe_video", side_effect=AssertionError("must use the cache")):
             self.assertEqual(renditions.source_infos(self.index_path, self.media_dir, ["demo.mp4"])["demo.mp4"]["native_fps"], 30)
 
-    def test_sources_probe_each_file_once_per_request(self):
+    def test_sources_probe_each_file_once(self):
         self.assign(index=1)
         self.assign(index=2)
         with mock.patch.object(renditions, "probe_video", wraps=renditions.probe_video) as probe:
-            # The per-slot helper must not be used: GET /api/mediasrc resolves every file in one pass.
+            # The per-slot helper must not be used: the file shared by both slots is probed once.
             with mock.patch.object(renditions, "source_info", side_effect=AssertionError("must not probe per slot")):
+                self.probed_source(1)
                 payload = self.client.get("/api/mediasrc").get_json()
         self.assertEqual(probe.call_count, 1)
         self.assertEqual([s["native_fps"] for s in payload if s["index"] in (1, 2)], [30, 30])
+
+    def blocking_probe(self):
+        """A probe_video stand-in that waits for `release` (at most 10 s) and counts its calls."""
+        release = threading.Event()
+        calls = []
+        real = renditions.probe_video
+
+        def probe(path):
+            calls.append(path)
+            release.wait(timeout=10)
+            return real(path)
+        return probe, release, calls
+
+    def test_listing_answers_before_an_uncached_probe_finishes(self):
+        # Owner review (S2): the 2 s source poll must not run media probes (up to 30 s each,
+        # one after another); it reports the rate as unknown and the probe runs in the background.
+        self.assign()
+        probe, release, calls = self.blocking_probe()
+        with mock.patch.object(renditions, "probe_video", side_effect=probe):
+            src = self.source()
+            self.assertFalse(release.is_set())
+            self.assertIsNone(src["native_fps"])
+            release.set()
+            self.assertEqual(self.probed_source()["native_fps"], 30)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_file_is_probed_once_while_its_probe_is_running(self):
+        # Polls from several browsers while a probe runs must not start another one for the file.
+        self.assign()
+        probe, release, calls = self.blocking_probe()
+        with mock.patch.object(renditions, "probe_video", side_effect=probe):
+            for _ in range(3):
+                self.assertIsNone(self.source()["native_fps"])
+            release.set()
+            self.assertEqual(self.probed_source()["native_fps"], 30)
+        self.assertEqual(len(calls), 1)
 
     def test_renditions_directory_is_hidden_from_video_lists(self):
         (self.media_dir / ".renditions").mkdir()

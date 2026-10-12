@@ -2555,7 +2555,10 @@ def _active_stream_file(index: Optional[int]) -> Optional[str]:
 
 
 def _native_fps_by_file(sources) -> dict[str, dict]:
-    """One cached probe pass for every assigned file in `sources`; {} when the index cannot be read."""
+    """Cached probe results for every assigned file in `sources`; {} when the index cannot be read.
+
+    Backs the 2 s sources poll, so it never probes: a file without a usable cached probe is
+    left out (its rate shows as unknown) and probed in the background for a later poll."""
     files = []
     for src in sources:
         file_name = src.get("file") or ""
@@ -2567,7 +2570,9 @@ def _native_fps_by_file(sources) -> dict[str, dict]:
             continue
         files.append(file_name)
     try:
-        return renditions.source_infos(RENDITIONS_INDEX_FILE, MEDIA_DIR, files)
+        infos, unprobed = renditions.cached_source_infos(RENDITIONS_INDEX_FILE, MEDIA_DIR, files)
+        renditions.schedule_probes(RENDITIONS_INDEX_FILE, MEDIA_DIR, unprobed)
+        return infos
     except Exception as exc:
         logging.debug("Failed to detect the frame rates of the assigned media sources: %s", exc)
         return {}

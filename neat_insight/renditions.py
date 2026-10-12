@@ -8,6 +8,7 @@ catalog assets and stream through mediasrc with ``-c:v copy``.
 import hashlib
 import json
 import logging
+import queue
 import re
 import shutil
 import subprocess
@@ -394,25 +395,12 @@ def source_info(index_path: Path, media_dir: Path, rel_path: str) -> dict:
 
 def source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> dict[str, dict]:
     """source_info for many files with one index load and at most one save; files that fail to stat/probe are omitted."""
-    stats = {}
-    for rel_path in dict.fromkeys(rel_paths):
-        try:
-            stats[rel_path] = (media_dir / rel_path).stat()
-        except OSError as exc:
-            logging.debug("Cannot stat the media source %s: %s", rel_path, exc)
-    if not stats:
-        return {}
-    with _index_lock:
-        cached = load_index(index_path)["sources"]
-    infos: dict[str, dict] = {}
+    infos, unprobed = cached_source_infos(index_path, media_dir, rel_paths)
     probed: dict[str, tuple[Any, dict]] = {}
-    for rel_path, stat in stats.items():
-        entry = cached.get(rel_path)
-        if _stat_matches(entry, stat) and "native_fps" in entry and (not _is_failed_probe(entry) or _failed_probe_usable(entry, stat)):
-            infos[rel_path] = dict(entry)
-            continue
+    for rel_path in unprobed:
         source_path = media_dir / rel_path
         try:
+            stat = source_path.stat()
             stream, stat = _for_current_stat(source_path, stat, lambda: probe_video(source_path))
         except OSError as exc:
             logging.debug("Cannot stat the media source %s: %s", rel_path, exc)
@@ -437,6 +425,67 @@ def source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> dic
             save_index(index_path, index)
         infos.update({rel_path: dict(fresh) for rel_path, (_stat, fresh) in probed.items()})
     return infos
+
+
+def cached_source_infos(index_path: Path, media_dir: Path, rel_paths: list[str]) -> tuple[dict[str, dict], list[str]]:
+    """What source_infos would return from the cache alone, and the files it would have to probe.
+
+    Never probes, so a caller on a hot path (the 2 s sources poll) can answer at once and
+    hand the rest to schedule_probes."""
+    stats = {}
+    for rel_path in dict.fromkeys(rel_paths):
+        try:
+            stats[rel_path] = (media_dir / rel_path).stat()
+        except OSError as exc:
+            logging.debug("Cannot stat the media source %s: %s", rel_path, exc)
+    if not stats:
+        return {}, []
+    with _index_lock:
+        cached = load_index(index_path)["sources"]
+    infos: dict[str, dict] = {}
+    unprobed: list[str] = []
+    for rel_path, stat in stats.items():
+        entry = cached.get(rel_path)
+        if _stat_matches(entry, stat) and "native_fps" in entry and (not _is_failed_probe(entry) or _failed_probe_usable(entry, stat)):
+            infos[rel_path] = dict(entry)
+        else:
+            unprobed.append(rel_path)
+    return infos, unprobed
+
+
+# Background probes for the sources listing: one worker, so at most one listing probe runs at a
+# time, and a file already queued or being probed is not queued again by later polls.
+_probe_queue: "queue.SimpleQueue[tuple[Path, Path, str]]" = queue.SimpleQueue()
+_probe_pending: set[tuple[Path, Path, str]] = set()
+_probe_guard = threading.Lock()
+_probe_worker: Optional[threading.Thread] = None
+
+
+def schedule_probes(index_path: Path, media_dir: Path, rel_paths: list[str]) -> None:
+    """Probe `rel_paths` in the background into the cache that cached_source_infos reads."""
+    global _probe_worker
+    with _probe_guard:
+        for rel_path in rel_paths:
+            job = (index_path, media_dir, rel_path)
+            if job in _probe_pending:
+                continue
+            _probe_pending.add(job)
+            _probe_queue.put(job)
+        if _probe_pending and (_probe_worker is None or not _probe_worker.is_alive()):
+            _probe_worker = threading.Thread(target=_run_probes, name="source-probes", daemon=True)
+            _probe_worker.start()
+
+
+def _run_probes() -> None:
+    while True:
+        job = _probe_queue.get()
+        try:
+            source_infos(*job[:2], [job[2]])  # caches a failure as well as a result
+        except Exception as exc:
+            logging.debug("Background probe of %s failed: %s", job[2], exc)
+        finally:
+            with _probe_guard:
+                _probe_pending.discard(job)
 
 
 def source_hash(index_path: Path, media_dir: Path, rel_path: str) -> str:
