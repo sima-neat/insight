@@ -9,6 +9,7 @@ import {
   elapsedPath,
   indexAt,
   linePath,
+  newestInColumn,
   scaleText,
   spanLabel,
   stackTotals,
@@ -221,7 +222,7 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
 
 /** Per-core CPU heatmap with time slices and one-minute averages. */
 export function CoreHeatmap({ cores, series, timestamps }) {
-  const { rows, average, busiest } = coreSummary(cores, series)
+  const { rows, average, busiest } = coreSummary(cores, series, timestamps)
   const [pointer, setPointer] = useState(null)
   const columns = Math.max(0, ...rows.map((row) => row.cells.length))
   const span = spanLabel(timestamps)
@@ -238,7 +239,7 @@ export function CoreHeatmap({ cores, series, timestamps }) {
     : null
   const hovered = hover && rows[hover.row]
   // The newest sample in the hovered column, to say how long ago that slice of the window was.
-  const sampleOf = (column) => Math.min(sampleCount - 1, Math.floor(((column + 1) / Math.max(1, columns)) * sampleCount) - 1)
+  const sampleOf = (column) => newestInColumn(column, sampleCount, columns, timestamps)
   return (
     <figure className="dash-chart dash-cores" aria-label={`Per-core CPU load over the last ${windowText || 'samples'}; one-minute average ${formatValue(average, '%')}`}>
       <figcaption className="dash-chart-head">

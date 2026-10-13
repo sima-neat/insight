@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
-  DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
+  DASH_TABS, HEAT_COLUMNS, agoLabel, newestInColumn, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
   elapsedPath, fixedValue, indexAt, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
   sharedThresholdLines, stackTotals, stackedPaths, thermalGroups, timeFractions, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
 } from './dashboard.js'
@@ -128,6 +128,24 @@ test('samples sit where their timestamps put them, so a delayed poll or back-off
   assert.deepEqual(timeFractions(['x', 'y', 'z'], 3), [0, 0.5, 1], 'unreadable timestamps fall back to even spacing')
   assert.deepEqual(timeFractions(stamps.slice(0, 2), 3), [0, 0.5, 1], 'timestamps that do not cover every sample fall back too')
   assert.deepEqual(timeFractions([stamps[2], stamps[0], stamps[1]], 3), [0, 0.5, 1], 'out-of-order timestamps fall back too')
+})
+
+test('the per-core minute and heatmap columns follow board time when polling is uneven', () => {
+  const core = [{ key: 'c0', short: 'c0', label: 'CPU core 0 usage', warn: 80, critical: 95 }]
+  // 40 samples two seconds apart at 100%, then a back-off: 20 samples reported at 10% within the final 30 s.
+  const stamps = [
+    ...Array.from({ length: 40 }, (_, index) => new Date(Date.UTC(2026, 8, 25, 0, 0, index * 2)).toISOString()),
+    ...Array.from({ length: 20 }, (_, index) => new Date(Date.UTC(2026, 8, 25, 0, 10, index * 1.5)).toISOString())
+  ]
+  const values = [...new Array(40).fill(100), ...new Array(20).fill(10)]
+  const timed = coreSummary(core, { c0: values }, stamps)
+  assert.equal(timed.average, 10, 'samples from minutes before the last one are not part of its 1-minute average')
+  assert.equal(coreSummary(core, { c0: values }).average, 40, 'without timestamps the last 30 samples stand in')
+  const cells = columnMeans(values, 4, stamps)
+  assert.deepEqual(cells, [100, null, null, 10], 'the gap between the bursts stays empty instead of being spread out')
+  assert.deepEqual([newestInColumn(0, 60, 4, stamps), newestInColumn(1, 60, 4, stamps), newestInColumn(3, 60, 4, stamps)], [39, -1, 59])
+  assert.deepEqual(columnMeans([1, 2, 3, 4, 5, 6], 4), [1, 2.5, 4, 5.5], 'by count without timestamps, as before')
+  assert.deepEqual([0, 1, 2, 3].map((column) => newestInColumn(column, 6, 4)), [0, 2, 3, 5])
 })
 
 test('per-core heatmap: column means over the window, a one-minute average per core', () => {

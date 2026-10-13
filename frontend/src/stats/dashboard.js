@@ -89,13 +89,18 @@ function yOf(value, scale, height) {
  * leaves a visible gap. Evenly spaced when the timestamps do not cover every sample in increasing order.
  */
 export function timeFractions(timestamps, length) {
+  const times = boardSeconds(timestamps, length)
+  if (!times || length < 2 || !(times[length - 1] > times[0])) {
+    return Array.from({ length }, (_, index) => index / Math.max(1, length - 1))
+  }
+  return times.map((time) => (time - times[0]) / (times[length - 1] - times[0]))
+}
+
+/** Each sample's board time in seconds, or null unless every one of `length` samples has one, in order. */
+function boardSeconds(timestamps, length) {
   const times = (timestamps || []).map(seconds)
-  const even = Array.from({ length }, (_, index) => index / Math.max(1, length - 1))
-  if (times.length !== length || length < 2) return even
-  const first = times[0]
-  const span = times[length - 1] - first
-  if (!(span > 0) || times.some((time, index) => time === null || (index && time < times[index - 1]))) return even
-  return times.map((time) => (time - first) / span)
+  if (!length || times.length !== length) return null
+  return times.some((time, index) => time === null || (index && time < times[index - 1])) ? null : times
 }
 
 /** SVG line and area; missing samples break the path rather than becoming zero. */
@@ -253,19 +258,48 @@ export function scaleText(scale, unit) {
 // one-minute average beside each core, so the view changes slowly rather than every sample.
 export const HEAT_COLUMNS = 48
 export const RECENT_SAMPLES = 30
+export const RECENT_SECONDS = 60
 
 function mean(values) {
   const numbers = (values || []).filter(isNumber)
   return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null
 }
 
-/** A series split into `columns` equal slices of time, each the mean of its samples. */
-export function columnMeans(values, columns = HEAT_COLUMNS) {
+/** The heatmap column a sample falls in: by board time when `timestamps` cover every sample, else by count. */
+function columnOf(index, length, columns, times) {
+  if (length <= columns) return index
+  const span = times ? times[length - 1] - times[0] : 0
+  if (span > 0) return Math.min(columns - 1, Math.floor(((times[index] - times[0]) / span) * columns))
+  const size = length / columns
+  return Math.min(columns - 1, Math.max(0, Math.ceil((index + 1) / size - 1e-9) - 1))
+}
+
+/** A series split into `columns` equal slices of time, each the mean of its samples (null where none). */
+export function columnMeans(values, columns = HEAT_COLUMNS, timestamps = null) {
   const list = values || []
   if (!list.length) return []
   if (list.length <= columns) return list.map((value) => (isNumber(value) ? value : null))
-  const size = list.length / columns
-  return Array.from({ length: columns }, (_, column) => mean(list.slice(Math.floor(column * size), Math.floor((column + 1) * size))))
+  const times = boardSeconds(timestamps, list.length)
+  const slices = Array.from({ length: columns }, () => [])
+  list.forEach((value, index) => slices[columnOf(index, list.length, columns, times)].push(value))
+  return slices.map(mean)
+}
+
+/** The newest sample in a heatmap column, to say how long ago that slice was; -1 when it holds none. */
+export function newestInColumn(column, length, columns, timestamps = null) {
+  const times = boardSeconds(timestamps, length)
+  for (let index = length - 1; index >= 0; index -= 1) {
+    if (columnOf(index, length, columns, times) === column) return index
+  }
+  return -1
+}
+
+/** The samples of the last minute by board time; the last RECENT_SAMPLES when timestamps cannot tell. */
+function recentValues(values, timestamps) {
+  const times = boardSeconds(timestamps, values.length)
+  if (!times) return values.slice(-RECENT_SAMPLES)
+  const since = times[times.length - 1] - RECENT_SECONDS
+  return values.filter((_, index) => times[index] > since)
 }
 
 /** A 0-100 load as one blue: pale when idle, deep when busy. Missing reads as the empty track. */
@@ -284,15 +318,15 @@ function toneOf(value, warn, critical) {
 }
 
 /** Heatmap rows plus one-minute average and busiest-core summaries. */
-export function coreSummary(cores, series) {
+export function coreSummary(cores, series, timestamps = null) {
   const rows = (cores || []).map((core) => {
     const values = series?.[core.key] || []
-    const recent = mean(values.slice(-RECENT_SAMPLES))
+    const recent = mean(recentValues(values, timestamps))
     return {
       key: core.key,
       name: core.short || core.label,
       label: core.label,
-      cells: columnMeans(values),
+      cells: columnMeans(values, HEAT_COLUMNS, timestamps),
       recent,
       tone: toneOf(recent, core.warn, core.critical)
     }
