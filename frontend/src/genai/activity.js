@@ -16,11 +16,16 @@
 //   micOpening    the browser is opening the microphone (it may be asking permission)
 //   transcribing  a recording is being turned into text
 //   modelOp       a model load, unload or speech-model switch runs
+//   benchmarking  the benchmark is running (it loads models and keeps the board busy)
+//   documentTask  a document upload, reset or clear is running
+//   documentsAvailable  the board can answer from documents
+//   benchmarkAvailable  the board offers the benchmark
+//   useDocuments  questions are sent with the documents
 //   downloading   a model download runs
 export function allowedActions(state) {
   const s = state || {}
   const listening = Boolean(s.recording || s.micOpening || s.transcribing)
-  const ready = Boolean(s.usable && !s.modelOp)
+  const ready = Boolean(s.usable && !s.modelOp && !s.benchmarking)
   const canChat = ready && Boolean(s.hasChatModel)
   // Models change only when nothing is using them (an open camera preview is
   // about to give the current model a picture).
@@ -28,7 +33,9 @@ export function allowedActions(state) {
   return {
     listening,
     typeMessage: canChat,
-    send: canChat && !s.replying && !listening && Boolean(s.hasDraft),
+    // While the documents are rebuilt their search is down, so a question
+    // that asks for them waits.
+    send: canChat && !s.replying && !listening && Boolean(s.hasDraft) && !(s.useDocuments && s.documentTask),
     stopReply: Boolean(s.replying),
     attachPicture: canChat && Boolean(s.sees),
     openCamera: canChat && Boolean(s.sees) && !s.cameraOpen,
@@ -41,8 +48,15 @@ export function allowedActions(state) {
     changeSpeechModel: modelsQuiet,
     // Requests in flight belong to the board they started on (a model load
     // can't be stopped there), so the address waits until they finish.
-    changeBoard: !s.replying && !listening && !s.modelOp && !s.downloading,
+    changeBoard: !s.replying && !listening && !s.modelOp && !s.downloading && !s.benchmarking && !s.documentTask,
     searchModels: !s.downloading,
-    downloadModel: !s.downloading
+    downloadModel: !s.downloading,
+    // The benchmark loads and unloads models: the same rule as changing them.
+    openBenchmark: modelsQuiet && !s.documentTask && Boolean(s.benchmarkAvailable),
+    // Fixed for the length of a reply: the reply was sent with or without them.
+    toggleDocuments: Boolean(s.documentsAvailable) && !s.replying,
+    // A reply that uses the documents may still be searching them.
+    // ... and a spoken question may be about to ask them.
+    documentTasks: ready && !s.documentTask && !(s.replying && s.useDocuments) && !listening
   }
 }

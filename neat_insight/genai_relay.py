@@ -43,10 +43,12 @@ _ALLOWED_PREFIXES = (
     "piperplus/",
     "supertonic/",
     "voices/",
+    "rag/",
 )
-# Quick status calls fail fast so the tab can show "unavailable"; model loads,
-# downloads and streamed replies can legitimately run for minutes.
-_QUICK_PATHS = ("health", "models/status", "models/catalog")
+# Quick status and control calls fail fast so the tab can show "unavailable"
+# or give up on a stuck run; model loads, downloads, document updates and
+# streamed replies can legitimately run for minutes.
+_QUICK_PATHS = ("health", "models/status", "models/catalog", "benchmark/status", "benchmark/stop", "rag/status")
 _QUICK_TIMEOUT_S = 5.0
 _LONG_TIMEOUT_S = 900.0
 _STREAM_CHUNK = 64 * 1024

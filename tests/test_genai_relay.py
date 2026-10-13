@@ -196,12 +196,26 @@ class GenaiRelayTests(unittest.TestCase):
 
     def test_refuses_shutdown_and_paths_outside_the_studio_api(self):
         self._configure(url=self.board)
-        for path in ("shutdown", "playground/", "static/newui.js", "models/../shutdown", "settingsx"):
+        for path in ("shutdown", "playground/", "static/newui.js", "models/../shutdown", "settingsx",
+                     "upload-to-rag", "rag/../shutdown"):
             with self.subTest(path=path):
                 response = self.client.post(f"/api/genai/{path}")
                 self.assertEqual(response.status_code, 404)
                 self.assertEqual(response.get_json()["reason"], "not-relayed")
         self.assertEqual(_FakeStudio.requests, [])
+
+    def test_relays_document_search_routes(self):
+        self.assertTrue(relay.is_allowed_path("rag/status"))
+        self.assertTrue(relay.is_allowed_path("rag/upload"))
+        self.assertFalse(relay.is_allowed_path("upload-to-rag"))
+
+    def test_status_and_stop_calls_fail_fast(self):
+        # A board that stops answering must not hold the benchmark's polling
+        # (or Stop) for the long timeout meant for loads and replies.
+        for path in ("benchmark/status", "benchmark/stop", "rag/status", "health", "models/status"):
+            self.assertIn(path, relay._QUICK_PATHS)
+        for path in ("models/load", "benchmark/run", "rag/upload", "v1/chat/completions"):
+            self.assertNotIn(path, relay._QUICK_PATHS)
 
     def test_streams_server_sent_events_without_buffering(self):
         self._configure(url=self.board)
