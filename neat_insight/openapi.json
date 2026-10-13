@@ -935,7 +935,7 @@
       "get": {
         "tags": ["Peripherals"],
         "summary": "Read the microphone test",
-        "description": "The latest microphone test on the selected board: while it records, its elapsed time and the level of the audio just received, for a live meter; once finished, its level and `audio_url`, or its error. `null` before any test. Never contacts the board.",
+        "description": "The latest microphone test on the selected board: while it records, its elapsed time and the level of the audio just received, for a live meter; once finished, its level and `audio_url`, or its error. `null` before any test, and once a scan lists another device under the microphone's id (a replug in the same port). Never contacts the board.",
         "operationId": "getMicrophoneTest",
         "responses": {
           "200": {"description": "The test, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"oneOf": [{"$ref": "#/components/schemas/MicrophoneTest"}, {"type": "null"}]}}}}}},
@@ -959,7 +959,7 @@
       "get": {
         "tags": ["Peripherals"],
         "summary": "Download the test recording",
-        "description": "The finished recording of the selected board as 16-bit PCM WAV. `404` once a newer test replaced it or another board was selected.",
+        "description": "The finished recording of the selected board as 16-bit PCM WAV. `404` once a newer test replaced it, another board was selected, or a scan lists another device under the microphone's id.",
         "operationId": "getMicrophoneTestAudio",
         "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {

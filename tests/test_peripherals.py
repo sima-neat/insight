@@ -1381,6 +1381,26 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertFalse(mictest._current.stop_requested)
 
 
+    def test_a_rescan_listing_another_device_under_the_id_drops_the_finished_test(self):
+        # Codex 4261034878: a replug in the same port keeps the id, and the old device's recording was offered.
+        self.client.post("/api/peripherals/refresh")
+        self.answer_checks(mic_check(users={YETI: []}), lambda argv, on_stdout, cancel: ExecResult(0, sine(0.5), b""))
+        self.assertEqual(self.start(seconds=1).status_code, 202)
+        mictest._current.thread.join(2)
+        test = self.mic_test()
+        self.assertEqual(test["state"], "ready")
+        url = test["audio_url"]
+        self.sentinel = catalog(imx477(), yeti(), revision=2)  # any other change keeps the result
+        self.client.post("/api/peripherals/refresh")
+        self.assertEqual(self.mic_test()["token"], test["token"])
+        replaced = yeti()
+        replaced["identity"]["card_index"] = 3
+        self.sentinel = catalog(imx477(), replaced, revision=3)
+        self.client.post("/api/peripherals/refresh")
+        self.assertIsNone(self.mic_test())
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertIsNone(mictest._current)
+
     def test_another_board_cannot_download_the_recording(self):
         test = mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
         test.finish(wav=b"RIFF....")

@@ -69,6 +69,16 @@ def find_microphone(snapshot: dict, mic_id: str) -> dict:
     raise BoardError("not_found", f"The last scan lists no microphone `{mic_id}`.", hint=UNPLUGGED_HINT)
 
 
+# The parts of a microphone's catalog record that name the device a test records from.
+_RECORD_KEYS = ("capture_target", "identity")
+
+
+def scanned_record(scanned: Optional[dict], mic_id: str) -> Optional[dict]:
+    """The capture target and identity the scan lists for this microphone, or None when it lists none."""
+    listed = next((item for item in (scanned or {}).get("devices", []) if item.get("id") == mic_id), None)
+    return None if listed is None else {key: listed.get(key) for key in _RECORD_KEYS}
+
+
 def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
     """The selector and format to record with, from Sentinel's current catalog.
 
@@ -79,8 +89,8 @@ def bind_microphone(catalog: dict, scanned: dict, mic_id: str) -> dict:
     microphone = next((item for item in catalog.get("devices", []) if item.get("id") == mic_id), None)
     if not microphone or microphone.get("type") != "microphone":
         raise BoardError("not_found", "That microphone is no longer in SiMa Sentinel's catalog.", hint=UNPLUGGED_HINT)
-    listed = next((item for item in scanned.get("devices", []) if item.get("id") == mic_id), None)
-    if listed is None or any(listed.get(key) != microphone.get(key) for key in ("capture_target", "identity")):
+    record = scanned_record(scanned, mic_id)
+    if record is None or record != {key: microphone.get(key) for key in _RECORD_KEYS}:
         raise BoardError(
             "stale_snapshot",
             "This microphone changed in SiMa Sentinel's catalog since the last scan.",
@@ -193,10 +203,13 @@ class _Stopped(Exception):
 class MicTest:
     """One recording: its live level while arecord runs, then the WAV or the error."""
 
-    def __init__(self, generation: int, mic_id: str, device: str, rate: int, channels: int, seconds: int):
+    def __init__(self, generation: int, mic_id: str, device: str, rate: int, channels: int, seconds: int,
+                 record: Optional[dict] = None):
         self.token = uuid.uuid4().hex
         self.generation = generation
         self.mic_id = mic_id
+        # The scanned record the test was bound to: a later scan listing another device under this id ends it.
+        self.record = record
         self.device = device
         self.rate, self.channels, self.seconds = rate, channels, seconds
         self.state = "recording"
@@ -285,7 +298,7 @@ def refuse_if_running(generation: int) -> None:
         raise _test_running()
 
 
-def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
+def start(session, mic_id: str, bound: dict, seconds: int, record: Optional[dict] = None) -> dict:
     """Start recording in the background and return at once; poll `current()` for the level.
 
     One test records at a time, so the board runs at most one arecord for Insight.
@@ -294,7 +307,8 @@ def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
     with _lock:
         if _recording_on(session.generation):
             raise _test_running()
-        test = MicTest(session.generation, mic_id, bound["selector"], bound["rate"], bound["channels"], seconds)
+        test = MicTest(session.generation, mic_id, bound["selector"], bound["rate"], bound["channels"], seconds,
+                       record)
         test.thread = threading.Thread(target=_record, args=(session, test), name="mic-test", daemon=True)
         _current = test
     test.thread.start()
@@ -321,14 +335,24 @@ def stop(generation: int) -> Optional[dict]:
     return test.status()
 
 
-def current(generation: int) -> Optional[dict]:
-    test = _current
-    return test.status() if test is not None and test.generation == generation else None
+def _of_scan(test: MicTest, scanned: Optional[dict]) -> bool:
+    """Whether the latest scan still lists the device this test recorded; a replaced one ends and forgets it."""
+    if test.record is None or scanned is None or scanned_record(scanned, test.mic_id) == test.record:
+        return True
+    discard(test.token)
+    return False
 
 
-def audio(token: str, generation: int) -> Optional[bytes]:
+def current(generation: int, scanned: Optional[dict] = None) -> Optional[dict]:
     test = _current
-    if test is None or test.token != token or test.generation != generation:
+    if test is None or test.generation != generation or not _of_scan(test, scanned):
+        return None
+    return test.status()
+
+
+def audio(token: str, generation: int, scanned: Optional[dict] = None) -> Optional[bytes]:
+    test = _current
+    if test is None or test.token != token or test.generation != generation or not _of_scan(test, scanned):
         return None
     with test.lock:
         return test.wav if test.state == "ready" else None
