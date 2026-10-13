@@ -19,6 +19,8 @@ FIRST_FRAME_TIMEOUT_SEC = 10.0
 UNCLAIMED_TIMEOUT_SEC = 15.0
 # A relay that receives nothing for this long ends, and the preview with it.
 STALL_TIMEOUT_SEC = 10.0
+# The longest frame wait: a start waits while holding the board lock, so board changes and refreshes wait too.
+MAX_FRAME_WAIT_SEC = 60.0
 START_TIMEOUT_SEC = 15.0
 STOP_TIMEOUT_SEC = 15.0
 PID_TIMEOUT_SEC = 2.0
@@ -104,9 +106,10 @@ class _Relay:
 
 
 def _frame_wait(base: float, rate) -> float:
-    """How long to wait for a frame: `base`, or two frame periods for a slower mode. V4L2 lets a camera
-    list any frame interval, so a mode can send a frame less often than `base` and still be healthy."""
-    return max(base, 2 / float(rate))
+    """How long to wait for a frame: `base`, or two frame periods for a slower mode, at most
+    MAX_FRAME_WAIT_SEC. V4L2 lets a camera list any frame interval, so a mode can send a frame less often
+    than `base` and still be healthy."""
+    return max(base, min(2 / float(rate), MAX_FRAME_WAIT_SEC))
 
 
 class PreviewManager:
