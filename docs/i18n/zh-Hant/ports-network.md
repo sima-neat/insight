@@ -82,6 +82,21 @@ metadata: UDP 9100 + N
 
 使用 Insight UI 中的系統資訊來檢查實際暴露的端口，然後再假設 URL 錯誤。
 
+## 選用的瀏覽器端設定
+
+託管環境可以將已配對 DevKit 使用的位址，與向外部瀏覽器公告的位址分開。Insight 會讀取兩個僅在啟動時套用的選用檔案：
+
+| 檔案 | 用途 |
+| --- | --- |
+| `/home/docker/.insight-config/browser-ice-address` | 由 vf 檢視器與 MediaMTX WHIP 端點共同公告、瀏覽器可連線的一個 IPv4 位址。 |
+| `/home/docker/.insight-config/launch-url` | 一個受信任的絕對 HTTP 或 HTTPS 啟動 URL。Insight 會使用其來源產生檢視器、WHIP 與 HTTP MJPEG URL。 |
+
+若沒有 `browser-ice-address`，Insight 會保留既有的 `CONTAINER_HOST_IP` 行為。若沒有 `launch-url`，產生的瀏覽器 URL 會繼續使用請求主機與 SDK 連接埠對應。因此，這兩個檔案會各自啟用託管環境行為，不會改變一般的本機或 DevKit 安裝。
+
+`browser-ice-address` 會在 vf 或 MediaMTX 啟動前驗證。空白或格式錯誤的瀏覽器位址會使 Insight 無法進入就緒狀態，而不是默默公告無法連線的位址。`launch-url` 是建議性設定：Insight 接受包含路徑、查詢或片段，且具有 ASCII 主機名稱的完整 URL，但只使用其 HTTP(S) 來源。無效的啟動 URL 會記錄警告，並保留舊有的請求主機與連接埠對應 URL 產生方式。請以不可分割的方式取代檔案、執行 `insight-admin restart`，再檢查 `/api/health`，確認新程序套用了該位址與公開來源。
+
+瀏覽器 ICE 位址不需要指派給本機網路介面。公有雲 IPv4 位址通常透過 1:1 NAT 到達主機。WebRTC 與 `webrtcWhipIce` UDP 連接埠仍必須公開，並由周邊網路原則允許。
+
 ## 使用連接埠對應表來設定應用程式。
 
 使用應用程式的位置來決定是否使用預設的容器連接埠，或使用 SDK 主機公開的連接埠。
