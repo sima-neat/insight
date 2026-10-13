@@ -137,7 +137,12 @@ class BoardManager:
     def test(self) -> dict:
         """Read the selected board's identity; return the state of that same board, or refuse if it changed."""
         session = self.session()
-        session.identity()
+        try:
+            session.identity()
+        except BoardError:
+            # A failure from a board that is no longer selected is a stale result, not that board's error.
+            session.require_current()
+            raise
         with self._lock:
             session.require_current()
             return self.state()

@@ -202,6 +202,20 @@ class BoardApiTests(unittest.TestCase):
             response = self.client.post("/api/board/test")
         self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
 
+    def test_a_failed_test_whose_board_changed_meanwhile_is_refused(self):
+        # Codex (790bf80): a failure from the departed board returned its 502/504 and guidance, not 409.
+        self.client.get("/api/board")
+        manager = self.app.extensions["neat_board"]
+        old = self.transports[-1]
+
+        def switch_then_fail(argv, *, timeout, stdin=None):
+            manager.select("10.1.1.1", 22, "sima")
+            raise BoardError("unreachable", "Could not connect", hint="Check the cable")
+
+        old.exec = switch_then_fail
+        response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
+
     def test_invalid_selection_returns_400_with_hint(self):
         response = self.client.post("/api/board/select", json={"host": "", "user": "sima"})
         self.assertEqual(response.status_code, 400)
