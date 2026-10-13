@@ -1,10 +1,11 @@
-"""Read-only camera check, executed on the board as ``python3 - REQUEST``.
+"""Read-only peripheral check, executed on the board as ``python3 - REQUEST``.
 
-Stdlib only and Python 3.8 compatible. SiMa Sentinel discovers the cameras; this
-adds what Sentinel does not report and the Peripherals page shows: which
-processes hold each camera's device nodes. It never opens a camera. REQUEST is
-JSON ``{"cameras": {id: [device nodes]}}``; a media device brings every node of
-its media graph. It prints one JSON document.
+Stdlib only and Python 3.8 compatible. SiMa Sentinel discovers the cameras and
+microphones; this adds what Sentinel does not report: which processes hold each
+device's nodes, and how many of a microphone's capture substreams are open now. It
+never opens a camera or a sound device. REQUEST is JSON ``{"cameras": {id: [device
+nodes]}, "microphones": {id: [capture PCM node]}}``; a media device brings every
+node of its media graph. It prints one JSON document.
 """
 import json
 import os
@@ -21,6 +22,7 @@ SEARCH_PATH = os.pathsep.join(
 )
 COMMAND_ENV = dict(os.environ, PATH=SEARCH_PATH, LC_ALL="C")
 _MEDIA_RE = re.compile(r"/dev/media[0-9]+")
+_PCM_RE = re.compile(r"/dev/snd/pcmC([0-9]+)D([0-9]+)c")
 
 
 def which(name):
@@ -131,6 +133,26 @@ def user_checker(method, tools):
     return lambda nodes: None
 
 
+def capture_open(node):
+    """How many substreams of a capture PCM are open now, from /proc/asound; None when unreadable.
+
+    A sound server such as PulseAudio opens a new microphone for a few seconds after it is plugged in,
+    and no event marks the release, so this is read live rather than taken from the last scan.
+    """
+    match = _PCM_RE.fullmatch(node or "")
+    if not match:
+        return None
+    directory = os.path.join(PROC_ROOT, "asound", "card" + match.group(1), "pcm%sc" % match.group(2))
+    try:
+        subs = [name for name in os.listdir(directory) if re.fullmatch(r"sub[0-9]+", name)]
+    except OSError:
+        return None
+    statuses = [_read(os.path.join(directory, sub, "status")) for sub in subs]
+    if not subs or None in statuses:
+        return None
+    return sum(1 for status in statuses if status != "closed")
+
+
 def camera_nodes(nodes, tools, failures):
     """The camera's nodes plus its media graphs' nodes, and whether every graph could be read."""
     found = set(nodes)
@@ -154,23 +176,30 @@ def collect(request):
     failures = []
     method = availability_method(tools)
     check_users = user_checker(method, tools)
-    users = {}
+    users, opened = {}, {}
+    for device_id, nodes in (request.get("microphones") or {}).items():
+        opened[device_id] = capture_open(nodes[0]) if nodes else None
+        # Every open of a capture PCM attaches a substream, so with none open nobody holds it.
+        users[device_id] = [] if opened[device_id] == 0 else check_users(nodes) if nodes else None
     cameras = request.get("cameras") or {}
-    for camera_id, nodes in cameras.items():
+    for device_id, nodes in cameras.items():
         if not nodes:
-            users[camera_id] = None
+            users[device_id] = None
             continue
         found, complete = camera_nodes(nodes, tools, failures)
         held = check_users(found)
         # Nobody holding the nodes that could be read proves nothing when the graph's video and
         # subdevice nodes could not be listed: report the camera as unchecked, not free.
-        users[camera_id] = held if held or complete else None
-    return {
+        users[device_id] = held if held or complete else None
+    result = {
         "tools": {name: bool(path) for name, path in tools.items() if name != "sudo"},
         "availability_method": method,
         "users": users,
         "failures": failures,
     }
+    if "microphones" in request:
+        result["capture_open"] = opened
+    return result
 
 
 if __name__ == "__main__":

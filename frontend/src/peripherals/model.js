@@ -10,19 +10,25 @@ const CONNECTIONS = [
   { id: 'usb', label: 'USB' }
 ]
 
+// Microphones are ALSA capture devices; anything that is not USB audio is on the board itself.
+const MIC_CONNECTIONS = [
+  { id: 'usb', label: 'USB (ALSA)' },
+  { id: 'onboard', label: 'On-board (ALSA)' }
+]
+
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
 
-// Device kinds Insight knows a name and an icon for. Only "camera" has a view;
-// the rest are listed so the shape of the page does not change when the backend
-// starts reporting them (contract: build nothing for other kinds yet). A kind
-// the backend invents gets the generic "device" icon.
+// Device kinds Insight knows a name and an icon for. Cameras and microphones
+// have a view; the rest are listed so the shape of the page does not change when
+// the backend starts reporting them (contract: build nothing for other kinds
+// yet). A kind the backend invents gets the generic "device" icon.
 const DEVICE_KINDS = [
   { id: 'camera', label: 'Cameras', icon: 'camera' },
   { id: 'microphone', label: 'Microphones', icon: 'microphone' },
   { id: 'lidar', label: 'LiDAR', icon: 'lidar' }
 ]
 
-const SUPPORTED_KINDS = new Set(['camera'])
+const SUPPORTED_KINDS = new Set(['camera', 'microphone'])
 
 const SEVERITY = {
   error: { label: 'Error', tone: 'periph-danger', rank: 0 },
@@ -93,11 +99,19 @@ export function defaultTargetText(defaults) {
   return ''
 }
 
-export function groupCameras(items) {
-  const cameras = (items || []).filter((item) => item?.kind === 'camera')
-  return CONNECTIONS
-    .map((c) => ({ ...c, items: cameras.filter((item) => item.connection === c.id) }))
+function groupKind(items, kind, connections) {
+  const devices = (items || []).filter((item) => item?.kind === kind)
+  return connections
+    .map((c) => ({ ...c, items: devices.filter((item) => item.connection === c.id) }))
     .filter((group) => group.items.length)
+}
+
+export function groupCameras(items) {
+  return groupKind(items, 'camera', CONNECTIONS)
+}
+
+export function groupMicrophones(items) {
+  return groupKind(items, 'microphone', MIC_CONNECTIONS)
 }
 
 function kindLabel(kind) {
@@ -176,6 +190,143 @@ export function cameraSubtitle(camera) {
   // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
+}
+
+// The subtitle only ties a webcam's or headset's microphone
+// to the camera item the same USB device produced.
+export function microphoneSubtitle(mic) {
+  const name = mic?.device?.part_of?.name
+  return name ? `Part of ${name}` : ''
+}
+
+export function sampleRateLabel(hz) {
+  const khz = Number(hz) / 1000
+  return `${Number.isInteger(khz) ? khz : Number(khz.toFixed(3))} kHz`
+}
+
+function rateList(rates) {
+  const khz = rates.map((hz) => sampleRateLabel(hz).replace(' kHz', ''))
+  return khz.length ? `${khz.join(' · ')} kHz` : ''
+}
+
+// One segmented row per distinct capture combination the device reports, e.g.
+// S24_3LE | 2 ch | 24-bit | 32 · 44.1 · 48 kHz. A continuous rate range stays a range ("8–48 kHz"):
+// expanding it into a list would invent rates the device never named.
+export function captureModes(mic) {
+  if (!Array.isArray(mic?.capture)) return null
+  return mic.capture.map((mode, index) => {
+    const rates = mode.rate_range
+      ? `${sampleRateLabel(mode.rate_range.min).replace(' kHz', '')}–${sampleRateLabel(mode.rate_range.max)}`
+      : rateList(mode.rates || [])
+    const badges = [
+      mode.format || '',
+      Number.isFinite(mode.channels) ? `${mode.channels} ch` : '',
+      Number.isFinite(mode.bits) ? `${mode.bits}-bit` : '',
+      rates
+    ].filter(Boolean)
+    return { key: `${index}-${mode.format}-${mode.channels}-${mode.bits}`, badges }
+  })
+}
+
+// --- Microphone test -------------------------------------------------------
+// Like a video call's "Test microphone": record on the board until Stop (or the backend's cap) while
+// a meter shows the live level, then play it back here with the meter following the playback.
+
+export const MIC_TEST_IDLE = { status: 'idle', test: null, error: null }
+// The meter spans -50..0 dBFS: a quiet room lights a segment or two, speech most of the bar.
+export const METER_FLOOR_DBFS = -50
+
+export function nextMicTestState(current, event) {
+  const state = current || MIC_TEST_IDLE
+  switch (event?.type) {
+    case 'record':
+      return { status: 'recording', test: null, error: null }
+    case 'recorded':
+      return state.status === 'recording' ? { status: 'playing', test: event.test, error: null } : state
+    case 'failed':
+      return state.status === 'recording' ? { status: 'error', test: null, error: event.error } : state
+    case 'played': // the recording ended, or Stop playing
+      return state.status === 'playing' ? { ...state, status: 'done' } : state
+    case 'replay':
+      return state.status === 'done' ? { ...state, status: 'playing' } : state
+    case 'resume': // a test the backend was already running or finished for this microphone
+      if (state.status !== 'idle' || !event.test) return state
+      return event.test.state === 'recording'
+        ? { status: 'recording', test: null, error: null }
+        : { status: 'done', test: event.test, error: null }
+    case 'reset':
+      return MIC_TEST_IDLE
+    default:
+      return state
+  }
+}
+
+// How many of `count` meter segments a level lights.
+export function meterSegments(levelDbfs, count) {
+  if (levelDbfs === null || levelDbfs === undefined || !Number.isFinite(Number(levelDbfs))) return 0
+  const fraction = (Number(levelDbfs) - METER_FLOOR_DBFS) / -METER_FLOOR_DBFS
+  return Math.round(Math.max(0, Math.min(1, fraction)) * count)
+}
+
+// Green for most of the bar, amber near the top, red at the end, as a level meter reads.
+export function segmentTone(index, count) {
+  if (index < Math.round(count * 0.7)) return 'low'
+  if (index < Math.round(count * 0.9)) return 'mid'
+  return 'high'
+}
+
+// The backend's current test when it belongs to this microphone and is still recording or has a
+// recording to replay. A detail mounted after it started (another microphone was selected in
+// between) takes it up instead of looking idle while the board records.
+export function micTestToResume(micId, test) {
+  if (!test || test.id !== micId) return null
+  return test.state === 'recording' || test.state === 'ready' ? test : null
+}
+
+// A start that failed without the backend's answer (the connection dropped, or a gateway replied
+// without an API body) may still have started recording, and a retry is then refused with
+// `test_running`. The backend's current test for this microphone is taken up when it is not the
+// one this detail already held (`heldToken`); otherwise the start's error stands.
+export function micStartMayHaveRun(error) {
+  return ['network', 'test_running', ''].includes(error?.code ?? '')
+}
+
+export function micTestAfterFailedStart(micId, error, test, heldToken) {
+  if (!micStartMayHaveRun(error)) return null
+  return test?.token === heldToken ? null : micTestToResume(micId, test)
+}
+
+// What to say about a finished recording: only when it needs attention.
+export function micLevelNotice(level) {
+  if (!level) return ''
+  if (level.silent) return 'Nothing was picked up. Check the microphone\'s mute button and gain, then test again.'
+  return ''
+}
+
+export function micTestErrorAction(error) {
+  switch (error?.code) {
+    case 'microphone_in_use':
+      return 'Stop the application that is recording from it, then test again. Insight never stops it for you.'
+    case 'not_found':
+    case 'stale_snapshot':
+      return 'Refresh, then test again.'
+    case 'tool_missing':
+      return 'Install alsa-utils on the board, then test again.'
+    default:
+      return error?.hint || ''
+  }
+}
+
+// The one button's label and what pressing it does, for each state.
+export function micTestAction(status, stopping) {
+  if (status === 'recording') return { label: stopping ? 'Stopping…' : 'Stop recording', action: 'stop', disabled: stopping }
+  if (status === 'playing') return { label: 'Stop playing', action: 'stop-playing', disabled: false }
+  return { label: 'Test microphone', action: 'record', disabled: false }
+}
+
+export function formatClock(seconds) {
+  const whole = Math.max(0, Math.floor(Number(seconds) || 0))
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
 function rank(tier) {
@@ -405,11 +556,19 @@ export function previewNeedsRestart(state, cameraId, next) {
   return !sameSelection(session.mode, next)
 }
 
-export function resolveCameraId(snapshot, previousId) {
-  const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items)
-  if (previousId && cameras.some((c) => c.id === previousId)) return previousId
+function resolveId(groups, snapshot, previousId) {
+  const devices = groups.flatMap((group) => group.items)
+  if (previousId && devices.some((d) => d.id === previousId)) return previousId
   if (previousId && snapshot?.changes?.removed?.some((r) => r.id === previousId)) return previousId
-  return cameras[0]?.id || null
+  return devices[0]?.id || null
+}
+
+export function resolveCameraId(snapshot, previousId) {
+  return resolveId(groupCameras(snapshot?.items), snapshot, previousId)
+}
+
+export function resolveMicrophoneId(snapshot, previousId) {
+  return resolveId(groupMicrophones(snapshot?.items), snapshot, previousId)
 }
 
 export function isSnapshotStale(board, snapshot) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CameraDetail, { cameraSubtitle } from './peripherals/CameraDetail.jsx'
 import KindIcon from './peripherals/KindIcon.jsx'
+import MicrophoneDetail, { microphoneSubtitle } from './peripherals/MicrophoneDetail.jsx'
 import { requestJson } from './peripherals/api.js'
 import {
   CONNECTION_ERROR_CODES,
@@ -12,6 +13,7 @@ import {
   countLabel,
   deviceTabs,
   groupCameras,
+  groupMicrophones,
   isSnapshotStale,
   modeLabel,
   nextPreviewState,
@@ -19,6 +21,7 @@ import {
   previewNeedsRestart,
   resolveCameraId,
   resolveDeviceKind,
+  resolveMicrophoneId,
   resolveSelection,
   restartSelection,
   runPreviewStart,
@@ -142,9 +145,20 @@ function DeviceKindNav({ tabs, activeId, onSelect }) {
   )
 }
 
-function CameraList({ groups, selectedId, onSelect }) {
+// Every detected device is connected; a camera also shows its verdict. A microphone carries no verdict,
+// and whether another program holds it is found out when its test starts.
+function cameraPills(camera) {
+  return [connectionPill(camera), cameraTierPill(camera)]
+}
+
+function microphonePills(microphone) {
+  return [connectionPill(microphone)]
+}
+
+// One listbox per device kind: arrow keys, Home and End move the selection; only the selected row is tabbable.
+function DeviceList({ label, groups, selectedId, onSelect, subtitle, pills }) {
   const rowRefs = useRef(new Map())
-  const order = groups.flatMap((group) => group.items.map((camera) => camera.id))
+  const order = groups.flatMap((group) => group.items.map((device) => device.id))
   const focusId = order.includes(selectedId) ? selectedId : order[0]
 
   function onKeyDown(event) {
@@ -158,30 +172,31 @@ function CameraList({ groups, selectedId, onSelect }) {
   }
 
   return (
-    <div className="periph-list" role="listbox" aria-label="Detected cameras" onKeyDown={onKeyDown}>
+    <div className="periph-list" role="listbox" aria-label={label} onKeyDown={onKeyDown}>
       {groups.map((group) => (
         <div key={group.id} className="periph-group" role="group" aria-labelledby={`periph-group-${group.id}`}>
           <div id={`periph-group-${group.id}`} className="periph-group-title" role="presentation">{group.label}</div>
-          {group.items.map((camera) => {
-            const tier = cameraTierPill(camera)
+          {group.items.map((device) => {
+            const text = subtitle(device)
             return (
               <div
-                key={camera.id}
-                ref={(node) => (node ? rowRefs.current.set(camera.id, node) : rowRefs.current.delete(camera.id))}
+                key={device.id}
+                ref={(node) => (node ? rowRefs.current.set(device.id, node) : rowRefs.current.delete(device.id))}
                 role="option"
-                aria-selected={camera.id === selectedId}
-                tabIndex={camera.id === focusId ? 0 : -1}
-                className={camera.id === selectedId ? 'periph-camera-row active' : 'periph-camera-row'}
-                onClick={() => onSelect(camera.id)}
+                aria-selected={device.id === selectedId}
+                tabIndex={device.id === focusId ? 0 : -1}
+                className={device.id === selectedId ? 'periph-camera-row active' : 'periph-camera-row'}
+                onClick={() => onSelect(device.id)}
               >
-                <span className="periph-camera-name">{camera.name}</span>
+                <span className="periph-camera-name">{device.name}</span>
                 {/* An empty subtitle must not render: the row is a grid, and a blank span would
                     leave this row taller than its neighbours. */}
-                {cameraSubtitle(camera) && <span className="periph-camera-id">{cameraSubtitle(camera)}</span>}
-                <span className="periph-pills">
-                  <Pill tone={connectionPill(camera).tone}>{connectionPill(camera).label}</Pill>
-                  <Pill tone={tier.tone}>{tier.label}</Pill>
-                </span>
+                {text && <span className="periph-camera-id">{text}</span>}
+                {pills(device).length > 0 && (
+                  <span className="periph-pills">
+                    {pills(device).map((pill) => <Pill key={pill.label} tone={pill.tone}>{pill.label}</Pill>)}
+                  </span>
+                )}
               </div>
             )
           })}
@@ -207,7 +222,7 @@ export default function PeripheralsView({
   const [scanError, setScanError] = useState(null)
   const [now, setNow] = useState(() => Date.now())
   const [kind, setKind] = useState('camera')
-  const [selectedId, setSelectedId] = useState(null)
+  const [selectedIds, setSelectedIds] = useState({})
   const [wanted, setWanted] = useState(null)
   const [preview, setPreview] = useState(PREVIEW_IDLE)
   const autoRefreshed = useRef(false)
@@ -217,12 +232,15 @@ export default function PeripheralsView({
   const tabs = useMemo(() => deviceTabs(snapshot?.items, { scanned: Boolean(snapshot?.scanned_at) }), [snapshot])
   const activeKind = resolveDeviceKind(tabs, kind)
   const groups = useMemo(() => groupCameras(snapshot?.items), [snapshot])
-  const activeId = resolveCameraId(snapshot, selectedId)
+  const activeId = resolveCameraId(snapshot, selectedIds.camera)
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
   const boardGenerationRef = useRef(board?.generation)
   boardGenerationRef.current = board?.generation
   const camera = groups.flatMap((group) => group.items).find((item) => item.id === activeId) || null
+  const micGroups = useMemo(() => groupMicrophones(snapshot?.items), [snapshot])
+  const activeMicId = resolveMicrophoneId(snapshot, selectedIds.microphone)
+  const mic = micGroups.flatMap((group) => group.items).find((item) => item.id === activeMicId) || null
   const selection = useMemo(() => {
     const resolved = camera && resolveSelection(camera, wanted?.id === camera.id ? wanted : null)
     return resolved ? { id: camera.id, ...resolved } : null
@@ -289,7 +307,8 @@ export default function PeripheralsView({
     // Follow the running preview, so opening the page does not stop it, and its mode, so the menus match the video.
     const adopted = adoptedSelection(session)
     if (adopted) {
-      setSelectedId(adopted.id)
+      setKind('camera')
+      setSelectedIds((current) => ({ ...current, camera: adopted.id }))
       setWanted(adopted)
     }
   }
@@ -307,8 +326,9 @@ export default function PeripheralsView({
       const data = await requestJson('/api/peripherals/refresh', { method: 'POST' })
       setSnapshot(data)
       setLoadError(null)
-      const count = groupCameras(data.items).reduce((total, group) => total + group.items.length, 0)
-      onStatus?.(`Scan complete: ${countLabel(count, 'camera')} on ${data.board?.label || 'the board'}.`)
+      const count = (list) => list.reduce((total, group) => total + group.items.length, 0)
+      const found = `${countLabel(count(groupCameras(data.items)), 'camera')}, ${countLabel(count(groupMicrophones(data.items)), 'microphone')}`
+      onStatus?.(`Scan complete: ${found} on ${data.board?.label || 'the board'}.`)
     } catch (err) {
       setScanError(normalizeError(err))
     } finally {
@@ -435,7 +455,8 @@ export default function PeripheralsView({
   const elapsed = Math.max(0, Math.round((now - scanStartedAt) / 1000))
   const scannedAt = snapshot?.scanned_at
   const changes = changeSummary(snapshot?.changes)
-  const removedName = snapshot?.changes?.removed?.find((item) => item.id === activeId)?.name || 'The selected camera'
+  const removedName = (id, fallback) => snapshot?.changes?.removed?.find((item) => item.id === id)?.name || fallback
+  const select = (kindId) => (id) => setSelectedIds((current) => ({ ...current, [kindId]: id }))
 
   let body = null
   if (loading || (boardLoading && !board)) body = <p className="hint">Loading peripherals…</p>
@@ -452,9 +473,39 @@ export default function PeripheralsView({
         <button type="button" className="btn-tonal" onClick={onOpenBoardPanel}>Choose a board</button>
       </Callout>
     )
-  } else if (activeKind !== 'camera') body = <p className="hint">Insight does not read this device kind yet.</p>
-  else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
-  else if (!scannedAt) body = !scanError && <p className="hint">Not scanned yet. Refresh to discover cameras on {target.label}.</p>
+  } else if (activeKind !== 'camera' && activeKind !== 'microphone') {
+    body = <p className="hint">Insight does not read this device kind yet.</p>
+  } else if (!scannedAt && scanning) body = <p className="hint">Scanning {target.label}…</p>
+  else if (!scannedAt) body = !scanError && <p className="hint">Not scanned yet. Refresh to discover devices on {target.label}.</p>
+  else if (activeKind === 'microphone' && !micGroups.length) {
+    body = (
+      <Callout tone="info" title={`No microphones detected on ${scannedLabel}`}>
+        <p>Connect a USB microphone, then refresh.</p>
+      </Callout>
+    )
+  } else if (activeKind === 'microphone') {
+    body = (
+      <div className="periph-grid">
+        <DeviceList
+          label="Detected microphones"
+          groups={micGroups}
+          selectedId={activeMicId}
+          onSelect={select('microphone')}
+          subtitle={microphoneSubtitle}
+          pills={microphonePills}
+        />
+        {mic ? (
+          <MicrophoneDetail mic={mic} />
+        ) : (
+          <div className="periph-detail">
+            <Callout title={`${removedName(activeMicId, 'The selected microphone')} is no longer detected`}>
+              <p>It was disconnected since the last refresh. Reconnect it and refresh, or pick another microphone from the list.</p>
+            </Callout>
+          </div>
+        )}
+      </div>
+    )
+  }
   else if (!groups.length) {
     body = (
       <Callout tone="info" title={`No cameras detected on ${scannedLabel}`}>
@@ -464,7 +515,14 @@ export default function PeripheralsView({
   } else {
     body = (
       <div className="periph-grid">
-        <CameraList groups={groups} selectedId={activeId} onSelect={setSelectedId} />
+        <DeviceList
+          label="Detected cameras"
+          groups={groups}
+          selectedId={activeId}
+          onSelect={select('camera')}
+          subtitle={cameraSubtitle}
+          pills={cameraPills}
+        />
         {camera ? (
           <CameraDetail
             camera={camera}
@@ -482,7 +540,7 @@ export default function PeripheralsView({
           />
         ) : (
           <div className="periph-detail">
-            <Callout title={`${removedName} is no longer detected`}>
+            <Callout title={`${removedName(activeId, 'The selected camera')} is no longer detected`}>
               <p>It was disconnected since the last refresh. Reconnect it and refresh, or pick another camera from the list.</p>
             </Callout>
           </div>

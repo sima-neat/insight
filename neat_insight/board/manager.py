@@ -41,9 +41,12 @@ class _ReportingTransport:
         self._generation = generation
         self._transport = transport
 
-    def exec(self, argv, *, timeout, stdin=None):
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
         try:
-            result = self._transport.exec(argv, timeout=timeout, stdin=stdin)
+            # Streaming arguments only when a caller uses them (the microphone test), so a transport
+            # that only runs commands still works.
+            extra = {key: value for key, value in (("on_stdout", on_stdout), ("cancel_event", cancel_event)) if value is not None}
+            result = self._transport.exec(argv, timeout=timeout, stdin=stdin, **extra)
         except BoardError as exc:
             self._manager._record(self._generation, error=exc)
             raise

@@ -9,6 +9,8 @@ _HTTP_STATUS = {
     "camera_in_use": 409,
     "mode_adjusted": 409,
     "preview_active": 409,
+    "microphone_in_use": 409,
+    "test_running": 409,
     "unreachable": 502,
     "auth_failed": 502,
     "tool_missing": 502,
