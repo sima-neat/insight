@@ -1,7 +1,7 @@
 import ast
+import contextlib
 import copy
 import json
-import os
 import math
 import struct
 import subprocess
@@ -223,6 +223,16 @@ def size_of(fmt, width, height):
     return next(s for s in fmt["sizes"] if (s["width"], s["height"]) == (width, height))
 
 
+def collect(request, *, euid=0, tools=None, **patches):
+    """board_check.collect as the given user, `which` answering from `tools`, with board_check functions replaced."""
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(board_check, "which", side_effect=(tools or {}).get))
+        stack.enter_context(mock.patch.object(board_check.os, "geteuid", return_value=euid))
+        for name, value in patches.items():
+            stack.enter_context(mock.patch.object(board_check, name, value))
+        return board_check.collect(request)
+
+
 class BoardCheckTests(unittest.TestCase):
     def test_source_parses_as_python_38(self):
         ast.parse(Path(board_check.__file__).read_text(encoding="utf-8"), feature_version=(3, 8))
@@ -244,11 +254,8 @@ class BoardCheckTests(unittest.TestCase):
                 return 0, "", ""
             return 0, " 4242", "/dev/media0:\n"
 
-        with mock.patch.object(board_check, "which", side_effect=tools.get), \
-             mock.patch.object(board_check, "run", side_effect=run), \
-             mock.patch.object(board_check.os, "geteuid", return_value=1000), \
-             mock.patch.object(board_check, "_read", return_value="gst-launch-1.0"):
-            result = board_check.collect({"cameras": {IMX477: ["/dev/media0"]}})
+        result = collect({"cameras": {IMX477: ["/dev/media0"]}}, euid=1000, tools=tools, run=run,
+                         _read=mock.Mock(return_value="gst-launch-1.0"))
         self.assertEqual(result["availability_method"], "sudo-fuser")
         self.assertEqual(result["users"], {IMX477: [{"pid": 4242, "command": "gst-launch-1.0"}]})
         self.assertIn(["/usr/bin/sudo", "-n", "/bin/fuser", "/dev/media0", "/dev/video0"], calls)
@@ -261,11 +268,8 @@ class BoardCheckTests(unittest.TestCase):
             def run(argv, timeout=10):
                 return (0, "", "") if argv[1:] == ["-n", "true"] else fuser_result
 
-            with self.subTest(fuser_result=fuser_result), \
-                 mock.patch.object(board_check, "which", side_effect=tools.get), \
-                 mock.patch.object(board_check, "run", side_effect=run), \
-                 mock.patch.object(board_check.os, "geteuid", return_value=1000):
-                result = board_check.collect({"cameras": {C920: ["/dev/video97"]}})
+            with self.subTest(fuser_result=fuser_result):
+                result = collect({"cameras": {C920: ["/dev/video97"]}}, euid=1000, tools=tools, run=run)
             self.assertEqual(result["availability_method"], "sudo-fuser")
             self.assertEqual(result["users"], {C920: expected})
 
@@ -275,32 +279,22 @@ class BoardCheckTests(unittest.TestCase):
             def run(argv, timeout=10):
                 return run_media_ctl
 
-            tools = {"media-ctl": media_ctl}
-            with self.subTest(media_ctl=media_ctl), \
-                 mock.patch.object(board_check, "which", side_effect=tools.get), \
-                 mock.patch.object(board_check, "run", side_effect=run), \
-                 mock.patch.object(board_check.os, "geteuid", return_value=0), \
-                 mock.patch.object(board_check, "scan_proc", return_value={}):
-                result = board_check.collect({"cameras": {IMX477: ["/dev/media0"], C920: ["/dev/video97"]}})
+            with self.subTest(media_ctl=media_ctl):
+                result = collect({"cameras": {IMX477: ["/dev/media0"], C920: ["/dev/video97"]}},
+                                 tools={"media-ctl": media_ctl}, run=run, scan_proc=mock.Mock(return_value={}))
             self.assertEqual(result["availability_method"], "proc-root")
             self.assertEqual(result["users"], {IMX477: None, C920: []})
 
     def test_an_unreadable_proc_leaves_availability_unknown_not_available(self):
         # Codex 4188915681: root without a listable /proc used to report every camera as available.
-        with mock.patch.object(board_check, "which", return_value=None), \
-             mock.patch.object(board_check.os, "geteuid", return_value=0), \
-             mock.patch.object(board_check.os, "listdir", side_effect=PermissionError("denied")):
-            result = board_check.collect({"cameras": {C920: ["/dev/video97"]}})
+        with mock.patch.object(board_check.os, "listdir", side_effect=PermissionError("denied")):
+            result = collect({"cameras": {C920: ["/dev/video97"]}})
         self.assertEqual(result["availability_method"], "proc-root")
         self.assertEqual(result["users"], {C920: None})
 
     def test_a_holder_of_the_media_device_is_reported_even_without_the_graph(self):
-        held = {"/dev/media0": {4242}}
-        with mock.patch.object(board_check, "which", return_value=None), \
-             mock.patch.object(board_check.os, "geteuid", return_value=0), \
-             mock.patch.object(board_check, "scan_proc", return_value=held), \
-             mock.patch.object(board_check, "_read", return_value="neat-app"):
-            result = board_check.collect({"cameras": {IMX477: ["/dev/media0"]}})
+        result = collect({"cameras": {IMX477: ["/dev/media0"]}}, scan_proc=mock.Mock(return_value={"/dev/media0": {4242}}),
+                         _read=mock.Mock(return_value="neat-app"))
         self.assertEqual(result["users"], {IMX477: [{"pid": 4242, "command": "neat-app"}]})
 
     def test_runs_as_a_program_and_prints_json(self):
@@ -329,11 +323,8 @@ class BoardCheckTests(unittest.TestCase):
     def test_microphones_get_their_capture_node_checked(self):
         held = {"/dev/snd/pcmC2D0c": {4242}, "/dev/snd/controlC2": {77}}
         comm = {"4242": "arecord", "77": "pulseaudio", "78": "pipewire-pulse", "79": "bash"}
-        with mock.patch.object(board_check, "which", return_value=None), \
-             mock.patch.object(board_check.os, "geteuid", return_value=0), \
-             mock.patch.object(board_check, "scan_proc", return_value=held), \
-             mock.patch.object(board_check, "_read", side_effect=lambda path: comm.get(path.split("/")[-2])):
-            result = board_check.collect({"cameras": {}, "microphones": {YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: []}})
+        result = collect({"cameras": {}, "microphones": {YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: []}},
+                         scan_proc=mock.Mock(return_value=held), _read=lambda path: comm.get(path.split("/")[-2]))
         self.assertEqual(result["users"], {YETI: [{"pid": 4242, "command": "arecord"}], C920_MIC: None})
 
     def test_a_capture_pcm_is_read_live_and_only_an_open_one_is_looked_up(self):
@@ -347,12 +338,9 @@ class BoardCheckTests(unittest.TestCase):
             def checker(method, tools):
                 return lambda nodes: looked_up.append(sorted(nodes)) or [{"pid": 812, "command": "pulseaudio"}]
 
-            with mock.patch.object(board_check, "PROC_ROOT", proc), \
-                 mock.patch.object(board_check, "which", return_value=None), \
-                 mock.patch.object(board_check.os, "geteuid", return_value=0), \
-                 mock.patch.object(board_check, "user_checker", checker):
-                result = board_check.collect({"microphones": {
-                    YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: ["/dev/snd/pcmC3D0c"], MONO_MIC: ["/dev/snd/pcmC9D0c"]}})
+            result = collect({"microphones": {
+                YETI: ["/dev/snd/pcmC2D0c"], C920_MIC: ["/dev/snd/pcmC3D0c"], MONO_MIC: ["/dev/snd/pcmC9D0c"]}},
+                PROC_ROOT=proc, user_checker=checker)
         self.assertEqual(result["capture_open"], {YETI: 0, C920_MIC: 1, MONO_MIC: None})
         self.assertEqual(result["users"][YETI], [])
         self.assertEqual(result["users"][C920_MIC], [{"pid": 812, "command": "pulseaudio"}])
@@ -361,6 +349,16 @@ class BoardCheckTests(unittest.TestCase):
 
 def states(fps):
     return [(choice["value"], choice["tier"], choice.get("reason")) for choice in fps]
+
+
+def rates(camera, fmt, width, height):
+    """The (rate, tier, reason) choices Insight offers for one mode of a scanned camera."""
+    return states(size_of(fmt_of(camera, fmt), width, height)["fps"])
+
+
+def scanned_camera(doc, board=None):
+    """One camera record scanned on its own, with Sentinel's board block for the IMX477 overlay by default."""
+    return item(snapshot_of(catalog(doc, board=board or board_block())), doc["id"])
 
 
 class SnapshotTests(unittest.TestCase):
@@ -384,7 +382,7 @@ class SnapshotTests(unittest.TestCase):
                         self.assertEqual({(t, r) for _, t, r in states(fps)}, {(tier, reason)})
 
     def test_imx477_nv12_modes_are_available_at_the_isp_sizes_when_the_overlays_support_its_sensor(self):
-        camera = item(snapshot_of(catalog(imx477(), board=board_block())), IMX477)
+        camera = scanned_camera(imx477())
         self.assertEqual((camera["connection"], camera["name"], camera["model"]), ("mipi", "imx477 5-001a", "imx477"))
         self.assertEqual(camera["support"], {"tier": "available", "reason": ""})
         self.assertEqual(camera["device"], {
@@ -398,8 +396,7 @@ class SnapshotTests(unittest.TestCase):
             ("AR24", "AR24 (packed 32-bit)", False, {"tier": "unsupported", "reason": cameras.FORMAT_REASON}),
             ("RGB3", "RGB3 (packed 24-bit)", False, {"tier": "unsupported", "reason": cameras.FORMAT_REASON}),
         ])
-        self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 1920, 1080)["fps"]),
-                         [(30, "unsupported", cameras.FORMAT_REASON)])
+        self.assertEqual(rates(camera, "RGB3", 1920, 1080), [(30, "unsupported", cameras.FORMAT_REASON)])
         nv12 = fmt_of(camera, "NV12")
         self.assertEqual([(s["width"], s["height"]) for s in nv12["sizes"]], [(1920, 1080), (2048, 1080), (2432, 2048)])
         self.assertEqual(size_of(nv12, 1920, 1080)["fps"], [{"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "available"}])
@@ -444,7 +441,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(usb["device"]["usb"]["bus_path"], doc["devices"][1]["identity"]["topology"])
         self.assertEqual([(f["format"], f["exportable"], f["support"]["tier"], len(f["sizes"])) for f in usb["formats"]],
                          [("MJPG", False, "unsupported", 1), ("YUYV", False, "unsupported", 1)])
-        self.assertEqual(states(size_of(fmt_of(usb, "MJPG"), 1920, 1080)["fps"]),
+        self.assertEqual(rates(usb, "MJPG", 1920, 1080),
                          [(value, "unsupported", cameras.USB_REASON) for value in (30, 24, 20, 15, 10, 7.5, 5)])
         self.assertEqual([c["value"] for c in size_of(fmt_of(usb, "YUYV"), 2560, 1472)["fps"]], [2])
         self.assertIsNone(usb["default_selection"])
@@ -456,7 +453,7 @@ class SnapshotTests(unittest.TestCase):
             dict(mipi_mode("NV12", 4056, 3040), isp_output=False),
             {"format": "NV12", "width": 1332, "height": 990},  # a Sentinel that does not say is not an ISP size
         ]
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        camera = scanned_camera(doc)
         nv12 = fmt_of(camera, "NV12")
         self.assertEqual((camera["support"]["tier"], nv12["exportable"], nv12["support"]["tier"]),
                          ("available", True, "available"))
@@ -466,14 +463,14 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
 
         doc["modes"] = doc["modes"][1:]
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        camera = scanned_camera(doc)
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.NO_ISP_SIZE_REASON})
         self.assertEqual((fmt_of(camera, "NV12")["exportable"], camera["default_selection"]), (False, None))
 
     def test_a_camera_whose_isp_sizes_are_not_nv12_is_unsupported_for_the_format(self):
         doc = imx477()
         doc["modes"] = [mipi_mode("RGB3", 1920, 1080), dict(mipi_mode("NV12", 4056, 3040), isp_output=False)]
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        camera = scanned_camera(doc)
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
         self.assertEqual(fmt_of(camera, "NV12")["support"]["reason"], cameras.NO_ISP_SIZE_REASON)
         self.assertIsNone(camera["default_selection"])
@@ -495,7 +492,7 @@ class SnapshotTests(unittest.TestCase):
             sensor_mode("NV12", 4056, 2160, True),
             sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON),
         ]
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        camera = scanned_camera(doc)
         nv12 = fmt_of(camera, "NV12")
         self.assertEqual((camera["support"]["tier"], nv12["exportable"], nv12["support"]["tier"]),
                          ("available", True, "available"))
@@ -509,18 +506,16 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         # The 4032 limit is the IMX477's widest aligned mode, not a rule for every sensor: another sensor's wide
         # sizes keep Sentinel's verdict.
-        other = item(snapshot_of(catalog(dict(doc, model="imx678"), board=board_block())), IMX477)
-        self.assertEqual(states(size_of(fmt_of(other, "NV12"), 4056, 3040)["fps"]), [(30, "available", None)])
-        self.assertEqual(states(size_of(fmt_of(camera, "RGB3"), 2028, 1520)["fps"]),
-                         [(30, "unsupported", cameras.FORMAT_REASON)])
+        other = scanned_camera(dict(doc, model="imx678"))
+        self.assertEqual(rates(other, "NV12", 4056, 3040), [(30, "available", None)])
+        self.assertEqual(rates(camera, "RGB3", 2028, 1520), [(30, "unsupported", cameras.FORMAT_REASON)])
 
         # Sentinel's "no" wins over Insight's own rule and keeps Sentinel's reason; with none of its modes available,
         # the camera's reason is the one Sentinel gave its NV12 modes, not one Insight infers.
         doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), available=False, reason="Not set up for this mode."),
                         sensor_mode("RGB3", 2028, 1520, False, cameras.FORMAT_REASON)]
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
-        self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]),
-                         [(30, "unsupported", "Not set up for this mode.")])
+        camera = scanned_camera(doc)
+        self.assertEqual(rates(camera, "NV12", 1920, 1080), [(30, "unsupported", "Not set up for this mode.")])
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "Not set up for this mode."})
         self.assertEqual(fmt_of(camera, "RGB3")["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
 
@@ -531,7 +526,7 @@ class SnapshotTests(unittest.TestCase):
             doc["isp"]["sizing"] = "runtime"
             doc["modes"] = [{"format": "NV12", "width": w, "height": h, "sensor_mode": True, "available": True}
                             for w, h in sizes]
-            return item(snapshot_of(catalog(doc, board=board_block())), IMX477)["default_selection"]
+            return scanned_camera(doc)["default_selection"]
         imx477_30 = [(1280, 990), (1332, 990), (1920, 1080), (2028, 1080), (2028, 1520), (2048, 1080), (3840, 2160)]
         self.assertEqual(doc_with(imx477_30), {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
         # No 1920-wide size: the widest Available size under 1920 wide.
@@ -551,10 +546,10 @@ class SnapshotTests(unittest.TestCase):
         reason = "IMX477 is not in this board's camera overlays."
         for name, block in cases.items():
             with self.subTest(name):
-                camera = item(snapshot_of(catalog(imx477(), board=block)), IMX477)
+                camera = scanned_camera(imx477(), block)
                 self.assertEqual(camera["support"], {"tier": "unsupported", "reason": reason})
                 self.assertEqual({(f["exportable"], f["support"]["reason"]) for f in camera["formats"]}, {(False, reason)})
-                self.assertEqual(states(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"]), [(30, "unsupported", reason)])
+                self.assertEqual(rates(camera, "NV12", 1920, 1080), [(30, "unsupported", reason)])
                 self.assertIsNone(camera["default_selection"])
         # The configured sensor names the camera when Sentinel links it; another vendor's IMX477 is not this one.
         econ = board_block(compatible="econ,imx477")
@@ -578,7 +573,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["issues"], [])
 
     def test_usb_camera_is_unsupported_and_offers_every_advertised_rate(self):
-        camera = item(snapshot_of(catalog(c920(), board=board_block())), C920)
+        camera = scanned_camera(c920())
         self.assertEqual((camera["connection"], camera["name"]), ("usb", "HD Pro Webcam C920"))
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "USB cameras have no camera overlay on this board."})
         self.assertEqual(camera["device"], {
@@ -643,7 +638,7 @@ class SnapshotTests(unittest.TestCase):
         doc["modes"] = [dict(mipi_mode("NV12", 1920, 1080), frame_intervals=[{"width": 1920, "height": 1080, "intervals": [
             {"type": "discrete", "numerator": 1, "denominator": 60}, {"type": "discrete", "numerator": 1, "denominator": 30},
         ]}])]
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        camera = scanned_camera(doc)
         self.assertEqual(size_of(fmt_of(camera, "NV12"), 1920, 1080)["fps"], [
             {"value": 60, "framerate_num": 60, "framerate_den": 1, "tier": "available"},
             {"value": 30, "framerate_num": 30, "framerate_den": 1, "tier": "available"},
@@ -656,7 +651,7 @@ class SnapshotTests(unittest.TestCase):
     def test_unreadable_isp_leaves_no_modes_and_says_why(self):
         doc = imx477()
         doc.update(modes=[], isp={"state": "unavailable", "reason": "no ISP output node was found"})
-        camera = item(snapshot_of(catalog(doc, board=board_block())), IMX477)
+        camera = scanned_camera(doc)
         self.assertEqual((camera["modes_source"], camera["formats"], camera["default_selection"]), ("unavailable", [], None))
         self.assertIn("no ISP output node was found", camera["errors"][0]["message"])
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": cameras.NO_MODES_REASON})
@@ -884,6 +879,22 @@ class MicrophoneSnapshotTests(unittest.TestCase):
         self.assertEqual(second["changes"]["removed"], [{"id": YETI, "name": "Yeti Nano"}])
 
 
+def sine(amplitude: float, frames: int = 4800, channels: int = 2) -> bytes:
+    values = [int(amplitude * 32767 * math.sin(2 * math.pi * 440 * i / 48000)) for i in range(frames)]
+    return struct.pack("<%dh" % (channels * frames), *[v for v in values for _ in range(channels)])
+
+
+def record_until_stopped(recording, cancelled=None):
+    """An arecord that sends one chunk, sets `recording`, then runs until Stop (setting `cancelled` if given)."""
+    def record(argv, on_stdout, cancel_event):
+        on_stdout(sine(0.5))
+        recording.set()
+        if cancel_event.wait(30) and cancelled:
+            cancelled.set()
+        raise CommandCancelled()
+    return record
+
+
 class FakeSession:
     def __init__(self, generation: int, transport, fingerprint: str = "fp-1", mode: str = "ssh"):
         self.generation = generation
@@ -930,22 +941,28 @@ class CheckTransport:
         return ExecResult(0, json.dumps(response).encode(), b"")
 
 
+def patch(test, target, name, *value, **kwargs):
+    """mock.patch.object for the whole of one test; returns the replacement."""
+    patcher = mock.patch.object(target, name, *value, **kwargs)
+    test.addCleanup(patcher.stop)
+    return patcher.start()
+
+
+def api_client(manager):
+    app = Flask(__name__)
+    app.register_blueprint(board_bp)
+    app.register_blueprint(peripherals_bp)
+    app.extensions["neat_board"] = manager
+    return app.test_client()
+
+
 class PeripheralsApiTests(unittest.TestCase):
     def setUp(self):
-        scans = mock.patch.object(api, "scans", cameras.ScanCache())
-        scans.start()
-        self.addCleanup(scans.stop)
+        patch(self, api, "scans", cameras.ScanCache())
         self.catalogs = []
-        sentinel = mock.patch.object(api.PeripheralClient, "refresh", autospec=True, side_effect=self._sentinel_refresh)
-        self.sentinel = sentinel.start()
-        self.addCleanup(sentinel.stop)
+        self.sentinel = patch(self, api.PeripheralClient, "refresh", autospec=True, side_effect=self._sentinel_refresh)
         self.manager = FakeManager()
-        self.scan_id = "unscanned"
-        app = Flask(__name__)
-        app.register_blueprint(board_bp)
-        app.register_blueprint(peripherals_bp)
-        app.extensions["neat_board"] = self.manager
-        self.client = app.test_client()
+        self.client = api_client(self.manager)
 
     def _sentinel_refresh(self, client):
         response = self.catalogs.pop(0) if len(self.catalogs) > 1 else self.catalogs[0]
@@ -960,10 +977,7 @@ class PeripheralsApiTests(unittest.TestCase):
         return transport
 
     def refresh(self):
-        response = self.client.post("/api/peripherals/refresh")
-        if response.status_code == 200:
-            self.scan_id = response.get_json()["scan_id"]
-        return response
+        return self.client.post("/api/peripherals/refresh")
 
     def test_scan_responses_are_not_cached(self):
         self.use()
@@ -974,10 +988,7 @@ class PeripheralsApiTests(unittest.TestCase):
         response = self.client.get("/api/peripherals")
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual(
-            (body["scan_id"], body["scanned_at"], body["items"], body["changes"]),
-            (None, None, [], None),
-        )
+        self.assertEqual((body["scan_id"], body["scanned_at"], body["items"], body["changes"]), (None, None, [], None))
         self.assertEqual(body["board"]["label"], "sima@192.168.2.2")
         self.assertEqual(transport.calls, [])
         self.sentinel.assert_not_called()
@@ -1085,8 +1096,9 @@ class PeripheralsApiTests(unittest.TestCase):
         self.manager.error = BoardError("no_target", "No board is selected.")
         self.assertEqual(self.client.get("/api/peripherals").status_code, 409)
 
-    def test_concurrent_refreshes_share_one_sentinel_refresh(self):
-        started, release = threading.Event(), threading.Event()
+    def refresh_twice(self, *patches):
+        """Two refreshes, the second arriving while Sentinel still answers the first; returns both responses."""
+        started, release, second_waiting = threading.Event(), threading.Event(), threading.Event()
         self.use()
 
         def slow_refresh(client):
@@ -1095,58 +1107,17 @@ class PeripheralsApiTests(unittest.TestCase):
             return catalog(imx477(), c920())
 
         self.sentinel.side_effect = slow_refresh
-        lock_requests = []
-        second_waiting = threading.Event()
         refresh_lock = api.scans.refresh_lock
 
-        def counting_refresh_lock(generation):
-            lock_requests.append(generation)
-            if len(lock_requests) == 2:
-                second_waiting.set()
-            return refresh_lock(generation)
-
-        results = []
-        with mock.patch.object(api.scans, "refresh_lock", counting_refresh_lock):
-            first = threading.Thread(target=lambda: results.append(self.refresh().get_json()))
-            first.start()
-            started.wait(5)
-            second = threading.Thread(target=lambda: results.append(self.refresh().get_json()))
-            second.start()
-            second_waiting.wait(5)
-            release.set()
-            first.join(5)
-            second.join(5)
-        self.assertEqual(self.sentinel.call_count, 1)
-        self.assertEqual(results[0], results[1])
-
-
-    def test_a_shared_refresh_is_refused_when_the_board_changed_while_it_waited(self):
-        started, release = threading.Event(), threading.Event()
-        self.use()
-
-        def slow_refresh(client):
-            started.set()
-            release.wait(5)
-            return catalog(imx477(), c920())
-
-        self.sentinel.side_effect = slow_refresh
-        second_waiting = threading.Event()
-        refresh_lock, completed_since = api.scans.refresh_lock, api.scans.completed_since
-
-        def counting_refresh_lock(generation):
+        def watched_refresh_lock(generation):
             if started.is_set():
                 second_waiting.set()
             return refresh_lock(generation)
 
-        def switch_board_once_shared(*args):
-            shared = completed_since(*args)
-            if shared:
-                self.manager.current.stale = True  # /api/board/select lands after the first refresh returned
-            return shared
-
         results = {}
-        with mock.patch.object(api.scans, "refresh_lock", counting_refresh_lock), \
-                mock.patch.object(api.scans, "completed_since", switch_board_once_shared):
+        with contextlib.ExitStack() as stack:
+            for patcher in (mock.patch.object(api.scans, "refresh_lock", watched_refresh_lock), *patches):
+                stack.enter_context(patcher)
             first = threading.Thread(target=lambda: results.setdefault("first", self.refresh()))
             first.start()
             started.wait(5)
@@ -1156,36 +1127,49 @@ class PeripheralsApiTests(unittest.TestCase):
             release.set()
             first.join(5)
             second.join(5)
+        return results["first"], results["second"]
+
+    def test_concurrent_refreshes_share_one_sentinel_refresh(self):
+        first, second = self.refresh_twice()
         self.assertEqual(self.sentinel.call_count, 1)
-        self.assertEqual(results["first"].status_code, 200)
-        second = results["second"]
+        self.assertEqual(first.get_json(), second.get_json())
+
+    def test_a_shared_refresh_is_refused_when_the_board_changed_while_it_waited(self):
+        completed_since = api.scans.completed_since
+
+        def switch_board_once_shared(*args):
+            shared = completed_since(*args)
+            if shared:
+                self.manager.current.stale = True  # /api/board/select lands after the first refresh returned
+            return shared
+
+        first, second = self.refresh_twice(mock.patch.object(api.scans, "completed_since", switch_board_once_shared))
+        self.assertEqual(self.sentinel.call_count, 1)
+        self.assertEqual(first.status_code, 200)
         self.assertEqual((second.status_code, second.get_json()["code"]), (409, "stale_snapshot"))
 
 
 class MicrophoneApiTests(unittest.TestCase):
     def setUp(self):
         for target, name, value in ((api, "scans", cameras.ScanCache()), (mictest, "_current", None)):
-            patcher = mock.patch.object(target, name, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+            patch(self, target, name, value)
         self.sentinel = catalog(imx477(), yeti())
-        self.reads = {}
-        for method in ("refresh", "catalog"):
-            patcher = mock.patch.object(api.PeripheralClient, method, autospec=True,
-                                        side_effect=lambda client: copy.deepcopy(self.sentinel))
-            self.reads[method] = patcher.start()
-            self.addCleanup(patcher.stop)
+        self.reads = {method: patch(self, api.PeripheralClient, method, autospec=True,
+                                    side_effect=lambda client: copy.deepcopy(self.sentinel))
+                      for method in ("refresh", "catalog")}
         self.manager = FakeManager()
         self.transport = CheckTransport(mic_check(users={IMX477: []}))
         self.manager.current = FakeSession(1, self.transport)
-        app = Flask(__name__)
-        app.register_blueprint(board_bp)
-        app.register_blueprint(peripherals_bp)
-        app.extensions["neat_board"] = self.manager
-        self.client = app.test_client()
+        self.client = api_client(self.manager)
 
     def start(self, mic_id=YETI, **body):
         return self.client.post("/api/peripherals/microphones/test", json={"id": mic_id, **body})
+
+    def mic_test(self):
+        return self.client.get("/api/peripherals/microphones/test").get_json()["test"]
+
+    def stop(self):
+        return self.client.post("/api/peripherals/microphones/test/stop")
 
     def test_refresh_runs_no_board_check(self):
         """A scan only reads Sentinel: whether a microphone is held is checked when its test starts."""
@@ -1315,13 +1299,7 @@ class MicrophoneApiTests(unittest.TestCase):
         """Codex 4187561574: the live in-use check would find Insight's own arecord and orphan the test."""
         self.client.post("/api/peripherals/refresh")
         recording = threading.Event()
-
-        def record(argv, on_stdout, cancel_event):
-            on_stdout(sine(0.5))
-            recording.set()
-            cancel_event.wait(30)
-            raise CommandCancelled()
-
+        record = record_until_stopped(recording)
         self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record)
         first = self.start().get_json()["test"]
         self.assertTrue(recording.wait(2))
@@ -1332,22 +1310,14 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertEqual((response.status_code, response.get_json()["code"]), (409, "test_running"))
         self.assertEqual((len(self.transport.calls), self.reads["catalog"].call_count), (calls, reads),
                          "refused before Sentinel or the board is asked")
-        self.assertEqual(self.client.get("/api/peripherals/microphones/test").get_json()["test"]["token"], first["token"])
-        self.client.post("/api/peripherals/microphones/test/stop")
+        self.assertEqual(self.mic_test()["token"], first["token"])
+        self.stop()
         mictest._current.thread.join(2)
 
     def test_start_records_with_sentinel_selector_then_poll_stop_and_audio_follow_the_reference_contract(self):
         self.client.post("/api/peripherals/refresh")
-        pcm = sine(0.5)
         recording = threading.Event()
-
-        def record(argv, on_stdout, cancel_event):
-            on_stdout(pcm)
-            recording.set()
-            cancel_event.wait(30)
-            raise CommandCancelled()
-
-        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record)
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record_until_stopped(recording))
         response = self.start()
         self.assertEqual(response.status_code, 202)
         test = response.get_json()["test"]
@@ -1356,12 +1326,12 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertTrue(recording.wait(2))
         self.assertEqual(self.transport.calls[-1][0][:4], ["arecord", "-q", "-D", "plughw:CARD=Nano,DEV=0"])
         self.assertEqual(self.start().get_json()["code"], "test_running")
-        live = self.client.get("/api/peripherals/microphones/test").get_json()["test"]
+        live = self.mic_test()
         self.assertEqual((live["token"], live["elapsed_ms"]), (test["token"], 100))
         self.assertIsNotNone(live["level_dbfs"])
-        self.assertEqual(self.client.post("/api/peripherals/microphones/test/stop").status_code, 200)
+        self.assertEqual(self.stop().status_code, 200)
         mictest._current.thread.join(2)
-        done = self.client.get("/api/peripherals/microphones/test").get_json()["test"]
+        done = self.mic_test()
         self.assertEqual(done["state"], "ready")
         self.assertFalse(done["level"]["silent"])
         wav = self.client.get(done["audio_url"])
@@ -1372,15 +1342,7 @@ class MicrophoneApiTests(unittest.TestCase):
         """Codex 4255505616: a test started while the board changed must not answer 202 for the departed board."""
         self.client.post("/api/peripherals/refresh")
         recording, cancelled = threading.Event(), threading.Event()
-
-        def record(argv, on_stdout, cancel_event):
-            on_stdout(sine(0.5))
-            recording.set()
-            if cancel_event.wait(30):
-                cancelled.set()
-            raise CommandCancelled()
-
-        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record)
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record_until_stopped(recording, cancelled))
         real_start, session, started = mictest.start, self.manager.current, []
 
         def start_then_switch(*args):
@@ -1407,15 +1369,15 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertTrue(old.stop_requested, "the departed board's recording is told to end")
         mictest._current.thread.join(2)
-        self.assertEqual(self.client.get("/api/peripherals/microphones/test").get_json()["test"]["state"], "ready")
+        self.assertEqual(self.mic_test()["state"], "ready")
 
     def test_another_board_sees_no_test_and_cannot_stop_it(self):
-        self.assertIsNone(self.client.get("/api/peripherals/microphones/test").get_json()["test"])
-        self.assertIsNone(self.client.post("/api/peripherals/microphones/test/stop").get_json()["test"])
+        self.assertIsNone(self.mic_test())
+        self.assertIsNone(self.stop().get_json()["test"])
         mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
         self.manager.current = FakeSession(2, self.transport)
-        self.assertIsNone(self.client.get("/api/peripherals/microphones/test").get_json()["test"])
-        self.assertIsNone(self.client.post("/api/peripherals/microphones/test/stop").get_json()["test"])
+        self.assertIsNone(self.mic_test())
+        self.assertIsNone(self.stop().get_json()["test"])
         self.assertFalse(mictest._current.stop_requested)
 
 
@@ -1431,16 +1393,11 @@ class MicrophoneApiTests(unittest.TestCase):
         response = self.client.get(url)
         self.assertEqual((response.status_code, response.get_json()["code"]), (404, "not_found"))
 
-def sine(amplitude: float, frames: int = 4800, channels: int = 2) -> bytes:
-    values = [int(amplitude * 32767 * math.sin(2 * math.pi * 440 * i / 48000)) for i in range(frames)]
-    return struct.pack("<%dh" % (channels * frames), *[v for v in values for _ in range(channels)])
 
 
 class MicrophoneTestTests(unittest.TestCase):
     def setUp(self):
-        patcher = mock.patch.object(mictest, "_current", None)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        patch(self, mictest, "_current", None)
 
     def bind(self, doc, scanned=None, mic_id=YETI):
         return mictest.bind_microphone(doc, scanned or doc, mic_id)

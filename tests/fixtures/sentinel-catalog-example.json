@@ -10,16 +10,9 @@
       }
     ],
     "model": "SiMa.ai Modalix SoM 16Gig Board",
-    "overlays": [
-      "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
-    ],
+    "overlays": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"],
     "supported_sensors": [
-      {
-        "compatible": "sony,imx477",
-        "overlays": [
-          "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
-        ]
-      }
+      {"compatible": "sony,imx477", "overlays": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]}
     ]
   },
   "devices": [
@@ -59,60 +52,15 @@
       "media_device": "/dev/media0",
       "model": "imx477",
       "modes": [
-        {
-          "format": "AR24",
-          "height": 1080,
-          "isp_output": true,
-          "width": 1920
-        },
-        {
-          "format": "AR24",
-          "height": 1080,
-          "isp_output": true,
-          "width": 2048
-        },
-        {
-          "format": "AR24",
-          "height": 2048,
-          "isp_output": true,
-          "width": 2432
-        },
-        {
-          "format": "NV12",
-          "height": 1080,
-          "isp_output": true,
-          "width": 1920
-        },
-        {
-          "format": "NV12",
-          "height": 1080,
-          "isp_output": true,
-          "width": 2048
-        },
-        {
-          "format": "NV12",
-          "height": 2048,
-          "isp_output": true,
-          "width": 2432
-        },
-        {
-          "format": "RGB3",
-          "height": 1080,
-          "isp_output": true,
-          "width": 1920
-        },
-        {
-          "format": "RGB3",
-          "height": 1080,
-          "isp_output": true,
-          "width": 2048
-        },
-        {
-          "format": "RGB3",
-          "height": 2048,
-          "isp_output": true,
-          "width": 2432
-        }
+        {"format": "AR24", "height": 1080, "isp_output": true, "width": 1920},
+        {"format": "AR24", "height": 1080, "isp_output": true, "width": 2048},
+        {"format": "AR24", "height": 2048, "isp_output": true, "width": 2432},
+        {"format": "NV12", "height": 1080, "isp_output": true, "width": 1920},
+        {"format": "NV12", "height": 1080, "isp_output": true, "width": 2048},
+        {"format": "NV12", "height": 2048, "isp_output": true, "width": 2432},
+        {"format": "RGB3", "height": 1080, "isp_output": true, "width": 1920},
+        {"format": "RGB3", "height": 1080, "isp_output": true, "width": 2048},
+        {"format": "RGB3", "height": 2048, "isp_output": true, "width": 2432}
       ],
       "sensor_timing": {
         "hblank_min": 9332,
@@ -151,41 +99,13 @@
             {
               "height": 1080,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1920
             }
@@ -199,13 +119,7 @@
           "frame_intervals": [
             {
               "height": 1472,
-              "intervals": [
-                {
-                  "denominator": 2,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
-              ],
+              "intervals": [{"denominator": 2, "numerator": 1, "type": "discrete"}],
               "width": 2560
             }
           ],
@@ -216,17 +130,9 @@
       "type": "camera"
     },
     {
-      "availability": {
-        "state": "available",
-        "subdevices": 1,
-        "subdevices_available": 1
-      },
+      "availability": {"state": "available", "subdevices": 1, "subdevices_available": 1},
       "backend": "alsa",
-      "capture_target": {
-        "card_id": "C920",
-        "device": 0,
-        "selector": "plughw:CARD=C920,DEV=0"
-      },
+      "capture_target": {"card_id": "C920", "device": 0, "selector": "plughw:CARD=C920,DEV=0"},
       "connection": "usb",
       "id": "microphone:alsa:329f324bddfdde7b",
       "identity": {
@@ -251,44 +157,29 @@
       "modes": [
         {
           "altset": 1,
-          "channel_map": [
-            "FL",
-            "FR"
-          ],
+          "channel_map": ["FL", "FR"],
           "channels": 2,
           "format": "S16_LE",
           "interface": 3,
-          "rates_hz": [
-            16000
-          ],
+          "rates_hz": [16000],
           "sample_bits": 16
         },
         {
           "altset": 2,
-          "channel_map": [
-            "FL",
-            "FR"
-          ],
+          "channel_map": ["FL", "FR"],
           "channels": 2,
           "format": "S16_LE",
           "interface": 3,
-          "rates_hz": [
-            24000
-          ],
+          "rates_hz": [24000],
           "sample_bits": 16
         },
         {
           "altset": 3,
-          "channel_map": [
-            "FL",
-            "FR"
-          ],
+          "channel_map": ["FL", "FR"],
           "channels": 2,
           "format": "S16_LE",
           "interface": 3,
-          "rates_hz": [
-            32000
-          ],
+          "rates_hz": [32000],
           "sample_bits": 16
         }
       ],

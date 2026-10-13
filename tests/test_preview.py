@@ -25,7 +25,8 @@ from neat_insight.board.transport import LocalTransport, key_fingerprint
 from neat_insight.peripherals import api as peripherals_api, cameras
 from neat_insight.peripherals.api import peripherals_bp
 from neat_insight.preview import api, gst, manager as preview
-from test_peripherals import C920, C920_BY_ID, IMX477, board_block, c920, catalog, check, imx477, mipi_mode, usb_mode
+from test_board import wait_until
+from test_peripherals import C920, C920_BY_ID, IMX477, board_block, c920, catalog, imx477, mipi_mode, usb_mode
 
 MODE = {"format": "NV12", "width": 1920, "height": 1080, "fps": 30}
 PREVIEW = "/api/peripherals/cameras/preview"
@@ -50,6 +51,11 @@ def scanned(*devices, generation=1, board=True):
 
 def item_of(snapshot, item_id):
     return next(item for item in snapshot["items"] if item["id"] == item_id)
+
+
+def comm(pid):
+    with open(f"/proc/{pid}/comm") as handle:
+        return handle.read().strip()
 
 
 class FakeStream:
@@ -164,7 +170,6 @@ class PipelineTests(unittest.TestCase):
                 with self.subTest(name=name):
                     self.assertEqual(subprocess.run(["sh", "-c", command], capture_output=True, timeout=30).stdout, name.encode())
 
-
     def test_the_frontend_offers_preview_for_the_usb_formats_the_backend_previews(self):
         model = (Path(__file__).parent.parent / "frontend" / "src" / "peripherals" / "model.js").read_text()
         listed = re.search(r"USB_PREVIEW_FORMATS = Object\.freeze\(\[([^\]]*)\]\)", model)
@@ -224,6 +229,13 @@ class PreviewTests(unittest.TestCase):
     def start(self, session=None, item=None, mode=MODE):
         item = item or self.imx477
         return self.manager.start(session or self.session, item, api.previewable_mode(item, dict(mode)))
+
+    def start_failing(self, stream, item=None, mode=MODE):
+        """Start on a fresh board whose pipeline is `stream`; returns the start's BoardError and that session."""
+        session = fake_session(FakeTransport(stream=stream))
+        with self.assertRaises(BoardError) as ctx:
+            self.start(session, item, mode)
+        return ctx.exception, session
 
     def client(self):
         app = Flask(__name__)
@@ -325,16 +337,15 @@ class PreviewTests(unittest.TestCase):
         for message in (b"[0:01] ERROR Camera camera.cpp:1009 Failed to acquire camera imx477 5-001a\n",
                         b"ERROR: from element /GstPipeline:pipeline0/GstV4l2Src:v4l2src0: Device '/dev/video97' is busy\n"):
             stream = FakeStream([], stderr=PID_LINE + message)
-            session = fake_session(FakeTransport(stream=stream))
-            with self.subTest(message=message), self.assertRaises(BoardError) as ctx:
-                self.start(session)
-            self.assertEqual((ctx.exception.code, ctx.exception.status), ("camera_in_use", 409))
-            self.assertEqual(ctx.exception.message, "imx477 5-001a is already in use: the board reports the camera busy; another process holds it.")
-            self.assertEqual(ctx.exception.extra["detail"], message.decode().strip())
-            self.assertTrue(stream.closed)
-            self.assertEqual(len(session.transport.kills()), 1)
-            self.assertIn(f"pid={PID};", session.transport.kills()[0])
-            self.assertIsNone(self.manager.current(1))
+            with self.subTest(message=message):
+                error, session = self.start_failing(stream)
+                self.assertEqual((error.code, error.status), ("camera_in_use", 409))
+                self.assertEqual(error.message, "imx477 5-001a is already in use: the board reports the camera busy; another process holds it.")
+                self.assertEqual(error.extra["detail"], message.decode().strip())
+                self.assertTrue(stream.closed)
+                self.assertEqual(len(session.transport.kills()), 1)
+                self.assertIn(f"pid={PID};", session.transport.kills()[0])
+                self.assertIsNone(self.manager.current(1))
 
     def test_a_size_libcamera_streams_differently_is_reported_with_the_size_that_works(self):
         """Transcribed from a 3.0 DevKit (B1859): asked for one size, libcamera configured another and
@@ -353,76 +364,58 @@ class PreviewTests(unittest.TestCase):
                         for w, h in ((4032, 3040), (1920, 1080))]
         imx477_30 = item_of(scanned(doc, c920()), IMX477)
         mode = {"format": "NV12", "width": 4032, "height": 3040, "fps": 30}
-        stream = FakeStream([], stderr=PID_LINE + detail)
-        session = fake_session(FakeTransport(stream=stream))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode=mode)
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("mode_adjusted", 409))
-        self.assertEqual(ctx.exception.message, "libcamera streams imx477 5-001a at 4000x3040, not 4032x3040.")
-        self.assertEqual((ctx.exception.extra["width"], ctx.exception.extra["height"]), (4000, 3040))
-        self.assertIn("Pick 4000x3040.", ctx.exception.hint)
+
+        def start_logging(stderr):
+            return self.start_failing(FakeStream([], stderr=PID_LINE + stderr), imx477_30, mode)
+
+        error, session = start_logging(detail)
+        self.assertEqual((error.code, error.status), ("mode_adjusted", 409))
+        self.assertEqual(error.message, "libcamera streams imx477 5-001a at 4000x3040, not 4032x3040.")
+        self.assertEqual((error.extra["width"], error.extra["height"]), (4000, 3040))
+        self.assertIn("Pick 4000x3040.", error.hint)
         self.assertEqual(len(session.transport.kills()), 1)
         # As the board really logs it: a long libcamera log whose early "configuring streams" line falls
         # outside the 1000-character detail; the DV-timings line still names the configured size.
         padding = b"".join(b"[1:37:08.150] [3009]  INFO ModalixIPA modalix.cpp:1566 calibration_shading_radial_r: YAML has 33 elements\n" for _ in range(12))
-        long = detail.replace(b"Applying neutral", padding + b"Applying neutral")
-        session = fake_session(FakeTransport(stream=FakeStream([], stderr=PID_LINE + long)))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode=mode)
-        self.assertEqual(ctx.exception.code, "mode_adjusted")
-        self.assertEqual(len(ctx.exception.extra["detail"]), 1000)
-        self.assertNotIn("configuring streams", ctx.exception.extra["detail"])
+        error, _ = start_logging(detail.replace(b"Applying neutral", padding + b"Applying neutral"))
+        self.assertEqual(error.code, "mode_adjusted")
+        self.assertEqual(len(error.extra["detail"]), 1000)
+        self.assertNotIn("configuring streams", error.extra["detail"])
         # GStreamer's error text may not have landed yet when the frame read gives up: the configured
         # size alone, with no frame, is enough.
-        early = detail[: detail.index(b"ERROR: from element")]
-        session = fake_session(FakeTransport(stream=FakeStream([], stderr=PID_LINE + early)))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode=mode)
-        self.assertEqual(ctx.exception.code, "mode_adjusted")
+        self.assertEqual(start_logging(detail[: detail.index(b"ERROR: from element")])[0].code, "mode_adjusted")
         # The same configured size as requested is not an adjustment: the generic failure stays.
-        same = detail.replace(b"4000x3040", b"4032x3040")
-        session = fake_session(FakeTransport(stream=FakeStream([], stderr=PID_LINE + same)))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session, imx477_30, mode=mode)
-        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertEqual(start_logging(detail.replace(b"4000x3040", b"4032x3040"))[0].code, "command_failed")
 
     def test_a_pipeline_that_fails_or_sends_no_frame_is_stopped_with_its_output(self):
         error = b"ERROR: from element /GstPipeline:pipeline0/GstLibcameraSrc:libcamerasrc0: Internal data stream error."
-        stream = FakeStream([], stderr=PID_LINE + error + b"\n")
-        session = fake_session(FakeTransport(stream=stream))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual(ctx.exception.code, "command_failed")
-        self.assertEqual(ctx.exception.message, "The preview pipeline stopped before it sent a frame.")
-        self.assertEqual(ctx.exception.extra["detail"], error.decode())
+        failure, session = self.start_failing(FakeStream([], stderr=PID_LINE + error + b"\n"))
+        self.assertEqual(failure.code, "command_failed")
+        self.assertEqual(failure.message, "The preview pipeline stopped before it sent a frame.")
+        self.assertEqual(failure.extra["detail"], error.decode())
         self.assertEqual(len(session.transport.kills()), 1)
 
         stream = FakeStream([b"--frame\r\n"], endless=True)
-        session = fake_session(FakeTransport(stream=stream))
-        with mock.patch.object(preview, "FIRST_FRAME_TIMEOUT_SEC", 0.05), self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual(ctx.exception.code, "command_failed")
-        self.assertIn("sent no frame within", ctx.exception.message)
+        with mock.patch.object(preview, "FIRST_FRAME_TIMEOUT_SEC", 0.05):
+            failure, session = self.start_failing(stream)
+        self.assertEqual(failure.code, "command_failed")
+        self.assertIn("sent no frame within", failure.message)
         self.assertTrue(stream.closed)
         self.assertEqual(len(session.transport.kills()), 1)
 
         stream = FakeStream([b"--frame\r\nContent-Length: 99999999\r\n\r\n"], endless=True)
-        with self.assertRaises(BoardError) as ctx:
-            self.start(fake_session(FakeTransport(stream=stream)))
-        self.assertIn("not usable", ctx.exception.message)
+        self.assertIn("not usable", self.start_failing(stream)[0].message)
         self.assertTrue(stream.closed)
         self.assertIsNone(self.manager.current(1))
 
     def test_a_missing_gstreamer_plugin_is_reported_with_the_install_hint(self):
         stream = FakeStream([], stderr=PID_LINE + b'WARNING: erroneous pipeline: no element "libcamerasrc"\n')
-        session = fake_session(FakeTransport(stream=stream))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual((ctx.exception.code, ctx.exception.status), ("tool_missing", 502))
-        self.assertEqual(ctx.exception.extra["tool"], "libcamerasrc")
-        self.assertIn("no libcamerasrc element", ctx.exception.message)
-        self.assertEqual(ctx.exception.hint, preview.GST_INSTALL_HINT)
-        self.assertEqual(ctx.exception.extra["detail"], 'WARNING: erroneous pipeline: no element "libcamerasrc"')
+        error, _ = self.start_failing(stream)
+        self.assertEqual((error.code, error.status), ("tool_missing", 502))
+        self.assertEqual(error.extra["tool"], "libcamerasrc")
+        self.assertIn("no libcamerasrc element", error.message)
+        self.assertEqual(error.hint, preview.GST_INSTALL_HINT)
+        self.assertEqual(error.extra["detail"], 'WARNING: erroneous pipeline: no element "libcamerasrc"')
         self.assertTrue(stream.closed)
         self.assertIsNone(self.manager.current(1))
 
@@ -430,11 +423,8 @@ class PreviewTests(unittest.TestCase):
         banner = b"bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)\n"
         stream = FakeStream([multipart(JPEG)], stderr=banner + PID_LINE, endless=True)
         self.assertEqual(preview.PreviewManager._pid(stream), PID)
-        failed = FakeStream([], stderr=banner + PID_LINE + b"ERROR: the camera went away\n")
-        session = fake_session(FakeTransport(stream=failed))
-        with self.assertRaises(BoardError) as ctx:
-            self.start(session)
-        self.assertEqual(ctx.exception.extra["detail"], banner.decode() + "ERROR: the camera went away")
+        error, session = self.start_failing(FakeStream([], stderr=banner + PID_LINE + b"ERROR: the camera went away\n"))
+        self.assertEqual(error.extra["detail"], banner.decode() + "ERROR: the camera went away")
         self.assertEqual(len(session.transport.kills()), 1)
         self.assertIn(f"pid={PID};", session.transport.kills()[0])
         # A bare number is not the tagged line: no PID is guessed from a banner.
@@ -563,9 +553,7 @@ class PreviewTests(unittest.TestCase):
     def test_a_stream_nobody_opens_is_stopped(self):
         with mock.patch.object(preview, "UNCLAIMED_TIMEOUT_SEC", 0.05):
             self.start()
-        deadline = time.monotonic() + 5
-        while self.manager.current(1) is not None and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(lambda: self.manager.current(1) is None)
         self.assertIsNone(self.manager.current(1))
         self.assertTrue(self.session.transport.streams[0][1].closed)
         self.assertEqual(len(self.session.transport.kills()), 1)
@@ -744,12 +732,7 @@ class KillScriptTests(unittest.TestCase):
     def test_the_pipeline_is_stopped_by_its_pid(self):
         pipeline = subprocess.Popen(["gst-launch-1.0", "-q", "videotestsrc", "is-live=true", "!", "fakesink"])
         self.addCleanup(pipeline.kill)
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            with open(f"/proc/{pipeline.pid}/comm") as handle:
-                if handle.read().strip() == "gst-launch-1.0":
-                    break
-            time.sleep(0.05)
+        wait_until(lambda: comm(pipeline.pid) == "gst-launch-1.0", timeout=10, interval=0.05)
         self.kill(pipeline.pid)
         self.assertIsNotNone(pipeline.wait(5))
 
@@ -758,50 +741,46 @@ class KillScriptTests(unittest.TestCase):
 class LocalPipelineTests(unittest.TestCase):
     """A start, relay and stop through LocalTransport with a real gst-launch-1.0 (a test source stands in for the camera)."""
 
-    def test_frames_flow_and_closing_the_relay_ends_the_pipeline(self):
+    ITEM = {"id": "camera:test", "name": "test", "connection": "usb", "device": {}}
+
+    def setUp(self):
         transport = LocalTransport()
-        session = SimpleNamespace(generation=1, transport=transport, raw_transport=transport)
-        manager = preview.PreviewManager()
-        manager._require_camera_free = lambda *args: None
+        self.session = SimpleNamespace(generation=1, transport=transport, raw_transport=transport)
+        self.manager = preview.PreviewManager()
+        self.manager._require_camera_free = lambda *args: None
+
+    def test_frames_flow_and_closing_the_relay_ends_the_pipeline(self):
+        session, manager = self.session, self.manager
         source = ["videotestsrc", "is-live=true", "!", "video/x-raw,format=YUY2,width=1280,height=720,framerate=30/1", "!", "videoconvert"]
         real = gst.pipeline
 
         def test_source(connection, *args):
             return source + real("usb", '"/dev/null"', "YUYV", 1280, 720, Fraction(30))[6:]
 
-        item = {"id": "camera:test", "name": "test", "connection": "usb", "device": {}}
         mode = {"format": "YUYV", "width": 1280, "height": 720, "fps": 30, "rate": Fraction(30), "source": '"/dev/null"'}
         with mock.patch.object(gst, "pipeline", test_source):
-            started = manager.start(session, item, mode)
+            started = manager.start(session, self.ITEM, mode)
         pid = manager._run["pid"]
-        with open(f"/proc/{pid}/comm") as handle:
-            self.assertEqual(handle.read().strip(), "gst-launch-1.0")
+        self.assertEqual(comm(pid), "gst-launch-1.0")
         relay = manager.relay(session, started["id"])
         parts = iter(relay)
         frames = [gst.FrameParser().feed(next(parts)) for _ in range(5)]
         self.assertTrue(all(len(found) == 1 and found[0].startswith(b"\xff\xd8") for found in frames))
         relay.close()
         self.assertIsNone(manager.current(1))
-        deadline = time.monotonic() + 10
-        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
-            time.sleep(0.05)
+        wait_until(lambda: not os.path.exists(f"/proc/{pid}"), timeout=10, interval=0.05)
         self.assertFalse(os.path.exists(f"/proc/{pid}"))
 
     def test_a_pipeline_gstreamer_rejects_reports_its_error(self):
-        transport = LocalTransport()
-        session = SimpleNamespace(generation=1, transport=transport, raw_transport=transport)
-        manager = preview.PreviewManager()
-        manager._require_camera_free = lambda *args: None
-        item = {"id": "camera:test", "name": "test", "connection": "usb", "device": {}}
         mode = {"format": "MJPG", "width": 640, "height": 480, "fps": 30, "rate": Fraction(30), "source": '"/dev/null"'}
         with mock.patch.object(gst, "pipeline", lambda *args: ["nosuchelement", "!", "fakesink"]), \
                 self.assertRaises(BoardError) as ctx:
-            manager.start(session, item, mode)
+            self.manager.start(self.session, self.ITEM, mode)
         self.assertEqual((ctx.exception.code, ctx.exception.extra["tool"]), ("tool_missing", "nosuchelement"))
         self.assertEqual(ctx.exception.hint, preview.GST_INSTALL_HINT)
         self.assertIn('no element "nosuchelement"', ctx.exception.extra["detail"])
         self.assertNotIn("neat-preview-pid=", ctx.exception.extra["detail"])
-        self.assertIsNone(manager.current(1))
+        self.assertIsNone(self.manager.current(1))
 
 
 class BoardChangeTests(unittest.TestCase):

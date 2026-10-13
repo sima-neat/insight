@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import errno
 import json
@@ -26,14 +27,7 @@ def catalog(observed_at=OBSERVED_AT, **extra):
     return {
         "revision": 1791164913635,
         "observed_at": observed_at,
-        "devices": [
-            {
-                "id": "future:stable-id",
-                "type": "future_sensor",
-                "backend": "future",
-                "vendor_field": 7,
-            }
-        ],
+        "devices": [{"id": "future:stable-id", "type": "future_sensor", "backend": "future", "vendor_field": 7}],
         "errors": [],
         **extra,
     }
@@ -42,6 +36,45 @@ def catalog(observed_at=OBSERVED_AT, **extra):
 def camera_catalog(**extra):
     """Sentinel's published contract example (its first device is the IMX477 MIPI camera)."""
     return {**contract_catalog(), **extra}
+
+
+def answering(response, status=200):
+    """Sentinel's socket answers every request with `response`: a document as JSON, or text as is."""
+    body = response if isinstance(response, str) else json.dumps(response)
+    return mock.patch.object(socket_client, "request", return_value=(status, body))
+
+
+def ssh_session(result):
+    """A board reached over SSH whose socket helper answers with `result`."""
+    transport = mock.Mock()
+    transport.exec.return_value = result
+    return FakeSession("ssh", transport), transport
+
+
+@contextlib.contextmanager
+def sentinel_socket(reply):
+    """A Unix socket that takes one request and answers it with `reply(connection)`; yields its path and the
+    requests it received."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "api.sock")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(1)
+        received = []
+
+        def serve():
+            with server:
+                connection, _ = server.accept()
+                with connection:
+                    received.append(connection.recv(4096))
+                    reply(connection)
+
+        worker = threading.Thread(target=serve)
+        worker.start()
+        try:
+            yield path, received
+        finally:
+            worker.join(30)
 
 
 class FakeSession:
@@ -59,18 +92,28 @@ class FakeSession:
 
 
 class PeripheralClientTests(unittest.TestCase):
+    def assert_rejected(self, response, code="peripheral_response", status=None, http_status=200, method="catalog"):
+        with answering(response, http_status), self.assertRaises(BoardError) as ctx:
+            getattr(PeripheralClient(FakeSession()), method)()
+        self.assertEqual(ctx.exception.code, code)
+        if status is not None:
+            self.assertEqual(ctx.exception.status, status)
+        return ctx.exception
+
+    def assert_accepted(self, response):
+        with answering(response):
+            self.assertEqual(PeripheralClient(FakeSession()).catalog(), response)
+
     def test_sentinels_contract_example_is_accepted_unchanged(self):
         example = contract_catalog()
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(example))):
-            self.assertEqual(PeripheralClient(FakeSession()).catalog(), example)
+        self.assert_accepted(example)
         self.assertEqual({d["type"] for d in example["devices"]}, {"camera", "microphone"})
 
     def test_catalog_preserves_unknown_devices_and_optional_fields(self):
         expected = catalog(new_optional={"value": 1})
         session = FakeSession()
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(expected))):
-            actual = PeripheralClient(session).catalog()
-        self.assertEqual(actual, expected)
+        with answering(expected):
+            self.assertEqual(PeripheralClient(session).catalog(), expected)
         self.assertEqual(session.current_checks, 1)
 
     def test_malformed_catalog_is_rejected(self):
@@ -85,16 +128,10 @@ class PeripheralClientTests(unittest.TestCase):
             "error record": catalog(errors=[{"provider": "camera.v4l2", "code": "io.open"}]),
             "devices": catalog(devices={}),
         }.items():
-            with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).catalog()
-                self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
-        largest = catalog(revision=2**52 - 1)
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(largest))):
-            self.assertEqual(PeripheralClient(FakeSession()).catalog()["revision"], 2**52 - 1)
-        before_first_scan = catalog(observed_at=None, devices=[])
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(before_first_scan))):
-            self.assertEqual(PeripheralClient(FakeSession()).catalog(), before_first_scan)
+            with self.subTest(name):
+                self.assert_rejected(response, status=502)
+        self.assert_accepted(catalog(revision=2**52 - 1))
+        self.assert_accepted(catalog(observed_at=None, devices=[]))  # before Sentinel's first scan
 
     def test_board_block_is_kept_with_malformed_fields_and_entries_dropped(self):
         overlay = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
@@ -117,11 +154,7 @@ class PeripheralClientTests(unittest.TestCase):
             ],
             "supported_sensors": {"compatible": "sony,imx477"},
         }
-        cleaned = {
-            "overlays": [overlay],
-            "configured_cameras": [{"compatible": "sony,imx477"}],
-            "supported_sensors": [],
-        }
+        cleaned = {"overlays": [overlay], "configured_cameras": [{"compatible": "sony,imx477"}], "supported_sensors": []}
         many = {"supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": [7]} for i in range(300)]}
         for name, block, expected in (
             ("good", good, good),
@@ -132,40 +165,31 @@ class PeripheralClientTests(unittest.TestCase):
                                "supported_sensors": [{"compatible": f"vendor,s{i}", "overlays": []}
                                                      for i in range(client_module.SUPPORTED_SENSORS_LIMIT)]}),
         ):
-            with self.subTest(name), mock.patch.object(
-                socket_client, "request", return_value=(200, json.dumps(camera_catalog(board=block)))
-            ):
+            with self.subTest(name), answering(camera_catalog(board=block)):
                 self.assertEqual(PeripheralClient(FakeSession()).catalog()["board"], expected)
         older = {key: value for key, value in camera_catalog().items() if key != "board"}
         for name, response in (("missing", older), ("not an object", camera_catalog(board=[1]))):
-            with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
+            with self.subTest(name), answering(response):
                 self.assertNotIn("board", PeripheralClient(FakeSession()).catalog())
 
     def test_provider_errors_are_kept_for_the_snapshot(self):
         errors = [{"provider": "camera.mipi", "code": "io.open", "reason": "could not open /dev/media0"},
                   {"provider": "hotplug", "code": "hotplug.unavailable", "reason": "uevents are unavailable"}]
-        response = camera_catalog(errors=errors)
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
+        with answering(camera_catalog(errors=errors)):
             self.assertEqual(PeripheralClient(FakeSession()).catalog()["errors"], errors)
 
     def test_discovery_disabled_is_reported_with_sentinels_reason(self):
         body = json.dumps({"error": "peripheral discovery is not running: disabled with --no-peripherals, or failed"})
         for method in ("catalog", "refresh"):
-            with self.subTest(method), mock.patch.object(socket_client, "request", return_value=(503, body)):
-                with self.assertRaises(BoardError) as ctx:
-                    getattr(PeripheralClient(FakeSession()), method)()
-                self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_unavailable", 503))
-                self.assertIn("--no-peripherals", ctx.exception.message)
-                self.assertEqual(ctx.exception.extra["daemon_status"], 503)
+            with self.subTest(method):
+                error = self.assert_rejected(body, "peripheral_unavailable", 503, http_status=503, method=method)
+                self.assertIn("--no-peripherals", error.message)
+                self.assertEqual(error.extra["daemon_status"], 503)
 
     def test_malformed_device_is_rejected_without_hiding_daemon_detail(self):
         response = catalog()
         response["devices"][0].pop("type")
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
-            with self.assertRaises(BoardError) as ctx:
-                PeripheralClient(FakeSession()).catalog()
-        self.assertEqual(ctx.exception.code, "peripheral_response")
-        self.assertIn("future:stable-id", ctx.exception.extra["detail"])
+        self.assertIn("future:stable-id", self.assert_rejected(response).extra["detail"])
 
     def test_malformed_known_camera_details_are_rejected(self):
         for mutate in (
@@ -197,12 +221,8 @@ class PeripheralClientTests(unittest.TestCase):
         ):
             response = camera_catalog()
             mutate(response["devices"][0])
-            with self.subTest(response=response), mock.patch.object(
-                socket_client, "request", return_value=(200, json.dumps(response))
-            ):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).catalog()
-                self.assertEqual(ctx.exception.code, "peripheral_response")
+            with self.subTest(response=response):
+                self.assert_rejected(response)
 
     def test_malformed_frame_intervals_are_rejected_before_the_snapshot_reads_them(self):
         def with_intervals(value):
@@ -227,37 +247,23 @@ class PeripheralClientTests(unittest.TestCase):
                       [{"width": 1920, "intervals": [interval]}],
                       [{"width": 1920, "height": 2**32, "intervals": [interval]}],
                       *([{"width": 1920, "height": 1080, "intervals": [bad]}] for bad in zeroed)):
-            with self.subTest(frame_intervals=value), mock.patch.object(
-                socket_client, "request", return_value=(200, json.dumps(with_intervals(value)))
-            ):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).catalog()
-                self.assertEqual(ctx.exception.code, "peripheral_response")
-        valid = with_intervals([{"width": 1920, "height": 1080, "intervals": [interval, stepwise]}])
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
-            self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
+            with self.subTest(frame_intervals=value):
+                self.assert_rejected(with_intervals(value))
+        self.assert_accepted(with_intervals([{"width": 1920, "height": 1080, "intervals": [interval, stepwise]}]))
 
     def test_frame_intervals_of_an_unknown_kind_are_rejected(self):
         def with_interval(interval):
             response = camera_catalog()
-            response["devices"][0]["modes"][0]["frame_intervals"] = [
-                {"width": 1920, "height": 1080, "intervals": [interval]}
-            ]
+            response["devices"][0]["modes"][0]["frame_intervals"] = [{"width": 1920, "height": 1080, "intervals": [interval]}]
             return response
 
         fraction = {"numerator": 1, "denominator": 30}
         continuous = {"type": "continuous", "minimum": fraction, "maximum": {"numerator": 1, "denominator": 5}}
         for kind in (None, "", "Discrete", "range", 1, ["stepwise"]):
             interval = {key: value for key, value in dict(continuous, type=kind).items() if value is not None}
-            with self.subTest(type=kind), mock.patch.object(
-                socket_client, "request", return_value=(200, json.dumps(with_interval(interval)))
-            ):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).catalog()
-                self.assertEqual(ctx.exception.code, "peripheral_response")
-        valid = with_interval(continuous)
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(valid))):
-            self.assertEqual(PeripheralClient(FakeSession()).catalog(), valid)
+            with self.subTest(type=kind):
+                self.assert_rejected(with_interval(interval))
+        self.assert_accepted(with_interval(continuous))
 
     def test_non_object_fields_the_snapshot_reads_are_rejected(self):
         usb = {"id": "camera:v4l2:1", "type": "camera", "backend": "v4l2", "device_path": "/dev/video0", "modes": [],
@@ -269,9 +275,7 @@ class PeripheralClientTests(unittest.TestCase):
             return response
 
         def usb_camera(**fields):
-            device = copy.deepcopy(usb)
-            device.update(fields)
-            return catalog(devices=[device])
+            return catalog(devices=[dict(copy.deepcopy(usb), **fields)])
 
         malformed = {
             "USB identity": usb_camera(identity="bad"),
@@ -284,59 +288,43 @@ class PeripheralClientTests(unittest.TestCase):
             # Codex (e84c907): a non-string reason reached the snapshot, which promises a string or null.
             "availability reason": mipi(availability={"state": "unknown", "reason": {"bad": True}}),
             "availability state": mipi(availability={"state": ["unknown"]}),
+            "USB identity node_index": usb_camera(identity={"node_index": -1}),
         }
-        for key in (
-            "stable_key", "topology", "interface", "vendor_id", "product_id",
-            "serial", "manufacturer", "speed",
-        ):
+        for key in ("stable_key", "topology", "interface", "vendor_id", "product_id", "serial", "manufacturer", "speed"):
             malformed[f"USB identity {key}"] = usb_camera(identity={key: {}})
-        malformed["USB identity node_index"] = usb_camera(identity={"node_index": -1})
         for name, response in malformed.items():
-            with self.subTest(name), mock.patch.object(socket_client, "request", return_value=(200, json.dumps(response))):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).catalog()
-                self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
+            with self.subTest(name):
+                self.assert_rejected(response, status=502)
         for response in (usb_camera(), usb_camera(identity={"node_index": 0}),
                          usb_camera(identity=None, by_id_path=None),
                          mipi(isp={"state": "unavailable", "reason": "x"}),
                          mipi(availability=None), mipi(availability={"state": "unknown", "reason": None})):
-            with self.subTest(valid=response), mock.patch.object(
-                socket_client, "request", return_value=(200, json.dumps(response))
-            ):
-                self.assertEqual(PeripheralClient(FakeSession()).catalog(), response)
+            with self.subTest(valid=response):
+                self.assert_accepted(response)
 
     def test_catalog_rejects_duplicate_identities_and_malformed_provider_errors(self):
         duplicate = camera_catalog()
         duplicate["devices"].append(dict(duplicate["devices"][0]))
-        malformed_error = camera_catalog(errors=[{"provider": "camera"}])
-        for response in (duplicate, malformed_error):
-            with self.subTest(response=response), mock.patch.object(
-                socket_client, "request", return_value=(200, json.dumps(response))
-            ):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).catalog()
-                self.assertEqual(ctx.exception.code, "peripheral_response")
+        for response in (duplicate, camera_catalog(errors=[{"provider": "camera"}])):
+            with self.subTest(response=response):
+                self.assert_rejected(response)
 
     def test_missing_socket_fails_clearly_without_fallback(self):
         missing = FileNotFoundError(errno.ENOENT, "missing")
-        with mock.patch.object(socket_client, "request", side_effect=missing):
-            with self.assertRaises(BoardError) as ctx:
-                PeripheralClient(FakeSession()).catalog()
+        with mock.patch.object(socket_client, "request", side_effect=missing), self.assertRaises(BoardError) as ctx:
+            PeripheralClient(FakeSession()).catalog()
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_missing", 503))
         self.assertIn("/run/simaai-sentinel/api.sock", ctx.exception.message)
         self.assertIn("sima-cli neat install sentinel", ctx.exception.hint)
 
     def test_sentinel_without_peripheral_catalog_asks_for_an_update(self):
         body = json.dumps({"error": "unknown Sentinel API endpoint"})
-        with mock.patch.object(socket_client, "request", return_value=(404, body)):
-            with self.assertRaises(BoardError) as ctx:
-                PeripheralClient(FakeSession()).catalog()
-        self.assertEqual(ctx.exception.code, "peripheral_version")
-        self.assertIn("sima-cli neat install sentinel", ctx.exception.hint)
+        error = self.assert_rejected(body, "peripheral_version", http_status=404)
+        self.assertIn("sima-cli neat install sentinel", error.hint)
 
     def test_refresh_is_one_post_answered_with_the_new_catalog(self):
         example = contract_catalog()
-        with mock.patch.object(socket_client, "request", return_value=(200, json.dumps(example))) as request:
+        with answering(example) as request:
             self.assertEqual(PeripheralClient(FakeSession(), socket_path="/tmp/s.sock").refresh(), example)
         request.assert_called_once_with("POST", "/v1/peripherals/refresh", None, socket_path="/tmp/s.sock",
                                         timeout=client_module.REFRESH_TIMEOUT_SEC, max_bytes=PeripheralClient.max_body_bytes)
@@ -344,9 +332,9 @@ class PeripheralClientTests(unittest.TestCase):
         self.assertGreater(client_module.REFRESH_TIMEOUT_SEC, 10)
 
     def test_remote_refresh_is_one_bounded_command(self):
-        transport = mock.Mock()
-        transport.exec.return_value = ExecResult(0, json.dumps({"status": 200, "text": json.dumps(catalog())}).encode(), b"")
-        self.assertEqual(PeripheralClient(FakeSession("ssh", transport)).refresh(), catalog())
+        session, transport = ssh_session(
+            ExecResult(0, json.dumps({"status": 200, "text": json.dumps(catalog())}).encode(), b""))
+        self.assertEqual(PeripheralClient(session).refresh(), catalog())
         argv = transport.exec.call_args.args[0]
         self.assertEqual(argv[:4], ["python3", "-", "POST", "/v1/peripherals/refresh"])
         self.assertEqual(float(argv[-2]), client_module.REFRESH_TIMEOUT_SEC)
@@ -357,11 +345,10 @@ class PeripheralClientTests(unittest.TestCase):
             (504, '{"error":"the peripheral scan did not finish within 10 seconds"}', "timeout", "within 10 seconds"),
             (429, '{"error":"8 refresh requests are already waiting; retry later"}', "peripheral_unavailable", "already waiting"),
         ):
-            with self.subTest(status=status), mock.patch.object(socket_client, "request", return_value=(status, body)):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(FakeSession()).refresh()
-                self.assertEqual((ctx.exception.code, ctx.exception.extra["daemon_status"]), (code, status))
-                self.assertIn(words, ctx.exception.message)
+            with self.subTest(status=status):
+                error = self.assert_rejected(body, code, http_status=status, method="refresh")
+                self.assertEqual(error.extra["daemon_status"], status)
+                self.assertIn(words, error.message)
 
     def test_a_local_failure_after_the_board_changed_is_reported_as_stale(self):
         # Codex (e84c907): a local socket failure raised before the generation check, so a board switched
@@ -370,21 +357,18 @@ class PeripheralClientTests(unittest.TestCase):
                         RemoteDisconnected("closed")):
             session = FakeSession()
             session.stale = True
-            with self.subTest(failure=type(failure).__name__), mock.patch.object(
-                socket_client, "request", side_effect=failure
-            ):
-                with self.assertRaises(BoardError) as ctx:
-                    PeripheralClient(session).refresh()
-                self.assertEqual(ctx.exception.code, "stale_snapshot")
+            with self.subTest(failure=type(failure).__name__), \
+                    mock.patch.object(socket_client, "request", side_effect=failure), \
+                    self.assertRaises(BoardError) as ctx:
+                PeripheralClient(session).refresh()
+            self.assertEqual(ctx.exception.code, "stale_snapshot")
 
     def test_a_remote_helper_failure_after_the_board_changed_is_reported_as_stale(self):
         # Codex (635553e): helper failures decoded after the transport's own check named the old board.
         for result in (ExecResult(127, b"", b"python3: not found"), ExecResult(0, b"not json", b""),
                        ExecResult(0, b'{"failure": "refused", "detail": "x"}', b""),
                        ExecResult(0, b'{"status": "bad", "text": 3}', b"")):
-            transport = mock.Mock()
-            transport.exec.return_value = result
-            session = FakeSession("ssh", transport)
+            session, _ = ssh_session(result)
             session.stale = True
             with self.subTest(result=result), self.assertRaises(BoardError) as ctx:
                 PeripheralClient(session).refresh()
@@ -392,94 +376,40 @@ class PeripheralClientTests(unittest.TestCase):
 
     def test_remote_access_runs_only_the_stdlib_socket_helper(self):
         response = catalog()
-        envelope = json.dumps({"status": 200, "text": json.dumps(response)}).encode()
-        transport = mock.Mock()
-        transport.exec.return_value = ExecResult(0, envelope, b"")
-        session = FakeSession("ssh", transport)
+        session, transport = ssh_session(ExecResult(0, json.dumps({"status": 200, "text": json.dumps(response)}).encode(), b""))
         self.assertEqual(PeripheralClient(session).catalog(), response)
-        argv = transport.exec.call_args.args[0]
-        self.assertEqual(argv[:4], ["python3", "-", "GET", "/v1/peripherals"])
+        self.assertEqual(transport.exec.call_args.args[0][:4], ["python3", "-", "GET", "/v1/peripherals"])
         self.assertIn(b"AF_UNIX", transport.exec.call_args.kwargs["stdin"])
 
     def test_remote_helper_malformed_envelope_is_normalized(self):
-        transport = mock.Mock()
-        transport.exec.return_value = ExecResult(0, b'{"status":"not-a-status","text":3}', b"")
+        session, _ = ssh_session(ExecResult(0, b'{"status":"not-a-status","text":3}', b""))
         with self.assertRaises(BoardError) as ctx:
-            PeripheralClient(FakeSession("ssh", transport)).catalog()
+            PeripheralClient(session).catalog()
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
 
 
 class SocketClientTests(unittest.TestCase):
     def test_real_unix_socket_request_reads_http_json(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "api.sock")
-            ready = threading.Event()
-
-            def serve():
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-                    server.bind(path)
-                    server.listen(1)
-                    ready.set()
-                    connection, _ = server.accept()
-                    with connection:
-                        request = connection.recv(4096)
-                        self.assertIn(b"GET /v1/peripherals HTTP/1.1", request)
-                        body = b'{"revision":12345}'
-                        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 18\r\n\r\n" + body)
-
-            worker = threading.Thread(target=serve)
-            worker.start()
-            self.assertTrue(ready.wait(2))
+        reply = b"HTTP/1.1 200 OK\r\nContent-Length: 18\r\n\r\n" + b'{"revision":12345}'
+        with sentinel_socket(lambda connection: connection.sendall(reply)) as (path, received):
             status, body = socket_client.request("GET", "/v1/peripherals", socket_path=path, timeout=2)
-            worker.join(2)
+        self.assertIn(b"GET /v1/peripherals HTTP/1.1", received[0])
         self.assertEqual((status, body), (200, '{"revision":12345}'))
 
     def test_truncated_http_response_is_a_stable_api_error(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "api.sock")
-            ready = threading.Event()
-
-            def serve():
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-                    server.bind(path)
-                    server.listen(1)
-                    ready.set()
-                    connection, _ = server.accept()
-                    with connection:
-                        connection.recv(4096)
-                        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{}")
-
-            worker = threading.Thread(target=serve)
-            worker.start()
-            self.assertTrue(ready.wait(2))
-            with self.assertRaises(BoardError) as ctx:
-                PeripheralClient(FakeSession(), socket_path=path).catalog()
-            worker.join(2)
+        reply = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{}"
+        with sentinel_socket(lambda connection: connection.sendall(reply)) as (path, _), \
+                self.assertRaises(BoardError) as ctx:
+            PeripheralClient(FakeSession(), socket_path=path).catalog()
         self.assertEqual((ctx.exception.code, ctx.exception.status), ("peripheral_response", 502))
         self.assertIn("malformed or incomplete", ctx.exception.message)
 
     def test_a_content_length_too_long_to_parse_is_a_stable_api_error(self):
         # Codex 4189241135: int() refused a 5,000-digit Content-Length and Refresh returned a 500.
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "api.sock")
-            ready = threading.Event()
-
-            def serve():
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-                    server.bind(path)
-                    server.listen(1)
-                    ready.set()
-                    connection, _ = server.accept()
-                    with connection:
-                        connection.recv(4096)
-                        connection.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: " + b"9" * 5000 + b"\r\n\r\n{}")
-
-            worker = threading.Thread(target=serve)
-            worker.start()
-            self.assertTrue(ready.wait(2))
-            with self.assertRaises(BoardError) as ctx:
-                PeripheralClient(FakeSession(), socket_path=path).catalog()
-            worker.join(2)
+        reply = b"HTTP/1.1 200 OK\r\nContent-Length: " + b"9" * 5000 + b"\r\n\r\n{}"
+        with sentinel_socket(lambda connection: connection.sendall(reply)) as (path, _), \
+                self.assertRaises(BoardError) as ctx:
+            PeripheralClient(FakeSession(), socket_path=path).catalog()
         self.assertEqual(ctx.exception.code, "peripheral_response")
 
     def test_trickled_response_is_bounded_by_one_wall_clock_deadline(self):
@@ -489,36 +419,22 @@ class SocketClientTests(unittest.TestCase):
             "body": (b"HTTP/1.1 200 OK\r\nContent-Length: 400\r\n\r\n", b"a" * 400),
         }
         for name, (prefix, trickle) in cases.items():
-            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
-                path = os.path.join(tmp, "api.sock")
-                ready = threading.Event()
+            def reply(connection):
+                try:
+                    connection.sendall(prefix)
+                    for index in range(len(trickle)):
+                        connection.sendall(trickle[index : index + 1])
+                        time.sleep(0.05)
+                except OSError:
+                    pass
 
-                def serve():
-                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
-                        server.bind(path)
-                        server.listen(1)
-                        ready.set()
-                        connection, _ = server.accept()
-                        with connection:
-                            connection.recv(4096)
-                            try:
-                                connection.sendall(prefix)
-                                for index in range(len(trickle)):
-                                    connection.sendall(trickle[index : index + 1])
-                                    time.sleep(0.05)
-                            except OSError:
-                                pass
-
-                worker = threading.Thread(target=serve)
-                worker.start()
-                self.assertTrue(ready.wait(2))
+            with self.subTest(name), sentinel_socket(reply) as (path, _):
                 started = time.monotonic()
                 with self.assertRaises(OSError) as ctx:
                     socket_client.request("GET", "/v1/peripherals", socket_path=path, timeout=0.3)
                 elapsed = time.monotonic() - started
-                worker.join(30)
-                self.assertEqual(socket_client.socket_failure(ctx.exception), socket_client.TIMED_OUT)
-                self.assertLess(elapsed, 0.8)
+            self.assertEqual(socket_client.socket_failure(ctx.exception), socket_client.TIMED_OUT)
+            self.assertLess(elapsed, 0.8)
 
 
 if __name__ == "__main__":
