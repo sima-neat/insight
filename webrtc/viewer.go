@@ -205,6 +205,7 @@ func (ch *Channel) publishMediaForCodec(codec videoCodec) (*channelMedia, error)
 
 const (
 	neatPortMapPath              = "/home/docker/.insight-config/neat-port-map.json"
+	browserICEAddressEnv         = "NEAT_INSIGHT_BROWSER_ICE_ADDRESS"
 	defaultEphemeralUDPPortStart = uint16(40000)
 	defaultEphemeralUDPPortEnd   = uint16(40200)
 	minValidEphemeralUDPPort     = 1
@@ -221,6 +222,13 @@ const (
 	// a sustained correlation failure reports evictions before it reports expiries.
 	metadataCorrelationRetention = 5 * time.Second
 )
+
+func configuredBrowserICEAddress() (string, string) {
+	if value, present := os.LookupEnv(browserICEAddressEnv); present {
+		return strings.TrimSpace(value), browserICEAddressEnv
+	}
+	return strings.TrimSpace(os.Getenv("CONTAINER_HOST_IP")), "CONTAINER_HOST_IP"
+}
 
 type neatPortMapConfig struct {
 	WebRTC *udpPortRangeConfig `json:"webRTC"`
@@ -656,13 +664,13 @@ func handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hostIP := os.Getenv("CONTAINER_HOST_IP")
+	hostIP, hostIPSource := configuredBrowserICEAddress()
 
 	if ip := net.ParseIP(hostIP); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
-		log.Printf("🌐 Using CONTAINER_HOST_IP override: %s", hostIP)
+		log.Printf("🌐 Using %s override: %s", hostIPSource, hostIP)
 		s.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
 	} else if hostIP != "" {
-		log.Printf("⚠️ Ignoring invalid or internal CONTAINER_HOST_IP: %q", hostIP)
+		log.Printf("⚠️ Ignoring invalid or internal %s: %q", hostIPSource, hostIP)
 	}
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(&m), webrtc.WithSettingEngine(s))

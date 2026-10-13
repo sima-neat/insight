@@ -56,7 +56,7 @@ Notes:
 ## Basic usage
 
 1. Open the Viewer tab to monitor active channels.
-2. Open Streaming to assign/start/stop input sources.
+2. Open Streaming to assign/start/stop input sources. To publish a webcam attached to your browser's computer as a live source, enable a camera under Media Sources → Local cameras and select it in a source slot.
 3. Open Stats to see the planned location for system load and runtime metrics. This view is a placeholder in the current release and is expected to be completed in the next release.
 
 ## Viewer settings
@@ -88,6 +88,12 @@ Prerequisites:
 - Python 3.10+
 - Node.js 20+ and npm
 - Go 1.24+
+- A C compiler for each Linux target: `gcc` for the host, plus
+  `gcc-aarch64-linux-gnu` or `gcc-x86-64-linux-gnu` to cross-build the other
+  Linux wheel. Linux wheels bundle a small `LD_PRELOAD` shim
+  (`tools/ffmpeg_nodelay.c`) that keeps the RTSP publishers' TCP sockets
+  free of Nagle delay; `NEAT_INSIGHT_FFMPEG_PRELOAD` overrides its path at
+  runtime.
 - mkcert, or a supported package manager for automatic runtime installation
 
 Build and install into your current virtualenv:
@@ -107,6 +113,7 @@ neat-insight --port 9900
 Useful build options:
 - `--target-platform <host|all|linux-aarch64|linux-amd64|macos-arm64|windows-amd64>`
 - `--skip-frontend`
+- `--skip-shim` (Linux wheels then run ffmpeg with Nagle enabled)
 
 ## Testing metadata
 

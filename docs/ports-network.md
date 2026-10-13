@@ -18,6 +18,8 @@ Insight uses several ports during normal operation. The default ports are the po
 | `videoUDP` | `9000-9079` | UDP | Video RTP ingest for viewer channels `0-79`. |
 | `metadataUDP` | `9100-9179` | UDP | Metadata JSON ingest for viewer channels `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC media and metadata DataChannel egress from vf to the browser. |
+| `webrtcWhip` | `8889` | HTTPS/TCP | Browser webcam publishing into MediaMTX over WHIP, republished as an RTSP source. |
+| `webrtcWhipIce` | `8189` | UDP | ICE media for browser webcam publishing. Signalling uses `webrtcWhip`; the video itself arrives here, so both must be reachable. |
 | `webSSH` | `8022` | HTTPS/TCP | Browser shell to a paired DevKit when available. |
 
 ## Find the actual SDK port map
@@ -39,6 +41,8 @@ The output includes `insight.webUiUrl` and an `exposedPorts` array:
     {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
     {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
   ],
   "insight": {
@@ -77,6 +81,21 @@ In the Neat Development Environment, ports may be remapped by the SDK container.
 This matters most for the Video Viewer. The internal default viewer port is `8081`, but the browser-facing port can be different when the SDK maps `videoUI` to another host port.
 
 Use System Information in the Insight UI to check the actual exposed ports before assuming a URL is wrong.
+
+## Optional browser-facing configuration
+
+Hosted environments can separate the address used by a paired DevKit from the address advertised to an external browser. Insight reads two optional, startup-scoped files:
+
+| File | Purpose |
+| --- | --- |
+| `/home/docker/.insight-config/browser-ice-address` | One browser-reachable IPv4 address advertised by both the vf viewer and MediaMTX WHIP endpoint. |
+| `/home/docker/.insight-config/launch-url` | One trusted absolute HTTP or HTTPS launch URL. Insight derives its origin for generated viewer, WHIP, and HTTP MJPEG URLs. |
+
+When `browser-ice-address` is absent, Insight keeps the existing `CONTAINER_HOST_IP` behavior. When `launch-url` is absent, generated browser URLs continue to use the request host and SDK port map. The files therefore opt into hosted-environment behavior independently and do not change ordinary local or DevKit installations.
+
+`browser-ice-address` is validated before vf or MediaMTX starts. An empty or malformed browser address prevents Insight from becoming ready instead of silently advertising an unreachable address. `launch-url` is advisory: Insight accepts a full URL with an ASCII hostname, including a path, query, or fragment, and uses only its HTTP(S) origin. An invalid launch URL logs a warning and preserves legacy request-host/port-map URL generation. Replace files atomically, run `insight-admin restart`, and inspect `/api/health` to confirm the address and public origin applied by the new process.
+
+The browser ICE address is not required to be assigned to a local network interface. Public cloud IPv4 addresses commonly reach the host through 1:1 NAT. The WebRTC and `webrtcWhipIce` UDP ports must still be published and allowed by the surrounding network policy.
 
 ## Configure applications with the port map
 
