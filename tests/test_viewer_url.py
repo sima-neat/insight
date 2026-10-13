@@ -231,6 +231,21 @@ class ViewerUrlTests(unittest.TestCase):
         )
         start.assert_not_called()
 
+    def test_a_devkit_paired_only_through_sima_devkit_ip_can_open_the_shell(self):
+        """The SDK's SIMA_DEVKIT_IP fallback offers the shell, so starting it must not need DEVKIT_SYNC_DEVKIT_IP."""
+        env = {"SIMA_DEVKIT_IP": "10.42.0.175"}
+        app_module.server_ssl_context = ("cert.pem", "key.pem")
+        self.addCleanup(setattr, app_module, "server_ssl_context", None)
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(app_module.board, "get_board_manager", side_effect=RuntimeError("no board")), \
+             mock.patch("neat_insight.utils.webssh_is_available", return_value=True), \
+             mock.patch("neat_insight.utils.is_webssh_running", return_value=True), \
+             mock.patch.object(app_module, "webssh_is_available", return_value=True), \
+             mock.patch.object(app_module, "is_webssh_running", return_value=True):
+            response = self.client.post("/api/devkit-shell/start", headers={"Host": "10.0.0.23:9900"})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIn("hostname=10.42.0.175", response.get_json()["launch_url"])
+
     def test_devkit_shell_url_preserves_ipv6_host(self):
         ports = [
             {"name": "webSSH", "hostPortStart": 26228, "protocol": "tcp"},
