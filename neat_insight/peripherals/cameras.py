@@ -340,12 +340,17 @@ def _interval_rates(entry: dict) -> list:
             )
         except (KeyError, TypeError, ZeroDivisionError):
             continue
-        rates += [
+        sampled = [
             Fraction(fps)
             for fps in STANDARD_FPS
             if slowest - 1e-3 <= fps <= fastest + 1e-3
             and (step is None or _on_step(1 / fps, 1 / fastest, step))
         ]
+        if not sampled and isinstance(high.get("numerator"), int) and isinstance(high.get("denominator"), int):
+            # No standard rate in the range (a range fixed at 24 fps, say): offer its fastest rate, the
+            # minimum interval, which every continuous or stepwise range includes.
+            sampled = [Fraction(high["denominator"], high["numerator"])]
+        rates += sampled
     return rates
 
 

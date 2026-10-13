@@ -582,6 +582,14 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(client.get("/api/peripherals/preview").get_json()["session"]["id"], second["id"])
         self.assertEqual(len(self.session.transport.kills()), 1)
 
+    def test_a_camera_kept_from_a_failed_providers_last_scan_is_not_previewed(self):
+        # Codex 4264144158: a retained USB camera's /dev/videoN may be another device after a replug.
+        retained = item_of(peripherals_api.scans.snapshot(1), C920)
+        retained["modes_source"] = "previous-scan"
+        response = self.client().post(PREVIEW, json={"id": C920, "format": "MJPG", "width": 1280, "height": 720, "fps": 30})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (503, "peripheral_unavailable"))
+        self.assertEqual(self.session.transport.streams, [])
+
     def test_preview_status_read_during_a_board_change_is_refused(self):
         # Codex 4263972495: the status route returned the departed board's session, which the change stopped.
         self.start()

@@ -717,6 +717,8 @@ test('Start preview is blocked with the reason for every state that forbids it',
   assert.match(block(imx477, mipiMode, { target: null }).reason, /No board is selected/)
   assert.match(block(null, null).reason, /Select a camera/)
   assert.match(block(imx477, mipiMode, { stale: true }).reason, /board changed/)
+  // Codex 4264144158: a camera kept from a failed provider's last scan may be another device now.
+  assert.match(block({ ...imx477, modes_source: 'previous-scan' }, mipiMode).reason, /last successful scan/)
 
   // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed mode.
   assert.deepEqual(block(usb, sel('MJPG', 1280, 720, 30)), open)
@@ -743,7 +745,7 @@ test('Start preview is blocked with the reason for every state that forbids it',
   }
 
   // The scan's availability never blocks Start; a busy camera is reported by the start itself.
-  assert.deepEqual(block(inUse, mipiMode), open)
+  assert.deepEqual(block({ ...inUse, modes_source: 'live' }, mipiMode), open)
 
   assert.match(block(imx477, mipiMode, { session: { ...liveSession, camera_id: imx568.id } }).reason, /already running on mipi:econ-imx568-fpga 5-0042/)
   assert.equal(block(imx477, mipiMode, { session: liveSession }).blocked, false)

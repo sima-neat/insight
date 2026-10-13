@@ -1135,6 +1135,24 @@ class PeripheralsApiTests(unittest.TestCase):
         camera = item(self.refresh().get_json(), C920)
         self.assertEqual([choice["value"] for choice in size_of(fmt_of(camera, "YUYV"), 640, 480)["fps"]], [30, 15, 10, 5])
 
+    def test_an_interval_range_without_a_standard_rate_offers_its_fastest_rate(self):
+        # Codex 4264144141: a range holding none of the standard rates left the size with no rate at all.
+        for kind, extra in (("continuous", {}), ("stepwise", {"step": {"numerator": 1, "denominator": 1000}})):
+            with self.subTest(kind):
+                doc = c920()
+                doc["modes"] = [dict(usb_mode("YUYV", 640, 480, [(1, 30)]), frame_intervals=[{
+                    "width": 640, "height": 480, "intervals": [{
+                        "type": kind,
+                        "minimum": {"numerator": 1, "denominator": 24},
+                        "maximum": {"numerator": 1, "denominator": 24},
+                        **extra,
+                    }],
+                }])]
+                self.use(catalog(doc))
+                camera = item(self.refresh().get_json(), C920)
+                [choice] = size_of(fmt_of(camera, "YUYV"), 640, 480)["fps"]
+                self.assertEqual((choice["value"], choice["framerate_num"], choice["framerate_den"]), (24, 24, 1))
+
     def test_get_is_refused_when_the_board_changes_before_it_returns(self):
         self.use()
         self.refresh()

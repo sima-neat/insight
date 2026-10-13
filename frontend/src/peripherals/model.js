@@ -889,6 +889,9 @@ export function previewBlock({ camera, selection, stale = false, session = null,
   if (!target) return { blocked: true, reason: 'No board is selected. Open board settings and choose one.' }
   if (!camera) return { blocked: true, reason: 'Select a camera first.' }
   if (stale) return { blocked: true, reason: 'The board changed after this scan. Refresh before starting a preview.' }
+  if (camera.modes_source === 'previous-scan') {
+    return { blocked: true, reason: 'This camera is listed from the last successful scan. Refresh before starting a preview.' }
+  }
   // A USB camera previews any mode it lists in a format the preview reads; a MIPI camera only its Available modes.
   const mipi = camera.connection !== 'usb'
   if (mipi && camera.support?.tier === 'unsupported') {

@@ -64,6 +64,14 @@ def scanned_camera(generation: int, camera_id: str) -> dict:
     if item is None:
         raise BoardError("not_found", f"Camera {camera_id} is not in the last scan.",
                          hint="Refresh and pick a camera from the list.")
+    if item.get("modes_source") == "previous-scan":
+        # Kept from the provider's last successful scan: its device node may now be another camera's.
+        raise BoardError(
+            "peripheral_unavailable",
+            f"{item.get('name') or camera_id} is listed from SiMa Sentinel's last successful scan, because its "
+            "provider failed during this refresh.",
+            hint="Refresh again; if the provider keeps failing, check SiMa Sentinel on the board.",
+        )
     return item
 
 
