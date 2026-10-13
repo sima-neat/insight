@@ -118,14 +118,27 @@ def describe(state: dict) -> dict:
     }
 
 
-# One installation at a time: a second request waits, then finds the daemon healthy and refuses.
-_INSTALL_LOCK = threading.Lock()
+# One installation per board at a time: a second request for that board waits, then finds the daemon
+# healthy and refuses. Another board's install does not wait for it. A lock lives while anyone uses it.
+_INSTALL_LOCKS = {}
+_INSTALL_LOCKS_GUARD = threading.Lock()
 
 
-def install(session) -> dict:
-    """Install Sentinel on the board with sima-cli; refuses to reinstall a healthy daemon."""
-    with _INSTALL_LOCK:
-        return _install(session)
+def install(session, board=None) -> dict:
+    """Install Sentinel on the board with sima-cli; refuses to reinstall a healthy daemon.
+
+    ``board`` names the board (its host key fingerprint), so installs on the same board are serialized."""
+    with _INSTALL_LOCKS_GUARD:
+        entry = _INSTALL_LOCKS.setdefault(board, [threading.Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            return _install(session)
+    finally:
+        with _INSTALL_LOCKS_GUARD:
+            entry[1] -= 1
+            if not entry[1]:
+                del _INSTALL_LOCKS[board]
 
 
 def _install(session) -> dict:

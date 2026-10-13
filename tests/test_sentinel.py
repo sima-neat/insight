@@ -547,6 +547,35 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(len(installers), 1)
         self.assertEqual(sorted(map(str, outcomes)), ["True", "already_installed"])
 
+    def test_an_install_on_one_board_does_not_wait_for_another_boards_install(self):
+        self.transport.status_fields = DOWN
+        installing, release = threading.Event(), threading.Event()
+
+        def slow_installer(argv, *, timeout, stdin=None):
+            if argv[0] == "sh" and "neat install sentinel" in argv[2]:
+                installing.set()
+                release.wait(5)
+                self.transport.status_fields = list(STATUS_FIELDS)
+            return FakeSentinel.exec(self.transport, argv, timeout=timeout, stdin=stdin)
+
+        self.transport.exec = slow_installer
+        first = threading.Thread(target=install.install, args=(self.session, "fp-a"))
+        first.start()
+        try:
+            self.assertTrue(installing.wait(5))
+            other = FakeSentinel()
+            other.status_fields = DOWN
+            other.heal_after_install(list(STATUS_FIELDS))
+            done = []
+            second = threading.Thread(target=lambda: done.append(install.install(FakeSession(other, 2, "fp-b"), "fp-b")))
+            second.start()
+            second.join(2)
+            self.assertEqual([result["status"]["healthy"] for result in done], [True], "board B waited for board A's install")
+        finally:
+            release.set()
+            first.join(5)
+        self.assertEqual(install._INSTALL_LOCKS, {}, "a board's lock is dropped once its installs finish")
+
     def test_the_daemon_run_is_named_and_dated_by_systemd_only_while_active(self):
         def status(*fields):
             return install.status(StaticBoard(ExecResult(0, "@@".join(fields).encode(), b"")))

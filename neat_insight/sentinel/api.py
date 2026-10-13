@@ -249,7 +249,7 @@ def install_sentinel():
         "The selected board changed since its Sentinel state was read, so nothing was installed.",
         "Read Sentinel state for the board selected now, then install again.",
     )
-    result = install.install(context.session)
+    result = install.install(context.session, context.identity.get("fingerprint") or context.session.target.label)
     cache.record(context.key, "daemon", result["status"], STATUS_TTL_SEC)
     return context.payload(daemon=result["status"], log=result["log"])
 
