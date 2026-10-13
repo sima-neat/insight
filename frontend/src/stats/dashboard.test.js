@@ -68,6 +68,10 @@ test('scales stay fixed: percentages 0-100, temperatures 40-90, the rest a round
   assert.deepEqual(scaleFor('%', [[12, 99]]), { min: 0, max: 100 })
   assert.deepEqual(scaleFor('C', [[66.8, 68.6]]), { min: 40, max: 90 })
   assert.deepEqual(scaleFor('C', [[35, 96.2]]), { min: 30, max: 100 }, 'a reading outside the band widens it')
+  // Every spelling the Thermal tab counts as a temperature gets the same shared scale.
+  for (const unit of ['°C', 'degC', 'deg C', 'celsius', ' Celsius ']) {
+    assert.deepEqual(scaleFor(unit, [[66.8, 68.6]]), { min: 40, max: 90 }, unit)
+  }
   assert.deepEqual(scaleFor('W', [[10.2, 16.69]]), { min: 0, max: 20 })
   assert.deepEqual(scaleFor('MB', [[742.3]]), { min: 0, max: 1000 })
   assert.deepEqual(scaleFor('MB', [[520.7]], 1788), { min: 0, max: 1788 }, 'a known capacity is the ceiling')

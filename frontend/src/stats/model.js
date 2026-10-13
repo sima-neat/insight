@@ -503,6 +503,11 @@ function unitKey(unit) {
   return String(unit ?? '').trim().toLowerCase()
 }
 
+/** Whether a unit names degrees Celsius, in any spelling Sentinel may use: the one test for every view. */
+export function isTemperatureUnit(unit) {
+  return TEMPERATURE_UNITS.has(unitKey(unit))
+}
+
 /**
  * A temperature, wherever Sentinel grouped it: the board sensors sit under Board, the SoC's
  * RTSN sensors under MLA, APU, CVU and TOP. The unit decides when there is one, so a

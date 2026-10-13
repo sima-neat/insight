@@ -1,5 +1,5 @@
 /** Pure dashboard arithmetic matching Sentinel's fixed-scale, 240-sample ops view. */
-import { durationWords, isThermalMetric, unitSuffix } from './model.js'
+import { durationWords, isTemperatureUnit, isThermalMetric, unitSuffix } from './model.js'
 
 export const DASH_TABS = [
   { id: 'overview', label: 'Overview' },
@@ -36,7 +36,7 @@ export function scaleFor(unit, valueLists, ceiling = null) {
   const values = valueLists.flat().filter(isNumber)
   const key = String(unit ?? '').trim().toLowerCase()
   if (key === '%') return { min: 0, max: 100 }
-  if (key === 'c' || key === '°c') {
+  if (isTemperatureUnit(key)) {
     const low = Math.min(THERMAL_SCALE.min, ...values.map((value) => Math.floor(value / 10) * 10))
     const high = Math.max(THERMAL_SCALE.max, ...values.map((value) => Math.ceil(value / 10) * 10))
     return { min: low, max: high }
