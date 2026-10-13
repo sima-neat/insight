@@ -266,11 +266,22 @@ def _test_running() -> BoardError:
     return BoardError("test_running", "A microphone test is already recording.", hint="Wait for it to finish.")
 
 
-def refuse_if_running() -> None:
+def _recording_on(generation: int) -> bool:
+    """Whether Insight's test records on the board selected now; a departed board's test is told to end
+    and does not hold up a test on this one."""
+    test = _current
+    if test is None or test.status()["state"] != "recording":
+        return False
+    if test.generation != generation:
+        test.request_stop()
+        return False
+    return True
+
+
+def refuse_if_running(generation: int) -> None:
     """Refuse a start while Insight's own test records, before any check of the board: the live
     in-use check would find Insight's own arecord and report the microphone as held by another process."""
-    test = _current
-    if test is not None and test.status()["state"] == "recording":
+    if _recording_on(generation):
         raise _test_running()
 
 
@@ -281,7 +292,7 @@ def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
     """
     global _current
     with _lock:
-        if _current is not None and _current.status()["state"] == "recording":
+        if _recording_on(session.generation):
             raise _test_running()
         test = MicTest(session.generation, mic_id, bound["selector"], bound["rate"], bound["channels"], seconds)
         test.thread = threading.Thread(target=_record, args=(session, test), name="mic-test", daemon=True)

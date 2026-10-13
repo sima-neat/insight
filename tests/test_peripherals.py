@@ -1391,6 +1391,19 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertTrue(cancelled.wait(2), "the departed board's arecord is stopped")
         started[0].thread.join(2)
 
+    def test_a_departed_boards_recording_does_not_block_a_test_on_the_new_board(self):
+        """Codex 4255561400: a test still recording on the previous board must not answer test_running here."""
+        old = mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
+        self.manager.current = FakeSession(2, self.transport)  # /api/board/select picked another board
+        self.client.post("/api/peripherals/refresh")
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}),
+                           lambda argv, on_stdout, cancel: ExecResult(0, sine(0.5), b""))
+        response = self.start()
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(old.stop_requested, "the departed board's recording is told to end")
+        mictest._current.thread.join(2)
+        self.assertEqual(self.client.get("/api/peripherals/microphones/test").get_json()["test"]["state"], "ready")
+
     def test_another_board_sees_no_test_and_cannot_stop_it(self):
         self.assertIsNone(self.client.get("/api/peripherals/microphones/test").get_json()["test"])
         self.assertIsNone(self.client.post("/api/peripherals/microphones/test/stop").get_json()["test"])
