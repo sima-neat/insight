@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from neat_insight.board import BoardError
+from neat_insight.peripherals.cameras import provider_of
 from neat_insight.peripherals.client import PeripheralClient
 from neat_insight.preview import gst
 
@@ -212,6 +213,10 @@ class PreviewManager:
         try:
             catalog = PeripheralClient(board_session).refresh(timeout=CAMERA_FPS_TIMEOUT_SEC)
             device = next((entry for entry in catalog["devices"] if entry["id"] == camera_id), None)
+            # A failed provider's devices are kept from its last successful scan, whose rate may be another mode's.
+            failed = {error.get("provider") for error in catalog.get("errors") or []}
+            if device is not None and provider_of(device) in failed:
+                device = None
             value = (device or {}).get("max_fps")
             if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
                 fps = value

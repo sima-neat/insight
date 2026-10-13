@@ -127,7 +127,11 @@ def previewable_mode(item: dict, body: dict) -> dict:
 @preview_bp.get("/api/peripherals/preview")
 def get_preview():
     """Return the preview running on the selected board, or null; never contacts the board."""
-    return {"session": previews().current(get_board_manager().session().generation)}
+    session = get_board_manager().session()
+    current = previews().current(session.generation)
+    # A board change while it was read: the session would be the departed board's, which the change stopped.
+    session.require_current()
+    return {"session": current}
 
 
 # API: start an explicit, temporary camera preview on the selected board.

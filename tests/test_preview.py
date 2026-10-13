@@ -109,7 +109,7 @@ class FakeTransport:
 def fake_session(transport=None, generation=1):
     transport = transport or FakeTransport()
     return SimpleNamespace(generation=generation, target=BoardTarget("ssh", "test", "board", 22, "sima"),
-                           transport=transport, raw_transport=transport)
+                           transport=transport, raw_transport=transport, require_current=lambda: None)
 
 
 class PipelineTests(unittest.TestCase):
@@ -582,6 +582,21 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(client.get("/api/peripherals/preview").get_json()["session"]["id"], second["id"])
         self.assertEqual(len(self.session.transport.kills()), 1)
 
+    def test_preview_status_read_during_a_board_change_is_refused(self):
+        # Codex 4263972495: the status route returned the departed board's session, which the change stopped.
+        self.start()
+        client = self.client()
+        real_current = self.manager.current
+
+        def read_then_switch(generation):
+            session = real_current(generation)
+            self.session.require_current = mock.Mock(side_effect=BoardError("stale_snapshot", "The board changed."))
+            return session
+
+        with mock.patch.object(self.manager, "current", side_effect=read_then_switch):
+            response = client.get("/api/peripherals/preview")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+
     def test_a_stop_the_board_does_not_answer_keeps_the_session_for_a_retry(self):
         self.start()
         session_id = self.manager.current(1)["id"]
@@ -671,6 +686,9 @@ class CameraFpsTests(unittest.TestCase):
             "unexpected error": RuntimeError("boom"),
             "no max_fps": catalog(imx477()),
             "camera gone": catalog(c920()),
+            # Codex 4263972484: a failed provider's camera is kept from its last scan, whose rate may be stale.
+            "provider failed": catalog(dict(imx477(), max_fps=66.18),
+                                       errors=[{"provider": "camera.mipi", "code": "io.read", "message": "failed"}]),
         }
         for name, answer in answers.items():
             with self.subTest(name):
