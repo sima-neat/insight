@@ -166,8 +166,13 @@ class BoardManager:
             return False
         return key is not None and key_fingerprint(key) == fingerprint
 
-    def test(self) -> None:
-        self.session().identity()
+    def test(self) -> dict:
+        """Read the selected board's identity; return the state of that same board, or refuse if it changed."""
+        session = self.session()
+        session.identity()
+        with self._lock:
+            session.require_current()
+            return self.state()
 
     def trust_host_key(self, fingerprint: str) -> None:
         with self.target_change_guard(lambda: self._presents(fingerprint)), self._lock:

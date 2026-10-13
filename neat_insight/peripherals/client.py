@@ -357,10 +357,11 @@ class PeripheralClient:
 
     @staticmethod
     def _valid_frame_intervals(value) -> bool:
-        """Each entry is one probed size with the list of intervals the device advertises for it; every
-        fraction the snapshot divides by must be positive."""
+        """Each entry is one probed size with the list of intervals the device advertises for it; the size must
+        be one the snapshot can match to its mode, and every fraction the snapshot divides by must be positive."""
         return isinstance(value, list) and all(
             isinstance(entry, dict)
+            and all(_positive_int(entry.get(key)) for key in ("width", "height"))
             and isinstance(entry.get("intervals"), list)
             and all(_valid_interval(interval) for interval in entry["intervals"])
             for entry in value

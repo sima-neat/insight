@@ -221,6 +221,10 @@ class PeripheralClientTests(unittest.TestCase):
         zeroed += [dict(interval, denominator=2**32), dict(stepwise, minimum={"numerator": 1, "denominator": 10**400})]
         for value in ([None], 5, {}, [{"width": 1920, "height": 1080, "intervals": 5}],
                       [{"width": 1920, "height": 1080, "intervals": [None]}], [{"width": 1920, "height": 1080}],
+                      # Codex (fb0ecbf): an entry whose size the snapshot cannot match dropped all its rates.
+                      [{"width": {}, "height": 1080, "intervals": [interval]}],
+                      [{"width": 1920, "intervals": [interval]}],
+                      [{"width": 1920, "height": 2**32, "intervals": [interval]}],
                       *([{"width": 1920, "height": 1080, "intervals": [bad]}] for bad in zeroed)):
             with self.subTest(frame_intervals=value), mock.patch.object(
                 socket_client, "request", return_value=(200, json.dumps(with_intervals(value)))

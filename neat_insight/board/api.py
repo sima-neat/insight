@@ -48,9 +48,7 @@ def select_board():
 @board_bp.post("/api/board/test")
 def test_board():
     """Connect to the selected board, read its host name and build, and return the updated board state."""
-    manager = get_board_manager()
-    manager.test()
-    return manager.state()
+    return get_board_manager().test()
 
 
 # API: trust the host key a reflashed board now presents.
