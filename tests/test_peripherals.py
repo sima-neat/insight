@@ -553,6 +553,12 @@ class SnapshotTests(unittest.TestCase):
         camera = scanned_camera(doc, board={**board_block(), "supported_sensors": []})
         self.assertEqual(camera["support"]["tier"], "unsupported")
 
+    def test_a_rate_below_a_thousandth_of_a_frame_per_second_stays_positive(self):
+        # Codex 4263899139: rounding 1/3000 fps to three decimals gave 0, which the preview start refuses.
+        self.assertEqual(cameras._fps(1, 3000), 0.000333333)
+        self.assertNotEqual(cameras._fps(1, 3000), cameras._fps(1, 3001))
+        self.assertEqual((cameras._fps(30, 1), cameras._fps(30000, 1001)), (30, 29.97))
+
     def test_the_api_schema_lists_every_tier_a_camera_reports(self):
         # Codex 4263806914: the schema allowed only available and unsupported after Unverified was added.
         doc = imx477()
@@ -1412,6 +1418,32 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertIsNone(mictest._current)
         self.assertTrue(cancelled.wait(2), "the departed board's arecord is stopped")
         started[0].thread.join(2)
+
+    def test_a_board_change_while_reading_or_stopping_the_test_is_refused(self):
+        """Codex 4263899131: status, stop and audio read the departed board's test when the board changed mid-request."""
+        session = self.manager.current
+
+        def switching(answer):
+            def read(*args):
+                session.stale = True  # /api/board/select picked another board during the read
+                return answer
+            return read
+
+        for name, route, method, answer in (
+            ("audio", "/api/peripherals/microphones/test/t.wav", "get", b"RIFF0000WAVE"),
+            ("status", "/api/peripherals/microphones/test", "get", {"token": "t", "state": "ready"}),
+            ("stop", "/api/peripherals/microphones/test/stop", "post", {"token": "t", "state": "recording"}),
+        ):
+            with self.subTest(name):
+                session.stale = False
+                with mock.patch.object(mictest, {"status": "current"}.get(name, name), side_effect=switching(answer)):
+                    response = getattr(self.client, method)(route)
+                self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+        session.stale = True
+        with mock.patch.object(mictest, "stop") as stop:
+            response = self.client.post("/api/peripherals/microphones/test/stop")
+        self.assertEqual(response.status_code, 409)
+        stop.assert_not_called()  # a stop for a board that is no longer selected never reaches its test
 
     def test_a_departed_boards_recording_does_not_block_a_test_on_the_new_board(self):
         """Codex 4255561400: a test still recording on the previous board must not answer test_running here."""

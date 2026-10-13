@@ -119,23 +119,32 @@ def start_microphone_test():
 @peripherals_bp.post("/api/peripherals/microphones/test/stop")
 def stop_microphone_test():
     """Stop the recording on the selected board; its result arrives through GET as usual."""
-    return {"test": mictest.stop(get_board_manager().session().generation)}
+    session = get_board_manager().session()
+    session.require_current()
+    test = mictest.stop(session.generation)
+    # A board change while it stopped: the answer would describe the departed board's test.
+    session.require_current()
+    return {"test": test}
 
 
 # API: the microphone test on the selected board: its live level, then its result.
 @peripherals_bp.get("/api/peripherals/microphones/test")
 def get_microphone_test():
     """Return the latest microphone test for the selected board, or null; never contacts the board."""
-    generation = get_board_manager().session().generation
-    return {"test": mictest.current(generation, scans.scan(generation)[1])}
+    session = get_board_manager().session()
+    test = mictest.current(session.generation, scans.scan(session.generation)[1])
+    session.require_current()
+    return {"test": test}
 
 
 # API: the finished test recording as a WAV file.
 @peripherals_bp.get("/api/peripherals/microphones/test/<token>.wav")
 def get_microphone_test_audio(token):
     """Serve the latest finished recording of the selected board; 404 once another test, board or device replaced it."""
-    generation = get_board_manager().session().generation
-    wav = mictest.audio(token, generation, scans.scan(generation)[1])
+    session = get_board_manager().session()
+    wav = mictest.audio(token, session.generation, scans.scan(session.generation)[1])
+    # A board change removes the recording, even one read just before the change.
+    session.require_current()
     if wav is None:
         raise BoardError("not_found", "This recording is gone; a newer test replaced it.", hint="Test again.")
     # Range-aware: Safari's audio element asks for byte ranges and does not play a reply that ignores them.

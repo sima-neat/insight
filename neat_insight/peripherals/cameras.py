@@ -74,7 +74,11 @@ def _selection(fmt: str, size: dict, fps) -> dict:
 
 def _fps(num: int, den: int):
     value = Fraction(num, den)
-    return int(value) if value.denominator == 1 else round(float(value), 3)
+    if value.denominator == 1:
+        return int(value)
+    # Three decimals for display, but a valid rate below 0.0005 fps must not read as 0, which no start accepts.
+    rounded = round(float(value), 3)
+    return rounded if rounded > 0 else float(f"{float(value):.6g}")
 
 
 def _choice(rate: Fraction, **verdict) -> dict:
