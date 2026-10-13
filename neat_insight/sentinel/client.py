@@ -266,7 +266,12 @@ class SentinelClient(SentinelSocket):
     def _json(self, method: str, path: str, body=None) -> dict:
         """Make one request from the board and return the body of a successful, schema-1 response,
         or raise the failure it describes."""
-        status, text = self.request(method, path, body, TIMEOUT_SEC)
+        try:
+            status, text = self.request(method, path, body, TIMEOUT_SEC)
+        except BoardError:
+            # A failure from a board that is no longer selected is a stale result, not that board's error.
+            self.session.require_current()
+            raise
         self.session.require_current()
         try:
             parsed = json.loads(text) if text else None

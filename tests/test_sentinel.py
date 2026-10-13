@@ -378,6 +378,22 @@ class ClientTests(unittest.TestCase):
             (call or self.client.health)()
         return raised.exception
 
+    def test_a_failed_request_from_a_board_no_longer_selected_is_reported_as_stale(self):
+        # Codex 4261146243: switching boards closes the old connection, and that failure was reported as
+        # the old board's own error, so a page still showing it stayed there instead of reloading.
+        def unreachable(argv, *, timeout, stdin=None):
+            raise BoardError("unreachable", "the connection closed")
+        self.transport.exec = unreachable
+        self.assertEqual(self.raised(error=BoardError).code, "unreachable")
+        self.session.current_error = BoardError("stale_snapshot", "the selected board changed")
+        self.assertEqual(self.raised(error=BoardError).code, "stale_snapshot")
+        local = FakeSession(FakeSentinel(), mode="local")
+        local.current_error = BoardError("stale_snapshot", "the selected board changed")
+        with mock.patch.object(socket_client, "request", side_effect=ConnectionResetError("reset")):
+            with self.assertRaises(BoardError) as raised:
+                SentinelClient(local).runs()
+        self.assertEqual(raised.exception.code, "stale_snapshot")
+
     def test_a_remote_call_streams_the_client_to_python3_on_the_board_with_its_body_as_an_argument(self):
         self.assertEqual(self.client.health(), HEALTH)
         argv, timeout, stdin = self.transport.calls[0]
