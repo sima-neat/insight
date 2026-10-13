@@ -105,7 +105,14 @@ def start_microphone_test():
     node = [bound["node"]] if isinstance(bound["node"], str) and bound["node"].startswith("/dev/") else []
     mictest.refuse_if_held(_run_check(session, {"microphones": {mic_id: node}}), mic_id)
     session.require_current()
-    return {"test": mictest.start(session, mic_id, bound, seconds)}, 202
+    test = mictest.start(session, mic_id, bound, seconds)
+    try:
+        # A board change during the start leaves this test on the departed board: end it and say so.
+        session.require_current()
+    except BoardError:
+        mictest.discard(test["token"])
+        raise
+    return {"test": test}, 202
 
 
 # API: end the microphone test's recording now; the page then plays what was recorded.

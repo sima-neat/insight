@@ -290,6 +290,17 @@ def start(session, mic_id: str, bound: dict, seconds: int) -> dict:
     return test.status()
 
 
+def discard(token: str) -> None:
+    """End the test `token` and forget it, so it neither blocks nor answers for the board selected now."""
+    global _current
+    with _lock:
+        test = _current
+        if test is None or test.token != token:
+            return
+        _current = None
+    test.request_stop()
+
+
 def stop(generation: int) -> Optional[dict]:
     """Ask the recording on the selected board to end now; the result follows as for a full one."""
     test = _current
