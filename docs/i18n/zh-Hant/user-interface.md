@@ -21,7 +21,7 @@ Insight 是圍繞您在驗證視覺應用程式時執行的開發工作來組織
 
 當應用程式產生多個建置輸出與日誌時，「工作區」特別有用。它提供一種可透過瀏覽器存取的方式，讓您在同一個開發工作階段中檢查這些成品。
 
-![Insight 工作區檢視，顯示管線序列圖與工作區成品。](images/insight-workspace-overview.png)
+![Insight 工作區檢視，顯示管線序列圖與工作區成品。](../../images/insight-workspace-overview.png)
 
 ## 媒體來源
 
@@ -37,7 +37,7 @@ Insight 是圍繞您在驗證視覺應用程式時執行的開發工作來組織
 
 匯入媒體後，您可以篩選檔案清單、預覽選取的檔案、檢查其基本中繼資料，或刪除不再需要的檔案。請在設定串流來源之前使用「媒體來源」，以便了解有哪些檔案可用、Insight 偵測到哪種編解碼器，以及這些檔案是否可讀取。
 
-![Insight 媒體來源檢視，顯示選取的影片預覽與媒體中繼資料。](images/insight-media-library.png)
+![Insight 媒體來源檢視，顯示選取的影片預覽與媒體中繼資料。](../../images/insight-media-library.png)
 
 「媒體來源」在單一檢視中結合了匯入、檔案選取、預覽、中繼資料檢查與刪除動作。匯入的目錄素材會儲存在 `catalog/` 下，YouTube 片段則儲存在 `youtube/` 下，讓您能辨識檔案是如何進入媒體庫的。
 
@@ -65,7 +65,7 @@ Insight 會依據指派的媒體選擇編解碼器與傳輸選項：
 
 當您需要為物件偵測、分割、追蹤、分類或 GenAI 視覺應用程式提供可重複的輸入串流時，這個檢視很有用。
 
-![Insight 串流來源檢視，顯示已指派的來源槽位與來源預覽。](images/insight-rtsp-source.png)
+![Insight 串流來源檢視，顯示已指派的來源槽位與來源預覽。](../../images/insight-rtsp-source.png)
 
 「串流來源」檢視可讓您將媒體檔案指派給來源槽位、啟動或停止串流、複製作用中的串流 URL，並在將所選來源接入應用程式之前先行預覽。
 
@@ -131,7 +131,7 @@ metadata: UDP 9100 + N
 - 輔助檢視會隨對應的影片影格清除並更新。
 - 瀏覽器播放功能運作正常。
 
-![Insight 視訊檢視器，顯示四頻道 WebRTC 網格。](images/insight-video-viewer.png)
+![Insight 視訊檢視器，顯示四頻道 WebRTC 網格。](../../images/insight-video-viewer.png)
 
 視訊檢視器一次可以顯示一個或多個頻道，並提供分頁與頻道選擇控制項，以進行較大規模的多串流測試。
 
