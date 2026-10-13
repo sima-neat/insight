@@ -588,6 +588,8 @@ class SshTransport:
             client.close()
             raw_socket.close()
             self._check_connect_deadline(deadline, argv, command_timeout)
+            # Authentication runs only after the trusted host key was accepted, so a rejected one is stale.
+            self.presented_host_key = None
             command = f"ssh-copy-id -p {self.port} {shlex.quote(self.user)}@{shlex.quote(self.host)}"
             account = _local_account()
             if account == "root":
