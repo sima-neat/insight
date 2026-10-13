@@ -330,7 +330,8 @@ test('a snapshot is stale only when it was scanned for another board generation'
 test('labels for tiers, sources, and defaults', () => {
   assert.deepEqual(tierInfo('available'), { label: 'Available', tone: 'ok' })
   assert.deepEqual(tierInfo('unsupported'), { label: 'Unsupported', tone: 'periph-danger' })
-  assert.deepEqual(tierInfo('bogus'), tierInfo('unsupported'), 'every mode is one of the two states')
+  assert.deepEqual(tierInfo('unverified'), { label: 'Unverified', tone: 'warn' })
+  assert.deepEqual(tierInfo('bogus'), tierInfo('unsupported'), 'every mode is one of the three states')
   for (const [source, label] of [['on-board', 'On this board'], ['sdk-env', 'SDK DevKit'], ['manual', 'Manual']]) assert.equal(sourceLabel(source), label)
   assert.equal(defaultTargetText({ on_board: false, sdk_env: { host: '192.168.2.2', port: 22, user: 'sima' } }), 'sima@192.168.2.2:22 (paired SDK DevKit)')
   assert.equal(defaultTargetText({ on_board: false, sdk_env: null }), '')
@@ -1296,4 +1297,32 @@ test('shell details read for an earlier board cannot overwrite the newer board',
   requests[2].reject(new Error('offline'))
   await failed
   assert.deepEqual(shown.at(-1), null)
+})
+
+test('an Unverified 3.0 sensor size is listed between Available and Unsupported and can be previewed', () => {
+  const UNVERIFIED = 'SiMa Sentinel cannot confirm libcamera streams this exact size; start a preview to check.'
+  const camera = {
+    ...imx477,
+    formats: [
+      format('NV12', 'NV12 (YUV 4:2:0)', true, support('available'), [
+        size(1332, 990, [30, 'unverified']),
+        size(1920, 1080, [30, 'available']),
+        size(4056, 3040, [30, 'unsupported'])
+      ])
+    ]
+  }
+  const groups = groupOptions(sizeOptions(camera, 'NV12'))
+  assert.deepEqual(groups.map((g) => [g.label, g.options.map((o) => o.label)]),
+    [['Available', ['1920×1080']], ['Unverified', ['1332×990']], ['Unsupported', ['4056×3040']]])
+  assert.deepEqual(resolveSelection({ ...camera, default_selection: null }, null), sel('NV12', 1920, 1080, 30),
+    'an Available size is preferred over an Unverified one')
+  const target = { host: '192.168.2.2' }
+  assert.equal(previewBlock({ camera, selection: sel('NV12', 1332, 990, 30), target }).blocked, false)
+  assert.equal(previewBlock({ camera, selection: sel('NV12', 4056, 3040, 30), target }).blocked, true)
+
+  const onlyUnverified = { ...camera, support: support('unverified', UNVERIFIED), default_selection: null,
+    formats: [format('NV12', 'NV12', false, support('unverified', UNVERIFIED), [size(1332, 990, [30, 'unverified'])])] }
+  assert.deepEqual(cameraTierPill(onlyUnverified), { label: 'Unverified', tone: 'warn' })
+  assert.equal(cameraSummaryLine(onlyUnverified), UNVERIFIED)
+  assert.equal(previewBlock({ camera: onlyUnverified, selection: sel('NV12', 1332, 990, 30), target }).blocked, false)
 })

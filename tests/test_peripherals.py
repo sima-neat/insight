@@ -519,6 +519,40 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(camera["support"], {"tier": "unsupported", "reason": "Not set up for this mode."})
         self.assertEqual(fmt_of(camera, "RGB3")["support"], {"tier": "unsupported", "reason": cameras.FORMAT_REASON})
 
+    def test_a_sensor_size_sentinel_leaves_undecided_is_unverified(self):
+        """Sentinel (sentinel#43) leaves a 3.0 NV12 sensor size without a verdict when libcamera may crop it from a
+        larger mode the ISP takes. It is Unverified: listed and previewable, with the reason, never the default."""
+        doc = imx477()
+        doc["isp"]["sizing"] = "runtime"
+        sensor = {"sensor_mode": True}
+        doc["modes"] = [
+            {"format": "NV12", "width": 1920, "height": 1080, **sensor, "isp_input": True, "available": True},
+            {"format": "NV12", "width": 1332, "height": 990, **sensor, "isp_input": False},
+            {"format": "NV12", "width": 4056, "height": 3040, **sensor, "isp_input": False, "available": False,
+             "reason": "libcamera would change the size."},
+            {"format": "RGB3", "width": 1332, "height": 990, **sensor, "isp_input": False, "available": False,
+             "reason": cameras.FORMAT_REASON},
+        ]
+        camera = scanned_camera(doc)
+        nv12 = fmt_of(camera, "NV12")
+        self.assertEqual((camera["support"]["tier"], nv12["support"]["tier"]), ("available", "available"))
+        self.assertEqual(states(size_of(nv12, 1332, 990)["fps"]), [(30, "unverified", cameras.UNVERIFIED_REASON)])
+        self.assertEqual(states(size_of(nv12, 4056, 3040)["fps"]), [(30, "unsupported", "libcamera would change the size.")])
+        self.assertEqual(rates(camera, "RGB3", 1332, 990), [(30, "unsupported", cameras.FORMAT_REASON)])
+        self.assertEqual(camera["default_selection"], {"format": "NV12", "width": 1920, "height": 1080, "fps": 30})
+
+        # Only Unverified sizes: the camera and its format are Unverified, nothing is preselected or exportable.
+        doc["modes"] = [doc["modes"][1]]
+        camera = scanned_camera(doc)
+        unverified = {"tier": "unverified", "reason": cameras.UNVERIFIED_REASON}
+        self.assertEqual((camera["support"], fmt_of(camera, "NV12")["support"]), (unverified, unverified))
+        self.assertEqual((fmt_of(camera, "NV12")["exportable"], camera["default_selection"]), (False, None))
+
+        # A sensor the board's overlays do not support stays Unsupported, with that reason.
+        doc["modes"] = [{"format": "NV12", "width": 1332, "height": 990, **sensor}]
+        camera = scanned_camera(doc, board={**board_block(), "supported_sensors": []})
+        self.assertEqual(camera["support"]["tier"], "unsupported")
+
     def test_the_default_mode_is_1920_wide_when_the_camera_offers_it(self):
         """The first Available size in sort order is the smallest (1280x990 on a 3.0 IMX477), not a useful start."""
         def doc_with(sizes):

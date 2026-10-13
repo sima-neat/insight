@@ -36,6 +36,10 @@ FORMAT_REASON = f"Neat's CameraInput outputs {CAMERAINPUT_FORMAT} only."
 SENSOR_MAX_WIDTH = {"imx477": 4032}
 MAX_WIDTH_REASON = "libcamera streams this camera at most {width} pixels wide on this board."
 NO_MODES_REASON = "SiMa Sentinel reported no modes for this camera."
+# A Platform 3.0 sensor size Sentinel leaves without a verdict: libcamera may crop it from a larger mode the ISP
+# takes, which Sentinel's read-only discovery cannot confirm. It is Unverified: selectable and previewable, never
+# the default.
+UNVERIFIED_REASON = "SiMa Sentinel cannot confirm libcamera streams this exact size; start a preview to check."
 NO_BY_ID_NOTE = "No /dev/v4l/by-id link was found; /dev/videoN numbering can change across reboots and replugs."
 # Sentinel names a MIPI camera after its sensor entity in the kernel media graph.
 NAME_SOURCE = "media-graph"
@@ -130,6 +134,8 @@ def _classified(mode: dict, camera_reason: str, max_width: Optional[int] = None)
         return dict(mode, available=not reason, reason=reason)
     if camera_reason:
         return dict(mode, available=False, reason=camera_reason)
+    if mode.get("sensor_mode") is True and mode["format"] == CAMERAINPUT_FORMAT:
+        return dict(mode, available=False, unverified=True, reason=UNVERIFIED_REASON)
     if mode.get("isp_output") is not True:
         return dict(mode, available=False, reason=NOT_ISP_SIZE_REASON)
     if mode["format"] != CAMERAINPUT_FORMAT:
@@ -294,6 +300,8 @@ def _verdict(modes: list, reason: str, decided: bool = False) -> dict:
     (CameraInput's format), else for all modes, rather than one Insight infers."""
     if any(mode["available"] for mode in modes):
         return _support("available", "")
+    if any(mode.get("unverified") for mode in modes):
+        return _support("unverified", UNVERIFIED_REASON)
     if reason or not modes:
         return _support("unsupported", reason or NO_MODES_REASON)
     if decided:
@@ -354,7 +362,12 @@ def _choices(modes: list, usb: bool) -> list:
             if (entry.get("width"), entry.get("height")) == (mode.get("width"), mode.get("height"))
             for rate in _interval_rates(entry)
         ] or ([] if usb else [CAMERAINPUT_RATE])
-        state = {"tier": "available"} if mode["available"] else {"tier": "unsupported", "reason": mode["reason"]}
+        if mode["available"]:
+            state = {"tier": "available"}
+        elif mode.get("unverified"):
+            state = {"tier": "unverified", "reason": mode["reason"]}
+        else:
+            state = {"tier": "unsupported", "reason": mode["reason"]}
         for rate in rates:
             value = _fps(rate.numerator, rate.denominator)
             if value not in choices or mode["available"]:

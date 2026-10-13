@@ -109,7 +109,7 @@ def previewable_mode(item: dict, body: dict) -> dict:
         raise _unsupported(f"{fps} fps is not a rate this camera reported for {mode['width']}x{mode['height']}.",
                            f"Pick one of: {listed}.")
     label = f"{mode['format']} {mode['width']}x{mode['height']} at {fps} fps"
-    if item["connection"] == "mipi" and (choice["tier"] != "available" or mode["format"] != "NV12"):
+    if item["connection"] == "mipi" and (choice["tier"] not in ("available", "unverified") or mode["format"] != "NV12"):
         raise _unsupported(f"{label} cannot be previewed: " + (choice.get("reason") or "it is not Available."),
                            "Pick a mode marked Available.")
     if item["connection"] == "usb" and mode["format"] != "MJPG" and mode["format"] not in gst.RAW_FORMATS:

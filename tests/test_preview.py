@@ -296,6 +296,15 @@ class PreviewTests(unittest.TestCase):
             api.previewable_mode(no_overlays, MODE)
         self.assertIn(f"cannot be previewed: {cameras.NO_BOARD_REASON}", ctx.exception.message)
 
+    def test_an_unverified_mipi_mode_is_previewed(self):
+        """Previewing is how a developer checks a 3.0 size Sentinel could not confirm."""
+        doc = imx477()
+        doc["isp"]["sizing"] = "runtime"
+        doc["modes"] = [{"format": "NV12", "width": 1332, "height": 990, "sensor_mode": True, "isp_input": False}]
+        item = item_of(scanned(doc), IMX477)
+        mode = api.previewable_mode(item, {**MODE, "width": 1332, "height": 990})
+        self.assertEqual((mode["width"], mode["height"], mode["rate"]), (1332, 990, Fraction(30)))
+
     def test_a_non_finite_frame_rate_is_an_invalid_request(self):
         client = self.client()
         for fps in ("1e309", "-1e309", "Infinity", "NaN", "10e400"):

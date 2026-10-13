@@ -1,9 +1,12 @@
 // Every camera mode is Available (the board's camera overlays support the sensor, the ISP outputs the size,
-// and the format is NV12) or Unsupported. A camera or format is Available when any of its modes is.
+// and the format is NV12), Unverified (a Platform 3.0 sensor size SiMa Sentinel cannot confirm libcamera
+// streams exactly; it can be previewed to check) or Unsupported. A camera or format takes its best mode's tier.
 const TIERS = {
   available: { label: 'Available', tone: 'ok' },
+  unverified: { label: 'Unverified', tone: 'warn' },
   unsupported: { label: 'Unsupported', tone: 'periph-danger' }
 }
+const TIER_RANK = { available: 0, unverified: 1, unsupported: 2 }
 
 const CONNECTIONS = [
   { id: 'mipi', label: 'MIPI' },
@@ -39,7 +42,7 @@ const SEVERITY = {
 export const CONNECTION_ERROR_CODES = new Set(['unreachable', 'auth_failed', 'host_key_changed'])
 
 function tierOf(tier) {
-  return tier === 'available' ? 'available' : 'unsupported'
+  return tier in TIER_RANK ? tier : 'unsupported'
 }
 
 export function tierInfo(tier) {
@@ -56,7 +59,7 @@ export function connectionPill(device) {
 }
 
 export function cameraTierPill(camera) {
-  return tierOf(camera?.support?.tier) === 'available' ? TIERS.available : TIERS.unsupported
+  return TIERS[tierOf(camera?.support?.tier)]
 }
 
 export function severityInfo(severity) {
@@ -330,7 +333,7 @@ export function formatClock(seconds) {
 }
 
 function rank(tier) {
-  return tierOf(tier) === 'available' ? 0 : 1
+  return TIER_RANK[tierOf(tier)]
 }
 
 function best(list, tierOf) {
@@ -432,6 +435,7 @@ export function sizeOptions(camera, format) {
 // pill beside the menu for the chosen entry, and the entries are grouped under their tier.
 const TIER_GROUPS = [
   { id: 'available', label: 'Available' },
+  { id: 'unverified', label: 'Unverified' },
   { id: 'unsupported', label: 'Unsupported' }
 ]
 
@@ -895,7 +899,7 @@ export function previewBlock({ camera, selection, stale = false, session = null,
   if (!mipi && !USB_PREVIEW_FORMATS.includes(selection.format)) {
     return { blocked: true, reason: `Preview decodes MJPG and converts raw formats such as YUYV, not ${selection.format}. Choose another format.` }
   }
-  if (mipi && selectionTier(camera, selection) !== 'available') {
+  if (mipi && !['available', 'unverified'].includes(selectionTier(camera, selection))) {
     return { blocked: true, reason: `${modeLabel(selection)} is Unsupported on this board. Choose an Available mode.` }
   }
   if (session?.camera_id && session.camera_id !== camera.id) {

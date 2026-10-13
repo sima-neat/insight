@@ -153,14 +153,15 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 
 ### 相機與模式
 
-選取 **Refresh**（重新整理）以掃描開發板：Insight 會要求 SiMa Sentinel 重新掃描並等待結果。Sentinel 會透過媒體圖與 ISP 找到 MIPI 相機，並透過 V4L2 找到 USB 相機。若 Sentinel 未安裝、未執行，或版本過舊而無法回報周邊裝置，頁面會說明這一點；請使用 `sima-cli neat install sentinel` 安裝或更新。對於每部相機，頁面會顯示其身分、連線、裝置識別碼，以及相機回報的像素格式與解析度。任何相機的解析度都不會顯示影格率：MIPI 相機的影格率取決於其正在執行的感測器模式，在相機執行前無從得知，因此頁面以相同方式對待所有相機。Insight 不會設定影格率。每個模式處於下列兩種狀態之一，像素格式與解析度選單會依狀態將其項目分組：
+選取 **Refresh**（重新整理）以掃描開發板：Insight 會要求 SiMa Sentinel 重新掃描並等待結果。Sentinel 會透過媒體圖與 ISP 找到 MIPI 相機，並透過 V4L2 找到 USB 相機。若 Sentinel 未安裝、未執行，或版本過舊而無法回報周邊裝置，頁面會說明這一點；請使用 `sima-cli neat install sentinel` 安裝或更新。對於每部相機，頁面會顯示其身分、連線、裝置識別碼，以及相機回報的像素格式與解析度。任何相機的解析度都不會顯示影格率：MIPI 相機的影格率取決於其正在執行的感測器模式，在相機執行前無從得知，因此頁面以相同方式對待所有相機。Insight 不會設定影格率。每個模式處於下列三種狀態之一，像素格式與解析度選單會依狀態將其項目分組：
 
 | 狀態 | 意義 |
 | --- | --- |
 | Available（可用） | 開發板的相機 overlay 支援該相機的感測器、ISP 能輸出此模式的尺寸，且其像素格式為 NV12。 |
+| Unverified（未驗證） | 在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，受支援感測器的某個 NV12 尺寸，而 SiMa Sentinel 無法確認 libcamera 會精確地以該尺寸串流，因為 libcamera 可能從較大的模式裁切出它。可選取並預覽以進行確認；但絕不會被預先選取。 |
 | Unsupported（不支援） | 上述任一條件不成立。USB 相機在開發板上沒有相機 overlay，因此一律為 Unsupported（不支援），頁面不會為其顯示原因。MIPI 相機的原因會指出是哪一項：感測器不在開發板的相機 overlay 中；ISP 無法輸出該尺寸；格式不是 NV12；或在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，尺寸寬於 libcamera 串流的寬度（IMX477 為 4032 像素）。若 Sentinel 版本過舊而無法回報開發板的相機 overlay，則在您更新之前，每個模式都會是 Unsupported（不支援）。 |
 
-每個模式的狀態由 SiMa Sentinel 判定並附上原因；Insight 顯示該結果。若 Sentinel 版本過舊而無法判定，Insight 會對 Sentinel 的目錄套用相同的規則。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。每部偵測到的相機都會顯示 **Connected**（已連線）標籤及其狀態：只要有任一模式為 Available（可用）即為 **Available**，否則為 **Unsupported**（不支援），相機面板會說明原因。Insight 不會指出是否有其他程式正在使用相機。
+每個模式的狀態由 SiMa Sentinel 判定並附上原因；Insight 顯示該結果。若 Sentinel 版本過舊而無法判定，Insight 會對 Sentinel 的目錄套用相同的規則。overlay 檢查會將 Sentinel 在開發板裝置樹中連結到該相機的感測器，與安裝在 `/boot` 下的 overlay 所支援的感測器進行比對。NV12 條件是關於 Neat 的 `CameraInput` 的固定事實，它輸出 NV12；Insight 不會查詢開發板上的 Neat。每部偵測到的相機都會顯示 **Connected**（已連線）標籤及其狀態：只要有任一模式為 Available（可用）即為 **Available**，否則只要有任一模式為 Unverified（未驗證）即為 **Unverified**（未驗證），否則為 **Unsupported**（不支援）；Unverified 或 Unsupported 相機的面板會說明原因。Insight 不會指出是否有其他程式正在使用相機。
 
 ### 預覽相機
 
@@ -168,7 +169,7 @@ Insight 會使用執行它之帳戶的金鑰透過 SSH 連線。它絕不會要�
 
 預覽會佔用相機，因此在您停止預覽之前，您的應用程式無法開啟該相機。Insight 不會在已被其他程序使用的相機上啟動預覽，也絕不會替您停止該程序。當您選取 **Stop**（停止）、離開頁面、重新整理掃描或變更選取的開發板時，擷取就會停止。關閉瀏覽器也會停止擷取。若 Insight 停止或重新啟動，開發板上的管線會在其輸出連線關閉後，於下一個影格時結束；若網路在沒有任何提示的情況下中斷，管線可能會持續佔用相機，直到開發板的 SSH 連線逾時為止。若要清除仍佔用相機的預覽，請在頁面仍顯示該預覽時選取 **Stop**（停止）、等待該逾時，或結束開發板上的 `gst-launch-1.0` 程序。
 
-MIPI 相機可預覽其 Available（可用）模式。在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，感測器列出的尺寸仍可能不是 libcamera 會輸出的尺寸；此時預覽會指出 libcamera 實際串流的尺寸，供您選擇。USB 相機可預覽它以 MJPG 或原始格式（例如 YUYV）列出的任何模式，即使其模式對 Neat 的 `CameraInput` 而言是 Unsupported（不支援）；當開發板具有穩定的 `/dev/v4l/by-id` 路徑時，Insight 會透過該路徑開啟相機。
+MIPI 相機可預覽其 Available（可用）與 Unverified（未驗證）模式。在 ISP 於執行階段採用感測器尺寸的開發板（Platform 3.0）上，感測器列出的尺寸仍可能不是 libcamera 會輸出的尺寸；此時預覽會指出 libcamera 實際串流的尺寸，供您選擇。USB 相機可預覽它以 MJPG 或原始格式（例如 YUYV）列出的任何模式，即使其模式對 Neat 的 `CameraInput` 而言是 Unsupported（不支援）；當開發板具有穩定的 `/dev/v4l/by-id` 路徑時，Insight 會透過該路徑開啟相機。
 
 預覽執行時，其旁的模式會顯示相機的影格率，此影格率可能高於預覽的 15 fps。預覽會向相機要求所選模式的影格率。對於 USB 相機，顯示的是該模式的影格率。對於 MIPI 相機，顯示的是感測器在此模式下能提供的最高影格率，標示為「up to」（最高），Insight 會在第一個影格抵達後向 SiMa Sentinel 取得此值，因此會在畫面出現數秒後才顯示；若 Sentinel 無法回報，則不會顯示影格率。
 
