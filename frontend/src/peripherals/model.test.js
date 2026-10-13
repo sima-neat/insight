@@ -89,6 +89,8 @@ const rates = (...pairs) => pairs.map(([value, tier]) => ({ value, tier }))
 const size = (width, height, ...pairs) => ({ width, height, fps: rates(...pairs) })
 const format = (name, label, exportable, formatSupport, sizes, range = null) => ({ format: name, label, exportable, support: formatSupport, range, sizes })
 const available = { state: 'available', users: [], reason: null }
+const sel = (format, width, height, fps) => ({ format, width, height, fps })
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const imx477 = {
   id: 'mipi:/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
@@ -97,12 +99,8 @@ const imx477 = {
   name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
   model: 'imx477',
   device: {
-    camera_name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a',
-    camera_name_source: 'libcamera',
-    media_device: '/dev/media0',
-    bus_info: 'platform:csi2video@1',
-    csi: 'csidev-40c3000.csi',
-    video_node: '/dev/video3'
+    camera_name: '/base/axi/pcie@120000/rp1/i2c@80000/imx477@1a', camera_name_source: 'libcamera',
+    media_device: '/dev/media0', bus_info: 'platform:csi2video@1', csi: 'csidev-40c3000.csi', video_node: '/dev/video3'
   },
   availability: available,
   support: support('available'),
@@ -179,24 +177,11 @@ const yeti = {
   connection: 'usb',
   name: 'Yeti Nano',
   device: {
-    card_index: 0,
-    card_id: 'Nano',
-    card_name: 'Yeti Nano',
-    card_driver: 'USB-Audio',
-    pcm_device: 0,
-    pcm_node: '/dev/snd/pcmC0D0c',
-    alsa_name: 'hw:CARD=Nano,DEV=0',
+    card_index: 0, card_id: 'Nano', card_name: 'Yeti Nano', card_driver: 'USB-Audio',
+    pcm_device: 0, pcm_node: '/dev/snd/pcmC0D0c', alsa_name: 'hw:CARD=Nano,DEV=0',
     by_path: '/dev/snd/by-path/platform-7ff0000000.pci-pci-0003:01:00.0-usb-0:3.1:1.0',
     by_id: '/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2127SG00CBA8_888-000441040606-00',
-    usb: {
-      vendor_id: 'b58e',
-      product_id: '0005',
-      manufacturer: 'Blue Microphones',
-      product: 'Yeti Nano',
-      serial: '2127SG00CBA8_888-000441040606',
-      bus_path: '1-3.1',
-      speed_mbps: 12
-    }
+    usb: { vendor_id: 'b58e', product_id: '0005', manufacturer: 'Blue Microphones', product: 'Yeti Nano', serial: '2127SG00CBA8_888-000441040606', bus_path: '1-3.1', speed_mbps: 12 }
   },
   availability: available,
   capture: [{ format: 'S24_3LE', channels: 2, bits: 24, rates: [32000, 44100, 48000], rate_range: null, channel_map: ['FL', 'FR'] }],
@@ -282,19 +267,16 @@ test('a resolution names its size only, for USB and MIPI cameras alike', () => {
 })
 
 test('a rate reads as a whole number within 1% of one, else as reported', () => {
-  assert.equal(rateLabel(30), '30 fps')
-  assert.equal(rateLabel(66.18), '66 fps')
-  assert.equal(rateLabel(29.97), '30 fps')
-  assert.equal(rateLabel('59.94'), '60 fps')
-  assert.equal(rateLabel(7.5), '7.5 fps')
-  assert.equal(rateLabel(12.345), '12.35 fps')
+  for (const [rate, label] of [[30, '30 fps'], [66.18, '66 fps'], [29.97, '30 fps'], ['59.94', '60 fps'], [7.5, '7.5 fps'], [12.345, '12.35 fps']]) {
+    assert.equal(rateLabel(rate), label)
+  }
   for (const unknown of [null, undefined, '', 0, -5, NaN, Infinity, 'x']) assert.equal(rateLabel(unknown), '')
 })
 
 test('the default selection is preselected; without one an Available mode is preferred', () => {
-  assert.deepEqual(resolveSelection(imx477, null), { format: 'NV12', width: 1920, height: 1080, fps: 30 })
+  assert.deepEqual(resolveSelection(imx477, null), sel('NV12', 1920, 1080, 30))
   // A USB camera has no Available mode and no default; its first reported mode is shown.
-  assert.deepEqual(resolveSelection(usb, null), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
+  assert.deepEqual(resolveSelection(usb, null), sel('MJPG', 1280, 720, 30))
   const mixed = {
     ...imx477,
     default_selection: null,
@@ -303,48 +285,30 @@ test('the default selection is preselected; without one an Available mode is pre
       format('NV12', 'NV12', true, support('available'), [size(4056, 3040, [30, 'unsupported']), size(1920, 1080, [15, 'unsupported'], [30, 'available'])])
     ]
   }
-  assert.deepEqual(resolveSelection(mixed, null), { format: 'NV12', width: 1920, height: 1080, fps: 30 })
+  assert.deepEqual(resolveSelection(mixed, null), sel('NV12', 1920, 1080, 30))
 })
 
 test('a missing or non-exportable default falls back to the best exportable mode', () => {
-  assert.deepEqual(resolveSelection(imx568, null), { format: 'NV12', width: 2432, height: 2048, fps: 30 })
-  const rgbDefault = { ...imx568, default_selection: { format: 'RGB888', width: 1920, height: 1080, fps: 30 } }
+  assert.deepEqual(resolveSelection(imx568, null), sel('NV12', 2432, 2048, 30))
+  const rgbDefault = { ...imx568, default_selection: sel('RGB888', 1920, 1080, 30) }
   assert.equal(resolveSelection(rgbDefault, null).format, 'NV12')
   assert.equal(resolveSelection({ ...imx568, formats: [imx568.formats[1]] }, null), null)
 })
 
 test('changing one level keeps the rest of the selection when it is still offered', () => {
-  assert.deepEqual(resolveSelection(usb, { format: 'YUYV' }), { format: 'YUYV', width: 640, height: 480, fps: 30 })
-  assert.deepEqual(
-    resolveSelection(usb, { format: 'YUYV', width: 640, height: 480, fps: 30 }),
-    { format: 'YUYV', width: 640, height: 480, fps: 30 }
-  )
-  assert.deepEqual(
-    resolveSelection(usb, { format: 'YUYV', width: 1280, height: 720, fps: 30 }),
-    { format: 'YUYV', width: 640, height: 480, fps: 30 }
-  )
-  assert.deepEqual(resolveSelection(usb, { format: 'MJPG' }), { format: 'MJPG', width: 1280, height: 720, fps: 30 })
-  assert.deepEqual(
-    resolveSelection(imx477, { format: 'NV12', width: 1280, height: 720, fps: 30 }),
-    { format: 'NV12', width: 1280, height: 720, fps: 60 }
-  )
-  assert.deepEqual(
-    resolveSelection(imx568, { format: 'NV12', width: 1920, height: 1080, fps: 59.94 }),
-    { format: 'NV12', width: 1920, height: 1080, fps: 59.94 }
-  )
+  assert.deepEqual(resolveSelection(usb, { format: 'YUYV' }), sel('YUYV', 640, 480, 30))
+  assert.deepEqual(resolveSelection(usb, sel('YUYV', 640, 480, 30)), sel('YUYV', 640, 480, 30))
+  assert.deepEqual(resolveSelection(usb, sel('YUYV', 1280, 720, 30)), sel('YUYV', 640, 480, 30))
+  assert.deepEqual(resolveSelection(usb, { format: 'MJPG' }), sel('MJPG', 1280, 720, 30))
+  assert.deepEqual(resolveSelection(imx477, sel('NV12', 1280, 720, 30)), sel('NV12', 1280, 720, 60))
+  assert.deepEqual(resolveSelection(imx568, sel('NV12', 1920, 1080, 59.94)), sel('NV12', 1920, 1080, 59.94))
 })
 
 test('a selection that disappears after refresh falls back instead of clearing', () => {
   const refreshed = { ...imx477, formats: [{ ...imx477.formats[0], sizes: [imx477.formats[0].sizes[0]] }] }
-  assert.deepEqual(
-    resolveSelection(refreshed, { format: 'NV12', width: 1280, height: 720, fps: 60 }),
-    { format: 'NV12', width: 1920, height: 1080, fps: 60 }
-  )
-  assert.deepEqual(
-    resolveSelection(refreshed, { format: 'NV12', width: 1280, height: 720, fps: 15 }),
-    { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-  )
-  assert.equal(resolveSelection(usb, { format: 'H264', width: 1920, height: 1080, fps: 30 }).format, 'MJPG')
+  assert.deepEqual(resolveSelection(refreshed, sel('NV12', 1280, 720, 60)), sel('NV12', 1920, 1080, 60))
+  assert.deepEqual(resolveSelection(refreshed, sel('NV12', 1280, 720, 15)), sel('NV12', 1920, 1080, 30))
+  assert.equal(resolveSelection(usb, sel('H264', 1920, 1080, 30)).format, 'MJPG')
 })
 
 test('the selected camera id survives refreshes and removals', () => {
@@ -367,9 +331,7 @@ test('labels for tiers, sources, and defaults', () => {
   assert.deepEqual(tierInfo('available'), { label: 'Available', tone: 'ok' })
   assert.deepEqual(tierInfo('unsupported'), { label: 'Unsupported', tone: 'periph-danger' })
   assert.deepEqual(tierInfo('bogus'), tierInfo('unsupported'), 'every mode is one of the two states')
-  assert.equal(sourceLabel('on-board'), 'On this board')
-  assert.equal(sourceLabel('sdk-env'), 'SDK DevKit')
-  assert.equal(sourceLabel('manual'), 'Manual')
+  for (const [source, label] of [['on-board', 'On this board'], ['sdk-env', 'SDK DevKit'], ['manual', 'Manual']]) assert.equal(sourceLabel(source), label)
   assert.equal(defaultTargetText({ on_board: false, sdk_env: { host: '192.168.2.2', port: 22, user: 'sima' } }), 'sima@192.168.2.2:22 (paired SDK DevKit)')
   assert.equal(defaultTargetText({ on_board: false, sdk_env: null }), '')
 })
@@ -389,7 +351,7 @@ test('a subtitle never repeats what the name already says', () => {
 })
 
 test('changing the mode restarts a preview, but only the one it belongs to', () => {
-  const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+  const mode = sel('NV12', 1920, 1080, 30)
   const live = { status: 'live', session: { id: 's1', camera_id: 'cam-a', mode } }
   assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, fps: 60 }), true, 'a different rate needs a restart')
   assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, width: 1280, height: 720 }), true)
@@ -412,24 +374,18 @@ test('issues sort by severity and changes read as sentences', () => {
 
 test('relative times and durations', () => {
   const now = Date.parse('2026-09-21T10:00:00Z')
-  assert.equal(formatRelativeTime('2026-09-21T09:59:58Z', now), 'just now')
-  assert.equal(formatRelativeTime('2026-09-21T09:59:30Z', now), '30 s ago')
-  assert.equal(formatRelativeTime('2026-09-21T09:55:00Z', now), '5 min ago')
-  assert.equal(formatRelativeTime('2026-09-21T07:00:00Z', now), '3 h ago')
-  assert.equal(formatRelativeTime('2026-09-19T10:00:00Z', now), '2 d ago')
-  assert.equal(formatRelativeTime(null, now), '')
+  for (const [at, label] of [
+    ['2026-09-21T09:59:58Z', 'just now'], ['2026-09-21T09:59:30Z', '30 s ago'], ['2026-09-21T09:55:00Z', '5 min ago'],
+    ['2026-09-21T07:00:00Z', '3 h ago'], ['2026-09-19T10:00:00Z', '2 d ago'], [null, '']
+  ]) assert.equal(formatRelativeTime(at, now), label)
   assert.equal(formatDuration(3400), '3.4 s')
   assert.equal(formatDuration(250), '250 ms')
 })
 
 test('API errors keep code, hint, and extra fields', () => {
   const body = {
-    error: 'Host key changed',
-    code: 'host_key_changed',
-    hint: 'Confirm the board was reflashed.',
-    host: '192.168.2.2',
-    expected_fingerprint: 'SHA256:old',
-    presented_fingerprint: 'SHA256:new'
+    error: 'Host key changed', code: 'host_key_changed', hint: 'Confirm the board was reflashed.',
+    host: '192.168.2.2', expected_fingerprint: 'SHA256:old', presented_fingerprint: 'SHA256:new'
   }
   const err = apiError(body, 409)
   assert.equal(err.message, 'Host key changed')
@@ -444,8 +400,7 @@ test('API errors keep code, hint, and extra fields', () => {
 })
 
 test('mode labels and selection equality drive the fallback notice', () => {
-  const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
-  // A MIPI mode's rate is not known before it runs, so only a USB mode names one.
+  const mode = sel('NV12', 1920, 1080, 30)
   // No camera's rate is named before it runs, USB included.
   assert.equal(modeLabel(mode), 'NV12 1920×1080')
   assert.equal(modeLabel({ ...mode, fps: 59.94 }), 'NV12 1920×1080')
@@ -462,10 +417,9 @@ test('board form defaults and validation', () => {
   assert.deepEqual(initialBoardForm(board), { host: '192.168.2.2', port: '22', user: 'sima' })
   assert.deepEqual(initialBoardForm(null), { host: '', port: '22', user: 'sima' })
   assert.deepEqual(validateBoardForm({ host: ' devkit.local ', port: '2222', user: 'sima' }), { body: { host: 'devkit.local', port: 2222, user: 'sima' } })
-  assert.ok(validateBoardForm({ host: '', port: '22', user: 'sima' }).error)
-  assert.ok(validateBoardForm({ host: 'a b', port: '22', user: 'sima' }).error)
-  assert.ok(validateBoardForm({ host: 'devkit', port: '70000', user: 'sima' }).error)
-  assert.ok(validateBoardForm({ host: 'devkit', port: '22', user: ' ' }).error)
+  for (const [host, port, user] of [['', '22', 'sima'], ['a b', '22', 'sima'], ['devkit', '70000', 'sima'], ['devkit', '22', ' ']]) {
+    assert.ok(validateBoardForm({ host, port, user }).error, JSON.stringify({ host, port, user }))
+  }
 })
 
 test('only http(s) links are rendered', () => {
@@ -621,15 +575,18 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+// A request that stays pending until the test answers it, in the order requests were sent.
+function queued(requests) {
+  const request = deferred()
+  requests.push(request)
+  return request.promise
+}
+
 function boardSyncHarness() {
   const requests = []
   const state = { board: null, error: null, loading: false, errors: 0 }
   const sync = createBoardSync({
-    fetchBoard: () => {
-      const request = deferred()
-      requests.push(request)
-      return request.promise
-    },
+    fetchBoard: () => queued(requests),
     onBoard: (data) => { state.board = data; state.error = null },
     onError: (err) => { state.error = err; state.errors += 1 },
     onLoading: (value) => { state.loading = value }
@@ -733,14 +690,14 @@ test('a mode menu groups its entries as Available and Unsupported, and the pill 
 })
 
 test('the selected mode keeps the tier the board reported for it', () => {
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), 'available')
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1280, height: 720, fps: 60 }), 'unsupported')
-  assert.equal(selectionTier(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), 'unsupported')
-  assert.equal(selectionTier(imx477, { format: 'NV12', width: 640, height: 480, fps: 30 }), '')
+  assert.equal(selectionTier(imx477, sel('NV12', 1920, 1080, 30)), 'available')
+  assert.equal(selectionTier(imx477, sel('NV12', 1280, 720, 60)), 'unsupported')
+  assert.equal(selectionTier(usb, sel('MJPG', 1280, 720, 30)), 'unsupported')
+  assert.equal(selectionTier(imx477, sel('NV12', 640, 480, 30)), '')
   assert.equal(selectionTier(imx477, null), '')
 })
 
-const mipiMode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+const mipiMode = sel('NV12', 1920, 1080, 30)
 const boardTarget = { mode: 'ssh', label: 'sima@192.168.2.2' }
 const liveSession = {
   id: '8f1c',
@@ -752,45 +709,43 @@ const liveSession = {
 }
 
 test('Start preview is blocked with the reason for every state that forbids it', () => {
-  assert.deepEqual(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget }), { blocked: false, reason: '' })
+  const block = (camera, selection, extra) => previewBlock({ camera, selection, target: boardTarget, ...extra })
+  const open = { blocked: false, reason: '' }
+  assert.deepEqual(block(imx477, mipiMode), open)
 
-  assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: null }).reason, /No board is selected/)
-  assert.match(previewBlock({ camera: null, selection: null, target: boardTarget }).reason, /Select a camera/)
-  assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, stale: true }).reason, /board changed/)
+  assert.match(block(imx477, mipiMode, { target: null }).reason, /No board is selected/)
+  assert.match(block(null, null).reason, /Select a camera/)
+  assert.match(block(imx477, mipiMode, { stale: true }).reason, /board changed/)
 
   // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed mode.
-  assert.deepEqual(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }), { blocked: false, reason: '' })
-  assert.match(previewBlock({ camera: usb, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
+  assert.deepEqual(block(usb, sel('MJPG', 1280, 720, 30)), open)
+  assert.match(block(usb, null).reason, /no mode Insight can start/)
   // A camera the scan says is in use is not blocked up front: the start reports a busy camera itself.
-  assert.deepEqual(previewBlock({ camera: { ...usb, availability: inUse.availability }, selection: { format: 'YUYV', width: 640, height: 480, fps: 15 }, target: boardTarget }), { blocked: false, reason: '' })
+  assert.deepEqual(block({ ...usb, availability: inUse.availability }, sel('YUYV', 640, 480, 15)), open)
 
   // Only the formats the backend previews: MJPG and the raw FourCCs GStreamer converts.
-  for (const fmt of ['MJPG', 'YUYV', 'GREY']) {
-    assert.equal(previewBlock({ camera: usb, selection: { format: fmt, width: 640, height: 480, fps: 30 }, target: boardTarget }).blocked, false, fmt)
-  }
-  const h264 = previewBlock({ camera: usb, selection: { format: 'H264', width: 1280, height: 720, fps: 30 }, target: boardTarget })
+  for (const fmt of ['MJPG', 'YUYV', 'GREY']) assert.equal(block(usb, sel(fmt, 640, 480, 30)).blocked, false, fmt)
+  const h264 = block(usb, sel('H264', 1280, 720, 30))
   assert.equal(h264.blocked, true)
   assert.match(h264.reason, /not H264\. Choose another format\.$/)
   assert.ok(Object.isFrozen(USB_PREVIEW_FORMATS))
 
-  assert.match(previewBlock({ camera: imx477, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
+  assert.match(block(imx477, null).reason, /no mode Insight can start/)
 
   const unsupported = { ...imx477, formats: [format('NV12', 'NV12', false, support('unsupported', ISP_SIZE), [size(1920, 1080, [30, 'unsupported'])])] }
-  assert.match(previewBlock({ camera: unsupported, selection: mipiMode, target: boardTarget }).reason, /is Unsupported on this board/)
+  assert.match(block(unsupported, mipiMode).reason, /is Unsupported on this board/)
   // The backend previews Available modes only: an Unsupported rate, or one with no state, must not leave Start enabled.
   for (const tier of ['', 'unsupported']) {
-    const unjudged = { ...imx477, formats: [format('NV12', 'NV12', true, support('available'), [size(1920, 1080, [30, tier])])] }
-    const block = previewBlock({ camera: unjudged, selection: mipiMode, target: boardTarget })
-    assert.equal(block.blocked, true, `tier ${JSON.stringify(tier)}`)
-    assert.match(block.reason, /is Unsupported on this board\. Choose an Available mode\.$/)
+    const unjudged = block({ ...imx477, formats: [format('NV12', 'NV12', true, support('available'), [size(1920, 1080, [30, tier])])] }, mipiMode)
+    assert.equal(unjudged.blocked, true, `tier ${JSON.stringify(tier)}`)
+    assert.match(unjudged.reason, /is Unsupported on this board\. Choose an Available mode\.$/)
   }
 
   // The scan's availability never blocks Start; a busy camera is reported by the start itself.
-  assert.deepEqual(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }), { blocked: false, reason: '' })
+  assert.deepEqual(block(inUse, mipiMode), open)
 
-  const elsewhere = previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: { ...liveSession, camera_id: imx568.id } })
-  assert.match(elsewhere.reason, /already running on mipi:econ-imx568-fpga 5-0042/)
-  assert.equal(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: liveSession }).blocked, false)
+  assert.match(block(imx477, mipiMode, { session: { ...liveSession, camera_id: imx568.id } }).reason, /already running on mipi:econ-imx568-fpga 5-0042/)
+  assert.equal(block(imx477, mipiMode, { session: liveSession }).blocked, false)
 })
 
 test('preview transitions: start, live, stop', () => {
@@ -911,24 +866,18 @@ test('every step of a start that resumes after an await acts only for the view r
     }
   }
   const requested = { cameraId: 'camera:a', generation: 3, mode: a }
+  const refused = async () => { throw { code: 'preview_active', message: 'busy' } }
+  const startedA = async () => ({ session: sessionFor(a) })
 
   // A refused start looks up the preview another tab runs; B is picked during that look-up, so the
   // other tab's session is not adopted (which would switch the menus back) and the pane resets.
   let p = page(a)
-  await runPreviewStart(requested, {
-    ...p.deps,
-    post: async () => { throw { code: 'preview_active', message: 'busy' } },
-    lookup: async () => { p.current.selection = b; return sessionFor(a) }
-  })
+  await runPreviewStart(requested, { ...p.deps, post: refused, lookup: async () => { p.current.selection = b; return sessionFor(a) } })
   assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'reset']])
 
   // Unchanged during the look-up: the running preview is adopted.
   p = page(a)
-  await runPreviewStart(requested, {
-    ...p.deps,
-    post: async () => { throw { code: 'preview_active', message: 'busy' } },
-    lookup: async () => sessionFor(a)
-  })
+  await runPreviewStart(requested, { ...p.deps, post: refused, lookup: async () => sessionFor(a) })
   assert.deepEqual(p.log, [['dispatch', 'start'], ['adopt', 's1']])
 
   // A start for A answers after B was picked, so it is stopped; C is picked during that stop, so C is
@@ -936,7 +885,7 @@ test('every step of a start that resumes after an await acts only for the view r
   p = page(b)
   await runPreviewStart(requested, {
     ...p.deps,
-    post: async () => ({ session: sessionFor(a) }),
+    post: startedA,
     stop: async (session) => { p.log.push(['stop', session.id]); p.current.selection = c; return true }
   })
   assert.deepEqual(p.log, [['dispatch', 'start'], ['stop', 's1'], ['start', 1920]])
@@ -945,14 +894,14 @@ test('every step of a start that resumes after an await acts only for the view r
   p = page(b)
   await runPreviewStart(requested, {
     ...p.deps,
-    post: async () => ({ session: sessionFor(a) }),
+    post: startedA,
     stop: async () => { p.current.cameraId = 'camera:b'; p.current.selection = { ...c, id: 'camera:b' }; return true }
   })
   assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'reset']])
 
   // Nothing changed: the session is shown.
   p = page(a)
-  await runPreviewStart(requested, { ...p.deps, post: async () => ({ session: sessionFor(a) }) })
+  await runPreviewStart(requested, { ...p.deps, post: startedA })
   assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'session']])
 })
 
@@ -1002,7 +951,6 @@ test('a stream refused because another tab claimed it first shows the preview th
 })
 
 test('a watched live preview is read until the backend no longer runs it, and cancelling stops the reads', async () => {
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const replies = [{ session: liveSession }, { session: liveSession }, { session: null }]
   const reads = []
   const requestJson = async (url) => {
@@ -1054,7 +1002,6 @@ test("a live preview's status read passes on the camera's rate once the backend 
   assert.equal(nextPreviewState(PREVIEW_IDLE, event), PREVIEW_IDLE)
 
   // Reading goes on after the rate arrives, until the preview ends.
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   const replies = [{ session: liveSession }, { session: { ...liveSession, camera_fps: 66.18 } }, { session: null }]
   const events = []
   watchPreview(async () => replies.shift() || { session: null }, '8f1c', (e) => events.push(e), 1)
@@ -1113,33 +1060,23 @@ test('a session belongs to the camera and board generation it was started for', 
 })
 
 test('every preview failure carries a recovery action and nothing destructive', () => {
+  const info = (body, status) => previewErrorInfo(normalizeError(apiError(body, status)))
   assert.equal(previewErrorInfo(null), null)
 
-  const busy = previewErrorInfo(normalizeError(apiError({
-    error: 'The camera is already open.',
-    code: 'camera_in_use',
-    hint: 'gst-launch-1.0 (pid 812) has /dev/video3 open.'
-  }, 409)))
+  const busy = info({ error: 'The camera is already open.', code: 'camera_in_use', hint: 'gst-launch-1.0 (pid 812) has /dev/video3 open.' }, 409)
   assert.equal(busy.hint, 'gst-launch-1.0 (pid 812) has /dev/video3 open.')
   assert.match(busy.action, /Insight never stops it for you/)
 
-  const other = previewErrorInfo(normalizeError(apiError({
-    error: 'A preview is already running.',
-    code: 'preview_active',
-    session: { camera_id: imx568.id }
-  }, 409)))
+  const other = info({ error: 'A preview is already running.', code: 'preview_active', session: { camera_id: imx568.id } }, 409)
   assert.equal(other.otherCamera, imx568.id)
   assert.match(other.action, /Stop the preview that is already running/)
 
   // The backend puts camera_id at the top level of the 409 body.
-  const flat = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409)))
-  assert.equal(flat.otherCamera, usb.id)
+  assert.equal(info({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409).otherCamera, usb.id)
 
-  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /^Choose a mode Insight lists as Available; /)
-
-  const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
-  assert.equal(failed.detail, 'gst: no element')
-  assert.equal(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'unreachable' }, 502))).action, '')
+  assert.match(info({ error: 'x', code: 'invalid_request' }, 400).action, /^Choose a mode Insight lists as Available; /)
+  assert.equal(info({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502).detail, 'gst: no element')
+  assert.equal(info({ error: 'x', code: 'unreachable' }, 502).action, '')
 })
 
 test('the preview stream is only loaded from its same-origin API path', () => {
@@ -1152,7 +1089,7 @@ test('the preview stream is only loaded from its same-origin API path', () => {
 })
 
 test('an adopted preview selects the camera and the mode it streams, not the defaults', () => {
-  const session = { id: 's1', camera_id: imx477.id, mode: { format: 'NV12', width: 1920, height: 1080, fps: 60 }, state: 'live' }
+  const session = { id: 's1', camera_id: imx477.id, mode: sel('NV12', 1920, 1080, 60), state: 'live' }
   const wanted = adoptedSelection(session)
   assert.deepEqual(wanted, { id: imx477.id, format: 'NV12', width: 1920, height: 1080, fps: 60 })
   assert.deepEqual(resolveSelection(imx477, wanted), session.mode)
@@ -1160,7 +1097,7 @@ test('an adopted preview selects the camera and the mode it streams, not the def
 })
 
 test('a start refused because another tab started a preview adopts that preview', () => {
-  const session = { id: 's1', camera_id: imx477.id, mode: { format: 'NV12', width: 1920, height: 1080, fps: 60 }, state: 'live' }
+  const session = { id: 's1', camera_id: imx477.id, mode: sel('NV12', 1920, 1080, 60), state: 'live' }
   const active = { code: 'preview_active', message: 'A preview is already running.' }
   assert.equal(sessionToAdopt(active, session), session)
   const adopted = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'adopt', session: sessionToAdopt(active, session) })
@@ -1293,12 +1230,7 @@ test('microphone test: the scan never disables Test; the start request checks th
 })
 
 test('the level meter lights green, then amber, then red, from -50 dBFS to full scale', () => {
-  assert.equal(meterSegments(null, 20), 0)
-  assert.equal(meterSegments(-80, 20), 0)
-  assert.equal(meterSegments(-50, 20), 0)
-  assert.equal(meterSegments(-25, 20), 10)
-  assert.equal(meterSegments(0, 20), 20)
-  assert.equal(meterSegments(6, 20), 20)
+  for (const [dbfs, lit] of [[null, 0], [-80, 0], [-50, 0], [-25, 10], [0, 20], [6, 20]]) assert.equal(meterSegments(dbfs, 20), lit, String(dbfs))
   assert.deepEqual([0, 13, 14, 17, 18, 19].map((i) => segmentTone(i, 20)), ['low', 'low', 'mid', 'mid', 'high', 'high'])
 })
 
@@ -1309,9 +1241,7 @@ test('microphone test: it only speaks up about silence', () => {
   assert.match(micTestErrorAction({ code: 'microphone_in_use' }), /never stops it/)
   assert.match(micTestErrorAction({ code: 'tool_missing' }), /alsa-utils/)
   assert.equal(micTestErrorAction({ code: 'command_failed', hint: 'See detail.' }), 'See detail.')
-  assert.equal(formatClock(0), '0:00')
-  assert.equal(formatClock(4.9), '0:04')
-  assert.equal(formatClock(75), '1:15')
+  for (const [seconds, clock] of [[0, '0:00'], [4.9, '0:04'], [75, '1:15']]) assert.equal(formatClock(seconds), clock)
 })
 
 test('microphone test: one button records, stops the recording, then stops the playback', () => {
@@ -1355,14 +1285,7 @@ test('the camera setup belongs to the board that was scanned', () => {
 test('shell details read for an earlier board cannot overwrite the newer board', async () => {
   const requests = []
   const shown = []
-  const sync = createShellInfoSync({
-    fetchShell: () => {
-      const request = deferred()
-      requests.push(request)
-      return request.promise
-    },
-    onShell: (info) => shown.push(info)
-  })
+  const sync = createShellInfoSync({ fetchShell: () => queued(requests), onShell: (info) => shown.push(info) })
   const first = sync.load()
   const second = sync.load()
   requests[1].resolve({ available: true, target: 'B' })
