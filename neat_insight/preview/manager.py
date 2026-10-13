@@ -103,6 +103,12 @@ class _Relay:
         self._stop()
 
 
+def _frame_wait(base: float, rate) -> float:
+    """How long to wait for a frame: `base`, or two frame periods for a slower mode. V4L2 lets a camera
+    list any frame interval, so a mode can send a frame less often than `base` and still be healthy."""
+    return max(base, 2 / float(rate))
+
+
 class PreviewManager:
     """At most one preview, owned by the board session that started it."""
 
@@ -152,7 +158,8 @@ class PreviewManager:
         stream = board_session.transport.stream(gst.board_command(arguments), timeout=START_TIMEOUT_SEC)
         parser = gst.FrameParser()
         try:
-            frames = self._first_frames(stream, parser, item["name"], (mode["width"], mode["height"]))
+            frames = self._first_frames(stream, parser, item["name"], (mode["width"], mode["height"]),
+                                        _frame_wait(FIRST_FRAME_TIMEOUT_SEC, mode["rate"]))
             pid = self._pid(stream)
         except Exception:
             stream.close()
@@ -180,7 +187,8 @@ class PreviewManager:
         with self._lock:
             self._session = session
             self._run = {"owner": board_session, "stream": stream, "parser": parser, "pid": pid,
-                         "frames": frames, "claimed": False, "timer": timer, "fps_reader": reader}
+                         "frames": frames, "claimed": False, "timer": timer, "fps_reader": reader,
+                         "stall_timeout": _frame_wait(STALL_TIMEOUT_SEC, mode["rate"])}
             started = dict(session)
         timer.start()
         if reader is not None:
@@ -239,9 +247,9 @@ class PreviewManager:
             raise _camera_in_use(item["name"], users)
 
     @staticmethod
-    def _first_frames(stream, parser, name: str, size: tuple) -> list:
+    def _first_frames(stream, parser, name: str, size: tuple, timeout: float = FIRST_FRAME_TIMEOUT_SEC) -> list:
         """Read until the pipeline writes its first complete frame; raise why it did not."""
-        deadline = time.monotonic() + FIRST_FRAME_TIMEOUT_SEC
+        deadline = time.monotonic() + timeout
         chunk = None
         while time.monotonic() < deadline:
             try:
@@ -285,7 +293,7 @@ class PreviewManager:
         raise BoardError(
             "command_failed",
             "The preview pipeline stopped before it sent a frame." if ended
-            else f"The camera sent no frame within {FIRST_FRAME_TIMEOUT_SEC:g} s.",
+            else f"The camera sent no frame within {timeout:g} s.",
             hint="The board output below says why; check that the camera is connected and no other application holds it.",
             detail=detail,
         )
@@ -334,7 +342,7 @@ class PreviewManager:
             for frame in frames:
                 yield gst.part(frame)
             while True:
-                chunk = run["stream"].read(STALL_TIMEOUT_SEC)
+                chunk = run["stream"].read(run["stall_timeout"])
                 if not chunk:
                     return  # The pipeline ended, stalled, or the preview was stopped.
                 for frame in run["parser"].feed(chunk):

@@ -523,6 +523,28 @@ class PreviewTests(unittest.TestCase):
             self.manager.relay(self.session, "unknown")
         self.assertEqual(ctx.exception.code, "not_found")
 
+    def test_a_slow_mode_is_waited_for_frame_by_frame_instead_of_stopped_as_stalled(self):
+        """V4L2 lets a camera list any frame interval: one frame every 20 s is a healthy preview."""
+        timeouts = []
+
+        class Recording(FakeStream):
+            def read(self, timeout):
+                timeouts.append(timeout)
+                return super().read(timeout)
+
+        session = fake_session(FakeTransport(stream=Recording([multipart(JPEG), multipart(JPEG)])))
+        mode = {"format": "MJPG", "width": 640, "height": 480, "fps": 0.05, "rate": Fraction(1, 20),
+                "source": '"/dev/null"'}
+        started = self.manager.start(session, self.c920, mode)
+        self.assertGreaterEqual(timeouts[0], 39)  # Two frame periods for the first frame, too.
+        relay = self.manager.relay(session, started["id"])
+        frames = iter(relay)
+        self.assertEqual([next(frames), next(frames)], [gst.part(JPEG)] * 2)
+        self.assertEqual(timeouts[-1], 40)
+        relay.close()
+        # A mode faster than one frame per 5 s keeps the usual waits.
+        self.assertEqual(preview._frame_wait(preview.STALL_TIMEOUT_SEC, Fraction(30)), preview.STALL_TIMEOUT_SEC)
+
     def test_a_stream_nobody_opens_is_stopped(self):
         with mock.patch.object(preview, "UNCLAIMED_TIMEOUT_SEC", 0.05):
             self.start()
