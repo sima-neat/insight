@@ -360,6 +360,8 @@ class PeripheralClient(SentinelSocket):
             or not isinstance(microphone.get("modes"), list)
             or not isinstance(availability, dict)
             or availability.get("state") not in {"available", "in_use", "unknown"}
+            # The snapshot's reason is a string or null.
+            or (availability.get("reason") is not None and not isinstance(availability["reason"], str))
             or not all(_non_negative_int(availability.get(key, 0)) for key in ("subdevices", "subdevices_available"))
             # Both counts come from the same /proc/asound info file; more free than exist is impossible.
             or (

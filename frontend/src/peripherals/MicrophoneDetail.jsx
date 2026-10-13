@@ -288,7 +288,7 @@ function MicTest({ mic }) {
 
 // Neat Core has no audio input node, so there is no mode to pick and nothing to export: the pane
 // shows what the board reports and a recording to listen to; a busy device is reported when its test starts.
-export default function MicrophoneDetail({ mic }) {
+export default function MicrophoneDetail({ mic, generation }) {
   const subtitle = microphoneSubtitle(mic)
 
   return (
@@ -305,7 +305,8 @@ export default function MicrophoneDetail({ mic }) {
       ))}
 
       <CaptureModes modes={captureModes(mic)} />
-      <MicTest key={mic.id} mic={mic} />
+      {/* A test belongs to one board: another board's microphone with the same id starts afresh. */}
+      <MicTest key={`${generation}:${mic.id}`} mic={mic} />
     </section>
   )
 }

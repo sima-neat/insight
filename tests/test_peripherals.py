@@ -856,6 +856,8 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "channel map": lambda mic: mic["modes"][0].update(channel_map="FL FR"),
             "availability": lambda mic: mic["availability"].update(state="busy-ish"),
             "counts": lambda mic: mic["availability"].update(subdevices=True),
+            # Codex 4255615190: a non-string reason reached the snapshot, which promises a string or null.
+            "availability reason": lambda mic: mic["availability"].update(state="unknown", reason={"bad": True}),
             # Codex 4189179496: more free than total made the snapshot report the microphone in use.
             "more free than total": lambda mic: mic["availability"].update(subdevices=1, subdevices_available=2),
             "issues": lambda mic: mic.update(issues=[None]),
@@ -864,6 +866,9 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "rate beyond __u32": lambda mic: mic["modes"][0].update(rates_hz=[2**32]),
             "PCM device beyond __u32": lambda mic: mic["capture_target"].update(device=10**400),
         }
+        unexplained = contract_microphone()
+        unexplained["availability"].update(state="unknown", reason=None)
+        validate(catalog(unexplained))
         # A backend or connection Sentinel may add later is not a malformed record.
         validate(catalog(dict(contract_microphone(), backend="pipewire", connection="bluetooth")))
         for name, mutate in malformed.items():
@@ -1362,6 +1367,47 @@ class MicrophoneApiTests(unittest.TestCase):
         wav = self.client.get(done["audio_url"])
         self.assertEqual((wav.status_code, wav.mimetype, wav.data[:4]), (200, "audio/wav", b"RIFF"))
         self.assertEqual(self.client.get("/api/peripherals/microphones/test/other.wav").status_code, 404)
+
+    def test_a_board_change_during_the_start_ends_the_test_and_is_refused(self):
+        """Codex 4255505616: a test started while the board changed must not answer 202 for the departed board."""
+        self.client.post("/api/peripherals/refresh")
+        recording, cancelled = threading.Event(), threading.Event()
+
+        def record(argv, on_stdout, cancel_event):
+            on_stdout(sine(0.5))
+            recording.set()
+            if cancel_event.wait(30):
+                cancelled.set()
+            raise CommandCancelled()
+
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}), record)
+        real_start, session, started = mictest.start, self.manager.current, []
+
+        def start_then_switch(*args):
+            status = real_start(*args)
+            started.append(mictest._current)
+            session.stale = True  # /api/board/select picked another board while the test started
+            return status
+
+        with mock.patch.object(mictest, "start", side_effect=start_then_switch):
+            response = self.start()
+        self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
+        self.assertIsNone(mictest._current)
+        self.assertTrue(cancelled.wait(2), "the departed board's arecord is stopped")
+        started[0].thread.join(2)
+
+    def test_a_departed_boards_recording_does_not_block_a_test_on_the_new_board(self):
+        """Codex 4255561400: a test still recording on the previous board must not answer test_running here."""
+        old = mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
+        self.manager.current = FakeSession(2, self.transport)  # /api/board/select picked another board
+        self.client.post("/api/peripherals/refresh")
+        self.answer_checks(mic_check(users={YETI: []}, capture_open={YETI: 0}),
+                           lambda argv, on_stdout, cancel: ExecResult(0, sine(0.5), b""))
+        response = self.start()
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(old.stop_requested, "the departed board's recording is told to end")
+        mictest._current.thread.join(2)
+        self.assertEqual(self.client.get("/api/peripherals/microphones/test").get_json()["test"]["state"], "ready")
 
     def test_another_board_sees_no_test_and_cannot_stop_it(self):
         self.assertIsNone(self.client.get("/api/peripherals/microphones/test").get_json()["test"])

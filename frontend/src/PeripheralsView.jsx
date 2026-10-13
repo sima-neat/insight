@@ -495,7 +495,7 @@ export default function PeripheralsView({
           pills={microphonePills}
         />
         {mic ? (
-          <MicrophoneDetail mic={mic} />
+          <MicrophoneDetail mic={mic} generation={board?.generation} />
         ) : (
           <div className="periph-detail">
             <Callout title={`${removedName(activeMicId, 'The selected microphone')} is no longer detected`}>

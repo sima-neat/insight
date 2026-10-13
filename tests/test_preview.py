@@ -555,6 +555,10 @@ class PreviewTests(unittest.TestCase):
         relay.close()
         # A mode faster than one frame per 5 s keeps the usual waits.
         self.assertEqual(preview._frame_wait(preview.STALL_TIMEOUT_SEC, Fraction(30)), preview.STALL_TIMEOUT_SEC)
+        # Codex 4255690083: a mode Sentinel lists down to one frame per 2**32-1 s must not hold the board
+        # lock for years; the wait is capped.
+        for base in (preview.FIRST_FRAME_TIMEOUT_SEC, preview.STALL_TIMEOUT_SEC):
+            self.assertEqual(preview._frame_wait(base, Fraction(1, 2**32 - 1)), 60)
 
     def test_a_stream_nobody_opens_is_stopped(self):
         with mock.patch.object(preview, "UNCLAIMED_TIMEOUT_SEC", 0.05):
