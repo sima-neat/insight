@@ -3874,7 +3874,8 @@ def pull_source():
         return _json_error(str(exc))
     snapshot = _path_snapshot()  # asked before the lock, which must not wait on MediaMTX
     with _sources_lock:
-        src = _find_source(index)
+        # Not _find_source: its webcam liveness check asks MediaMTX, and the checks below need no runtime state.
+        src = next((s for s in load_sources() if s.get("index") == index), None)
         if not src:
             return _json_error("Source not found", 404)
         if src.get("type") == SOURCE_TYPE_WEBCAM:

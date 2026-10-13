@@ -2935,6 +2935,19 @@ class PullSourceTests(_SourceFixture):
         self.assertTrue(snapshot_held and set_held)
         self.assertEqual(snapshot_held + set_held, [False] * (len(snapshot_held) + len(set_held)))
 
+    def test_pull_checks_playing_webcams_outside_the_source_lock(self):
+        # A playing webcam elsewhere makes every source listing ask MediaMTX whether it is still live.
+        self.sources_file.write_text('[{"index": 1, "file": "", "state": "playing", "type": "webcam"}]', encoding="utf-8")
+        held = []
+
+        def ready_paths():
+            held.append(lock_is_held(app_module._sources_lock))
+            return {"cam1"}
+        with mock.patch.object(app_module, "webcam_ready_paths", side_effect=ready_paths):
+            self.assertEqual(self._pull().status_code, 200)
+        self.assertTrue(held)
+        self.assertNotIn(True, held)
+
     def test_failed_pull_cleanup_runs_outside_the_source_lock(self):
         self.mtx.fail_after_apply = True
         clear_patch, held = self.spy_lock("clear_pull_source")
