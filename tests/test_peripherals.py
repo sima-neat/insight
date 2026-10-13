@@ -304,11 +304,14 @@ class BoardCheckTests(unittest.TestCase):
         self.assertEqual(result["users"], {IMX477: [{"pid": 4242, "command": "neat-app"}]})
 
     def test_runs_as_a_program_and_prints_json(self):
-        request = json.dumps({"cameras": {"camera:x": ["/dev/no-such-node"]}})
-        done = subprocess.run(
-            [sys.executable, "-I", "-", request], input=Path(board_check.__file__).read_bytes(),
-            capture_output=True, timeout=60,
-        )
+        # A real file nobody holds: with passwordless sudo and fuser (as on a CI runner) the check uses fuser,
+        # which reports a missing path as an error, so a missing node would rightly come back unchecked (None).
+        with tempfile.NamedTemporaryFile() as node:
+            request = json.dumps({"cameras": {"camera:x": [node.name]}})
+            done = subprocess.run(
+                [sys.executable, "-I", "-", request], input=Path(board_check.__file__).read_bytes(),
+                capture_output=True, timeout=60,
+            )
         self.assertEqual(done.returncode, 0, done.stderr)
         result = json.loads(done.stdout)
         self.assertEqual(result["users"], {"camera:x": []})
