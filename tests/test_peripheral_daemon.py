@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 import unittest.mock as mock
+from http.client import RemoteDisconnected
 
 from neat_insight.board.errors import BoardError
 from neat_insight.board.target import BoardTarget
@@ -48,9 +49,12 @@ class FakeSession:
         self.transport = transport
         self.generation = generation
         self.current_checks = 0
+        self.stale = False
 
     def require_current(self):
         self.current_checks += 1
+        if self.stale:
+            raise BoardError("stale_snapshot", "The selected board changed while this request was running.")
 
 
 class PeripheralClientTests(unittest.TestCase):
@@ -266,6 +270,9 @@ class PeripheralClientTests(unittest.TestCase):
             "camera model": usb_camera(model=7),
             "MIPI isp": mipi(isp="unavailable"),
             "availability": mipi(availability=["unknown"]),
+            # Codex (e84c907): a non-string reason reached the snapshot, which promises a string or null.
+            "availability reason": mipi(availability={"state": "unknown", "reason": {"bad": True}}),
+            "availability state": mipi(availability={"state": ["unknown"]}),
         }
         for key in (
             "stable_key", "topology", "interface", "vendor_id", "product_id",
@@ -281,7 +288,7 @@ class PeripheralClientTests(unittest.TestCase):
         for response in (usb_camera(), usb_camera(identity={"node_index": 0}),
                          usb_camera(identity=None, by_id_path=None),
                          mipi(isp={"state": "unavailable", "reason": "x"}),
-                         mipi(availability=None)):
+                         mipi(availability=None), mipi(availability={"state": "unknown", "reason": None})):
             with self.subTest(valid=response), mock.patch.object(
                 socket_client, "request", return_value=(200, json.dumps(response))
             ):
@@ -344,6 +351,20 @@ class PeripheralClientTests(unittest.TestCase):
                     PeripheralClient(FakeSession()).refresh()
                 self.assertEqual((ctx.exception.code, ctx.exception.extra["daemon_status"]), (code, status))
                 self.assertIn(words, ctx.exception.message)
+
+    def test_a_local_failure_after_the_board_changed_is_reported_as_stale(self):
+        # Codex (e84c907): a local socket failure raised before the generation check, so a board switched
+        # mid-request got an error about the old on-board Sentinel instead of stale_snapshot.
+        for failure in (ConnectionRefusedError(errno.ECONNREFUSED, "refused"), socket.timeout("timed out"),
+                        RemoteDisconnected("closed")):
+            session = FakeSession()
+            session.stale = True
+            with self.subTest(failure=type(failure).__name__), mock.patch.object(
+                socket_client, "request", side_effect=failure
+            ):
+                with self.assertRaises(BoardError) as ctx:
+                    PeripheralClient(session).refresh()
+                self.assertEqual(ctx.exception.code, "stale_snapshot")
 
     def test_remote_access_runs_only_the_stdlib_socket_helper(self):
         response = catalog()
