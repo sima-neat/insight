@@ -11,23 +11,15 @@
     ],
     "firmware": "3.0.0",
     "model": "SiMa.ai Modalix SoM 16Gig Board",
-    "overlays": [
-      "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
-    ],
+    "overlays": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"],
     "supported_sensors": [
       {
         "compatible": "Metoak,simor",
-        "overlays": [
-          "modalix-som-connectech-METOAK-DUAL.dtbo",
-          "modalix-som-waveshare-METOAK-DUAL.dtbo"
-        ]
+        "overlays": ["modalix-som-connectech-METOAK-DUAL.dtbo", "modalix-som-waveshare-METOAK-DUAL.dtbo"]
       },
       {
         "compatible": "Metoak,xc9080",
-        "overlays": [
-          "modalix-som-connectech-METOAK-DUAL.dtbo",
-          "modalix-som-waveshare-METOAK-DUAL.dtbo"
-        ]
+        "overlays": ["modalix-som-connectech-METOAK-DUAL.dtbo", "modalix-som-waveshare-METOAK-DUAL.dtbo"]
       },
       {
         "compatible": "OV,og05c10",
@@ -93,12 +85,7 @@
           "modalix-hhhlv2-linkB-ECON-GMSL-IMX568-3CAM.dtbo"
         ]
       },
-      {
-        "compatible": "econ,mipi_gen",
-        "overlays": [
-          "modalix-som-waveshare-ECON-MIPI-GEN-1CAM.dtbo"
-        ]
-      },
+      {"compatible": "econ,mipi_gen", "overlays": ["modalix-som-waveshare-ECON-MIPI-GEN-1CAM.dtbo"]},
       {
         "compatible": "onsemi,ar0234",
         "overlays": [
@@ -356,83 +343,17 @@
           "sensor_mode": true,
           "width": 4056
         },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 990,
-          "sensor_mode": true,
-          "width": 1280
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 990,
-          "sensor_mode": true,
-          "width": 1332
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 1080,
-          "sensor_mode": true,
-          "width": 1920
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 1080,
-          "sensor_mode": true,
-          "width": 2028
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 1520,
-          "sensor_mode": true,
-          "width": 2028
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 1080,
-          "sensor_mode": true,
-          "width": 2048
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 2160,
-          "sensor_mode": true,
-          "width": 3840
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 3040,
-          "sensor_mode": true,
-          "width": 3968
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 3040,
-          "sensor_mode": true,
-          "width": 4032
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 2160,
-          "sensor_mode": true,
-          "width": 4056
-        },
-        {
-          "available": true,
-          "format": "NV12",
-          "height": 3040,
-          "sensor_mode": true,
-          "width": 4056
-        },
+        {"available": true, "format": "NV12", "height": 990, "sensor_mode": true, "width": 1280},
+        {"available": true, "format": "NV12", "height": 990, "sensor_mode": true, "width": 1332},
+        {"available": true, "format": "NV12", "height": 1080, "sensor_mode": true, "width": 1920},
+        {"available": true, "format": "NV12", "height": 1080, "sensor_mode": true, "width": 2028},
+        {"available": true, "format": "NV12", "height": 1520, "sensor_mode": true, "width": 2028},
+        {"available": true, "format": "NV12", "height": 1080, "sensor_mode": true, "width": 2048},
+        {"available": true, "format": "NV12", "height": 2160, "sensor_mode": true, "width": 3840},
+        {"available": true, "format": "NV12", "height": 3040, "sensor_mode": true, "width": 3968},
+        {"available": true, "format": "NV12", "height": 3040, "sensor_mode": true, "width": 4032},
+        {"available": true, "format": "NV12", "height": 2160, "sensor_mode": true, "width": 4056},
+        {"available": true, "format": "NV12", "height": 3040, "sensor_mode": true, "width": 4056},
         {
           "available": false,
           "format": "NV16",
@@ -736,41 +657,13 @@
             {
               "height": 90,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 160
             }
@@ -787,41 +680,13 @@
             {
               "height": 120,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 160
             }
@@ -838,41 +703,13 @@
             {
               "height": 144,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 176
             }
@@ -889,41 +726,13 @@
             {
               "height": 180,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 320
             }
@@ -940,41 +749,13 @@
             {
               "height": 240,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 320
             }
@@ -991,41 +772,13 @@
             {
               "height": 288,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 352
             }
@@ -1042,41 +795,13 @@
             {
               "height": 240,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 432
             }
@@ -1093,41 +818,13 @@
             {
               "height": 360,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 640
             }
@@ -1144,41 +841,13 @@
             {
               "height": 480,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 640
             }
@@ -1195,41 +864,13 @@
             {
               "height": 448,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 800
             }
@@ -1246,41 +887,13 @@
             {
               "height": 600,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 800
             }
@@ -1297,41 +910,13 @@
             {
               "height": 480,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 864
             }
@@ -1348,41 +933,13 @@
             {
               "height": 720,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 960
             }
@@ -1399,41 +956,13 @@
             {
               "height": 576,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1024
             }
@@ -1450,41 +979,13 @@
             {
               "height": 720,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1280
             }
@@ -1501,41 +1002,13 @@
             {
               "height": 896,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1600
             }
@@ -1552,41 +1025,13 @@
             {
               "height": 1080,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1920
             }
@@ -1603,41 +1048,13 @@
             {
               "height": 90,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 160
             }
@@ -1654,41 +1071,13 @@
             {
               "height": 120,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 160
             }
@@ -1705,41 +1094,13 @@
             {
               "height": 144,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 176
             }
@@ -1756,41 +1117,13 @@
             {
               "height": 180,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 320
             }
@@ -1807,41 +1140,13 @@
             {
               "height": 240,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 320
             }
@@ -1858,41 +1163,13 @@
             {
               "height": 288,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 352
             }
@@ -1909,41 +1186,13 @@
             {
               "height": 240,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 432
             }
@@ -1960,41 +1209,13 @@
             {
               "height": 360,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 640
             }
@@ -2011,41 +1232,13 @@
             {
               "height": 480,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 640
             }
@@ -2062,41 +1255,13 @@
             {
               "height": 448,
               "intervals": [
-                {
-                  "denominator": 30,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 30, "numerator": 1, "type": "discrete"},
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 800
             }
@@ -2113,36 +1278,12 @@
             {
               "height": 600,
               "intervals": [
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 800
             }
@@ -2159,36 +1300,12 @@
             {
               "height": 480,
               "intervals": [
-                {
-                  "denominator": 24,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 20,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 24, "numerator": 1, "type": "discrete"},
+                {"denominator": 20, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 864
             }
@@ -2205,26 +1322,10 @@
             {
               "height": 720,
               "intervals": [
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 960
             }
@@ -2241,26 +1342,10 @@
             {
               "height": 576,
               "intervals": [
-                {
-                  "denominator": 15,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 15, "numerator": 1, "type": "discrete"},
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1024
             }
@@ -2277,21 +1362,9 @@
             {
               "height": 720,
               "intervals": [
-                {
-                  "denominator": 10,
-                  "numerator": 1,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 10, "numerator": 1, "type": "discrete"},
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1280
             }
@@ -2308,16 +1381,8 @@
             {
               "height": 896,
               "intervals": [
-                {
-                  "denominator": 15,
-                  "numerator": 2,
-                  "type": "discrete"
-                },
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
+                {"denominator": 15, "numerator": 2, "type": "discrete"},
+                {"denominator": 5, "numerator": 1, "type": "discrete"}
               ],
               "width": 1600
             }
@@ -2333,13 +1398,7 @@
           "frame_intervals": [
             {
               "height": 1080,
-              "intervals": [
-                {
-                  "denominator": 5,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
-              ],
+              "intervals": [{"denominator": 5, "numerator": 1, "type": "discrete"}],
               "width": 1920
             }
           ],
@@ -2354,13 +1413,7 @@
           "frame_intervals": [
             {
               "height": 1472,
-              "intervals": [
-                {
-                  "denominator": 2,
-                  "numerator": 1,
-                  "type": "discrete"
-                }
-              ],
+              "intervals": [{"denominator": 2, "numerator": 1, "type": "discrete"}],
               "width": 2560
             }
           ],
@@ -2372,17 +1425,9 @@
       "type": "camera"
     },
     {
-      "availability": {
-        "state": "available",
-        "subdevices": 1,
-        "subdevices_available": 1
-      },
+      "availability": {"state": "available", "subdevices": 1, "subdevices_available": 1},
       "backend": "alsa",
-      "capture_target": {
-        "card_id": "C920",
-        "device": 0,
-        "selector": "plughw:CARD=C920,DEV=0"
-      },
+      "capture_target": {"card_id": "C920", "device": 0, "selector": "plughw:CARD=C920,DEV=0"},
       "connection": "usb",
       "id": "microphone:alsa:329f324bddfdde7b",
       "identity": {
@@ -2407,44 +1452,29 @@
       "modes": [
         {
           "altset": 1,
-          "channel_map": [
-            "FL",
-            "FR"
-          ],
+          "channel_map": ["FL", "FR"],
           "channels": 2,
           "format": "S16_LE",
           "interface": 3,
-          "rates_hz": [
-            16000
-          ],
+          "rates_hz": [16000],
           "sample_bits": 16
         },
         {
           "altset": 2,
-          "channel_map": [
-            "FL",
-            "FR"
-          ],
+          "channel_map": ["FL", "FR"],
           "channels": 2,
           "format": "S16_LE",
           "interface": 3,
-          "rates_hz": [
-            24000
-          ],
+          "rates_hz": [24000],
           "sample_bits": 16
         },
         {
           "altset": 3,
-          "channel_map": [
-            "FL",
-            "FR"
-          ],
+          "channel_map": ["FL", "FR"],
           "channels": 2,
           "format": "S16_LE",
           "interface": 3,
-          "rates_hz": [
-            32000
-          ],
+          "rates_hz": [32000],
           "sample_bits": 16
         }
       ],
