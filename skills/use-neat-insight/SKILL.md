@@ -286,7 +286,7 @@ The metadata sender targets UDP `9100+channel` by default and emits JSON compati
 
 ## Segmentation Metadata
 
-`type: "segmentation"` carries `data.segments[]`, one entry per instance with `label`, `confidence`, `bbox` in frame pixels, `mask_format`, and `mask`.
+`type: "segmentation"` carries `data.segments[]`, one entry per instance with `label`, `confidence`, `bbox` in frame pixels, `mask_format`, `mask`, and optional `show_rectangle`.
 
 The two mask formats use different coordinate frames:
 
@@ -294,6 +294,10 @@ The two mask formats use different coordinate frames:
 | --- | --- | --- |
 | `polygon` | `[[x, y], ...]`, at least three points | Frame-absolute. `bbox` optional, derived from the extent when absent. |
 | `rle` | `{"size": [h, w], "counts": [...]}` | Bbox-local: `size` covers the `bbox` rectangle, not the image. `bbox` required. |
+
+Segment bounding rectangles are hidden by default for both mask formats. Set
+`show_rectangle: true` on a segment to draw its `bbox` outline; only boolean `true`
+opts in. The `bbox` still places the label and RLE mask and drives ROI filtering.
 
 RLE runs are column-major, the first run is background, and `counts` is a JSON array of integers — not the compressed byte string `pycocotools.mask.encode()` returns. Send the mask at mask-head resolution; the viewer stretches it onto `bbox` with interpolation.
 
