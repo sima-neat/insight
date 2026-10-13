@@ -553,6 +553,27 @@ class SnapshotTests(unittest.TestCase):
         camera = scanned_camera(doc, board={**board_block(), "supported_sensors": []})
         self.assertEqual(camera["support"]["tier"], "unsupported")
 
+    def test_the_api_schema_lists_every_tier_a_camera_reports(self):
+        # Codex 4263806914: the schema allowed only available and unsupported after Unverified was added.
+        doc = imx477()
+        doc["isp"]["sizing"] = "runtime"
+        doc["modes"] = [
+            {"format": "NV12", "width": 1920, "height": 1080, "sensor_mode": True, "isp_input": True, "available": True},
+            {"format": "NV12", "width": 1332, "height": 990, "sensor_mode": True, "isp_input": False},
+            {"format": "RGB3", "width": 1332, "height": 990, "sensor_mode": True, "available": False,
+             "reason": cameras.FORMAT_REASON},
+        ]
+        camera = scanned_camera(doc)
+        reported = {camera["support"]["tier"]} | {f["support"]["tier"] for f in camera["formats"]}
+        reported |= {r["tier"] for f in camera["formats"] for s in f["sizes"] for r in s["fps"]}
+        self.assertEqual(reported, {"available", "unverified", "unsupported"})
+        spec = json.loads((Path(cameras.__file__).parents[1] / "openapi.json").read_text(encoding="utf-8"))
+        schemas = spec["components"]["schemas"]
+        rate = schemas["PeripheralCamera"]["properties"]["formats"]["items"]["properties"]["sizes"]["items"]
+        rate_tier = rate["properties"]["fps"]["items"]["properties"]["tier"]
+        self.assertLessEqual(reported, set(schemas["SupportTier"]["properties"]["tier"]["enum"]))
+        self.assertLessEqual(reported, set(rate_tier["enum"]))
+
     def test_the_default_mode_is_1920_wide_when_the_camera_offers_it(self):
         """The first Available size in sort order is the smallest (1280x990 on a 3.0 IMX477), not a useful start."""
         def doc_with(sizes):
