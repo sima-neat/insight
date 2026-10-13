@@ -723,8 +723,9 @@ export function nextPreviewState(state, event) {
     case 'ended':
       // A live preview the backend stopped, with its reason; nothing is left to stop.
       if (outOfDate(current, event)) return current
-      // One shown in another page ended there: this page has nothing to explain.
-      if (current.status === 'elsewhere') return PREVIEW_IDLE
+      // One shown in another page ended there: this page has nothing to explain. One this page is stopping
+      // ended because of that stop (closing the stream ends it), so it is a stop, not a failure.
+      if (current.status === 'elsewhere' || current.status === 'stopping') return PREVIEW_IDLE
       return { status: 'idle', session: null, error: event.error || null }
     case 'failed':
       if (outOfDate(current, event)) return current

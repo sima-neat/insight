@@ -884,6 +884,12 @@ test('preview transitions: failures, reset, and adopting an existing session', (
   assert.equal(nextPreviewState(elsewhere, { type: 'stopping', for: liveSession.id }).status, 'stopping')
 
   const live = nextPreviewState(starting, { type: 'session', session: liveSession })
+  // Stop closes the stream, so its end can arrive before the stop's own answer: that is the stop, not a failure,
+  // and the stop's answer afterwards changes nothing.
+  const stoppingLive = nextPreviewState(live, { type: 'stopping', for: liveSession.id })
+  const endedByStop = nextPreviewState(stoppingLive, streamEndedEvent(liveSession.id))
+  assert.deepEqual(endedByStop, PREVIEW_IDLE)
+  assert.deepEqual(nextPreviewState(endedByStop, { type: 'stopped', for: liveSession.id }), PREVIEW_IDLE)
   const stopping = nextPreviewState(starting, { type: 'stopping', for: liveSession.id, session: liveSession })
   const stopFailed = nextPreviewState(stopping, { type: 'stop-failed', for: liveSession.id, error: { message: 'SSH failed' } })
   assert.equal(stopFailed.status, 'live')
