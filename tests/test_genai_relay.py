@@ -209,6 +209,14 @@ class GenaiRelayTests(unittest.TestCase):
         self.assertTrue(relay.is_allowed_path("rag/upload"))
         self.assertFalse(relay.is_allowed_path("upload-to-rag"))
 
+    def test_status_and_stop_calls_fail_fast(self):
+        # A board that stops answering must not hold the benchmark's polling
+        # (or Stop) for the long timeout meant for loads and replies.
+        for path in ("benchmark/status", "benchmark/stop", "rag/status", "health", "models/status"):
+            self.assertIn(path, relay._QUICK_PATHS)
+        for path in ("models/load", "benchmark/run", "rag/upload", "v1/chat/completions"):
+            self.assertNotIn(path, relay._QUICK_PATHS)
+
     def test_streams_server_sent_events_without_buffering(self):
         self._configure(url=self.board)
 

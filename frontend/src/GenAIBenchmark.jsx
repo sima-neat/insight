@@ -118,7 +118,13 @@ export default function GenAIBenchmark({ status, ticket, onClose, onModelsChange
       if (over()) {
         // Stop arrived while the run was starting, so the board's stop found
         // nothing to stop: stop the run that has now begun.
-        if (stopRequested.current) postJson('benchmark/stop', {}).catch(() => {})
+        if (stopRequested.current) {
+          const earlier = stopDone.current
+          stopDone.current = (async () => {
+            await earlier
+            await stopBoardRun(runTicket.current)
+          })()
+        }
         return null
       }
       setLive(started)

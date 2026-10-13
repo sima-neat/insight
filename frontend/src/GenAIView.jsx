@@ -38,6 +38,7 @@ import { allowedActions } from './genai/activity.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
+import { benchmarkSupport } from './genai/benchmark.js'
 import { documentsSummary, documentsSupport, progressOutcome, sourcesNote } from './genai/documents.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
@@ -238,6 +239,7 @@ export default function GenAIView({ onError, onStatus }) {
   const backend = deriveBackendState({ health, status, busyOp, lastError })
   const usable = canUseModels(backend.state)
   const docs = documentsSupport(health)
+  const bench = benchmarkSupport(health)
   const chatModel = loadedChatModel(status)
   const sees = Boolean(chatModel && chatModel.supportsVision)
   // What the user may do now: every control and action reads this one table.
@@ -259,6 +261,7 @@ export default function GenAIView({ onError, onStatus }) {
     benchmarking,
     documentTask: Boolean(docProgress),
     documentsAvailable: docs.available,
+    benchmarkAvailable: bench.available,
     useDocuments: useDocs && docs.available
   })
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
@@ -1131,7 +1134,7 @@ export default function GenAIView({ onError, onStatus }) {
           <button type="button" className={`btn-ghost genai-tool${spot('solutions')}`} onClick={() => setSolutionsOpen(true)} aria-label="SiMaSentry Solutions" title="SiMaSentry Solutions: Med, Safe and Sec demo apps on the loaded model">
             <Icon d={ICONS.shield} />
           </button>
-          <button type="button" className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => { if (allowed.openBenchmark) setBenchOpen(true) }} disabled={!allowed.openBenchmark} aria-label="Benchmark" title={usable ? 'Benchmark: first token time and tokens per second for the board\'s models' : backend.title}>
+          <button type="button" className={`btn-ghost genai-tool${spot('benchmark')}`} onClick={() => { if (allowed.openBenchmark) setBenchOpen(true) }} disabled={!allowed.openBenchmark} aria-label="Benchmark" title={!usable ? backend.title : bench.available ? 'Benchmark: first token time and tokens per second for the board\'s models' : bench.reason}>
             <Icon d={ICONS.gauge} />
           </button>
           <button type="button" className="btn-ghost genai-tool" onClick={() => setTutorialStep(0)} aria-pressed={step !== null} aria-label="Tutorial" title="Tutorial">

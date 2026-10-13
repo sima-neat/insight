@@ -27,7 +27,7 @@ import { documentsSummary, documentsSupport, parseSources, progressOutcome, sour
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions } from './activity.js'
 import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
-import { benchProgress, benchmarkCsv, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
+import { benchProgress, benchmarkCsv, benchmarkSupport, benchmarkFilename, benchmarkJson, benchmarkRequest, clampSetting, comparisonRows, BENCH_LIMITS } from './benchmark.js'
 
 // Shapes captured from a Modalix DevKit running GenAI Studio in backend-only mode.
 const HEALTH_OK = {
@@ -647,7 +647,7 @@ test('a benchmark or a document task holds what would disturb it', () => {
   const docs = allowedActions({ ...READY, documentTask: true })
   assert.deepEqual([docs.changeBoard, docs.documentTasks, docs.openBenchmark], [false, false, false])
   assert.equal(docs.send, true)
-  assert.equal(allowedActions(READY).openBenchmark, true)
+  assert.equal(allowedActions({ ...READY, benchmarkAvailable: true }).openBenchmark, true)
 })
 
 test('board errors read in both shapes GenAI Studio uses', () => {
@@ -667,7 +667,7 @@ test('questions with documents wait while the documents are rebuilt', () => {
   const rebuilding = { ...READY, documentTask: true, documentsAvailable: true }
   assert.equal(allowedActions({ ...rebuilding, useDocuments: true }).send, false)
   assert.equal(allowedActions({ ...rebuilding, useDocuments: false }).send, true)
-  assert.equal(allowedActions({ ...READY, cameraOpen: true }).openBenchmark, false)
+  assert.equal(allowedActions({ ...READY, cameraOpen: true, benchmarkAvailable: true }).openBenchmark, false)
   assert.equal(allowedActions({ ...READY, documentsAvailable: false }).toggleDocuments, false)
 })
 
@@ -690,4 +690,13 @@ test('the benchmark JSON says which step failed and why', () => {
   const ok = { model: 'a', summary: { count: 1 }, runs: [] }
   const json = JSON.parse(benchmarkJson([ok, { model: 'b', failed: 'board error', stage: 'run' }, { model: 'c', failed: 'failed to load: x', stage: 'load' }], { runs: 1, maxTokens: 8, prompt: '' }))
   assert.deepEqual(json.results.map((r) => [r.model, r.loadFailed, r.error]), [['a', false, null], ['b', false, 'board error'], ['c', true, 'failed to load: x']])
+})
+
+test('the benchmark is offered only by a board that says so', () => {
+  const health = (features) => ({ httpStatus: 200, body: { ...HEALTH_OK, features } })
+  assert.equal(benchmarkSupport(health({ benchmark: true, rag: true })).available, true)
+  assert.equal(benchmarkSupport(health({ benchmark: false })).available, false)
+  assert.equal(benchmarkSupport(health(undefined)).available, false)
+  assert.equal(allowedActions({ ...READY, benchmarkAvailable: false }).openBenchmark, false)
+  assert.equal(allowedActions({ ...READY, benchmarkAvailable: true }).openBenchmark, true)
 })

@@ -19,6 +19,7 @@
 //   benchmarking  the benchmark is running (it loads models and keeps the board busy)
 //   documentTask  a document upload, reset or clear is running
 //   documentsAvailable  the board can answer from documents
+//   benchmarkAvailable  the board offers the benchmark
 //   useDocuments  questions are sent with the documents
 //   downloading   a model download runs
 export function allowedActions(state) {
@@ -51,7 +52,7 @@ export function allowedActions(state) {
     searchModels: !s.downloading,
     downloadModel: !s.downloading,
     // The benchmark loads and unloads models: the same rule as changing them.
-    openBenchmark: modelsQuiet && !s.documentTask,
+    openBenchmark: modelsQuiet && !s.documentTask && Boolean(s.benchmarkAvailable),
     // Fixed for the length of a reply: the reply was sent with or without them.
     toggleDocuments: Boolean(s.documentsAvailable) && !s.replying,
     // A reply that uses the documents may still be searching them.

@@ -15,6 +15,14 @@ export function clampSetting(value, { min, max, default: fallback }) {
   return Math.max(min, Math.min(max, n))
 }
 
+// Whether the board offers the benchmark, from /health's `features`
+// (GenAI Studio reports {benchmark: true} when it does).
+export function benchmarkSupport(health) {
+  const features = health && health.httpStatus === 200 && health.body && health.body.features
+  if (features && features.benchmark === true) return { available: true, reason: '' }
+  return { available: false, reason: "This board's GenAI Studio doesn't offer the benchmark. Update Apps on the board." }
+}
+
 // The request body for POST /benchmark/run.
 export function benchmarkRequest({ model, runs, maxTokens, prompt }) {
   return {
