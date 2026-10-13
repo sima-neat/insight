@@ -146,6 +146,10 @@ def start_preview():
 @preview_bp.get("/api/peripherals/cameras/preview/<session_id>/stream")
 def stream_preview(session_id):
     """Relay the board's JPEG frames as multipart/x-mixed-replace; the preview stops when this response ends."""
+    if request.method == "HEAD":
+        # Flask answers HEAD on a GET route by running it. The stream has one viewer and ends with its
+        # response, so a probe would claim the preview and stop it before the page's <img> opens it.
+        return Response(status=405, headers={"Allow": "GET"})
     relay = previews().relay(get_board_manager().session(), session_id)
     return Response(relay, mimetype=f"multipart/x-mixed-replace; boundary={gst.BOUNDARY}")
 

@@ -484,6 +484,17 @@ class PreviewTests(unittest.TestCase):
         self.assertIsNone(self.manager.current(1))
         self.assertEqual(len(self.session.transport.kills()), 1)
 
+    def test_a_head_request_neither_claims_nor_stops_the_stream(self):
+        client = self.client()
+        session = client.post(PREVIEW, json={"id": IMX477, **MODE}).get_json()["session"]
+        probe = client.head(session["stream_url"])
+        self.assertEqual(self.session.transport.kills(), [])
+        self.assertFalse(self.manager.current(1)["viewer"])
+        self.assertEqual((probe.status_code, probe.headers.get("Allow")), (405, "GET"))
+        response = client.get(session["stream_url"])
+        self.assertEqual(response.status_code, 200)
+        response.close()
+
     def test_a_stream_request_racing_the_unclaimed_deadline_never_claims_a_preview_being_stopped(self):
         """The deadline decides under the lock: a stream request after it finds the preview gone, so the
         timer never kills a stream it just handed out."""
