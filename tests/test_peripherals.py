@@ -807,6 +807,24 @@ def contract_microphone():
 
 
 class MicrophoneSnapshotTests(unittest.TestCase):
+    def test_a_microphone_carries_a_fingerprint_of_the_record_a_test_binds_to(self):
+        # Codex 4264051724: the page keyed a test by fields it shows, so a change only in identity kept the old test.
+        def record_of(mic):
+            return item(snapshot_of(catalog(mic)), YETI)["record"]
+
+        same = record_of(yeti())
+        self.assertEqual(same, record_of(yeti()))
+        changed_identity = yeti()
+        changed_identity["identity"] = {**changed_identity["identity"], "pcm_name": "Another PCM"}
+        self.assertNotEqual(record_of(changed_identity), same)
+        changed_target = yeti()
+        changed_target["capture_target"] = {**changed_target["capture_target"], "device": 1}
+        self.assertNotEqual(record_of(changed_target), same)
+        # A field outside the bound record, such as Sentinel's name, keeps the fingerprint.
+        renamed = yeti()
+        renamed["name"] = "Renamed"
+        self.assertEqual(record_of(renamed), same)
+
     def test_sentinels_contract_microphone_maps_to_the_approved_page_fields(self):
         record = contract_microphone()
         mic = item(snapshot_of(contract_catalog()), record["id"])
@@ -821,6 +839,7 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "availability": {"state": "available", "users": [], "reason": None},
             "capture": [{"format": "S16_LE", "channels": 2, "bits": 16, "rates": [rate], "rate_range": None,
                          "channel_map": ["FL", "FR"]} for rate in (16000, 24000, 32000)],
+            "record": microphones.record_key(record),
             "notes": [], "errors": [],
         })
 
@@ -838,6 +857,7 @@ class MicrophoneSnapshotTests(unittest.TestCase):
             "availability": {"state": "available", "users": [], "reason": None},
             "capture": [{"format": "S24_3LE", "channels": 2, "bits": 24, "rates": [32000, 44100, 48000],
                          "rate_range": None, "channel_map": ["FL", "FR"]}],
+            "record": microphones.record_key(yeti()),
             "notes": [], "errors": [],
         })
 

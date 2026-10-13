@@ -19,7 +19,7 @@ from typing import Optional
 from neat_insight.board import BoardError
 from neat_insight.board.transport import CommandCancelled
 from neat_insight.peripherals.cameras import provider_of
-from neat_insight.peripherals.microphones import KERNEL_IN_USE_REASON
+from neat_insight.peripherals.microphones import KERNEL_IN_USE_REASON, RECORD_KEYS
 
 # The longest a test records when nobody presses Stop.
 DEFAULT_SECONDS = 30
@@ -70,7 +70,7 @@ def find_microphone(snapshot: dict, mic_id: str) -> dict:
 
 
 # The parts of a microphone's catalog record that name the device a test records from.
-_RECORD_KEYS = ("capture_target", "identity")
+_RECORD_KEYS = RECORD_KEYS
 
 
 def scanned_record(scanned: Optional[dict], mic_id: str) -> Optional[dict]:

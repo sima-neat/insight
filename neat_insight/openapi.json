@@ -1568,6 +1568,7 @@
         "properties": {
           "id": {"type": "string", "description": "Sentinel's device id, derived from the device's sysfs path and capture PCM, never from a card number. Stable across rescans and card renumbering.", "example": "microphone:alsa:3ff3d77bf791d455"},
           "kind": {"type": "string", "enum": ["microphone"]},
+          "record": {"type": "string", "description": "A fingerprint of the scanned capture target and identity a microphone test binds to. It changes when a rescan lists another device under the same `id` (a replug in the same port); a test from before the change is gone."},
           "connection": {"type": "string", "enum": ["usb", "onboard"]},
           "name": {"type": "string", "description": "USB product string, else Sentinel's name (the ALSA card name)."},
           "device": {

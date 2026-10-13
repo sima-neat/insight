@@ -3,7 +3,13 @@
 Neat Core has no audio input node, so a microphone item carries identity, capture
 capabilities and SiMa Sentinel's availability fact only: there is nothing to export for it.
 """
+import hashlib
+import json
+
 from neat_insight.peripherals.cameras import _availability, provider_of
+
+# The fields of Sentinel's record a microphone test binds to: a change in either is another device.
+RECORD_KEYS = ("capture_target", "identity")
 
 NO_CAPABILITIES_NOTE = "Capture formats cannot be read without opening the device."
 # Sentinel's issue for a device without read-only formats; NO_CAPABILITIES_NOTE already says it.
@@ -67,9 +73,16 @@ def _item(mic: dict, usb_cameras: dict, retained: bool) -> dict:
         "device": info,
         "availability": _availability(mic.get("availability")),
         "capture": [_capture(mode) for mode in modes] if modes else None,
+        "record": record_key(mic),
         "notes": notes,
         "errors": [],
     }
+
+
+def record_key(mic: dict) -> str:
+    """A short fingerprint of the record a microphone test binds to, so the page can tell a replaced device."""
+    record = {key: mic.get(key) for key in RECORD_KEYS}
+    return hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
 
 
 def _capture(mode: dict) -> dict:

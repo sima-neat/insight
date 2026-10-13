@@ -21,3 +21,10 @@ test('a rescan that lists another device under the same microphone id starts the
   assert.equal(testKey(1), testKey(1, { ...mic, device: { ...mic.device } }))
   assert.notEqual(testKey(1), testKey(1, { ...mic, device: { ...mic.device, card_index: 3 } }))
 })
+
+test('a rescan that changes only fields the page does not show still starts the test afresh', () => {
+  // Codex 4264051724: the key read the shown device fields; the backend binds a test to the whole scanned record.
+  const recorded = { ...mic, record: 'a1' }
+  assert.equal(testKey(1, recorded), testKey(1, { ...recorded, device: { ...mic.device } }))
+  assert.notEqual(testKey(1, recorded), testKey(1, { ...recorded, record: 'b2' }))
+})
