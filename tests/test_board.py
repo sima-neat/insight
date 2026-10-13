@@ -557,6 +557,14 @@ class SshTransportErrorTests(unittest.TestCase):
             self.transport._connect(time.monotonic() + 5, ["true"], 5)
         self.assertIsNone(self.transport.presented_host_key)
 
+    def test_an_authentication_failure_forgets_the_rejected_host_key(self):
+        # Codex 4260952130: the trusted key was accepted before authentication failed, so the rejected key is stale.
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertIs(self.transport.presented_host_key, new)
+        self.assertEqual(self._connect_raising(paramiko.AuthenticationException("denied")).code, "auth_failed")
+        self.assertIsNone(self.transport.presented_host_key)
+
     def test_auth_failure_suggests_ssh_copy_id(self):
         error = self._connect_raising(paramiko.AuthenticationException("denied"))
         self.assertEqual(error.code, "auth_failed")
