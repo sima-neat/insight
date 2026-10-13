@@ -701,12 +701,18 @@ export function previewBlock({ camera, selection, stale = false, session = null,
   return { blocked: false, reason: '' }
 }
 
+// The events of a stop. A start that answered after the user moved on is stopped before the page
+// holds its session, so its stop is tagged with an id the page never held.
+const STOP_EVENTS = new Set(['stopping', 'stopped', 'stop-failed'])
+
 function outOfDate(state, event) {
   if (event.for == null) return false
-  // A preview that is still starting holds no session id yet, so an event tagged with one cannot
-  // be matched. The only preview it can refer to is that one: discarding it would strand the page
-  // in "Starting…" with a Stop button that has nothing to stop.
-  if (!state.session) return state.status !== 'starting' && state.status !== 'stopping'
+  // A preview that is still starting holds no session id yet. Its own stop must apply, or the page
+  // stays in "Starting…" with a Stop button that has nothing to stop; any other tagged event (a late
+  // "ended" from the preview before it) belongs to an earlier preview.
+  if (!state.session) {
+    return !((state.status === 'starting' || state.status === 'stopping') && STOP_EVENTS.has(event.type))
+  }
   return state.session.id !== event.for
 }
 

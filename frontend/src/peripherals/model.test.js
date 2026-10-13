@@ -761,6 +761,16 @@ test('preview transitions: a start that was never adopted still releases the pag
   assert.deepEqual(stopped, PREVIEW_IDLE)
 })
 
+test('preview transitions: a late event from the previous preview leaves a new start alone', () => {
+  // The previous preview's stream check answers after the user started the next one.
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  assert.equal(nextPreviewState(starting, streamEndedEvent('previous')), starting)
+  assert.equal(nextPreviewState(starting, { type: 'failed', for: 'previous', error: { message: 'boom' } }), starting)
+  assert.equal(nextPreviewState(starting, { type: 'elsewhere', for: 'previous', session: liveSession }), starting)
+  // The new start's answer is still shown.
+  assert.equal(nextPreviewState(starting, { type: 'session', session: liveSession }).status, 'live')
+})
+
 test('preview transitions: a stale session id never disturbs a newer one', () => {
   const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
   assert.equal(nextPreviewState(live, streamEndedEvent('old-id')), live)
