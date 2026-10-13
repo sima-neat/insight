@@ -16,6 +16,12 @@ class ViewerUrlTests(unittest.TestCase):
     def setUp(self):
         app_module.app.config.update(TESTING=True)
         self.client = app_module.app.test_client()
+        # The shell opens on the selected board, which Insight saves under the user's home. Start every test with no
+        # board selected, so a selection saved on the test machine cannot change the result; tests that need a board
+        # patch their own manager over this one.
+        no_board = mock.patch.object(app_module.board, "get_board_manager", side_effect=RuntimeError("no board"))
+        no_board.start()
+        self.addCleanup(no_board.stop)
 
     def test_viewer_url_uses_video_ui_port_from_port_map(self):
         ports = [
