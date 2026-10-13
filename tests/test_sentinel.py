@@ -990,6 +990,25 @@ class SentinelApiTests(_ApiCase):
         self.assertEqual(body["status"], {"state": "ready", "error": None})
         self.assertEqual(len(self.transport.scripts), 2)
 
+    def test_a_board_call_failing_after_the_board_changed_is_reported_as_stale(self):
+        # Codex 4261619516: the identity read (and every other board call) could fail on the old connection
+        # after another client selected a board, and the failure passed as the old board's own error.
+        stale = BoardError("stale_snapshot", "The selected board changed.")
+        failing = {"identity": lambda: setattr(self.session, "identity", mock.Mock(side_effect=BoardError("unreachable", "closed"))),
+                   "status script": lambda: setattr(self.transport, "exec_error", BoardError("unreachable", "closed"))}
+        for name, fail in failing.items():
+            with self.subTest(call=name):
+                api.cache = state.BoardCache()
+                self.session.current_error = None
+                saved = (self.session.__dict__.get("identity"), self.transport.exec_error)
+                fail()
+                self.refused(self.get("/api/sentinel"), 502, "unreachable")
+                self.session.current_error = stale
+                self.refused(self.get("/api/sentinel"), 409, "stale_snapshot")
+                self.session.__dict__.pop("identity", None)
+                self.transport.exec_error = saved[1]
+        self.session.current_error = None
+
     def test_board_errors_pass_through_with_their_status(self):
         self.manager.error = BoardError("no_target", "No board is selected.", hint="Select one.")
         self.manager.generation = 2

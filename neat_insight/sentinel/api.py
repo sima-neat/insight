@@ -55,6 +55,14 @@ def _no_store(response):
 def _sentinel_error(exc: BoardError):
     """The board error shape, plus the `generation` of the board that answered once it is known,
     so a client can tell a failure from another board from one of the board it asked."""
+    session = g.get("sentinel_session")
+    if session is not None and exc.code != "stale_snapshot":
+        # A failure from a board that is no longer selected (switching closes its connection) is a stale
+        # result, not that board's error; this covers every board call the endpoints make.
+        try:
+            session.require_current()
+        except BoardError as stale:
+            exc = stale
     payload = exc.to_dict()
     generation = g.get("sentinel_generation")
     if generation is not None:
@@ -76,6 +84,7 @@ class _Context:
                 g.sentinel_generation = manager.state()["generation"]
             raise
         g.sentinel_generation = self.session.generation
+        g.sentinel_session = self.session
         self.identity = cache.identity(self.session)
         self.key = cache.key(self.session, self.identity)
         self.client = SentinelClient(self.session)
