@@ -589,6 +589,9 @@ class PreviewTests(unittest.TestCase):
         response = self.client().post(PREVIEW, json={"id": C920, "format": "MJPG", "width": 1280, "height": 720, "fps": 30})
         self.assertEqual((response.status_code, response.get_json()["code"]), (503, "peripheral_unavailable"))
         self.assertEqual(self.session.transport.streams, [])
+        # Codex 4264471459: the documented 503 must be in the operation's responses.
+        spec = json.loads((Path(api.__file__).parents[1] / "openapi.json").read_text(encoding="utf-8"))
+        self.assertIn("503", spec["paths"][PREVIEW]["post"]["responses"])
 
     def test_preview_status_read_during_a_board_change_is_refused(self):
         # Codex 4263972495: the status route returned the departed board's session, which the change stopped.

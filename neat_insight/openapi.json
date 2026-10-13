@@ -882,6 +882,7 @@
           "404": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "503": {"$ref": "#/components/responses/BoardErrorResponse"},
           "504": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
