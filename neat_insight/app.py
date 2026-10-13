@@ -3891,7 +3891,7 @@ def pull_source():
         # A Stop, Reset or reassignment during the probe leaves no record, process or
         # holder behind; only the generation shows that the slot moved on.
         generation = _slot_generation(index)
-    # Probe outside the lock: two seconds at most, and no slot state changes until it answers.
+    # Probe outside the lock: it can take a few seconds, and no slot state changes until it answers.
     result = probe_rtsp(target.url)
     if result.status == "auth_failed":
         return jsonify({"error": result.error, "reason": "auth_failed"}), 400

@@ -80,7 +80,8 @@ def _masked_query(query: str) -> str:
     return "&".join(parts)
 
 
-PROBE_TIMEOUT_SECONDS = 2.0
+# mediamtx, and cameras like it, answer a wrong password only after a 2 s pause.
+PROBE_TIMEOUT_SECONDS = 5.0
 AUTH_REJECTED_MESSAGE = "The camera rejected the username or password"
 AUTH_REQUIRED_MESSAGE = "The camera requires a username and password"
 
