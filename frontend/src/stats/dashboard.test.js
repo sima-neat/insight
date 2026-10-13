@@ -162,7 +162,7 @@ test('per-core heatmap: column means over the window, a one-minute average per c
   assert.deepEqual(coreSummary([], {}), { rows: [], average: null, busiest: null })
 })
 
-test('compare runs overlays one series per run over elapsed time, baseline first, with Sentinel\'s own summary', () => {
+test('compare runs overlays one series per run over elapsed time, baseline first, summarised over the common window', () => {
   const overlay = compareOverlay(RAW, 'power')
   assert.deepEqual([overlay.spec.label, overlay.unit], ['Total power', 'W'])
   assert.deepEqual(overlay.lines.map((line) => [line.name, line.baseline]), [['tes3', true], ['insight-hw-1790177227', false]])
@@ -170,7 +170,7 @@ test('compare runs overlays one series per run over elapsed time, baseline first
   assert.deepEqual(overlay.lines[1].points.map((point) => point.v), [8.53125, 8.53125, 8.53125, 8.875])
   assert.equal(Math.round(overlay.overlap), 6)
   const [base, other] = overlay.rows
-  assert.deepEqual([base.samples, base.mean, base.energy], [4, 9.03125, 54.1891436875])
+  assert.deepEqual([base.samples, base.mean, base.energy], [4, 9.03125, 54.1875], 'board power integrated over the window')
   assert.deepEqual([other.minimum, other.p95, other.maximum], [8.53125, 8.875, 8.875])
   assert.equal(Number(other.delta.toFixed(3)), -4.585)
   const table = compareTable(RAW)
@@ -192,9 +192,16 @@ test('compare runs overlays one series per run over elapsed time, baseline first
   const last = run.samples[run.samples.length - 1]
   const later = new Date(Date.parse(last.timestamp) + 5000).toISOString()
   run.samples.push({ ...last, timestamp: later, values: { ...last.values, power_current_watts: 50 } })
+  // Sentinel summarises each whole run, so its figures for this run now include that sample.
+  const summary = body.summaries[run.metadata.id]
+  summary.metrics.power_current_watts = { count: 5, minimum: 8.53125, mean: 16.89375, median: 8.53125, p95: 50, maximum: 50 }
+  summary.energy_joules = 300
+  body.baseline_deltas_pct[run.metadata.id].power_current_watts = 87.06
   const clipped = compareOverlay(longer, 'power')
   assert.equal(clipped.lines[1].points.at(-1).v, 50, 'the extra sample is past the common window')
   assert.deepEqual(clipped.scale, compareOverlay(RAW, 'power').scale, 'and does not stretch the scale')
+  // Codex 4261313748: the rows describe the same samples as the chart, so the extra one changes none of them.
+  assert.deepEqual(clipped.rows, compareOverlay(RAW, 'power').rows)
 })
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {

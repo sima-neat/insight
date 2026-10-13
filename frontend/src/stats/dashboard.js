@@ -367,6 +367,20 @@ function stats(values) {
   }
 }
 
+const POWER_KEY = 'power_current_watts'
+
+/** Joules over the window: board power integrated between consecutive readings inside it. */
+function windowEnergy(points, window) {
+  const inside = withinWindow(points, window)
+  let joules = null
+  for (let index = 1; index < inside.length; index += 1) {
+    const [before, after] = [inside[index - 1], inside[index]]
+    if (!isNumber(before.v) || !isNumber(after.v)) continue
+    joules = (joules ?? 0) + ((before.v + after.v) / 2) * (after.t - before.t)
+  }
+  return joules
+}
+
 /** The series in COMPARE_SERIES that these runs actually recorded. */
 export function compareSeriesAvailable(payload) {
   const runs = (payload?.sentinel || payload || {}).runs || []
@@ -394,39 +408,47 @@ export function compareOverlay(payload, seriesId) {
     // Each run's own sensors: a run recorded on another build can name its temperatures differently.
     const thermalKeys = (Array.isArray(run.metrics) ? run.metrics : defs).filter(isThermalMetric).map((entry) => entry.key)
     const start = seconds(run.samples[0]?.timestamp)
-    const points = run.samples.map((sample) => {
+    const timed = run.samples.map((sample) => {
       const values = sample?.values || {}
       const value = spec.thermal
         ? thermalKeys.map((key) => values[key]).filter(isNumber).reduce((max, next) => (max === null || next > max ? next : max), null)
         : values[spec.key]
       const at = seconds(sample?.timestamp)
-      return { t: start === null || at === null ? null : at - start, v: isNumber(value) ? value : null }
-    }).filter((point) => isNumber(point.t) && point.t >= 0)
-    return { id: run.metadata.id, name: String(run.metadata.name || run.metadata.id), baseline: run.metadata.id === baselineId, points }
+      const t = start === null || at === null ? null : at - start
+      return { point: { t, v: isNumber(value) ? value : null }, power: { t, v: isNumber(values[POWER_KEY]) ? values[POWER_KEY] : null } }
+    }).filter(({ point }) => isNumber(point.t) && point.t >= 0)
+    return {
+      id: run.metadata.id,
+      name: String(run.metadata.name || run.metadata.id),
+      baseline: run.metadata.id === baselineId,
+      points: timed.map(({ point }) => point),
+      power: timed.map(({ power }) => power)
+    }
   }).sort((a, b) => Number(b.baseline) - Number(a.baseline))
 
   const ends = lines.map((line) => (line.points.length ? line.points[line.points.length - 1].t : 0))
   const overlap = Math.min(...ends)
-  const baselineStats = stats(lines.find((line) => line.baseline)?.points.map((point) => point.v) || [])
+  // The rows describe the same data as the chart: each run's samples inside the common window. Sentinel's
+  // own summaries cover each whole run, which differ in length, so they are left to the per-metric table.
+  const windowed = (line) => withinWindow(line.points, overlap).map((point) => point.v)
+  const baselineStats = stats(windowed(lines.find((line) => line.baseline) || { points: [] }))
   const rows = lines.map((line) => {
-    const summary = spec.thermal ? null : body.summaries?.[line.id]?.metrics?.[spec.key]
-    const figures = summary && isNumber(summary.count) ? summary : stats(line.points.map((point) => point.v))
-    let delta = spec.thermal ? null : body.baseline_deltas_pct?.[line.id]?.[spec.key]
-    if (spec.thermal && isNumber(figures.mean) && isNumber(baselineStats.mean) && baselineStats.mean !== 0) {
-      delta = ((figures.mean - baselineStats.mean) / baselineStats.mean) * 100
-    }
+    const figures = stats(windowed(line))
+    const delta = isNumber(figures.mean) && isNumber(baselineStats.mean) && baselineStats.mean !== 0
+      ? ((figures.mean - baselineStats.mean) / baselineStats.mean) * 100
+      : null
     return {
       id: line.id,
       name: line.name,
       baseline: line.baseline,
-      samples: figures.count ?? line.points.length,
+      samples: figures.count,
       minimum: figures.minimum ?? null,
       mean: figures.mean ?? null,
       median: figures.median ?? null,
       p95: figures.p95 ?? null,
       maximum: figures.maximum ?? null,
       delta: isNumber(delta) ? delta : null,
-      energy: isNumber(body.summaries?.[line.id]?.energy_joules) ? body.summaries[line.id].energy_joules : null
+      energy: windowEnergy(line.power, overlap)
     }
   })
   // Scaled to the samples inside the common window only: the clipped point past it is drawn at the edge, not read.
