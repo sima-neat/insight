@@ -187,6 +187,12 @@ class PeripheralClientTests(unittest.TestCase):
             }),
             lambda camera: camera.update(modes=[{"format": "MJPG", "width": 2**32, "height": 1080}]),
             lambda camera: camera.update(modes=[{"format": "MJPG", "width": 1920, "height": 10**400}]),
+            # Codex (635553e): a verdict field of the wrong type, e.g. available "false", fell through to
+            # Insight's own rule and could list an Unsupported mode as Available.
+            lambda camera: camera["modes"][0].update(available="false"),
+            lambda camera: camera["modes"][0].update(isp_output="true"),
+            lambda camera: camera["modes"][0].update(sensor_mode=1),
+            lambda camera: camera["modes"][0].update(reason={"bad": True}),
         ):
             response = camera_catalog()
             mutate(response["devices"][0])
@@ -365,6 +371,19 @@ class PeripheralClientTests(unittest.TestCase):
                 with self.assertRaises(BoardError) as ctx:
                     PeripheralClient(session).refresh()
                 self.assertEqual(ctx.exception.code, "stale_snapshot")
+
+    def test_a_remote_helper_failure_after_the_board_changed_is_reported_as_stale(self):
+        # Codex (635553e): helper failures decoded after the transport's own check named the old board.
+        for result in (ExecResult(127, b"", b"python3: not found"), ExecResult(0, b"not json", b""),
+                       ExecResult(0, b'{"failure": "refused", "detail": "x"}', b""),
+                       ExecResult(0, b'{"status": "bad", "text": 3}', b"")):
+            transport = mock.Mock()
+            transport.exec.return_value = result
+            session = FakeSession("ssh", transport)
+            session.stale = True
+            with self.subTest(result=result), self.assertRaises(BoardError) as ctx:
+                PeripheralClient(session).refresh()
+            self.assertEqual(ctx.exception.code, "stale_snapshot")
 
     def test_remote_access_runs_only_the_stdlib_socket_helper(self):
         response = catalog()
