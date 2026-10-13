@@ -41,6 +41,7 @@ import {
   deltaAbsenceText,
   factRows,
   failureNotice,
+  noticeForBoard,
   formatPercentDelta,
   formatRelativeTime,
   formatTimeRange,
@@ -851,7 +852,7 @@ function HostPanel({ model, error, updatedAt, busy, now }) {
 
 export default function StatsView({ board = null, boardError = null, onOpenBoardPanel, onReloadBoard, onError, onStatus, hostExtra = null }) {
   const [state, setState] = useState(null)
-  const [stateError, setStateError] = useState(null)
+  const [storedStateError, setStateError] = useState(null)
   const [stateBusy, setStateBusy] = useState(true)
   const [installBusy, setInstallBusy] = useState(false)
   const [installError, setInstallError] = useState(null)
@@ -943,6 +944,8 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   const stale = stalePayloads.metrics || stalePayloads.state
   const polling = info.available && live && !halted && !stale
   const generation = board?.generation ?? null
+  // Until the new board's state arrives, a failure stored for the previous board is not this board's.
+  const stateError = noticeForBoard(storedStateError, generation)
 
   // An answer is applied only while the view is mounted, its request still belongs to the
   // selected board and has not been superseded, and the answer was read from that board.
@@ -1295,6 +1298,7 @@ export default function StatsView({ board = null, boardError = null, onOpenBoard
   useEffect(() => {
     if (!guard.current.switchTo(generation)) return
     setState(null)
+    setStateError(null)
     reset()
     loadState()
   }, [generation])

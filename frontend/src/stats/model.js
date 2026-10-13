@@ -421,6 +421,12 @@ export function healthProblems(health) {
  * `generation` is the board generation the request was issued under, so a failure that
  * lands after a board switch can be labelled like a stale payload.
  */
+/** A failure notice only while the board it came from is still the selected one; another board's is not shown as this one's. */
+export function noticeForBoard(notice, generation) {
+  if (!notice || !Number.isInteger(notice.generation) || !Number.isInteger(generation)) return notice
+  return notice.generation === generation ? notice : null
+}
+
 export function failureNotice(error, generation = null, { action = 'read' } = {}) {
   const normalized = normalizeError(error)
   if (!normalized) return null

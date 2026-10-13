@@ -6,7 +6,7 @@ import { apiError } from '../peripherals/model.js'
 import {
   BOARD_PROBLEM_CODES, HOST_POLL_MS, MAX_COMPARE_RUNS, MAX_POLL_MS, NAME_LIMIT, POLL_MS, compareIncludes, compareQuery,
   compareReady, compareTable, createRequestGuard, daemonBusy, daemonFacts, daemonInfo, daemonNoticeNeeded, definitionsByKey,
-  deletePrompt, deleteRunQuery, deleteStops, deleteSummary, deltaAbsenceText, factRows, failureNotice, formatBytes,
+  deletePrompt, deleteRunQuery, deleteStops, deleteSummary, deltaAbsenceText, factRows, failureNotice, formatBytes, noticeForBoard,
   formatPercentDelta, formatSeconds, formatTimeRange, formatValue, healthFacts, healthProblems, hostMetricsModel, hostNotice,
   installQuery, isStale, metricsModel, missingSelection, parseTags, payloadBoardLabel, pollDelay, remainingPollDelay, runActionRef, runDetail,
   runList, runSubtitle, selectionChange, sessionCsv, sessionCsvFilename, sparkline, sparklineLabel, staleFlags, staleNote,
@@ -714,4 +714,14 @@ test('the session exports as CSV: a row per sample, a column per metric, empty w
   assert.equal(sessionCsv(model), ['timestamp,Current board power (W),MLA RTSN-0 (°C),CPU load 1m', '2026-09-25T18:40:00Z,12.5,55.1,6.01', '2026-09-25T18:40:02Z,13,,6.2', ''].join('\r\n'))
   assert.equal(sessionCsv({ metrics: [], timestamps: [] }), '')
   assert.equal(sessionCsvFilename(new Date(2026, 8, 25, 18, 4, 5)), 'sentinel-session-2026-09-25-180405.csv')
+})
+
+test('a failure read for one board selection is not shown once another board is selected', () => {
+  // Codex 4261434636: a stored `no_target` kept telling the user to select a board after one was selected.
+  const noTarget = failureNotice(apiError({ code: 'no_target', error: 'No board is selected.', generation: 2 }, 409), 2)
+  assert.equal(noticeForBoard(noTarget, 2), noTarget)
+  assert.equal(noticeForBoard(noTarget, 3), null)
+  assert.equal(noticeForBoard(null, 3), null)
+  const unknown = { ...noTarget, generation: null }
+  assert.equal(noticeForBoard(unknown, 3), unknown, 'a notice that names no board is kept as it was')
 })
