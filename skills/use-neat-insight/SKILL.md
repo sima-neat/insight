@@ -88,6 +88,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 - Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
 - Hard-reload the viewer after installing a new Insight before trusting a rendering result. A browser can serve a stale `drawing.js` for days.
+- Global Viewer Configuration saves are authoritative: they clear stored channel settings so the change takes effect everywhere. Settings opened from a tile create a later channel override; **Use Global Settings** discards it. Metadata types also have a **Show Overlay** switch; use it instead of treating style rows as visibility controls.
+- **Panel Transparency** in the 3D Pose tab adds transparency to auxiliary-panel surfaces without fading the visualization or controls. A global save applies the value to every channel.
 - Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
@@ -160,7 +162,20 @@ A frame may be described by several metadata types at once. Send one message per
 type, all carrying the source frame's `timestamp` in integer milliseconds; the
 correlator matches each against the retained frame mapping, and the viewer draws
 every type it holds for that frame.
-A second message of the same type for the same frame replaces the first; retained
+A separate panel accepts `type: "auxiliary-visualization"` for data that should
+not cover the video. Its generic `data` object requires `schema_version: 1`, a
+stable `id`, a registered `renderer`, and an object `payload`. Auxiliary views
+require the exact correlated RTP timestamp; a matched view may remain for 160 ms
+across a delivery gap. Multiple IDs become tabs. Keep their channel and source
+PTS identical to the video and overlay messages.
+The built-in `blazepose-3d` renderer reads named finite `x`, `y`, and `z` values
+from `payload.poses[].keypoints[]`. Its **3D Pose** Viewer Configuration tab sets
+panel visibility, size, transparency, camera angle, and reference-cube visibility
+globally or per channel. The renderer draws each correlated frame directly,
+without smoothing or automatic motion. Pose Estimation settings separately
+control the 2D overlay, joint markers, and landmark names.
+A second ordinary message of the same type for the same frame replaces the first;
+auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses
 the single-message arrival fallback, since types cannot safely be grouped without
 a shared frame identity.
