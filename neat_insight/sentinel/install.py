@@ -111,6 +111,14 @@ def describe(state: dict) -> dict:
             "code": "sentinel_missing",
             "hint": "Install it from this page, or run `{}` on the board.".format(MANUAL_COMMAND),
         }
+    if state["service"] == "active":
+        # Running, yet its API socket is gone: starting it again would change nothing.
+        return {
+            "error": "The {} service is running, but its API socket {} is missing.".format(SERVICE, state["socket_path"]),
+            "code": "sentinel_failed",
+            "hint": "Check its log on the board with `journalctl -u {0}`, then restart it with "
+            "`sudo systemctl restart {0}`.".format(SERVICE),
+        }
     return {
         "error": "The {} service is installed but {}.".format(SERVICE, state["service"] or "not running"),
         "code": "sentinel_stopped",

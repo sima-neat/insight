@@ -220,7 +220,8 @@ def get_sentinel():
     problem = install.describe(daemon)
     health, state, error = None, "ready", None
     if problem:
-        state, error = problem["code"].replace("sentinel_", ""), dict(problem)
+        state = {"sentinel_missing": "missing", "sentinel_stopped": "stopped"}.get(problem["code"], "error")
+        error = dict(problem)
     else:
         try:
             health = context.client.health()

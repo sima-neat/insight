@@ -522,6 +522,12 @@ class InstallTests(unittest.TestCase):
         problem = install.describe(missing)
         self.assertEqual(problem["code"], "sentinel_missing")
         self.assertIn("sima-cli neat install sentinel", problem["hint"])
+        # Codex 4261415797: a running service without its socket is not "stopped", and starting it does nothing.
+        socketless = install.describe(self.state("active", "no", "yes", ""))
+        self.assertEqual(socketless["code"], "sentinel_failed")
+        self.assertIn("running, but its API socket " + socket_client.SOCKET_PATH + " is missing", socketless["error"])
+        self.assertIn("journalctl -u simaai-sentinel", socketless["hint"])
+        self.assertIn("sudo systemctl restart simaai-sentinel", socketless["hint"])
         self.assertIsNone(install.describe(self.state(*STATUS_FIELDS)))
         # A healthy install is never reinstalled: only the status script runs.
         before = len(self.transport.scripts)
@@ -966,6 +972,11 @@ class SentinelApiTests(_ApiCase):
         api.cache = state.BoardCache()
         body = self.get("/api/sentinel").get_json()
         self.assertEqual((body["status"]["state"], body["status"]["error"]["code"], body["available"]), ("error", "sentinel_schema", False))
+        # A running service whose socket is missing reports one of the documented states, not a new one.
+        self.transport.status_fields = ["active", "no", "yes", "/usr/bin/sima-cli"]
+        api.cache = state.BoardCache()
+        body = self.get("/api/sentinel").get_json()
+        self.assertEqual((body["status"]["state"], body["status"]["error"]["code"]), ("error", "sentinel_failed"))
 
     def test_explicit_refresh_bypasses_the_cached_daemon_status(self):
         self.transport.status_fields = list(DOWN)
