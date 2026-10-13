@@ -133,6 +133,18 @@ class TargetResolutionTests(unittest.TestCase):
             store.clear()
 
 
+class IPv6TargetTests(unittest.TestCase):
+    def test_ipv6_board_addresses_are_accepted_and_zones_stay_interface_names(self):
+        # Codex 4264302544: `::1` and a zoned link-local address were refused as host names.
+        for host in ("::1", "fe80::1%eth0", "fe80::6ae1:54ff:fe06:4b18%bridge100", "2001:db8::2", "192.168.2.2", "modalix.local"):
+            with self.subTest(host=host):
+                self.assertEqual(target_module.validate_ssh_target(host)["host"], host)
+        for host in ("fe80::1%", "fe80::1%eth0;reboot", "fe80::1%a b", "::1%$(id)", "-oProxyCommand=x", ":::1", ""):
+            with self.subTest(host=host):
+                with self.assertRaises(BoardError):
+                    target_module.validate_ssh_target(host)
+
+
 class BoardApiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

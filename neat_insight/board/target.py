@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 import os
@@ -14,7 +15,23 @@ DEFAULT_SSH_USER = "sima"
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,252})$")
 _USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
+_ZONE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _WARNED = set()
+
+
+def _valid_host(host: str) -> bool:
+    """A host name, or any IP address, including IPv6 forms such as `::1` and a zoned `fe80::1%eth0`."""
+    if _HOST_RE.match(host):
+        return True
+    address, percent, zone = host.partition("%")
+    # A zone names a network interface; keep it to interface-name characters, as the host pattern does.
+    if percent and not _ZONE_RE.match(zone):
+        return False
+    try:
+        ipaddress.ip_address(f"{address}%{zone}" if zone else address)
+    except ValueError:
+        return False
+    return True
 
 
 def _warn_once(message: str) -> None:
@@ -47,7 +64,7 @@ def validate_ssh_target(host, port=DEFAULT_SSH_PORT, user=DEFAULT_SSH_USER) -> d
     if user in (None, ""):
         user = DEFAULT_SSH_USER
     user = user.strip() if isinstance(user, str) else ""
-    if not _HOST_RE.match(host):
+    if not _valid_host(host):
         raise BoardError("invalid_request", "Enter the board's IP address or host name.", hint="For example 192.168.2.2")
     if port in (None, ""):
         port = DEFAULT_SSH_PORT
