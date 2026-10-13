@@ -105,7 +105,7 @@ def start_microphone_test():
     node = [bound["node"]] if isinstance(bound["node"], str) and bound["node"].startswith("/dev/") else []
     mictest.refuse_if_held(_run_check(session, {"microphones": {mic_id: node}}), mic_id)
     session.require_current()
-    test = mictest.start(session, mic_id, bound, seconds)
+    test = mictest.start(session, mic_id, bound, seconds, mictest.scanned_record(scanned, mic_id))
     try:
         # A board change during the start leaves this test on the departed board: end it and say so.
         session.require_current()
@@ -126,14 +126,16 @@ def stop_microphone_test():
 @peripherals_bp.get("/api/peripherals/microphones/test")
 def get_microphone_test():
     """Return the latest microphone test for the selected board, or null; never contacts the board."""
-    return {"test": mictest.current(get_board_manager().session().generation)}
+    generation = get_board_manager().session().generation
+    return {"test": mictest.current(generation, scans.scan(generation)[1])}
 
 
 # API: the finished test recording as a WAV file.
 @peripherals_bp.get("/api/peripherals/microphones/test/<token>.wav")
 def get_microphone_test_audio(token):
-    """Serve the latest finished recording of the selected board; 404 once another test or board replaced it."""
-    wav = mictest.audio(token, get_board_manager().session().generation)
+    """Serve the latest finished recording of the selected board; 404 once another test, board or device replaced it."""
+    generation = get_board_manager().session().generation
+    wav = mictest.audio(token, generation, scans.scan(generation)[1])
     if wav is None:
         raise BoardError("not_found", "This recording is gone; a newer test replaced it.", hint="Test again.")
     # Range-aware: Safari's audio element asks for byte ranges and does not play a reply that ignores them.

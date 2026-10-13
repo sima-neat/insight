@@ -305,8 +305,9 @@ export default function MicrophoneDetail({ mic, generation }) {
       ))}
 
       <CaptureModes modes={captureModes(mic)} />
-      {/* A test belongs to one board: another board's microphone with the same id starts afresh. */}
-      <MicTest key={`${generation}:${mic.id}`} mic={mic} />
+      {/* A test belongs to one board and one scanned device: another board's microphone with the same id, or
+          another device a rescan lists under this id (a replug in the same port), starts afresh. */}
+      <MicTest key={`${generation}:${mic.id}:${JSON.stringify(mic.device ?? null)}`} mic={mic} />
     </section>
   )
 }
