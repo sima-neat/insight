@@ -612,6 +612,11 @@ class SshTransport:
                 hint="Use the board's IP address, or check DNS on this machine.",
             ) from exc
         except (paramiko.SSHException, OSError, EOFError) as exc:
+            # Paramiko can fail after the host key check with a plain SSHException (for example "No
+            # authentication methods available"); the board then presented the trusted key, so an
+            # earlier rejected one is stale here too.
+            if self._presented_trusted_key(client):
+                self.presented_host_key = None
             client.close()
             if raw_socket is not None:
                 raw_socket.close()
@@ -622,6 +627,18 @@ class SshTransport:
         # The board now presents the trusted key, so an earlier rejected one must not be trusted later.
         self.presented_host_key = None
         return client
+
+    def _presented_trusted_key(self, client) -> bool:
+        """Whether this connection got past the host key check: its server key is the one Insight trusts."""
+        try:
+            transport = client.get_transport()
+            key = transport.get_remote_server_key() if transport is not None else None
+        except (paramiko.SSHException, AttributeError):
+            return False
+        if key is None:
+            return False
+        trusted = client.get_host_keys().lookup(self.host_key_name) or {}
+        return trusted.get(key.get_name()) == key
 
     def _connect_socket(self, deadline, argv, timeout):
         addresses = self._run_bounded(

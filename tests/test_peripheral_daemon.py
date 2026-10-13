@@ -132,6 +132,15 @@ class PeripheralClientTests(unittest.TestCase):
         self.assert_accepted(catalog(revision=2**52 - 1))
         self.assert_accepted(catalog(observed_at=None, devices=[]))  # before Sentinel's first scan
 
+    def test_deeply_nested_json_is_a_malformed_answer_not_a_crash(self):
+        # Codex 4263540718: json.loads raises RecursionError on deep nesting, well under the response cap.
+        nested = "[" * 100_000 + "]" * 100_000
+        self.assert_rejected(nested, status=502)
+        session, _ = ssh_session(ExecResult(0, nested.encode(), b""))
+        with self.assertRaises(BoardError) as ctx:
+            PeripheralClient(session).catalog()
+        self.assertEqual(ctx.exception.code, "peripheral_response")
+
     def test_board_block_is_kept_with_malformed_fields_and_entries_dropped(self):
         overlay = "modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"
         good = {

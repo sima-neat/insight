@@ -177,7 +177,7 @@ class PeripheralClient:
         self.session.require_current()
         try:
             parsed = json.loads(text) if text else None
-        except ValueError:
+        except (ValueError, RecursionError):  # deep nesting raises RecursionError, not a decode error
             parsed = None
         if not 200 <= status < 300:
             detail = (parsed.get("reason") or parsed.get("error")) if isinstance(parsed, dict) else None
@@ -241,7 +241,7 @@ class PeripheralClient:
             )
         try:
             envelope = json.loads(result.stdout.decode("utf-8", errors="replace"))
-        except ValueError:
+        except (ValueError, RecursionError):  # deep nesting raises RecursionError, not a decode error
             envelope = None
         if not isinstance(envelope, dict) or ("status" not in envelope and "failure" not in envelope):
             raise BoardError(

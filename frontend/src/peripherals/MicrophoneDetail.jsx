@@ -204,7 +204,9 @@ function MicTest({ mic }) {
     try {
       await stopMicrophoneTest()
     } catch (err) {
-      if (mounted.current) dispatch({ type: 'failed', error: normalizeError(err) })
+      if (!mounted.current) return
+      dispatch({ type: 'stop-failed', error: normalizeError(err) })
+      setStopping(false)
     }
   }
 
@@ -277,7 +279,9 @@ function MicTest({ mic }) {
       </div>
 
       {notice && <p className="hint periph-mic-warning" role="alert">{notice}</p>}
-      {status === 'error' && <ErrorNotice error={{ ...state.error, hint: micTestErrorAction(state.error) }} />}
+      {(status === 'error' || (recording && state.error)) && (
+        <ErrorNotice error={{ ...state.error, hint: micTestErrorAction(state.error) }} />
+      )}
 
       {state.test?.audio_url && (
         <audio ref={audioRef} src={state.test.audio_url} preload="auto" onEnded={() => dispatch({ type: 'played' })} />

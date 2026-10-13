@@ -565,6 +565,22 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(self._connect_raising(paramiko.AuthenticationException("denied")).code, "auth_failed")
         self.assertIsNone(self.transport.presented_host_key)
 
+    def test_a_plain_ssh_failure_after_the_trusted_key_forgets_the_rejected_one(self):
+        # Codex 4263540703: Paramiko's legacy auth path fails with a plain SSHException after the host key check.
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        self.transport.replace_host_key(old)
+        self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertIs(self.transport.presented_host_key, new)
+        # A failure before any key exchange proves nothing about the key, so the rejected one is kept.
+        with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=None):
+            self.assertEqual(self._connect_raising(paramiko.SSHException("Error reading SSH protocol banner")).code, "unreachable")
+        self.assertIs(self.transport.presented_host_key, new)
+        presented_old = mock.Mock(**{"get_remote_server_key.return_value": old})
+        with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=presented_old):
+            error = self._connect_raising(paramiko.SSHException("No authentication methods available"))
+        self.assertEqual(error.code, "unreachable")
+        self.assertIsNone(self.transport.presented_host_key)
+
     def test_auth_failure_suggests_ssh_copy_id(self):
         error = self._connect_raising(paramiko.AuthenticationException("denied"))
         self.assertEqual(error.code, "auth_failed")

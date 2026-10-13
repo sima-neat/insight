@@ -111,9 +111,12 @@ export default function PreviewPane({ camera, selection, stale, target, state: p
                 ? 'The preview stream could not be opened. Stop the preview and report it with the board label.'
                 : `Starting the camera on the board… ${elapsed} s`}
           </span>
-          <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
-            {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
-          </button>
+          {/* A start has no session until its first frame, so there is nothing to stop yet; it ends by itself. */}
+          {session && (
+            <button type="button" className="btn-ghost" onClick={onStop} disabled={state?.status === 'stopping'}>
+              {state?.status === 'stopping' ? 'Stopping…' : 'Stop preview'}
+            </button>
+          )}
         </div>
       )}
 

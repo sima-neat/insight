@@ -135,3 +135,10 @@ test("a failed start's board output is folded, so the error stays one row", () =
   assert.notEqual(details.props.open, true)
   assert.ok(find(details, (n) => n.type === 'pre'))
 })
+
+test('a start with no session yet offers no Stop, since there is no preview to stop', () => {
+  // Codex 4263048510: Stop on a start without a session did nothing while the start kept running.
+  assert.equal(button(render({ state: { status: 'starting', session: null, error: null } }), 'Stop preview'), null)
+  // An adopted start that already has its session keeps Stop.
+  assert.notEqual(button(render({ state: { status: 'starting', session, error: null } }), 'Stop preview'), null)
+})

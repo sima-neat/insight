@@ -248,6 +248,8 @@ export function nextMicTestState(current, event) {
       return state.status === 'recording' ? { status: 'playing', test: event.test, error: null } : state
     case 'failed':
       return state.status === 'recording' ? { status: 'error', test: null, error: event.error } : state
+    case 'stop-failed': // the board may still be recording: keep Stop and take up the result when it comes
+      return state.status === 'recording' ? { ...state, error: event.error } : state
     case 'played': // the recording ended, or Stop playing
       return state.status === 'playing' ? { ...state, status: 'done' } : state
     case 'replay':

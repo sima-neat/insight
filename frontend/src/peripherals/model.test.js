@@ -1195,6 +1195,18 @@ test('microphone test: record, play back, replay, and never a late answer out of
   assert.equal(nextMicTestState(undefined, { type: 'nonsense' }), MIC_TEST_IDLE)
 })
 
+test('microphone test: a failed stop keeps the test recording, so Stop can be retried and the recording is taken up', () => {
+  // Codex 4263048526: a failed stop turned the test into an error, and the board's recording was then ignored.
+  const recording = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  const error = { code: 'network', message: 'Could not reach Insight.' }
+  const stopFailed = nextMicTestState(recording, { type: 'stop-failed', error })
+  assert.deepEqual(stopFailed, { status: 'recording', test: null, error })
+  const test = { token: 'a', audio_url: '/x.wav', level: { silent: false } }
+  assert.deepEqual(nextMicTestState(stopFailed, { type: 'recorded', test }), { status: 'playing', test, error: null })
+  const done = { status: 'done', test, error: null }
+  assert.equal(nextMicTestState(done, { type: 'stop-failed', error }), done, 'only a recording test is stopped')
+})
+
 test('microphone test: a detail mounted mid-test takes up the board\'s test for its own microphone', () => {
   const recording = { token: 't', id: yeti.id, state: 'recording', elapsed_ms: 1200, level_dbfs: -20 }
   const ready = { token: 't', id: yeti.id, state: 'ready', audio_url: '/t.wav', level: { silent: false } }
