@@ -83,8 +83,8 @@ class BoardCache:
 
     def record(self, key, name: str, value, ttl: float):
         with self._lock:
-            self._reset_unlocked(key)
-            self._values[name] = (time.monotonic() + ttl, value)
+            if self._reset_unlocked(key):
+                self._values[name] = (time.monotonic() + ttl, value)
         return value
 
     def observe_daemon(self, key, instance_id) -> None:
@@ -94,7 +94,8 @@ class BoardCache:
         is a new session: its samples are not one trend with the old one's.
         """
         with self._lock:
-            self._reset_unlocked(key)
+            if not self._reset_unlocked(key):
+                return
             if instance_id != self._daemon_instance:
                 self._history = deque(maxlen=self.history_limit)
                 self._seeded = False
@@ -109,7 +110,8 @@ class BoardCache:
         the history again, so a sparkline never draws a gap of hours as one step.
         """
         with self._lock:
-            self._reset_unlocked(key)
+            if not self._reset_unlocked(key):
+                return []
             timestamp = (sample or {}).get("timestamp")
             if not sample or not timestamp or (self._history and self._history[-1]["timestamp"] == timestamp):
                 return list(self._history)
@@ -142,7 +144,8 @@ class BoardCache:
         them is close enough to it to be one trend; otherwise the seed is dropped.
         """
         with self._lock:
-            self._reset_unlocked(key)
+            if not self._reset_unlocked(key):
+                return []
             self._seeded = True
             if self._seed_quarantined:
                 cut, previous = None, None
@@ -186,7 +189,14 @@ class BoardCache:
         with self._lock:
             return list(self._history) if key == self._key else []
 
-    def _reset_unlocked(self, key) -> None:
+    def _reset_unlocked(self, key) -> bool:
+        """Make `key` the cached board, unless it is from an older board selection; return whether it is.
+
+        A read of a board that was deselected can still be running when the next board's reads
+        begin. Its late writes are dropped, so they cannot replace the selected board's cache.
+        """
+        if key != self._key and self._older_unlocked(key):
+            return False
         if key != self._key:
             self._key = key
             self._values = {}
@@ -194,3 +204,10 @@ class BoardCache:
             self._seeded = False
             self._seed_quarantined = False
             self._daemon_instance = None
+        return True
+
+    def _older_unlocked(self, key) -> bool:
+        if self._key is None:
+            return False
+        new, current = key[0], self._key[0]
+        return isinstance(new, int) and isinstance(current, int) and new < current

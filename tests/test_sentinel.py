@@ -305,6 +305,34 @@ class SocketClientTests(unittest.TestCase):
         self.assertIn("4096", envelope["detail"])
         self.assertNotIn("text", envelope)
 
+    def test_a_caller_cap_below_the_module_cap_is_the_one_enforced(self):
+        # Codex 4261038322: the caller's cap (Peripherals asks for 4 MiB) was computed, then ignored for the
+        # 12 MiB module cap, so a catalog between the two was accepted instead of refused by name.
+        samples = [{"timestamp": "2026-09-23T15:27:%02dZ" % (i % 60), "values": {"rtsn_0": 40.5}} for i in range(120)]
+        self.server.answers["/v1/runs/long"] = (200, {"schema": 1, "metadata": {"name": "long"}, "samples": samples})
+        size = len(json.dumps(self.server.answers["/v1/runs/long"][1]))
+        cap = size - 1
+        self.assertGreater(socket_client.MAX_BODY_BYTES, size)
+        for omit_length in (False, True):
+            with self.subTest(declared_length=not omit_length):
+                self.server.omit_length = omit_length
+                with self.assertRaises(socket_client.ResponseTooLarge) as raised:
+                    socket_client.request("GET", "/v1/runs/long", socket_path=self.path, max_bytes=cap)
+                self.assertIn(str(cap), str(raised.exception))
+                self.assertEqual(
+                    socket_client.request("GET", "/v1/runs/long", socket_path=self.path, max_bytes=size)[0], 200
+                )
+        # The remote form passes the cap as MAX_BYTES and reports the same failure.
+        self.server.omit_length = False
+        code, envelope = self.main("GET", "/v1/runs/long", "", self.path, "", str(cap))
+        self.assertEqual((code, envelope["failure"]), (4, socket_client.TOO_LARGE))
+        self.assertIn(str(cap), envelope["detail"])
+        # A cap above the module cap does not raise it.
+        self.long_run()
+        with self.assertRaises(socket_client.ResponseTooLarge) as raised:
+            socket_client.request("GET", "/v1/runs/long", socket_path=self.path, max_bytes=10 * 4096)
+        self.assertIn("4096", str(raised.exception))
+
     def test_an_on_board_client_names_a_body_over_the_limit(self):
         # The cap is the client's own (Peripherals reads less), so it is patched on the client.
         limit = 1024 * 1024
@@ -748,6 +776,26 @@ class BoardCacheTests(unittest.TestCase):
         self.assertEqual(self.cache.get(self.KEY, "daemon"), {"healthy": True})
         self.cache.record(self.KEY, "daemon", {"healthy": True}, -1)
         self.assertIsNone(self.cache.get(self.KEY, "daemon"))
+
+    def test_a_deselected_boards_late_writes_do_not_replace_the_selected_boards_cache(self):
+        # Codex 4261038338: reads are locked per board, so a read of the board selected before can
+        # finish after the next board's reads began; its writes used to reset the cache to that board.
+        selected = (2, "fp-2")
+        self.cache.observe_daemon(selected, "inv-2")
+        self.cache.record(selected, "definitions", DEFINITIONS, 60)
+        self.cache.add_sample(selected, {"timestamp": "2026-09-23T17:54:21Z", "values": {"load": 1}})
+        self.cache.seed(selected, [])
+        self.cache.record(self.KEY, "daemon", {"healthy": True}, 60)
+        self.cache.observe_daemon(self.KEY, "inv-1")
+        self.assertEqual(self.cache.add_sample(self.KEY, {"timestamp": "2026-09-23T17:54:23Z", "values": {}}), [])
+        self.assertEqual(self.cache.seed(self.KEY, [{"timestamp": "2026-09-23T17:54:19Z", "values": {}}]), [])
+        self.assertEqual(self.cache.get(selected, "definitions"), DEFINITIONS)
+        self.assertIsNone(self.cache.get(selected, "daemon"))
+        self.assertEqual(self.stamps(self.cache.history(selected)), ["2026-09-23T17:54:21Z"])
+        self.assertFalse(self.cache.needs_seed(selected))
+        # The selected board's next sample continues its own history.
+        after = self.cache.add_sample(selected, {"timestamp": "2026-09-23T17:54:23Z", "values": {"load": 2}})
+        self.assertEqual(self.stamps(after, 3), ["21Z", "23Z"])
 
     def test_the_daemons_samples_go_before_the_polled_ones_once_per_board_bounded_like_the_history(self):
         cache = state.BoardCache(history_limit=5)
