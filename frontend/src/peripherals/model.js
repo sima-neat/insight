@@ -571,6 +571,23 @@ export function streamEndedEvent(sessionId) {
   }
 }
 
+// The pane's event for an <img> that could not load the stream. The backend gives a stream one
+// viewer and refuses the next (preview_active): two pages that both found the preview unclaimed both
+// try, and the one refused shows it as running in another tab while the backend still runs it with a
+// viewer. Otherwise the stream is over.
+export async function streamErrorEvent(request, sessionId) {
+  let current = null
+  try {
+    current = (await request('/api/peripherals/preview'))?.session
+  } catch {
+    current = null
+  }
+  if (current?.id === sessionId && current.state !== 'stopped' && current.viewer) {
+    return { type: 'elsewhere', for: sessionId, session: current }
+  }
+  return streamEndedEvent(sessionId)
+}
+
 // How often a live preview's page reads GET /api/peripherals/preview, which never contacts the board.
 export const PREVIEW_POLL_MS = 2500
 
@@ -720,6 +737,10 @@ export function nextPreviewState(state, event) {
       // The rate the camera runs at, for the running session only; unchanged, the state is kept as is.
       if (!current.session || outOfDate(current, event) || current.session.camera_fps === event.fps) return current
       return { ...current, session: { ...current.session, camera_fps: event.fps } }
+    case 'elsewhere':
+      // This page's stream was refused because another page shows it; only a live pane changes.
+      if (outOfDate(current, event) || current.status !== 'live') return current
+      return { status: 'elsewhere', session: event.session || current.session, error: null }
     case 'ended':
       // A live preview the backend stopped, with its reason; nothing is left to stop.
       if (outOfDate(current, event)) return current

@@ -25,7 +25,7 @@ import {
   sessionToAdopt,
   severityInfo,
   sortIssues,
-  streamEndedEvent,
+  streamErrorEvent,
   watchPreview
 } from './peripherals/model.js'
 import { Callout, ErrorNotice, Pill } from './peripherals/ui.jsx'
@@ -411,10 +411,11 @@ export default function PeripheralsView({
   }, [board?.generation])
 
   // The <img> could not load the stream. The backend stops a preview whose stream ends (and one whose
-  // stream nobody opened), so the page only shows it as stopped. It sends no stop: a stream this tab
-  // could not open may be the one another tab is showing.
-  function streamEnded(sessionId) {
-    dispatchPreview(streamEndedEvent(sessionId))
+  // stream nobody opened), so the page shows it as stopped, or as shown in another tab when that tab
+  // claimed the stream first. It sends no stop: a stream this tab could not open may be the one
+  // another tab is showing.
+  async function streamEnded(sessionId) {
+    dispatchPreview(await streamErrorEvent(requestJson, sessionId))
   }
 
   // A stream that ends cleanly fires no <img> error, so while live the page reads whether the backend

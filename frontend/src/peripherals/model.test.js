@@ -53,6 +53,7 @@ import {
   sortIssues,
   sourceLabel,
   streamEndedEvent,
+  streamErrorEvent,
   tierInfo,
   validateBoardForm,
   watchPreview
@@ -796,6 +797,38 @@ test("a live preview's status read ends it once the backend no longer runs this 
 
   // A read that fails proves nothing about the stream.
   assert.equal(await previewStatusEvent(async () => { throw new Error('network') }, '8f1c'), null)
+})
+
+test('a stream refused because another tab claimed it first shows the preview there, not as ended', async () => {
+  // Both tabs found the session unclaimed and went live; the backend gave the stream to the other tab.
+  const live = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: { ...liveSession, viewer: false } })
+  assert.equal(live.status, 'live')
+  const reply = (body) => async () => body
+
+  const claimed = { ...liveSession, viewer: true }
+  const refused = await streamErrorEvent(reply({ session: claimed }), '8f1c')
+  const shown = nextPreviewState(live, refused)
+  assert.equal(shown.status, 'elsewhere')
+  assert.equal(shown.error, null)
+  assert.equal(shown.session.id, '8f1c')
+
+  // Nobody holds it, it is gone, another session runs, or the read failed: the stream is over.
+  for (const request of [
+    reply({ session: { ...liveSession, viewer: false } }),
+    reply({ session: null }),
+    reply({ session: { ...claimed, id: 'other' } }),
+    reply({ session: { ...claimed, state: 'stopped' } }),
+    async () => { throw new Error('network') }
+  ]) {
+    const event = await streamErrorEvent(request, '8f1c')
+    assert.deepEqual(event, streamEndedEvent('8f1c'))
+    assert.equal(nextPreviewState(live, event).error.code, 'stream_ended')
+  }
+
+  // Only a live pane moves: a Stop in progress or a newer session is left alone.
+  const stopping = nextPreviewState(live, { type: 'stopping', for: '8f1c' })
+  assert.equal(nextPreviewState(stopping, refused), stopping)
+  assert.equal(nextPreviewState(live, { ...refused, for: 'older' }), live)
 })
 
 test('a watched live preview is read until the backend no longer runs it, and cancelling stops the reads', async () => {
