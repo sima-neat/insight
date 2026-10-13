@@ -61,7 +61,27 @@ class _ReportingTransport:
         except BoardError:
             stream.close()
             raise
-        return stream
+        return _ReportingStream(self._manager, self._generation, stream)
+
+
+class _ReportingStream:
+    """A board stream whose read failures are recorded like `exec`'s: an SSH session lost while a preview
+    streams marks the board unreachable instead of leaving it reported as connected."""
+
+    def __init__(self, manager: "BoardManager", generation: int, stream):
+        self._manager = manager
+        self._generation = generation
+        self._stream = stream
+
+    def read(self, timeout):
+        try:
+            return self._stream.read(timeout)
+        except BoardError as exc:
+            self._manager._record(self._generation, error=exc)
+            raise
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
 
 
 class BoardSession:

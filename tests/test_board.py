@@ -217,6 +217,28 @@ class BoardApiTests(unittest.TestCase):
         status = self.client.get("/api/board").get_json()["status"]
         self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
 
+    def test_a_stream_that_fails_after_it_started_is_recorded(self):
+        class LostStream:
+            closed = False
+
+            def read(self, timeout):
+                raise BoardError("unreachable", "The SSH session failed")
+
+            def close(self):
+                self.closed = True
+
+        self.client.post("/api/board/test")
+        lost = LostStream()
+        self.transports[-1].stream = lambda argv, *, timeout: lost
+        with self.app.app_context():
+            stream = board.get_board_manager().session().transport.stream(["true"], timeout=1)
+        with self.assertRaises(BoardError):
+            stream.read(1)
+        status = self.client.get("/api/board").get_json()["status"]
+        self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
+        stream.close()
+        self.assertTrue(lost.closed)
+
     def test_errors_from_a_replaced_target_do_not_overwrite_new_status(self):
         with self.app.app_context():
             old = board.get_board_manager().session()
