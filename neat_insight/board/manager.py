@@ -134,8 +134,13 @@ class BoardManager:
             self._store.clear()
             self._replace_session(self.target())
 
-    def test(self) -> None:
-        self.session().identity()
+    def test(self) -> dict:
+        """Read the selected board's identity; return the state of that same board, or refuse if it changed."""
+        session = self.session()
+        session.identity()
+        with self._lock:
+            session.require_current()
+            return self.state()
 
     def trust_host_key(self, fingerprint: str) -> None:
         with self._lock:

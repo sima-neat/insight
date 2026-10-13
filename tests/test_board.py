@@ -185,6 +185,23 @@ class BoardApiTests(unittest.TestCase):
                 old.transport.exec(["true"], timeout=1)
             self.assertEqual(ctx.exception.code, "stale_snapshot")
 
+    def test_a_test_whose_board_changed_after_it_connected_is_refused(self):
+        # Codex (fb0ecbf): a selection made in another tab after the identity read but before the response
+        # returned 200 with the new, untested board.
+        self.client.get("/api/board")
+        manager = self.app.extensions["neat_board"]
+        session = manager.session()
+        identity = session.identity
+
+        def read_then_switch():
+            result = identity()
+            manager.select("10.1.1.1", 22, "sima")
+            return result
+
+        with mock.patch.object(session, "identity", side_effect=read_then_switch):
+            response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
+
     def test_invalid_selection_returns_400_with_hint(self):
         response = self.client.post("/api/board/select", json={"host": "", "user": "sima"})
         self.assertEqual(response.status_code, 400)
