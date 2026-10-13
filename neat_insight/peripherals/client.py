@@ -163,15 +163,13 @@ class PeripheralClient:
         return payload
 
     def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC) -> dict:
-        if self.session.target.mode == "local":
-            try:
-                status, text = self._call_local(method, path, body, timeout)
-            except BoardError:
-                # A failure from a board that is no longer selected is a stale result, not that board's error.
-                self.session.require_current()
-                raise
-        else:
-            status, text = self._call_remote(method, path, body, timeout)
+        call = self._call_local if self.session.target.mode == "local" else self._call_remote
+        try:
+            status, text = call(method, path, body, timeout)
+        except BoardError:
+            # A failure from a board that is no longer selected is a stale result, not that board's error.
+            self.session.require_current()
+            raise
         self.session.require_current()
         try:
             parsed = json.loads(text) if text else None
@@ -339,6 +337,13 @@ class PeripheralClient:
                 or not mode["format"]
             ):
                 raise self._response_error("SiMa Sentinel returned a malformed camera mode.", mode)
+            # The verdict fields decide whether a mode is listed as Available, so a wrong type is rejected
+            # rather than read as a different verdict.
+            if any(mode.get(key) is not None and not isinstance(mode[key], bool)
+                   for key in ("available", "isp_output", "sensor_mode")) or (
+                mode.get("reason") is not None and not isinstance(mode["reason"], str)
+            ):
+                raise self._response_error("SiMa Sentinel returned a malformed camera mode verdict.", mode)
             if "width" in mode or "height" in mode:
                 valid = "size_range" not in mode and all(_positive_int(mode.get(key)) for key in ("width", "height"))
             else:
