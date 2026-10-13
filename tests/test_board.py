@@ -95,6 +95,8 @@ class TargetResolutionTests(unittest.TestCase):
                          {"host": "board", "port": 2222, "user": "sima"})
         self.assertEqual(target_module.validate_ssh_target("board", 22.0, None)["port"], 22)
         self.assertEqual(target_module.validate_ssh_target("board", "000022", None)["port"], 22)
+        # Codex (635553e): leading zeros count toward int()'s digit limit, so this raised (a 500).
+        self.assertEqual(target_module.validate_ssh_target("board", "0" * 5000 + "22", None)["port"], 22)
 
     def test_store_round_trips_and_ignores_corrupt_files(self):
         with tempfile.TemporaryDirectory() as directory:
