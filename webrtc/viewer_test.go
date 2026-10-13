@@ -31,6 +31,30 @@ func TestHandleOfferReturnsUnavailableBeforeCodecIsKnown(t *testing.T) {
 	}
 }
 
+func TestConfiguredBrowserICEAddress(t *testing.T) {
+	t.Run("dedicated address wins", func(t *testing.T) {
+		t.Setenv("CONTAINER_HOST_IP", "10.77.0.1")
+		t.Setenv(browserICEAddressEnv, " 54.12.34.56 ")
+
+		address, source := configuredBrowserICEAddress()
+		if address != "54.12.34.56" || source != browserICEAddressEnv {
+			t.Fatalf("unexpected address selection: address=%q source=%q", address, source)
+		}
+	})
+
+	t.Run("container host remains the fallback", func(t *testing.T) {
+		t.Setenv("CONTAINER_HOST_IP", " 10.77.0.1 ")
+		if err := os.Unsetenv(browserICEAddressEnv); err != nil {
+			t.Fatal(err)
+		}
+
+		address, source := configuredBrowserICEAddress()
+		if address != "10.77.0.1" || source != "CONTAINER_HOST_IP" {
+			t.Fatalf("unexpected address selection: address=%q source=%q", address, source)
+		}
+	})
+}
+
 func TestHandleOfferAdvertisesSelectedCodec(t *testing.T) {
 	tests := []struct {
 		name             string

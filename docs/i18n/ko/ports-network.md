@@ -18,6 +18,8 @@ Insight는 일반적인 작동 중에 여러 포트를 사용합니다. 기본 �
 | `videoUDP` | `9000-9079` | UDP | 시청자 채널을 위한 비디오 RTP 콘텐츠 업로드 `0-79`. |
 | `metadataUDP` | `9100-9179` | UDP | 뷰어 채널을 위한 메타데이터 JSON 가져오기 `0-79`. |
 | `webRTC` | `40000-40199` | UDP | WebRTC 미디어 및 메타데이터가 비디오 프레임워크에서 브라우저로 전송되는 DataChannel. |
+| `webrtcWhip` | `8889` | HTTPS/TCP | WHIP를 통해 브라우저 웹캠을 MediaMTX에 게시하고 RTSP 소스로 다시 제공합니다. |
+| `webrtcWhipIce` | `8189` | UDP | 브라우저 웹캠 게시를 위한 ICE 미디어입니다. 시그널링은 `webrtcWhip`를 사용하고 실제 비디오는 여기로 수신되므로 두 포트 모두 접근 가능해야 합니다. |
 | `webSSH` | `8022` | HTTPS/TCP | 사용 가능한 경우 브라우저 셸을 페어링된 DevKit로 연결합니다. |
 
 ## 실제 SDK 포트 맵을 찾아보세요.
@@ -39,6 +41,8 @@ neat --json
     {"hostPortEnd": 9079, "hostPortStart": 9000, "name": "videoUDP", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8081, "name": "videoUI", "protocol": "tcp"},
     {"hostPortEnd": 40199, "hostPortStart": 40000, "name": "webRTC", "protocol": "udp"},
+    {"hostPortEnd": null, "hostPortStart": 8889, "name": "webrtcWhip", "protocol": "tcp"},
+    {"hostPortEnd": null, "hostPortStart": 8189, "name": "webrtcWhipIce", "protocol": "udp"},
     {"hostPortEnd": null, "hostPortStart": 8022, "name": "webSSH", "protocol": "tcp"}
   ],
   "insight": {
@@ -77,6 +81,21 @@ Neat 개발 환경에서 SDK 컨테이너가 포트를 재매핑할 수 있습�
 이는 특히 비디오 뷰어에 중요합니다. 내부 기본 뷰어 포트는 `8081`이지만, SDK가 `videoUI`를 다른 호스트 포트에 매핑하는 경우 브라우저에 표시되는 포트가 다를 수 있습니다.
 
 Insight UI의 시스템 정보를 사용하여 URL이 잘못되었다고 가정하기 전에 실제 노출된 포트를 확인하십시오.
+
+## 선택적 브라우저 연결 구성
+
+호스팅 환경에서는 페어링된 DevKit이 사용하는 주소와 외부 브라우저에 알리는 주소를 분리할 수 있습니다. Insight는 시작 시에만 적용되는 다음 두 개의 선택적 파일을 읽습니다.
+
+| 파일 | 용도 |
+| --- | --- |
+| `/home/docker/.insight-config/browser-ice-address` | vf 뷰어와 MediaMTX WHIP 엔드포인트가 모두 알리는, 브라우저에서 접근 가능한 단일 IPv4 주소입니다. |
+| `/home/docker/.insight-config/launch-url` | 신뢰할 수 있는 하나의 절대 HTTP 또는 HTTPS 시작 URL입니다. Insight는 이 URL의 오리진을 사용하여 뷰어, WHIP 및 HTTP MJPEG URL을 생성합니다. |
+
+`browser-ice-address`가 없으면 Insight는 기존 `CONTAINER_HOST_IP` 동작을 유지합니다. `launch-url`이 없으면 생성된 브라우저 URL은 계속 요청 호스트와 SDK 포트 맵을 사용합니다. 따라서 두 파일은 호스팅 환경 동작을 독립적으로 활성화하며 일반적인 로컬 또는 DevKit 설치에는 영향을 주지 않습니다.
+
+`browser-ice-address`는 vf 또는 MediaMTX가 시작되기 전에 검증됩니다. 비어 있거나 잘못된 브라우저 주소가 있으면 접근할 수 없는 주소를 조용히 알리는 대신 Insight가 준비 상태가 되지 않습니다. `launch-url`은 권고 설정입니다. Insight는 경로, 쿼리 또는 프래그먼트가 포함된 ASCII 호스트 이름의 전체 URL을 허용하지만 HTTP(S) 오리진만 사용합니다. 잘못된 시작 URL은 경고를 기록하고 기존 요청 호스트/포트 맵 URL 생성을 유지합니다. 파일을 원자적으로 교체하고 `insight-admin restart`를 실행한 다음 `/api/health`를 확인하여 새 프로세스에 주소와 공개 오리진이 적용되었는지 확인하십시오.
+
+브라우저 ICE 주소는 로컬 네트워크 인터페이스에 할당될 필요가 없습니다. 퍼블릭 클라우드 IPv4 주소는 일반적으로 1:1 NAT를 통해 호스트에 도달합니다. 그래도 WebRTC 및 `webrtcWhipIce` UDP 포트는 게시되어야 하며 주변 네트워크 정책에서 허용되어야 합니다.
 
 ## 포트 맵을 사용하여 애플리케이션을 구성합니다.
 
