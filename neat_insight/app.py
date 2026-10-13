@@ -66,6 +66,7 @@ from neat_insight.api_docs import api_docs_bp
 from neat_insight.board.target import sdk_env_target
 from neat_insight.peripherals import peripherals_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
+from neat_insight.sentinel import sentinel_bp
 from neat_insight.remote_devkit import (
     get_remote_metrics,
     is_remote_devkit_configured,
@@ -76,7 +77,7 @@ from neat_insight.runtime_config import (
     load_runtime_network_config,
 )
 from neat_insight.remotefs import read_remote_file
-from neat_insight.sentinel import sentinel_bp
+from neat_insight import preview
 from neat_insight.utils import (
     board_type,
     check_and_generate_mkcert_certificate,
@@ -3371,6 +3372,9 @@ def viewer_url():
         "channel_limit_source": limit_source,
         "sdk_channel_limited": sdk_limited,
     }
+
+
+preview.init_app(app)
 
 
 # API: serve the built single-page application entrypoint.

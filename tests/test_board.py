@@ -16,7 +16,7 @@ from neat_insight.board import manager as manager_module
 from neat_insight.board import transport as transport_module
 from neat_insight.board import target as target_module
 from neat_insight.board.errors import BoardError
-from neat_insight.board.transport import ExecResult, LocalTransport, SshTransport, key_fingerprint
+from neat_insight.board.transport import CommandCancelled, ExecResult, LocalTransport, SshTransport, key_fingerprint
 
 SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "sima", "DEVKIT_SYNC_DEVKIT_PORT": "22"}
 IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
@@ -29,7 +29,7 @@ class FakeTransport:
         self.calls = []
         self.closed = False
 
-    def exec(self, argv, *, timeout, stdin=None):
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
         self.calls.append(argv)
         if self.error:
             raise self.error
@@ -185,6 +185,37 @@ class BoardApiTests(unittest.TestCase):
                 old.transport.exec(["true"], timeout=1)
             self.assertEqual(ctx.exception.code, "stale_snapshot")
 
+    def test_a_test_whose_board_changed_after_it_connected_is_refused(self):
+        # Codex (fb0ecbf): a selection made in another tab after the identity read but before the response
+        # returned 200 with the new, untested board.
+        self.client.get("/api/board")
+        manager = self.app.extensions["neat_board"]
+        session = manager.session()
+        identity = session.identity
+
+        def read_then_switch():
+            result = identity()
+            manager.select("10.1.1.1", 22, "sima")
+            return result
+
+        with mock.patch.object(session, "identity", side_effect=read_then_switch):
+            response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
+
+    def test_a_failed_test_whose_board_changed_meanwhile_is_refused(self):
+        # Codex (790bf80): a failure from the departed board returned its 502/504 and guidance, not 409.
+        self.client.get("/api/board")
+        manager = self.app.extensions["neat_board"]
+        old = self.transports[-1]
+
+        def switch_then_fail(argv, *, timeout, stdin=None):
+            manager.select("10.1.1.1", 22, "sima")
+            raise BoardError("unreachable", "Could not connect", hint="Check the cable")
+
+        old.exec = switch_then_fail
+        response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
+
     def test_invalid_selection_returns_400_with_hint(self):
         response = self.client.post("/api/board/select", json={"host": "", "user": "sima"})
         self.assertEqual(response.status_code, 400)
@@ -199,6 +230,28 @@ class BoardApiTests(unittest.TestCase):
         self.assertEqual(response.get_json(), {"error": "Could not connect", "code": "unreachable", "hint": "Check the cable"})
         status = self.client.get("/api/board").get_json()["status"]
         self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
+
+    def test_a_stream_that_fails_after_it_started_is_recorded(self):
+        class LostStream:
+            closed = False
+
+            def read(self, timeout):
+                raise BoardError("unreachable", "The SSH session failed")
+
+            def close(self):
+                self.closed = True
+
+        self.client.post("/api/board/test")
+        lost = LostStream()
+        self.transports[-1].stream = lambda argv, *, timeout: lost
+        with self.app.app_context():
+            stream = board.get_board_manager().session().transport.stream(["true"], timeout=1)
+        with self.assertRaises(BoardError):
+            stream.read(1)
+        status = self.client.get("/api/board").get_json()["status"]
+        self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
+        stream.close()
+        self.assertTrue(lost.closed)
 
     def test_errors_from_a_replaced_target_do_not_overwrite_new_status(self):
         with self.app.app_context():
@@ -289,6 +342,124 @@ class LocalTransportTests(unittest.TestCase):
         with self.assertRaises(BoardError) as ctx:
             LocalTransport().exec(["sh", "-c", "exec >&- 2>&-; sleep 5"], timeout=0.3)
         self.assertEqual(ctx.exception.code, "timeout")
+
+    def read_all(self, stream, limit=10):
+        chunks, deadline = [], time.monotonic() + limit
+        while time.monotonic() < deadline:
+            chunk = stream.read(1)
+            if chunk == b"":
+                return b"".join(chunks)
+            chunks.append(chunk or b"")
+        self.fail("the stream did not end")
+
+    def test_stream_reads_stdout_as_it_arrives_and_keeps_stderr_bounded(self):
+        stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; echo one; sleep 0.3; echo two"], timeout=5)
+        self.assertIsNone(LocalTransport().stream(["sleep", "5"], timeout=5).read(0.05), "nothing arrived in time")
+        self.assertEqual(self.read_all(stream), b"one\ntwo\n")
+        self.assertRegex(stream.stderr(), rb"^[0-9]+\n$")
+        self.assertEqual(stream.read(1), b"")
+        stream.close()
+        self.assertEqual(stream.read(1), b"", "a closed stream reads as ended")
+
+        noisy = LocalTransport().stream(["sh", "-c", "echo first >&2; head -c 100000 /dev/zero | tr '\\0' x >&2; echo last >&2"], timeout=5)
+        self.read_all(noisy)
+        deadline = time.monotonic() + 5
+        while not noisy.stderr().endswith(b"last\n") and time.monotonic() < deadline:
+            time.sleep(0.01)
+        stderr = noisy.stderr()
+        self.assertTrue(stderr.startswith(b"first\n") and stderr.endswith(b"last\n"))
+        self.assertLessEqual(len(stderr), transport_module.STDERR_HEAD_BYTES + transport_module.STDERR_TAIL_BYTES + 5)
+
+    def test_closing_a_stream_ends_the_command_at_its_next_write(self):
+        stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; exec yes"], timeout=5)
+        self.assertTrue(stream.read(5))
+        deadline = time.monotonic() + 5
+        while not stream.stderr() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        pid = int(stream.stderr())
+        stream.close()
+        deadline = time.monotonic() + 5
+        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(os.path.exists(f"/proc/{pid}"), "yes died on SIGPIPE and was reaped")
+
+    def test_a_stream_that_cannot_start_is_a_board_error(self):
+        with self.assertRaises(BoardError) as ctx:
+            LocalTransport().stream(["no-such-command-xyz"], timeout=5)
+        self.assertEqual(ctx.exception.code, "command_failed")
+
+
+    def test_exec_hands_stdout_over_while_the_command_runs(self):
+        seen = []
+        started = time.monotonic()
+        result = LocalTransport().exec(
+            ["sh", "-c", "printf ab; sleep 0.5; printf cd; echo err >&2"],
+            timeout=5,
+            on_stdout=lambda chunk: seen.append((chunk, time.monotonic() - started)),
+        )
+        self.assertEqual((b"".join(chunk for chunk, _ in seen), result.stdout, result.stderr), (b"abcd", b"abcd", b"err\n"))
+        self.assertEqual(seen[0][0], b"ab")
+        self.assertLess(seen[0][1], 0.4, "the first chunk arrives before the command ends, not at exit")
+
+    def test_cancel_event_terminates_a_command_without_waiting_for_output(self):
+        cancel = threading.Event()
+        outcome = []
+
+        def run():
+            try:
+                LocalTransport().exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+            except Exception as error:
+                outcome.append(error)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        time.sleep(0.05)
+        cancel.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertIsInstance(outcome[0], CommandCancelled)
+
+    def test_close_terminates_active_local_commands_and_rejects_new_work(self):
+        transport = LocalTransport()
+        ready = threading.Event()
+        outcome, pids = [], []
+
+        def on_stdout(chunk):
+            pids.append(int(chunk))
+            ready.set()
+
+        def run():
+            try:
+                transport.exec(["sh", "-c", "echo $$; exec sleep 30"], timeout=60, on_stdout=on_stdout)
+            except Exception as error:
+                outcome.append(error)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        self.assertTrue(ready.wait(2))
+        transport.close()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome[0].code, "stale_snapshot")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pids[0], 0)
+        with self.assertRaises(BoardError) as ctx:
+            transport.exec(["true"], timeout=1)
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
+
+
+class ReportingTransportTests(unittest.TestCase):
+    def test_session_transport_forwards_the_stdout_callback_and_cancellation(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        session = manager_module.BoardManager(Path(tmp.name), on_board=True).session()
+        seen = []
+        session.transport.exec(["printf", "ab"], timeout=5, on_stdout=seen.append)
+        self.assertEqual(b"".join(seen), b"ab")
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(CommandCancelled):
+            session.transport.exec(["sleep", "30"], timeout=60, cancel_event=cancel)
 
 
 class SshTransportErrorTests(unittest.TestCase):
@@ -548,6 +719,75 @@ class SshTransportErrorTests(unittest.TestCase):
                     self.assertIsNone(transport._client)
                 close_at += 1
 
+    def test_cancel_event_closes_only_the_active_command_channel(self):
+        channel = mock.Mock()
+        channel.recv_ready.side_effect = [True, False]
+        channel.recv.return_value = b"pcm"
+        channel.recv_stderr_ready.return_value = False
+        channel.exit_status_ready.return_value = False
+        cancel = threading.Event()
+        seen = []
+
+        def on_stdout(chunk):
+            seen.append(chunk)
+            cancel.set()
+
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=60, on_stdout=on_stdout, cancel_event=cancel)
+        self.assertEqual(seen, [b"pcm"])
+        channel.close.assert_called_once_with()
+        self.assertFalse(self.transport._closed)
+
+    def test_cancel_event_stops_a_command_whose_start_is_stalled(self):
+        # Stop pressed while exec_command hangs (slow SSH setup) must not wait for the command deadline.
+        channel = mock.Mock()
+        stalled = threading.Event()
+        channel.exec_command.side_effect = lambda command: stalled.wait(30)
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        started = time.monotonic()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+        stalled.set()
+        self.assertLess(time.monotonic() - started, 5)
+        channel.close.assert_called()
+        self.assertFalse(self.transport._closed)
+
+    def test_cancel_event_stops_a_command_whose_channel_is_still_opening(self):
+        # Codex 4188926190: Stop pressed while connecting or opening the session must not wait for it.
+        channel = mock.Mock()
+        stalled = threading.Event()
+
+        def open_late(deadline, argv, timeout):
+            stalled.wait(30)
+            return channel
+
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        started = time.monotonic()
+        with mock.patch.object(self.transport, "_open_channel", side_effect=open_late):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+            self.assertLess(time.monotonic() - started, 5)
+            stalled.set()
+            # The channel that opens after Stop is closed, and the command never starts on it.
+            deadline = time.monotonic() + 5
+            while not channel.close.called and time.monotonic() < deadline:
+                time.sleep(0.01)
+        channel.close.assert_called()
+        channel.exec_command.assert_not_called()
+        self.assertFalse(self.transport._closed)
+
+    def test_a_command_cancelled_before_its_channel_opens_never_runs(self):
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch.object(self.transport, "_open_channel") as open_channel:
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+        open_channel.assert_not_called()
+
     def test_output_that_never_pauses_stops_at_the_limit(self):
         # Codex 4188993841: recv_ready() that stays true must not let output grow past the limit.
         channel = mock.Mock()
@@ -564,6 +804,57 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")
         self.assertEqual(self._connect_raising(ConnectionRefusedError("refused")).code, "unreachable")
         self.assertIn("could not be resolved", self._connect_raising(socket.gaierror("nope")).message)
+
+    def test_stream_reads_the_channel_and_close_closes_it(self):
+        channel = mock.Mock(closed=False)
+        replies = [b"--frame", None, b""]
+
+        def recv(size):
+            reply = replies.pop(0)
+            if reply is None:
+                time.sleep(0.02)  # The channel timeout passes with nothing to read.
+                raise socket.timeout()
+            return reply
+
+        channel.recv.side_effect = recv
+        stderr = [b"4242\n", b"libcamera noise\n"]
+        channel.recv_stderr_ready.side_effect = lambda: bool(stderr)
+        channel.recv_stderr.side_effect = lambda size: stderr.pop(0)
+        channel.exit_status_ready.return_value = True
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            stream = self.transport.stream(["sh", "-c", "echo $$ >&2; exec gst-launch-1.0 -q fakesrc ! fdsink fd=1"], timeout=5)
+        channel.exec_command.assert_called_once_with("sh -c 'echo $$ >&2; exec gst-launch-1.0 -q fakesrc ! fdsink fd=1'")
+        channel.shutdown_write.assert_called_once_with()
+        self.assertEqual(stream.read(1), b"--frame")
+        self.assertIsNone(stream.read(0.01))
+        self.assertEqual(stream.read(1), b"")
+        deadline = time.monotonic() + 5
+        while stderr and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(stream.stderr(), b"4242\nlibcamera noise\n")
+        stream.close()
+        stream.close()
+        deadline = time.monotonic() + 5
+        while not channel.close.called and time.monotonic() < deadline:
+            time.sleep(0.01)
+        channel.close.assert_called_once_with()
+        self.assertEqual(stream.read(1), b"")
+
+    def test_a_stream_whose_session_fails_reports_it_like_exec(self):
+        channel = mock.Mock(closed=False)
+        channel.exec_command.side_effect = paramiko.SSHException("channel refused")
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), self.assertRaises(BoardError) as ctx:
+            self.transport.stream(["true"], timeout=5)
+        self.assertEqual(ctx.exception.code, "unreachable")
+        channel = mock.Mock(closed=False)
+        channel.recv.side_effect = EOFError()
+        channel.recv_stderr_ready.return_value = False
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            stream = self.transport.stream(["true"], timeout=5)
+        with self.assertRaises(BoardError) as ctx:
+            stream.read(1)
+        self.assertEqual(ctx.exception.code, "unreachable")
+        stream.close()
 
 
 if __name__ == "__main__":

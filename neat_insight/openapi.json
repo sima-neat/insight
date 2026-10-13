@@ -27,7 +27,7 @@
     {"name": "Workspace", "description": "Explore files produced by Neat workflows without exposing arbitrary host paths. APIs support folders, bounded search, text preview, raw images, and virtual paths into MPK tar archives using `archive::member` syntax."},
     {"name": "DevKit shell", "description": "Discover or start the optional hosted shell bridge for a configured remote DevKit. These operations report actionable availability and connection metadata rather than configuring the DevKit itself."},
     {"name": "Board", "description": "Select the one board that board-facing features use. Insight runs commands locally when it is installed on the board, and otherwise over SSH to the SDK-paired DevKit or a manually entered address. Authentication uses the SSH keys of the account running Insight; no password is accepted or stored. Failures return `code` and `hint` fields that name the recovery step."},
-    {"name": "Peripherals", "description": "List the MIPI and USB cameras SiMa Sentinel reports on the selected board. Sentinel discovers the cameras and Insight reads its catalog. Neither captures frames, changes sensor controls, or publishes streams. Each camera mode is Available or Unsupported, decided from Sentinel's report: its sensor is in the board's camera overlays, the ISP outputs its size, and its format is NV12 (a fixed fact about Neat's `CameraInput`, not queried from the board)."},
+    {"name": "Peripherals", "description": "List the MIPI and USB cameras and ALSA microphones SiMa Sentinel reports on the selected board, preview a camera, and test a microphone. Sentinel discovers the devices and Insight reads its catalog. Discovery never captures frames or audio, opens a sound device, changes sensor controls, or publishes streams; only a camera preview or a microphone test, started explicitly, captures, and only while it runs. Each camera mode is Available or Unsupported, decided from Sentinel's report: its sensor is in the board's camera overlays, the ISP outputs its size, and its format is NV12 (a fixed fact about Neat's `CameraInput`, not queried from the board). Core has no audio input node, so microphones carry no verdict."},
     {"name": "Sentinel", "description": "Read SiMa Sentinel telemetry from the selected board and control its traces. Sentinel serves its API on a unix socket that is never exposed over the network, so Insight reaches it from the board itself: in process when Insight runs on the board, and otherwise by running a small client there over SSH. Metric values are `null` when the board cannot measure them, never zero."}
   ],
   "x-tagGroups": [
@@ -794,7 +794,10 @@
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardSelectRequest"}, "examples": {"manual": {"value": {"host": "192.168.2.2", "port": 22, "user": "sima"}}, "reset": {"value": {"reset": true}}}}}},
         "responses": {
           "200": {"description": "Updated board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
-          "400": {"$ref": "#/components/responses/BoardErrorResponse"}
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
@@ -822,18 +825,20 @@
         "responses": {
           "200": {"description": "Updated board state.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/BoardState"}}}},
           "400": {"$ref": "#/components/responses/BoardErrorResponse"},
-          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
     "/api/peripherals": {
       "get": {
         "tags": ["Peripherals"],
-        "summary": "Get the last camera scan",
+        "summary": "Get the last peripheral scan",
         "description": "Returns the snapshot from the last `POST /api/peripherals/refresh` of the selected board. Before the first scan, or after the selected board changes, `scanned_at` is `null` and `items` is empty. This call never connects to the board.",
         "operationId": "getPeripherals",
         "responses": {
-          "200": {"description": "Last camera snapshot, or an empty one.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
+          "200": {"description": "Last peripheral snapshot, or an empty one.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
@@ -841,11 +846,11 @@
     "/api/peripherals/refresh": {
       "post": {
         "tags": ["Peripherals"],
-        "summary": "Scan the selected board for cameras",
-        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Each mode's `support` comes from Sentinel's catalog alone (see `SupportTier`). A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists cameras added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
+        "summary": "Scan the selected board for cameras and microphones",
+        "description": "Asks SiMa Sentinel on the board (`/run/simaai-sentinel/api.sock`, `POST /v1/peripherals/refresh`) to rescan; Sentinel answers with the catalog of a scan that started after the request (it returns `504` after 10 s and `429` when 8 refreshes already wait). Over SSH the socket is reached with a stdlib `python3` helper. Each mode's `support` comes from Sentinel's catalog alone (see `SupportTier`). Microphones are Sentinel's ALSA capture devices, read from `/proc/asound` and sysfs without opening a sound device; their `availability` is Sentinel's own, passed through. A camera whose provider failed keeps Sentinel's last good modes (`modes_source: previous-scan`). `changes` lists devices added or removed since the previous refresh. Concurrent refreshes of one board share a single scan. Sentinel errors (not installed, not running, discovery disabled, too old, malformed answer) return `503` or `502` with an install or update hint.",
         "operationId": "refreshPeripherals",
         "responses": {
-          "200": {"description": "New camera snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
+          "200": {"description": "New peripheral snapshot.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PeripheralsSnapshot"}}}},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
           "503": {"$ref": "#/components/responses/BoardErrorResponse"},
@@ -853,42 +858,115 @@
         }
       }
     },
-    "/api/buildinfo": {
+    "/api/peripherals/preview": {
       "get": {
-        "tags": ["Service and system"],
-        "summary": "Get local or remote platform build information",
-        "description": "Returns parsed SiMa release and platform metadata for the active environment. On a remote-DevKit installation the backend retrieves the target's build information; without a DevKit it falls back to host platform details. A `502` generally means the configured remote target could not be reached or read.",
-        "operationId": "getBuildInfo",
+        "tags": ["Peripherals"],
+        "summary": "Get the running camera preview",
+        "description": "Returns the preview session for the selected board, or `null`. Never contacts the board. A session belongs to one board generation; selecting another board invalidates it.",
+        "operationId": "getCameraPreview",
         "responses": {
-          "200": {"description": "Parsed SiMa build metadata, or host platform details when no DevKit is configured.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
-          "500": {"$ref": "#/components/responses/InternalError"},
-          "502": {"$ref": "#/components/responses/BadGateway"}
+          "200": {"description": "The current preview session, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"oneOf": [{"$ref": "#/components/schemas/PreviewSession"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
-    "/api/server-ip": {
-      "get": {
-        "tags": ["Service and system"],
-        "summary": "Get the browser-reachable backend IP",
-        "description": "Resolves the address that browser-facing links should use, preferring `CONTAINER_HOST_IP`, then an inferred LAN address, and finally `127.0.0.1`. This is intended for URL construction in container and bridge-network deployments, not as a complete network-interface inventory.",
-        "operationId": "getServerIp",
+    "/api/peripherals/cameras/preview": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Start a camera preview",
+        "description": "Starts an explicit, temporary capture: over the board connection Insight runs a GStreamer pipeline (`gst-launch-1.0`; `libcamerasrc` for a MIPI camera, `v4l2src` on the camera's `/dev/v4l/by-id` path for a USB camera) that scales the mode to at most 640 pixels wide at up to 15 fps and writes JPEG frames to its stdout. Insight answers once the first frame arrived (within 10 s, or two frame periods for a mode slower than 0.2 fps) and relays the frames at `stream_url`. Discovery never starts capture; only this call does. The mode defaults to the camera's `default_selection` and must be one the last scan listed: for a MIPI camera an `available` mode (an ISP size in NV12), for a USB camera any listed mode in MJPG or a raw format (YUYV, UYVY, YVYU, NV12, NV21, YU12, YV12, GREY, RGB3, BGR3). The rate is the scan's exact fraction (`framerate_num`/`framerate_den`). Insight refuses a camera the scan or a check just before the start finds in use, or one the pipeline cannot acquire (409 `camera_in_use`); a board without `gst-launch-1.0`, or without a GStreamer element the pipeline needs (named in `tool`), returns 502 `tool_missing` with the packages to install; a pipeline that fails or sends no frame returns 502 `command_failed` with its output in `detail`. While a preview runs the camera cannot be opened by an application. Capture stops on `stop`, when its stream response ends, when nobody opens the stream within 15 s, when a refresh starts, or when the selected board changes.",
+        "operationId": "startCameraPreview",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}}, "example": {"id": "camera:imx477 5-001a"}}}},
         "responses": {
-          "200": {"description": "Configured or inferred LAN IP.", "content": {"application/json": {"schema": {"type": "object", "required": ["ip"], "properties": {"ip": {"type": "string"}}}, "example": {"ip": "192.168.1.25"}}}}
+          "200": {"description": "The preview session.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"$ref": "#/components/schemas/PreviewSession"}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
-    "/api/viewer-url": {
+    "/api/peripherals/cameras/preview/{session_id}/stream": {
       "get": {
-        "tags": ["Viewer"],
-        "summary": "Build a browser-reachable vf viewer URL",
-        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
-        "operationId": "getViewerUrl",
-        "parameters": [
-          {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
-          {"name": "src", "in": "query", "description": "Comma-separated zero-based vf channel indexes. Invalid and out-of-capacity indexes are discarded.", "schema": {"type": "string"}, "example": "0,1,2,3"}
-        ],
+        "tags": ["Peripherals"],
+        "summary": "Stream a camera preview",
+        "description": "Relays the preview's JPEG frames as a long-lived `multipart/x-mixed-replace; boundary=frame` response, one `image/jpeg` part with a `Content-Length` per frame, for an `<img>` element. Insight checks the board's framing and refuses a frame over 4 MiB. One viewer per session: a second request returns 409 `preview_active`. When the response ends (the viewer disconnects, or the board sends nothing for 10 s, or for two frame periods for a mode slower than 0.2 fps) the preview stops on the board. An unknown or superseded session id returns 404.",
+        "operationId": "streamCameraPreview",
+        "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
         "responses": {
-          "200": {"description": "Viewer URL plus the resolved SDK or DevKit channel capacity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ViewerUrl"}}}}
+          "200": {"description": "Long-lived multipart JPEG stream.", "content": {"multipart/x-mixed-replace": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/cameras/preview/{session_id}/stop": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Stop a camera preview",
+        "description": "Closes the stream and stops the pipeline on the board by its process id (TERM, then KILL after 2 s), which releases the camera. Returns the stopped session, or `null` when that session already ended, so a repeated stop succeeds; an older session id never stops a newer session. The stream is closed first, so a pipeline whose kill command fails still ends at its next write; the session is kept for a retry only when the stream's own cleanup has not already released it.",
+        "operationId": "stopCameraPreview",
+        "parameters": [{"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "The stopped session, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"session": {"oneOf": [{"$ref": "#/components/schemas/PreviewSession"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/microphones/test": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Start a microphone test",
+        "description": "Starts recording from a scanned microphone on the board and returns `202` at once. It records until `POST .../test/stop` or for `seconds` (at most 30); poll `GET` for the live level and the result. Insight first re-reads SiMa Sentinel's catalog: when that microphone's capture target or identity changed since the scan (a replug, or a restarted Sentinel routing the id elsewhere), it returns `409 stale_snapshot` without recording; other catalog changes, such as a previewing camera's rate, do not count; it also refuses a microphone whose provider data is from an earlier scan (`409 stale_snapshot`), and one without a safe Sentinel selector (`502 peripheral_response`). Sentinel's availability is not used to refuse: Insight then checks the capture PCM on the board and returns `409 microphone_in_use`, naming the holding process where it can see it, only when a substream is open now. The board runs `arecord` on Sentinel's `plughw:CARD=<id>,DEV=<n>` selector, converted to 16-bit PCM at 48 kHz when the device offers it (else its nearest rate below, never above 48 kHz) and at most two channels. Only one test records at a time (`409 test_running`). Returns `409 stale_snapshot` when the selected board changed since the scan. A busy device, a board without `arecord`, or a failed recording ends the test with `state: failed` and the error.",
+        "operationId": "startMicrophoneTest",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MicrophoneTestRequest"}, "example": {"id": "microphone:alsa:3ff3d77bf791d455"}}}},
+        "responses": {
+          "202": {"description": "Recording started.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"$ref": "#/components/schemas/MicrophoneTest"}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "502": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "503": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      },
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Read the microphone test",
+        "description": "The latest microphone test on the selected board: while it records, its elapsed time and the level of the audio just received, for a live meter; once finished, its level and `audio_url`, or its error. `null` before any test. Never contacts the board.",
+        "operationId": "getMicrophoneTest",
+        "responses": {
+          "200": {"description": "The test, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"oneOf": [{"$ref": "#/components/schemas/MicrophoneTest"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/microphones/test/stop": {
+      "post": {
+        "tags": ["Peripherals"],
+        "summary": "Stop the microphone test's recording",
+        "description": "Ends the recording on the selected board at once, even when `arecord` has stopped producing audio; what was recorded becomes the result, read through `GET` as usual. A test stopped before 0.1 s was recorded ends with `stopped_early`. Returns the test, or null when there is none for the selected board. It never stops another application.",
+        "operationId": "stopMicrophoneTest",
+        "responses": {
+          "200": {"description": "The test, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"oneOf": [{"$ref": "#/components/schemas/MicrophoneTest"}, {"type": "null"}]}}}}}},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/peripherals/microphones/test/{token}.wav": {
+      "get": {
+        "tags": ["Peripherals"],
+        "summary": "Download the test recording",
+        "description": "The finished recording of the selected board as 16-bit PCM WAV. `404` once a newer test replaced it or another board was selected.",
+        "operationId": "getMicrophoneTestAudio",
+        "parameters": [{"name": "token", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "The recording.", "content": {"audio/wav": {"schema": {"type": "string", "format": "binary"}}}},
+          "404": {"$ref": "#/components/responses/BoardErrorResponse"},
+          "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }
     },
@@ -1062,6 +1140,45 @@
           "409": {"$ref": "#/components/responses/BoardErrorResponse"},
           "502": {"$ref": "#/components/responses/BoardErrorResponse"},
           "504": {"$ref": "#/components/responses/BoardErrorResponse"}
+        }
+      }
+    },
+    "/api/buildinfo": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Get local or remote platform build information",
+        "description": "Returns parsed SiMa release and platform metadata for the active environment. On a remote-DevKit installation the backend retrieves the target's build information; without a DevKit it falls back to host platform details. A `502` generally means the configured remote target could not be reached or read.",
+        "operationId": "getBuildInfo",
+        "responses": {
+          "200": {"description": "Parsed SiMa build metadata, or host platform details when no DevKit is configured.", "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}},
+          "500": {"$ref": "#/components/responses/InternalError"},
+          "502": {"$ref": "#/components/responses/BadGateway"}
+        }
+      }
+    },
+    "/api/server-ip": {
+      "get": {
+        "tags": ["Service and system"],
+        "summary": "Get the browser-reachable backend IP",
+        "description": "Resolves the address that browser-facing links should use, preferring `CONTAINER_HOST_IP`, then an inferred LAN address, and finally `127.0.0.1`. This is intended for URL construction in container and bridge-network deployments, not as a complete network-interface inventory.",
+        "operationId": "getServerIp",
+        "responses": {
+          "200": {"description": "Configured or inferred LAN IP.", "content": {"application/json": {"schema": {"type": "object", "required": ["ip"], "properties": {"ip": {"type": "string"}}}, "example": {"ip": "192.168.1.25"}}}}
+        }
+      }
+    },
+    "/api/viewer-url": {
+      "get": {
+        "tags": ["Viewer"],
+        "summary": "Build a browser-reachable vf viewer URL",
+        "description": "Constructs the vf HTTPS viewer URL using the configured public origin when `/home/docker/.insight-config/launch-url` is present, otherwise the current request host and mapped `videoUI` port. When `src` is omitted, all channels within the resolved capacity are included; supplied indexes that are invalid or exceed an SDK port-publication limit are discarded. The response also explains whether capacity came from a DevKit, the SDK port map, or the legacy 80-channel fallback.",
+        "operationId": "getViewerUrl",
+        "parameters": [
+          {"name": "mode", "in": "query", "description": "Viewer color mode.", "schema": {"type": "string", "default": "light", "enum": ["light", "dark"]}},
+          {"name": "src", "in": "query", "description": "Comma-separated zero-based vf channel indexes. Invalid and out-of-capacity indexes are discarded.", "schema": {"type": "string"}, "example": "0,1,2,3"}
+        ],
+        "responses": {
+          "200": {"description": "Viewer URL plus the resolved SDK or DevKit channel capacity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ViewerUrl"}}}}
         }
       }
     },
@@ -1509,12 +1626,12 @@
         "required": ["error", "code"],
         "properties": {
           "error": {"type": "string", "description": "Human-readable failure reason."},
-          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "unreachable", "auth_failed", "tool_missing", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large"]},
+          "code": {"type": "string", "enum": ["invalid_request", "not_found", "no_target", "host_key_changed", "stale_snapshot", "camera_in_use", "mode_adjusted", "preview_active", "unreachable", "auth_failed", "tool_missing", "command_failed", "timeout", "peripheral_missing", "peripheral_refused", "peripheral_denied", "peripheral_unavailable", "peripheral_response", "peripheral_version", "microphone_in_use", "test_running", "stopped_early", "trace_conflict", "already_installed", "request_too_large", "sentinel_missing", "sentinel_stopped", "sentinel_denied", "sentinel_schema", "sentinel_failed", "response_too_large"]},
+          "generation": {"type": "integer", "description": "Sentinel endpoints only: the board `generation` that answered with the failure, present once the selected board is known, so a client can discard a failure from a board other than the one it asked."},
           "hint": {"type": ["string", "null"], "description": "Concrete recovery step, such as the `ssh-copy-id` command to run."},
           "command": {"type": "string", "description": "`auth_failed` only: the command that authorizes an SSH key on the board."},
           "tool": {"type": "string", "description": "`tool_missing` only: the command that was not found on the board."},
           "detail": {"type": "string", "description": "The underlying error text, such as SiMa Sentinel's answer or the socket failure."},
-          "generation": {"type": "integer", "description": "Sentinel endpoints only: the board `generation` that answered with the failure, present once the selected board is known, so a client can discard a failure from a board other than the one it asked."},
           "host": {"type": "string", "description": "`host_key_changed` only: the known_hosts name of the board."},
           "expected_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint Insight trusted."},
           "presented_fingerprint": {"type": "string", "description": "`host_key_changed` only: SHA256 fingerprint the board presented."}
@@ -1597,18 +1714,84 @@
           "scan_id": {"type": ["string", "null"], "description": "Opaque identifier for this exact peripheral scan; null before the first scan."},
           "scanned_at": {"type": ["string", "null"], "format": "date-time"},
           "scan_ms": {"type": "integer"},
-          "items": {"type": "array", "items": {"$ref": "#/components/schemas/PeripheralCamera"}},
+          "items": {"type": "array", "items": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCamera"}, {"$ref": "#/components/schemas/PeripheralMicrophone"}], "discriminator": {"propertyName": "kind"}}},
           "issues": {"type": "array", "items": {"type": "object", "properties": {"severity": {"type": "string", "enum": ["info", "warning", "error"]}, "code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
-          "changes": {"type": ["object", "null"], "description": "`added` and `removed` cameras compared with the previous refresh of the same board."},
+          "changes": {"type": ["object", "null"], "description": "`added` and `removed` devices (`id`, `name`) compared with the previous refresh of the same board."},
           "camera_setup": {"oneOf": [{"$ref": "#/components/schemas/PeripheralCameraSetup"}, {"type": "null"}], "description": "The board's camera setup from its device tree, as SiMa Sentinel reports it; null before the first scan or when Sentinel is too old to report it."}
         }
       },
-      "PeripheralCameraSetup": {
+      "PreviewSession": {
         "type": "object",
-        "required": ["model", "overlays"],
+        "description": "An explicit, temporary capture whose JPEG frames Insight relays at `stream_url`.",
+        "required": ["id", "camera_id", "mode", "stream_url", "generation", "state", "camera_fps"],
         "properties": {
-          "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
-          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]}
+          "id": {"type": "string", "description": "Session id; every later call must present it."},
+          "camera_id": {"type": "string"},
+          "mode": {"type": "object", "properties": {"format": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}, "fps": {"type": "number"}}},
+          "stream_url": {"type": "string", "description": "Same-origin path of the session's multipart JPEG stream.", "example": "/api/peripherals/cameras/preview/0f3c2a9e5b7d4c1e8a6f2d0b9c4e7a13/stream"},
+          "generation": {"type": "integer"},
+          "started_at": {"type": "string", "format": "date-time"},
+          "state": {"type": "string", "enum": ["live", "stopped"]},
+          "viewer": {"type": "boolean", "description": "Whether a page already shows this preview's stream, which has one viewer; only `GET /api/peripherals/preview` reports it."},
+          "camera_fps": {"type": ["number", "null"], "description": "The frame rate the camera runs at in this mode, or null while it is unknown. A USB camera's is the mode's rate, which the pipeline requests. A MIPI camera's is the most its sensor delivers in this mode: SiMa Sentinel's `max_fps` (computed at minimum blanking) from a rescan Insight requests after the first frame, when the sensor runs in this mode, so the page shows it as \"up to\"; it stays null when Sentinel does not report it. That rescan records no Insight scan and does not stop the preview.", "example": 66.18}
+        }
+      },
+      "PeripheralMicrophone": {
+        "type": "object",
+        "description": "An ALSA capture device from SiMa Sentinel's catalog. There is no Neat configuration to export for it: Core has no audio input node.",
+        "required": ["id", "kind", "connection", "name", "device", "availability", "capture", "notes", "errors"],
+        "properties": {
+          "id": {"type": "string", "description": "Sentinel's device id, derived from the device's sysfs path and capture PCM, never from a card number. Stable across rescans and card renumbering.", "example": "microphone:alsa:3ff3d77bf791d455"},
+          "kind": {"type": "string", "enum": ["microphone"]},
+          "connection": {"type": "string", "enum": ["usb", "onboard"]},
+          "name": {"type": "string", "description": "USB product string, else Sentinel's name (the ALSA card name)."},
+          "device": {
+            "type": "object",
+            "description": "`card_index`, `card_id`, `card_name`, `card_driver`, `pcm_device`, `pcm_node` (`/dev/snd/pcmC<card>D<device>c`), `alsa_name` (`hw:CARD=<id>,DEV=<device>`), the card's `by_path` and `by_id` links when udev made them, `usb` identity and `part_of` (`id`, `name`) when the same USB device is also a camera item.",
+            "additionalProperties": true
+          },
+          "availability": {"type": "object", "description": "SiMa Sentinel's own availability fact, passed through. Insight does not inspect the board's processes during a scan; a microphone another program has open is reported when its test starts (`409 microphone_in_use`).", "properties": {"state": {"type": "string", "enum": ["available", "in_use", "unknown"]}, "users": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "command": {"type": "string"}}}}, "reason": {"type": ["string", "null"]}}},
+          "capture": {
+            "type": ["array", "null"],
+            "description": "Each capture format, channel count, bit depth and rate set Sentinel reads from the USB-audio `/proc/asound/card<N>/stream<M>` file; `null` for other drivers, whose formats cannot be read without opening the device.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "format": {"type": ["string", "null"], "example": "S24_3LE"},
+                "channels": {"type": ["integer", "null"]},
+                "bits": {"type": ["integer", "null"]},
+                "rates": {"type": "array", "items": {"type": "integer"}, "description": "Discrete sample rates in Hz; empty when `rate_range` is set."},
+                "rate_range": {"type": ["object", "null"], "properties": {"min": {"type": "integer"}, "max": {"type": "integer"}}, "description": "A continuous rate range in Hz."},
+                "channel_map": {"type": ["array", "null"], "items": {"type": "string"}, "example": ["FL", "FR"]}
+              }
+            }
+          },
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "errors": {"type": "array", "items": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}}
+        }
+      },
+      "MicrophoneTestRequest": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string", "description": "A microphone `id` from the last scan."},
+          "seconds": {"type": "integer", "minimum": 1, "maximum": 30, "default": 30, "description": "The longest to record when nobody stops it."}
+        }
+      },
+      "MicrophoneTest": {
+        "type": "object",
+        "required": ["token", "id", "state", "device", "format", "elapsed_ms", "level_dbfs"],
+        "properties": {
+          "token": {"type": "string"},
+          "id": {"type": "string", "description": "The microphone recorded."},
+          "state": {"type": "string", "enum": ["recording", "ready", "failed"]},
+          "device": {"type": "string", "description": "The ALSA device recorded from: Sentinel's selector.", "example": "plughw:CARD=Nano,DEV=0"},
+          "format": {"type": "object", "properties": {"rate": {"type": "integer"}, "channels": {"type": "integer"}, "bits": {"type": "integer", "enum": [16]}, "seconds": {"type": "integer"}}},
+          "elapsed_ms": {"type": "integer", "description": "Audio received so far."},
+          "level_dbfs": {"type": ["number", "null"], "description": "While recording, the peak of the audio just received in dBFS; `null` for silence and once finished."},
+          "level": {"type": "object", "description": "When ready: peak and RMS in dBFS (`null` for digital silence). `silent` is true when the typical level is below -60 dBFS, so a click on open does not count as sound.", "properties": {"peak_dbfs": {"type": ["number", "null"]}, "rms_dbfs": {"type": ["number", "null"]}, "silent": {"type": "boolean"}}},
+          "audio_url": {"type": "string", "description": "When ready: where to fetch the WAV."},
+          "error": {"$ref": "#/components/schemas/BoardError"}
         }
       },
       "SentinelBoard": {
@@ -1726,6 +1909,14 @@
           "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^,]*$", "description": "Unique trace name of at most 80 UTF-8 bytes, without control characters or a comma (`/api/sentinel/compare` separates runs with commas); Sentinel rejects a name a run already uses."},
           "note": {"type": ["string", "null"], "maxLength": 512},
           "tags": {"type": ["array", "null"], "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 80}}
+        }
+      },
+      "PeripheralCameraSetup": {
+        "type": "object",
+        "required": ["model", "overlays"],
+        "properties": {
+          "model": {"type": ["string", "null"], "description": "The board model from its device tree.", "example": "SiMa.ai Modalix SoM 16Gig Board"},
+          "overlays": {"type": "array", "items": {"type": "string"}, "description": "The device-tree overlays the board loads that configure a camera sensor, in U-Boot's order: the entries of SiMa Sentinel's overlay list that some sensor in its `board.supported_sensors` names. Other overlays (PCIe, secure boot) are not listed.", "example": ["modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo"]}
         }
       }
     }

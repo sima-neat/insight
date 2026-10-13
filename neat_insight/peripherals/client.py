@@ -86,6 +86,10 @@ def _positive_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 < value <= U32_MAX
 
 
+def _object_or_none(value) -> bool:
+    return value is None or isinstance(value, dict)
+
+
 def _fraction(value) -> bool:
     return isinstance(value, dict) and _positive_int(value.get("numerator")) and _positive_int(value.get("denominator"))
 
@@ -177,9 +181,9 @@ class PeripheralClient(SentinelSocket):
         self._validate_catalog(payload)
         return payload
 
-    def refresh(self) -> dict:
+    def refresh(self, timeout: float = REFRESH_TIMEOUT_SEC) -> dict:
         """Rescan: Sentinel answers with the catalog of a scan that started after the request."""
-        payload = self._call("POST", "/v1/peripherals/refresh", timeout=REFRESH_TIMEOUT_SEC)
+        payload = self._call("POST", "/v1/peripherals/refresh", timeout=timeout)
         self._validate_catalog(payload)
         return payload
 
@@ -242,6 +246,8 @@ class PeripheralClient(SentinelSocket):
             device_ids.add(device["id"])
             if device["type"] == "camera":
                 self._validate_camera(device)
+            elif device["type"] == "microphone":
+                self._validate_microphone(device)
         for error in payload["errors"]:
             if not isinstance(error, dict) or not all(isinstance(error.get(key), str) and error[key] for key in ("provider", "code", "reason")):
                 raise self._response_error("SiMa Sentinel returned a malformed provider error.", error)
@@ -323,12 +329,84 @@ class PeripheralClient(SentinelSocket):
             if "frame_intervals" in mode and not self._valid_frame_intervals(mode["frame_intervals"]):
                 raise self._response_error("SiMa Sentinel returned malformed frame intervals.", mode)
 
+    def _validate_microphone(self, microphone: dict) -> None:
+        """Sentinel's ALSA capture record; optional identity fields are omitted, never null. `backend` and
+        `connection` must be non-empty strings but are not checked against today's values: a new one is
+        shown, not a reason to reject the whole catalog. `backend` names the provider whose errors apply."""
+        target = microphone.get("capture_target")
+        identity = microphone.get("identity")
+        availability = microphone.get("availability")
+        issues = microphone.get("issues", [])
+        if (
+            not isinstance(microphone.get("name"), str)
+            or not microphone["name"]
+            or not all(isinstance(microphone.get(key), str) and microphone[key] for key in ("backend", "connection"))
+            or not isinstance(target, dict)
+            or not _non_negative_int(target.get("device"))
+            or not all(isinstance(target.get(key, ""), str) for key in ("card_id", "selector"))
+            or not isinstance(identity, dict)
+            or not isinstance(identity.get("stable_key"), str)
+            or not identity["stable_key"]
+            or ("card_index" in identity and not _non_negative_int(identity["card_index"]))
+            or not all(
+                isinstance(identity.get(key, ""), str)
+                for key in ("card_id", "card_name", "card_driver", "pcm_name", "pcm_node", "by_path", "by_id")
+            )
+            or not _object_or_none(identity.get("usb"))
+            or not all(
+                isinstance((identity.get("usb") or {}).get(key, ""), str)
+                for key in ("bus_path", "vendor_id", "product_id", "interface", "manufacturer", "product", "serial")
+            )
+            or not isinstance(microphone.get("modes"), list)
+            or not isinstance(availability, dict)
+            or availability.get("state") not in {"available", "in_use", "unknown"}
+            or not all(_non_negative_int(availability.get(key, 0)) for key in ("subdevices", "subdevices_available"))
+            # Both counts come from the same /proc/asound info file; more free than exist is impossible.
+            or (
+                "subdevices" in availability
+                and availability.get("subdevices_available", 0) > availability["subdevices"]
+            )
+            or not isinstance(issues, list)
+        ):
+            raise self._response_error("SiMa Sentinel returned malformed microphone details.", microphone)
+        for mode in microphone["modes"]:
+            if not self._valid_microphone_mode(mode):
+                raise self._response_error("SiMa Sentinel returned a malformed microphone mode.", mode)
+        for issue in issues:
+            if not isinstance(issue, dict) or not all(
+                isinstance(issue.get(key), str) and issue[key] for key in ("code", "reason")
+            ):
+                raise self._response_error("SiMa Sentinel returned a malformed microphone issue.", issue)
+
+    @staticmethod
+    def _valid_microphone_mode(mode) -> bool:
+        """One capture mode: a format, optional counts, and discrete `rates_hz` or one `rate_range_hz`, not both."""
+        if not isinstance(mode, dict) or not isinstance(mode.get("format"), str) or not mode["format"]:
+            return False
+        if "rates_hz" in mode and "rate_range_hz" in mode:
+            return False
+        rates, span = mode.get("rates_hz", [1]), mode.get("rate_range_hz", {"min": 1, "max": 1})
+        return (
+            all(_non_negative_int(mode.get(key, 0)) for key in ("interface", "altset"))
+            and all(_positive_int(mode.get(key, 1)) for key in ("channels", "sample_bits"))
+            and isinstance(rates, list)
+            and bool(rates)
+            and all(_positive_int(rate) for rate in rates)
+            and isinstance(span, dict)
+            and _positive_int(span.get("min"))
+            and _positive_int(span.get("max"))
+            and span["min"] <= span["max"]
+            and isinstance(mode.get("channel_map", []), list)
+            and all(isinstance(channel, str) for channel in mode.get("channel_map", []))
+        )
+
     @staticmethod
     def _valid_frame_intervals(value) -> bool:
-        """Each entry is one probed size with the list of intervals the device advertises for it; every
-        fraction the snapshot divides by must be positive."""
+        """Each entry is one probed size with the list of intervals the device advertises for it; the size must
+        be one the snapshot can match to its mode, and every fraction the snapshot divides by must be positive."""
         return isinstance(value, list) and all(
             isinstance(entry, dict)
+            and all(_positive_int(entry.get(key)) for key in ("width", "height"))
             and isinstance(entry.get("intervals"), list)
             and all(_valid_interval(interval) for interval in entry["intervals"])
             for entry in value

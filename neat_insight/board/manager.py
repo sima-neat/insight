@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import threading
 from datetime import datetime, timezone
@@ -40,14 +41,50 @@ class _ReportingTransport:
         self._generation = generation
         self._transport = transport
 
-    def exec(self, argv, *, timeout, stdin=None):
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
         try:
-            result = self._transport.exec(argv, timeout=timeout, stdin=stdin)
+            # Streaming arguments only when a caller uses them (the microphone test), so a transport
+            # that only runs commands still works.
+            extra = {key: value for key, value in (("on_stdout", on_stdout), ("cancel_event", cancel_event)) if value is not None}
+            result = self._transport.exec(argv, timeout=timeout, stdin=stdin, **extra)
         except BoardError as exc:
             self._manager._record(self._generation, error=exc)
             raise
         self._manager.require_generation(self._generation)
         return result
+
+    def stream(self, argv, *, timeout):
+        try:
+            stream = self._transport.stream(argv, timeout=timeout)
+        except BoardError as exc:
+            self._manager._record(self._generation, error=exc)
+            raise
+        try:
+            self._manager.require_generation(self._generation)
+        except BoardError:
+            stream.close()
+            raise
+        return _ReportingStream(self._manager, self._generation, stream)
+
+
+class _ReportingStream:
+    """A board stream whose read failures are recorded like `exec`'s: an SSH session lost while a preview
+    streams marks the board unreachable instead of leaving it reported as connected."""
+
+    def __init__(self, manager: "BoardManager", generation: int, stream):
+        self._manager = manager
+        self._generation = generation
+        self._stream = stream
+
+    def read(self, timeout):
+        try:
+            return self._stream.read(timeout)
+        except BoardError as exc:
+            self._manager._record(self._generation, error=exc)
+            raise
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
 
 
 class BoardSession:
@@ -107,6 +144,10 @@ class BoardManager:
         self._session: Optional[BoardSession] = None
         self._status = {"state": "unknown", "checked_at": None, "error": None}
         self._board: Optional[dict] = None
+        # Entered around every request that may change the target, with a callable that tells whether it
+        # will: a feature that runs on the board (the camera preview) stops there first and keeps new work
+        # off the old board until the change is done.
+        self.target_change_guard = lambda changes: contextlib.nullcontext()
 
     def target(self) -> Optional[BoardTarget]:
         return resolve_target(self._store.load(), self.on_board, sdk_env_target())
@@ -125,20 +166,44 @@ class BoardManager:
             return self._session
 
     def select(self, host, port, user) -> None:
-        with self._lock:
-            self._store.save(validate_ssh_target(host, port, user))
-            self._replace_session(self.target())
+        saved = validate_ssh_target(host, port, user)
+        with self.target_change_guard(lambda: self._changes_target(saved)):
+            with self._lock:
+                self._store.save(saved)
+                self._replace_session(self.target())
 
     def reset(self) -> None:
-        with self._lock:
-            self._store.clear()
-            self._replace_session(self.target())
+        with self.target_change_guard(lambda: self._changes_target(None)):
+            with self._lock:
+                self._store.clear()
+                self._replace_session(self.target())
 
-    def test(self) -> None:
-        self.session().identity()
+    def _changes_target(self, saved: Optional[dict]) -> bool:
+        return resolve_target(saved, self.on_board, sdk_env_target()) != self.target()
+
+    def _presents(self, fingerprint: str) -> bool:
+        """Whether the selected board presented this host key, so trusting it will change the target."""
+        try:
+            key = getattr(self.session().raw_transport, "presented_host_key", None)
+        except BoardError:
+            return False
+        return key is not None and key_fingerprint(key) == fingerprint
+
+    def test(self) -> dict:
+        """Read the selected board's identity; return the state of that same board, or refuse if it changed."""
+        session = self.session()
+        try:
+            session.identity()
+        except BoardError:
+            # A failure from a board that is no longer selected is a stale result, not that board's error.
+            session.require_current()
+            raise
+        with self._lock:
+            session.require_current()
+            return self.state()
 
     def trust_host_key(self, fingerprint: str) -> None:
-        with self._lock:
+        with self.target_change_guard(lambda: self._presents(fingerprint)), self._lock:
             transport = self.session().raw_transport
             key = getattr(transport, "presented_host_key", None)
             if key is None or key_fingerprint(key) != fingerprint:

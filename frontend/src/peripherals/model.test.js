@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
+  PREVIEW_IDLE,
+  USB_PREVIEW_FORMATS,
+  adoptedSelection,
   apiError,
+  captureModes,
   blockedFormatSummary,
   boardCameraSetup,
   boardIndicator,
@@ -15,6 +20,7 @@ import {
   connectionPill,
   changeSummary,
   createBoardSync,
+  createShellInfoSync,
   createFocusReturn,
   defaultTargetText,
   deviceTabs,
@@ -24,23 +30,54 @@ import {
   formatRelativeTime,
   groupOptions,
   groupCameras,
+  groupMicrophones,
   initialBoardForm,
   isSnapshotStale,
+  microphoneSubtitle,
+  micLevelNotice,
+  micStartMayHaveRun,
+  micTestAfterFailedStart,
+  micTestToResume,
+  micTestAction,
+  micTestErrorAction,
+  MIC_TEST_IDLE,
+  nextMicTestState,
+  formatClock,
+  meterSegments,
+  segmentTone,
   modeLabel,
+  nextPreviewState,
   normalizeError,
   optionTier,
   overlayName,
+  previewBlock,
+  previewErrorInfo,
+  previewNeedsRestart,
+  previewStatusEvent,
+  previewStatusInfo,
+  previewStreamUrl,
   rateLabel,
   resolveCameraId,
   resolveDeviceKind,
+  resolveMicrophoneId,
   resolveSelection,
+  restartSelection,
+  runPreviewStart,
   safeHref,
   sameSelection,
+  selectionTier,
+  sessionMatches,
+  sessionToAdopt,
+  sampleRateLabel,
   sizeOptions,
   sortIssues,
   sourceLabel,
+  streamEndedEvent,
+  startSuperseded,
+  streamErrorEvent,
   tierInfo,
-  validateBoardForm
+  validateBoardForm,
+  watchPreview
 } from './model.js'
 
 const ISP_SIZE = 'The ISP cannot output this size.'
@@ -135,6 +172,50 @@ const usb = {
   errors: []
 }
 
+// The Blue Yeti Nano item exactly as the real DevKit scan returned it.
+const yeti = {
+  id: 'microphone:alsa:3ff3d77bf791d455',
+  kind: 'microphone',
+  connection: 'usb',
+  name: 'Yeti Nano',
+  device: {
+    card_index: 0,
+    card_id: 'Nano',
+    card_name: 'Yeti Nano',
+    card_driver: 'USB-Audio',
+    pcm_device: 0,
+    pcm_node: '/dev/snd/pcmC0D0c',
+    alsa_name: 'hw:CARD=Nano,DEV=0',
+    by_path: '/dev/snd/by-path/platform-7ff0000000.pci-pci-0003:01:00.0-usb-0:3.1:1.0',
+    by_id: '/dev/snd/by-id/usb-Blue_Microphones_Yeti_Nano_2127SG00CBA8_888-000441040606-00',
+    usb: {
+      vendor_id: 'b58e',
+      product_id: '0005',
+      manufacturer: 'Blue Microphones',
+      product: 'Yeti Nano',
+      serial: '2127SG00CBA8_888-000441040606',
+      bus_path: '1-3.1',
+      speed_mbps: 12
+    }
+  },
+  availability: available,
+  capture: [{ format: 'S24_3LE', channels: 2, bits: 24, rates: [32000, 44100, 48000], rate_range: null, channel_map: ['FL', 'FR'] }],
+  notes: [],
+  errors: []
+}
+
+const onboardMic = {
+  id: 'microphone:alsa:0a1b2c3d4e5f6071',
+  kind: 'microphone',
+  connection: 'onboard',
+  name: 'sima-audio',
+  device: { card_index: 1, card_id: 'simaaudio', card_name: 'sima-audio', card_driver: 'simple-card', pcm_device: 0, pcm_node: '/dev/snd/pcmC1D0c', alsa_name: 'hw:CARD=simaaudio,DEV=0' },
+  availability: available,
+  capture: null,
+  notes: ['Capture formats cannot be read without opening the device.'],
+  errors: []
+}
+
 const snapshot = {
   board: { label: 'sima@192.168.2.2', source: 'sdk-env', hostname: 'modalix', machine: 'aarch64', build_version: '2.0.0', fingerprint: 'SHA256:abc' },
   generation: 3,
@@ -145,7 +226,7 @@ const snapshot = {
     libcamerasrc: { present: true, external_buffer_mode: true, buffer_count: true },
     availability_method: 'proc-user'
   },
-  items: [usb, imx477, { id: 'mic:0', kind: 'microphone', connection: 'usb', name: 'USB mic' }, imx568, inUse],
+  items: [usb, imx477, yeti, imx568, inUse],
   issues: [
     { severity: 'info', code: 'no_usb_power', message: 'USB hub reports low power.', hint: 'Use a powered hub.' },
     { severity: 'error', code: 'tool_missing', message: 'v4l2-ctl is missing.', hint: 'Install v4l-utils on the board.' },
@@ -307,6 +388,22 @@ test('a subtitle never repeats what the name already says', () => {
   assert.equal(cameraSubtitle({ name: 'cam', model: 'imx477' }), 'imx477')
 })
 
+test('changing the mode restarts a preview, but only the one it belongs to', () => {
+  const mode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+  const live = { status: 'live', session: { id: 's1', camera_id: 'cam-a', mode } }
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, fps: 60 }), true, 'a different rate needs a restart')
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, width: 1280, height: 720 }), true)
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode, format: 'RGB888' }), true)
+  // Re-selecting the mode it is already streaming must not interrupt the picture.
+  assert.equal(previewNeedsRestart(live, 'cam-a', { ...mode }), false)
+  // A preview belongs to one camera; another camera's menus must not touch it.
+  assert.equal(previewNeedsRestart(live, 'cam-b', { ...mode, fps: 60 }), false)
+  assert.equal(previewNeedsRestart({ status: 'starting', session: live.session }, 'cam-a', { ...mode, fps: 60 }), true)
+  assert.equal(previewNeedsRestart({ status: 'idle', session: null }, 'cam-a', { ...mode, fps: 60 }), false)
+  assert.equal(previewNeedsRestart({ status: 'stopping', session: live.session }, 'cam-a', { ...mode, fps: 60 }), false)
+  assert.equal(previewNeedsRestart(live, 'cam-a', null), false)
+})
+
 test('issues sort by severity and changes read as sentences', () => {
   assert.deepEqual(sortIssues(snapshot.issues).map((i) => i.severity), ['error', 'warning', 'info'])
   assert.deepEqual(changeSummary(snapshot.changes), ['Disconnected since last refresh: imx219', 'New: HD Webcam C270'])
@@ -377,7 +474,7 @@ test('only http(s) links are rendered', () => {
   assert.equal(safeHref(undefined), null)
 })
 
-// --- #126 addendum: board indicator, device sub-tabs, declutter ------------
+// --- #126 addendum: board indicator, device sub-tabs, declutter, preview ----
 
 test('the masthead board indicator collapses board state into a label and a short pill', () => {
   assert.deepEqual(boardIndicator(null).state.short, 'Loading…')
@@ -406,15 +503,16 @@ test('the masthead board indicator collapses board state into a label and a shor
   assert.equal(boardIndicator({ target: { label: 'This board' }, status: null }).state.short, 'Not checked')
 })
 
-test('device sub-tabs come from the snapshot kinds and keep unbuilt kinds disabled', () => {
+test('device sub-tabs come from the snapshot kinds; microphones are selectable, unbuilt kinds disabled', () => {
   const tabs = deviceTabs(snapshot.items)
   assert.deepEqual(tabs.map((t) => t.id), ['camera', 'microphone', 'lidar'])
   assert.deepEqual(tabs.map((t) => t.label), ['Cameras', 'Microphones', 'LiDAR'])
   assert.equal(tabs[0].count, 4)
   assert.equal(tabs[0].disabled, false)
   assert.equal(tabs[1].count, 1, 'the microphone in the snapshot is counted')
-  assert.equal(tabs[1].disabled, true)
-  assert.match(tabs[1].note, /cannot show microphones yet/)
+  assert.equal(tabs[1].supported, true)
+  assert.equal(tabs[1].disabled, false)
+  assert.equal(tabs[1].note, '')
   assert.equal(tabs[2].count, 0)
   assert.equal(tabs[2].note, 'Not supported yet')
 })
@@ -437,7 +535,7 @@ test('each rail icon carries a count bubble, an accessible name and the reason i
   assert.deepEqual(tabs.map((t) => t.name), ['Cameras, 4 devices', 'Microphones, 1 device', 'LiDAR, 0 devices'])
   assert.equal(tabs[0].note, '', 'a selectable kind needs no explanation')
   assert.equal(tabs[0].tooltip, 'Cameras, 4 devices')
-  assert.equal(tabs[1].tooltip, 'Microphones — 1 device detected; Insight cannot show microphones yet.')
+  assert.equal(tabs[1].tooltip, 'Microphones, 1 device')
   assert.equal(tabs[2].tooltip, 'LiDAR — Not supported yet')
   const one = deviceTabs([{ kind: 'camera' }])[0]
   assert.equal(one.name, 'Cameras, 1 device')
@@ -462,7 +560,8 @@ test('a supported kind with nothing detected is greyed but says why', () => {
 test('only an enabled sub-tab can be selected', () => {
   const tabs = deviceTabs(snapshot.items)
   assert.equal(resolveDeviceKind(tabs, 'camera'), 'camera')
-  assert.equal(resolveDeviceKind(tabs, 'microphone'), 'camera', 'disabled kinds fall back')
+  assert.equal(resolveDeviceKind(tabs, 'microphone'), 'microphone')
+  assert.equal(resolveDeviceKind(tabs, 'lidar'), 'camera', 'disabled kinds fall back')
   assert.equal(resolveDeviceKind(tabs, 'nonsense'), 'camera')
   assert.equal(resolveDeviceKind([], 'camera'), null)
 })
@@ -633,6 +732,598 @@ test('a mode menu groups its entries as Available and Unsupported, and the pill 
   assert.deepEqual(groupOptions([]), [])
 })
 
+test('the selected mode keeps the tier the board reported for it', () => {
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1920, height: 1080, fps: 30 }), 'available')
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 1280, height: 720, fps: 60 }), 'unsupported')
+  assert.equal(selectionTier(usb, { format: 'MJPG', width: 1280, height: 720, fps: 30 }), 'unsupported')
+  assert.equal(selectionTier(imx477, { format: 'NV12', width: 640, height: 480, fps: 30 }), '')
+  assert.equal(selectionTier(imx477, null), '')
+})
+
+const mipiMode = { format: 'NV12', width: 1920, height: 1080, fps: 30 }
+const boardTarget = { mode: 'ssh', label: 'sima@192.168.2.2' }
+const liveSession = {
+  id: '8f1c',
+  camera_id: imx477.id,
+  mode: mipiMode,
+  stream_url: '/api/peripherals/cameras/preview/8f1c/stream',
+  generation: 3,
+  state: 'live'
+}
+
+test('Start preview is blocked with the reason for every state that forbids it', () => {
+  assert.deepEqual(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget }), { blocked: false, reason: '' })
+
+  assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: null }).reason, /No board is selected/)
+  assert.match(previewBlock({ camera: null, selection: null, target: boardTarget }).reason, /Select a camera/)
+  assert.match(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, stale: true }).reason, /board changed/)
+
+  // A USB camera has no camera overlay, so its modes are Unsupported, and it previews any listed mode.
+  assert.deepEqual(previewBlock({ camera: usb, selection: { format: 'MJPG', width: 1280, height: 720, fps: 30 }, target: boardTarget }), { blocked: false, reason: '' })
+  assert.match(previewBlock({ camera: usb, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
+  // A camera the scan says is in use is not blocked up front: the start reports a busy camera itself.
+  assert.deepEqual(previewBlock({ camera: { ...usb, availability: inUse.availability }, selection: { format: 'YUYV', width: 640, height: 480, fps: 15 }, target: boardTarget }), { blocked: false, reason: '' })
+
+  // Only the formats the backend previews: MJPG and the raw FourCCs GStreamer converts.
+  for (const fmt of ['MJPG', 'YUYV', 'GREY']) {
+    assert.equal(previewBlock({ camera: usb, selection: { format: fmt, width: 640, height: 480, fps: 30 }, target: boardTarget }).blocked, false, fmt)
+  }
+  const h264 = previewBlock({ camera: usb, selection: { format: 'H264', width: 1280, height: 720, fps: 30 }, target: boardTarget })
+  assert.equal(h264.blocked, true)
+  assert.match(h264.reason, /not H264\. Choose another format\.$/)
+  assert.ok(Object.isFrozen(USB_PREVIEW_FORMATS))
+
+  assert.match(previewBlock({ camera: imx477, selection: null, target: boardTarget }).reason, /no mode Insight can start/)
+
+  const unsupported = { ...imx477, formats: [format('NV12', 'NV12', false, support('unsupported', ISP_SIZE), [size(1920, 1080, [30, 'unsupported'])])] }
+  assert.match(previewBlock({ camera: unsupported, selection: mipiMode, target: boardTarget }).reason, /is Unsupported on this board/)
+  // The backend previews Available modes only: an Unsupported rate, or one with no state, must not leave Start enabled.
+  for (const tier of ['', 'unsupported']) {
+    const unjudged = { ...imx477, formats: [format('NV12', 'NV12', true, support('available'), [size(1920, 1080, [30, tier])])] }
+    const block = previewBlock({ camera: unjudged, selection: mipiMode, target: boardTarget })
+    assert.equal(block.blocked, true, `tier ${JSON.stringify(tier)}`)
+    assert.match(block.reason, /is Unsupported on this board\. Choose an Available mode\.$/)
+  }
+
+  // The scan's availability never blocks Start; a busy camera is reported by the start itself.
+  assert.deepEqual(previewBlock({ camera: inUse, selection: mipiMode, target: boardTarget }), { blocked: false, reason: '' })
+
+  const elsewhere = previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: { ...liveSession, camera_id: imx568.id } })
+  assert.match(elsewhere.reason, /already running on mipi:econ-imx568-fpga 5-0042/)
+  assert.equal(previewBlock({ camera: imx477, selection: mipiMode, target: boardTarget, session: liveSession }).blocked, false)
+})
+
+test('preview transitions: start, live, stop', () => {
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  assert.deepEqual(starting, { status: 'starting', session: null, error: null })
+
+  const pending = nextPreviewState(starting, { type: 'session', session: { ...liveSession, state: 'starting' } })
+  assert.equal(pending.status, 'starting')
+  assert.equal(pending.session.id, '8f1c')
+
+  const live = nextPreviewState(pending, { type: 'session', session: liveSession })
+  assert.equal(live.status, 'live')
+  assert.equal(previewStatusInfo(live).label, 'Live')
+
+  const stopping = nextPreviewState(live, { type: 'stopping', for: '8f1c' })
+  assert.equal(stopping.status, 'stopping')
+  assert.equal(stopping.session.id, '8f1c', 'the session stays on screen while the board stops')
+  assert.deepEqual(nextPreviewState(stopping, { type: 'stopped', for: '8f1c' }), PREVIEW_IDLE)
+
+  // A session reported as "stopped" ends the preview too.
+  assert.deepEqual(nextPreviewState(live, { type: 'session', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
+})
+
+test('preview transitions: a start that was never adopted still releases the page', () => {
+  // Selecting another camera mid-start: the response belongs to the old camera, so the page stops
+  // that session instead of adopting it. Those events carry an id the page never held.
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  assert.equal(starting.status, 'starting')
+  assert.equal(starting.session, null)
+  const stopping = nextPreviewState(starting, { type: 'stopping', for: 'never-adopted' })
+  assert.equal(stopping.status, 'stopping')
+  const stopped = nextPreviewState(stopping, { type: 'stopped', for: 'never-adopted' })
+  assert.deepEqual(stopped, PREVIEW_IDLE)
+})
+
+test('preview transitions: a late event from the previous preview leaves a new start alone', () => {
+  // The previous preview's stream check answers after the user started the next one.
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  assert.equal(nextPreviewState(starting, streamEndedEvent('previous')), starting)
+  assert.equal(nextPreviewState(starting, { type: 'failed', for: 'previous', error: { message: 'boom' } }), starting)
+  assert.equal(nextPreviewState(starting, { type: 'elsewhere', for: 'previous', session: liveSession }), starting)
+  // The new start's answer is still shown.
+  assert.equal(nextPreviewState(starting, { type: 'session', session: liveSession }).status, 'live')
+})
+
+test('preview transitions: a stale session id never disturbs a newer one', () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  assert.equal(nextPreviewState(live, streamEndedEvent('old-id')), live)
+  assert.equal(nextPreviewState(live, { type: 'stopped', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, { type: 'stopping', for: 'old-id' }), live)
+  assert.equal(nextPreviewState(live, { type: 'failed', for: 'old-id', error: { message: 'boom' } }), live)
+  assert.equal(nextPreviewState(live, { type: 'session', session: { ...liveSession, id: 'other' } }), live)
+
+  const ended = nextPreviewState(live, streamEndedEvent('8f1c'))
+  assert.equal(ended.status, 'idle')
+  assert.equal(ended.session, null)
+  assert.equal(ended.error.message, 'The preview stream stopped.')
+  assert.ok(previewErrorInfo(ended.error).hint, 'a stopped stream always offers a way back')
+})
+
+test("a live preview's status read ends it once the backend no longer runs this session", async () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  const reads = []
+  const reply = (body) => async (url) => {
+    reads.push(url)
+    return body
+  }
+
+  // Still the backend's current session: nothing changes.
+  assert.equal(await previewStatusEvent(reply({ session: liveSession }), '8f1c'), null)
+  assert.deepEqual(reads, ['/api/peripherals/preview'])
+
+  // No session, another session, or this one stopped: the stream is over.
+  for (const body of [{ session: null }, { session: { ...liveSession, id: 'other' } }, { session: { ...liveSession, state: 'stopped' } }]) {
+    const event = await previewStatusEvent(reply(body), '8f1c')
+    assert.deepEqual(event, streamEndedEvent('8f1c'), JSON.stringify(body))
+    const ended = nextPreviewState(live, event)
+    assert.equal(ended.status, 'idle')
+    assert.equal(ended.error.code, 'stream_ended')
+  }
+
+  // A read that fails proves nothing about the stream.
+  assert.equal(await previewStatusEvent(async () => { throw new Error('network') }, '8f1c'), null)
+})
+
+test('a restart starts the mode selected once its stop finished, not the one selected before it', () => {
+  const b = { id: 'camera:a', format: 'MJPG', width: 640, height: 480, fps: 30 }
+  const c = { ...b, width: 1280, height: 720 }
+  const requested = { cameraId: 'camera:a', generation: 3 }
+  // Mode C was picked while the stop for the switch to B ran.
+  assert.deepEqual(restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: c }), c)
+  // Another camera or board meanwhile: nothing is started.
+  assert.equal(restartSelection(requested, { cameraId: 'camera:b', generation: 3, selection: { ...c, id: 'camera:b' } }), null)
+  assert.equal(restartSelection(requested, { cameraId: 'camera:a', generation: 4, selection: c }), null)
+  assert.equal(restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: null }), null)
+})
+
+test('every step of a start that resumes after an await acts only for the view read at that step', async () => {
+  const a = { id: 'camera:a', format: 'MJPG', width: 640, height: 480, fps: 30 }
+  const b = { ...a, width: 1280, height: 720 }
+  const c = { ...a, width: 1920, height: 1080 }
+  const sessionFor = (mode) => ({ id: 's1', camera_id: 'camera:a', generation: 3, state: 'live', mode: { format: mode.format, width: mode.width, height: mode.height, fps: mode.fps } })
+  // A page whose selection the test changes while a request is in flight.
+  function page(selection) {
+    const log = []
+    const current = { cameraId: 'camera:a', generation: 3, selection }
+    return {
+      log,
+      current,
+      deps: {
+        dispatch: (event) => log.push(['dispatch', event.type]),
+        adopt: (session) => log.push(['adopt', session.id]),
+        start: (mode) => log.push(['start', mode.width]),
+        stop: async (session) => { log.push(['stop', session.id]); return true },
+        view: () => ({ ...current }),
+        normalize: (err) => err
+      }
+    }
+  }
+  const requested = { cameraId: 'camera:a', generation: 3, mode: a }
+
+  // A refused start looks up the preview another tab runs; B is picked during that look-up, so the
+  // other tab's session is not adopted (which would switch the menus back) and the pane resets.
+  let p = page(a)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => { throw { code: 'preview_active', message: 'busy' } },
+    lookup: async () => { p.current.selection = b; return sessionFor(a) }
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'reset']])
+
+  // Unchanged during the look-up: the running preview is adopted.
+  p = page(a)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => { throw { code: 'preview_active', message: 'busy' } },
+    lookup: async () => sessionFor(a)
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['adopt', 's1']])
+
+  // A start for A answers after B was picked, so it is stopped; C is picked during that stop, so C is
+  // started, not B.
+  p = page(b)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => ({ session: sessionFor(a) }),
+    stop: async (session) => { p.log.push(['stop', session.id]); p.current.selection = c; return true }
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['stop', 's1'], ['start', 1920]])
+
+  // The camera changed during that stop: nothing is started.
+  p = page(b)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => ({ session: sessionFor(a) }),
+    stop: async () => { p.current.cameraId = 'camera:b'; p.current.selection = { ...c, id: 'camera:b' }; return true }
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'reset']])
+
+  // Nothing changed: the session is shown.
+  p = page(a)
+  await runPreviewStart(requested, { ...p.deps, post: async () => ({ session: sessionFor(a) }) })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'session']])
+})
+
+test('a start is superseded once the camera, board, or mode it was sent for is no longer the one shown', () => {
+  const mode = { format: 'MJPG', width: 640, height: 480, fps: 30 }
+  const requested = { cameraId: 'camera:a', generation: 3, mode }
+  const latest = { cameraId: 'camera:a', generation: 3, selection: { id: 'camera:a', ...mode } }
+  assert.equal(startSuperseded(requested, latest), false)
+  assert.equal(startSuperseded(requested, { ...latest, cameraId: 'camera:b' }), true)
+  assert.equal(startSuperseded(requested, { ...latest, generation: 4 }), true)
+  assert.equal(startSuperseded(requested, { ...latest, selection: { ...latest.selection, fps: 15 } }), true)
+  assert.equal(startSuperseded(requested, { ...latest, selection: null }), true)
+  // A board without a generation (none reported yet) compares on camera and mode alone.
+  assert.equal(startSuperseded({ ...requested, generation: undefined }, latest), false)
+})
+
+test('a stream refused because another tab claimed it first shows the preview there, not as ended', async () => {
+  // Both tabs found the session unclaimed and went live; the backend gave the stream to the other tab.
+  const live = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: { ...liveSession, viewer: false } })
+  assert.equal(live.status, 'live')
+  const reply = (body) => async () => body
+
+  const claimed = { ...liveSession, viewer: true }
+  const refused = await streamErrorEvent(reply({ session: claimed }), '8f1c')
+  const shown = nextPreviewState(live, refused)
+  assert.equal(shown.status, 'elsewhere')
+  assert.equal(shown.error, null)
+  assert.equal(shown.session.id, '8f1c')
+
+  // Nobody holds it, it is gone, another session runs, or the read failed: the stream is over.
+  for (const request of [
+    reply({ session: { ...liveSession, viewer: false } }),
+    reply({ session: null }),
+    reply({ session: { ...claimed, id: 'other' } }),
+    reply({ session: { ...claimed, state: 'stopped' } }),
+    async () => { throw new Error('network') }
+  ]) {
+    const event = await streamErrorEvent(request, '8f1c')
+    assert.deepEqual(event, streamEndedEvent('8f1c'))
+    assert.equal(nextPreviewState(live, event).error.code, 'stream_ended')
+  }
+
+  // Only a live pane moves: a Stop in progress or a newer session is left alone.
+  const stopping = nextPreviewState(live, { type: 'stopping', for: '8f1c' })
+  assert.equal(nextPreviewState(stopping, refused), stopping)
+  assert.equal(nextPreviewState(live, { ...refused, for: 'older' }), live)
+})
+
+test('a watched live preview is read until the backend no longer runs it, and cancelling stops the reads', async () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const replies = [{ session: liveSession }, { session: liveSession }, { session: null }]
+  const reads = []
+  const requestJson = async (url) => {
+    reads.push(url)
+    return replies.shift() || { session: null }
+  }
+  const events = []
+  watchPreview(requestJson, '8f1c', (event) => events.push(event), 1)
+  const deadline = Date.now() + 2000
+  while (!events.length && Date.now() < deadline) await sleep(5)
+  assert.deepEqual(events, [streamEndedEvent('8f1c')])
+  assert.equal(reads.length, 3)
+  await sleep(20)
+  assert.equal(reads.length, 3, 'reading stops once the preview ended')
+
+  let count = 0
+  const cancel = watchPreview(async () => {
+    count += 1
+    return { session: null }
+  }, '8f1c', (event) => events.push(event), 1)
+  cancel()
+  await sleep(20)
+  assert.equal(count, 0)
+  assert.equal(events.length, 1)
+
+  // Cancelled while a read is in flight: its answer is dropped.
+  let answer
+  const slow = watchPreview(() => new Promise((resolve) => { answer = resolve }), '8f1c', (event) => events.push(event), 1)
+  while (!answer) await sleep(1)
+  slow()
+  answer({ session: null })
+  await sleep(10)
+  assert.equal(events.length, 1)
+})
+
+test("a live preview's status read passes on the camera's rate once the backend knows it", async () => {
+  const live = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'session', session: liveSession })
+  const reply = (body) => async () => body
+  // Unknown (a MIPI sensor before Sentinel answers, or one it could not read): nothing to pass on.
+  assert.equal(await previewStatusEvent(reply({ session: { ...liveSession, camera_fps: null } }), '8f1c'), null)
+  const event = await previewStatusEvent(reply({ session: { ...liveSession, camera_fps: 66.18 } }), '8f1c')
+  assert.deepEqual(event, { type: 'camera-fps', for: '8f1c', fps: 66.18 })
+  const known = nextPreviewState(live, event)
+  assert.equal(known.status, 'live')
+  assert.equal(known.session.camera_fps, 66.18)
+  assert.equal(known.session.stream_url, liveSession.stream_url)
+  assert.equal(nextPreviewState(known, event), known, 'an unchanged rate keeps the state')
+  assert.equal(nextPreviewState(live, { ...event, for: 'other' }), live, "another session's rate is ignored")
+  assert.equal(nextPreviewState(PREVIEW_IDLE, event), PREVIEW_IDLE)
+
+  // Reading goes on after the rate arrives, until the preview ends.
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const replies = [{ session: liveSession }, { session: { ...liveSession, camera_fps: 66.18 } }, { session: null }]
+  const events = []
+  watchPreview(async () => replies.shift() || { session: null }, '8f1c', (e) => events.push(e), 1)
+  const deadline = Date.now() + 2000
+  while (events.length < 2 && Date.now() < deadline) await sleep(5)
+  assert.deepEqual(events, [event, streamEndedEvent('8f1c')])
+})
+
+test('preview transitions: failures, reset, and adopting an existing session', () => {
+  const starting = nextPreviewState(PREVIEW_IDLE, { type: 'start' })
+  const failed = nextPreviewState(starting, { type: 'failed', error: { message: 'Camera in use', code: 'camera_in_use' } })
+  assert.equal(failed.status, 'error')
+  assert.equal(previewStatusInfo(failed).label, 'Could not start')
+  // A late response from the failed attempt must not put the pane back in "live".
+  assert.equal(nextPreviewState(failed, { type: 'session', session: liveSession }), failed)
+  assert.deepEqual(nextPreviewState(failed, { type: 'reset' }), PREVIEW_IDLE)
+
+  const adopted = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: liveSession })
+  assert.equal(adopted.status, 'live')
+  assert.equal(adopted.session.stream_url, liveSession.stream_url)
+  assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: { ...liveSession, state: 'stopped' } }), PREVIEW_IDLE)
+  assert.deepEqual(nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: null }), PREVIEW_IDLE)
+
+  // A session another page already shows (its one viewer) is not opened here: the pane offers Stop.
+  const shown = { ...liveSession, viewer: true }
+  const elsewhere = nextPreviewState(PREVIEW_IDLE, { type: 'adopt', session: shown })
+  assert.equal(elsewhere.status, 'elsewhere')
+  assert.equal(nextPreviewState(elsewhere, { type: 'session', session: shown }).status, 'elsewhere')
+  assert.deepEqual(nextPreviewState(elsewhere, streamEndedEvent(liveSession.id)), PREVIEW_IDLE)
+  assert.equal(nextPreviewState(elsewhere, { type: 'stopping', for: liveSession.id }).status, 'stopping')
+
+  const live = nextPreviewState(starting, { type: 'session', session: liveSession })
+  // Stop closes the stream, so its end can arrive before the stop's own answer: that is the stop, not a failure,
+  // and the stop's answer afterwards changes nothing.
+  const stoppingLive = nextPreviewState(live, { type: 'stopping', for: liveSession.id })
+  const endedByStop = nextPreviewState(stoppingLive, streamEndedEvent(liveSession.id))
+  assert.deepEqual(endedByStop, PREVIEW_IDLE)
+  assert.deepEqual(nextPreviewState(endedByStop, { type: 'stopped', for: liveSession.id }), PREVIEW_IDLE)
+  const stopping = nextPreviewState(starting, { type: 'stopping', for: liveSession.id, session: liveSession })
+  const stopFailed = nextPreviewState(stopping, { type: 'stop-failed', for: liveSession.id, error: { message: 'SSH failed' } })
+  assert.equal(stopFailed.status, 'live')
+  assert.equal(stopFailed.session.id, liveSession.id)
+  assert.equal(stopFailed.error.message, 'SSH failed')
+  assert.equal(nextPreviewState(live, { type: 'nonsense' }), live)
+  assert.equal(nextPreviewState(undefined, { type: 'nonsense' }), PREVIEW_IDLE)
+})
+
+test('a session belongs to the camera and board generation it was started for', () => {
+  assert.equal(sessionMatches(liveSession, imx477.id, 3), true)
+  assert.equal(sessionMatches(liveSession, imx477.id, 3, liveSession.mode), true)
+  assert.equal(sessionMatches(liveSession, imx477.id, 3, { ...liveSession.mode, fps: 60 }), false)
+  assert.equal(sessionMatches(liveSession, imx477.id, 4), false)
+  assert.equal(sessionMatches(liveSession, imx568.id, 3), false)
+  assert.equal(sessionMatches(liveSession, imx477.id), true)
+  assert.equal(sessionMatches(null, imx477.id, 3), false)
+})
+
+test('every preview failure carries a recovery action and nothing destructive', () => {
+  assert.equal(previewErrorInfo(null), null)
+
+  const busy = previewErrorInfo(normalizeError(apiError({
+    error: 'The camera is already open.',
+    code: 'camera_in_use',
+    hint: 'gst-launch-1.0 (pid 812) has /dev/video3 open.'
+  }, 409)))
+  assert.equal(busy.hint, 'gst-launch-1.0 (pid 812) has /dev/video3 open.')
+  assert.match(busy.action, /Insight never stops it for you/)
+
+  const other = previewErrorInfo(normalizeError(apiError({
+    error: 'A preview is already running.',
+    code: 'preview_active',
+    session: { camera_id: imx568.id }
+  }, 409)))
+  assert.equal(other.otherCamera, imx568.id)
+  assert.match(other.action, /Stop the preview that is already running/)
+
+  // The backend puts camera_id at the top level of the 409 body.
+  const flat = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'preview_active', camera_id: usb.id }, 409)))
+  assert.equal(flat.otherCamera, usb.id)
+
+  assert.match(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'invalid_request' }, 400))).action, /^Choose a mode Insight lists as Available; /)
+
+  const failed = previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'command_failed', detail: 'gst: no element' }, 502)))
+  assert.equal(failed.detail, 'gst: no element')
+  assert.equal(previewErrorInfo(normalizeError(apiError({ error: 'x', code: 'unreachable' }, 502))).action, '')
+})
+
+test('the preview stream is only loaded from its same-origin API path', () => {
+  assert.equal(previewStreamUrl(liveSession), liveSession.stream_url)
+  for (const url of ['https://evil.example/api/peripherals/cameras/preview/8f1c/stream', 'javascript:alert(1)',
+    '/api/peripherals/cameras/preview/../stop/stream', '//evil.example/api/peripherals/cameras/preview/8f1c/stream', '', undefined]) {
+    assert.equal(previewStreamUrl({ ...liveSession, stream_url: url }), null, String(url))
+  }
+  assert.equal(previewStreamUrl(null), null)
+})
+
+test('an adopted preview selects the camera and the mode it streams, not the defaults', () => {
+  const session = { id: 's1', camera_id: imx477.id, mode: { format: 'NV12', width: 1920, height: 1080, fps: 60 }, state: 'live' }
+  const wanted = adoptedSelection(session)
+  assert.deepEqual(wanted, { id: imx477.id, format: 'NV12', width: 1920, height: 1080, fps: 60 })
+  assert.deepEqual(resolveSelection(imx477, wanted), session.mode)
+  assert.equal(adoptedSelection({ id: 's2', mode: session.mode }), null)
+})
+
+test('a start refused because another tab started a preview adopts that preview', () => {
+  const session = { id: 's1', camera_id: imx477.id, mode: { format: 'NV12', width: 1920, height: 1080, fps: 60 }, state: 'live' }
+  const active = { code: 'preview_active', message: 'A preview is already running.' }
+  assert.equal(sessionToAdopt(active, session), session)
+  const adopted = nextPreviewState(nextPreviewState(PREVIEW_IDLE, { type: 'start' }), { type: 'adopt', session: sessionToAdopt(active, session) })
+  assert.deepEqual(adopted, { status: 'live', session, error: null }, 'the pane shows its video and Stop')
+  // Nothing to adopt: the other preview already stopped, or the start failed for another reason.
+  assert.equal(sessionToAdopt(active, null), null)
+  assert.equal(sessionToAdopt(active, { ...session, state: 'stopped' }), null)
+  assert.equal(sessionToAdopt({ code: 'camera_in_use' }, session), null)
+})
+
+test('with no microphone detected the kind stays greyed and says so', () => {
+  const [, mics] = deviceTabs([imx477])
+  assert.equal(mics.supported, true)
+  assert.equal(mics.disabled, true)
+  assert.equal(mics.note, 'No microphones detected')
+  assert.equal(mics.tooltip, 'Microphones — No microphones detected')
+  assert.equal(resolveDeviceKind(deviceTabs([imx477]), 'microphone'), 'camera')
+  assert.equal(resolveDeviceKind(deviceTabs([yeti]), 'camera'), 'microphone', 'a board with only a mic opens on it')
+})
+
+test('microphones are grouped USB first, then on-board, and cameras are left out', () => {
+  const groups = groupMicrophones([onboardMic, imx477, yeti])
+  assert.deepEqual(groups.map((g) => g.label), ['USB (ALSA)', 'On-board (ALSA)'])
+  assert.deepEqual(groups.map((g) => g.items.map((m) => m.id)), [[yeti.id], [onboardMic.id]])
+  assert.deepEqual(groupCameras([yeti]), [], 'a microphone never shows in the camera list')
+})
+
+test('the selected microphone survives refreshes and removals', () => {
+  const items = { items: [yeti, onboardMic], changes: { added: [], removed: [{ id: 'usb:0c76:161f:1-3.2:c0', name: 'USB PnP Audio Device' }] } }
+  assert.equal(resolveMicrophoneId(items, null), yeti.id)
+  assert.equal(resolveMicrophoneId(items, onboardMic.id), onboardMic.id)
+  assert.equal(resolveMicrophoneId(items, 'usb:0c76:161f:1-3.2:c0'), 'usb:0c76:161f:1-3.2:c0')
+  assert.equal(resolveMicrophoneId(items, imx477.id), yeti.id, 'a camera id is not a microphone selection')
+})
+
+test('the real Yeti Nano reads as capture tags', () => {
+  assert.equal(microphoneSubtitle(yeti), '', 'the ALSA name is not shown under the title')
+  assert.deepEqual(captureModes(yeti), [{ key: '0-S24_3LE-2-24', badges: ['S24_3LE', '2 ch', '24-bit', '32 · 44.1 · 48 kHz'] }])
+})
+
+test('capture tags cover mono, several formats, single rates and continuous ranges', () => {
+  const modes = captureModes({
+    capture: [
+      { format: 'S32_LE', channels: 2, bits: 24, rates: [44100, 48000, 88200, 96000], rate_range: null, channel_map: ['FL', 'FR'] },
+      { format: 'S16_LE', channels: 1, bits: 16, rates: [16000], rate_range: null, channel_map: ['MONO'] },
+      { format: 'S24_3LE', channels: 1, bits: 24, rates: [], rate_range: { min: 8000, max: 48000 }, channel_map: null },
+      { format: 'S16_LE', channels: 1, bits: 16, rates: [11025], rate_range: { min: 11025, max: 96000 }, channel_map: null }
+    ]
+  })
+  assert.deepEqual(modes.map((mode) => mode.badges), [
+    ['S32_LE', '2 ch', '24-bit', '44.1 · 48 · 88.2 · 96 kHz'],
+    ['S16_LE', '1 ch', '16-bit', '16 kHz'],
+    ['S24_3LE', '1 ch', '24-bit', '8–48 kHz'],
+    ['S16_LE', '1 ch', '16-bit', '11.025–96 kHz']
+  ], 'a continuous range stays one range')
+  assert.deepEqual(captureModes({ capture: [{ format: null, channels: null, bits: null, rates: [], rate_range: null }] })[0].badges, [],
+    'a field the kernel did not print is left out, not shown empty')
+  assert.equal(new Set(modes.map((m) => m.key)).size, 4, 'every combination keeps its own row')
+  assert.equal(sampleRateLabel(22050), '22.05 kHz')
+})
+
+test('a card without readable capabilities omits its capture modes', () => {
+  assert.equal(captureModes(onboardMic), null)
+  assert.deepEqual(captureModes({ capture: [] }), [])
+  const bare = {
+    ...yeti,
+    name: 'USB Device 0x1234:0x5678',
+    device: { card_index: 3, pcm_device: 0, pcm_node: '/dev/snd/pcmC3D0c', usb: { vendor_id: '1234', product_id: '5678', manufacturer: null, product: null, serial: null, bus_path: '1-2', speed_mbps: null } }
+  }
+  assert.equal(microphoneSubtitle(bare), '')
+})
+
+test('a webcam microphone names the camera it is part of', () => {
+  const webcamMic = { ...yeti, device: { ...yeti.device, alsa_name: 'hw:CARD=C920,DEV=0', part_of: { id: usb.id, name: 'HD Pro Webcam C920' } } }
+  assert.equal(microphoneSubtitle(webcamMic), 'Part of HD Pro Webcam C920')
+})
+
+test('microphone test: record, play back, replay, and never a late answer out of turn', () => {
+  const recording = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  assert.equal(recording.status, 'recording')
+  const test = { token: 'a', audio_url: '/x.wav', level: { silent: false } }
+  const playing = nextMicTestState(recording, { type: 'recorded', test })
+  assert.deepEqual(playing, { status: 'playing', test, error: null }, 'playback starts by itself')
+  const done = nextMicTestState(playing, { type: 'played' })
+  assert.equal(done.status, 'done')
+  assert.equal(nextMicTestState(done, { type: 'replay' }).status, 'playing')
+  assert.equal(nextMicTestState(recording, { type: 'replay' }), recording, 'nothing to replay while recording')
+  const failed = nextMicTestState(recording, { type: 'failed', error: { code: 'microphone_in_use' } })
+  assert.equal(failed.status, 'error')
+  assert.equal(nextMicTestState(MIC_TEST_IDLE, { type: 'recorded', test }), MIC_TEST_IDLE, 'an answer nobody is waiting for is dropped')
+  assert.equal(nextMicTestState(done, { type: 'failed', error: {} }), done)
+  assert.equal(nextMicTestState(done, { type: 'record' }).status, 'recording', 'test again from a finished test')
+  assert.deepEqual(nextMicTestState(failed, { type: 'reset' }), MIC_TEST_IDLE)
+  assert.equal(nextMicTestState(undefined, { type: 'nonsense' }), MIC_TEST_IDLE)
+})
+
+test('microphone test: a detail mounted mid-test takes up the board\'s test for its own microphone', () => {
+  const recording = { token: 't', id: yeti.id, state: 'recording', elapsed_ms: 1200, level_dbfs: -20 }
+  const ready = { token: 't', id: yeti.id, state: 'ready', audio_url: '/t.wav', level: { silent: false } }
+  assert.equal(micTestToResume(yeti.id, recording), recording)
+  assert.equal(micTestToResume(yeti.id, ready), ready, 'a recording finished while another mic was shown is kept')
+  assert.equal(micTestToResume(onboardMic.id, recording), null, 'another microphone\'s test is not shown here')
+  assert.equal(micTestToResume(yeti.id, { ...recording, state: 'failed' }), null)
+  assert.equal(micTestToResume(yeti.id, null), null)
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: recording }), { status: 'recording', test: null, error: null })
+  assert.deepEqual(nextMicTestState(MIC_TEST_IDLE, { type: 'resume', test: ready }), { status: 'done', test: ready, error: null })
+  const started = nextMicTestState(MIC_TEST_IDLE, { type: 'record' })
+  assert.equal(nextMicTestState(started, { type: 'resume', test: ready }), started, 'a test started here is not replaced')
+})
+
+test('microphone test: a start whose answer was lost takes up the recording it began', () => {
+  const recording = { token: 'new', id: yeti.id, state: 'recording', elapsed_ms: 400, level_dbfs: -30 }
+  const ready = { ...recording, state: 'ready', audio_url: '/new.wav' }
+  const lost = { code: 'network', message: 'Could not reach the Insight server.' }
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, recording, null), recording)
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: 'test_running' }, recording, 'old'), recording, 'a retry refused by its own recording')
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: '', message: 'Request failed: 504' }, ready, null), ready, 'a gateway error without an API body')
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, { ...ready, token: 'old' }, 'old'), null, 'the recording shown before Test is not new')
+  assert.equal(micTestAfterFailedStart(onboardMic.id, { code: 'test_running' }, recording, null), null, 'another microphone is recording')
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, { ...recording, state: 'failed' }, null), null)
+  assert.equal(micTestAfterFailedStart(yeti.id, lost, null, null), null)
+  assert.equal(micTestAfterFailedStart(yeti.id, { code: 'microphone_in_use' }, recording, null), null, 'the backend answered: its error stands')
+  assert.deepEqual([lost, { code: 'test_running' }, { code: '' }, { code: 'not_found' }].map(micStartMayHaveRun), [true, true, true, false], 'only these read the current test')
+})
+
+test('microphone test: the scan never disables Test; the start request checks the board', () => {
+  assert.equal(micTestAction('idle', false).disabled, false)
+  const source = readFileSync(new URL('./MicrophoneDetail.jsx', import.meta.url), 'utf8')
+  assert.match(source, /disabled=\{button\.disabled\}/, 'only the button state disables Test, not the scan')
+})
+
+test('the level meter lights green, then amber, then red, from -50 dBFS to full scale', () => {
+  assert.equal(meterSegments(null, 20), 0)
+  assert.equal(meterSegments(-80, 20), 0)
+  assert.equal(meterSegments(-50, 20), 0)
+  assert.equal(meterSegments(-25, 20), 10)
+  assert.equal(meterSegments(0, 20), 20)
+  assert.equal(meterSegments(6, 20), 20)
+  assert.deepEqual([0, 13, 14, 17, 18, 19].map((i) => segmentTone(i, 20)), ['low', 'low', 'mid', 'mid', 'high', 'high'])
+})
+
+test('microphone test: it only speaks up about silence', () => {
+  assert.match(micLevelNotice({ silent: true, peak_dbfs: null }), /Nothing was picked up/)
+  assert.equal(micLevelNotice({ silent: false, peak_dbfs: -9 }), '')
+  assert.equal(micLevelNotice(null), '')
+  assert.match(micTestErrorAction({ code: 'microphone_in_use' }), /never stops it/)
+  assert.match(micTestErrorAction({ code: 'tool_missing' }), /alsa-utils/)
+  assert.equal(micTestErrorAction({ code: 'command_failed', hint: 'See detail.' }), 'See detail.')
+  assert.equal(formatClock(0), '0:00')
+  assert.equal(formatClock(4.9), '0:04')
+  assert.equal(formatClock(75), '1:15')
+})
+
+test('microphone test: one button records, stops the recording, then stops the playback', () => {
+  assert.deepEqual(micTestAction('idle', false), { label: 'Test microphone', action: 'record', disabled: false })
+  assert.deepEqual(micTestAction('recording', false), { label: 'Stop recording', action: 'stop', disabled: false },
+    'Stop is available the moment recording starts')
+  assert.deepEqual(micTestAction('recording', true), { label: 'Stopping…', action: 'stop', disabled: true })
+  assert.deepEqual(micTestAction('playing', false), { label: 'Stop playing', action: 'stop-playing', disabled: false })
+  assert.equal(micTestAction('done', false).action, 'record')
+  assert.equal(micTestAction('error', false).action, 'record')
+})
+
 const cameraSetup = {
   model: 'SiMa.ai Modalix SoM 16Gig Board',
   overlays: ['modalix-som-waveshare-ARDU-IMX477-1CAM.dtbo']
@@ -658,4 +1349,28 @@ test('the camera setup belongs to the board that was scanned', () => {
   assert.equal(boardCameraSetup({ generation: 3 }, { ...snapshot, camera_setup: null }), null, 'an older Sentinel')
   assert.equal(boardCameraSetup(null, snapshot), null)
   assert.equal(boardCameraSetup({ generation: 3 }, null), null)
+})
+
+// Codex (5878ec6): shell details read for an earlier board answered last and overwrote the newer board's.
+test('shell details read for an earlier board cannot overwrite the newer board', async () => {
+  const requests = []
+  const shown = []
+  const sync = createShellInfoSync({
+    fetchShell: () => {
+      const request = deferred()
+      requests.push(request)
+      return request.promise
+    },
+    onShell: (info) => shown.push(info)
+  })
+  const first = sync.load()
+  const second = sync.load()
+  requests[1].resolve({ available: true, target: 'B' })
+  requests[0].resolve({ available: false, target: 'A' })
+  await Promise.all([first, second])
+  assert.deepEqual(shown, [{ available: true, target: 'B' }])
+  const failed = sync.load()
+  requests[2].reject(new Error('offline'))
+  await failed
+  assert.deepEqual(shown.at(-1), null)
 })

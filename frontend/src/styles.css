@@ -411,6 +411,9 @@ select:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .periph-preview-frame,
+  .periph-spinner,
+  .periph-live-dot,
   .toast,
   .upload-progress-card,
   .upload-progress-bar.indeterminate {
@@ -3672,6 +3675,133 @@ button:disabled {
   margin: 8px 0 0;
 }
 
+/* Microphone capture: one segmented badge row per format/channels/bits/rates combination. */
+.periph-capture {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.periph-capture .hint {
+  margin: 0;
+}
+
+.periph-capture-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+}
+
+.periph-capture-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.periph-capture-badges > span + span {
+  border-left: 1px solid var(--line);
+}
+
+/* Microphone test: record on the board, play back here. */
+.periph-mic-test {
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-mic-test-head {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-mic-test-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-mic-test .hint,
+.periph-mic-test .periph-callout {
+  margin: 0;
+}
+
+.periph-mic-warning {
+  color: #8f2f45;
+}
+
+/* Button, live level meter, caption: one row, as a video call's microphone test lays it out. */
+.periph-mic-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 150px;
+  align-items: center;
+  gap: 12px;
+}
+
+.periph-mic-button {
+  min-width: 148px;
+}
+
+.periph-meter {
+  height: 14px;
+  display: flex;
+  gap: 3px;
+}
+
+.periph-meter > span {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.periph-meter > span.on.low {
+  background: #1f9d55;
+}
+
+.periph-meter > span.on.mid {
+  background: #e0a100;
+}
+
+.periph-meter > span.on.high {
+  background: var(--danger);
+}
+
+.periph-mic-caption {
+  justify-self: end;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .periph-mic-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .periph-mic-caption {
+    justify-self: start;
+  }
+}
+
 @media (max-width: 980px) {
   .periph-grid {
     grid-template-columns: 1fr;
@@ -3905,6 +4035,134 @@ button:disabled {
   margin-top: 4px;
 }
 
+/* Camera preview */
+.periph-preview {
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.periph-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.periph-preview-head h4 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #40596d;
+}
+
+.periph-preview .hint,
+.periph-preview .periph-callout {
+  margin: 0;
+}
+
+.periph-preview-reason {
+  color: #8f2f45;
+}
+
+/* The live video: the one element that takes the full width, with its chip and Stop overlaid. */
+.periph-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #0e1923;
+  overflow: hidden;
+}
+
+.periph-preview-progress {
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.periph-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: periph-spin 0.9s linear infinite;
+}
+
+.periph-preview-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The stream keeps the camera's aspect ratio, which need not be 16:9. */
+  object-fit: contain;
+  animation: periph-stage-in 200ms ease both;
+}
+
+.periph-stage-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.periph-stage-chip .periph-mode-badges {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  gap: 8px;
+}
+
+.periph-stage-chip .periph-mode-badges > span {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  padding: 0;
+}
+
+.periph-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff5c6c;
+  animation: periph-blink 1.2s steps(2, start) infinite;
+}
+
+.periph-stage-stop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.periph-stage-stop:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+@keyframes periph-stage-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes periph-spin { to { transform: rotate(360deg) } }
+@keyframes periph-blink { to { visibility: hidden } }
+
+.periph-inline-code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 /* Phones: the rail becomes a row of icons above the panel (RAIL_ROW_QUERY in PeripheralsView.jsx).
    The tip anchors to the whole row, so it spans the row's width and never runs off-screen. */
 @media (max-width: 640px) {
@@ -3932,6 +4190,32 @@ button:disabled {
     max-width: none;
   }
 }
+
+/* Preview mode: format, size and rate as one segmented tag group. */
+.periph-mode-badges {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #274155;
+  white-space: nowrap;
+}
+
+.periph-mode-badges > span {
+  padding: 4px 10px;
+  line-height: 1.2;
+}
+
+.periph-mode-badges > span + span {
+  border-left: 1px solid var(--line);
+}
+
+/* Stats page (Insight PR #138) */
 
 /* Stats (Sentinel) view. It reuses the Peripherals panel, callout and pill styles and
    adds only what telemetry needs: metric cards, sparklines and the run tables. */

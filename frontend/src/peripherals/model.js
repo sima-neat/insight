@@ -10,19 +10,25 @@ const CONNECTIONS = [
   { id: 'usb', label: 'USB' }
 ]
 
+// Microphones are ALSA capture devices; anything that is not USB audio is on the board itself.
+const MIC_CONNECTIONS = [
+  { id: 'usb', label: 'USB (ALSA)' },
+  { id: 'onboard', label: 'On-board (ALSA)' }
+]
+
 const SOURCES = { 'on-board': 'On this board', 'sdk-env': 'SDK DevKit', manual: 'Manual' }
 
-// Device kinds Insight knows a name and an icon for. Only "camera" has a view;
-// the rest are listed so the shape of the page does not change when the backend
-// starts reporting them (contract: build nothing for other kinds yet). A kind
-// the backend invents gets the generic "device" icon.
+// Device kinds Insight knows a name and an icon for. Cameras and microphones
+// have a view; the rest are listed so the shape of the page does not change when
+// the backend starts reporting them (contract: build nothing for other kinds
+// yet). A kind the backend invents gets the generic "device" icon.
 const DEVICE_KINDS = [
   { id: 'camera', label: 'Cameras', icon: 'camera' },
   { id: 'microphone', label: 'Microphones', icon: 'microphone' },
   { id: 'lidar', label: 'LiDAR', icon: 'lidar' }
 ]
 
-const SUPPORTED_KINDS = new Set(['camera'])
+const SUPPORTED_KINDS = new Set(['camera', 'microphone'])
 
 const SEVERITY = {
   error: { label: 'Error', tone: 'periph-danger', rank: 0 },
@@ -93,11 +99,19 @@ export function defaultTargetText(defaults) {
   return ''
 }
 
-export function groupCameras(items) {
-  const cameras = (items || []).filter((item) => item?.kind === 'camera')
-  return CONNECTIONS
-    .map((c) => ({ ...c, items: cameras.filter((item) => item.connection === c.id) }))
+function groupKind(items, kind, connections) {
+  const devices = (items || []).filter((item) => item?.kind === kind)
+  return connections
+    .map((c) => ({ ...c, items: devices.filter((item) => item.connection === c.id) }))
     .filter((group) => group.items.length)
+}
+
+export function groupCameras(items) {
+  return groupKind(items, 'camera', CONNECTIONS)
+}
+
+export function groupMicrophones(items) {
+  return groupKind(items, 'microphone', MIC_CONNECTIONS)
 }
 
 function kindLabel(kind) {
@@ -176,6 +190,143 @@ export function cameraSubtitle(camera) {
   // The name already carries the model for a MIPI camera ("imx477 5-001a"), so repeating it says nothing.
   const model = camera?.model && !(camera?.name || '').includes(camera.model) ? camera.model : null
   return [model, deviceId !== camera?.name && deviceId].filter(Boolean).join(' · ')
+}
+
+// The subtitle only ties a webcam's or headset's microphone
+// to the camera item the same USB device produced.
+export function microphoneSubtitle(mic) {
+  const name = mic?.device?.part_of?.name
+  return name ? `Part of ${name}` : ''
+}
+
+export function sampleRateLabel(hz) {
+  const khz = Number(hz) / 1000
+  return `${Number.isInteger(khz) ? khz : Number(khz.toFixed(3))} kHz`
+}
+
+function rateList(rates) {
+  const khz = rates.map((hz) => sampleRateLabel(hz).replace(' kHz', ''))
+  return khz.length ? `${khz.join(' · ')} kHz` : ''
+}
+
+// One segmented row per distinct capture combination the device reports, e.g.
+// S24_3LE | 2 ch | 24-bit | 32 · 44.1 · 48 kHz. A continuous rate range stays a range ("8–48 kHz"):
+// expanding it into a list would invent rates the device never named.
+export function captureModes(mic) {
+  if (!Array.isArray(mic?.capture)) return null
+  return mic.capture.map((mode, index) => {
+    const rates = mode.rate_range
+      ? `${sampleRateLabel(mode.rate_range.min).replace(' kHz', '')}–${sampleRateLabel(mode.rate_range.max)}`
+      : rateList(mode.rates || [])
+    const badges = [
+      mode.format || '',
+      Number.isFinite(mode.channels) ? `${mode.channels} ch` : '',
+      Number.isFinite(mode.bits) ? `${mode.bits}-bit` : '',
+      rates
+    ].filter(Boolean)
+    return { key: `${index}-${mode.format}-${mode.channels}-${mode.bits}`, badges }
+  })
+}
+
+// --- Microphone test -------------------------------------------------------
+// Like a video call's "Test microphone": record on the board until Stop (or the backend's cap) while
+// a meter shows the live level, then play it back here with the meter following the playback.
+
+export const MIC_TEST_IDLE = { status: 'idle', test: null, error: null }
+// The meter spans -50..0 dBFS: a quiet room lights a segment or two, speech most of the bar.
+export const METER_FLOOR_DBFS = -50
+
+export function nextMicTestState(current, event) {
+  const state = current || MIC_TEST_IDLE
+  switch (event?.type) {
+    case 'record':
+      return { status: 'recording', test: null, error: null }
+    case 'recorded':
+      return state.status === 'recording' ? { status: 'playing', test: event.test, error: null } : state
+    case 'failed':
+      return state.status === 'recording' ? { status: 'error', test: null, error: event.error } : state
+    case 'played': // the recording ended, or Stop playing
+      return state.status === 'playing' ? { ...state, status: 'done' } : state
+    case 'replay':
+      return state.status === 'done' ? { ...state, status: 'playing' } : state
+    case 'resume': // a test the backend was already running or finished for this microphone
+      if (state.status !== 'idle' || !event.test) return state
+      return event.test.state === 'recording'
+        ? { status: 'recording', test: null, error: null }
+        : { status: 'done', test: event.test, error: null }
+    case 'reset':
+      return MIC_TEST_IDLE
+    default:
+      return state
+  }
+}
+
+// How many of `count` meter segments a level lights.
+export function meterSegments(levelDbfs, count) {
+  if (levelDbfs === null || levelDbfs === undefined || !Number.isFinite(Number(levelDbfs))) return 0
+  const fraction = (Number(levelDbfs) - METER_FLOOR_DBFS) / -METER_FLOOR_DBFS
+  return Math.round(Math.max(0, Math.min(1, fraction)) * count)
+}
+
+// Green for most of the bar, amber near the top, red at the end, as a level meter reads.
+export function segmentTone(index, count) {
+  if (index < Math.round(count * 0.7)) return 'low'
+  if (index < Math.round(count * 0.9)) return 'mid'
+  return 'high'
+}
+
+// The backend's current test when it belongs to this microphone and is still recording or has a
+// recording to replay. A detail mounted after it started (another microphone was selected in
+// between) takes it up instead of looking idle while the board records.
+export function micTestToResume(micId, test) {
+  if (!test || test.id !== micId) return null
+  return test.state === 'recording' || test.state === 'ready' ? test : null
+}
+
+// A start that failed without the backend's answer (the connection dropped, or a gateway replied
+// without an API body) may still have started recording, and a retry is then refused with
+// `test_running`. The backend's current test for this microphone is taken up when it is not the
+// one this detail already held (`heldToken`); otherwise the start's error stands.
+export function micStartMayHaveRun(error) {
+  return ['network', 'test_running', ''].includes(error?.code ?? '')
+}
+
+export function micTestAfterFailedStart(micId, error, test, heldToken) {
+  if (!micStartMayHaveRun(error)) return null
+  return test?.token === heldToken ? null : micTestToResume(micId, test)
+}
+
+// What to say about a finished recording: only when it needs attention.
+export function micLevelNotice(level) {
+  if (!level) return ''
+  if (level.silent) return 'Nothing was picked up. Check the microphone\'s mute button and gain, then test again.'
+  return ''
+}
+
+export function micTestErrorAction(error) {
+  switch (error?.code) {
+    case 'microphone_in_use':
+      return 'Stop the application that is recording from it, then test again. Insight never stops it for you.'
+    case 'not_found':
+    case 'stale_snapshot':
+      return 'Refresh, then test again.'
+    case 'tool_missing':
+      return 'Install alsa-utils on the board, then test again.'
+    default:
+      return error?.hint || ''
+  }
+}
+
+// The one button's label and what pressing it does, for each state.
+export function micTestAction(status, stopping) {
+  if (status === 'recording') return { label: stopping ? 'Stopping…' : 'Stop recording', action: 'stop', disabled: stopping }
+  if (status === 'playing') return { label: 'Stop playing', action: 'stop-playing', disabled: false }
+  return { label: 'Test microphone', action: 'record', disabled: false }
+}
+
+export function formatClock(seconds) {
+  const whole = Math.max(0, Math.floor(Number(seconds) || 0))
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
 function rank(tier) {
@@ -314,6 +465,12 @@ export function blockedFormatSummary(options) {
   return `${countLabel(blocked.length, 'format')} cannot be used (${blocked.map((option) => option.value).join(', ')})`
 }
 
+export function selectionTier(camera, selection) {
+  if (!selection) return ''
+  const size = findSize(findFormat(camera, selection.format), selection.width, selection.height)
+  return findFps(size, selection.fps)?.tier || ''
+}
+
 export function resolveSelection(camera, wanted) {
   const formats = (camera?.formats || []).filter(isSelectable)
   if (!formats.length) return null
@@ -335,11 +492,83 @@ export function sameSelection(a, b) {
   return a.format === b.format && a.width === b.width && a.height === b.height && Number(a.fps) === Number(b.fps)
 }
 
-export function resolveCameraId(snapshot, previousId) {
-  const cameras = groupCameras(snapshot?.items).flatMap((group) => group.items)
-  if (previousId && cameras.some((c) => c.id === previousId)) return previousId
+// Whether a start the page sent no longer matches what the page shows: the camera, the board, or the
+// mode changed while the board was starting it. Its outcome then belongs to none of them.
+export function startSuperseded(requested, latest) {
+  if (requested.cameraId !== latest.cameraId) return true
+  const { generation: sent } = requested
+  const { generation: now } = latest
+  if (sent != null && now != null && Number(sent) !== Number(now)) return true
+  return !sameSelection(requested.mode, latest.selection)
+}
+
+// The mode to start once a restart's stop finished: the mode selected now, which the user may have
+// changed again while the stop ran. None when the camera or the board changed meanwhile.
+export function restartSelection(requested, latest) {
+  if (requested.cameraId !== latest.cameraId) return null
+  const { generation: sent } = requested
+  const { generation: now } = latest
+  if (sent != null && now != null && Number(sent) !== Number(now)) return null
+  return latest.selection?.id === requested.cameraId ? latest.selection : null
+}
+
+// One start of a preview, from its POST to what the pane shows. The user can change the camera, the board,
+// or the mode while any request is in flight, so every step that resumes after an await reads `view()`
+// again and acts only for what is selected then. `deps`: post(mode) -> response, lookup() -> the running
+// session or null, stop(session) -> whether it stopped, start(mode), adopt(session), dispatch(event),
+// view() -> { cameraId, generation, selection }, and normalize(error).
+export async function runPreviewStart(requested, deps) {
+  deps.dispatch({ type: 'start' })
+  let data
+  try {
+    data = await deps.post(requested.mode)
+  } catch (err) {
+    // Like a start that succeeded too late: once superseded, its failure says nothing about what the
+    // pane now shows.
+    if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' })
+    const error = deps.normalize(err)
+    // Another tab started a preview after this page loaded: show that one, with its Stop.
+    const running = error.code === 'preview_active' ? await deps.lookup() : null
+    if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' })
+    const existing = sessionToAdopt(error, running)
+    return existing ? deps.adopt(existing) : deps.dispatch({ type: 'failed', error })
+  }
+  // A session for a camera, board, or mode no longer shown would label one camera's video as another's,
+  // or disagree with the menus: it is stopped instead.
+  const latest = deps.view()
+  if (sessionMatches(data.session, latest.cameraId, latest.generation, latest.selection)) {
+    return deps.dispatch({ type: 'session', session: data.session })
+  }
+  if (!(await deps.stop(data.session))) return undefined
+  // The mode may have changed again while the stop ran: start the one selected now, or nothing when
+  // the camera or board changed.
+  const next = restartSelection(requested, deps.view())
+  return next ? deps.start(next) : deps.dispatch({ type: 'reset' })
+}
+
+// A preview streams the mode it was started with. When the menus move, the picture and the menus
+// disagree until it is restarted on the new one.
+export function previewNeedsRestart(state, cameraId, next) {
+  const session = state?.session
+  if (!next || !session) return false
+  if (state.status !== 'starting' && state.status !== 'live') return false
+  if (session.camera_id !== cameraId) return false
+  return !sameSelection(session.mode, next)
+}
+
+function resolveId(groups, snapshot, previousId) {
+  const devices = groups.flatMap((group) => group.items)
+  if (previousId && devices.some((d) => d.id === previousId)) return previousId
   if (previousId && snapshot?.changes?.removed?.some((r) => r.id === previousId)) return previousId
-  return cameras[0]?.id || null
+  return devices[0]?.id || null
+}
+
+export function resolveCameraId(snapshot, previousId) {
+  return resolveId(groupCameras(snapshot?.items), snapshot, previousId)
+}
+
+export function resolveMicrophoneId(snapshot, previousId) {
+  return resolveId(groupMicrophones(snapshot?.items), snapshot, previousId)
 }
 
 export function isSnapshotStale(board, snapshot) {
@@ -504,4 +733,257 @@ export function createFocusReturn() {
       return target
     }
   }
+}
+
+// --- Camera preview -------------------------------------------------------
+// The preview is a small state machine driven entirely by the backend session
+// object. It lives here so the transitions can be tested without a DOM.
+
+export const PREVIEW_IDLE = Object.freeze({ status: 'idle', session: null, error: null })
+
+const PREVIEW_STATUS = {
+  idle: { label: 'Not running', tone: '' },
+  starting: { label: 'Starting…', tone: 'periph-info' },
+  live: { label: 'Live', tone: 'ok' },
+  elsewhere: { label: 'In another tab', tone: 'periph-info' },
+  stopping: { label: 'Stopping…', tone: 'periph-info' },
+  error: { label: 'Could not start', tone: 'periph-danger' }
+}
+
+const PREVIEW_ERROR_ACTIONS = {
+  camera_in_use: 'Stop that process on the board yourself, then start the preview again. Insight never stops it for you.',
+  preview_active: 'Stop the preview that is already running, then start this one.',
+  invalid_request: 'Choose a mode Insight lists as Available; this one was rejected.',
+  mode_adjusted: 'Pick the size libcamera streams at. The board lists the requested size, but its libcamera pipeline does not output it.',
+  command_failed: 'The preview pipeline could not start on the board. The board output below says why.',
+  stale_snapshot: 'The board changed after this scan. Refresh, then start the preview again.'
+}
+
+export function previewStatusInfo(state) {
+  return PREVIEW_STATUS[state?.status] || PREVIEW_STATUS.idle
+}
+
+// The session's stream, only as the same-origin API path Insight serves it on; null for anything else.
+export function previewStreamUrl(session) {
+  const url = String(session?.stream_url || '')
+  return /^\/api\/peripherals\/cameras\/preview\/[A-Za-z0-9_-]+\/stream$/.test(url) ? url : null
+}
+
+// The pane's event for a stream that ended: the backend stops a preview whose stream ends, so the
+// preview is over, with the reason shown.
+export function streamEndedEvent(sessionId) {
+  return {
+    type: 'ended',
+    for: sessionId,
+    error: {
+      message: 'The preview stream stopped.',
+      code: 'stream_ended',
+      hint: 'Start the preview again. If it keeps stopping, check the camera connection on the board.',
+      details: {}
+    }
+  }
+}
+
+// The pane's event for an <img> that could not load the stream. The backend gives a stream one
+// viewer and refuses the next (preview_active): two pages that both found the preview unclaimed both
+// try, and the one refused shows it as running in another tab while the backend still runs it with a
+// viewer. Otherwise the stream is over.
+export async function streamErrorEvent(request, sessionId) {
+  let current = null
+  try {
+    current = (await request('/api/peripherals/preview'))?.session
+  } catch {
+    current = null
+  }
+  if (current?.id === sessionId && current.state !== 'stopped' && current.viewer) {
+    return { type: 'elsewhere', for: sessionId, session: current }
+  }
+  return streamEndedEvent(sessionId)
+}
+
+// How often a live preview's page reads GET /api/peripherals/preview, which never contacts the board.
+export const PREVIEW_POLL_MS = 2500
+
+// One read of the backend's preview for a live session: the ended event when the backend no longer
+// runs it; while it does, the camera's rate once the backend knows it (a MIPI sensor's arrives after
+// the first frame), else null. A failed read proves nothing, so it ends nothing.
+export async function previewStatusEvent(request, sessionId) {
+  let current
+  try {
+    current = (await request('/api/peripherals/preview'))?.session
+  } catch {
+    return null
+  }
+  if (current?.id !== sessionId || current.state === 'stopped') return streamEndedEvent(sessionId)
+  return rateLabel(current.camera_fps) ? { type: 'camera-fps', for: sessionId, fps: current.camera_fps } : null
+}
+
+// An <img> fires no event when a multipart stream ends cleanly (end of the board stream, the stall
+// timeout, a refresh or board change from elsewhere), so a live preview is read every `interval` ms
+// until the backend no longer runs it; then `onEvent` gets the ended event. A read that finds the
+// camera's rate passes it on as a camera-fps event and reading goes on. Returns the cancel function.
+export function watchPreview(request, sessionId, onEvent, interval = PREVIEW_POLL_MS) {
+  let cancelled = false
+  let timer = null
+  async function check() {
+    const event = await previewStatusEvent(request, sessionId)
+    if (cancelled) return
+    if (event) onEvent(event)
+    if (event?.type !== 'ended') timer = setTimeout(check, interval)
+  }
+  timer = setTimeout(check, interval)
+  return () => {
+    cancelled = true
+    clearTimeout(timer)
+  }
+}
+
+// What the menus show for a preview the page adopts (reload, another tab): its camera and the mode
+// it streams, so they agree with the video. Null when the session names no camera.
+export function adoptedSelection(session) {
+  if (!session?.camera_id) return null
+  const mode = session.mode || {}
+  return { id: session.camera_id, format: mode.format, width: mode.width, height: mode.height, fps: mode.fps }
+}
+
+// The running preview a refused start should adopt: another tab started one between this page's
+// load and its start, so the pane shows that preview and its Stop instead of an error. Null otherwise.
+export function sessionToAdopt(error, session) {
+  if (error?.code !== 'preview_active' || !session || session.state === 'stopped') return null
+  return session
+}
+
+export function sessionMatches(session, cameraId, generation, selection = null) {
+  if (!session || !cameraId) return false
+  if (session.camera_id !== cameraId) return false
+  if (generation != null && session.generation !== undefined && Number(session.generation) !== Number(generation)) return false
+  return !selection || sameSelection(session.mode, selection)
+}
+
+export function previewErrorInfo(error) {
+  if (!error) return null
+  const code = error.code || ''
+  const details = error.details || {}
+  const other = details.session || details.preview || {}
+  return {
+    code,
+    message: error.message,
+    hint: error.hint || '',
+    action: PREVIEW_ERROR_ACTIONS[code] || '',
+    otherCamera: code === 'preview_active' ? String(other.camera_id || details.camera_id || '') : '',
+    detail: typeof details.detail === 'string' ? details.detail : ''
+  }
+}
+
+// The USB formats the backend previews: MJPG, and the raw FourCCs in neat_insight/preview/gst.py
+// RAW_FORMATS (tests/test_preview.py keeps the two lists equal).
+export const USB_PREVIEW_FORMATS = Object.freeze(['MJPG', 'YUYV', 'UYVY', 'YVYU', 'NV12', 'NV21', 'YU12', 'YV12', 'GREY', 'RGB3', 'BGR3'])
+
+export function previewBlock({ camera, selection, stale = false, session = null, target = null } = {}) {
+  if (!target) return { blocked: true, reason: 'No board is selected. Open board settings and choose one.' }
+  if (!camera) return { blocked: true, reason: 'Select a camera first.' }
+  if (stale) return { blocked: true, reason: 'The board changed after this scan. Refresh before starting a preview.' }
+  // A USB camera previews any mode it lists in a format the preview reads; a MIPI camera only its Available modes.
+  const mipi = camera.connection !== 'usb'
+  if (mipi && camera.support?.tier === 'unsupported') {
+    return {
+      blocked: true,
+      reason: camera.support.reason || 'Preview uses the board libcamera capture path, which this camera is not supported by.'
+    }
+  }
+  if (!selection) return { blocked: true, reason: 'This camera reports no mode Insight can start.' }
+  if (!mipi && !USB_PREVIEW_FORMATS.includes(selection.format)) {
+    return { blocked: true, reason: `Preview decodes MJPG and converts raw formats such as YUYV, not ${selection.format}. Choose another format.` }
+  }
+  if (mipi && selectionTier(camera, selection) !== 'available') {
+    return { blocked: true, reason: `${modeLabel(selection)} is Unsupported on this board. Choose an Available mode.` }
+  }
+  if (session?.camera_id && session.camera_id !== camera.id) {
+    return { blocked: true, reason: `A preview is already running on ${session.camera_id}. Stop it before starting this one.` }
+  }
+  return { blocked: false, reason: '' }
+}
+
+// The events of a stop. A start that answered after the user moved on is stopped before the page
+// holds its session, so its stop is tagged with an id the page never held.
+const STOP_EVENTS = new Set(['stopping', 'stopped', 'stop-failed'])
+
+function outOfDate(state, event) {
+  if (event.for == null) return false
+  // A preview that is still starting holds no session id yet. Its own stop must apply, or the page
+  // stays in "Starting…" with a Stop button that has nothing to stop; any other tagged event (a late
+  // "ended" from the preview before it) belongs to an earlier preview.
+  if (!state.session) {
+    return !((state.status === 'starting' || state.status === 'stopping') && STOP_EVENTS.has(event.type))
+  }
+  return state.session.id !== event.for
+}
+
+export function nextPreviewState(state, event) {
+  const current = state || PREVIEW_IDLE
+  switch (event?.type) {
+    case 'start':
+      return { status: 'starting', session: null, error: null }
+    case 'adopt': {
+      // A session this browser did not start (page reload, second tab).
+      const session = event.session
+      if (!session || session.state === 'stopped') return PREVIEW_IDLE
+      // The stream has one viewer: when another page shows it, this one offers Stop, not a second stream.
+      if (session.viewer) return { status: 'elsewhere', session, error: null }
+      return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
+    }
+    case 'session': {
+      const session = event.session
+      if (!session) return PREVIEW_IDLE
+      // A response for a session we already replaced or stopped must not revive it.
+      if (current.session && current.session.id !== session.id) return current
+      if (current.status === 'idle' || current.status === 'error') return current
+      if (session.state === 'stopped') return { status: 'idle', session: null, error: null }
+      if (current.status === 'stopping') return { status: 'stopping', session, error: null }
+      if (current.status === 'elsewhere') return { status: 'elsewhere', session, error: null }
+      return { status: session.state === 'live' ? 'live' : 'starting', session, error: null }
+    }
+    case 'stopping':
+      if (outOfDate(current, event)) return current
+      return { status: 'stopping', session: current.session || event.session || null, error: null }
+    case 'stopped':
+      if (outOfDate(current, event)) return current
+      return PREVIEW_IDLE
+    case 'stop-failed':
+      if (outOfDate(current, event)) return current
+      return { status: 'live', session: current.session || event.session || null, error: event.error || null }
+    case 'camera-fps':
+      // The rate the camera runs at, for the running session only; unchanged, the state is kept as is.
+      if (!current.session || outOfDate(current, event) || current.session.camera_fps === event.fps) return current
+      return { ...current, session: { ...current.session, camera_fps: event.fps } }
+    case 'elsewhere':
+      // This page's stream was refused because another page shows it; only a live pane changes.
+      if (outOfDate(current, event) || current.status !== 'live') return current
+      return { status: 'elsewhere', session: event.session || current.session, error: null }
+    case 'ended':
+      // A live preview the backend stopped, with its reason; nothing is left to stop.
+      if (outOfDate(current, event)) return current
+      // One shown in another page ended there: this page has nothing to explain. One this page is stopping
+      // ended because of that stop (closing the stream ends it), so it is a stop, not a failure.
+      if (current.status === 'elsewhere' || current.status === 'stopping') return PREVIEW_IDLE
+      return { status: 'idle', session: null, error: event.error || null }
+    case 'failed':
+      if (outOfDate(current, event)) return current
+      return { status: 'error', session: null, error: event.error || null }
+    case 'reset':
+      return PREVIEW_IDLE
+    default:
+      return current
+  }
+}
+
+// The browser shell's details for the selected board. A board change reloads them, and a read sent for an
+// earlier board can answer last; only the newest read is applied. A failed read hides the shell.
+export function createShellInfoSync({ fetchShell, onShell }) {
+  return createBoardSync({
+    fetchBoard: fetchShell,
+    onBoard: onShell,
+    onError: () => onShell(null),
+    onLoading: () => {}
+  })
 }

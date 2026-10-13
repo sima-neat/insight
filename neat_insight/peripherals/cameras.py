@@ -139,14 +139,18 @@ def _classified(mode: dict, camera_reason: str, max_width: Optional[int] = None)
 
 def build_snapshot(catalog: dict, board: dict, generation: int, previous: Optional[dict], scan_ms: int):
     """Return the snapshot built from Sentinel's catalog."""
+    # microphones.py reuses this module's helpers, so it is imported here, not at the top.
+    from neat_insight.peripherals.microphones import microphone_items
+
     # A failed provider's devices from its last successful scan stay in the catalog.
     retained = {error["provider"] for error in catalog["errors"]}
-    items = []
+    cameras = []
     for device in cameras_of(catalog):
         reason = _camera_reason(device, catalog.get("board"))
         max_width = SENSOR_MAX_WIDTH.get(str(device.get("model") or "").lower()) if device.get("backend") == "mipi" else None
         modes = [_classified(mode, reason, max_width) for mode in device.get("modes") or []]
-        items.append(_item(device, modes, reason, provider_of(device) in retained))
+        cameras.append(_item(device, modes, reason, provider_of(device) in retained))
+    items = cameras + microphone_items(catalog, cameras, retained)
     return {
         "board": board,
         "generation": generation,
@@ -452,6 +456,15 @@ class ScanCache:
             entry = self._entry
         return entry["snapshot"] if entry and entry["generation"] == generation else None
 
+    def scan(self, generation: int) -> tuple:
+        """The last scan of this board as (snapshot, Sentinel catalog), read together; (None, None) without one.
+
+        One read keeps a refresh that lands in between from pairing one scan's snapshot with another's catalog.
+        """
+        with self._lock:
+            entry = self._entry
+        return (entry["snapshot"], entry["catalog"]) if entry and entry["generation"] == generation else (None, None)
+
     def completed_since(self, generation: int, since: float) -> Optional[dict]:
         """The snapshot of a refresh that finished after `since` (monotonic), i.e. one that was in flight."""
         with self._lock:
@@ -472,6 +485,9 @@ class ScanCache:
                     "generation": generation,
                     "fingerprint": board.get("fingerprint"),
                     "snapshot": snapshot,
+                    # The microphone test binds to the microphone records this scan listed.
+                    "catalog": {"revision": catalog["revision"],
+                                "devices": [device for device in catalog["devices"] if device["type"] == "microphone"]},
                     "completed": time.monotonic(),
                 }
             self._refresh_locks = {g: lock for g, lock in self._refresh_locks.items() if g >= generation}

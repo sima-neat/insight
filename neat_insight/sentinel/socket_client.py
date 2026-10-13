@@ -108,12 +108,12 @@ def request(method, path, body=None, socket_path=SOCKET_PATH, timeout=TIMEOUT_SE
         length = None
         if declared.isascii() and declared.isdigit():
             # Past 18 digits it is over the limit anyway, and int() refuses a long enough string.
-            length = int(declared) if len(declared) <= 18 else limit + 1
-        if length is not None and length > limit:
-            raise ResponseTooLarge(limit)
-        data = response.read(limit + 1)
-        if len(data) > limit:
-            raise ResponseTooLarge(limit)
+            length = int(declared) if len(declared) <= 18 else MAX_BODY_BYTES + 1
+        if length is not None and length > MAX_BODY_BYTES:
+            raise ResponseTooLarge(MAX_BODY_BYTES)
+        data = response.read(MAX_BODY_BYTES + 1)
+        if len(data) > MAX_BODY_BYTES:
+            raise ResponseTooLarge(MAX_BODY_BYTES)
         if length is not None and len(data) != length:
             raise IncompleteRead(data, length - len(data))
         return response.status, data.decode("utf-8", errors="replace")
