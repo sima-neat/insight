@@ -351,6 +351,16 @@ export function startSuperseded(requested, latest) {
   return !sameSelection(requested.mode, latest.selection)
 }
 
+// The mode to start once a restart's stop finished: the mode selected now, which the user may have
+// changed again while the stop ran. None when the camera or the board changed meanwhile.
+export function restartSelection(requested, latest) {
+  if (requested.cameraId !== latest.cameraId) return null
+  const { generation: sent } = requested
+  const { generation: now } = latest
+  if (sent != null && now != null && Number(sent) !== Number(now)) return null
+  return latest.selection?.id === requested.cameraId ? latest.selection : null
+}
+
 // A preview streams the mode it was started with. When the menus move, the picture and the menus
 // disagree until it is restarted on the new one.
 export function previewNeedsRestart(state, cameraId, next) {

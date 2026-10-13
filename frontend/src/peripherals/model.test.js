@@ -45,6 +45,7 @@ import {
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
+  restartSelection,
   safeHref,
   sameSelection,
   selectionTier,
@@ -809,6 +810,18 @@ test("a live preview's status read ends it once the backend no longer runs this 
 
   // A read that fails proves nothing about the stream.
   assert.equal(await previewStatusEvent(async () => { throw new Error('network') }, '8f1c'), null)
+})
+
+test('a restart starts the mode selected once its stop finished, not the one selected before it', () => {
+  const b = { id: 'camera:a', format: 'MJPG', width: 640, height: 480, fps: 30 }
+  const c = { ...b, width: 1280, height: 720 }
+  const requested = { cameraId: 'camera:a', generation: 3 }
+  // Mode C was picked while the stop for the switch to B ran.
+  assert.deepEqual(restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: c }), c)
+  // Another camera or board meanwhile: nothing is started.
+  assert.equal(restartSelection(requested, { cameraId: 'camera:b', generation: 3, selection: { ...c, id: 'camera:b' } }), null)
+  assert.equal(restartSelection(requested, { cameraId: 'camera:a', generation: 4, selection: c }), null)
+  assert.equal(restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: null }), null)
 })
 
 test('a start is superseded once the camera, board, or mode it was sent for is no longer the one shown', () => {

@@ -20,6 +20,7 @@ import {
   resolveCameraId,
   resolveDeviceKind,
   resolveSelection,
+  restartSelection,
   sameSelection,
   sessionMatches,
   sessionToAdopt,
@@ -347,7 +348,13 @@ export default function PeripheralsView({
     // A running preview was started with the old mode and keeps streaming it, so the picture would
     // disagree with the menus above it. Restart it on the mode that is now selected.
     if (!previewNeedsRestart(previewRef.current, camera.id, next)) return
-    if (await stopPreview(previewRef.current.session.id)) await startPreview(next)
+    const requested = { cameraId: camera.id, generation: boardGenerationRef.current }
+    if (!(await stopPreview(previewRef.current.session.id))) return
+    // A mode picked while the stop ran made no restart of its own (the pane was stopping), so start
+    // the mode selected now rather than this call's.
+    const latest = { cameraId: activeIdRef.current, generation: boardGenerationRef.current, selection: selectionRef.current }
+    const mode = restartSelection(requested, latest)
+    if (mode) await startPreview(mode)
   }
 
   async function loadInitial() {
