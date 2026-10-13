@@ -2,6 +2,7 @@
 import json
 import math
 import re
+from fractions import Fraction
 from http.client import HTTPException
 from pathlib import Path
 
@@ -96,7 +97,11 @@ def _valid_interval(interval) -> bool:
     # The snapshot reads any other kind as a range, so an unknown or missing kind must not pass.
     if not isinstance(kind, str) or kind not in INTERVAL_FRACTIONS:
         return False
-    return all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind])
+    if not all(_fraction(interval.get(key)) for key in INTERVAL_FRACTIONS[kind]):
+        return False
+    # The shortest interval (fastest rate) comes first; a reversed range has no rate in it.
+    low, high = interval["minimum"], interval["maximum"]
+    return Fraction(low["numerator"], low["denominator"]) <= Fraction(high["numerator"], high["denominator"])
 
 
 # Sentinel's optional `board` block: the board model and the camera setup its device tree declares. It

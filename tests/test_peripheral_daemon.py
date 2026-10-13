@@ -248,6 +248,9 @@ class PeripheralClientTests(unittest.TestCase):
              {"type": "continuous", "minimum": fraction, "maximum": {"numerator": 0, "denominator": 5}}]
         # V4L2 fractions are __u32; a larger one overflowed when the snapshot converted it to a float.
         zeroed += [dict(interval, denominator=2**32), dict(stepwise, minimum={"numerator": 1, "denominator": 10**400})]
+        # Codex 4264241539: a reversed range (minimum longer than maximum) has no rate in it.
+        zeroed += [dict(stepwise, minimum=stepwise["maximum"], maximum=fraction),
+                   {"type": "continuous", "minimum": {"numerator": 1, "denominator": 5}, "maximum": fraction}]
         for value in ([None], 5, {}, [{"width": 1920, "height": 1080, "intervals": 5}],
                       [{"width": 1920, "height": 1080, "intervals": [None]}], [{"width": 1920, "height": 1080}],
                       # Codex (fb0ecbf): an entry whose size the snapshot cannot match dropped all its rates.
