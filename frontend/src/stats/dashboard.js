@@ -84,10 +84,24 @@ function yOf(value, scale, height) {
   return height - ((clamped - scale.min) / span) * height
 }
 
+/**
+ * Where each sample sits across the plot (0..1), from its board timestamp, so a delayed poll or a back-off
+ * leaves a visible gap. Evenly spaced when the timestamps do not cover every sample in increasing order.
+ */
+export function timeFractions(timestamps, length) {
+  const times = (timestamps || []).map(seconds)
+  const even = Array.from({ length }, (_, index) => index / Math.max(1, length - 1))
+  if (times.length !== length || length < 2) return even
+  const first = times[0]
+  const span = times[length - 1] - first
+  if (!(span > 0) || times.some((time, index) => time === null || (index && time < times[index - 1]))) return even
+  return times.map((time) => (time - first) / span)
+}
+
 /** SVG line and area; missing samples break the path rather than becoming zero. */
-export function linePath(values, scale, width, height) {
+export function linePath(values, scale, width, height, fractions = null) {
   const list = values || []
-  const steps = Math.max(1, list.length - 1)
+  const at = fractions && fractions.length === list.length ? fractions : timeFractions(null, list.length)
   const segments = []
   let current = []
   list.forEach((value, index) => {
@@ -96,7 +110,7 @@ export function linePath(values, scale, width, height) {
       current = []
       return
     }
-    current.push([round((index / steps) * width), round(yOf(value, scale, height))])
+    current.push([round(at[index] * width), round(yOf(value, scale, height))])
   })
   if (current.length) segments.push(current)
   const line = segments
@@ -107,17 +121,17 @@ export function linePath(values, scale, width, height) {
     .map((points) => `M${points[0][0]} ${height} ${points.map(([x, y]) => `L${x} ${y}`).join(' ')} L${points[points.length - 1][0]} ${height} Z`)
     .join(' ')
   const tail = segments.length ? segments[segments.length - 1] : null
-  const lastPoint = tail && tail[tail.length - 1][0] === round(((list.length - 1) / steps) * width) ? tail[tail.length - 1] : null
+  const lastPoint = tail && tail[tail.length - 1][0] === round(at[list.length - 1] * width) ? tail[tail.length - 1] : null
   return { line, area, last: lastPoint ? { x: lastPoint[0], y: lastPoint[1] } : null }
 }
 
 /** Stacked areas, bottom band first; a missing constituent breaks the whole stack. */
-export function stackedPaths(lists, scale, width, height) {
+export function stackedPaths(lists, scale, width, height, fractions = null) {
   const length = Math.max(0, ...lists.map((list) => (list || []).length))
-  const steps = Math.max(1, length - 1)
+  const at = fractions && fractions.length === length ? fractions : timeFractions(null, length)
   const complete = Array.from({ length }, (_, index) => lists.every((list) => isNumber((list || [])[index])))
   const base = new Array(length).fill(0)
-  const x = (index) => round((index / steps) * width)
+  const x = (index) => round(at[index] * width)
   return lists.map((list) => {
     const lower = base.slice()
     for (let index = 0; index < length; index += 1) if (complete[index]) base[index] += list[index]
@@ -168,10 +182,13 @@ export function agoLabel(timestamps, index) {
   return gap < 1 ? 'Now' : `${durationWords(gap, { precise: true })} ago`
 }
 
-/** The sample index under a pointer at `fraction` (0..1) of the plot's width. */
-export function indexAt(fraction, length) {
+/** The sample nearest a pointer at `fraction` (0..1) of the plot's width, placed as `timeFractions` places it. */
+export function indexAt(fraction, length, fractions = null) {
   if (!length) return -1
-  return Math.min(length - 1, Math.max(0, Math.round(fraction * (length - 1))))
+  if (!fractions || fractions.length !== length) return Math.min(length - 1, Math.max(0, Math.round(fraction * (length - 1))))
+  let best = 0
+  fractions.forEach((at, index) => { if (Math.abs(at - fraction) < Math.abs(fractions[best] - fraction)) best = index })
+  return best
 }
 
 /** The board's temperature sensors under Sentinel's own group names, in Sentinel's order. */

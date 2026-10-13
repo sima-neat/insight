@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   DASH_TABS, HEAT_COLUMNS, agoLabel, axisLabel, columnMeans, compareOverlay, compareSeriesAvailable, coreSummary, currentTotal, currentValue, dashTabFrom,
   elapsedPath, fixedValue, indexAt, linePath, loadColor, metricsMatching, niceCeil, scaleFor, scaleText, spanLabel,
-  sharedThresholdLines, stackTotals, stackedPaths, thermalGroups, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
+  sharedThresholdLines, stackTotals, stackedPaths, thermalGroups, timeFractions, thermalMaxSeries, thresholdLines, tightScale, valueNear, windowPoints
 } from './dashboard.js'
 import { STATS_TABS, compareTable, isThermalMetric, metricSection, metricsModel, statsTabFrom } from './model.js'
 
@@ -114,6 +114,20 @@ test('time labels use board timestamps only, in whole words; figures in a row sh
   assert.deepEqual([scaleText({ min: 40, max: 90 }, 'C'), scaleText({ min: 0, max: 100 }, '%'), scaleText({ min: 0, max: 1000 }, 'MB')], ['40–90 °C', '0–100%', '0–1,000 MB'])
   assert.deepEqual([fixedValue(12, 'W', 1), fixedValue(13.66, 'W', 1), fixedValue(0.5625, 'W', 2), fixedValue(null, 'W', 1), fixedValue(55.12, 'C', 1)],
     ['12.0 W', '13.7 W', '0.56 W', '—', '55.1 °C'])
+})
+
+test('samples sit where their timestamps put them, so a delayed poll or back-off shows as a gap', () => {
+  const stamps = ['2026-09-25T00:00:00Z', '2026-09-25T00:00:02Z', '2026-09-25T00:00:32Z']
+  const at = timeFractions(stamps, 3)
+  assert.deepEqual(at.map((value) => Number(value.toFixed(4))), [0, 0.0625, 1])
+  assert.equal(linePath([10, 20, 30], { min: 0, max: 100 }, 320, 100, at).line, 'M0 90 L20 80 L320 70')
+  assert.deepEqual(linePath([10, 20, 30], { min: 0, max: 100 }, 320, 100, at).last, { x: 320, y: 70 })
+  assert.deepEqual(stackedPaths([[1, 1, 1]], { min: 0, max: 2 }, 320, 2, at), ['M0 1 L20 1 L320 1 L320 2 L20 2 L0 2 Z'])
+  assert.equal(indexAt(0.7, 3, at), 2, 'past the gap the pointer is nearest the 32-second sample, not the 2-second one')
+  assert.equal(indexAt(0.05, 3, at), 1)
+  assert.deepEqual(timeFractions(['x', 'y', 'z'], 3), [0, 0.5, 1], 'unreadable timestamps fall back to even spacing')
+  assert.deepEqual(timeFractions(stamps.slice(0, 2), 3), [0, 0.5, 1], 'timestamps that do not cover every sample fall back too')
+  assert.deepEqual(timeFractions([stamps[2], stamps[0], stamps[1]], 3), [0, 0.5, 1], 'out-of-order timestamps fall back too')
 })
 
 test('per-core heatmap: column means over the window, a one-minute average per core', () => {

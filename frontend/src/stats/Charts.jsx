@@ -13,6 +13,7 @@ import {
   spanLabel,
   stackTotals,
   stackedPaths,
+  timeFractions,
   unitAfter,
   valueNear
 } from './dashboard.js'
@@ -28,15 +29,15 @@ function percentOf(value, scale) {
 }
 
 // Remember pointer position so the readout follows data that shifts on each poll.
-function useHover(length) {
+function useHover(length, fractions) {
   const plot = useRef(null)
   const [fraction, setFraction] = useState(null)
   const onPointerMove = (event) => {
     const rect = plot.current?.getBoundingClientRect()
     if (rect?.width) setFraction(Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)))
   }
-  const index = fraction === null ? -1 : indexAt(fraction, length)
-  return { plot, index, onPointerMove, onPointerLeave: () => setFraction(null) }
+  const index = fraction === null ? -1 : indexAt(fraction, length, fractions)
+  return { plot, index, at: index >= 0 && fractions ? fractions[index] : null, onPointerMove, onPointerLeave: () => setFraction(null) }
 }
 
 // Stable legends show current readings; tooltips carry hovered readings without reflow.
@@ -74,8 +75,8 @@ function Frame({ title, headline, scale, timestamps, compact, tone, label, child
           {children}
           {hover.index >= 0 && (
             <>
-              <span className="dash-crosshair" style={{ left: `${(hover.index / Math.max(1, (timestamps?.length || 1) - 1)) * 100}%` }} aria-hidden="true" />
-              <span className={`dash-tooltip${hover.index > (timestamps?.length || 0) / 2 ? ' flip' : ''}`} style={{ left: `${(hover.index / Math.max(1, (timestamps?.length || 1) - 1)) * 100}%` }} aria-hidden="true">
+              <span className="dash-crosshair" style={{ left: `${hover.at * 100}%` }} aria-hidden="true" />
+              <span className={`dash-tooltip${hover.at > 0.5 ? ' flip' : ''}`} style={{ left: `${hover.at * 100}%` }} aria-hidden="true">
                 <span className="dash-tooltip-time">{agoLabel(timestamps, hover.index)}</span>
                 {tooltip}
               </span>
@@ -99,8 +100,9 @@ const THRESHOLD_NAMES = { warn: 'Warning', critical: 'Critical' }
 export function TimeChart({ title, headline, series, scale, unit, timestamps, thresholds = [], height = 96, compact = false, tone }) {
   const id = useId().replace(/[^a-zA-Z0-9]/g, '')
   const length = Math.max(0, ...series.map((item) => item.values.length))
-  const hover = useHover(length)
-  const paths = series.map((item) => linePath(item.values, scale, WIDTH, HEIGHT))
+  const fractions = timeFractions(timestamps, length)
+  const hover = useHover(length, fractions)
+  const paths = series.map((item) => linePath(item.values, scale, WIDTH, HEIGHT, fractions))
   const label = `${title}: ${headline ?? ''}${spanLabel(timestamps) ? `, over the last ${spanLabel(timestamps).replace(' ago', '')}` : ''}`
   return (
     <Frame
@@ -164,8 +166,9 @@ export function StackedChart({ title, headline, series, scale, unit, timestamps,
   const id = useId().replace(/[^a-zA-Z0-9]/g, '')
   const lists = series.map((item) => item.values)
   const length = Math.max(0, ...lists.map((list) => list.length))
-  const hover = useHover(length)
-  const areas = stackedPaths(lists, scale, WIDTH, HEIGHT)
+  const fractions = timeFractions(timestamps, length)
+  const hover = useHover(length, fractions)
+  const areas = stackedPaths(lists, scale, WIDTH, HEIGHT, fractions)
   const totals = stackTotals(lists)
   const at = length - 1
   const total = totals[at] ?? null
