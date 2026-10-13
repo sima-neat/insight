@@ -184,7 +184,13 @@ class PeripheralClient(SentinelSocket):
         return payload
 
     def _call(self, method: str, path: str, body=None, timeout=socket_client.TIMEOUT_SEC) -> dict:
-        status, text = self.request(method, path, body, timeout)
+        try:
+            status, text = self.request(method, path, body, timeout)
+        except BoardError:
+            if self.session.target.mode == "local":
+                # A failure from a board that is no longer selected is a stale result, not that board's error.
+                self.session.require_current()
+            raise
         self.session.require_current()
         try:
             parsed = json.loads(text) if text else None
@@ -263,6 +269,13 @@ class PeripheralClient(SentinelSocket):
             or any(
                 camera.get(key) is not None and not isinstance(camera.get(key), dict)
                 for key in ("identity", "availability", "isp")
+            )
+            or (
+                isinstance(camera.get("availability"), dict)
+                and any(
+                    camera["availability"].get(key) is not None and not isinstance(camera["availability"][key], str)
+                    for key in ("state", "reason")
+                )
             )
             or (camera.get("max_fps") is not None and not _finite_positive(camera["max_fps"]))
             or (
