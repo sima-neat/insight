@@ -505,3 +505,14 @@ export function createFocusReturn() {
     }
   }
 }
+
+// The browser shell's details for the selected board. A board change reloads them, and a read sent for an
+// earlier board can answer last; only the newest read is applied. A failed read hides the shell.
+export function createShellInfoSync({ fetchShell, onShell }) {
+  return createBoardSync({
+    fetchBoard: fetchShell,
+    onBoard: onShell,
+    onError: () => onShell(null),
+    onLoading: () => {}
+  })
+}

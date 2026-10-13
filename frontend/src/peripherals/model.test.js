@@ -15,6 +15,7 @@ import {
   connectionPill,
   changeSummary,
   createBoardSync,
+  createShellInfoSync,
   createFocusReturn,
   defaultTargetText,
   deviceTabs,
@@ -659,3 +660,28 @@ test('the camera setup belongs to the board that was scanned', () => {
   assert.equal(boardCameraSetup(null, snapshot), null)
   assert.equal(boardCameraSetup({ generation: 3 }, null), null)
 })
+
+// Codex (5878ec6): shell details read for an earlier board answered last and overwrote the newer board's.
+test('shell details read for an earlier board cannot overwrite the newer board', async () => {
+  const requests = []
+  const shown = []
+  const sync = createShellInfoSync({
+    fetchShell: () => {
+      const request = deferred()
+      requests.push(request)
+      return request.promise
+    },
+    onShell: (info) => shown.push(info)
+  })
+  const first = sync.load()
+  const second = sync.load()
+  requests[1].resolve({ available: true, target: 'B' })
+  requests[0].resolve({ available: false, target: 'A' })
+  await Promise.all([first, second])
+  assert.deepEqual(shown, [{ available: true, target: 'B' }])
+  const failed = sync.load()
+  requests[2].reject(new Error('offline'))
+  await failed
+  assert.deepEqual(shown.at(-1), null)
+})
+

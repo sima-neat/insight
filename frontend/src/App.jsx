@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { requestJson as requestBoardJson } from './peripherals/api.js'
-import { boardIndicator, createBoardSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
+import { boardIndicator, createBoardSync, createShellInfoSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
 
 import {
   closeAllWebcamSessions,
@@ -798,6 +798,14 @@ export default function App() {
       onLoading: setBoardLoading
     })
   }
+  // A board change reloads the shell details; an older read must not overwrite the newer board's.
+  const shellInfoSyncRef = useRef(null)
+  if (!shellInfoSyncRef.current) {
+    shellInfoSyncRef.current = createShellInfoSync({
+      fetchShell: () => fetchJson('/api/devkit-shell'),
+      onShell: setDevkitShellInfo
+    })
+  }
   const [sysInfoOpen, setSysInfoOpen] = useState(false)
   const [sysInfo, setSysInfo] = useState(null)
   const [sysInfoLoading, setSysInfoLoading] = useState(false)
@@ -931,13 +939,8 @@ export default function App() {
     })
   }
 
-  async function loadDevkitShellInfo() {
-    try {
-      const data = await fetchJson('/api/devkit-shell')
-      setDevkitShellInfo(data)
-    } catch {
-      setDevkitShellInfo(null)
-    }
+  function loadDevkitShellInfo() {
+    return shellInfoSyncRef.current.load()
   }
 
   async function loadSysInfo() {
