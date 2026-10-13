@@ -2819,10 +2819,10 @@ class PullSourceTests(_SourceFixture):
     def test_background_probe_marks_unreachable_then_recovers_to_connecting(self):
         self._pull()
         record = app_module.pull_registry.get(3)
-        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("unreachable", "Timed out after 2 s")
+        self.probe_results[CAM] = app_module.pull_sources.ProbeResult("unreachable", "Timed out after 5 s")
         record.probed_at = 0.0
         self.assertEqual(self._slot(3)["pull"]["status"], "unreachable")   # the list request ran the due probe
-        self.assertEqual(self._slot(3)["pull"]["error"], "Timed out after 2 s")
+        self.assertEqual(self._slot(3)["pull"]["error"], "Timed out after 5 s")
         self.probe_results.pop(CAM)
         record.probed_at = 0.0
         self.assertEqual(self._slot(3)["pull"]["status"], "connecting")
