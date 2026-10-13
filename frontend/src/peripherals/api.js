@@ -82,8 +82,9 @@ export function startMicrophoneTest(id) {
   return requestJson('/api/peripherals/microphones/test', { method: 'POST', body: { id } })
 }
 
-export function stopMicrophoneTest() {
-  return requestJson('/api/peripherals/microphones/test/stop', { method: 'POST' })
+// Stops only the test `token`: a late Stop from an earlier test never ends one another tab started.
+export function stopMicrophoneTest(token) {
+  return requestJson('/api/peripherals/microphones/test/stop', { method: 'POST', body: { token } })
 }
 
 export function getMicrophoneTest() {

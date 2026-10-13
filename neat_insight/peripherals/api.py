@@ -121,7 +121,12 @@ def stop_microphone_test():
     """Stop the recording on the selected board; its result arrives through GET as usual."""
     session = get_board_manager().session()
     session.require_current()
-    test = mictest.stop(session.generation)
+    body = request.get_json(silent=True)
+    token = body.get("token") if isinstance(body, dict) else None
+    if not isinstance(token, str) or not token:
+        raise BoardError("invalid_request", "Name the test to stop by its token.",
+                         hint="Send the token the start returned, as {\"token\": \"...\"}.")
+    test = mictest.stop(session.generation, token)
     # A board change while it stopped: the answer would describe the departed board's test.
     session.require_current()
     return {"test": test}

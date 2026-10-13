@@ -202,7 +202,7 @@ function MicTest({ mic }) {
   const stopRecording = async () => {
     setStopping(true)
     try {
-      await stopMicrophoneTest()
+      await stopMicrophoneTest(heldToken.current)
     } catch (err) {
       if (!mounted.current) return
       dispatch({ type: 'stop-failed', error: normalizeError(err) })

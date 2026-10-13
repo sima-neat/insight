@@ -326,11 +326,14 @@ def discard(token: str) -> None:
     test.request_stop()
 
 
-def stop(generation: int) -> Optional[dict]:
-    """Ask the recording on the selected board to end now; the result follows as for a full one."""
-    test = _current
-    if test is None or test.generation != generation:
-        return None
+def stop(generation: int, token: str) -> Optional[dict]:
+    """Ask test `token` on the selected board to end now; the result follows as for a full one.
+
+    A Stop for an earlier test (from another tab, or arriving late) never stops the one recording now."""
+    with _lock:
+        test = _current
+        if test is None or test.generation != generation or test.token != token:
+            return None
     test.request_stop()
     return test.status()
 

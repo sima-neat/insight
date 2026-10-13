@@ -1267,8 +1267,11 @@ class MicrophoneApiTests(unittest.TestCase):
     def mic_test(self):
         return self.client.get("/api/peripherals/microphones/test").get_json()["test"]
 
-    def stop(self):
-        return self.client.post("/api/peripherals/microphones/test/stop")
+    def stop(self, token=None):
+        """Stop the current test by its token, as the page does; `token` names another one."""
+        if token is None:
+            token = mictest._current.token if mictest._current is not None else "none"
+        return self.client.post("/api/peripherals/microphones/test/stop", json={"token": token})
 
     def test_refresh_runs_no_board_check(self):
         """A scan only reads Sentinel: whether a microphone is held is checked when its test starts."""
@@ -1475,11 +1478,11 @@ class MicrophoneApiTests(unittest.TestCase):
             with self.subTest(name):
                 session.stale = False
                 with mock.patch.object(mictest, {"status": "current"}.get(name, name), side_effect=switching(answer)):
-                    response = getattr(self.client, method)(route)
+                    response = getattr(self.client, method)(route, **({"json": {"token": "t"}} if method == "post" else {}))
                 self.assertEqual((response.status_code, response.get_json()["code"]), (409, "stale_snapshot"))
         session.stale = True
         with mock.patch.object(mictest, "stop") as stop:
-            response = self.client.post("/api/peripherals/microphones/test/stop")
+            response = self.client.post("/api/peripherals/microphones/test/stop", json={"token": "t"})
         self.assertEqual(response.status_code, 409)
         stop.assert_not_called()  # a stop for a board that is no longer selected never reaches its test
 
@@ -1495,6 +1498,17 @@ class MicrophoneApiTests(unittest.TestCase):
         self.assertTrue(old.stop_requested, "the departed board's recording is told to end")
         mictest._current.thread.join(2)
         self.assertEqual(self.mic_test()["state"], "ready")
+
+    def test_a_late_stop_for_an_earlier_test_never_stops_the_current_one(self):
+        # Codex 4264387696: a Stop by generation alone ended a test another tab had just started.
+        current = mictest._current = mictest.MicTest(1, YETI, "plughw:CARD=Nano,DEV=0", 48000, 2, 30)
+        self.assertIsNone(self.stop(token="earlier-test").get_json()["test"])
+        self.assertFalse(current.stop_requested)
+        response = self.client.post("/api/peripherals/microphones/test/stop", json={})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+        self.assertFalse(current.stop_requested)
+        self.assertEqual(self.stop().get_json()["test"]["token"], current.token)
+        self.assertTrue(current.stop_requested)
 
     def test_another_board_sees_no_test_and_cannot_stop_it(self):
         self.assertIsNone(self.mic_test())
@@ -1652,7 +1666,7 @@ class MicrophoneTestTests(unittest.TestCase):
             with self.subTest(state=state):
                 _, test = self.run_test(stalled)
                 self.assertTrue(started.wait(2))
-                mictest.stop(1)
+                mictest.stop(1, mictest._current.token)
                 test.thread.join(2)
                 self.assertFalse(test.thread.is_alive())
                 status = test.status()
@@ -1670,7 +1684,7 @@ class MicrophoneTestTests(unittest.TestCase):
 
         _, test = self.run_test(chatty)
         time.sleep(0.05)
-        mictest.stop(1)
+        mictest.stop(1, mictest._current.token)
         test.thread.join(2)
         self.assertEqual(test.status()["state"], "ready")
 

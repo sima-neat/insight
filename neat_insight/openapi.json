@@ -947,10 +947,12 @@
       "post": {
         "tags": ["Peripherals"],
         "summary": "Stop the microphone test's recording",
-        "description": "Ends the recording on the selected board at once, even when `arecord` has stopped producing audio; what was recorded becomes the result, read through `GET` as usual. A test stopped before 0.1 s was recorded ends with `stopped_early`. Returns the test, or null when there is none for the selected board. It never stops another application.",
+        "description": "Ends the test named by `token` on the selected board at once; a token that is not the current test's (a late Stop for an earlier test) stops nothing and returns null. It ends the recording even when `arecord` has stopped producing audio; what was recorded becomes the result, read through `GET` as usual. A test stopped before 0.1 s was recorded ends with `stopped_early`. Returns the test, or null when there is none for the selected board. It never stops another application.",
         "operationId": "stopMicrophoneTest",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["token"], "properties": {"token": {"type": "string", "description": "The token the start returned."}}}, "example": {"token": "35ed6b2dff5643bf8a13e65017dd11f4"}}}},
         "responses": {
           "200": {"description": "The test, or null.", "content": {"application/json": {"schema": {"type": "object", "properties": {"test": {"oneOf": [{"$ref": "#/components/schemas/MicrophoneTest"}, {"type": "null"}]}}}}}},
+          "400": {"$ref": "#/components/responses/BoardErrorResponse"},
           "409": {"$ref": "#/components/responses/BoardErrorResponse"}
         }
       }

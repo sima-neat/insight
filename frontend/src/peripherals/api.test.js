@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { copyText, readMicrophoneTest } from './api.js'
+import { copyText, readMicrophoneTest, stopMicrophoneTest } from './api.js'
 
 function failing(code) {
   return Object.assign(new Error(code), { code })
@@ -98,4 +98,22 @@ test('copyText copies through a hidden textarea when the page has no clipboard A
 
   await copyText('{}')
   assert.deepEqual(commands, [['append', '{}'], ['copy']])
+})
+
+test('Stop names the test it stops by its token', async () => {
+  // Codex 4264387696: a Stop by board alone ended a test another tab had just started.
+  const sent = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    sent.push({ url, init })
+    return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ test: null }), text: async () => '{"test":null}' }
+  }
+  try {
+    await stopMicrophoneTest('t1')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  assert.equal(sent[0].url, '/api/peripherals/microphones/test/stop')
+  assert.equal(sent[0].init.method, 'POST')
+  assert.deepEqual(JSON.parse(sent[0].init.body), { token: 't1' })
 })
