@@ -25,6 +25,7 @@ import {
   sessionToAdopt,
   severityInfo,
   sortIssues,
+  startSuperseded,
   streamErrorEvent,
   watchPreview
 } from './peripherals/model.js'
@@ -262,6 +263,7 @@ export default function PeripheralsView({
 
   async function startPreview(mode = selection) {
     if (!camera || !mode) return
+    const requested = { cameraId: camera.id, generation: boardGenerationRef.current, mode }
     dispatchPreview({ type: 'start' })
     try {
       const data = await requestJson(PREVIEW_BASE, {
@@ -286,6 +288,13 @@ export default function PeripheralsView({
         }
       }
     } catch (err) {
+      // Like a start that succeeded too late: the camera, board, or mode changed while the board was
+      // starting it, so its failure says nothing about what the pane now shows.
+      const latest = { cameraId: activeIdRef.current, generation: boardGenerationRef.current, selection: selectionRef.current }
+      if (startSuperseded(requested, latest)) {
+        dispatchPreview({ type: 'reset' })
+        return
+      }
       const error = normalizeError(err)
       // Another tab started a preview after this page loaded: show that one, with its Stop.
       const running = error.code === 'preview_active'

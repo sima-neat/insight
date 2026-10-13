@@ -341,6 +341,16 @@ export function sameSelection(a, b) {
   return a.format === b.format && a.width === b.width && a.height === b.height && Number(a.fps) === Number(b.fps)
 }
 
+// Whether a start the page sent no longer matches what the page shows: the camera, the board, or the
+// mode changed while the board was starting it. Its outcome then belongs to none of them.
+export function startSuperseded(requested, latest) {
+  if (requested.cameraId !== latest.cameraId) return true
+  const { generation: sent } = requested
+  const { generation: now } = latest
+  if (sent != null && now != null && Number(sent) !== Number(now)) return true
+  return !sameSelection(requested.mode, latest.selection)
+}
+
 // A preview streams the mode it was started with. When the menus move, the picture and the menus
 // disagree until it is restarted on the new one.
 export function previewNeedsRestart(state, cameraId, next) {

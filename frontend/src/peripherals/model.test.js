@@ -53,6 +53,7 @@ import {
   sortIssues,
   sourceLabel,
   streamEndedEvent,
+  startSuperseded,
   streamErrorEvent,
   tierInfo,
   validateBoardForm,
@@ -797,6 +798,19 @@ test("a live preview's status read ends it once the backend no longer runs this 
 
   // A read that fails proves nothing about the stream.
   assert.equal(await previewStatusEvent(async () => { throw new Error('network') }, '8f1c'), null)
+})
+
+test('a start is superseded once the camera, board, or mode it was sent for is no longer the one shown', () => {
+  const mode = { format: 'MJPG', width: 640, height: 480, fps: 30 }
+  const requested = { cameraId: 'camera:a', generation: 3, mode }
+  const latest = { cameraId: 'camera:a', generation: 3, selection: { id: 'camera:a', ...mode } }
+  assert.equal(startSuperseded(requested, latest), false)
+  assert.equal(startSuperseded(requested, { ...latest, cameraId: 'camera:b' }), true)
+  assert.equal(startSuperseded(requested, { ...latest, generation: 4 }), true)
+  assert.equal(startSuperseded(requested, { ...latest, selection: { ...latest.selection, fps: 15 } }), true)
+  assert.equal(startSuperseded(requested, { ...latest, selection: null }), true)
+  // A board without a generation (none reported yet) compares on camera and mode alone.
+  assert.equal(startSuperseded({ ...requested, generation: undefined }, latest), false)
 })
 
 test('a stream refused because another tab claimed it first shows the preview there, not as ended', async () => {
