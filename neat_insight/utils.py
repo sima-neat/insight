@@ -438,9 +438,8 @@ def _wait_for_tcp_listener(port, host="127.0.0.1", timeout_sec=5.0):
 def ensure_webssh_started(ssl_context):
     global webssh_proc
 
-    devkit_ip = get_devkit_sync_devkit_ip()
-    if not devkit_ip:
-        raise RuntimeError(f"{DEVKIT_SYNC_DEVKIT_IP_ENV} is not set.")
+    # webssh is a generic SSH proxy: the board comes from the launch URL, so the caller decides which board
+    # (DEVKIT_SYNC_DEVKIT_IP, its SIMA_DEVKIT_IP fallback, or the selected board) and none is needed here.
     if not webssh_is_available():
         raise RuntimeError(
             "webssh is not installed in the current neat-insight environment. "

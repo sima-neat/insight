@@ -3301,7 +3301,7 @@ def start_devkit_shell():
         return _json_error(str(exc), 500)
 
     if not payload["configured"]:
-        return _json_error("DEVKIT_SYNC_DEVKIT_IP is not configured.", 404)
+        return _json_error("No DevKit is selected or paired with this SDK.", 404)
     if not payload["launch_supported"]:
         return _json_error("The browser shell is available only for the SDK-paired DevKit.", 409)
     if server_ssl_context is None:
