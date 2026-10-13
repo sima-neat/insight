@@ -484,6 +484,18 @@ class PreviewTests(unittest.TestCase):
         self.assertIsNone(self.manager.current(1))
         self.assertEqual(len(self.session.transport.kills()), 1)
 
+    def test_a_stream_request_racing_the_unclaimed_deadline_never_claims_a_preview_being_stopped(self):
+        """The deadline decides under the lock: a stream request after it finds the preview gone, so the
+        timer never kills a stream it just handed out."""
+        self.start()
+        session_id = self.manager.current(1)["id"]
+        released = []
+        with mock.patch.object(self.manager, "_release", side_effect=released.append):
+            self.manager._stop_unclaimed(session_id)  # the deadline fires; its kill is still to come
+            with self.assertRaises(BoardError) as ctx:
+                self.manager.relay(self.session, session_id)
+        self.assertEqual((ctx.exception.code, released), ("not_found", [session_id]))
+
     def test_a_viewer_that_disconnects_stops_the_pipeline_and_a_second_viewer_is_refused(self):
         self.start()
         stream = self.session.transport.streams[0][1]

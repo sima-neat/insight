@@ -317,7 +317,8 @@ class PreviewManager:
         One reader per session: a second one is refused."""
         with self._lock:
             session, run = self._session, self._run
-            if session is None or session["id"] != session_id or session["generation"] != board_session.generation:
+            if (session is None or session["id"] != session_id or session["generation"] != board_session.generation
+                    or run.get("expired")):
                 raise _unknown_session()
             if run["claimed"]:
                 raise BoardError("preview_active", "This preview is already shown in another tab or window.",
@@ -349,6 +350,9 @@ class PreviewManager:
             run = self._run if self._session is not None and self._session["id"] == session_id else None
             if run is None or run["claimed"]:
                 return
+            # Decided under the lock: a stream request that arrives from here on finds the preview gone
+            # instead of claiming a pipeline this is about to kill.
+            run["expired"] = True
         logging.info("Stopping camera preview %s: no viewer opened its stream.", session_id)
         self._release(session_id)
 
