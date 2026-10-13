@@ -22,6 +22,28 @@ SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "s
 IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
 
 
+def wait_until(condition, timeout=5, interval=0.01):
+    """Poll `condition` until it holds or `timeout` passes; the caller asserts the outcome."""
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(interval)
+
+
+def in_thread(target):
+    """Run `target` in a started thread; returns the thread and the list of exceptions it raised."""
+    errors = []
+
+    def run():
+        try:
+            target()
+        except Exception as error:
+            errors.append(error)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    return worker, errors
+
+
 class FakeTransport:
     def __init__(self, results=None, error=None):
         self.results = list(results or [])
@@ -363,9 +385,7 @@ class LocalTransportTests(unittest.TestCase):
 
         noisy = LocalTransport().stream(["sh", "-c", "echo first >&2; head -c 100000 /dev/zero | tr '\\0' x >&2; echo last >&2"], timeout=5)
         self.read_all(noisy)
-        deadline = time.monotonic() + 5
-        while not noisy.stderr().endswith(b"last\n") and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(lambda: noisy.stderr().endswith(b"last\n"))
         stderr = noisy.stderr()
         self.assertTrue(stderr.startswith(b"first\n") and stderr.endswith(b"last\n"))
         self.assertLessEqual(len(stderr), transport_module.STDERR_HEAD_BYTES + transport_module.STDERR_TAIL_BYTES + 5)
@@ -373,21 +393,16 @@ class LocalTransportTests(unittest.TestCase):
     def test_closing_a_stream_ends_the_command_at_its_next_write(self):
         stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; exec yes"], timeout=5)
         self.assertTrue(stream.read(5))
-        deadline = time.monotonic() + 5
-        while not stream.stderr() and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(stream.stderr)
         pid = int(stream.stderr())
         stream.close()
-        deadline = time.monotonic() + 5
-        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
-            time.sleep(0.05)
+        wait_until(lambda: not os.path.exists(f"/proc/{pid}"), interval=0.05)
         self.assertFalse(os.path.exists(f"/proc/{pid}"), "yes died on SIGPIPE and was reaped")
 
     def test_a_stream_that_cannot_start_is_a_board_error(self):
         with self.assertRaises(BoardError) as ctx:
             LocalTransport().stream(["no-such-command-xyz"], timeout=5)
         self.assertEqual(ctx.exception.code, "command_failed")
-
 
     def test_exec_hands_stdout_over_while_the_command_runs(self):
         seen = []
@@ -403,16 +418,7 @@ class LocalTransportTests(unittest.TestCase):
 
     def test_cancel_event_terminates_a_command_without_waiting_for_output(self):
         cancel = threading.Event()
-        outcome = []
-
-        def run():
-            try:
-                LocalTransport().exec(["sleep", "30"], timeout=60, cancel_event=cancel)
-            except Exception as error:
-                outcome.append(error)
-
-        worker = threading.Thread(target=run)
-        worker.start()
+        worker, outcome = in_thread(lambda: LocalTransport().exec(["sleep", "30"], timeout=60, cancel_event=cancel))
         time.sleep(0.05)
         cancel.set()
         worker.join(2)
@@ -422,20 +428,15 @@ class LocalTransportTests(unittest.TestCase):
     def test_close_terminates_active_local_commands_and_rejects_new_work(self):
         transport = LocalTransport()
         ready = threading.Event()
-        outcome, pids = [], []
+        pids = []
 
         def on_stdout(chunk):
             pids.append(int(chunk))
             ready.set()
 
-        def run():
-            try:
-                transport.exec(["sh", "-c", "echo $$; exec sleep 30"], timeout=60, on_stdout=on_stdout)
-            except Exception as error:
-                outcome.append(error)
-
-        worker = threading.Thread(target=run)
-        worker.start()
+        worker, outcome = in_thread(
+            lambda: transport.exec(["sh", "-c", "echo $$; exec sleep 30"], timeout=60, on_stdout=on_stdout)
+        )
         self.assertTrue(ready.wait(2))
         transport.close()
         worker.join(2)
@@ -501,30 +502,11 @@ class SshTransportErrorTests(unittest.TestCase):
 
     def test_exec_uses_one_deadline_for_command_launch_and_output(self):
         clock = [0.0]
-
-        class SlowChannel:
-            def settimeout(self, timeout):
-                pass
-
-            def exec_command(self, command):
-                clock[0] = 0.15
-
-            def shutdown_write(self):
-                pass
-
-            def recv_ready(self):
-                return False
-
-            def recv_stderr_ready(self):
-                return False
-
-            def exit_status_ready(self):
-                return False
-
-            def close(self):
-                pass
-
-        with mock.patch.object(self.transport, "_open_channel", return_value=SlowChannel()), \
+        channel = mock.Mock()
+        channel.exec_command.side_effect = lambda command: clock.__setitem__(0, 0.15)
+        for idle in (channel.recv_ready, channel.recv_stderr_ready, channel.exit_status_ready):
+            idle.return_value = False
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), \
              mock.patch.object(transport_module.time, "monotonic", side_effect=lambda: clock[0]), \
              mock.patch.object(
                  transport_module.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)
@@ -536,21 +518,9 @@ class SshTransportErrorTests(unittest.TestCase):
 
     def test_exec_timeout_interrupts_an_unacknowledged_command(self):
         waiting = threading.Event()
-
-        class StuckChannel:
-            def settimeout(self, timeout):
-                pass
-
-            def exec_command(self, command):
-                waiting.wait()
-
-            def shutdown_write(self):
-                pass
-
-            def close(self):
-                waiting.set()
-
-        channel = StuckChannel()
+        channel = mock.Mock()
+        channel.exec_command.side_effect = lambda command: waiting.wait()
+        channel.close.side_effect = waiting.set
         with mock.patch.object(self.transport, "_open_channel", return_value=channel), \
              mock.patch.object(self.transport, "_drop") as drop, \
              self.assertRaises(BoardError) as ctx:
@@ -603,31 +573,24 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(stored.lookup("192.168.2.2")["ssh-rsa"], new)
 
     def test_close_during_connect_returns_at_once_and_discards_the_connection(self):
-        started, closed, errors = threading.Event(), threading.Event(), []
+        started, closed = threading.Event(), threading.Event()
 
         def slow_connect(*args, **kwargs):
             started.set()
             closed.wait(2)
 
-        def run():
-            try:
-                self.transport.exec(["true"], timeout=2)
-            except BoardError as exc:
-                errors.append(exc.code)
-
         with mock.patch.object(paramiko.SSHClient, "connect", side_effect=slow_connect), \
              mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
              mock.patch.object(paramiko.SSHClient, "get_transport", return_value=mock.Mock()), \
              mock.patch.object(paramiko.SSHClient, "close") as close:
-            worker = threading.Thread(target=run)
-            worker.start()
+            worker, errors = in_thread(lambda: self.transport.exec(["true"], timeout=2))
             started.wait(2)
             begin = time.monotonic()
             self.transport.close()
             self.assertLess(time.monotonic() - begin, 0.2)
             closed.set()
             worker.join(2)
-        self.assertEqual(errors, ["stale_snapshot"])
+        self.assertEqual([error.code for error in errors], ["stale_snapshot"])
         self.assertTrue(close.called)
 
     def test_close_at_any_point_before_the_command_is_sent_stops_it(self):
@@ -641,20 +604,10 @@ class SshTransportErrorTests(unittest.TestCase):
                 self.closed, self.commands = False, []
                 client = self
 
-                class Channel:
-                    def settimeout(self, timeout):
-                        pass
-
-                    def exec_command(self, command):
-                        if client.closed:
-                            raise paramiko.SSHException("Channel is not open")
-                        client.commands.append(command)
-
-                    def shutdown_write(self):
-                        pass
-
-                    def close(self):
-                        pass
+                def exec_command(command):
+                    if client.closed:
+                        raise paramiko.SSHException("Channel is not open")
+                    client.commands.append(command)
 
                 class Transport:
                     def is_active(self):
@@ -663,7 +616,7 @@ class SshTransportErrorTests(unittest.TestCase):
                     def open_session(self, timeout=None):
                         if client.closed:
                             raise paramiko.SSHException("SSH session not active")
-                        return Channel()
+                        return mock.Mock(exec_command=mock.Mock(side_effect=exec_command))
 
                 self._transport = Transport()
 
@@ -773,9 +726,7 @@ class SshTransportErrorTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 5)
             stalled.set()
             # The channel that opens after Stop is closed, and the command never starts on it.
-            deadline = time.monotonic() + 5
-            while not channel.close.called and time.monotonic() < deadline:
-                time.sleep(0.01)
+            wait_until(lambda: channel.close.called)
         channel.close.assert_called()
         channel.exec_command.assert_not_called()
         self.assertFalse(self.transport._closed)
@@ -828,15 +779,11 @@ class SshTransportErrorTests(unittest.TestCase):
         self.assertEqual(stream.read(1), b"--frame")
         self.assertIsNone(stream.read(0.01))
         self.assertEqual(stream.read(1), b"")
-        deadline = time.monotonic() + 5
-        while stderr and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(lambda: not stderr)
         self.assertEqual(stream.stderr(), b"4242\nlibcamera noise\n")
         stream.close()
         stream.close()
-        deadline = time.monotonic() + 5
-        while not channel.close.called and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(lambda: channel.close.called)
         channel.close.assert_called_once_with()
         self.assertEqual(stream.read(1), b"")
 
