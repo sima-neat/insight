@@ -1,0 +1,113 @@
+import { apiError } from './model.js'
+
+export async function requestJson(url, { method = 'GET', body } = {}) {
+  let res
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    })
+  } catch {
+    throw apiError({ error: 'Could not reach the Insight server.', code: 'network', hint: 'Check that Insight is still running, then retry.' })
+  }
+  const isJson = (res.headers.get('content-type') || '').toLowerCase().includes('application/json')
+  const data = isJson ? await res.json().catch(() => null) : null
+  if (!res.ok) throw apiError(data, res.status)
+  if (!data) {
+    throw apiError({
+      error: `Expected JSON from ${url}.`,
+      code: 'bad_response',
+      hint: 'The running Insight server may not include this API. Update Insight and restart it.'
+    }, res.status)
+  }
+  return data
+}
+
+// `text` may be a promise: handing it to ClipboardItem inside the click keeps the copy allowed while it
+// resolves, which Safari requires. Without a clipboard (plain HTTP to a board) a hidden textarea copies it.
+export async function copyText(text) {
+  const failure = 'Could not copy: the browser only allows clipboard access over HTTPS or localhost. Select the text and copy it instead.'
+  if (globalThis.ClipboardItem && navigator.clipboard?.write) {
+    try {
+      const blob = Promise.resolve(text).then((value) => new Blob([value], { type: 'text/plain' }))
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })])
+      return
+    } catch {
+      // A failed lookup rethrows below; a refused write falls back to the older paths.
+    }
+  }
+  text = await text
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // Falls back to the textarea below.
+    }
+  }
+  if (!globalThis.document?.execCommand) throw new Error(failure)
+  const focused = document.activeElement
+  const area = document.createElement('textarea')
+  area.value = text
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } catch {
+    // Reported below.
+  } finally {
+    area.remove()
+    focused?.focus?.({ preventScroll: true })
+  }
+  if (!copied) throw new Error(failure)
+}
+
+export function downloadText(filename, content) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export function startMicrophoneTest(id) {
+  return requestJson('/api/peripherals/microphones/test', { method: 'POST', body: { id } })
+}
+
+// Stops only the test `token`: a late Stop from an earlier test never ends one another tab started.
+export function stopMicrophoneTest(token) {
+  return requestJson('/api/peripherals/microphones/test/stop', { method: 'POST', body: { token } })
+}
+
+export function getMicrophoneTest() {
+  return requestJson('/api/peripherals/microphones/test')
+}
+
+// The status read never contacts the board, so a failed read is a network blip or an Insight
+// restart, not the end of the recording: retry it. Codes that mean the test is gone end it, and so
+// does a run of failures (about 5 s at the page's 100 ms poll).
+const TERMINAL_MICROPHONE_STATUS_ERRORS = new Set(['not_found', 'stale_snapshot'])
+
+export async function readMicrophoneTest({
+  request = getMicrophoneTest,
+  isActive = () => true,
+  wait = () => new Promise((resolve) => setTimeout(resolve, 100)),
+  maxFailures = 50
+} = {}) {
+  for (let failures = 1; ; failures += 1) {
+    try {
+      return await request()
+    } catch (error) {
+      if (TERMINAL_MICROPHONE_STATUS_ERRORS.has(error?.code) || failures >= maxFailures || !isActive()) throw error
+      await wait()
+    }
+  }
+}
