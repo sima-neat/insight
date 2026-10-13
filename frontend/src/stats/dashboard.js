@@ -429,7 +429,9 @@ export function compareOverlay(payload, seriesId) {
       energy: isNumber(body.summaries?.[line.id]?.energy_joules) ? body.summaries[line.id].energy_joules : null
     }
   })
-  return { spec, available, unit, lines, overlap, rows }
+  // Scaled to the samples inside the common window only: the clipped point past it is drawn at the edge, not read.
+  const scale = tightScale(lines.map((line) => withinWindow(line.points, overlap).map((point) => point.v)))
+  return { spec, available, unit, lines, overlap, scale, rows }
 }
 
 /** A padded, outward-rounded comparison scale that keeps small differences visible. */
@@ -451,6 +453,11 @@ export function windowPoints(points, window) {
   if (window <= 0) return list.filter((point) => Math.abs(point.t) <= 1e-9)
   const past = list.findIndex((point) => point.t > window + 1e-9)
   return past < 0 ? list : list.slice(0, past + 1)
+}
+
+/** The samples inside the window itself, without the clipped point that only carries the line to its edge. */
+export function withinWindow(points, window) {
+  return (points || []).filter((point) => point.t <= Math.max(window, 0) + 1e-9)
 }
 
 export function elapsedPath(points, window, scale, width, height) {
@@ -476,10 +483,10 @@ export function elapsedPath(points, window, scale, width, height) {
   return segments.map((segment) => segment.map(([x, y], index) => `${index ? 'L' : 'M'}${x} ${y}`).join(' ')).join(' ')
 }
 
-/** The reading nearest to elapsed time `t`, for the hover readout. */
-export function valueNear(points, t) {
+/** The reading nearest to elapsed time `t`, for the hover readout; a `window` leaves out samples past it. */
+export function valueNear(points, t, window) {
   let best = null
-  for (const point of points || []) {
+  for (const point of window === undefined ? points || [] : withinWindow(points, window)) {
     if (!isNumber(point.t)) continue
     if (!best || Math.abs(point.t - t) < Math.abs(best.t - t)) best = point
   }

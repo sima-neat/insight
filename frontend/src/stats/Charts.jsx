@@ -345,7 +345,7 @@ export function ElapsedChart({ title, lines, window, scale, unit, height = 200 }
               <span className={`dash-tooltip${hover.index > 50 ? ' flip' : ''}`} style={{ left: `${hover.index}%` }} aria-hidden="true">
                 <span className="dash-tooltip-time">{at.toFixed(1)} s</span>
                 {lines.map((line) => {
-                  const near = valueNear(line.points, at)
+                  const near = valueNear(line.points, at, window)
                   return (
                     <span key={line.id} className="dash-tooltip-row" style={{ '--series': line.color }}>
                       <span className="dash-swatch" />

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ElapsedChart } from './Charts.jsx'
-import { compareOverlay, tightScale, windowPoints } from './dashboard.js'
+import { compareOverlay, windowPoints } from './dashboard.js'
 import { formatPercentDelta, formatValue } from './model.js'
 import { SegmentedTabs } from './ui.jsx'
 
@@ -11,9 +11,8 @@ export default function CompareOverlay({ payload }) {
   const [seriesId, setSeriesId] = useState('power')
   const overlay = compareOverlay(payload, seriesId)
   if (!overlay) return null
-  const { spec, available, unit, overlap, rows } = overlay
+  const { spec, available, unit, overlap, scale, rows } = overlay
   const lines = overlay.lines.map((line, index) => ({ ...line, points: windowPoints(line.points, overlap), color: RUN_COLORS[index % RUN_COLORS.length] }))
-  const scale = tightScale(lines.map((line) => line.points.map((point) => point.v)))
   return (
     <div className="dash dash-compare">
       <SegmentedTabs

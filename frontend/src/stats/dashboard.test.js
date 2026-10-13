@@ -182,6 +182,19 @@ test('compare runs overlays one series per run over elapsed time, baseline first
   assert.equal(elapsedPath([{ t: 0, v: 1 }, { t: 2, v: 3 }], 0, { min: 0, max: 4 }, 100, 4), 'M49 3 L51 3', 'a zero common window shows its initial sample as a point')
   assert.deepEqual(windowPoints([{ t: 0, v: null }, { t: 2, v: 3 }], 0), [{ t: 0, v: null }], 'scale and tooltip see only that same window')
   assert.deepEqual([valueNear(points, 1.2), valueNear(points, 1), valueNear([], 1)], [{ t: 1, v: null }, { t: 1, v: null }, null])
+
+  // Codex 4261227803: the point past the window is drawn only to carry the line to its edge; the
+  // scale and the hover readout use the samples inside the window.
+  assert.deepEqual(valueNear([{ t: 0, v: 1 }, { t: 2, v: 3 }, { t: 5, v: 100 }], 4, 4), { t: 2, v: 3 })
+  const longer = structuredClone(RAW)
+  const body = longer.sentinel || longer
+  const run = body.runs.find((entry) => entry.metadata.id !== body.baseline_id)
+  const last = run.samples[run.samples.length - 1]
+  const later = new Date(Date.parse(last.timestamp) + 5000).toISOString()
+  run.samples.push({ ...last, timestamp: later, values: { ...last.values, power_current_watts: 50 } })
+  const clipped = compareOverlay(longer, 'power')
+  assert.equal(clipped.lines[1].points.at(-1).v, 50, 'the extra sample is past the common window')
+  assert.deepEqual(clipped.scale, compareOverlay(RAW, 'power').scale, 'and does not stretch the scale')
 })
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {
