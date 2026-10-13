@@ -267,21 +267,37 @@ function mean(values) {
 
 /** The heatmap column a sample falls in: by board time when `timestamps` cover every sample, else by count. */
 function columnOf(index, length, columns, times) {
-  if (length <= columns) return index
   const span = times ? times[length - 1] - times[0] : 0
   if (span > 0) return Math.min(columns - 1, Math.floor(((times[index] - times[0]) / span) * columns))
+  if (length <= columns) return index
   const size = length / columns
   return Math.min(columns - 1, Math.max(0, Math.ceil((index + 1) / size - 1e-9) - 1))
 }
 
-/** A series split into `columns` equal slices of time, each the mean of its samples (null where none). */
+/**
+ * How many columns a history fills. A long one fills them all. A short one with board times gets one column per
+ * sampling interval, its smallest gap, so a pause in the samples stays an empty stretch instead of closing up.
+ */
+function columnCount(length, columns, times) {
+  const span = times ? times[length - 1] - times[0] : 0
+  if (length > columns) return columns
+  if (!(span > 0)) return length
+  let step = Infinity
+  for (let index = 1; index < length; index += 1) {
+    const gap = times[index] - times[index - 1]
+    if (gap > 0) step = Math.min(step, gap)
+  }
+  return Math.min(columns, Math.round(span / step) + 1)
+}
+
+/** A series split into equal slices of time, at most `columns`, each the mean of its samples (null where none). */
 export function columnMeans(values, columns = HEAT_COLUMNS, timestamps = null) {
   const list = values || []
   if (!list.length) return []
-  if (list.length <= columns) return list.map((value) => (isNumber(value) ? value : null))
   const times = boardSeconds(timestamps, list.length)
-  const slices = Array.from({ length: columns }, () => [])
-  list.forEach((value, index) => slices[columnOf(index, list.length, columns, times)].push(value))
+  const count = columnCount(list.length, columns, times)
+  const slices = Array.from({ length: count }, () => [])
+  list.forEach((value, index) => slices[columnOf(index, list.length, count, times)].push(value))
   return slices.map(mean)
 }
 
@@ -369,14 +385,21 @@ function stats(values) {
 
 const POWER_KEY = 'power_current_watts'
 
-/** Joules over the window: board power integrated between consecutive readings inside it. */
+/**
+ * Joules over the window: board power integrated between consecutive readings, up to the window's edge. A run with
+ * no reading at the edge has its last interval cut there, at the power interpolated between the readings either side,
+ * as its chart line is.
+ */
 function windowEnergy(points, window) {
-  const inside = withinWindow(points, window)
+  const list = points || []
   let joules = null
-  for (let index = 1; index < inside.length; index += 1) {
-    const [before, after] = [inside[index - 1], inside[index]]
-    if (!isNumber(before.v) || !isNumber(after.v)) continue
-    joules = (joules ?? 0) + ((before.v + after.v) / 2) * (after.t - before.t)
+  for (let index = 1; index < list.length; index += 1) {
+    const [before, after] = [list[index - 1], list[index]]
+    if (before.t >= window - 1e-9) break
+    if (!isNumber(before.v) || !isNumber(after.v) || !(after.t > before.t)) continue
+    const end = Math.min(after.t, window)
+    const atEnd = before.v + ((after.v - before.v) * (end - before.t)) / (after.t - before.t)
+    joules = (joules ?? 0) + ((before.v + atEnd) / 2) * (end - before.t)
   }
   return joules
 }

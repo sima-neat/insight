@@ -146,6 +146,12 @@ test('the per-core minute and heatmap columns follow board time when polling is 
   assert.deepEqual([newestInColumn(0, 60, 4, stamps), newestInColumn(1, 60, 4, stamps), newestInColumn(3, 60, 4, stamps)], [39, -1, 59])
   assert.deepEqual(columnMeans([1, 2, 3, 4, 5, 6], 4), [1, 2.5, 4, 5.5], 'by count without timestamps, as before')
   assert.deepEqual([0, 1, 2, 3].map((column) => newestInColumn(column, 6, 4)), [0, 2, 3, 5])
+  // Codex 4261518799: a short history kept one column per sample whatever the time between them, so a pause closed up.
+  const at = (offsets) => offsets.map((second) => new Date(Date.UTC(2026, 8, 25, 0, 0, second)).toISOString())
+  const paused = columnMeans([10, 20, 90], HEAT_COLUMNS, at([0, 2, 32]))
+  assert.deepEqual([paused.length, paused[0], paused[1], paused[2], paused[15], paused[16]], [17, 10, 20, null, null, 90], 'one column per 2 s interval')
+  assert.deepEqual([0, 1, 2, 16].map((column) => newestInColumn(column, 3, paused.length, at([0, 2, 32]))), [0, 1, -1, 2])
+  assert.deepEqual(columnMeans([1, 2, 3], HEAT_COLUMNS, at([0, 2, 4])), [1, 2, 3], 'evenly sampled, the columns stay adjacent')
 })
 
 test('per-core heatmap: column means over the window, a one-minute average per core', () => {
@@ -202,6 +208,19 @@ test('compare runs overlays one series per run over elapsed time, baseline first
   assert.deepEqual(clipped.scale, compareOverlay(RAW, 'power').scale, 'and does not stretch the scale')
   // Codex 4261313748: the rows describe the same samples as the chart, so the extra one changes none of them.
   assert.deepEqual(clipped.rows, compareOverlay(RAW, 'power').rows)
+  // Codex 4261518789: a run with no reading at the window's edge is integrated up to the edge, as its line is drawn.
+  const edge = structuredClone(RAW)
+  const edgeBody = edge.sentinel || edge
+  const offsets = (run, secondsList) => {
+    const first = Date.parse(run.samples[0].timestamp)
+    const template = run.samples[0]
+    run.samples = secondsList.map((second) => ({ ...template, timestamp: new Date(first + second * 1000).toISOString(), values: { ...template.values, power_current_watts: 10 } }))
+  }
+  offsets(edgeBody.runs.find((entry) => entry.metadata.id === edgeBody.baseline_id), [0, 3, 6])
+  offsets(edgeBody.runs.find((entry) => entry.metadata.id !== edgeBody.baseline_id), [0, 2, 4])
+  const cut = compareOverlay(edge, 'power')
+  assert.equal(cut.overlap, 4)
+  assert.deepEqual(cut.rows.map((row) => row.energy), [40, 40], '10 W for the 4 s window, though one run has no reading at 4 s')
 })
 
 test('compare runs offers only the series the runs recorded, and derives the thermal maximum', () => {
