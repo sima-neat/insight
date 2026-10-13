@@ -21,12 +21,10 @@ import {
   resolveDeviceKind,
   resolveSelection,
   restartSelection,
+  runPreviewStart,
   sameSelection,
-  sessionMatches,
-  sessionToAdopt,
   severityInfo,
   sortIssues,
-  startSuperseded,
   streamErrorEvent,
   watchPreview
 } from './peripherals/model.js'
@@ -262,49 +260,28 @@ export default function PeripheralsView({
     return true
   }
 
+  // What the pane shows now. Every step of a start that resumes after an await reads it again: the
+  // user can change the camera, the board, or the mode while any request is in flight.
+  function latestView() {
+    return { cameraId: activeIdRef.current, generation: boardGenerationRef.current, selection: selectionRef.current }
+  }
+
   async function startPreview(mode = selection) {
     if (!camera || !mode) return
-    const requested = { cameraId: camera.id, generation: boardGenerationRef.current, mode }
-    dispatchPreview({ type: 'start' })
-    try {
-      const data = await requestJson(PREVIEW_BASE, {
+    const cameraId = camera.id
+    await runPreviewStart({ cameraId, generation: boardGenerationRef.current, mode }, {
+      post: (m) => requestJson(PREVIEW_BASE, {
         method: 'POST',
-        body: { id: camera.id, format: mode.format, width: mode.width, height: mode.height, fps: mode.fps }
-      })
-      // The user can select another camera while the board is starting this one. Adopting the
-      // session anyway would label camera A's video as camera B's. The same applies to a mode
-      // changed while the POST was in flight: the returned picture must match the menus.
-      const latestSelection = selectionRef.current
-      if (sessionMatches(data.session, activeIdRef.current, boardGenerationRef.current, latestSelection)) {
-        dispatchPreview({ type: 'session', session: data.session })
-      } else if (await stopPreview(data.session?.id, data.session)) {
-        if (
-          activeIdRef.current === camera.id &&
-          latestSelection?.id === camera.id &&
-          !sameSelection(data.session?.mode, latestSelection)
-        ) {
-          await startPreview(latestSelection)
-        } else {
-          dispatchPreview({ type: 'reset' })
-        }
-      }
-    } catch (err) {
-      // Like a start that succeeded too late: the camera, board, or mode changed while the board was
-      // starting it, so its failure says nothing about what the pane now shows.
-      const latest = { cameraId: activeIdRef.current, generation: boardGenerationRef.current, selection: selectionRef.current }
-      if (startSuperseded(requested, latest)) {
-        dispatchPreview({ type: 'reset' })
-        return
-      }
-      const error = normalizeError(err)
-      // Another tab started a preview after this page loaded: show that one, with its Stop.
-      const running = error.code === 'preview_active'
-        ? await requestJson('/api/peripherals/preview').then((data) => data.session, () => null)
-        : null
-      const existing = sessionToAdopt(error, running)
-      if (existing) adoptPreview(existing)
-      else dispatchPreview({ type: 'failed', error })
-    }
+        body: { id: cameraId, format: m.format, width: m.width, height: m.height, fps: m.fps }
+      }),
+      lookup: () => requestJson('/api/peripherals/preview').then((data) => data.session, () => null),
+      stop: (session) => stopPreview(session?.id, session),
+      start: startPreview,
+      adopt: adoptPreview,
+      dispatch: dispatchPreview,
+      view: latestView,
+      normalize: normalizeError
+    })
   }
 
   function adoptPreview(session) {
@@ -352,8 +329,7 @@ export default function PeripheralsView({
     if (!(await stopPreview(previewRef.current.session.id))) return
     // A mode picked while the stop ran made no restart of its own (the pane was stopping), so start
     // the mode selected now rather than this call's.
-    const latest = { cameraId: activeIdRef.current, generation: boardGenerationRef.current, selection: selectionRef.current }
-    const mode = restartSelection(requested, latest)
+    const mode = restartSelection(requested, latestView())
     if (mode) await startPreview(mode)
   }
 

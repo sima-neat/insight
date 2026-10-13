@@ -46,6 +46,7 @@ import {
   resolveDeviceKind,
   resolveSelection,
   restartSelection,
+  runPreviewStart,
   safeHref,
   sameSelection,
   selectionTier,
@@ -822,6 +823,74 @@ test('a restart starts the mode selected once its stop finished, not the one sel
   assert.equal(restartSelection(requested, { cameraId: 'camera:b', generation: 3, selection: { ...c, id: 'camera:b' } }), null)
   assert.equal(restartSelection(requested, { cameraId: 'camera:a', generation: 4, selection: c }), null)
   assert.equal(restartSelection(requested, { cameraId: 'camera:a', generation: 3, selection: null }), null)
+})
+
+test('every step of a start that resumes after an await acts only for the view read at that step', async () => {
+  const a = { id: 'camera:a', format: 'MJPG', width: 640, height: 480, fps: 30 }
+  const b = { ...a, width: 1280, height: 720 }
+  const c = { ...a, width: 1920, height: 1080 }
+  const sessionFor = (mode) => ({ id: 's1', camera_id: 'camera:a', generation: 3, state: 'live', mode: { format: mode.format, width: mode.width, height: mode.height, fps: mode.fps } })
+  // A page whose selection the test changes while a request is in flight.
+  function page(selection) {
+    const log = []
+    const current = { cameraId: 'camera:a', generation: 3, selection }
+    return {
+      log,
+      current,
+      deps: {
+        dispatch: (event) => log.push(['dispatch', event.type]),
+        adopt: (session) => log.push(['adopt', session.id]),
+        start: (mode) => log.push(['start', mode.width]),
+        stop: async (session) => { log.push(['stop', session.id]); return true },
+        view: () => ({ ...current }),
+        normalize: (err) => err
+      }
+    }
+  }
+  const requested = { cameraId: 'camera:a', generation: 3, mode: a }
+
+  // A refused start looks up the preview another tab runs; B is picked during that look-up, so the
+  // other tab's session is not adopted (which would switch the menus back) and the pane resets.
+  let p = page(a)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => { throw { code: 'preview_active', message: 'busy' } },
+    lookup: async () => { p.current.selection = b; return sessionFor(a) }
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'reset']])
+
+  // Unchanged during the look-up: the running preview is adopted.
+  p = page(a)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => { throw { code: 'preview_active', message: 'busy' } },
+    lookup: async () => sessionFor(a)
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['adopt', 's1']])
+
+  // A start for A answers after B was picked, so it is stopped; C is picked during that stop, so C is
+  // started, not B.
+  p = page(b)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => ({ session: sessionFor(a) }),
+    stop: async (session) => { p.log.push(['stop', session.id]); p.current.selection = c; return true }
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['stop', 's1'], ['start', 1920]])
+
+  // The camera changed during that stop: nothing is started.
+  p = page(b)
+  await runPreviewStart(requested, {
+    ...p.deps,
+    post: async () => ({ session: sessionFor(a) }),
+    stop: async () => { p.current.cameraId = 'camera:b'; p.current.selection = { ...c, id: 'camera:b' }; return true }
+  })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'reset']])
+
+  // Nothing changed: the session is shown.
+  p = page(a)
+  await runPreviewStart(requested, { ...p.deps, post: async () => ({ session: sessionFor(a) }) })
+  assert.deepEqual(p.log, [['dispatch', 'start'], ['dispatch', 'session']])
 })
 
 test('a start is superseded once the camera, board, or mode it was sent for is no longer the one shown', () => {

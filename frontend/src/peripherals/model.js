@@ -361,6 +361,40 @@ export function restartSelection(requested, latest) {
   return latest.selection?.id === requested.cameraId ? latest.selection : null
 }
 
+// One start of a preview, from its POST to what the pane shows. The user can change the camera, the board,
+// or the mode while any request is in flight, so every step that resumes after an await reads `view()`
+// again and acts only for what is selected then. `deps`: post(mode) -> response, lookup() -> the running
+// session or null, stop(session) -> whether it stopped, start(mode), adopt(session), dispatch(event),
+// view() -> { cameraId, generation, selection }, and normalize(error).
+export async function runPreviewStart(requested, deps) {
+  deps.dispatch({ type: 'start' })
+  let data
+  try {
+    data = await deps.post(requested.mode)
+  } catch (err) {
+    // Like a start that succeeded too late: once superseded, its failure says nothing about what the
+    // pane now shows.
+    if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' })
+    const error = deps.normalize(err)
+    // Another tab started a preview after this page loaded: show that one, with its Stop.
+    const running = error.code === 'preview_active' ? await deps.lookup() : null
+    if (startSuperseded(requested, deps.view())) return deps.dispatch({ type: 'reset' })
+    const existing = sessionToAdopt(error, running)
+    return existing ? deps.adopt(existing) : deps.dispatch({ type: 'failed', error })
+  }
+  // A session for a camera, board, or mode no longer shown would label one camera's video as another's,
+  // or disagree with the menus: it is stopped instead.
+  const latest = deps.view()
+  if (sessionMatches(data.session, latest.cameraId, latest.generation, latest.selection)) {
+    return deps.dispatch({ type: 'session', session: data.session })
+  }
+  if (!(await deps.stop(data.session))) return undefined
+  // The mode may have changed again while the stop ran: start the one selected now, or nothing when
+  // the camera or board changed.
+  const next = restartSelection(requested, deps.view())
+  return next ? deps.start(next) : deps.dispatch({ type: 'reset' })
+}
+
 // A preview streams the mode it was started with. When the menus move, the picture and the menus
 // disagree until it is restarted on the new one.
 export function previewNeedsRestart(state, cameraId, next) {
