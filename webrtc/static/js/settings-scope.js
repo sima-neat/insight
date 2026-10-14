@@ -1,7 +1,7 @@
 // The settings dialog's scope UI (spec part 3): a channel gets its own value for a
-// setting only while that setting's switch is on. The global dialog lists, under
-// every setting, the channels with a value of their own, and offers a reset of all
-// channels. settings.js owns the dialog and calls into this file; nothing here
+// setting only while that setting's switch is on. The global dialog marks every
+// setting that channels set themselves with an icon that lists them, and offers a
+// reset of all channels. settings.js owns the dialog and calls into this file; nothing here
 // touches the page until create() runs from settings.js's DOMContentLoaded handler.
 (() => {
   // The settings functions this UI calls (viewer-settings-resolver.js).
@@ -30,6 +30,12 @@
     "resetChannelScopesMessage",
     "resetChannelScopesConfirmButton",
     "resetChannelScopesCancel",
+    "settingsOverridesModal",
+    "settingsOverridesTitle",
+    "settingsOverridesMessage",
+    "settingsOverridesList",
+    "settingsOverridesClose",
+    "settingsOverridesDone",
     "saveViewerSettings"
   ];
 
@@ -300,6 +306,37 @@
     return button;
   }
 
+  function overridesText(count) {
+    return count === 1 ? "1 channel uses its own value" : `${count} channels use their own value`;
+  }
+
+  // The global dialog's mark on a setting that channels set themselves: an icon at the
+  // end of its row (of its group on the ROI tab) that opens the list of those channels.
+  function createOverrideIcon(container, onClick) {
+    const wrapper = document.createElement(container.tagName === "TR" ? "td" : "span");
+    wrapper.className = "settings-override-cell settings-global-only";
+    const button = createButton("\u26a0", "settings-override-icon", onClick);
+    button.hidden = true;
+    wrapper.appendChild(button);
+    container.appendChild(wrapper);
+    return button;
+  }
+
+  // A modal over the settings dialog: Escape, a click beside its card and its close
+  // buttons all close it, without closing the dialog under it.
+  function wireModal(modal, closeButtons, close) {
+    closeButtons.forEach((button) => button.addEventListener("click", close));
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) close();
+    });
+    modal.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    });
+  }
+
   function createNoteLine(text, button) {
     const line = document.createElement("div");
     line.className = "settings-scope-note-line";
@@ -345,7 +382,7 @@
       row.hidden = true;
       const cell = document.createElement("td");
       cell.className = "settings-scope-note";
-      cell.colSpan = 3;
+      cell.colSpan = 4;
       row.appendChild(cell);
       container.after(row);
       return { box: row, content: cell };
@@ -367,15 +404,22 @@
     const resetMessage = document.getElementById("resetChannelScopesMessage");
     const resetConfirmButton = document.getElementById("resetChannelScopesConfirmButton");
     const resetCancel = document.getElementById("resetChannelScopesCancel");
+    const overridesModal = document.getElementById("settingsOverridesModal");
+    const overridesTitle = document.getElementById("settingsOverridesTitle");
+    const overridesMessage = document.getElementById("settingsOverridesMessage");
+    const overridesList = document.getElementById("settingsOverridesList");
     let scope = "global";
+    // The setting whose channels the overrides modal lists while it is open.
+    let shownOverrides = null;
 
-    const settings = settingsApi.scalarSettings().map(({ id }) => {
+    const settings = settingsApi.scalarSettings().map(({ id, metadataType }) => {
       const entry = SCALAR_CONTROLS[id];
       const control = document.getElementById(entry.control);
       const container = settingContainer(control);
       const own = createSwitch(entry.control, container);
       const note = createNote(container);
-      const setting = { id, entry, control, container, own, note };
+      const setting = { id, metadataType, entry, control, container, own, note };
+      setting.overrideIcon = createOverrideIcon(container, () => openOverrides(setting));
       own.input.addEventListener("change", () => onSwitchChange(setting));
       return setting;
     });
@@ -393,14 +437,13 @@
     });
 
     resetLink.addEventListener("click", openResetConfirm);
-    resetCancel.addEventListener("click", closeResetConfirm);
     resetConfirmButton.addEventListener("click", resetAllChannels);
-    resetConfirm.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      closeResetConfirm();
-    });
+    wireModal(resetConfirm, [resetCancel], closeResetConfirm);
+    wireModal(
+      overridesModal,
+      ["settingsOverridesClose", "settingsOverridesDone"].map((id) => document.getElementById(id)),
+      closeOverrides
+    );
 
     function inChannelDialog() {
       return isChannelScope(scope);
@@ -445,43 +488,82 @@
 
     // Collapsed to one summary line, so a long list cannot push the settings apart; `open`
     // keeps it expanded when it is re-rendered after a "Use global value" click.
-    function renderGlobalNote(setting, open = false) {
-      const overrides = settingsApi.listChannelOverrides(setting.id);
-      setting.note.content.replaceChildren();
-      setting.note.box.hidden = overrides.length === 0;
-      if (overrides.length === 0) return;
-      const box = document.createElement("details");
-      box.className = "settings-scope-note--info";
-      box.open = open;
-      const summary = document.createElement("summary");
-      summary.textContent =
-        overrides.length === 1 ? "1 channel uses its own value" : `${overrides.length} channels use their own value`;
-      box.appendChild(summary);
-      overrides.forEach(({ channel, value }) => {
-        box.appendChild(
-          createNoteLine(
-            `Channel ${channel} uses its own value: ${setting.entry.describe(value)}.`,
-            createButton("Use global value", "settings-scope-link", () => useGlobalValueForChannel(setting, channel))
-          )
-        );
-      });
-      box.appendChild(
-        createNoteLine(overrides.length === 1 ? "Changes here do not affect it." : "Changes here do not affect them.")
-      );
-      setting.note.content.appendChild(box);
+    // The setting as the overrides modal names it: its label, after its metadata type
+    // where several types have a setting of that name.
+    function settingTitle(setting) {
+      const label = document.querySelector(`label[for="${setting.entry.control}"]`);
+      const name = label ? label.textContent.trim() : setting.id;
+      const type = settingsApi.metadataTypes.find(({ value }) => value === setting.metadataType);
+      return type ? `${type.label}: ${name}` : name;
     }
 
-    // "Use global value" in the global dialog takes effect at once, without Save.
+    function renderOverrideIcon(setting) {
+      const count = settingsApi.listChannelOverrides(setting.id).length;
+      const text = overridesText(count);
+      setting.overrideIcon.hidden = count === 0;
+      setting.overrideIcon.title = text;
+      setting.overrideIcon.setAttribute("aria-label", `${settingTitle(setting)}: ${text}`);
+    }
+
+    function renderOverridesModal() {
+      const setting = shownOverrides;
+      const overrides = settingsApi.listChannelOverrides(setting.id);
+      overridesTitle.textContent = settingTitle(setting);
+      overridesMessage.textContent =
+        `${overridesText(overrides.length)}. ` +
+        `Changes in the global settings do not affect ${overrides.length === 1 ? "it" : "them"}.`;
+      overridesList.replaceChildren(
+        ...overrides.map(({ channel, value }) => {
+          const line = document.createElement("div");
+          line.className = "settings-overrides-line";
+          const text = document.createElement("span");
+          text.textContent = `Channel ${channel}: ${setting.entry.describe(value)}`;
+          line.append(
+            text,
+            createButton("Use global value", "settings-scope-link", () => useGlobalValueForChannel(setting, channel))
+          );
+          return line;
+        })
+      );
+    }
+
+    function openOverrides(setting) {
+      shownOverrides = setting;
+      renderOverridesModal();
+      overridesModal.hidden = false;
+      const firstLink = overridesList.querySelector(".settings-scope-link");
+      if (firstLink) firstLink.focus();
+    }
+
+    function hideOverrides() {
+      overridesModal.hidden = true;
+      overridesList.replaceChildren();
+      shownOverrides = null;
+    }
+
+    // Back to the icon that opened the modal, or to the setting once no channel is left.
+    function closeOverrides() {
+      const setting = shownOverrides;
+      hideOverrides();
+      if (!setting) return;
+      if (!setting.overrideIcon.hidden) setting.overrideIcon.focus();
+      else if (!setting.control.disabled) setting.control.focus();
+      else saveButton.focus();
+    }
+
+    // "Use global value" in the overrides modal takes effect at once, without Save.
     function useGlobalValueForChannel(setting, channel) {
       const channelScope = `channel_${channel}`;
       if (!settingsApi.clearScopeOwnValue(channelScope, setting.id)) return;
       dispatchSettingsChanged(channelScope);
-      renderGlobalNote(setting, true);
+      renderOverrideIcon(setting);
       renderResetLink();
-      // The button is gone; keep the focus on this setting.
-      const nextLink = setting.note.content.querySelector(".settings-scope-link");
-      if (nextLink) nextLink.focus();
-      else if (!setting.control.disabled) setting.control.focus();
+      if (setting.overrideIcon.hidden) {
+        closeOverrides();
+        return;
+      }
+      renderOverridesModal();
+      overridesList.querySelector(".settings-scope-link").focus();
     }
 
     function onSwitchChange(setting) {
@@ -571,14 +653,16 @@
     }
 
     function renderResetLink() {
-      resetLink.hidden = !resetConfirm.hidden || settingsApi.countChannelScopes() === 0;
+      resetLink.hidden = settingsApi.countChannelScopes() === 0;
     }
 
     function openResetConfirm() {
       const count = settingsApi.countChannelScopes();
-      resetMessage.textContent = `Remove the own values of ${channelCountText(count)}? Regions of interest are kept.`;
+      resetMessage.textContent =
+        `The own values of ${channelCountText(count)} are removed, and ${count === 1 ? "it follows" : "they follow"} ` +
+        "the global settings again. " +
+        "Regions of interest are kept.";
       resetConfirm.hidden = false;
-      resetLink.hidden = true;
       resetCancel.focus();
     }
 
@@ -615,8 +699,14 @@
     // The scope-dependent parts of the dialog, without touching values the user may
     // have changed: notes, inherited entries, locks, scope line and reset link.
     function render() {
-      if (inChannelDialog()) settings.forEach(renderChannelNote);
-      else settings.forEach((setting) => renderGlobalNote(setting)); // collapsed: forEach's index is no `open`
+      if (inChannelDialog()) {
+        settings.forEach(renderChannelNote);
+      } else {
+        settings.forEach((setting) => {
+          setting.note.box.hidden = true;
+          renderOverrideIcon(setting);
+        });
+      }
       refreshInherited();
       refreshControls();
       renderScopeLine();
@@ -632,6 +722,7 @@
       // the settings-channel-only and settings-global-only elements are displayed.
       dialog.dataset.settingsScope = inChannelDialog() ? "channel" : "global";
       hideResetConfirm();
+      hideOverrides();
       if (inChannelDialog()) loadChannelSettings();
       else loadGlobalSettings();
       render();

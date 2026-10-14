@@ -270,14 +270,33 @@
       </div>
       <div class="modal-footer">
         <div class="settings-reset">
-          <button type="button" id="resetChannelScopes" class="settings-scope-link settings-global-only" hidden>Reset all channels to the global settings…</button>
-          <div id="resetChannelScopesConfirm" class="settings-reset-confirm settings-global-only" role="group" aria-labelledby="resetChannelScopesMessage" hidden>
-            <span id="resetChannelScopesMessage" class="settings-reset-message"></span>
-            <button type="button" id="resetChannelScopesConfirmButton" class="settings-reset-button settings-reset-button--danger">Reset</button>
-            <button type="button" id="resetChannelScopesCancel" class="settings-reset-button">Cancel</button>
-          </div>
+          <button type="button" id="resetChannelScopes" class="settings-reset-all settings-global-only" hidden>Reset all channels to the global settings…</button>
         </div>
         <button id="saveViewerSettings" class="app-button">Save</button>
+      </div>
+      <!-- Modals over the dialog, opened by the scope UI (settings-scope.js). -->
+      <div id="settingsOverridesModal" class="settings-submodal" hidden>
+        <div class="settings-submodal-card" role="dialog" aria-modal="true" aria-labelledby="settingsOverridesTitle" aria-describedby="settingsOverridesMessage">
+          <div class="settings-submodal-header">
+            <h3 id="settingsOverridesTitle" class="settings-submodal-title"></h3>
+            <button type="button" id="settingsOverridesClose" class="settings-submodal-close" aria-label="Close">&times;</button>
+          </div>
+          <p id="settingsOverridesMessage" class="settings-submodal-message"></p>
+          <div id="settingsOverridesList" class="settings-overrides-list"></div>
+          <div class="settings-submodal-actions">
+            <button type="button" id="settingsOverridesDone" class="settings-modal-button settings-modal-button--neutral">Close</button>
+          </div>
+        </div>
+      </div>
+      <div id="resetChannelScopesConfirm" class="settings-submodal" hidden>
+        <div class="settings-submodal-card" role="alertdialog" aria-modal="true" aria-labelledby="resetChannelScopesTitle" aria-describedby="resetChannelScopesMessage">
+          <h3 id="resetChannelScopesTitle" class="settings-submodal-title">Reset all channels?</h3>
+          <p id="resetChannelScopesMessage" class="settings-submodal-message"></p>
+          <div class="settings-submodal-actions">
+            <button type="button" id="resetChannelScopesCancel" class="settings-modal-button settings-modal-button--neutral">Cancel</button>
+            <button type="button" id="resetChannelScopesConfirmButton" class="settings-modal-button settings-modal-button--danger">Reset</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
