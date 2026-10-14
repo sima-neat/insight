@@ -193,6 +193,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [tutorialStep, setTutorialStep] = useState(null)
   const [streaming, setStreaming] = useState(false)
   const chatAbort = useRef(null)
+  const boardGeneration = useRef(0)   // + 1 on every board switch
   // Set synchronously, so two sends before the next render can't both stream.
   const streamingRef = useRef(false)
   // Bumped by New chat: a reply still finishing from the old chat is dropped.
@@ -422,6 +423,7 @@ export default function GenAIView({ onError, onStatus }) {
   // requests still on their way end, and its state goes, so nothing of it
   // (an error, a catalog, voices, search results) shows against the new one.
   function forgetBoard() {
+    boardGeneration.current += 1
     boardSession.current?.restart()
     voicesLoading.current = false
     // The conversation and an attached picture belong to the previous board:
@@ -849,10 +851,14 @@ export default function GenAIView({ onError, onStatus }) {
 
   async function attachImage(file) {
     if (!file) return
+    // A board switch while a large picture is being resized drops it: it was
+    // chosen for the previous board.
+    const board = boardGeneration.current
     try {
-      setImage(await imageToDataUrl(file))
+      const picture = await imageToDataUrl(file)
+      if (board === boardGeneration.current) setImage(picture)
     } catch {
-      onError?.('That file could not be read as an image.')
+      if (board === boardGeneration.current) onError?.('That file could not be read as an image.')
     }
   }
 

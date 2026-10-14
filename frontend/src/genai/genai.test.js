@@ -719,4 +719,8 @@ test('switching boards ends the conversation and drops an attached picture', () 
   // Saving the same address is not a switch: the conversation stays.
   const apply = view.slice(view.indexOf('async function applySettings('), view.indexOf('\n  }\n', view.indexOf('async function applySettings(')))
   assert.match(apply, /if \(saved\?\.url !== before\) forgetBoard\(\)/)
+  // A picture still being resized when the board changes is dropped, not attached afterwards.
+  assert.match(forget, /boardGeneration\.current \+= 1/)
+  const attach = view.slice(view.indexOf('async function attachImage('), view.indexOf('\n  }\n', view.indexOf('async function attachImage(')))
+  assert.match(attach, /if \(board === boardGeneration\.current\) setImage\(picture\)/)
 })
