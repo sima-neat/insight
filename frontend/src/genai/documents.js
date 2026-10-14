@@ -63,3 +63,58 @@ export function progressOutcome(text) {
   if (last.startsWith('❌')) return { done: true, ok: false, message: clean(last), lines: lines.map(clean) }
   return { done: false, ok: false, message: clean(last), lines: lines.map(clean) }
 }
+
+// --- what the database holds (GET /rag/inspect) -------------------------------
+
+// Sections asked for at most: enough for a handbook, without loading a huge
+// database into the page at once.
+export const INSPECT_LIMIT = 2000
+
+export function inspectPath(limit = INSPECT_LIMIT) {
+  return `rag/inspect?limit=${limit}`
+}
+
+// The heading path of a section: its Header_1, Header_2, … metadata in order.
+export function sectionHeading(metadata) {
+  const md = metadata && typeof metadata === 'object' ? metadata : {}
+  return Object.keys(md)
+    .filter((k) => /^header/i.test(k) && md[k])
+    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+    .map((k) => String(md[k]))
+    .join(' › ')
+}
+
+// GET /rag/inspect in words: summary rows, the sections, and what to say when
+// there are none. `count` is the number returned, meta.chunks the database's.
+export function inspectSummary(data) {
+  if (!data) return { rows: [], sections: [], note: 'Reading the documents…' }
+  if (data.enabled === false) return { rows: [], sections: [], note: 'Document search is turned off on the board.' }
+  const meta = data.meta || {}
+  // Numbered by position: the database's ids are 64-bit and arrive rounded by
+  // JSON.parse, so several sections can share one.
+  const sections = (Array.isArray(data.documents) ? data.documents : []).map((d, i) => ({
+    number: i + 1,
+    heading: sectionHeading(d && d.metadata),
+    text: String((d && d.text) || '')
+  }))
+  const total = typeof meta.chunks === 'number' ? meta.chunks : sections.length
+  const rows = []
+  if (meta.input) rows.push({ label: 'Source', value: String(meta.input).split('/').pop(), title: String(meta.input) })
+  rows.push({ label: 'Sections', value: total > sections.length ? `${total} (showing the first ${sections.length})` : String(sections.length) })
+  if (meta.embedding_model) rows.push({ label: 'Search model', value: String(meta.embedding_model).replace(/\/+$/, '').split('/').pop(), title: String(meta.embedding_model) })
+  if (data.path) rows.push({ label: 'Database', value: String(data.path).split('/').pop(), title: String(data.path) })
+  let note = ''
+  if (data.error) note = `${data.error}. Restart GenAI Studio on the board if it persists.`
+  else if (!sections.length) note = data.exists === false ? 'No documents yet: upload a Markdown file or reset to the default document.' : 'The database holds no sections.'
+  return { rows, sections, note }
+}
+
+// The sections whose heading or text contains every word of `query`, ignoring case.
+export function filterSections(sections, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return sections
+  return sections.filter((s) => {
+    const hay = `${s.heading}\n${s.text}`.toLowerCase()
+    return words.every((w) => hay.includes(w))
+  })
+}

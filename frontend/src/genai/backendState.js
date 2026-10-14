@@ -155,6 +155,16 @@ export function loadedChatModel(status) {
   return chatModels(status).find((m) => loaded.has(m.name)) || null
 }
 
+// Whether a downloaded model can be deleted from the board: not while it is
+// loaded, loading or the speech model in use (the board refuses those).
+export function deletableModel(model, status) {
+  if (!model || !model.name) return false
+  const loaded = new Set((status && status.loaded) || [])
+  const loading = status && status.loading && status.loading.name
+  return !loaded.has(model.name) && !model.loaded && !model.activeAsr &&
+    model.name !== (status && status.asrModel) && model.name !== loading
+}
+
 export function formatBytes(bytes) {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']

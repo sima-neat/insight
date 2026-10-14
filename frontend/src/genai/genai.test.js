@@ -14,16 +14,40 @@ import {
   supportsThinking,
   thinkingModelOnBoard,
   voiceEngineWarnings,
+  deletableModel,
   loadedChatModel,
   speechModels
 } from './backendState.js'
 import { TUTORIAL_STORAGE_KEY, markTutorialSeen, tutorialSeen, tutorialSteps } from './tutorial.js'
 import { languageNames, latinLanguage, readAloudSupport, scriptLanguage, speakableText } from './speech.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser, splitThinking } from './streams.js'
-import { REPLY_CUT_OFF, downloadModel, errorMessage, probeHealth, streamChat } from './client.js'
+import { REPLY_CUT_OFF, boardCameraSnapshot, chatRequestBody, downloadModel, errorMessage, probeHealth, streamChat } from './client.js'
 import { chatStreamStats, heardMetrics, replyMetrics, speechMetrics } from './metrics.js'
 import { createSentenceSplitter, speakablePieces } from './sentences.js'
-import { documentsSummary, documentsSupport, parseSources, progressOutcome, sourcesNote } from './documents.js'
+import {
+  INSPECT_LIMIT,
+  documentsSummary,
+  documentsSupport,
+  filterSections,
+  inspectPath,
+  inspectSummary,
+  parseSources,
+  progressOutcome,
+  sectionHeading,
+  sourcesNote
+} from './documents.js'
+import { boardCameraSupport, parseCameraDevices, pickCamera, snapshotErrorMessage, snapshotPath } from './boardCamera.js'
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  MAX_TOKENS_KEY,
+  MAX_TOKENS_LIMITS,
+  SYSTEM_PROMPT_KEY,
+  clampMaxTokens,
+  loadReplySettings,
+  saveReplySettings,
+  systemPromptFor
+} from './replySettings.js'
+import { LOOP_PAUSE_MS, VISION_PRESETS, createVisionLoop, pause } from './visionLoop.js'
 import { SOLUTIONS, chatLog, chatLogFilename, solutionUrl } from './chatExport.js'
 import { allowedActions } from './activity.js'
 import { anySignal, closedTicket, createBoardSession } from './boardSession.js'
@@ -319,7 +343,7 @@ test('thinking is offered only for models that have a reasoning mode', () => {
 
 test('the tutorial covers every feature, and says why Think first is greyed out for a model that cannot', () => {
   const ids = tutorialSteps().map((s) => s.id)
-  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'talk', 'listen', 'languages', 'solutions', 'documents', 'benchmark', 'export', 'think', 'help'])
+  assert.deepEqual(ids, ['intro', 'model', 'ask', 'picture', 'vision', 'talk', 'listen', 'languages', 'solutions', 'documents', 'benchmark', 'export', 'think', 'help'])
   const think = (options) => tutorialSteps(options).find((s) => s.id === 'think').body
   assert.match(think({ canThink: true }), /Turn on Think first/)
   assert.match(think({ canThink: false, thinkingModel: 'Qwen3 0.6B' }), /greyed out.*choose Qwen3 0\.6B/)
@@ -723,4 +747,402 @@ test('switching boards ends the conversation and drops an attached picture', () 
   assert.match(forget, /boardGeneration\.current \+= 1/)
   const attach = view.slice(view.indexOf('async function attachImage('), view.indexOf('\n  }\n', view.indexOf('async function attachImage(')))
   assert.match(attach, /if \(board === boardGeneration\.current\) setImage\(picture\)/)
+})
+
+// --- board camera, vision view, reply settings, model delete, documents viewer --
+
+test('the board camera is offered only by a board that says so, with the reason otherwise', () => {
+  const health = (features) => ({ httpStatus: 200, body: { ...HEALTH_OK, features } })
+  assert.deepEqual(boardCameraSupport(health({ rag: true, benchmark: true, board_camera: true })), { available: true, reason: '' })
+  // The DevKit's current build: features without board_camera.
+  assert.match(boardCameraSupport(health({ rag: true, benchmark: true })).reason, /Update Apps on the board/)
+  assert.equal(boardCameraSupport(health({ board_camera: false })).available, false)
+  assert.equal(boardCameraSupport(health(undefined)).available, false)
+  assert.match(boardCameraSupport(null).reason, /Connect to a board/)
+  assert.equal(boardCameraSupport({ httpStatus: 502, body: {} }).available, false)
+})
+
+test("the board's camera list keeps only devices a snapshot accepts, and the default when it exists", () => {
+  // Shapes from a Modalix DevKit: ISP nodes such as /dev/video15m2m are listed
+  // too, but /board-camera/snapshot only accepts /dev/videoN.
+  const body = {
+    default: '/dev/video16',
+    devices: [
+      { device: '/dev/video15m2m', name: '' },
+      { device: '/dev/video4', name: 'modalix-isp-stats-ctx0' },
+      { device: '/dev/video16', name: '' },
+      { device: '/dev/video16', name: 'duplicate' },
+      { device: '../etc/passwd', name: 'x' },
+      null,
+      { device: '/dev/video2', label: 'USB Camera' }
+    ]
+  }
+  const cameras = parseCameraDevices(body)
+  assert.deepEqual(cameras, {
+    default: '/dev/video16',
+    devices: [
+      { device: '/dev/video4', label: 'modalix-isp-stats-ctx0 (/dev/video4)' },
+      { device: '/dev/video16', label: '/dev/video16' },
+      { device: '/dev/video2', label: 'USB Camera (/dev/video2)' }
+    ]
+  })
+  assert.equal(pickCamera(cameras, '/dev/video2'), '/dev/video2', 'the choice made before stays')
+  assert.equal(pickCamera(cameras, '/dev/video9'), '/dev/video16', "else the board's default")
+  assert.equal(pickCamera({ ...cameras, default: '/dev/video30' }, ''), '/dev/video4', 'else the first')
+  assert.equal(pickCamera(parseCameraDevices({ devices: [] }), ''), null)
+  assert.deepEqual(parseCameraDevices(null), { devices: [], default: null })
+  assert.equal(parseCameraDevices({ devices: [], default: 'video0' }).default, null)
+})
+
+test('a board camera snapshot is the JPEG, and a refusal reads as what to do', async () => {
+  assert.equal(snapshotPath('/dev/video16'), 'board-camera/snapshot?device=%2Fdev%2Fvideo16')
+  assert.equal(snapshotPath(''), 'board-camera/snapshot')
+  const realFetch = globalThis.fetch
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9])
+  try {
+    let asked = null
+    globalThis.fetch = async (url, init) => {
+      asked = { url, init }
+      return new Response(jpeg, { status: 200, headers: { 'Content-Type': 'image/jpeg' } })
+    }
+    const picture = await boardCameraSnapshot('/dev/video16')
+    assert.equal(asked.url, '/api/genai/board-camera/snapshot?device=%2Fdev%2Fvideo16')
+    assert.equal(asked.init.cache, 'no-store', 'never an earlier picture from the cache')
+    assert.equal(picture.type, 'image/jpeg')
+    assert.deepEqual(new Uint8Array(await picture.arrayBuffer()), jpeg, 'the bytes arrive unchanged')
+
+    respondWith(503, JSON.stringify({ error: 'Board camera capture failed' }), 'application/json')
+    const failed = await boardCameraSnapshot('/dev/video16').catch((e) => e)
+    assert.equal(failed.status, 503)
+    assert.equal(failed.message, 'Board camera capture failed')
+    assert.match(snapshotErrorMessage(failed, '/dev/video16'), /couldn't take a picture with \/dev\/video16\. Check that the camera is plugged in/)
+
+    respondWith(400, JSON.stringify({ error: 'Invalid board camera device' }), 'application/json')
+    assert.match(snapshotErrorMessage(await boardCameraSnapshot('/dev/video1').catch((e) => e), '/dev/video1'), /doesn't accept \/dev\/video1/)
+
+    respondWith(200, '<html>login</html>', 'text/html')
+    await assert.rejects(boardCameraSnapshot('/dev/video16'), /instead of a picture/)
+    respondWith(200, '', 'image/jpeg')
+    await assert.rejects(boardCameraSnapshot('/dev/video16'), /empty picture/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('board camera and vision rules: one picture and one question at a time', () => {
+  const cam = { ...READY, boardCameraAvailable: true }
+  assert.equal(allowedActions(READY).openBoardCamera, false, 'not without the feature')
+  assert.equal(allowedActions(cam).openBoardCamera, true)
+  assert.equal(allowedActions({ ...cam, sees: false }).openBoardCamera, false)
+  assert.equal(allowedActions({ ...cam, cameraOpen: true }).openBoardCamera, false, "one camera panel at a time")
+  assert.equal(allowedActions({ ...cam, boardSnapshot: true }).takeBoardSnapshot, false, 'the device takes one capture at a time')
+  assert.equal(allowedActions({ ...cam, visionLoop: true }).takeBoardSnapshot, false)
+  assert.equal(allowedActions({ ...READY, visionOpen: true }).openCamera, false)
+
+  const idle = allowedActions({ ...READY, visionOpen: true })
+  assert.deepEqual([idle.askVision, idle.startVisionLoop, idle.stopVision, idle.chooseVisionSource], [true, true, false, true])
+  for (const busy of [{ replying: true }, { recording: true }, { transcribing: true }, { visionAsking: true }, { visionLoop: true }, { boardSnapshot: true }]) {
+    const a = allowedActions({ ...READY, visionOpen: true, ...busy })
+    assert.equal(a.askVision, false, `ask while ${Object.keys(busy)[0]}`)
+    assert.equal(a.startVisionLoop, false, `loop while ${Object.keys(busy)[0]}`)
+  }
+  const looping = allowedActions({ ...READY, visionOpen: true, visionLoop: true })
+  assert.equal(looping.stopVision, true)
+  assert.equal(looping.chooseVisionSource, false, 'the source stays while the loop runs')
+  assert.equal(looping.continueVisionLoop, true)
+  assert.equal(looping.changeReplySettings, false)
+  assert.equal(allowedActions({ ...READY, visionAsking: true }).stopVision, true, 'Stop also ends a single question')
+  // What ends a running loop at its next picture.
+  for (const gone of [{ modelOp: true }, { benchmarking: true }, { usable: false }, { sees: false }, { hasChatModel: false }]) {
+    assert.equal(allowedActions({ ...READY, visionLoop: true, ...gone }).continueVisionLoop, false, Object.keys(gone)[0])
+  }
+  assert.equal(allowedActions({ ...READY, sees: false }).openVision, false)
+})
+
+test('a vision question holds what would disturb it: the chat, models and the board', () => {
+  for (const busy of [{ visionAsking: true }, { visionLoop: true }]) {
+    const a = allowedActions({ ...READY, visionOpen: true, ...busy })
+    for (const action of ['send', 'changeChatModel', 'changeSpeechModel', 'deleteModel', 'openBenchmark', 'changeBoard']) {
+      assert.equal(a[action], false, `${action} while ${Object.keys(busy)[0]}`)
+    }
+  }
+  // An open view is about to give the model a picture, as an open camera is.
+  const open = allowedActions({ ...READY, visionOpen: true, benchmarkAvailable: true })
+  assert.deepEqual([open.changeChatModel, open.deleteModel, open.openBenchmark], [false, false, false])
+  assert.equal(open.changeBoard, true)
+})
+
+test('model delete, document viewing and reply settings have their own rules', () => {
+  assert.equal(allowedActions(READY).deleteModel, true)
+  for (const busy of [{ modelOp: true }, { downloading: true }, { replying: true }, { recording: true }, { benchmarking: true }, { cameraOpen: true }]) {
+    assert.equal(allowedActions({ ...READY, ...busy }).deleteModel, false, Object.keys(busy)[0])
+  }
+  assert.equal(allowedActions({ ...READY, documentsAvailable: true }).inspectDocuments, true)
+  assert.equal(allowedActions({ ...READY, documentsAvailable: true, documentTask: true }).inspectDocuments, false, 'not half-rebuilt')
+  assert.equal(allowedActions({ ...READY, documentsAvailable: false }).inspectDocuments, false)
+  assert.equal(allowedActions({ ...READY, replying: true }).changeReplySettings, true, 'a reply keeps the settings it was sent with')
+})
+
+test('only a model that is not in use can be deleted', () => {
+  const [vlm, small, whisper, gte] = STATUS.catalog
+  assert.equal(deletableModel(vlm, STATUS), false, 'loaded')
+  assert.equal(deletableModel(small, STATUS), true)
+  assert.equal(deletableModel(whisper, STATUS), false, 'the speech model in use')
+  assert.equal(deletableModel(gte, STATUS), true)
+  assert.equal(deletableModel(small, { ...STATUS, loading: { name: small.name } }), false, 'being loaded')
+  assert.equal(deletableModel({ name: 'other-asr', type: 'asr' }, { ...STATUS, asrModel: 'other-asr' }), false)
+  assert.equal(deletableModel(null, STATUS), false)
+})
+
+test('the vision loop asks one question at a time, pauses between answers, and reads the prompt each turn', async () => {
+  const events = []
+  let inFlight = 0
+  let most = 0
+  let question = 'What do you see?'
+  let stopReason
+  let stopped
+  const done = new Promise((resolve) => { stopped = resolve })
+  const loop = createVisionLoop({
+    capture: async () => {
+      events.push(`capture ${loop.turns + 1}`)
+      return `frame ${loop.turns + 1}`
+    },
+    ask: async ({ picture, prompt, turn }) => {
+      inFlight += 1
+      most = Math.max(most, inFlight)
+      events.push(`ask ${turn}: ${picture} / ${prompt}`)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      if (turn === 1) question = 'Read any text in view'
+      if (turn === 3) loop.stop()
+    },
+    prompt: () => question,
+    wait: async (ms) => { events.push(`pause ${ms}`) },
+    onStop: (reason) => { stopReason = reason; stopped() }
+  })
+  loop.start()
+  // Wait for the loop to end (a slow CI machine must not cut it short).
+  await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 5000))])
+  assert.equal(most, 1, 'never two questions at once')
+  assert.deepEqual(events, [
+    'capture 1', 'ask 1: frame 1 / What do you see?', `pause ${LOOP_PAUSE_MS}`,
+    'capture 2', 'ask 2: frame 2 / Read any text in view', `pause ${LOOP_PAUSE_MS}`,
+    'capture 3', 'ask 3: frame 3 / Read any text in view'
+  ])
+  assert.equal(loop.running, false)
+  assert.equal(stopReason, null, 'stopped by the user: nothing to report')
+  assert.equal(loop.signal.aborted, true)
+  assert.deepEqual(VISION_PRESETS, ['What do you see?', 'Describe the scene in detail', 'Read any text in view'])
+})
+
+test('the vision loop stops on a failed picture or answer, a block, or a request ended from outside', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10))
+  const run = (options) => {
+    const result = { reason: undefined, asked: 0, captured: 0 }
+    const loop = createVisionLoop({
+      capture: async () => { result.captured += 1; return 'frame' },
+      ask: async () => { result.asked += 1 },
+      prompt: () => 'q',
+      wait: async () => {},
+      onStop: (reason) => { result.reason = reason },
+      ...options(result)
+    })
+    result.loop = loop.start()
+    return result
+  }
+  const camera = run(() => ({ capture: async () => { throw new Error('The board couldn\'t take a picture.') } }))
+  await settle()
+  assert.equal(camera.reason, "The board couldn't take a picture.")
+  assert.equal(camera.asked, 0)
+
+  const answer = run((r) => ({ ask: async () => { r.asked += 1; throw new Error("The model didn't answer: boom") } }))
+  await settle()
+  assert.equal(answer.reason, "The model didn't answer: boom")
+  assert.equal(answer.asked, 1, 'no second question after a failure')
+
+  let allowed = true
+  const blocked = run((r) => ({
+    blocked: () => (allowed ? null : 'A model is loading.'),
+    ask: async () => { r.asked += 1; allowed = false }
+  }))
+  await settle()
+  assert.equal(blocked.reason, 'A model is loading.')
+  assert.deepEqual([blocked.captured, blocked.asked], [1, 1], 'checked before the next picture is taken')
+
+  // The board session ended the request (a board switch): stop without an error.
+  const board = run((r) => ({ ask: async () => { r.asked += 1; throw new DOMException('aborted', 'AbortError') } }))
+  await settle()
+  assert.equal(board.reason, null)
+  assert.equal(board.loop.running, false)
+})
+
+test('stopping the vision loop ends the question in flight and its pause', async () => {
+  let askSignal = null
+  let stops = 0
+  const loop = createVisionLoop({
+    capture: async () => 'frame',
+    ask: ({ signal }) => new Promise((resolve, reject) => {
+      askSignal = signal
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+    }),
+    prompt: () => 'q',
+    onStop: () => { stops += 1 }
+  }).start()
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  loop.stop('closed')
+  loop.stop('twice')
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(askSignal.aborted, true)
+  assert.equal(stops, 1, 'reported once')
+
+  const controller = new AbortController()
+  const started = Date.now()
+  const waiting = pause(10_000, controller.signal)
+  controller.abort()
+  await waiting
+  assert.ok(Date.now() - started < 1000, 'a pause ends with the loop')
+  await pause(10_000, AbortSignal.abort())
+})
+
+test('reply settings: the default prompt, a custom one with the picture note, and the reply length', () => {
+  // The tab's prompts before they could be changed, word for word.
+  const base = 'Answer clearly and concisely. Use Markdown formatting when it helps. Answer the question in the language it was asked in.'
+  assert.equal(DEFAULT_SYSTEM_PROMPT, base)
+  assert.equal(systemPromptFor({ picture: 'current' }), `${base} The user's current message includes an image. Answer using what you see in it.`)
+  assert.equal(systemPromptFor({ picture: 'earlier' }), `${base} An earlier message in this conversation includes an image. Answer questions about it using what you see in it.`)
+  assert.match(systemPromptFor({ custom: '   ' }), /^Answer clearly.*No image is attached.*Never describe an image you were not given\.$/)
+  const pirate = systemPromptFor({ custom: '  Answer like a pirate.  ', picture: 'current' })
+  assert.equal(pirate, "Answer like a pirate. The user's current message includes an image. Answer using what you see in it.")
+  assert.doesNotMatch(systemPromptFor({ custom: 'Be brief.' }), /Answer clearly/, 'the custom prompt replaces the default text')
+
+  assert.deepEqual([MAX_TOKENS_LIMITS.min, MAX_TOKENS_LIMITS.max, MAX_TOKENS_LIMITS.default], [32, 2048, 512])
+  assert.equal(clampMaxTokens('8'), 32)
+  assert.equal(clampMaxTokens(99999), 2048)
+  assert.equal(clampMaxTokens('300'), 288, 'on the slider steps')
+  assert.equal(clampMaxTokens('lots'), 512)
+})
+
+test('reply settings are remembered per browser, and storage that refuses gives the defaults', () => {
+  const store = new Map()
+  const storage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k)
+  }
+  assert.deepEqual(loadReplySettings(storage), { systemPrompt: '', maxTokens: 512 })
+  saveReplySettings(storage, { systemPrompt: 'Answer like a pirate.' })
+  saveReplySettings(storage, { maxTokens: 1024 })
+  assert.deepEqual(loadReplySettings(storage), { systemPrompt: 'Answer like a pirate.', maxTokens: 1024 })
+  // Back to the defaults: nothing stays stored, so a new default reaches this browser.
+  saveReplySettings(storage, { systemPrompt: '  ', maxTokens: 512 })
+  assert.equal(store.has(SYSTEM_PROMPT_KEY), false)
+  assert.equal(store.has(MAX_TOKENS_KEY), false)
+  store.set(MAX_TOKENS_KEY, '100000')
+  assert.equal(loadReplySettings(storage).maxTokens, 2048, 'a hand-edited value is clamped')
+
+  const broken = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => { throw new Error('denied') } }
+  assert.deepEqual(loadReplySettings(broken), { systemPrompt: '', maxTokens: 512 })
+  assert.doesNotThrow(() => saveReplySettings(broken, { systemPrompt: 'x', maxTokens: 64 }))
+  assert.deepEqual(loadReplySettings(null), { systemPrompt: '', maxTokens: 512 }, 'window.localStorage itself refused')
+  assert.doesNotThrow(() => saveReplySettings(null, { maxTokens: 64 }))
+})
+
+test('chat requests carry max_tokens and the system prompt; the documents only when asked', async () => {
+  const messages = [{ role: 'system', content: systemPromptFor({ custom: 'Be brief.' }) }, { role: 'user', content: 'hi' }]
+  assert.deepEqual(chatRequestBody({ model: 'm', messages, maxTokens: 256 }), { model: 'm', messages, stream: true, max_tokens: 256 })
+  assert.deepEqual(chatRequestBody({ model: 'm', messages, maxTokens: 256, useDocuments: true }).neat_rag, true)
+  assert.equal('max_tokens' in chatRequestBody({ model: 'm', messages }), false)
+
+  const realFetch = globalThis.fetch
+  try {
+    let sent = null
+    globalThis.fetch = async (url, init) => {
+      sent = { url, body: JSON.parse(init.body) }
+      return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }
+    await streamChat({ model: 'm', messages, maxTokens: 1024, onDelta: () => {} })
+    assert.equal(sent.url, '/api/genai/v1/chat/completions')
+    assert.equal(sent.body.max_tokens, 1024)
+    assert.equal(sent.body.messages[0].content, "Be brief. No image is attached to the current message. If the user asks about an image, photo, camera or what you see, say that no image was provided and ask them to attach one or use the camera. Never describe an image you were not given.")
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('View documents: the source, its sections by heading, and the filter', () => {
+  // GET /rag/inspect as a DevKit returns it (limit 3 of the 8 sections).
+  const inspect = {
+    collection: 'demo_collection',
+    count: 3,
+    documents: [
+      { id: 469763706461880320, metadata: { Header_2: 'What Neat Is', Header_1: 'Neat Library Overview' }, text: 'The Neat Library is the C++ and Python library.' },
+      { id: 469763706461880321, metadata: { Header_1: 'Neat Library Overview', Header_2: 'How It Works' }, text: 'A compiled\nmodel archive becomes a Model component.' },
+      { id: 469763706461880322, metadata: {}, text: 'Piper provides text-to-speech.' }
+    ],
+    enabled: true,
+    error: null,
+    exists: true,
+    meta: { chunks: 8, collection: 'demo_collection', embedding_model: '/media/nvme/llima/models/gte-small/', input: '/media/nvme/st30/app587/src/common/rag/neat.md' },
+    path: '/media/nvme/st30/app587/src/python/ui/milvus.db'
+  }
+  const view = inspectSummary(inspect)
+  assert.deepEqual(view.rows.map((r) => [r.label, r.value]), [
+    ['Source', 'neat.md'], ['Sections', '8 (showing the first 3)'], ['Search model', 'gte-small'], ['Database', 'milvus.db']
+  ])
+  assert.equal(view.rows[0].title, '/media/nvme/st30/app587/src/common/rag/neat.md')
+  assert.equal(view.note, '')
+  // The ids arrive rounded (64-bit) and equal: sections are told apart by number.
+  assert.equal(new Set(inspect.documents.map((d) => d.id)).size, 1)
+  assert.deepEqual(view.sections.map((s) => [s.number, s.heading]), [
+    [1, 'Neat Library Overview › What Neat Is'],
+    [2, 'Neat Library Overview › How It Works'],
+    [3, '']
+  ])
+  assert.equal(sectionHeading({ Header_10: 'c', Header_2: 'b', Header_1: 'a', source: 'x' }), 'a › b › c')
+  assert.deepEqual(filterSections(view.sections, '').length, 3)
+  assert.deepEqual(filterSections(view.sections, 'MODEL archive').map((s) => s.number), [2], 'every word, any case')
+  assert.deepEqual(filterSections(view.sections, 'how it works').map((s) => s.number), [2], 'headings count')
+  assert.deepEqual(filterSections(view.sections, 'nothing like this'), [])
+
+  assert.equal(inspectSummary({ ...inspect, documents: [], meta: {}, exists: false }).note, 'No documents yet: upload a Markdown file or reset to the default document.')
+  assert.match(inspectSummary({ ...inspect, documents: [], error: 'Could not read the RAG database' }).note, /^Could not read the RAG database\. Restart GenAI Studio/)
+  assert.equal(inspectSummary({ enabled: false, error: 'RAG is disabled' }).note, 'Document search is turned off on the board.')
+  assert.equal(inspectSummary({ ...inspect, meta: {} }).rows.find((r) => r.label === 'Sections').value, '3')
+  assert.equal(inspectPath(), `rag/inspect?limit=${INSPECT_LIMIT}`)
+})
+
+test('the view sends the reply settings, and drops board camera and vision results from a previous board', () => {
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  const fn = (signature) => {
+    const start = view.indexOf(signature)
+    assert.ok(start >= 0, signature)
+    return view.slice(start, view.indexOf('\n  }\n', start))
+  }
+  const send = fn('function sendMessage(')
+  assert.match(send, /systemPromptFor\(\{ custom: replySettings\.systemPrompt/)
+  assert.match(send, /maxTokens: replySettings\.maxTokens/)
+  assert.match(send, /visionBusy\.current\) return false/, 'a spoken question waits while the vision view asks')
+  const ask = fn('async function askAboutPicture(')
+  assert.match(ask, /systemPromptFor\(\{ custom: replySettings\.systemPrompt, picture: 'current' \}\)/)
+  assert.match(ask, /maxTokens: replySettings\.maxTokens/)
+  assert.match(ask, /const board = ticket\(signal\)/)
+  assert.match(ask, /if \(reading\) await reading\.done/, 'a loop waits for the reading before the next picture')
+  // A picture from the board's camera is attached only if the board is still the same.
+  const snap = fn('async function takeBoardPicture(')
+  assert.match(snap, /const board = ticket\(controller\.signal\)/)
+  assert.ok(snap.indexOf('if (!board.live() || controller.signal.aborted) return') < snap.indexOf('setImage(picture)'))
+  const forget = fn('function forgetBoard() {')
+  for (const step of ['setVisionOpen(false)', 'setBoardCameraOpen(false)', 'setBoardCameras(null)']) assert.ok(forget.includes(step), step)
+  // The vision view: each picture and answer is checked against the board it was asked of.
+  const vision = view.slice(view.indexOf('function VisionView('))
+  assert.match(vision, /if \(!board\.live\(\) \|\| signal\.aborted\) throw new DOMException/)
+  assert.match(vision, /if \(!board\.live\(\) \|\| signal\.aborted\) return\n {4}setAnswer/)
+  assert.match(vision, /loop\.current\.stop\('The model changed\.'\)/)
+})
+
+test("each vision answer starts without the previous answer's speech figures", () => {
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  const start = view.indexOf("setSpeechError((e) => (e && e.id === VISION_READING ? null : e))")
+  assert.ok(start >= 0)
+  assert.match(view.slice(start, start + 400), /const \{ \[VISION_READING\]: _previous, \.\.\.rest \} = prev/)
 })

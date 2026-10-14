@@ -6,6 +6,7 @@ import {
   START_COMMAND,
   canUseModels,
   chatModels,
+  deletableModel,
   deriveBackendState,
   engineName,
   formatBytes,
@@ -19,6 +20,7 @@ import {
 } from './genai/backendState.js'
 import {
   REPLY_CUT_OFF,
+  boardCameraSnapshot,
   clearDocuments,
   resetDocuments,
   uploadDocument,
@@ -39,7 +41,25 @@ import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
 import { benchmarkSupport } from './genai/benchmark.js'
-import { documentsSummary, documentsSupport, progressOutcome, sourcesNote } from './genai/documents.js'
+import {
+  documentsSummary,
+  documentsSupport,
+  filterSections,
+  inspectPath,
+  inspectSummary,
+  progressOutcome,
+  sourcesNote
+} from './genai/documents.js'
+import { boardCameraSupport, parseCameraDevices, pickCamera, snapshotErrorMessage } from './genai/boardCamera.js'
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  MAX_TOKENS_LIMITS,
+  clampMaxTokens,
+  loadReplySettings,
+  saveReplySettings,
+  systemPromptFor
+} from './genai/replySettings.js'
+import { VISION_PRESETS, createVisionLoop } from './genai/visionLoop.js'
 import { createSentenceSplitter, speakablePieces } from './genai/sentences.js'
 import { splitThinking } from './genai/streams.js'
 import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.js'
@@ -47,19 +67,8 @@ import { markTutorialSeen, tutorialSeen, tutorialSteps } from './genai/tutorial.
 const GenAIBenchmark = lazy(() => import('./GenAIBenchmark.jsx'))
 
 const POLL_MS = 5000
-const MAX_TOKENS = 512
-// The Studio's default system prompt (apps: src/common/config.yaml). The tab
-// knows whether the message carries a picture, so it says so: a small vision
-// model left to judge that itself answered "no image was provided" to some
-// questions that had one, and invented a scene for others that had none.
-const BASE_PROMPT =
-  'Answer clearly and concisely. Use Markdown formatting when it helps. ' +
-  'Answer the question in the language it was asked in.'
-const WITH_IMAGE_PROMPT = `${BASE_PROMPT} The user's current message includes an image. Answer using what you see in it.`
-const EARLIER_IMAGE_PROMPT = `${BASE_PROMPT} An earlier message in this conversation includes an image. Answer questions about it using what you see in it.`
-const WITHOUT_IMAGE_PROMPT =
-  `${BASE_PROMPT} No image is attached to the current message. If the user asks about an image, photo, camera or ` +
-  'what you see, say that no image was provided and ask them to attach one or use the camera. Never describe an image you were not given.'
+// The id the vision view's answers are read aloud under (chat replies use their own).
+const VISION_READING = 'vision'
 // A short silent WAV: played on the click itself so the browser lets the same
 // element play the synthesized speech that arrives seconds later.
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='
@@ -88,6 +97,27 @@ async function imageToDataUrl(blob, maxSide = 896) {
   return canvas.toDataURL('image/jpeg', 0.9)
 }
 
+// The frame a camera preview shows now, scaled the same way; null before it has one.
+function videoFrameToDataUrl(video, maxSide = 896) {
+  if (!video || !video.videoWidth) return null
+  const canvas = document.createElement('canvas')
+  const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight))
+  canvas.width = Math.round(video.videoWidth * scale)
+  canvas.height = Math.round(video.videoHeight * scale)
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.9)
+}
+
+// Settings live in this browser; a browser that refuses storage (cookies
+// blocked) throws on the property itself.
+function browserStorage() {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
 // Model output is untrusted: an image in it would be fetched from wherever the
 // model points (so it is shown as its alt text), and links open outside Insight.
 const MARKDOWN_COMPONENTS = {
@@ -106,6 +136,8 @@ function Icon({ d }) {
 const ICONS = {
   photo: 'M4 5h16v14H4zM4 15l5-5 4 4 3-3 4 4M15.5 9.5a1 1 0 1 0 0-.01',
   camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  boardCamera: 'M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5',
+  vision: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
   send: 'M12 19V5M5 12l7-7 7 7',
   stop: 'M7 7h10v10H7z',
@@ -189,6 +221,7 @@ export default function GenAIView({ onError, onStatus }) {
   const [docsMidChat, setDocsMidChat] = useState(false)
   const [docStatus, setDocStatus] = useState(null)     // GET /rag/status
   const [docProgress, setDocProgress] = useState(null) // {label, text} while an upload/reset/clear runs
+  const [docsViewOpen, setDocsViewOpen] = useState(false)   // View documents: what the database holds
   const docInput = useRef(null)
   const [tutorialStep, setTutorialStep] = useState(null)
   const [streaming, setStreaming] = useState(false)
@@ -211,6 +244,20 @@ export default function GenAIView({ onError, onStatus }) {
   const cameraStream = useRef(null)
   const cameraStarting = useRef(false)
   const [cameraOpening, setCameraOpening] = useState(false)   // the browser may be asking permission
+  // The board's own cameras: the panel under the chat, its list
+  // (null until fetched) and the chosen /dev/videoN.
+  const [boardCameraOpen, setBoardCameraOpen] = useState(false)
+  const [boardCameras, setBoardCameras] = useState(null)
+  const [boardCamera, setBoardCamera] = useState('')
+  const [boardSnapshotting, setBoardSnapshotting] = useState(false)
+  const boardSnapshotAbort = useRef(null)
+  // The vision view and what it is doing ({asking, loop, snapshot}).
+  const [visionOpen, setVisionOpen] = useState(false)
+  const [visionActivity, setVisionActivity] = useState({ asking: false, loop: false, snapshot: false })
+  // Read by sendMessage, which can run renders after a click (a recording).
+  const visionBusy = useRef(false)
+  // Settings, Replies: the system prompt ('' = the default) and the longest reply.
+  const [replySettings, setReplySettings] = useState(() => loadReplySettings(browserStorage()))
 
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -241,6 +288,7 @@ export default function GenAIView({ onError, onStatus }) {
   const usable = canUseModels(backend.state)
   const docs = documentsSupport(health)
   const bench = benchmarkSupport(health)
+  const boardCam = boardCameraSupport(health)
   const chatModel = loadedChatModel(status)
   const sees = Boolean(chatModel && chatModel.supportsVision)
   // What the user may do now: every control and action reads this one table.
@@ -252,7 +300,8 @@ export default function GenAIView({ onError, onStatus }) {
     hasMessages: messages.length > 0,
     hasDraft: Boolean(draft.trim() || image),
     // Opening counts as open: a permission prompt may be pending.
-    cameraOpen: cameraOpen || cameraOpening,
+    cameraOpen: cameraOpen || cameraOpening || boardCameraOpen,
+    visionOpen,
     replying: streaming,
     recording,
     micOpening,
@@ -263,6 +312,10 @@ export default function GenAIView({ onError, onStatus }) {
     documentTask: Boolean(docProgress),
     documentsAvailable: docs.available,
     benchmarkAvailable: bench.available,
+    boardCameraAvailable: boardCam.available,
+    boardSnapshot: boardSnapshotting || visionActivity.snapshot,
+    visionAsking: visionActivity.asking,
+    visionLoop: visionActivity.loop,
     useDocuments: useDocs && docs.available
   })
   const canThink = Boolean(chatModel && supportsThinking(chatModel.name))
@@ -411,6 +464,7 @@ export default function GenAIView({ onError, onStatus }) {
       chatAbort.current?.abort()
       speechAbort.current?.abort()
       transcribeAbort.current?.abort()
+      boardSnapshotAbort.current?.abort()
       player.current?.pause()
       cameraStream.current?.getTracks().forEach((t) => t.stop())
       recorder.current?.stream?.getTracks().forEach((t) => t.stop())
@@ -441,6 +495,13 @@ export default function GenAIView({ onError, onStatus }) {
     setDocStatus(null)
     setUseDocs(false)         // chosen for the previous board's documents
     setDocsMidChat(false)
+    setDocsViewOpen(false)
+    // Its cameras, and the vision view (closing it stops its loop).
+    setBoardCameraOpen(false)
+    setBoardSnapshotting(false)
+    setBoardCameras(null)
+    setBoardCamera('')
+    setVisionOpen(false)
   }
 
   async function applySettings(event) {
@@ -503,6 +564,15 @@ export default function GenAIView({ onError, onStatus }) {
 
   function switchSpeechModel(model) {
     if (allowed.changeSpeechModel && model.supported !== false) runModelOp(`Switching speech recognition to ${friendlyModelName(model.name)}`, 'models/asr', { name: model.name })
+  }
+
+  // A model on the board that isn't in use; the board's refusal is shown as
+  // the operation's error.
+  function deleteModel(model) {
+    if (!allowed.deleteModel || !deletableModel(model, status)) return
+    const size = model.sizeBytes ? ` (${formatBytes(model.sizeBytes)})` : ''
+    if (!window.confirm(`Delete ${friendlyModelName(model.name)}${size} from the board? Its files are removed; download it again to use it.`)) return
+    runModelOp(`Deleting ${friendlyModelName(model.name)}`, 'models/delete', { name: model.name })
   }
 
   function chooseChatModel(name) {
@@ -599,17 +669,21 @@ export default function GenAIView({ onError, onStatus }) {
     let engineUsed = null
     let wake = null             // resolves the player loop's wait for audio
     let settlePlaying = null    // ends the piece playing now
+    let over = null
+    const done = new Promise((resolve) => { over = resolve })   // the reading ended, however
     // Stopping the reading (Stop speaking, a new reading, leaving the tab) must
     // also end the piece in flight, or its player loop never finishes.
     signal.addEventListener('abort', () => {
       settlePlaying?.()
       wake?.()
+      over()
     })
 
     const isOver = () => finished && !pending.length && !ready.length && !synthesizing
     const end = () => {
       setSpeakingId((current) => (current === id ? null : current))
       if (speechAbort.current === controller) speechAbort.current = null
+      over()
     }
     const fail = (error) => {
       if (error.name === 'AbortError' || signal.aborted) return
@@ -691,6 +765,7 @@ export default function GenAIView({ onError, onStatus }) {
     }
 
     return {
+      done,
       // Returns false once the reply's language turns out to have no voice.
       add(piece) {
         if (signal.aborted) return false
@@ -754,7 +829,7 @@ export default function GenAIView({ onError, onStatus }) {
   // player (or null), when the click that asked was earlier than this call.
   function sendMessage(text = draft, { replyPlayer, heard = null } = {}) {
     const prompt = text.trim()
-    if ((!prompt && !image) || !chatModel || streamingRef.current) return false
+    if ((!prompt && !image) || !chatModel || streamingRef.current || visionBusy.current) return false
     if (replyPlayer === undefined) replyPlayer = readAloud ? unlockPlayer() : null
     const generation = chatGeneration.current
     // A detected spoken language applies to the spoken turn only, not to later typed ones.
@@ -774,7 +849,7 @@ export default function GenAIView({ onError, onStatus }) {
       return { role: 'user', content: m.text }
     })
     const outgoing = [
-      { role: 'system', content: image ? WITH_IMAGE_PROMPT : carried >= 0 ? EARLIER_IMAGE_PROMPT : WITHOUT_IMAGE_PROMPT },
+      { role: 'system', content: systemPromptFor({ custom: replySettings.systemPrompt, picture: image ? 'current' : carried >= 0 ? 'earlier' : 'none' }) },
       ...history,
       { role: 'user', content: canThink && !thinking ? withNoThink(userContent) : userContent }
     ]
@@ -815,7 +890,7 @@ export default function GenAIView({ onError, onStatus }) {
         const { stats, rag } = await streamChat({
           model: chatModel.name,
           messages: outgoing,
-          maxTokens: MAX_TOKENS,
+          maxTokens: replySettings.maxTokens,
           useDocuments: useDocs && docs.available,
           signal: ticket(controller.signal).signal,
           onDelta: (piece) => {
@@ -892,16 +967,160 @@ export default function GenAIView({ onError, onStatus }) {
   }
 
   function captureFrame() {
-    const video = videoRef.current
-    if (!video || !video.videoWidth) return
-    const canvas = document.createElement('canvas')
-    const scale = Math.min(1, 896 / Math.max(video.videoWidth, video.videoHeight))
-    canvas.width = Math.round(video.videoWidth * scale)
-    canvas.height = Math.round(video.videoHeight * scale)
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
-    setImage(canvas.toDataURL('image/jpeg', 0.9))
+    const picture = videoFrameToDataUrl(videoRef.current)
+    if (!picture) return
+    setImage(picture)
     closeCamera()
     composer.current?.focus()
+  }
+
+  // --- board camera -----------------------------------------------------------
+
+  // The board's cameras, fetched when its camera panel or the vision view opens.
+  async function loadBoardCameras() {
+    const board = ticket()
+    try {
+      const cameras = parseCameraDevices(await getJson('board-camera/devices', { signal: board.signal }))
+      if (!board.live()) return
+      setBoardCameras(cameras)
+      setBoardCamera((current) => pickCamera(cameras, current) || '')
+    } catch (error) {
+      if (!isAbort(error) && board.live()) setBoardCameras({ devices: [], default: null, error: `Couldn't list the board's cameras: ${error.message}` })
+    }
+  }
+
+  function openBoardCamera() {
+    if (!allowed.openBoardCamera) return
+    setBoardCameraOpen(true)
+    loadBoardCameras()
+  }
+
+  function closeBoardCamera() {
+    boardSnapshotAbort.current?.abort()
+    setBoardCameraOpen(false)
+  }
+
+  // A picture from the board's camera, attached like a photo to the next message.
+  async function takeBoardPicture() {
+    if (!allowed.takeBoardSnapshot || !boardCamera) return
+    const device = boardCamera
+    const controller = new AbortController()
+    boardSnapshotAbort.current = controller
+    const board = ticket(controller.signal)
+    setBoardSnapshotting(true)
+    try {
+      const picture = await imageToDataUrl(await boardCameraSnapshot(device, { signal: board.signal }))
+      // Taken for the board in use when it was asked for, and still wanted:
+      // a board switch or Cancel meanwhile drops it.
+      if (!board.live() || controller.signal.aborted) return
+      setImage(picture)
+      setBoardCameraOpen(false)
+      composer.current?.focus()
+    } catch (error) {
+      if (!isAbort(error) && board.live() && !controller.signal.aborted) onError?.(snapshotErrorMessage(error, device))
+    } finally {
+      if (boardSnapshotAbort.current === controller) boardSnapshotAbort.current = null
+      if (board.live()) setBoardSnapshotting(false)
+    }
+  }
+
+  // --- vision view ------------------------------------------------------------
+
+  function openVision() {
+    if (!allowed.openVision) return
+    setVisionOpen(true)
+    if (boardCam.available) loadBoardCameras()
+  }
+
+  // What the view is doing, for the rule table (and sendMessage, which can
+  // run after a recording ends).
+  const onVisionActivity = useCallback((activity) => {
+    visionBusy.current = Boolean(activity.asking || activity.loop)
+    setVisionActivity(activity)
+  }, [])
+
+  // Must run inside a click: unlocks the player for the answers read aloud.
+  function prepareVisionSpeech() {
+    if (readAloudRef.current) unlockPlayer()
+  }
+
+  function changeReadAloud(on) {
+    setReadAloud(on)
+    if (on) unlockPlayer()            // the vision loop reads its answers renders later
+    else if (speakingId === VISION_READING) stopSpeaking()
+  }
+
+  // One question about one picture from the vision view: a request of its own
+  // (no chat history), with the tab's system prompt and reply length.
+  // onDelta(answer so far). With Read replies aloud on, the answer is read as
+  // it is written, and this resolves once the reading is over too: a loop
+  // takes its next picture only then. Ending `signal` ends both.
+  async function askAboutPicture({ picture, prompt, signal, onDelta }) {
+    const model = chatModel
+    if (!model || !model.supportsVision) throw new Error('Load a model that sees images first.')
+    const content = [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: picture } }]
+    const messages = [
+      { role: 'system', content: systemPromptFor({ custom: replySettings.systemPrompt, picture: 'current' }) },
+      { role: 'user', content: canThink && !thinking ? withNoThink(content) : content }
+    ]
+    const board = ticket(signal)
+    const t0 = performance.now()
+    let tFirst = null
+    let reply = ''
+    // A reading that failed, and its speech figures, belong to the previous answer.
+    setSpeechError((e) => (e && e.id === VISION_READING ? null : e))
+    setSpeechStats((prev) => {
+      if (!(VISION_READING in prev)) return prev
+      const { [VISION_READING]: _previous, ...rest } = prev
+      return rest
+    })
+    let reading = readAloudRef.current && player.current ? startReading(VISION_READING, player.current, t0) : null
+    const splitter = createSentenceSplitter()
+    const speakNew = (final) => {
+      if (!reading) return
+      for (const piece of splitter.push(splitThinking(reply).answer, final)) {
+        if (!reading.add(piece)) {
+          reading = null
+          return
+        }
+      }
+      if (final) reading.finish()
+    }
+    const stopReading = () => reading?.abort()
+    signal.addEventListener('abort', stopReading, { once: true })
+    try {
+      const { stats } = await streamChat({
+        model: model.name,
+        messages,
+        maxTokens: replySettings.maxTokens,
+        signal: board.signal,
+        onDelta: (piece) => {
+          if (tFirst === null) tFirst = performance.now()
+          reply += piece
+          // An answer from the previous board is not shown.
+          if (board.live()) onDelta(splitThinking(reply).answer)
+          speakNew(false)
+        }
+      })
+      const metrics = replyMetrics({ t0, tFirst, tEnd: performance.now(), stats })
+      speakNew(true)
+      if (reading) await reading.done
+      return { answer: splitThinking(reply).answer, metrics }
+    } catch (error) {
+      reading?.abort()
+      if (isAbort(error)) throw error
+      throw new Error(error.message === REPLY_CUT_OFF ? REPLY_CUT_OFF : `The model didn't answer: ${error.message}`)
+    } finally {
+      signal.removeEventListener('abort', stopReading)
+    }
+  }
+
+  // --- reply settings ---------------------------------------------------------
+
+  function changeReplySettings(update) {
+    if (!allowed.changeReplySettings) return
+    setReplySettings((prev) => ({ ...prev, ...update }))
+    saveReplySettings(browserStorage(), update)
   }
 
   // --- speech input -----------------------------------------------------------
@@ -1057,6 +1276,7 @@ export default function GenAIView({ onError, onStatus }) {
     if (action === 'example-question') tryPrompt('Explain what an AI accelerator does, in simple terms.')
     else if (action === 'example-translate') tryPrompt("Translate 'good morning, how are you?' into Spanish.")
     else if (action === 'camera') openCamera()
+    else if (action === 'vision') openVision()
     else if (action === 'settings') setSettingsOpen(true)
   }
 
@@ -1084,8 +1304,15 @@ export default function GenAIView({ onError, onStatus }) {
           <p className="genai-tutorial-title">{step.title}</p>
           <p className="genai-tutorial-body">{step.body}</p>
           <div className="genai-actions">
-            {step.action && (step.action !== 'camera' || allowed.attachPicture) && (
-              <button type="button" className="btn-tonal" disabled={step.action === 'camera' ? !allowed.openCamera : step.action.startsWith('example') && !allowed.typeMessage} onClick={() => tryTutorialAction(step.action)}>Try it</button>
+            {step.action && ((step.action !== 'camera' && step.action !== 'vision') || allowed.attachPicture) && (
+              <button
+                type="button"
+                className="btn-tonal"
+                disabled={step.action === 'camera' ? !allowed.openCamera : step.action === 'vision' ? !allowed.openVision : step.action.startsWith('example') && !allowed.typeMessage}
+                onClick={() => tryTutorialAction(step.action)}
+              >
+                Try it
+              </button>
             )}
             <span className="genai-tutorial-spacer" />
             <button type="button" className="btn-ghost" onClick={closeTutorial}>Skip tutorial</button>
@@ -1211,6 +1438,44 @@ export default function GenAIView({ onError, onStatus }) {
           </div>
 
           <div className="genai-settings-section">
+            <h3>Replies</h3>
+            <label className="genai-field">
+              <span>System prompt</span>
+              <textarea
+                value={replySettings.systemPrompt}
+                onChange={(e) => changeReplySettings({ systemPrompt: e.target.value })}
+                placeholder={DEFAULT_SYSTEM_PROMPT}
+                rows={3}
+                disabled={!allowed.changeReplySettings}
+              />
+            </label>
+            <div className="genai-actions">
+              <button type="button" className="btn-ghost genai-small" disabled={!allowed.changeReplySettings || !replySettings.systemPrompt} onClick={() => changeReplySettings({ systemPrompt: '' })}>
+                Reset to default
+              </button>
+              <span className="hint">
+                {replySettings.systemPrompt.trim() ? 'Your prompt replaces the default.' : 'Empty uses the default shown.'} The tab still tells the model whether a message has a picture.
+              </span>
+            </div>
+            <label className="genai-field">
+              <span>Longest reply: {replySettings.maxTokens} tokens</span>
+              <input
+                type="range"
+                min={MAX_TOKENS_LIMITS.min}
+                max={MAX_TOKENS_LIMITS.max}
+                step={MAX_TOKENS_LIMITS.step}
+                value={replySettings.maxTokens}
+                onChange={(e) => changeReplySettings({ maxTokens: clampMaxTokens(e.target.value) })}
+                disabled={!allowed.changeReplySettings}
+              />
+            </label>
+            <p className="hint">
+              A token is about three quarters of a word; a reply that reaches the limit stops there. Both settings apply to the chat
+              and the vision view, not to the benchmark, and this browser remembers them.
+            </p>
+          </div>
+
+          <div className="genai-settings-section">
             <h3>Voice</h3>
             <div className="genai-form">
               <label>
@@ -1248,6 +1513,9 @@ export default function GenAIView({ onError, onStatus }) {
               disabled={!allowed.changeChatModel}
               onLoad={loadChatModel}
               onUnload={unloadChatModel}
+              canDelete={(m) => deletableModel(m, status)}
+              deleteDisabled={!allowed.deleteModel}
+              onDelete={deleteModel}
             />
             <ModelList
               title="Speech recognition"
@@ -1255,6 +1523,9 @@ export default function GenAIView({ onError, onStatus }) {
               activeName={status?.asrModel}
               disabled={!allowed.changeSpeechModel}
               onUse={switchSpeechModel}
+              canDelete={(m) => deletableModel(m, status)}
+              deleteDisabled={!allowed.deleteModel}
+              onDelete={deleteModel}
             />
           </div>
 
@@ -1306,6 +1577,9 @@ export default function GenAIView({ onError, onStatus }) {
                   <button type="button" className="btn-tonal" disabled={!allowed.documentTasks} onClick={() => docInput.current?.click()}>Upload a Markdown file</button>
                   <button type="button" className="btn-ghost" disabled={!allowed.documentTasks} onClick={() => runDocumentTask('Resetting', resetDocuments)}>Reset to the default</button>
                   <button type="button" className="btn-ghost danger" disabled={!allowed.documentTasks || !(docStatus && docStatus.database)} onClick={() => window.confirm('Remove all documents from the board? Use my documents then finds nothing until you upload or reset.') && runDocumentTask('Clearing', clearDocuments)}>Clear</button>
+                  <button type="button" className="btn-ghost" disabled={!allowed.inspectDocuments || !(docStatus && docStatus.database)} title="The sections the board searches, with a filter" onClick={() => { if (allowed.inspectDocuments) setDocsViewOpen(true) }}>
+                    View documents
+                  </button>
                 </div>
                 {docProgress && (
                   <p className="hint" aria-live="polite">{docProgress.label}… {progressOutcome(docProgress.text).message}</p>
@@ -1425,6 +1699,18 @@ export default function GenAIView({ onError, onStatus }) {
           </div>
         )}
 
+        {boardCameraOpen && (
+          <div className="genai-camera" role="group" aria-label="Board camera">
+            <BoardCameraPicker cameras={boardCameras} camera={boardCamera} onChange={setBoardCamera} disabled={!allowed.takeBoardSnapshot} />
+            <div className="genai-actions">
+              <button type="button" className="btn-tonal" onClick={takeBoardPicture} disabled={!allowed.takeBoardSnapshot || !boardCamera}>
+                {boardSnapshotting ? 'Taking a picture…' : 'Take a picture'}
+              </button>
+              <button type="button" className="btn-ghost" onClick={closeBoardCamera}>Cancel</button>
+            </div>
+          </div>
+        )}
+
         {image && (
           <div className="genai-attachment">
             <img src={image} alt="Picture to send with your next message" />
@@ -1461,8 +1747,24 @@ export default function GenAIView({ onError, onStatus }) {
               <button type="button" className="btn-ghost genai-icon-btn" aria-label="Attach a picture" title={sees ? 'Attach a picture' : 'Needs a model that sees images'} disabled={!allowed.attachPicture} onClick={() => fileInput.current?.click()}>
                 <Icon d={ICONS.photo} />
               </button>
-              <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the camera" title={sees ? 'Take a picture with the camera' : 'Needs a model that sees images'} disabled={!allowed.openCamera} onClick={openCamera}>
+              {/* A board without its camera says why here, where the board's camera would be. */}
+              <button
+                type="button"
+                className="btn-ghost genai-icon-btn"
+                aria-label="Take a picture with this browser's camera"
+                title={!sees ? 'Needs a model that sees images' : `Take a picture with this browser's camera${boardCam.available ? '' : `. Board camera: ${boardCam.reason}`}`}
+                disabled={!allowed.openCamera}
+                onClick={openCamera}
+              >
                 <Icon d={ICONS.camera} />
+              </button>
+              {boardCam.available && (
+                <button type="button" className="btn-ghost genai-icon-btn" aria-label="Take a picture with the board's camera" title={sees ? "Take a picture with a camera plugged into the board" : 'Needs a model that sees images'} disabled={!allowed.openBoardCamera} onClick={openBoardCamera}>
+                  <Icon d={ICONS.boardCamera} />
+                </button>
+              )}
+              <button type="button" className={`btn-ghost genai-icon-btn${spot('vision')}`} aria-label="Vision view" title={sees ? 'Vision: the camera full size, ask about it once or in a loop' : 'Needs a model that sees images'} disabled={!allowed.openVision} onClick={openVision}>
+                <Icon d={ICONS.vision} />
               </button>
             </span>
             <span className="genai-header-spacer" />
@@ -1501,6 +1803,30 @@ export default function GenAIView({ onError, onStatus }) {
           />
         </Suspense>
       )}
+
+      {visionOpen && (
+        <VisionView
+          model={chatModel}
+          allowed={allowed}
+          busyReason={backend.title}
+          boardCam={boardCam}
+          cameras={boardCameras}
+          camera={boardCamera}
+          onCameraChange={setBoardCamera}
+          ticket={ticket}
+          ask={askAboutPicture}
+          prepareSpeech={prepareVisionSpeech}
+          readAloud={readAloud}
+          onReadAloudChange={changeReadAloud}
+          speechStats={speechStats[VISION_READING]}
+          speechError={speechError && speechError.id === VISION_READING ? speechError.text : ''}
+          onActivity={onVisionActivity}
+          onFullscreen={toggleFullscreen}
+          onClose={() => setVisionOpen(false)}
+        />
+      )}
+
+      {docsViewOpen && <DocumentsViewer ticket={ticket} onClose={() => setDocsViewOpen(false)} />}
 
       {solutionsOpen && (
         <SolutionsOverlay
@@ -1614,7 +1940,7 @@ function SolutionsOverlay({ model, sees, onClose }) {
   )
 }
 
-function ModelList({ title, models, loadedNames, activeName, disabled, onLoad, onUnload, onUse }) {
+function ModelList({ title, models, loadedNames, activeName, disabled, onLoad, onUnload, onUse, canDelete, deleteDisabled, onDelete }) {
   return (
     <div className="genai-model-group">
       <p className="genai-model-group-title">{title}</p>
@@ -1640,10 +1966,421 @@ function ModelList({ title, models, loadedNames, activeName, disabled, onLoad, o
               {onUse && !active && (
                 <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || ''} onClick={() => onUse(m)}>Use</button>
               )}
+              {onDelete && canDelete(m) && (
+                <button type="button" className="btn-ghost genai-small danger" disabled={deleteDisabled} title="Delete it from the board to free its space" onClick={() => onDelete(m)}>Delete</button>
+              )}
             </li>
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+// The board's cameras as a menu; while they are listed, why there are none, or
+// what went wrong.
+function BoardCameraPicker({ cameras, camera, onChange, disabled }) {
+  if (!cameras) return <span className="hint">Looking for cameras on the board…</span>
+  if (cameras.error) return <span className="genai-error">{cameras.error}</span>
+  if (!cameras.devices.length) return <span className="hint">No camera is plugged into the board.</span>
+  return (
+    <label className="genai-model-picker">
+      <span>Board camera</span>
+      <select value={camera} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
+        {cameras.devices.map((d) => <option key={d.device} value={d.device}>{d.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
+const asSentence = (text) => (/[.!?…]$/.test(text) ? text : `${text}.`)
+
+// The vision view, like the standalone Studio's full-screen Vision: a camera
+// (this browser's, or the board's, one picture per question) full size, with
+// the latest answer under it. Ask asks once; Loop takes a new picture and asks
+// again after each answer (genai/visionLoop.js) until Stop, an error, a model
+// change, or the view closing (also when the board changes or the tab is left).
+// `ask` is the tab's: its requests belong to the board session, and it reads
+// the answers aloud when Read replies aloud is on.
+function VisionView({ model, allowed, busyReason, boardCam, cameras, camera, onCameraChange, ticket, ask, prepareSpeech, readAloud, onReadAloudChange, speechStats, speechError, onActivity, onFullscreen, onClose }) {
+  const sees = Boolean(model && model.supportsVision)
+  const modelName = model ? model.name : null
+  const [source, setSource] = useState('browser')          // 'browser' | 'board'
+  const [prompt, setPrompt] = useState(VISION_PRESETS[0])
+  const [answer, setAnswer] = useState(null)                // {prompt, text, pending, stopped, metrics, turn}
+  const [notice, setNotice] = useState('')                  // why the loop stopped, or a camera problem
+  const [asking, setAsking] = useState(false)
+  const [looping, setLooping] = useState(false)
+  const [snapshotting, setSnapshotting] = useState(false)
+  const [boardPicture, setBoardPicture] = useState(null)    // the board camera's latest picture
+  const [cameraReady, setCameraReady] = useState(false)
+  const [cameraTry, setCameraTry] = useState(0)            // choosing this browser's camera again retries it
+  const videoRef = useRef(null)
+  const promptBox = useRef(null)
+  const loop = useRef(null)
+  const loopModel = useRef(null)
+  const once = useRef(null)          // a single question's AbortController
+  const preview = useRef(null)       // Take a picture's AbortController
+  // Read by the loop at every turn: it outlives the render that started it.
+  const latest = useRef({})
+  latest.current = { ask, source, camera, prompt, allowed, busyReason, model, sees }
+
+  useEffect(() => {
+    onActivity({ asking, loop: looping, snapshot: snapshotting })
+  }, [asking, looping, snapshotting, onActivity])
+
+  // Closing the view ends the loop and any question.
+  useEffect(() => () => {
+    loop.current?.stop()
+    once.current?.abort()
+    preview.current?.abort()
+    onActivity({ asking: false, loop: false, snapshot: false })
+  }, [onActivity])
+
+  // Another model answers now: the loop was asking the previous one.
+  useEffect(() => {
+    if (loop.current && loopModel.current !== modelName) loop.current.stop('The model changed.')
+  }, [modelName])
+
+  useEffect(() => {
+    promptBox.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  // This browser's camera runs while it is the source.
+  useEffect(() => {
+    if (source !== 'browser') return undefined
+    let stream = null
+    let cancelled = false
+    setCameraReady(false)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setNotice("This browser can't use a camera on this page. Use the board camera, or open Insight over HTTPS.")
+      return undefined
+    }
+    navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then((s) => {
+      if (cancelled) {
+        s.getTracks().forEach((t) => t.stop())
+        return
+      }
+      stream = s
+      if (videoRef.current) videoRef.current.srcObject = s
+      setCameraReady(true)
+    }, (error) => {
+      if (!cancelled) setNotice(`This browser's camera isn't available (${error.message}). Allow camera access for this page, then choose it again.`)
+    })
+    return () => {
+      cancelled = true
+      stream?.getTracks().forEach((t) => t.stop())
+      if (videoRef.current) videoRef.current.srcObject = null
+    }
+  }, [source, cameraTry])
+
+  // The picture to ask about: this browser's camera now, or a new one from the board's.
+  async function capture(signal) {
+    const { source: from, camera: device } = latest.current
+    if (from === 'browser') {
+      const picture = videoFrameToDataUrl(videoRef.current)
+      if (!picture) throw new Error("This browser's camera has no picture yet.")
+      return picture
+    }
+    if (!device) throw new Error('Choose a board camera first.')
+    const board = ticket(signal)
+    setSnapshotting(true)
+    try {
+      const picture = await imageToDataUrl(await boardCameraSnapshot(device, { signal: board.signal }))
+      // From the previous board, or for a question that was stopped: dropped.
+      if (!board.live() || signal.aborted) throw new DOMException('Stopped', 'AbortError')
+      setBoardPicture(picture)
+      return picture
+    } catch (error) {
+      if (isAbort(error)) throw error
+      throw new Error(snapshotErrorMessage(error, device))
+    } finally {
+      if (board.live()) setSnapshotting(false)
+    }
+  }
+
+  // One question about one picture; the answer shows as it is written.
+  async function answerTurn({ picture, prompt: question, signal, turn }) {
+    const board = ticket(signal)
+    setAnswer({ prompt: question, text: '', pending: true, turn })
+    const result = await latest.current.ask({
+      picture,
+      prompt: question,
+      signal: board.signal,
+      onDelta: (text) => {
+        if (!board.signal.aborted) setAnswer((a) => (a && a.pending ? { ...a, text } : a))
+      }
+    })
+    if (!board.live() || signal.aborted) return
+    setAnswer({ prompt: question, text: result.answer, metrics: result.metrics, turn })
+  }
+
+  function blockedReason() {
+    const now = latest.current
+    if (now.allowed.continueVisionLoop) return null
+    if (!now.model) return 'No chat model is loaded.'
+    if (!now.sees) return `${friendlyModelName(now.model.name)} doesn't see images.`
+    return asSentence(now.busyReason || 'The board is busy')
+  }
+
+  function markStopped() {
+    setAnswer((a) => (a && a.pending ? { ...a, pending: false, stopped: true } : a))
+  }
+
+  async function askOnce(question = prompt) {
+    if (!allowed.askVision) return
+    const text = question.trim() || VISION_PRESETS[0]
+    prepareSpeech()
+    setNotice('')
+    const controller = new AbortController()
+    once.current = controller
+    setAsking(true)
+    try {
+      await answerTurn({ picture: await capture(controller.signal), prompt: text, signal: controller.signal })
+    } catch (error) {
+      if (!isAbort(error) && !controller.signal.aborted) {
+        setNotice(asSentence(error.message))
+        setAnswer((a) => (a && a.pending ? { ...a, pending: false } : a))
+      }
+    } finally {
+      if (once.current === controller) once.current = null
+      setAsking(false)
+    }
+  }
+
+  function startLoop() {
+    if (!allowed.startVisionLoop) return
+    prepareSpeech()
+    setNotice('')
+    loopModel.current = modelName
+    const run = createVisionLoop({
+      capture,
+      ask: answerTurn,
+      prompt: () => latest.current.prompt.trim() || VISION_PRESETS[0],
+      blocked: blockedReason,
+      onStop: (reason) => {
+        if (loop.current === run) loop.current = null
+        setLooping(false)
+        markStopped()
+        if (reason) setNotice(`The loop stopped. ${asSentence(reason)}`)
+      }
+    })
+    loop.current = run
+    setLooping(true)
+    run.start()
+  }
+
+  function stop() {
+    if (!allowed.stopVision) return
+    loop.current?.stop()
+    once.current?.abort()
+    markStopped()
+  }
+
+  // In a loop the next picture is asked about it; otherwise it is asked now.
+  function choosePreset(text) {
+    setPrompt(text)
+    if (!looping) askOnce(text)
+  }
+
+  function chooseSource(next) {
+    if (!allowed.chooseVisionSource) return
+    setNotice('')
+    if (next !== source) setSource(next)
+    else if (next === 'browser' && !cameraReady) setCameraTry((n) => n + 1)   // e.g. after allowing access
+  }
+
+  // Board camera: a picture to aim with, before asking.
+  async function takePicture() {
+    if (!allowed.takeBoardSnapshot) return
+    setNotice('')
+    const controller = new AbortController()
+    preview.current = controller
+    try {
+      await capture(controller.signal)
+    } catch (error) {
+      if (!isAbort(error) && !controller.signal.aborted) setNotice(asSentence(error.message))
+    } finally {
+      if (preview.current === controller) preview.current = null
+    }
+  }
+
+  const busy = asking || looping
+  return (
+    <div className="genai-vision" role="dialog" aria-modal="true" aria-label="Vision">
+      <div className="genai-bench-top genai-vision-top">
+        <h2>Vision</h2>
+        <p>
+          {!model ? 'No model loaded: choose one in the Model menu first.'
+            : sees ? <>Asking <b>{friendlyModelName(model.name)}</b> about what the camera sees.</>
+              : `${friendlyModelName(model.name)} doesn't see images: load a model that does.`}
+        </p>
+        <div className="genai-vision-sources" role="group" aria-label="Picture source">
+          <button type="button" className={source === 'browser' ? 'btn-tonal genai-small' : 'btn-ghost genai-small'} aria-pressed={source === 'browser'} disabled={!allowed.chooseVisionSource} onClick={() => chooseSource('browser')}>
+            This browser's camera
+          </button>
+          {boardCam.available && (
+            <button type="button" className={source === 'board' ? 'btn-tonal genai-small' : 'btn-ghost genai-small'} aria-pressed={source === 'board'} disabled={!allowed.chooseVisionSource} onClick={() => chooseSource('board')}>
+              Board camera
+            </button>
+          )}
+        </div>
+        <button type="button" className="btn-ghost genai-tool" onClick={onFullscreen} aria-label="Full screen" title="Full screen">
+          <Icon d={ICONS.fullscreen} />
+        </button>
+        <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+      </div>
+      {!boardCam.available && <p className="hint genai-vision-note">Board camera: {boardCam.reason}</p>}
+
+      <div className="genai-vision-stage">
+        {source === 'browser' ? (
+          <video ref={videoRef} autoPlay playsInline muted aria-label="This browser's camera" />
+        ) : boardPicture ? (
+          <img src={boardPicture} alt="The latest picture from the board's camera" />
+        ) : (
+          <p className="genai-vision-empty">Each question takes a new picture with the board's camera. Take a picture to aim it first.</p>
+        )}
+        {source === 'browser' && !cameraReady && !notice && <p className="genai-vision-empty genai-vision-over">Starting this browser's camera…</p>}
+        {looping && <span className="genai-vision-live">Loop{answer && answer.turn ? ` · answer ${answer.turn}` : ''}</span>}
+      </div>
+
+      <div className="genai-vision-answer" aria-live="polite">
+        {answer ? (
+          <>
+            <p className="genai-vision-question">{answer.prompt}</p>
+            {answer.text ? (
+              <div className="genai-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{answer.text}</ReactMarkdown></div>
+            ) : (
+              answer.pending && <p className="hint">{snapshotting ? 'Taking a picture on the board…' : 'Looking…'}</p>
+            )}
+            {answer.stopped && <p className="hint">Stopped.</p>}
+            <Metrics items={answer.metrics} label="How fast the model answered" />
+            <Metrics items={speechStats} label="How fast the answer was spoken" />
+          </>
+        ) : (
+          <p className="hint">Ask about the picture and the answer appears here. Loop asks again about each new picture until you press Stop.</p>
+        )}
+        {speechError && <p className="genai-error">{speechError}</p>}
+        {notice && <p className="genai-error" role="alert">{notice}</p>}
+      </div>
+
+      <form className="genai-vision-ask" onSubmit={(e) => { e.preventDefault(); askOnce() }}>
+        <div className="genai-examples" aria-label="Questions to ask">
+          {VISION_PRESETS.map((text) => (
+            <button key={text} type="button" className="btn-ghost genai-small" aria-pressed={prompt === text} disabled={!allowed.typeMessage} onClick={() => choosePreset(text)}>
+              {text}
+            </button>
+          ))}
+        </div>
+        <div className="genai-row">
+          <input ref={promptBox} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={VISION_PRESETS[0]} aria-label="Question about the picture" disabled={!allowed.typeMessage} />
+          {busy ? (
+            <button type="button" className="btn-ghost danger" disabled={!allowed.stopVision} onClick={stop}>Stop</button>
+          ) : (
+            <>
+              <button type="submit" className="btn-tonal" disabled={!allowed.askVision}>Ask</button>
+              <button type="button" className="btn-ghost" disabled={!allowed.startVisionLoop} title="Ask again about each new picture until you press Stop" onClick={startLoop}>Loop</button>
+            </>
+          )}
+        </div>
+        <div className="genai-actions">
+          {source === 'board' && <BoardCameraPicker cameras={cameras} camera={camera} onChange={onCameraChange} disabled={!allowed.chooseVisionSource} />}
+          {source === 'board' && (
+            <button type="button" className="btn-ghost genai-small" disabled={!allowed.takeBoardSnapshot || !camera} onClick={takePicture}>
+              {snapshotting && !busy ? 'Taking a picture…' : 'Take a picture'}
+            </button>
+          )}
+          <span className="genai-header-spacer" />
+          <label className="genai-check" title="Read every answer aloud with the board's speech engine; a loop waits for the reading before the next picture">
+            <input type="checkbox" checked={readAloud} onChange={(e) => onReadAloudChange(e.target.checked)} />
+            Read answers aloud
+          </label>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+// View documents: what the board's document database holds (GET rag/inspect),
+// the source and its sections, with a filter, like the standalone Studio's.
+function DocumentsViewer({ ticket, onClose }) {
+  const [data, setData] = useState(null)
+  const [failed, setFailed] = useState('')
+  const [query, setQuery] = useState('')
+  const filterBox = useRef(null)
+
+  useEffect(() => {
+    // Closing the viewer, a board switch or leaving the tab ends the request.
+    const closed = new AbortController()
+    const board = ticket(closed.signal)
+    getJson(inspectPath(), { signal: board.signal })
+      .then((next) => { if (board.live() && !closed.signal.aborted) setData(next) })
+      .catch((error) => { if (!isAbort(error) && board.live()) setFailed(`Couldn't read the documents: ${error.message}`) })
+    return () => closed.abort()
+  }, [ticket])
+
+  // The filter box appears with the sections.
+  useEffect(() => {
+    if (data) filterBox.current?.focus()
+  }, [data])
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const view = useMemo(() => inspectSummary(data), [data])
+  const shown = useMemo(() => filterSections(view.sections, query), [view, query])
+  return (
+    <div className="genai-bench" role="dialog" aria-modal="true" aria-label="Documents on the board">
+      <div className="genai-bench-top">
+        <h2>Documents</h2>
+        <p>What the board searches when Use my documents is on.</p>
+        <button type="button" className="btn-ghost" onClick={onClose} title="Close (Esc)">Close</button>
+      </div>
+      <div className="genai-bench-body">
+        <section className="genai-bench-live" aria-label="Summary">
+          {view.rows.length > 0 && (
+            <dl className="genai-docs-meta">
+              {view.rows.map((r) => (
+                <div key={r.label}>
+                  <dt>{r.label}</dt>
+                  <dd title={r.title}>{r.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {failed ? <p className="genai-error">{failed}</p> : view.note && <p className="hint">{view.note}</p>}
+        </section>
+        {view.sections.length > 0 && (
+          <section className="genai-bench-results" aria-label="Sections">
+            <div className="genai-bench-results-head">
+              <input ref={filterBox} type="search" className="search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter sections…" aria-label="Filter sections" />
+              <span className="hint genai-docs-count">{query.trim() ? `${shown.length} of ${view.sections.length}` : view.sections.length} sections</span>
+            </div>
+            {shown.length === 0 && <p className="hint">No section matches “{query.trim()}”.</p>}
+            <ol className="genai-docs-sections">
+              {shown.map((s) => (
+                <li key={s.number}>
+                  <p className="genai-docs-heading"><span>{s.number}</span>{s.heading || '(no heading)'}</p>
+                  <p className="genai-docs-text">{s.text}</p>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+      </div>
     </div>
   )
 }

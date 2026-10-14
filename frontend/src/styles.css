@@ -5306,3 +5306,222 @@ button:disabled {
   flex: 1;
   min-width: 220px;
 }
+
+/* Settings, Replies: a labelled text area and a slider. */
+.genai-field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-field textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.genai-field textarea:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(15, 122, 116, 0.25);
+}
+
+.genai-field input[type="range"] {
+  max-width: 360px;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+}
+
+/* Vision: the camera full size, the latest answer and the question under it. */
+.genai-vision {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.genai-vision-top {
+  flex-wrap: wrap;
+}
+
+.genai-vision-top p {
+  flex: 1 1 220px;
+}
+
+.genai-vision-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.genai-vision-note {
+  margin: 0;
+  padding: 6px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.genai-vision-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #0b0f14;
+}
+
+.genai-vision-stage video,
+.genai-vision-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.genai-vision-empty {
+  max-width: 52ch;
+  margin: 0;
+  padding: 16px;
+  color: #c3cfdc;
+  text-align: center;
+}
+
+.genai-vision-over {
+  position: absolute;
+}
+
+.genai-vision-live {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(11, 15, 20, 0.8);
+  color: #e8eef6;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.genai-vision-answer {
+  max-height: 32vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.genai-vision-answer p {
+  margin: 0;
+}
+
+.genai-vision-question {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.genai-vision-ask {
+  display: grid;
+  gap: 8px;
+  padding: 10px 24px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.genai-vision-ask .genai-examples {
+  margin-top: 0;
+}
+
+/* View documents: the summary, then each section. */
+.genai-docs-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
+.genai-docs-meta dt {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.genai-docs-meta dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.genai-docs-count {
+  flex: none;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.genai-docs-sections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.genai-docs-sections li {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  background: var(--surface-soft);
+}
+
+.genai-docs-heading {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #274155;
+}
+
+.genai-docs-heading span {
+  flex: none;
+  min-width: 2ch;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.genai-docs-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .genai-vision-note,
+  .genai-vision-answer,
+  .genai-vision-ask {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
