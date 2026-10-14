@@ -79,7 +79,9 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - Treat file paths returned by media APIs as relative paths under the neat-insight media directory. Do not send absolute host paths to media-source APIs.
 - Use `/api/mediasrc` to read source state before changing assignments or playback.
 - Stop active media sources before destructive media operations when possible. `/api/delete-media` also clears matching assignments for deleted files.
-- Do not configure DevKit IP through neat-insight UI or API. Remote devkit configuration is environment-driven.
+- Peripherals never captures video: SiMa Sentinel on the board discovers the cameras and microphones (`/run/simaai-sentinel/api.sock`, `GET /v1/peripherals`), and Insight only reads its catalog; only an explicit camera preview captures video and only an explicit microphone test records audio. When Sentinel is missing or fails, surface its error (`peripheral_*` codes, install or update with `sima-cli neat install sentinel`); never add an Insight-side hardware scan as a fallback.
+- Preview is the only Peripherals operation that touches the sensor, and only while it runs: over the board connection Insight runs `gst-launch-1.0` (`libcamerasrc` for MIPI, `v4l2src` on the `/dev/v4l/by-id` path for USB) that writes multipart JPEG (at most 640 px wide, up to 15 fps) to stdout, and relays it at the session's `stream_url` as `multipart/x-mixed-replace`. It uses no vf channel, UDP port, or PyNeat. Discovery never captures. A failed start carries the pipeline's stderr in `detail`. The session's `camera_fps` is the rate the camera runs at: a USB mode's own rate; for MIPI, Sentinel's `max_fps` from one Sentinel rescan after the first frame (no Insight scan is recorded and the preview keeps running), `null` until then or when Sentinel cannot report it.
+- Board-facing features (Peripherals) use one selected board from `/api/board`: a saved manual target, else the board Insight runs on, else the SDK-paired DevKit (`DEVKIT_SYNC_DEVKIT_IP`, `_USER`, `_PORT`). Select a board with `POST /api/board/select` only when the user names one; never send passwords, because authentication uses the SSH keys of the account running Insight. For an SSH selection, the DevKit shell targets that board; an on-board selection falls back to the SDK-paired DevKit. Browser launch is enabled only for an SDK-paired target using the default `sima` account; remote Stats still reads its original `cfg.json` target.
 - Use `/api/viewer-url` for vf viewer links instead of hand-building them when the browser target should match the current backend host.
 - Use `/api/ingest/stats` when debugging whether RTP reaches vf before assuming a browser, ICE, or decoder problem.
 - Use `/api/egress/stats` when RTP reaches vf but the browser does not decode, render, or keep a stable WebRTC session.
@@ -88,6 +90,8 @@ Keep video and metadata channel numbers aligned. For channel `N`, video goes to 
 - For RTSP media-source URLs copied from the UI, adjust the host and port when the consumer is outside the SDK container.
 - Test overlay rendering on `videoUI`, not `mainUI`. Only the vf viewer loads `/static/drawing.js`; the console's Video Viewer bundles no overlay renderer and draws only what a browser cached from an older install.
 - Hard-reload the viewer after installing a new Insight before trusting a rendering result. A browser can serve a stale `drawing.js` for days.
+- Global Viewer Configuration saves are authoritative: they clear stored channel settings so the change takes effect everywhere. Settings opened from a tile create a later channel override; **Use Global Settings** discards it. Metadata types also have a **Show Overlay** switch; use it instead of treating style rows as visibility controls.
+- **Panel Transparency** in the 3D Pose tab adds transparency to auxiliary-panel surfaces without fading the visualization or controls. A global save applies the value to every channel.
 - Read `messages_forwarded` as DataChannel delivery, not correlation success. Zero forwarded with peers attached cannot distinguish no viewer from no match; use the correlation counters below.
 - Reproduce overlay loss against a wall-clock-paced source before blaming Insight. Metadata pairs with video within one millisecond, so a pipeline that stamps its two branches from different clocks drifts out of tolerance permanently. Model latency does not move source PTS; a known cause is an internal graph boundary replacing source PTS with appsrc running time (sima-neat/core#654).
 - Keep changes here proportionate and comment only invariants. Pull requests have been rejected for size and comment density with correct behaviour; value justifications belong in the pull request body.
@@ -160,7 +164,20 @@ A frame may be described by several metadata types at once. Send one message per
 type, all carrying the source frame's `timestamp` in integer milliseconds; the
 correlator matches each against the retained frame mapping, and the viewer draws
 every type it holds for that frame.
-A second message of the same type for the same frame replaces the first; retained
+A separate panel accepts `type: "auxiliary-visualization"` for data that should
+not cover the video. Its generic `data` object requires `schema_version: 1`, a
+stable `id`, a registered `renderer`, and an object `payload`. Auxiliary views
+require the exact correlated RTP timestamp; a matched view may remain for 160 ms
+across a delivery gap. Multiple IDs become tabs. Keep their channel and source
+PTS identical to the video and overlay messages.
+The built-in `blazepose-3d` renderer reads named finite `x`, `y`, and `z` values
+from `payload.poses[].keypoints[]`. Its **3D Pose** Viewer Configuration tab sets
+panel visibility, size, transparency, camera angle, and reference-cube visibility
+globally or per channel. The renderer draws each correlated frame directly,
+without smoothing or automatic motion. Pose Estimation settings separately
+control the 2D overlay, joint markers, and landmark names.
+A second ordinary message of the same type for the same frame replaces the first;
+auxiliary messages replace only the view with the same `data.id`. Retained
 messages draw in arrival order. Metadata without a correlated RTP timestamp uses
 the single-message arrival fallback, since types cannot safely be grouped without
 a shared frame identity.
@@ -428,6 +445,29 @@ curl -k -N https://127.0.0.1:9900/api/genai/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"<loaded-model>","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+## Board And Peripherals
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/board` | Selected board target, its `source` (`manual`, `on-board`, `sdk-env`), defaults, `generation`, and last status. Never connects. |
+| `POST` | `/api/board/select` | JSON `{"host", "port", "user"}` saves a manual target; `{"reset": true}` restores the default. |
+| `POST` | `/api/board/test` | Connect and read the board's host name, machine, and build version. |
+| `POST` | `/api/board/trust-host-key` | JSON `{"fingerprint"}`; trust the key a reflashed board presented (`presented_fingerprint` from `host_key_changed`). |
+| `GET` | `/api/peripherals` | Last camera and microphone scan for the selected board, or an empty snapshot with `scanned_at: null`. |
+| `POST` | `/api/peripherals/refresh` | Ask SiMa Sentinel to rescan MIPI and USB cameras and ALSA microphones, use the catalog of the scan Sentinel runs for that refresh, and mark each camera mode Available or Unsupported. |
+| `GET` | `/api/peripherals/preview` | The running preview session, or `null`. |
+| `POST` | `/api/peripherals/cameras/preview` | JSON `{"id"}` plus an optional `{"format", "width", "height", "fps"}` (MIPI: an Available mode; USB: any listed MJPG or raw mode); start the board pipeline, wait up to 10 s (two frame periods for a mode slower than 0.2 fps, at most 60 s) for its first frame, and return the session with its `stream_url`. Refuses a busy camera (`409 camera_in_use`, also when libcamera or v4l2src reports it busy) and never stops the process holding it; `502 tool_missing` when the board has no `gst-launch-1.0` or lacks a GStreamer element the pipeline needs (named in `tool`); `502 command_failed` with the pipeline's stderr in `detail`. |
+| `GET` | `/api/peripherals/cameras/preview/<session_id>/stream` | The JPEG frames as `multipart/x-mixed-replace; boundary=frame`, one viewer per session (`409 preview_active` for a second). The preview stops when this response ends, when nobody opens it within 15 s of the start, or after 10 s (two frame periods for a mode slower than 0.2 fps, at most 60 s) without a frame. |
+| `POST` | `/api/peripherals/cameras/preview/<session_id>/stop` | Close the stream and kill the pipeline by PID on the board, releasing the camera; returns `{"session": null}` for a session that already ended. |
+| `POST` | `/api/peripherals/microphones/test` | JSON `{"id"}` (optional `"seconds"`, 1-30); re-read Sentinel's catalog, then record from that microphone on the board until stopped (at most 30 s, 48 kHz, 2 channels); 202 with the test. One test at a time. |
+| `GET` | `/api/peripherals/microphones/test` | The selected board's latest test: live `level_dbfs` and `elapsed_ms` while recording, then `level` and `audio_url`, or `error`; `null` before any test or once a scan lists another device under that id. Never connects. |
+| `POST` | `/api/peripherals/microphones/test/stop` | End the test named by `{"token": ...}` (from the start) now; another token stops nothing. The result arrives through `GET`. |
+| `GET` | `/api/peripherals/microphones/test/<token>.wav` | The finished recording of the selected board as WAV; 404 once a newer test replaced it, another board was selected, or a scan lists another device under that id. |
+
+Board errors carry `code` and `hint`. `auth_failed` includes the `ssh-copy-id` command to authorize the service account's key; `host_key_changed` (409) includes both fingerprints. Camera discovery never captures frames, changes sensor controls, or publishes streams. Each mode's `support.tier` and `reason` are SiMa Sentinel's own verdict (its per-mode `available` and `reason`, sentinel#43). On Platform 3.0 the modes are the sensor's sizes (`sensor_mode`), and Insight also marks IMX477 sizes wider than 4032 `unsupported`, because libcamera streams them at 4032 wide. With a Sentinel that gives no verdict, Insight applies the same rule: a mode is `available` when Sentinel's `board` block lists the camera's sensor (its `configured_cameras` entry for the camera id) among the sensors the board's camera overlays support, the mode is an ISP output size (`isp_output`), and its format is NV12; otherwise it is `unsupported` with a `reason`. NV12 is a fixed fact about Neat's `CameraInput`, not queried from the board. USB cameras are always `unsupported`, and without Sentinel's `board` block every mode is. A camera or format is `available` when any of its modes is; `exportable` and `default_selection` follow the Available modes. Sentinel failures return `peripheral_missing`, `peripheral_refused`, `peripheral_denied` or `peripheral_unavailable` (503; also Sentinel's 429 when 8 refreshes already wait, with a retry hint), `peripheral_version` or `peripheral_response` (502), and `timeout` (504) when Sentinel's refresh scan does not finish within 10 s or the board does not answer. A request answered after the selected board changed returns 409 `stale_snapshot`; refresh first.
+
+Besides a camera preview, a microphone test is the only Peripherals action that opens a device. It records only from the `plughw:` selector Sentinel's current catalog names for that id, never from a card number, and returns 409 `stale_snapshot` when that microphone's capture target or identity in Sentinel's catalog changed since the scan (a change elsewhere in the catalog, such as a previewing camera's rate, does not count), 409 `microphone_in_use` when a live check at test start finds the capture PCM open (naming the process where visible; Sentinel's own availability does not decide), and 409 `test_running` while another test records. Treat these, a missing `arecord` (`tool_missing`), and a silent result as visible outcomes; never stop another process or switch to a different device.
 
 ## Error Handling
 

@@ -9,6 +9,7 @@
 
 It provides:
 - Multi-channel WebRTC video viewer with MetadataReceiver support
+- Frame-correlated auxiliary visualization panels, including BlazePose 3D
 - Codec-aware media source control with RTSP and HTTP MJPEG streaming
 - System and application metrics dashboard
 
@@ -79,6 +80,12 @@ ROI settings are split into filtering and display:
 
 General settings include Overlay Delay, which delays metadata selection so boxes
 and tracks can be aligned with the displayed WebRTC frame.
+
+Frame-correlated data that should not cover the video can use an auxiliary
+visualization panel. See [`docs/auxiliary-visualizations.md`](docs/auxiliary-visualizations.md)
+for the generic contract and built-in BlazePose 3D renderer. Viewer Configuration
+controls the panel per channel, and the 3D skeleton stays frame-aligned with the
+2D pose overlay.
 
 ## Build from source
 
