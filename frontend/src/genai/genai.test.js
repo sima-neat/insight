@@ -700,3 +700,20 @@ test('the benchmark is offered only by a board that says so', () => {
   assert.equal(allowedActions({ ...READY, benchmarkAvailable: false }).openBenchmark, false)
   assert.equal(allowedActions({ ...READY, benchmarkAvailable: true }).openBenchmark, true)
 })
+
+test('switching boards ends the conversation and drops an attached picture', () => {
+  // The next message rebuilds its history from the conversation, so anything
+  // left would be sent to the newly selected board.
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  const body = (name) => {
+    const start = view.indexOf(`function ${name}() {`)
+    assert.ok(start >= 0, name)
+    return view.slice(start, view.indexOf('\n  }\n', start))
+  }
+  const forget = body('forgetBoard')
+  assert.match(forget, /resetConversation\(\)/)
+  assert.match(forget, /setImage\(null\)/)
+  const reset = body('resetConversation')
+  for (const step of ['chatAbort.current?.abort()', 'stopSpeaking()', 'setMessages([])']) assert.ok(reset.includes(step), step)
+  assert.match(body('newChat'), /resetConversation\(\)/)
+})

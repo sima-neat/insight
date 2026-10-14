@@ -424,7 +424,10 @@ export default function GenAIView({ onError, onStatus }) {
   function forgetBoard() {
     boardSession.current?.restart()
     voicesLoading.current = false
-    stopSpeaking()
+    // The conversation and an attached picture belong to the previous board:
+    // the next message must not send them to the new one.
+    resetConversation()
+    setImage(null)
     setHealth(null)
     setStatus(null)
     setLastError(null)
@@ -1009,8 +1012,9 @@ export default function GenAIView({ onError, onStatus }) {
     else root.current?.requestFullscreen?.().catch(() => {})
   }
 
-  function newChat() {
-    if (!allowed.newChat) return
+  // Ends the conversation: cancels a reply in progress, stops speaking and
+  // clears the history. New chat and switching boards both start here.
+  function resetConversation() {
     chatGeneration.current += 1
     chatAbort.current?.abort()
     stopSpeaking()
@@ -1018,6 +1022,11 @@ export default function GenAIView({ onError, onStatus }) {
     setSpeechStats({})
     setMessages([])
     setDocsMidChat(false)
+  }
+
+  function newChat() {
+    if (!allowed.newChat) return
+    resetConversation()
     composer.current?.focus()
   }
 
