@@ -900,6 +900,8 @@ test('the vision loop asks one question at a time, pauses between answers, and r
   let most = 0
   let question = 'What do you see?'
   let stopReason
+  let stopped
+  const done = new Promise((resolve) => { stopped = resolve })
   const loop = createVisionLoop({
     capture: async () => {
       events.push(`capture ${loop.turns + 1}`)
@@ -916,10 +918,11 @@ test('the vision loop asks one question at a time, pauses between answers, and r
     },
     prompt: () => question,
     wait: async (ms) => { events.push(`pause ${ms}`) },
-    onStop: (reason) => { stopReason = reason }
+    onStop: (reason) => { stopReason = reason; stopped() }
   })
   loop.start()
-  await new Promise((resolve) => setTimeout(resolve, 60))
+  // Wait for the loop to end (a slow CI machine must not cut it short).
+  await Promise.race([done, new Promise((resolve) => setTimeout(resolve, 5000))])
   assert.equal(most, 1, 'never two questions at once')
   assert.deepEqual(events, [
     'capture 1', 'ask 1: frame 1 / What do you see?', `pause ${LOOP_PAUSE_MS}`,
@@ -1135,4 +1138,11 @@ test('the view sends the reply settings, and drops board camera and vision resul
   assert.match(vision, /if \(!board\.live\(\) \|\| signal\.aborted\) throw new DOMException/)
   assert.match(vision, /if \(!board\.live\(\) \|\| signal\.aborted\) return\n {4}setAnswer/)
   assert.match(vision, /loop\.current\.stop\('The model changed\.'\)/)
+})
+
+test("each vision answer starts without the previous answer's speech figures", () => {
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  const start = view.indexOf("setSpeechError((e) => (e && e.id === VISION_READING ? null : e))")
+  assert.ok(start >= 0)
+  assert.match(view.slice(start, start + 400), /const \{ \[VISION_READING\]: _previous, \.\.\.rest \} = prev/)
 })

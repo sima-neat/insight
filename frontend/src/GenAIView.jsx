@@ -1067,8 +1067,13 @@ export default function GenAIView({ onError, onStatus }) {
     const t0 = performance.now()
     let tFirst = null
     let reply = ''
-    // A reading that failed belongs to the previous answer.
+    // A reading that failed, and its speech figures, belong to the previous answer.
     setSpeechError((e) => (e && e.id === VISION_READING ? null : e))
+    setSpeechStats((prev) => {
+      if (!(VISION_READING in prev)) return prev
+      const { [VISION_READING]: _previous, ...rest } = prev
+      return rest
+    })
     let reading = readAloudRef.current && player.current ? startReading(VISION_READING, player.current, t0) : null
     const splitter = createSentenceSplitter()
     const speakNew = (final) => {
