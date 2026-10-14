@@ -11,6 +11,7 @@
     "test:peripherals": "node --test src/peripherals/*.test.js",
     "test:streaming": "node --test src/streaming/*.test.js",
     "test": "node --test src/*/*.test.js",
+    "test:genai": "node --test src/genai/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -427,6 +427,27 @@ Use `/api/server-ip` and `/api/viewer-url` when debugging container, bridge netw
 
 Hosted environments can opt into a separate browser-facing network configuration by writing `/home/docker/.insight-config/browser-ice-address` and/or `/home/docker/.insight-config/launch-url` before restarting Insight. The ICE file supplies one IPv4 address to both vf and MediaMTX; the launch URL supplies the trusted origin for viewer, WHIP, and HTTP MJPEG links. Missing files retain the existing `CONTAINER_HOST_IP` and request-host/port-map behavior. A present invalid browser ICE address prevents readiness. An invalid launch URL logs a warning and preserves the request-host/port-map fallback.
 
+## GenAI Studio
+
+Insight relays calls to the GenAI Studio backend on a board (started there with `run.sh --backend-only`, HTTPS port `5000`). The board's self-signed certificate is accepted by Insight, so clients only call Insight.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/genai/settings` | Return the board address in use (`url`) and the configured and default addresses. |
+| `POST` | `/api/genai/settings` | Set or clear `url` (`https://host[:port]`); an empty string clears it. |
+| `GET`, `POST` | `/api/genai/<path>` | Forward a Studio API call (`health`, `voices`, `v1/…`, `audio/…`, `models/…`, `benchmark/…`, `tts/…`, `piperplus/…`, `supertonic/…`, `voices/…`, `rag/…`, `board-camera/…`) and stream the answer back unchanged, including binary answers such as a `board-camera/snapshot` JPEG; `shutdown` and other paths return 404. |
+
+The default address is `https://127.0.0.1:5000` on a board, otherwise `https://<DEVKIT_SYNC_DEVKIT_IP>:5000`. Relay errors carry a `reason`: `bad-request` (400), `not-relayed` (404), `unreachable` (502), `not-configured` or `invalid-address` (503), and `cfg-unreadable` or `cfg-unwritable` (500).
+
+```bash
+curl -k https://127.0.0.1:9900/api/genai/health
+curl -k -N https://127.0.0.1:9900/api/genai/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"<loaded-model>","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+curl -k https://127.0.0.1:9900/api/genai/board-camera/devices
+curl -k -o frame.jpg 'https://127.0.0.1:9900/api/genai/board-camera/snapshot?device=/dev/video16'
+```
+
 ## Board And Peripherals
 
 | Method | Path | Purpose |
@@ -458,7 +479,8 @@ Most JSON API errors return `{"error": "message"}` with an HTTP error status. Co
 - `403` for unsafe media paths.
 - `404` for missing logs, media files, or media-source indexes.
 - `500` for local processing or stream startup failures.
-- `502` for unreachable or unreadable remote devkit build information.
+- `502` for unreachable or unreadable remote devkit build information, or an unreachable GenAI Studio board.
+- GenAI Studio relay errors carry a `reason`: `400 bad-request` for an invalid board address, `404 not-relayed`, `502 unreachable`, `503 not-configured` or `invalid-address`, and `500 cfg-unreadable` or `cfg-unwritable` when Insight's `cfg.json` cannot be read (nothing is changed or relayed) or saved.
 - `415` from vf `/offer` when the browser's offer does not advertise the channel's codec, meaning it has no decoder for that stream. This is permanent for that browser; viewers must not retry it.
 - `503` from vf `/offer` until RTP payload type 96 (H.264) or 98 (H.265) identifies the channel codec; viewers should retry this response.
 
