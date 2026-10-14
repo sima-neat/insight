@@ -435,7 +435,7 @@ Insight relays calls to the GenAI Studio backend on a board (started there with 
 | --- | --- | --- |
 | `GET` | `/api/genai/settings` | Return the board address in use (`url`) and the configured and default addresses. |
 | `POST` | `/api/genai/settings` | Set or clear `url` (`https://host[:port]`); an empty string clears it. |
-| `GET`, `POST` | `/api/genai/<path>` | Forward a Studio API call (`health`, `voices`, `v1/…`, `audio/…`, `models/…`, `benchmark/…`, `tts/…`, `piperplus/…`, `supertonic/…`, `voices/…`) and stream the answer back unchanged; `shutdown` and other paths return 404. |
+| `GET`, `POST` | `/api/genai/<path>` | Forward a Studio API call (`health`, `voices`, `v1/…`, `audio/…`, `models/…`, `benchmark/…`, `tts/…`, `piperplus/…`, `supertonic/…`, `voices/…`, `rag/…`, `board-camera/…`) and stream the answer back unchanged, including binary answers such as a `board-camera/snapshot` JPEG; `shutdown` and other paths return 404. |
 
 The default address is `https://127.0.0.1:5000` on a board, otherwise `https://<DEVKIT_SYNC_DEVKIT_IP>:5000`. Relay errors carry a `reason`: `bad-request` (400), `not-relayed` (404), `unreachable` (502), `not-configured` or `invalid-address` (503), and `cfg-unreadable` or `cfg-unwritable` (500).
 
@@ -444,6 +444,8 @@ curl -k https://127.0.0.1:9900/api/genai/health
 curl -k -N https://127.0.0.1:9900/api/genai/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"<loaded-model>","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+curl -k https://127.0.0.1:9900/api/genai/board-camera/devices
+curl -k -o frame.jpg 'https://127.0.0.1:9900/api/genai/board-camera/snapshot?device=/dev/video16'
 ```
 
 ## Board And Peripherals

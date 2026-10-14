@@ -21,7 +21,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Choose a model',
       body:
         'The model at the top answers your messages. "Sees images" means it also understands pictures. ' +
-        'Loading a different model takes a few minutes; Settings, Get more models downloads new ones.',
+        'Loading a different model takes a few minutes; Settings, Get more models downloads new ones, and ' +
+        'Delete in Settings, Models on the board frees the space of one you no longer need.',
       target: 'model',
       action: null
     },
@@ -30,7 +31,8 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Ask anything',
       body:
         'Type in the message box and press Enter. The answer appears as it is written, with how fast it came ' +
-        'underneath; the stop button ends it early. New chat, next to the model, starts over.',
+        'underneath; the stop button ends it early. New chat, next to the model, starts over. Settings, Replies ' +
+        'sets your own system prompt and how long a reply may be.',
       target: 'composer',
       action: 'example-question'
     },
@@ -39,9 +41,20 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
       title: 'Show it a picture',
       body:
         'With a model that sees images, attach a photo or take one with your camera, then ask about it: ' +
-        '"What is in this picture?" or "What does this sign say?"',
+        '"What is in this picture?" or "What does this sign say?" The video camera button takes the picture ' +
+        'with a camera plugged into the board instead.',
       target: 'media',
       action: 'camera'
+    },
+    {
+      id: 'vision',
+      title: 'Watch with the camera',
+      body:
+        'The eye opens the vision view: the camera full size and the latest answer under it. Ask once, pick ' +
+        '"What do you see?" or another question, or press Loop to ask again about each new picture until ' +
+        'you press Stop. Turn on Read answers aloud to hear them.',
+      target: 'vision',
+      action: 'vision'
     },
     {
       id: 'talk',
@@ -89,7 +102,7 @@ export function tutorialSteps({ canThink = false, thinkingModel = null } = {}) {
     body:
       'Turn on Use my documents and the board looks up the matching passages in its document database before ' +
       'answering, and says which ones it used. Settings, Documents uploads your own Markdown file or resets to ' +
-      'the default SiMa document.',
+      'the default SiMa document, and View documents shows the sections the board searches.',
     target: 'documents',
     action: null
   })

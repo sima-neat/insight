@@ -11,6 +11,9 @@ from flask import Flask
 
 from neat_insight import genai_relay as relay
 
+# A JPEG's first and last bytes, with bytes that are not valid UTF-8 between.
+_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01" + bytes(range(256)) + b"\xff\xd9"
+
 
 class _FakeStudio(BaseHTTPRequestHandler):
     """A stand-in for the board's GenAI Studio backend (plain HTTP)."""
@@ -41,6 +44,21 @@ class _FakeStudio(BaseHTTPRequestHandler):
         self._record()
         if self.path == "/health":
             self._send_json(200, {"ok": True, "mode": "backend-only"})
+        elif self.path == "/board-camera/devices":
+            self._send_json(200, {"devices": [{"device": "/dev/video16", "name": "USB Camera"}], "default": "/dev/video16"})
+        elif self.path.startswith("/board-camera/snapshot"):
+            if self.path.endswith("device=%2Fdev%2Fvideo16"):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(_JPEG)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Capture-Tool", "ffmpeg")
+                self.end_headers()
+                self.wfile.write(_JPEG)
+            elif self.path.endswith("device=%2Fdev%2Fvideo9"):
+                self._send_json(503, {"error": "Board camera capture failed"})
+            else:
+                self._send_json(400, {"error": "Invalid board camera device"})
         elif self.path.startswith("/models/logs/stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -208,6 +226,43 @@ class GenaiRelayTests(unittest.TestCase):
         self.assertTrue(relay.is_allowed_path("rag/status"))
         self.assertTrue(relay.is_allowed_path("rag/upload"))
         self.assertFalse(relay.is_allowed_path("upload-to-rag"))
+
+    def test_relays_board_camera_routes(self):
+        self.assertTrue(relay.is_allowed_path("board-camera/devices"))
+        self.assertTrue(relay.is_allowed_path("board-camera/snapshot"))
+        self.assertFalse(relay.is_allowed_path("board-camera/../shutdown"))
+        self.assertFalse(relay.is_allowed_path("board-camera"))
+        # Listing is quick; a snapshot may try several capture tools on the board.
+        self.assertIn("board-camera/devices", relay._QUICK_PATHS)
+        self.assertNotIn("board-camera/snapshot", relay._QUICK_PATHS)
+        self._configure(url=self.board)
+
+        response = self.client.get("/api/genai/board-camera/devices")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["default"], "/dev/video16")
+
+    def test_a_board_camera_snapshot_passes_through_byte_for_byte(self):
+        self._configure(url=self.board)
+
+        response = self.client.get("/api/genai/board-camera/snapshot?device=%2Fdev%2Fvideo16")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, _JPEG)
+        self.assertEqual(response.headers["Content-Type"], "image/jpeg")
+        self.assertEqual(response.headers["Content-Length"], str(len(_JPEG)))
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.headers["X-Capture-Tool"], "ffmpeg")
+        self.assertEqual(_FakeStudio.requests[-1]["path"], "/board-camera/snapshot?device=%2Fdev%2Fvideo16")
+
+    def test_a_refused_board_camera_snapshot_keeps_the_board_error(self):
+        self._configure(url=self.board)
+        for device, status, message in (("%2Fdev%2Fvideo9", 503, "Board camera capture failed"),
+                                        ("nope", 400, "Invalid board camera device")):
+            with self.subTest(device=device):
+                response = self.client.get(f"/api/genai/board-camera/snapshot?device={device}")
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(response.get_json(), {"error": message})
 
     def test_status_and_stop_calls_fail_fast(self):
         # A board that stops answering must not hold the benchmark's polling

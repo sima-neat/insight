@@ -1,5 +1,6 @@
 // Calls from the GenAI tab to Insight's /api/genai relay (insight#150), which
 // forwards them to the board's GenAI Studio backend.
+import { snapshotPath } from './boardCamera.js'
 import { parseSources } from './documents.js'
 import { chatStreamStats } from './metrics.js'
 import { chatDeltaText, createJsonLinesParser, createSseParser } from './streams.js'
@@ -34,8 +35,8 @@ export class GenaiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', json, form, headers = {}, signal } = {}) {
-  const init = { method, headers: { ...headers }, signal }
+async function request(path, { method = 'GET', json, form, headers = {}, signal, cache } = {}) {
+  const init = { method, headers: { ...headers }, signal, ...(cache ? { cache } : {}) }
   if (json !== undefined) {
     init.headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(json)
@@ -108,19 +109,25 @@ async function readStream(response, onText) {
 
 export const REPLY_CUT_OFF = 'The reply stopped early: the connection to the board closed before it finished.'
 
+// The body of POST v1/chat/completions: an OpenAI request, plus "neat_rag"
+// to answer from the board's documents.
+export function chatRequestBody({ model, messages, maxTokens, useDocuments = false }) {
+  return {
+    model,
+    messages,
+    stream: true,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
+    ...(useDocuments ? { neat_rag: true } : {})
+  }
+}
+
 // Streams a chat reply; calls onDelta(text) for each piece. Resolves with
 // {stats, rag}: the board's {tokens, tps} for the reply (or null), and with
 // useDocuments the passages the board added ({hits, sources}, else null).
 export async function streamChat({ model, messages, maxTokens, useDocuments = false, signal, onDelta }) {
   const response = await request('v1/chat/completions', {
     method: 'POST',
-    json: {
-      model,
-      messages,
-      stream: true,
-      ...(maxTokens ? { max_tokens: maxTokens } : {}),
-      ...(useDocuments ? { neat_rag: true } : {})
-    },
+    json: chatRequestBody({ model, messages, maxTokens, useDocuments }),
     signal
   })
   if (!response.ok) {
@@ -253,4 +260,20 @@ export async function speak({ text, model = 'default', voice, language, signal }
     voice: response.headers.get('X-Voice'),
     rtf: response.headers.get('X-RTF')
   }
+}
+
+// One picture from a camera on the board (GET board-camera/snapshot): a JPEG
+// Blob. The board answers errors as JSON (400 for a device it doesn't accept,
+// 503 when it couldn't capture); anything that isn't a picture is an error too.
+export async function boardCameraSnapshot(device, { signal } = {}) {
+  const response = await request(snapshotPath(device), { signal, cache: 'no-store' })
+  if (!response.ok) {
+    const body = await readJson(response)
+    throw new GenaiError(errorMessage(body, response.status), { status: response.status, body })
+  }
+  const type = response.headers.get('Content-Type') || ''
+  if (!type.startsWith('image/')) throw new GenaiError(`The board sent ${type || 'something'} instead of a picture.`, { status: response.status })
+  const picture = await response.blob()
+  if (!picture.size) throw new GenaiError('The board sent an empty picture.', { status: response.status })
+  return picture
 }
