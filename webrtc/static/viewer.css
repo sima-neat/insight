@@ -745,15 +745,13 @@ canvas {
   line-height: 1.4;
 }
 
-.settings-scope-line,
-.settings-scope-note--info {
+.settings-scope-line {
   background: rgba(0, 188, 212, 0.12);
   border: 1px solid rgba(0, 188, 212, 0.45);
   color: #b8eef6;
 }
 
-[data-theme="light"] .settings-scope-line,
-[data-theme="light"] .settings-scope-note--info {
+[data-theme="light"] .settings-scope-line {
   background: #e3f6fa;
   border-color: #7fd3e2;
   color: #0b4f5c;
@@ -890,27 +888,42 @@ canvas {
   color: #4a4a4a;
 }
 
-.settings-scope-note--info {
-  padding: 6px 10px;
-  border-radius: 6px;
+/* The global dialog's mark on a setting that channels set themselves: a slim last
+   column (the end of a ROI group) holding an amber icon that opens their list. */
+.filter-table td.settings-override-cell {
+  width: 22px;
+  padding-left: 0;
+  padding-right: 4px;
 }
 
-.settings-scope-note--info summary {
+.settings-override-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  font-size: 13px;
+  line-height: 1;
   cursor: pointer;
 }
 
-.settings-scope-note--info[open] summary {
-  margin-bottom: 4px;
+.settings-override-icon:hover {
+  background: rgba(245, 158, 11, 0.28);
 }
 
-.filter-table td.settings-scope-note .settings-scope-note--info,
-.roi-scope-setting .settings-scope-note .settings-scope-note--info {
-  color: #b8eef6;
+[data-theme="light"] .settings-override-icon {
+  background: #fef3c7;
+  color: #b45309;
 }
 
-[data-theme="light"] .filter-table td.settings-scope-note .settings-scope-note--info,
-[data-theme="light"] .roi-scope-setting .settings-scope-note .settings-scope-note--info {
-  color: #0b4f5c;
+.settings-override-icon:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
 }
 
 .settings-scope-link {
@@ -928,7 +941,9 @@ canvas {
 }
 
 .settings-scope-link:focus-visible,
-.settings-reset-button:focus-visible {
+.settings-modal-button:focus-visible,
+.settings-reset-all:focus-visible,
+.settings-submodal-close:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
@@ -983,42 +998,143 @@ canvas {
   font-size: 0.85rem;
 }
 
-.settings-reset-confirm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-/* The dialog is a fixed 700px, so the message plus both buttons never fit on one
-   line. Forcing the message to its own full-width row leaves Reset and Cancel
-   together on the row below it, instead of Cancel wrapping alone. */
-.settings-reset-confirm .settings-reset-message {
-  flex-basis: 100%;
-}
-
-.settings-reset-button {
-  padding: 4px 12px;
-  border: 1px solid #8a8a8a;
+/* Resetting every channel is a button of its own, solid amber like the icons that
+   mark what it clears; dark text, as white on this amber would be hard to read. */
+.settings-reset-all {
+  padding: 0.6rem 1.2rem;
+  border: none;
   border-radius: 4px;
-  background: transparent;
+  background: #f59e0b;
+  color: #1a1a1a;
+  font-family: var(--viewer-font-sans);
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.settings-reset-all:hover {
+  background: #d97706;
+}
+
+/* A modal over the settings dialog: the overrides of a setting, the reset's confirmation. */
+.settings-popup-modal {
+  position: relative;
+}
+
+.settings-submodal {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.settings-submodal-card {
+  width: min(420px, calc(100% - 40px));
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px 18px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: #1b1b1b;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  font-family: var(--viewer-font-sans);
+}
+
+[data-theme="light"] .settings-submodal-card {
+  border-color: #c8c8c8;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.settings-submodal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-submodal-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.settings-submodal-close {
+  padding: 0;
+  border: none;
+  background: none;
   color: inherit;
-  font: inherit;
+  font-size: 1.3rem;
+  line-height: 1;
   cursor: pointer;
 }
 
-.settings-reset-button--danger {
-  border-color: #f87171;
-  background: rgba(248, 113, 113, 0.16);
-  color: #fecaca;
+.settings-submodal-message {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #ccc;
 }
 
-[data-theme="light"] .settings-reset-button {
-  border-color: #6a6a6a;
+[data-theme="light"] .settings-submodal-message {
+  color: #3a3a3a;
 }
 
-[data-theme="light"] .settings-reset-button--danger {
-  border-color: #b91c1c;
-  background: #fee2e2;
-  color: #7f1d1d;
+.settings-overrides-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.9rem;
+}
+
+[data-theme="light"] .settings-overrides-line {
+  border-top-color: rgba(0, 0, 0, 0.12);
+}
+
+.settings-submodal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.settings-modal-button {
+  padding: 0.5rem 1.1rem;
+  border: none;
+  border-radius: 4px;
+  font-family: var(--viewer-font-sans);
+  font-size: 0.95rem;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.settings-modal-button--neutral {
+  background: #4a4a4a;
+  color: #f0f0f0;
+}
+
+.settings-modal-button--neutral:hover {
+  background: #5a5a5a;
+}
+
+[data-theme="light"] .settings-modal-button--neutral {
+  background: #d4d4d4;
+  color: #1a1a1a;
+}
+
+.settings-modal-button--danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.settings-modal-button--danger:hover {
+  background: #b91c1c;
 }

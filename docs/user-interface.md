@@ -166,7 +166,7 @@ Viewer settings exist in two scopes. The settings button of the viewer page open
 
 A channel follows the global settings. To give a channel its own value, open its settings, switch on **Own value** next to the setting, set the value and select **Save**. A value that a channel sets itself takes precedence over the global value. Switching **Own value** off again makes the channel follow the global value. Class colors work per entry: the channel's dialog shows the global entries as **from global**, and **Override** copies one into an entry of the channel.
 
-Under each setting, the global dialog shows how many channels set their own value; expand that line to list them. **Use global value** removes a channel's own value at once, without **Save**. **Reset all channels to the global settings…** removes the own values of every channel; regions of interest are kept.
+In the global dialog, an amber warning icon at the end of a setting's row marks a setting that channels set themselves; its tooltip says how many. Select the icon to list those channels with their values. **Use global value** removes a channel's own value at once, without **Save**. **Reset all channels to the global settings…** removes the own values of every channel after a confirmation; regions of interest are kept.
 
 Settings are stored in the browser. They are not shared between browsers or machines.
 
