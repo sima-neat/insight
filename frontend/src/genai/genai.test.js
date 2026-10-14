@@ -700,3 +700,27 @@ test('the benchmark is offered only by a board that says so', () => {
   assert.equal(allowedActions({ ...READY, benchmarkAvailable: false }).openBenchmark, false)
   assert.equal(allowedActions({ ...READY, benchmarkAvailable: true }).openBenchmark, true)
 })
+
+test('switching boards ends the conversation and drops an attached picture', () => {
+  // The next message rebuilds its history from the conversation, so anything
+  // left would be sent to the newly selected board.
+  const view = readFileSync(new URL('../GenAIView.jsx', import.meta.url), 'utf8')
+  const body = (name) => {
+    const start = view.indexOf(`function ${name}() {`)
+    assert.ok(start >= 0, name)
+    return view.slice(start, view.indexOf('\n  }\n', start))
+  }
+  const forget = body('forgetBoard')
+  assert.match(forget, /resetConversation\(\)/)
+  assert.match(forget, /setImage\(null\)/)
+  const reset = body('resetConversation')
+  for (const step of ['chatAbort.current?.abort()', 'stopSpeaking()', 'setMessages([])']) assert.ok(reset.includes(step), step)
+  assert.match(body('newChat'), /resetConversation\(\)/)
+  // Saving the same address is not a switch: the conversation stays.
+  const apply = view.slice(view.indexOf('async function applySettings('), view.indexOf('\n  }\n', view.indexOf('async function applySettings(')))
+  assert.match(apply, /if \(saved\?\.url !== before\) forgetBoard\(\)/)
+  // A picture still being resized when the board changes is dropped, not attached afterwards.
+  assert.match(forget, /boardGeneration\.current \+= 1/)
+  const attach = view.slice(view.indexOf('async function attachImage('), view.indexOf('\n  }\n', view.indexOf('async function attachImage(')))
+  assert.match(attach, /if \(board === boardGeneration\.current\) setImage\(picture\)/)
+})
