@@ -445,9 +445,11 @@ export default function GenAIView({ onError, onStatus }) {
     event.preventDefault()
     if (!allowed.changeBoard) return
     try {
+      const before = settings?.url
       const saved = await saveSettings({ url: addressDraft.trim() })
       setSettings(saved)
-      forgetBoard()
+      // Saving the same address keeps the conversation; another board starts fresh.
+      if (saved?.url !== before) forgetBoard()
       setAddressError('')
       onStatus?.('Board settings saved.')
       refresh()

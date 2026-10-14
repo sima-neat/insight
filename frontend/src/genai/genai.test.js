@@ -716,4 +716,7 @@ test('switching boards ends the conversation and drops an attached picture', () 
   const reset = body('resetConversation')
   for (const step of ['chatAbort.current?.abort()', 'stopSpeaking()', 'setMessages([])']) assert.ok(reset.includes(step), step)
   assert.match(body('newChat'), /resetConversation\(\)/)
+  // Saving the same address is not a switch: the conversation stays.
+  const apply = view.slice(view.indexOf('async function applySettings('), view.indexOf('\n  }\n', view.indexOf('async function applySettings(')))
+  assert.match(apply, /if \(saved\?\.url !== before\) forgetBoard\(\)/)
 })
