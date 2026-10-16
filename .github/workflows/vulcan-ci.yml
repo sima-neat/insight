@@ -65,6 +65,23 @@ jobs:
         working-directory: frontend
         run: npm test
 
+  docs-translations:
+    name: Check documentation translations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Check translations
+        # Same coverage and source-hash rule Core's docs build applies when it imports these docs.
+        run: python scripts/check_translation_sources.py
+
   build:
     name: Build ${{ matrix.target_platform }}
     runs-on: ubuntu-latest
