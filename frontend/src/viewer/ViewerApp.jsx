@@ -4,6 +4,7 @@ import {
   applyVideoSyncBuffer,
   createMetadataQueue,
   enqueueMetadata,
+  holdOverlays,
   metadataQueueSnapshot,
   takeMetadataForFrame,
 } from "./metadataSync.js";
@@ -87,6 +88,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
   const metadataQueueRef = useRef(createMetadataQueue());
   const synchronizationSettingsRef = useRef(getSynchronizationSettings(index));
   const videoSyncStatusRef = useRef({ supported: false, applied: false, targetMs: null });
+  const heldOverlaysRef = useRef(new Map());
   const trackHistoryRef = useRef(new Map());
   const rtcpRef = useRef({
     lastBytes: null,
@@ -189,6 +191,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
       auxiliaryPanelRef.current?.reset();
+      heldOverlaysRef.current.clear();
       trackHistoryRef.current.clear();
       rtcpRef.current = {
         lastBytes: null,
@@ -312,7 +315,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
             // Every type for this frame draws onto the same overlay, already
             // cleared above.
             const frameState = {};
-            for (const candidate of overlays) {
+            for (const candidate of holdOverlays(heldOverlaysRef.current, overlays, now)) {
               const metadataType = candidate.data?.type;
               const resolvedSettings = getResolvedViewerSettings(index, metadataType);
               if (
@@ -324,12 +327,14 @@ function ChannelTile({ index, onActiveChange, debug }) {
                 trackHistory: trackHistoryRef.current,
                 now,
                 frameState,
+                held: candidate.held === true,
               };
               drawMetadata(ctx, canvas, candidate.data, video, index, drawContext);
             }
           }
         } else if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
+          heldOverlaysRef.current.clear();
           trackHistoryRef.current.clear();
           auxiliaryPanelRef.current?.clearFrame();
         }
@@ -395,6 +400,7 @@ function ChannelTile({ index, onActiveChange, debug }) {
               setTileActive(false);
               const canvas = canvasRef.current;
               canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+              heldOverlaysRef.current.clear();
               trackHistoryRef.current.clear();
               auxiliaryPanelRef.current?.clearFrame();
             }

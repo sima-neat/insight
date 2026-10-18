@@ -5,7 +5,9 @@ import {
   applyVideoSyncBuffer,
   createMetadataQueue,
   enqueueMetadata,
+  holdOverlays,
   metadataQueueSnapshot,
+  OVERLAY_HOLD_MS,
   takeMetadataForFrame,
 } from "./metadataSync.js";
 
@@ -360,4 +362,17 @@ test("matching, fallback, and expiry release timestamped queue capacity", () => 
     assert.equal(metadataQueueSnapshot(queue).evicted, 0, release);
     assert.equal(takeMetadataForFrame(queue, 100, 0, 21).length, 1, release);
   }
+});
+
+test("a type missing from a frame redraws its last message until a new one or the hold expires", () => {
+  const held = new Map();
+  const detection = { data: { type: "object-detection", data: { objects: [{ bbox: [1, 2, 3, 4] }] } } };
+  const pose = { data: { type: "pose-estimation", data: { poses: [] } } };
+  const noObjects = { data: { type: "object-detection", data: { objects: [] } } };
+
+  assert.deepEqual(holdOverlays(held, [detection], 0), [detection]);
+  assert.deepEqual(holdOverlays(held, [pose], 100), [pose, { ...detection, held: true }]);
+  assert.deepEqual(holdOverlays(held, [noObjects], 150), [noObjects, { ...pose, held: true }]);
+  assert.deepEqual(holdOverlays(held, [], 150 + OVERLAY_HOLD_MS), [{ ...noObjects, held: true }]);
+  assert.deepEqual(holdOverlays(held, [], 151 + OVERLAY_HOLD_MS), []);
 });

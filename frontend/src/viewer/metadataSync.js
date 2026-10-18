@@ -127,6 +127,27 @@ export function takeMetadataForFrame(queue, rtpTimestamp, metadataRetentionMs, n
   return [];
 }
 
+// Inference often runs slower than the video, so many frames carry no message of a
+// type. Such a frame redraws that type's last message for up to OVERLAY_HOLD_MS instead
+// of flickering it off. A message that arrives, even one with no objects, replaces it.
+export const OVERLAY_HOLD_MS = 200;
+
+export function holdOverlays(held, overlays, now) {
+  const fresh = new Set();
+  for (const item of overlays) {
+    const type = metadataTypeOf(item.data);
+    fresh.add(type);
+    held.set(type, { item, matchedAt: now });
+  }
+  const repeats = [];
+  for (const [type, { item, matchedAt }] of held) {
+    if (fresh.has(type)) continue;
+    if (now - matchedAt > OVERLAY_HOLD_MS) held.delete(type);
+    else repeats.push({ ...item, held: true });
+  }
+  return [...overlays, ...repeats];
+}
+
 export function metadataQueueSnapshot(queue) {
   return {
     ...queue.stats,
