@@ -573,7 +573,10 @@ window.drawStrategies = {
       return;
     }
 
-    updateTrackHistory(trackHistory, index, visibleTracks, drawContext.now || performance.now(), historySettings);
+    // A held message repeats an earlier frame; recording it again would add a stale trail point.
+    if (!drawContext.held) {
+      updateTrackHistory(trackHistory, index, visibleTracks, drawContext.now || performance.now(), historySettings);
+    }
 
     const activeKeys = new Set(
       visibleTracks
