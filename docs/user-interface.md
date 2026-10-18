@@ -247,6 +247,60 @@ Below the runs, a compact panel reports the machine Insight itself runs on — t
 
 Last on the tab, the profiling timeline plots numeric fields from the profiling events Insight streams from a running application. It is independent of Sentinel: it measures the application, not the device.
 
+## GenAI Studio
+
+The GenAI Studio view runs language, vision and speech models on a board. It talks to GenAI Studio from Neat Apps, which runs on the board in backend-only mode; Insight relays every call, so the browser never connects to the board directly.
+
+Start the backend on the board first, from the GenAI Studio application directory:
+
+```bash
+./run.sh --backend-only
+```
+
+The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
+
+The status label, and a banner when something needs attention, show the backend's state and what to do next:
+
+- **Not set up**: no board is selected, and the settings open. Enter the board's address, such as `https://192.168.1.20:5000`. On a board, Insight defaults to the local backend; in the Neat Development Environment it defaults to the paired DevKit.
+- **Not running**: the board does not answer. Start the backend with the command above (**Copy start command** copies it), or check the address.
+- **Error**: the board answered with an error, or the address is not GenAI Studio. The banner shows the board's message.
+- **Starting**: the backend answers but its model server is not ready yet.
+- **Busy**: a model is loading. Chat and speech wait until it finishes.
+- **Incompatible**: the board's GenAI Studio API version does not match this Insight. Update the one the banner names.
+- **Ready**: chat and speech are available. A voice that failed to load on the board is reported here too.
+
+**Chat** is one conversation in the middle of the page. Type in the message box, or press the microphone, speak, and press it again: your words are transcribed and sent. With a model that sees images, attach a picture, take one with this browser's camera, or take one with a camera plugged into the board: the video camera button lists the board's cameras (`/dev/videoN`), and **Take a picture** attaches the board's picture to your next message. The board camera needs GenAI Studio that reports the `board_camera` feature; on an older one the button is hidden and the camera button's tooltip says why. Replies appear as they are written; the stop button ends one early, and **New chat** starts over so the model forgets the conversation. **Read aloud** reads one reply and **Stop speaking** ends it; **Read replies aloud** reads every reply, starting with the first sentence while the rest is still being written. The browser asks for microphone and camera permission the first time.
+
+Under each reply, Insight shows how fast it was produced, measured in the browser:
+
+- **First token**: from sending to the first text of the reply.
+- **Speed** and **Tokens**: tokens per second and the reply's length. Speed comes from the board when it reports it; otherwise Insight calculates it in the browser.
+- **Total**: from sending to the end of the reply.
+- **First audio**, **RTF** and **Voice**, when the reply is read aloud: the time until it started playing, the real-time factor (seconds of compute per second of speech; below 1 is faster than real time), and the speech engine.
+- **Transcribed** and **Language**, under a spoken question: the time from the end of the recording to the text, and the language heard.
+
+**Vision** (the eye under the message box) shows the camera full size with the latest answer under it, like the standalone GenAI Studio's full-screen vision. Choose **This browser's camera** or **Board camera** (the board takes a new picture for each question; **Take a picture** shows one to aim with), type a question or pick **What do you see?**, **Describe the scene in detail** or **Read any text in view**, then:
+
+- **Ask** asks once about the current picture.
+- **Loop** asks the same question about a new picture after each answer, one request at a time, with a short pause between answers, until you press **Stop**. A question edited during the loop is asked from the next picture on. With **Read answers aloud** on, each answer is read before the next picture is taken.
+
+The loop also stops when the model changes or no longer sees images, the board stops answering or starts another operation, a picture or answer fails (the reason is shown), the board address changes, or you close the view or leave the tab. Vision questions are separate requests without the chat's history, and their answers are not added to the chat. **Full screen** in the view uses the whole screen; Esc or **Close** returns to the chat.
+
+**Export chat** saves the conversation as a `.log` text file (`neat-chat-<date>-<time>.log`) with the export time and model at the top, then each turn; pictures appear as `[image]`.
+
+**SiMaSentry Solutions** opens three demo apps that run on the loaded chat model through Insight: **SiMaSentry-Med** (clinical chat and medical image review), **SiMaSentry-Safe** (PPE and hazard checks) and **SiMaSentry-Sec** (security footage analysis and change detection). Their picture features need a model that sees images. The models run on the board, but voice input inside these apps uses the browser's own speech recognition, which may send audio to an online service (Chrome does). An app's own Home button, **Back** or Esc returns to the launcher; **Close** returns to the chat.
+
+**Benchmark** measures the board's chat models. Choose one or more models, the number of runs (1 to 50), the reply length in tokens (8 to 2048) and, optionally, a prompt, then **Run benchmark**. Each model runs in turn; a model that isn't loaded is loaded first, which can unload the chat model, so reload it from the **Model** menu afterwards. Progress and the reply appear while it runs, and **Stop** ends it. The results compare tokens per second (mean, p90 and standard deviation), time to first token and reply length, with the fastest values highlighted; **Each run** lists the runs of the last model. **Download CSV** and **Download JSON** save the results.
+
+**Use my documents** answers from the document database on the board: the board looks up the passages that match each question and adds them before the model answers, and a note under the reply names the sections used (or says nothing matched). **Settings**, **Documents** shows what the database holds, uploads a Markdown file (replacing the documents), resets to the default SiMa document, or clears it. **View documents** lists what was ingested: the source file, the number of sections (chunks) and each section's heading path and text, with **Filter sections…** to find a passage (up to the first 2,000 sections). Documents need GenAI Studio with document search (the switch is greyed out with the reason otherwise).
+
+**Settings** holds the board address, the replies, the voice engine, voice and spoken language, and the models on the board with their sizes and the free disk space.
+
+- **Replies**: **System prompt** replaces the tab's default instructions (shown in the empty box) for the chat and the vision view; **Reset to default** empties it. The tab still adds one sentence saying whether the message has a picture, because small vision models otherwise misjudge that. **Longest reply** sets the most tokens a reply may have (32 to 2048, default 512, as in the standalone GenAI Studio); it is sent as `max_tokens` and does not change the benchmark, which has its own setting. This browser remembers both.
+- **Models on the board**: **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. **Delete** removes a downloaded model's files from the board after you confirm; it is offered only for models that are not loaded and not the speech model in use, and the board's reason is shown if it refuses. When the board is online, search Hugging Face and **Download** a model onto the board.
+
+If a model load fails or replies stop, restart GenAI Studio on the board (`./run.sh stop`, then `./run.sh --backend-only`); that frees the accelerator, and the model can then be loaded again. **Settings**, **Troubleshooting** repeats this.
+
 ## System Information
 
 The system information panel summarizes the environment Insight can see. In the Neat Development Environment, it can show SDK and component information, Insight status, update information, and exposed port mappings such as `mainUI` and `videoUI`.
