@@ -16,6 +16,7 @@ import {
 } from './streaming/webcamPublishing.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
+const GenAIView = lazy(() => import('./GenAIView.jsx'))
 const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
 const BoardPanel = lazy(() => import('./peripherals/BoardPanel.jsx'))
 
@@ -40,7 +41,8 @@ const TABS = [
   { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
   { id: 'peripherals', label: 'Peripherals', icon: '/icons/peripherals.svg' },
-  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
+  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' },
+  { id: 'genai', label: 'GenAI Studio', icon: '/icons/genai.svg' }
 ]
 const YOUTUBE_IMPORT_TARGETS = [
   { value: '1080p30', label: '1080p30' },
@@ -61,7 +63,8 @@ const ROUTE_TO_TAB = {
   viewer: 'viewer',
   peripherals: 'peripherals',
   stats: 'visualizer',
-  visualizer: 'visualizer'
+  visualizer: 'visualizer',
+  genai: 'genai'
 }
 const TAB_TO_ROUTE = {
   workspace: '/workspace',
@@ -69,7 +72,8 @@ const TAB_TO_ROUTE = {
   rtsp: '/streaming',
   viewer: '/viewer',
   peripherals: '/peripherals',
-  visualizer: '/stats'
+  visualizer: '/stats',
+  genai: '/genai'
 }
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
 const ONBOARDING_STEPS = [
@@ -128,6 +132,14 @@ const ONBOARDING_STEPS = [
     summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
     details:
       'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
+  },
+  {
+    id: 'genai',
+    tab: 'genai',
+    title: 'Try generative AI on the board',
+    summary: 'GenAI Studio runs language, vision and speech models on the board; this tab is where you use them.',
+    details:
+      'Start the backend on the board with ./run.sh --backend-only from the GenAI Studio app, then load a model here, chat with text, images or your camera, transcribe speech, and hear replies. The tab shows when the board is busy or unavailable and how to recover.'
   }
 ]
 
@@ -2352,6 +2364,12 @@ export default function App() {
                 routePath={routeWorkspacePath}
                 onNavigate={(path) => selectTab('workspace', path)}
               />
+            </Suspense>
+          )}
+
+          {tab === 'genai' && (
+            <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading GenAI Studio...</p></section>}>
+              <GenAIView onError={setError} onStatus={setUploadStatus} />
             </Suspense>
           )}
 
