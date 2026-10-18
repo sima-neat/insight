@@ -1,0 +1,844 @@
+import os
+import socket
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import unittest.mock as mock
+from pathlib import Path
+
+import paramiko
+from flask import Flask
+
+from neat_insight import board
+from neat_insight.board import manager as manager_module
+from neat_insight.board import transport as transport_module
+from neat_insight.board import target as target_module
+from neat_insight.board.errors import BoardError
+from neat_insight.board.transport import CommandCancelled, ExecResult, LocalTransport, SshTransport, key_fingerprint
+
+SDK_ENV = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.2", "DEVKIT_SYNC_DEVKIT_USER": "sima", "DEVKIT_SYNC_DEVKIT_PORT": "22"}
+IDENTITY_OUTPUT = b"modalix\n@@\n92b95ac6\n@@\nMACHINE = modalix\nSIMA_BUILD_VERSION = 2.1.3_master_B4837\n"
+
+
+def wait_until(condition, timeout=5, interval=0.01):
+    """Poll `condition` until it holds or `timeout` passes; the caller asserts the outcome."""
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(interval)
+
+
+def in_thread(target):
+    """Run `target` in a started thread; returns the thread and the list of exceptions it raised."""
+    errors = []
+
+    def run():
+        try:
+            target()
+        except Exception as error:
+            errors.append(error)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    return worker, errors
+
+
+class FakeTransport:
+    def __init__(self, results=None, error=None):
+        self.results = list(results or [])
+        self.error = error
+        self.calls = []
+        self.closed = False
+
+    def exec(self, argv, *, timeout, stdin=None, on_stdout=None, cancel_event=None):
+        self.calls.append(argv)
+        if self.error:
+            raise self.error
+        return self.results.pop(0) if self.results else ExecResult(0, IDENTITY_OUTPUT, b"")
+
+    def remote_host_key_fingerprint(self):
+        return "SHA256:abc"
+
+    def close(self):
+        self.closed = True
+
+
+class TargetResolutionTests(unittest.TestCase):
+    def test_precedence_is_manual_then_board_then_sdk_env(self):
+        saved = {"host": "10.0.0.5", "port": 2222, "user": "dev"}
+        sdk = {"host": "192.168.2.2", "port": 22, "user": "sima"}
+        manual = target_module.resolve_target(saved, True, sdk)
+        self.assertEqual((manual.mode, manual.source, manual.label), ("ssh", "manual", "dev@10.0.0.5:2222"))
+        local = target_module.resolve_target(None, True, sdk)
+        self.assertEqual((local.mode, local.source, local.label), ("local", "on-board", "This board"))
+        env = target_module.resolve_target(None, False, sdk)
+        self.assertEqual((env.source, env.label), ("sdk-env", "sima@192.168.2.2"))
+        self.assertIsNone(target_module.resolve_target(None, False, None))
+
+    def test_sdk_env_reads_devkit_sync_like_the_rest_of_insight(self):
+        env = {"DEVKIT_SYNC_DEVKIT_IP": "192.168.2.7", "DEVKIT_SYNC_DEVKIT_USER": "dev", "DEVKIT_SYNC_DEVKIT_PORT": "2222"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(target_module.sdk_env_target(), {"host": "192.168.2.7", "port": 2222, "user": "dev"})
+        with mock.patch.dict(os.environ, {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local"}, clear=True), \
+             mock.patch.object(target_module, "_WARNED", set()):
+            with self.assertLogs(level="WARNING") as logs:
+                self.assertIsNone(target_module.sdk_env_target())
+                self.assertIsNone(target_module.sdk_env_target())
+            self.assertEqual(len(logs.records), 1)
+            self.assertIn("Ignoring DEVKIT_SYNC_DEVKIT_IP", logs.output[0])
+        env = {"DEVKIT_SYNC_DEVKIT_IP": "devkit.local", "SIMA_DEVKIT_IP": "192.168.2.9"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(target_module, "_WARNED", set()):
+            with self.assertLogs(level="WARNING"):
+                self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
+        with mock.patch.dict(os.environ, {"SIMA_DEVKIT_IP": "192.168.2.9"}, clear=True):
+            self.assertEqual(target_module.sdk_env_target()["host"], "192.168.2.9")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(target_module.sdk_env_target())
+
+    def test_validation_rejects_option_like_hosts_bad_ports_and_users(self):
+        for host, port, user in (
+            ("-oProxyCommand=x", 22, "sima"),
+            ("", 22, "sima"),
+            (True, 22, "sima"),
+            ("board", True, "sima"),
+            ("board", 22.9, "sima"),
+            ("board", float("inf"), "sima"),
+            ("board", float("nan"), "sima"),
+            ("board", 70000, "sima"),
+            ("board", "9" * 5000, "sima"),
+            ("board", 22, True),
+            ("board", 22, "a b"),
+        ):
+            with self.assertRaises(BoardError) as ctx:
+                target_module.validate_ssh_target(host, port, user)
+            self.assertEqual(ctx.exception.status, 400)
+        self.assertEqual(target_module.validate_ssh_target("board", "2222", None),
+                         {"host": "board", "port": 2222, "user": "sima"})
+        self.assertEqual(target_module.validate_ssh_target("board", 22.0, None)["port"], 22)
+        self.assertEqual(target_module.validate_ssh_target("board", "000022", None)["port"], 22)
+        # Codex (635553e): leading zeros count toward int()'s digit limit, so this raised (a 500).
+        self.assertEqual(target_module.validate_ssh_target("board", "0" * 5000 + "22", None)["port"], 22)
+
+    def test_store_round_trips_and_ignores_corrupt_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = target_module.TargetStore(Path(directory) / "board-target.json")
+            self.assertIsNone(store.load())
+            store.save({"host": "board", "port": 22, "user": "sima"})
+            self.assertEqual(store.load(), {"host": "board", "port": 22, "user": "sima"})
+            store.path.write_text("{not json", encoding="utf-8")
+            with self.assertLogs(level="WARNING"):
+                self.assertIsNone(store.load())
+            store.clear()
+            store.clear()
+
+
+class IPv6TargetTests(unittest.TestCase):
+    def test_ipv6_board_addresses_are_accepted_and_zones_stay_interface_names(self):
+        # Codex 4264302544: `::1` and a zoned link-local address were refused as host names.
+        for host in ("::1", "fe80::1%eth0", "fe80::6ae1:54ff:fe06:4b18%bridge100", "2001:db8::2", "192.168.2.2", "modalix.local"):
+            with self.subTest(host=host):
+                self.assertEqual(target_module.validate_ssh_target(host)["host"], host)
+        for host in ("fe80::1%", "fe80::1%eth0;reboot", "fe80::1%a b", "::1%$(id)", "-oProxyCommand=x", ":::1", ""):
+            with self.subTest(host=host):
+                with self.assertRaises(BoardError):
+                    target_module.validate_ssh_target(host)
+
+
+class BoardApiTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        env_patch = mock.patch.dict(os.environ, SDK_ENV, clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        self.transports = []
+        ssh_patch = mock.patch.object(manager_module, "SshTransport", side_effect=self._make_transport)
+        ssh_patch.start()
+        self.addCleanup(ssh_patch.stop)
+        self.app = Flask(__name__)
+        board.init_app(self.app, Path(self.tmp.name), on_board=False)
+        self.client = self.app.test_client()
+
+    def _make_transport(self, host, port, user, known_hosts):
+        transport = FakeTransport()
+        transport.target = (host, port, user)
+        self.transports.append(transport)
+        return transport
+
+    def test_state_reports_sdk_default_without_connecting(self):
+        body = self.client.get("/api/board").get_json()
+        self.assertEqual(body["target"]["source"], "sdk-env")
+        self.assertEqual(body["defaults"]["sdk_env"], {"host": "192.168.2.2", "port": 22, "user": "sima"})
+        self.assertEqual(body["status"]["state"], "unknown")
+        self.assertEqual(body["generation"], 1)
+        self.assertEqual(self.transports[0].calls, [])
+
+    def test_test_reads_identity_and_marks_connected(self):
+        body = self.client.post("/api/board/test").get_json()
+        self.assertEqual(body["status"]["state"], "connected")
+        self.assertEqual(body["board"]["hostname"], "modalix")
+        self.assertEqual(body["board"]["machine"], "modalix")
+        self.assertEqual(body["board"]["build_version"], "2.1.3_master_B4837")
+        self.assertEqual(len(body["board"]["fingerprint"]), 16)
+
+    def test_a_port_too_long_for_int_is_a_400_not_a_500(self):
+        response = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": "9" * 5000, "user": "sima"})
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
+    def test_select_and_reset_bump_generation_and_close_old_connection(self):
+        first = self.client.get("/api/board").get_json()["generation"]
+        body = self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 2222.0, "user": "dev"}).get_json()
+        self.assertEqual(body["target"]["source"], "manual")
+        self.assertEqual(body["saved"], {"host": "10.1.1.1", "port": 2222, "user": "dev"})
+        self.assertGreater(body["generation"], first)
+        self.assertTrue(self.transports[0].closed)
+        self.assertEqual(self.transports[-1].target, ("10.1.1.1", 2222, "dev"))
+        body = self.client.post("/api/board/select", json={"reset": True}).get_json()
+        self.assertEqual(body["target"]["source"], "sdk-env")
+        self.assertIsNone(body["saved"])
+
+    def test_reset_must_be_a_boolean_and_leaves_the_target_alone(self):
+        self.client.post("/api/board/select", json={"host": "10.1.1.1", "port": 22, "user": "sima"})
+        for reset in ("false", 1, None, []):
+            with self.subTest(reset=reset):
+                response = self.client.post("/api/board/select", json={"reset": reset})
+                self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+        self.assertEqual(self.client.get("/api/board").get_json()["target"]["host"], "10.1.1.1")
+
+    def test_a_result_read_from_a_replaced_board_is_refused(self):
+        with self.app.app_context():
+            old = board.get_board_manager().session()
+            old.require_current()
+            self.client.post("/api/board/select", json={"host": "10.1.1.1"})
+            with self.assertRaises(BoardError) as ctx:
+                old.require_current()
+            self.assertEqual((ctx.exception.code, ctx.exception.status), ("stale_snapshot", 409))
+            # A command that finishes after the board changed is refused rather than returned.
+            with self.assertRaises(BoardError) as ctx:
+                old.transport.exec(["true"], timeout=1)
+            self.assertEqual(ctx.exception.code, "stale_snapshot")
+
+    def test_a_test_whose_board_changed_after_it_connected_is_refused(self):
+        # Codex (fb0ecbf): a selection made in another tab after the identity read but before the response
+        # returned 200 with the new, untested board.
+        self.client.get("/api/board")
+        manager = self.app.extensions["neat_board"]
+        session = manager.session()
+        identity = session.identity
+
+        def read_then_switch():
+            result = identity()
+            manager.select("10.1.1.1", 22, "sima")
+            return result
+
+        with mock.patch.object(session, "identity", side_effect=read_then_switch):
+            response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
+
+    def test_a_failed_test_whose_board_changed_meanwhile_is_refused(self):
+        # Codex (790bf80): a failure from the departed board returned its 502/504 and guidance, not 409.
+        self.client.get("/api/board")
+        manager = self.app.extensions["neat_board"]
+        old = self.transports[-1]
+
+        def switch_then_fail(argv, *, timeout, stdin=None):
+            manager.select("10.1.1.1", 22, "sima")
+            raise BoardError("unreachable", "Could not connect", hint="Check the cable")
+
+        old.exec = switch_then_fail
+        response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json().get("code")), (409, "stale_snapshot"))
+
+    def test_invalid_selection_returns_400_with_hint(self):
+        response = self.client.post("/api/board/select", json={"host": "", "user": "sima"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "invalid_request")
+        self.assertTrue(response.get_json()["hint"])
+
+    def test_connection_errors_surface_with_code_and_are_recorded(self):
+        self.client.get("/api/board")
+        self.transports[-1].error = BoardError("unreachable", "Could not connect", hint="Check the cable")
+        response = self.client.post("/api/board/test")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json(), {"error": "Could not connect", "code": "unreachable", "hint": "Check the cable"})
+        status = self.client.get("/api/board").get_json()["status"]
+        self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
+
+    def test_a_stream_that_fails_after_it_started_is_recorded(self):
+        class LostStream:
+            closed = False
+
+            def read(self, timeout):
+                raise BoardError("unreachable", "The SSH session failed")
+
+            def close(self):
+                self.closed = True
+
+        self.client.post("/api/board/test")
+        lost = LostStream()
+        self.transports[-1].stream = lambda argv, *, timeout: lost
+        with self.app.app_context():
+            stream = board.get_board_manager().session().transport.stream(["true"], timeout=1)
+        with self.assertRaises(BoardError):
+            stream.read(1)
+        status = self.client.get("/api/board").get_json()["status"]
+        self.assertEqual((status["state"], status["error"]["code"]), ("error", "unreachable"))
+        stream.close()
+        self.assertTrue(lost.closed)
+
+    def test_errors_from_a_replaced_target_do_not_overwrite_new_status(self):
+        with self.app.app_context():
+            old = board.get_board_manager().session()
+            self.client.post("/api/board/select", json={"host": "10.1.1.1"})
+            self.transports[0].error = BoardError("timeout", "late")
+            with self.assertRaises(BoardError):
+                old.transport.exec(["true"], timeout=1)
+        self.assertEqual(self.client.get("/api/board").get_json()["status"]["state"], "unknown")
+
+    def test_no_target_is_409(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            response = self.client.post("/api/board/test")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()["code"], "no_target")
+
+    def test_trust_host_key_requires_the_presented_fingerprint(self):
+        response = self.client.post("/api/board/trust-host-key", json={"fingerprint": "SHA256:x"})
+        self.assertEqual(response.status_code, 400)
+
+    def test_trusting_a_new_host_key_starts_a_new_board_generation(self):
+        before = self.client.post("/api/board/test").get_json()
+        old = self.transports[-1]
+        key = paramiko.RSAKey.generate(1024)
+        old.presented_host_key = key
+        old.replace_host_key = mock.Mock()
+        response = self.client.post("/api/board/trust-host-key", json={"fingerprint": key_fingerprint(key)})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        old.replace_host_key.assert_called_once_with(key)
+        self.assertTrue(old.closed)
+        self.assertIsNot(self.transports[-1], old)
+        self.assertGreater(body["generation"], before["generation"])
+        self.assertEqual((body["status"]["state"], body["board"]), ("unknown", None))
+
+    def test_identity_is_read_on_every_call(self):
+        with self.app.app_context():
+            session = board.get_board_manager().session()
+            session.identity()
+            session.identity()
+        self.assertEqual(len(self.transports[-1].calls), 2)
+
+    def test_empty_identity_output_is_an_error(self):
+        self.client.get("/api/board")
+        self.transports[-1].results = [ExecResult(0, b"", b"")]
+        response = self.client.post("/api/board/test")
+        self.assertEqual((response.status_code, response.get_json()["code"]), (502, "command_failed"))
+
+    def test_non_object_bodies_get_the_json_error_shape(self):
+        response = self.client.post("/api/board/select", json=[1])
+        self.assertEqual((response.status_code, response.get_json()["code"]), (400, "invalid_request"))
+
+    def test_board_state_is_not_cached(self):
+        self.assertEqual(self.client.get("/api/board").headers["Cache-Control"], "no-store")
+
+
+class LocalTransportTests(unittest.TestCase):
+    def test_exec_captures_output_stdin_and_missing_commands(self):
+        transport = LocalTransport()
+        result = transport.exec(["sh", "-c", "cat; echo err >&2; exit 3"], timeout=5, stdin=b"hello")
+        self.assertEqual((result.exit_code, result.stdout, result.stderr), (3, b"hello", b"err\n"))
+        self.assertEqual(transport.exec(["no-such-command-xyz"], timeout=5).exit_code, 127)
+
+    def test_a_command_the_system_cannot_start_is_a_failed_exit_like_a_shell(self):
+        # Codex 4189090649: an argument over Linux's 128 KiB per-argument limit raised OSError (a 500).
+        result = LocalTransport().exec(["echo", "x" * (256 * 1024)], timeout=5)
+        self.assertEqual(result.exit_code, 126)
+        self.assertIn(b"too long", result.stderr)
+
+    def test_exec_timeout_raises_board_error(self):
+        with self.assertRaises(BoardError) as ctx:
+            LocalTransport().exec(["sleep", "5"], timeout=0.2)
+        self.assertEqual((ctx.exception.code, ctx.exception.status), ("timeout", 504))
+
+    def test_exec_stops_a_command_at_the_output_limit_like_ssh(self):
+        started = time.monotonic()
+        with mock.patch.object(transport_module, "MAX_OUTPUT_BYTES", 4096), self.assertRaises(BoardError) as ctx:
+            LocalTransport().exec(["yes"], timeout=10)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertIn("more than 4096 bytes", ctx.exception.message)
+        self.assertLess(time.monotonic() - started, 5, "the command is killed at the limit, not left to the timeout")
+
+    def test_exec_streams_stdin_larger_than_a_pipe_buffer(self):
+        payload = os.urandom(1 << 20)
+        self.assertEqual(LocalTransport().exec(["cat"], timeout=10, stdin=payload).stdout, payload)
+
+    def test_exec_timeout_covers_a_command_that_closed_its_output(self):
+        with self.assertRaises(BoardError) as ctx:
+            LocalTransport().exec(["sh", "-c", "exec >&- 2>&-; sleep 5"], timeout=0.3)
+        self.assertEqual(ctx.exception.code, "timeout")
+
+    def read_all(self, stream, limit=10):
+        chunks, deadline = [], time.monotonic() + limit
+        while time.monotonic() < deadline:
+            chunk = stream.read(1)
+            if chunk == b"":
+                return b"".join(chunks)
+            chunks.append(chunk or b"")
+        self.fail("the stream did not end")
+
+    def test_stream_reads_stdout_as_it_arrives_and_keeps_stderr_bounded(self):
+        stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; echo one; sleep 0.3; echo two"], timeout=5)
+        self.assertIsNone(LocalTransport().stream(["sleep", "5"], timeout=5).read(0.05), "nothing arrived in time")
+        self.assertEqual(self.read_all(stream), b"one\ntwo\n")
+        self.assertRegex(stream.stderr(), rb"^[0-9]+\n$")
+        self.assertEqual(stream.read(1), b"")
+        stream.close()
+        self.assertEqual(stream.read(1), b"", "a closed stream reads as ended")
+
+        noisy = LocalTransport().stream(["sh", "-c", "echo first >&2; head -c 100000 /dev/zero | tr '\\0' x >&2; echo last >&2"], timeout=5)
+        self.read_all(noisy)
+        wait_until(lambda: noisy.stderr().endswith(b"last\n"))
+        stderr = noisy.stderr()
+        self.assertTrue(stderr.startswith(b"first\n") and stderr.endswith(b"last\n"))
+        self.assertLessEqual(len(stderr), transport_module.STDERR_HEAD_BYTES + transport_module.STDERR_TAIL_BYTES + 5)
+
+    def test_closing_a_stream_ends_the_command_at_its_next_write(self):
+        stream = LocalTransport().stream(["sh", "-c", "echo $$ >&2; exec yes"], timeout=5)
+        self.assertTrue(stream.read(5))
+        wait_until(stream.stderr)
+        pid = int(stream.stderr())
+        stream.close()
+        wait_until(lambda: not os.path.exists(f"/proc/{pid}"), interval=0.05)
+        self.assertFalse(os.path.exists(f"/proc/{pid}"), "yes died on SIGPIPE and was reaped")
+
+    def test_a_stream_that_cannot_start_is_a_board_error(self):
+        with self.assertRaises(BoardError) as ctx:
+            LocalTransport().stream(["no-such-command-xyz"], timeout=5)
+        self.assertEqual(ctx.exception.code, "command_failed")
+
+    def test_exec_hands_stdout_over_while_the_command_runs(self):
+        seen = []
+        started = time.monotonic()
+        result = LocalTransport().exec(
+            ["sh", "-c", "printf ab; sleep 0.5; printf cd; echo err >&2"],
+            timeout=5,
+            on_stdout=lambda chunk: seen.append((chunk, time.monotonic() - started)),
+        )
+        self.assertEqual((b"".join(chunk for chunk, _ in seen), result.stdout, result.stderr), (b"abcd", b"abcd", b"err\n"))
+        self.assertEqual(seen[0][0], b"ab")
+        self.assertLess(seen[0][1], 0.4, "the first chunk arrives before the command ends, not at exit")
+
+    def test_cancel_event_terminates_a_command_without_waiting_for_output(self):
+        cancel = threading.Event()
+        worker, outcome = in_thread(lambda: LocalTransport().exec(["sleep", "30"], timeout=60, cancel_event=cancel))
+        time.sleep(0.05)
+        cancel.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertIsInstance(outcome[0], CommandCancelled)
+
+    def test_close_terminates_active_local_commands_and_rejects_new_work(self):
+        transport = LocalTransport()
+        ready = threading.Event()
+        pids = []
+
+        def on_stdout(chunk):
+            pids.append(int(chunk))
+            ready.set()
+
+        worker, outcome = in_thread(
+            lambda: transport.exec(["sh", "-c", "echo $$; exec sleep 30"], timeout=60, on_stdout=on_stdout)
+        )
+        self.assertTrue(ready.wait(2))
+        transport.close()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(outcome[0].code, "stale_snapshot")
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pids[0], 0)
+        with self.assertRaises(BoardError) as ctx:
+            transport.exec(["true"], timeout=1)
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
+
+
+class ReportingTransportTests(unittest.TestCase):
+    def test_session_transport_forwards_the_stdout_callback_and_cancellation(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        session = manager_module.BoardManager(Path(tmp.name), on_board=True).session()
+        seen = []
+        session.transport.exec(["printf", "ab"], timeout=5, on_stdout=seen.append)
+        self.assertEqual(b"".join(seen), b"ab")
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(CommandCancelled):
+            session.transport.exec(["sleep", "30"], timeout=60, cancel_event=cancel)
+
+
+class SshTransportErrorTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.transport = SshTransport("192.168.2.2", 22, "sima", Path(self.tmp.name) / "known_hosts")
+
+    def _connect_raising(self, exc):
+        with mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "connect", side_effect=exc):
+            with self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=1)
+        return ctx.exception
+
+    def test_auth_failure_command_uses_sudo_when_insight_runs_as_root(self):
+        with mock.patch.object(transport_module, "_local_account", return_value="root"):
+            error = self._connect_raising(paramiko.AuthenticationException("denied"))
+        self.assertEqual(error.extra["command"], "sudo -H ssh-copy-id -p 22 sima@192.168.2.2")
+
+    def test_closed_transport_never_connects(self):
+        self.transport.close()
+        with mock.patch.object(paramiko.SSHClient, "connect") as connect:
+            with self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=1)
+        self.assertEqual(ctx.exception.code, "stale_snapshot")
+        connect.assert_not_called()
+
+    def test_exec_timeout_includes_waiting_for_the_transport_lock(self):
+        self.transport._lock.acquire()
+        started = time.monotonic()
+        try:
+            with self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=0.05)
+        finally:
+            self.transport._lock.release()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_exec_uses_one_deadline_for_command_launch_and_output(self):
+        clock = [0.0]
+        channel = mock.Mock()
+        channel.exec_command.side_effect = lambda command: clock.__setitem__(0, 0.15)
+        for idle in (channel.recv_ready, channel.recv_stderr_ready, channel.exit_status_ready):
+            idle.return_value = False
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), \
+             mock.patch.object(transport_module.time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(
+                 transport_module.time, "sleep", side_effect=lambda delay: clock.__setitem__(0, clock[0] + delay)
+             ), \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["true"], timeout=0.2)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertAlmostEqual(clock[0], 0.2)
+
+    def test_exec_timeout_interrupts_an_unacknowledged_command(self):
+        waiting = threading.Event()
+        channel = mock.Mock()
+        channel.exec_command.side_effect = lambda command: waiting.wait()
+        channel.close.side_effect = waiting.set
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), \
+             mock.patch.object(self.transport, "_drop") as drop, \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["true"], timeout=0.05)
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertTrue(waiting.wait(1))
+        drop.assert_not_called()
+
+    def test_hostname_resolution_is_bounded_by_the_exec_deadline(self):
+        release = threading.Event()
+
+        def stalled_resolution(*args, **kwargs):
+            release.wait(1)
+            return []
+
+        started = time.monotonic()
+        try:
+            with mock.patch.object(socket, "getaddrinfo", side_effect=stalled_resolution), \
+                 self.assertRaises(BoardError) as ctx:
+                self.transport.exec(["true"], timeout=0.05)
+        finally:
+            release.set()
+        self.assertEqual(ctx.exception.code, "timeout")
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_a_later_successful_connection_forgets_the_rejected_host_key(self):
+        # Codex 4189241123: a stale rejected key could still be trusted after the trusted key was accepted.
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertIs(self.transport.presented_host_key, new)
+        with mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "connect"), \
+             mock.patch.object(paramiko.SSHClient, "get_transport"):
+            self.transport._connect(time.monotonic() + 5, ["true"], 5)
+        self.assertIsNone(self.transport.presented_host_key)
+
+    def test_an_authentication_failure_forgets_the_rejected_host_key(self):
+        # Codex 4260952130: the trusted key was accepted before authentication failed, so the rejected key is stale.
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertIs(self.transport.presented_host_key, new)
+        self.assertEqual(self._connect_raising(paramiko.AuthenticationException("denied")).code, "auth_failed")
+        self.assertIsNone(self.transport.presented_host_key)
+
+    def test_a_plain_ssh_failure_after_the_trusted_key_forgets_the_rejected_one(self):
+        # Codex 4263540703: Paramiko's legacy auth path fails with a plain SSHException after the host key check.
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        self.transport.replace_host_key(old)
+        self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertIs(self.transport.presented_host_key, new)
+        # A failure before any key exchange proves nothing about the key, so the rejected one is kept.
+        with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=None):
+            self.assertEqual(self._connect_raising(paramiko.SSHException("Error reading SSH protocol banner")).code, "unreachable")
+        self.assertIs(self.transport.presented_host_key, new)
+        presented_old = mock.Mock(**{"get_remote_server_key.return_value": old})
+        with mock.patch.object(paramiko.SSHClient, "get_transport", return_value=presented_old):
+            error = self._connect_raising(paramiko.SSHException("No authentication methods available"))
+        self.assertEqual(error.code, "unreachable")
+        self.assertIsNone(self.transport.presented_host_key)
+
+    def test_auth_failure_suggests_ssh_copy_id(self):
+        error = self._connect_raising(paramiko.AuthenticationException("denied"))
+        self.assertEqual(error.code, "auth_failed")
+        self.assertIn("ssh-copy-id -p 22 sima@192.168.2.2", error.hint)
+
+    def test_changed_host_key_reports_both_fingerprints(self):
+        old, new = paramiko.RSAKey.generate(1024), paramiko.RSAKey.generate(1024)
+        error = self._connect_raising(paramiko.BadHostKeyException("192.168.2.2", new, old))
+        self.assertEqual((error.code, error.status), ("host_key_changed", 409))
+        self.assertNotEqual(error.extra["expected_fingerprint"], error.extra["presented_fingerprint"])
+        self.assertIs(self.transport.presented_host_key, new)
+        self.transport.replace_host_key(new)
+        stored = paramiko.HostKeys(str(self.transport.known_hosts))
+        self.assertEqual(stored.lookup("192.168.2.2")["ssh-rsa"], new)
+
+    def test_close_during_connect_returns_at_once_and_discards_the_connection(self):
+        started, closed = threading.Event(), threading.Event()
+
+        def slow_connect(*args, **kwargs):
+            started.set()
+            closed.wait(2)
+
+        with mock.patch.object(paramiko.SSHClient, "connect", side_effect=slow_connect), \
+             mock.patch.object(self.transport, "_connect_socket", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "get_transport", return_value=mock.Mock()), \
+             mock.patch.object(paramiko.SSHClient, "close") as close:
+            worker, errors = in_thread(lambda: self.transport.exec(["true"], timeout=2))
+            started.wait(2)
+            begin = time.monotonic()
+            self.transport.close()
+            self.assertLess(time.monotonic() - begin, 0.2)
+            closed.set()
+            worker.join(2)
+        self.assertEqual([error.code for error in errors], ["stale_snapshot"])
+        self.assertTrue(close.called)
+
+    def test_close_at_any_point_before_the_command_is_sent_stops_it(self):
+        # close() does not take the transport lock, so it can land between any two lines of
+        # exec()/_open_channel(). Wherever it lands before the command is sent, the command must
+        # not run, the error must say the board changed, and no connection may stay attached.
+        targets = {SshTransport.exec.__code__, SshTransport._open_channel.__code__}
+
+        class FakeClient:
+            def __init__(self):
+                self.closed, self.commands = False, []
+                client = self
+
+                def exec_command(command):
+                    if client.closed:
+                        raise paramiko.SSHException("Channel is not open")
+                    client.commands.append(command)
+
+                class Transport:
+                    def is_active(self):
+                        return not client.closed
+
+                    def open_session(self, timeout=None):
+                        if client.closed:
+                            raise paramiko.SSHException("SSH session not active")
+                        return mock.Mock(exec_command=mock.Mock(side_effect=exec_command))
+
+                self._transport = Transport()
+
+            def get_transport(self):
+                return self._transport
+
+            def close(self):
+                self.closed = True
+
+        def run(connected, close_at):
+            transport = SshTransport("192.168.2.2", 22, "sima", Path(self.tmp.name) / "known_hosts")
+            client = FakeClient()
+            if connected:
+                transport._client = client
+            seen = [0]
+
+            def local(frame, event, arg):
+                if event == "line" and not client.commands and not transport._closed:
+                    if seen[0] == close_at:
+                        transport.close()
+                    seen[0] += 1
+                return local
+
+            def global_trace(frame, event, arg):
+                return local if frame.f_code in targets else None
+
+            error = None
+            with mock.patch.object(SshTransport, "_connect", return_value=client) as connect, \
+                 mock.patch.object(SshTransport, "_collect", return_value=ExecResult(0, b"", b"")):
+                sys.settrace(global_trace)
+                try:
+                    transport.exec(["true"], timeout=1)
+                except BoardError as exc:
+                    error = exc
+                finally:
+                    sys.settrace(None)
+            return transport, client, error, seen[0], connected or connect.called
+
+        for connected in (False, True):
+            close_at = 0
+            while True:
+                transport, client, error, lines, handed_out = run(connected, close_at)
+                if close_at >= lines:
+                    # close() never fired: the command ran normally.
+                    self.assertEqual(client.commands, ["true"])
+                    break
+                with self.subTest(connected=connected, close_at=close_at):
+                    self.assertEqual(client.commands, [])
+                    self.assertIsNotNone(error)
+                    self.assertEqual(error.code, "stale_snapshot")
+                    # A connection that was made (or already open) is closed, not left on the transport.
+                    self.assertEqual(client.closed, handed_out)
+                    self.assertIsNone(transport._client)
+                close_at += 1
+
+    def test_cancel_event_closes_only_the_active_command_channel(self):
+        channel = mock.Mock()
+        channel.recv_ready.side_effect = [True, False]
+        channel.recv.return_value = b"pcm"
+        channel.recv_stderr_ready.return_value = False
+        channel.exit_status_ready.return_value = False
+        cancel = threading.Event()
+        seen = []
+
+        def on_stdout(chunk):
+            seen.append(chunk)
+            cancel.set()
+
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=60, on_stdout=on_stdout, cancel_event=cancel)
+        self.assertEqual(seen, [b"pcm"])
+        channel.close.assert_called_once_with()
+        self.assertFalse(self.transport._closed)
+
+    def test_cancel_event_stops_a_command_whose_start_is_stalled(self):
+        # Stop pressed while exec_command hangs (slow SSH setup) must not wait for the command deadline.
+        channel = mock.Mock()
+        stalled = threading.Event()
+        channel.exec_command.side_effect = lambda command: stalled.wait(30)
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        started = time.monotonic()
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+        stalled.set()
+        self.assertLess(time.monotonic() - started, 5)
+        channel.close.assert_called()
+        self.assertFalse(self.transport._closed)
+
+    def test_cancel_event_stops_a_command_whose_channel_is_still_opening(self):
+        # Codex 4188926190: Stop pressed while connecting or opening the session must not wait for it.
+        channel = mock.Mock()
+        stalled = threading.Event()
+
+        def open_late(deadline, argv, timeout):
+            stalled.wait(30)
+            return channel
+
+        cancel = threading.Event()
+        threading.Timer(0.2, cancel.set).start()
+        started = time.monotonic()
+        with mock.patch.object(self.transport, "_open_channel", side_effect=open_late):
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+            self.assertLess(time.monotonic() - started, 5)
+            stalled.set()
+            # The channel that opens after Stop is closed, and the command never starts on it.
+            wait_until(lambda: channel.close.called)
+        channel.close.assert_called()
+        channel.exec_command.assert_not_called()
+        self.assertFalse(self.transport._closed)
+
+    def test_a_command_cancelled_before_its_channel_opens_never_runs(self):
+        cancel = threading.Event()
+        cancel.set()
+        with mock.patch.object(self.transport, "_open_channel") as open_channel:
+            with self.assertRaises(CommandCancelled):
+                self.transport.exec(["arecord"], timeout=40, cancel_event=cancel)
+        open_channel.assert_not_called()
+
+    def test_output_that_never_pauses_stops_at_the_limit(self):
+        # Codex 4188993841: recv_ready() that stays true must not let output grow past the limit.
+        channel = mock.Mock()
+        channel.recv_ready.return_value = True
+        channel.recv.return_value = b"x" * 1024
+        with mock.patch.object(transport_module, "MAX_OUTPUT_BYTES", 4096), \
+             mock.patch.object(self.transport, "_open_channel", return_value=channel), \
+             self.assertRaises(BoardError) as ctx:
+            self.transport.exec(["yes"], timeout=5)
+        self.assertEqual(ctx.exception.code, "command_failed")
+        self.assertEqual(channel.recv.call_count, 5)
+
+    def test_network_failures_are_unreachable(self):
+        self.assertEqual(self._connect_raising(socket.timeout("timed out")).code, "unreachable")
+        self.assertEqual(self._connect_raising(ConnectionRefusedError("refused")).code, "unreachable")
+        self.assertIn("could not be resolved", self._connect_raising(socket.gaierror("nope")).message)
+
+    def test_stream_reads_the_channel_and_close_closes_it(self):
+        channel = mock.Mock(closed=False)
+        replies = [b"--frame", None, b""]
+
+        def recv(size):
+            reply = replies.pop(0)
+            if reply is None:
+                time.sleep(0.02)  # The channel timeout passes with nothing to read.
+                raise socket.timeout()
+            return reply
+
+        channel.recv.side_effect = recv
+        stderr = [b"4242\n", b"libcamera noise\n"]
+        channel.recv_stderr_ready.side_effect = lambda: bool(stderr)
+        channel.recv_stderr.side_effect = lambda size: stderr.pop(0)
+        channel.exit_status_ready.return_value = True
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            stream = self.transport.stream(["sh", "-c", "echo $$ >&2; exec gst-launch-1.0 -q fakesrc ! fdsink fd=1"], timeout=5)
+        channel.exec_command.assert_called_once_with("sh -c 'echo $$ >&2; exec gst-launch-1.0 -q fakesrc ! fdsink fd=1'")
+        channel.shutdown_write.assert_called_once_with()
+        self.assertEqual(stream.read(1), b"--frame")
+        self.assertIsNone(stream.read(0.01))
+        self.assertEqual(stream.read(1), b"")
+        wait_until(lambda: not stderr)
+        self.assertEqual(stream.stderr(), b"4242\nlibcamera noise\n")
+        stream.close()
+        stream.close()
+        wait_until(lambda: channel.close.called)
+        channel.close.assert_called_once_with()
+        self.assertEqual(stream.read(1), b"")
+
+    def test_a_stream_whose_session_fails_reports_it_like_exec(self):
+        channel = mock.Mock(closed=False)
+        channel.exec_command.side_effect = paramiko.SSHException("channel refused")
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel), self.assertRaises(BoardError) as ctx:
+            self.transport.stream(["true"], timeout=5)
+        self.assertEqual(ctx.exception.code, "unreachable")
+        channel = mock.Mock(closed=False)
+        channel.recv.side_effect = EOFError()
+        channel.recv_stderr_ready.return_value = False
+        with mock.patch.object(self.transport, "_open_channel", return_value=channel):
+            stream = self.transport.stream(["true"], timeout=5)
+        with self.assertRaises(BoardError) as ctx:
+            stream.read(1)
+        self.assertEqual(ctx.exception.code, "unreachable")
+        stream.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

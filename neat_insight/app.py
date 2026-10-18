@@ -61,8 +61,13 @@ from neat_insight.mediasrc import (
     webcam_publisher_sessions,
     stop_media_stream_if,
 )
+from neat_insight import board
 from neat_insight.api_docs import api_docs_bp
+from neat_insight.genai_relay import genai_bp
+from neat_insight.board.target import sdk_env_target
+from neat_insight.peripherals import peripherals_bp
 from neat_insight.profiler import NeatMetricsBroker, PeriodicZmqPublisher
+from neat_insight.sentinel import sentinel_bp
 from neat_insight.remote_devkit import (
     get_remote_metrics,
     is_remote_devkit_configured,
@@ -73,13 +78,13 @@ from neat_insight.runtime_config import (
     load_runtime_network_config,
 )
 from neat_insight.remotefs import read_remote_file
+from neat_insight import preview
 from neat_insight.utils import (
     board_type,
     check_and_generate_mkcert_certificate,
     cleanup_processes,
     ensure_webssh_started,
     get_certificate_access_url,
-    get_devkit_sync_devkit_ip,
     get_lan_ip,
     get_webssh_port,
     init_environment,
@@ -167,6 +172,10 @@ DEFAULT_VIDEO_UI_PORT = 8081
 app = Flask(__name__)
 app.register_blueprint(api_docs_bp)
 app.register_blueprint(workspace_bp)
+app.register_blueprint(genai_bp)
+board.init_app(app, env["NEAT_INSIGHT_DATA"], on_board=is_sima_board())
+app.register_blueprint(peripherals_bp)
+app.register_blueprint(sentinel_bp)
 neat_metrics_broker = NeatMetricsBroker()
 neat_metrics_broker.start()
 sys_metrics_publisher = None
@@ -231,20 +240,47 @@ def _format_public_http_url(path="", query=""):
     return f"{url}?{query}" if query else url
 
 
+def _shell_target():
+    """The board the shell should open on: the one Insight is using, not a separate env var.
+
+    Falls back to DEVKIT_SYNC_DEVKIT_IP so a board that was never selected still has a shell.
+    """
+    try:
+        target = board.get_board_manager().target()
+    except Exception:  # noqa: BLE001 - the shell must not depend on board resolution succeeding
+        target = None
+    if target is not None and target.mode == "ssh" and target.host:
+        # The bundled password is only a promise the SDK makes for its paired default DevKit.
+        # Manual targets and SDK targets with an overridden account use the service account's
+        # SSH key and may have unrelated passwords, so never send the DevKit credential to them.
+        ssh_user = target.user or DEFAULT_DEVKIT_SSH_USERNAME
+        return (
+            target.host,
+            target.port or 22,
+            ssh_user,
+            target.source == "sdk-env" and ssh_user == DEFAULT_DEVKIT_SSH_USERNAME,
+        )
+    paired = sdk_env_target()
+    if not paired:
+        return None, 22, DEFAULT_DEVKIT_SSH_USERNAME, False
+    ssh_user = paired["user"]
+    return paired["host"], paired["port"], ssh_user, ssh_user == DEFAULT_DEVKIT_SSH_USERNAME
+
+
 def _build_devkit_shell_payload():
-    devkit_ip = get_devkit_sync_devkit_ip()
+    devkit_ip, ssh_port, ssh_user, credentials_prefilled = _shell_target()
     configured = bool(devkit_ip)
     webssh_port = get_webssh_port()
     webssh_host_port = _resolve_webssh_host_port()
     launch_url = None
 
-    if configured:
+    if configured and credentials_prefilled:
         password_b64 = base64.b64encode(DEFAULT_DEVKIT_SSH_PASSWORD.encode("utf-8")).decode("ascii")
         params = urllib.parse.urlencode(
             {
                 "hostname": devkit_ip,
-                "port": 22,
-                "username": DEFAULT_DEVKIT_SSH_USERNAME,
+                "port": ssh_port,
+                "username": ssh_user,
                 "password": password_b64,
                 "title": f"DevKit {devkit_ip}",
             }
@@ -260,7 +296,8 @@ def _build_devkit_shell_payload():
         "webssh_port": webssh_port,
         "webssh_host_port": webssh_host_port,
         "default_username": DEFAULT_DEVKIT_SSH_USERNAME,
-        "credentials_prefilled": True,
+        "credentials_prefilled": credentials_prefilled,
+        "launch_supported": configured and credentials_prefilled,
         "launch_url": launch_url,
     }
 
@@ -3269,7 +3306,9 @@ def start_devkit_shell():
         return _json_error(str(exc), 500)
 
     if not payload["configured"]:
-        return _json_error("DEVKIT_SYNC_DEVKIT_IP is not configured.", 404)
+        return _json_error("No DevKit is selected or paired with this SDK.", 404)
+    if not payload["launch_supported"]:
+        return _json_error("The browser shell is available only for the SDK-paired DevKit.", 409)
     if server_ssl_context is None:
         return _json_error("Insight TLS context is not initialized.", 500)
 
@@ -3335,6 +3374,9 @@ def viewer_url():
         "channel_limit_source": limit_source,
         "sdk_channel_limited": sdk_limited,
     }
+
+
+preview.init_app(app)
 
 
 # API: serve the built single-page application entrypoint.

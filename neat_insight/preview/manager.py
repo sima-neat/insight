@@ -1,0 +1,455 @@
+"""Run one temporary camera preview: a GStreamer pipeline on the board whose JPEG frames Insight relays."""
+import json
+import logging
+import re
+import threading
+import time
+import uuid
+from contextlib import contextmanager, suppress
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from neat_insight.board import BoardError
+from neat_insight.peripherals.cameras import provider_of
+from neat_insight.peripherals.client import PeripheralClient
+from neat_insight.preview import gst
+
+FIRST_FRAME_TIMEOUT_SEC = 10.0
+# A stream nobody opened within this long after the start is stopped.
+UNCLAIMED_TIMEOUT_SEC = 15.0
+# A relay that receives nothing for this long ends, and the preview with it.
+STALL_TIMEOUT_SEC = 10.0
+# The longest frame wait: a start waits while holding the board lock, so board changes and refreshes wait too.
+MAX_FRAME_WAIT_SEC = 60.0
+START_TIMEOUT_SEC = 15.0
+STOP_TIMEOUT_SEC = 15.0
+PID_TIMEOUT_SEC = 2.0
+# How long SiMa Sentinel gets to rescan a MIPI camera once its preview runs, for the camera's rate.
+CAMERA_FPS_TIMEOUT_SEC = 10.0
+# How long a pipeline that exited gets to finish writing its error, which arrives apart from stdout.
+STDERR_WAIT_SEC = 2.0
+STREAM_PATH = "/api/peripherals/cameras/preview/{}/stream"
+BOARD_CHECK = Path(__file__).parent.parent / "peripherals" / "board_check.py"
+GST_INSTALL_HINT = (
+    "Install GStreamer on the board: `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base "
+    "gstreamer1.0-plugins-good`, plus `gstreamer1.0-libcamera` for MIPI cameras."
+)
+_DEVICE_NODE = re.compile(r"/dev/[A-Za-z0-9_./-]+")
+# What libcamera and v4l2src print when another process holds the camera.
+_CAMERA_BUSY = re.compile(r"Failed to acquire camera|Device or resource busy|Device '[^']*' is busy")
+# The line the board command writes to stderr before it becomes gst-launch-1.0 (see gst.board_command);
+# a login shell may print other lines first.
+_PID = re.compile(rb"^" + gst.PID_TAG.encode() + rb"([0-9]{1,10})$", re.M)
+_PID_LINE = re.compile("^" + re.escape(gst.PID_TAG) + "[0-9]+\n?", re.M)
+_NO_ELEMENT = re.compile(r'no element "(\w+)"')
+# libcamera's Modalix pipeline logs the stream it configured; when that differs from the size the
+# pipeline asked for, libcamerasrc cannot negotiate its caps and stops ("not-negotiated"). GStreamer's
+# error text can land on stderr a moment after the frame read gives up, so the configured size alone,
+# with no frame delivered, is the signal.
+_CONFIGURED = re.compile(r"configuring streams: \(0\) (\d+)x(\d+)-|Applying neutral DV Timings for \S+ \((\d+)x(\d+)\)")
+
+
+def _kill_script(pid: int) -> str:
+    """Stop the pipeline by PID: TERM, then KILL after a short grace. Only while that PID is still
+    gst-launch-1.0, so a PID the system reused for another process is never signalled."""
+    return (
+        f'pid={pid}; alive() {{ [ "$(cat /proc/$pid/comm 2>/dev/null)" = gst-launch-1.0 ]; }}; '
+        "alive || exit 0; kill $pid 2>/dev/null; i=0; "
+        'while alive && [ "$i" -lt 10 ]; do sleep 0.2; i=$((i + 1)); done; '
+        "alive && kill -9 $pid 2>/dev/null; exit 0"
+    )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _camera_in_use(name: str, users: list, detail: str = "") -> BoardError:
+    holders = ", ".join(f"{user['command']} (pid {user['pid']})" for user in users)
+    return BoardError(
+        "camera_in_use",
+        f"{name} is already in use: " + (f"Open in {holders}." if holders else "the board reports the camera busy; another process holds it."),
+        hint="Stop the application using the camera, then start the preview.",
+        users=users,
+        **({"detail": detail} if detail else {}),
+    )
+
+
+def _unknown_session() -> BoardError:
+    return BoardError("not_found", "That preview session is not running.", hint="Start the preview again.")
+
+
+def _stderr_text(stream, wait: float = 0) -> str:
+    """The pipeline's whole stderr without the PID line the shell writes; `wait` lets an exiting one finish it."""
+    text = stream.stderr(wait).decode("utf-8", errors="replace")
+    return _PID_LINE.sub("", text).strip()
+
+
+def _stderr_detail(stream, wait: float = 0) -> str:
+    """The tail of the pipeline's stderr, bounded for an error response."""
+    return _stderr_text(stream, wait)[-1000:]
+
+
+class _Relay:
+    """A stream's response body. Closing it stops the preview even when it was never iterated, which a
+    generator's own cleanup does not cover."""
+
+    def __init__(self, frames, stop):
+        self._frames, self._stop = frames, stop
+
+    def __iter__(self):
+        return self._frames
+
+    def close(self) -> None:
+        self._frames.close()
+        self._stop()
+
+
+def _frame_wait(base: float, rate) -> float:
+    """How long to wait for a frame: `base`, or two frame periods for a slower mode, at most
+    MAX_FRAME_WAIT_SEC. V4L2 lets a camera list any frame interval, so a mode can send a frame less often
+    than `base` and still be healthy."""
+    return max(base, min(2 / float(rate), MAX_FRAME_WAIT_SEC))
+
+
+class PreviewManager:
+    """At most one preview, owned by the board session that started it."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        # Held by a preview start for its whole request, and by board_change() and refresh() around a
+        # target change or a scan, so no start can launch capture on a board in between.
+        self.board_lock = threading.Lock()
+        self._session: Optional[dict] = None
+        self._run: Optional[dict] = None  # The running pipeline: owner, stream, parser, pid, pending frames.
+        self._starting: Optional[str] = None
+
+    def current(self, generation: int) -> Optional[dict]:
+        with self._lock:
+            session = self._session
+            if session is None or session["generation"] != generation:
+                return None
+            # The stream has one viewer; a page that finds it taken shows the preview as running elsewhere.
+            return dict(session, viewer=bool(self._run and self._run["claimed"]))
+
+    def start(self, board_session, item: dict, mode: dict) -> dict:
+        """Start one scanned camera's mode; `mode` is {format, width, height, fps, rate, source} (see api)."""
+        with self._lock:
+            session = self._session
+        if session is not None and session["generation"] != board_session.generation:
+            self._release(session["id"])
+        with self._lock:
+            running = self._starting or (self._session or {}).get("camera_id")
+            if running:
+                raise BoardError(
+                    "preview_active",
+                    f"A preview of {running} is already starting or running.",
+                    hint="Stop that preview before starting another one.",
+                    camera_id=running,
+                )
+            self._starting = item["id"]
+        try:
+            return self._start(board_session, item, mode)
+        finally:
+            with self._lock:
+                self._starting = None
+
+    def _start(self, board_session, item: dict, mode: dict) -> dict:
+        self._require_gstreamer(board_session)
+        self._require_camera_free(board_session, item)
+        arguments = gst.pipeline(item["connection"], mode["source"], mode["format"], mode["width"], mode["height"], mode["rate"])
+        stream = board_session.transport.stream(gst.board_command(arguments), timeout=START_TIMEOUT_SEC)
+        parser = gst.FrameParser()
+        try:
+            frames = self._first_frames(stream, parser, item["name"], (mode["width"], mode["height"]),
+                                        _frame_wait(FIRST_FRAME_TIMEOUT_SEC, mode["rate"]))
+            pid = self._pid(stream)
+        except Exception:
+            stream.close()
+            self._kill(board_session, stream)
+            raise
+        session_id = uuid.uuid4().hex
+        session = {
+            "id": session_id,
+            "camera_id": item["id"],
+            "mode": {key: mode[key] for key in ("format", "width", "height", "fps")},
+            "stream_url": STREAM_PATH.format(session_id),
+            "generation": board_session.generation,
+            "started_at": _now(),
+            "state": "live",
+            # The rate the camera runs at: a USB camera's driver honours the mode's rate the pipeline
+            # requests; a MIPI sensor's is read from Sentinel once it runs in this mode (None until then).
+            "camera_fps": mode["fps"] if item["connection"] == "usb" else None,
+        }
+        timer = threading.Timer(UNCLAIMED_TIMEOUT_SEC, self._stop_unclaimed, args=(session_id,))
+        timer.daemon = True
+        reader = None
+        if item["connection"] == "mipi":
+            reader = threading.Thread(target=self._read_camera_fps, args=(board_session, session_id, item["id"]),
+                                      name=f"preview-fps-{session_id[:8]}", daemon=True)
+        with self._lock:
+            self._session = session
+            self._run = {"owner": board_session, "stream": stream, "parser": parser, "pid": pid,
+                         "frames": frames, "claimed": False, "timer": timer, "fps_reader": reader,
+                         "stall_timeout": _frame_wait(STALL_TIMEOUT_SEC, mode["rate"])}
+            started = dict(session)
+        timer.start()
+        if reader is not None:
+            reader.start()
+        return started
+
+    def _read_camera_fps(self, board_session, session_id: str, camera_id: str) -> None:
+        """Set a MIPI preview's `camera_fps` from SiMa Sentinel's rescan, after its first frame.
+
+        Sentinel's `max_fps` comes from the sensor's current mode, which is now the preview's mode, so it
+        is the rate the camera really runs at. This asks Sentinel directly: Insight records no snapshot
+        and runs no refresh, so the preview is not stopped. Any failure leaves `camera_fps` None."""
+        fps = None
+        with self._lock:
+            # The preview may already have ended (stopped, or its board deselected): nothing to read for.
+            if self._session is None or self._session["id"] != session_id:
+                return
+        try:
+            catalog = PeripheralClient(board_session).refresh(timeout=CAMERA_FPS_TIMEOUT_SEC)
+            device = next((entry for entry in catalog["devices"] if entry["id"] == camera_id), None)
+            # A failed provider's devices are kept from its last successful scan, whose rate may be another mode's.
+            failed = {error.get("provider") for error in catalog.get("errors") or []}
+            if device is not None and provider_of(device) in failed:
+                device = None
+            value = (device or {}).get("max_fps")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+                fps = value
+        except Exception as exc:  # Best effort: the preview runs on without the rate.
+            logging.info("Could not read the rate of camera preview %s from SiMa Sentinel: %s", session_id, exc)
+        with self._lock:
+            if self._session is not None and self._session["id"] == session_id:
+                self._session["camera_fps"] = fps
+
+    @staticmethod
+    def _require_gstreamer(board_session) -> None:
+        result = board_session.transport.exec(["sh", "-c", "command -v gst-launch-1.0 || true"], timeout=10)
+        if not result.stdout.strip():
+            raise BoardError(
+                "tool_missing",
+                "Preview runs a GStreamer pipeline on the board, and gst-launch-1.0 is not installed there.",
+                hint=GST_INSTALL_HINT,
+                tool="gst-launch-1.0",
+            )
+
+    @staticmethod
+    def _require_camera_free(board_session, item: dict) -> None:
+        """Refuse a camera another process holds now; when that cannot be read, the start reports it."""
+        device = item["device"]
+        node = device.get("media_device") if item["connection"] == "mipi" else device.get("video_node")
+        if not isinstance(node, str) or not _DEVICE_NODE.fullmatch(node):
+            return
+        request = json.dumps({"cameras": {item["id"]: [node]}})
+        try:
+            result = board_session.transport.exec(["python3", "-", request], timeout=20, stdin=BOARD_CHECK.read_bytes())
+            users = json.loads(result.stdout.decode("utf-8", errors="replace"))["users"][item["id"]]
+        except (BoardError, ValueError, KeyError, TypeError) as exc:
+            logging.warning("Could not check whether %s is in use: %s", item["id"], exc)
+            return
+        if isinstance(users, list) and users:
+            raise _camera_in_use(item["name"], users)
+
+    @staticmethod
+    def _first_frames(stream, parser, name: str, size: tuple, timeout: float = FIRST_FRAME_TIMEOUT_SEC) -> list:
+        """Read until the pipeline writes its first complete frame; raise why it did not."""
+        deadline = time.monotonic() + timeout
+        chunk = None
+        while time.monotonic() < deadline:
+            try:
+                chunk = stream.read(max(deadline - time.monotonic(), 0))
+                if chunk:
+                    frames = parser.feed(chunk)
+                    if frames:
+                        return frames
+                    continue
+            except gst.FrameError as exc:
+                raise BoardError("command_failed", f"The board's preview output is not usable: {exc}") from None
+            if chunk == b"":
+                break  # The pipeline exited.
+        ended = chunk == b""
+        text = _stderr_text(stream, STDERR_WAIT_SEC if ended else 0)
+        detail = text[-1000:]
+        if _CAMERA_BUSY.search(text):
+            raise _camera_in_use(name, [], detail)
+        configured = _CONFIGURED.search(text)
+        if configured:
+            width, height = int(configured[1] or configured[3]), int(configured[2] or configured[4])
+            if (width, height) != tuple(size):
+                raise BoardError(
+                    "mode_adjusted",
+                    f"libcamera streams {name} at {width}x{height}, not {size[0]}x{size[1]}.",
+                    hint=f"Pick {width}x{height}. The board lists {size[0]}x{size[1]} as a sensor size, but its "
+                         "libcamera pipeline does not output it.",
+                    width=width,
+                    height=height,
+                    detail=detail,
+                )
+        missing = _NO_ELEMENT.search(text)
+        if missing:
+            raise BoardError(
+                "tool_missing",
+                f"The board's GStreamer has no {missing[1]} element, which the preview pipeline needs.",
+                hint=GST_INSTALL_HINT,
+                tool=missing[1],
+                detail=detail,
+            )
+        raise BoardError(
+            "command_failed",
+            "The preview pipeline stopped before it sent a frame." if ended
+            else f"The camera sent no frame within {timeout:g} s.",
+            hint="The board output below says why; check that the camera is connected and no other application holds it.",
+            detail=detail,
+        )
+
+    @staticmethod
+    def _pid(stream) -> int:
+        """The pipeline's PID, which the shell writes to stderr before it becomes gst-launch-1.0."""
+        deadline = time.monotonic() + PID_TIMEOUT_SEC
+        while True:
+            match = _PID.search(stream.stderr())
+            if match:
+                return int(match[1])
+            if time.monotonic() >= deadline:
+                raise BoardError("command_failed", "The board did not report the preview pipeline's process id.",
+                                 detail=_stderr_detail(stream))
+            time.sleep(0.05)
+
+    @staticmethod
+    def _kill(board_session, stream) -> None:
+        """Best effort: kill a pipeline whose start failed, so a stalled one does not keep the camera."""
+        match = _PID.search(stream.stderr())
+        if match:
+            with suppress(BoardError):
+                board_session.raw_transport.exec(["sh", "-c", _kill_script(int(match[1]))], timeout=STOP_TIMEOUT_SEC)
+
+    def relay(self, board_session, session_id: str):
+        """Claim the session's stream and return a generator of response parts; the preview stops when it ends.
+
+        One reader per session: a second one is refused."""
+        with self._lock:
+            session, run = self._session, self._run
+            if (session is None or session["id"] != session_id or session["generation"] != board_session.generation
+                    or run.get("expired")):
+                raise _unknown_session()
+            if run["claimed"]:
+                raise BoardError("preview_active", "This preview is already shown in another tab or window.",
+                                 hint="Close the other view, or stop the preview and start it again here.",
+                                 camera_id=session["camera_id"])
+            run["claimed"] = True
+            run["timer"].cancel()
+            frames, run["frames"] = run["frames"], []
+        return _Relay(self._frames(session_id, run, frames), lambda: self._release(session_id))
+
+    def _frames(self, session_id: str, run: dict, frames: list):
+        try:
+            for frame in frames:
+                yield gst.part(frame)
+            while True:
+                chunk = run["stream"].read(run["stall_timeout"])
+                if not chunk:
+                    return  # The pipeline ended, stalled, or the preview was stopped.
+                for frame in run["parser"].feed(chunk):
+                    yield gst.part(frame)
+        except (BoardError, gst.FrameError) as exc:
+            logging.warning("Camera preview %s ended: %s", session_id, exc)
+        finally:
+            # Also when the browser disconnects: the pipeline must not outlive its only viewer.
+            self._release(session_id)
+
+    def _stop_unclaimed(self, session_id: str) -> None:
+        with self._lock:
+            run = self._run if self._session is not None and self._session["id"] == session_id else None
+            if run is None or run["claimed"]:
+                return
+            # Decided under the lock: a stream request that arrives from here on finds the preview gone
+            # instead of claiming a pipeline this is about to kill.
+            run["expired"] = True
+        logging.info("Stopping camera preview %s: no viewer opened its stream.", session_id)
+        self._release(session_id)
+
+    def stop(self, board_session, session_id: str) -> Optional[dict]:
+        """Stop the session and return it, or None when it already ended: stopping twice is not an error,
+        and an older session id never stops a newer session."""
+        with self._lock:
+            session = self._session
+        if session is None or session["id"] != session_id:
+            return None
+        if session["generation"] == board_session.generation:
+            self._stop_current(session_id)
+        else:
+            self._release(session_id)
+        return {**session, "state": "stopped"}
+
+    @contextmanager
+    def board_change(self, changes):
+        """Around a request that may change the selected board: when `changes()` says it will, stop the
+        preview on its board before Insight closes that board's connection."""
+        with self.board_lock:
+            if changes():
+                self.stop_for_board_change()
+            yield
+
+    @contextmanager
+    def refresh(self, generation):
+        """Around a refresh: stop the preview before the scan and keep new previews out until it ends.
+        `generation` is a callable returning the selected board's generation."""
+        with self.board_lock:
+            self.stop_for_refresh(generation())
+            yield
+
+    def stop_for_board_change(self) -> None:
+        """Stop the preview on its board before Insight closes that board's connection."""
+        with self._lock:
+            session = self._session
+        if session is not None:
+            self._release(session["id"])
+
+    def stop_for_refresh(self, generation: int) -> None:
+        """Stop the preview before a refresh scans its board; refuse the scan when it cannot be stopped.
+
+        Forgetting it instead would let the scan record the camera as held by a preview nobody can stop."""
+        with self._lock:
+            session = self._session
+        if session is None:
+            return
+        if session["generation"] != generation:
+            self._release(session["id"])  # Another board's preview; the scan does not look at that board.
+            return
+        try:
+            self._stop_current(session["id"])
+        except BoardError as exc:
+            raise BoardError(
+                exc.code,
+                f"Could not stop the camera preview before the scan: {exc.message}",
+                hint="The preview is still running. Stop it, or click Refresh again once the board responds.",
+            ) from exc
+
+    def _release(self, session_id: str) -> None:
+        try:
+            self._stop_current(session_id)
+        except BoardError as exc:
+            # That board may be gone; its pipeline already lost its output and dies at its next write.
+            logging.warning("Could not stop camera preview %s on its board: %s", session_id, exc)
+            with self._lock:
+                self._forget(session_id)
+
+    def _stop_current(self, session_id: str) -> None:
+        with self._lock:
+            session, run = self._session, self._run
+            if session is None or session["id"] != session_id:
+                return
+        run["timer"].cancel()
+        run["stream"].close()
+        # The board that started it, even when another board is selected now.
+        run["owner"].raw_transport.exec(["sh", "-c", _kill_script(run["pid"])], timeout=STOP_TIMEOUT_SEC)
+        with self._lock:
+            self._forget(session_id)
+
+    def _forget(self, session_id: str) -> None:
+        if self._session is not None and self._session["id"] == session_id:
+            self._session = self._run = None

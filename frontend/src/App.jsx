@@ -1,4 +1,7 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+import { requestJson as requestBoardJson } from './peripherals/api.js'
+import { boardIndicator, createBoardSync, createShellInfoSync, normalizeError as normalizeBoardError } from './peripherals/model.js'
 
 import {
   closeAllWebcamSessions,
@@ -13,6 +16,10 @@ import {
 } from './streaming/webcamPublishing.js'
 
 const WorkspaceView = lazy(() => import('./WorkspaceView.jsx'))
+const GenAIView = lazy(() => import('./GenAIView.jsx'))
+const PeripheralsView = lazy(() => import('./PeripheralsView.jsx'))
+const BoardPanel = lazy(() => import('./peripherals/BoardPanel.jsx'))
+const StatsView = lazy(() => import('./StatsView.jsx'))
 
 const SOURCE_COUNT = 48
 const WEBCAM_OPTION_PREFIX = '__webcam__:'
@@ -34,7 +41,9 @@ const TABS = [
   { id: 'media', label: 'Media Sources', icon: '/icons/media.png' },
   { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
-  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
+  { id: 'peripherals', label: 'Peripherals', icon: '/icons/peripherals.svg' },
+  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' },
+  { id: 'genai', label: 'GenAI Studio', icon: '/icons/genai.svg' }
 ]
 const YOUTUBE_IMPORT_TARGETS = [
   { value: '1080p30', label: '1080p30' },
@@ -53,22 +62,25 @@ const ROUTE_TO_TAB = {
   streaming: 'rtsp',
   rtsp: 'rtsp',
   viewer: 'viewer',
+  peripherals: 'peripherals',
   stats: 'visualizer',
-  visualizer: 'visualizer'
+  visualizer: 'visualizer',
+  genai: 'genai'
 }
 const TAB_TO_ROUTE = {
   workspace: '/workspace',
   media: '/media',
   rtsp: '/streaming',
   viewer: '/viewer',
-  visualizer: '/stats'
+  peripherals: '/peripherals',
+  visualizer: '/stats',
+  genai: '/genai'
 }
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
 const ONBOARDING_STEPS = [
   {
     id: 'intro',
     tab: null,
-    eyebrow: 'Step 1 of 6',
     title: 'What is Insight?',
     summary: 'Insight helps developers inspect a workspace, set up test streams, view inference results, and watch system performance while they test an application.',
     details:
@@ -77,7 +89,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'workspace',
     tab: 'workspace',
-    eyebrow: 'Step 2 of 6',
     title: 'Explore the Workspace',
     summary: 'Workspace is for browsing the shared files a developer works with across the SDK container, host, and paired DevKit.',
     details:
@@ -86,7 +97,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'media',
     tab: 'media',
-    eyebrow: 'Step 3 of 6',
     title: 'Start in Media Sources',
     summary: 'This is where you bring files into Insight and inspect what is available before you stream anything.',
     details:
@@ -95,7 +105,6 @@ const ONBOARDING_STEPS = [
   {
     id: 'rtsp',
     tab: 'rtsp',
-    eyebrow: 'Step 4 of 6',
     title: 'Set up streaming sources',
     summary: 'This tab turns files from the library into live source slots such as src1, src2, and src3.',
     details:
@@ -104,20 +113,34 @@ const ONBOARDING_STEPS = [
   {
     id: 'viewer',
     tab: 'viewer',
-    eyebrow: 'Step 5 of 6',
     title: 'Live viewer',
     summary: 'The viewer shows active channels with low-latency WebRTC playback so you can confirm that video and inference results are flowing end to end.',
     details:
       'Your application can send video into UDP ports 9000-9079, where each port maps to one viewer channel. It can also send matching metadata into UDP ports 9100-9179 so overlays appear on the same channel. For setup guidance and application examples, see docs.sima-neat.com.'
   },
   {
+    id: 'peripherals',
+    tab: 'peripherals',
+    title: 'See what is attached to the board',
+    summary: 'Peripherals detects devices on the selected board and shows what each one reports.',
+    details:
+      'Confirm a camera works before you build around it, then read the modes it reports. Cameras work today; other kinds appear as Insight learns to read them.'
+  },
+  {
     id: 'visualizer',
     tab: 'visualizer',
-    eyebrow: 'Step 6 of 6',
     title: 'Check system stats',
-    summary: 'The Stats tab helps you understand what the device and software runtime are doing while the apps are running.',
+    summary: 'The Stats tab reads power, temperature, CPU, memory and storage from the Sentinel daemon on the board you have selected.',
     details:
-      'Use it to watch system load, follow profiling timelines, and spot signs that performance issues are coming from the runtime rather than the viewer.'
+      'Watch the board’s live metrics while an application runs, and record a trace around a workload to keep it on the board as a named run. Open a saved run to see each metric’s minimum, mean and maximum, or compare runs against a baseline to see what changed between them.'
+  },
+  {
+    id: 'genai',
+    tab: 'genai',
+    title: 'Try generative AI on the board',
+    summary: 'GenAI Studio runs language, vision and speech models on the board; this tab is where you use them.',
+    details:
+      'Start the backend on the board with ./run.sh --backend-only from the GenAI Studio app, then load a model here, chat with text, images or your camera, transcribe speech, and hear replies. The tab shows when the board is busy or unavailable and how to recover.'
   }
 ]
 
@@ -536,12 +559,6 @@ function extractNumericFields(obj, prefix = '', out = {}) {
   return out
 }
 
-function radialOffset(radius, percent) {
-  const pct = Math.max(0, Math.min(100, Number(percent) || 0))
-  const circumference = 2 * Math.PI * radius
-  return circumference - (circumference * pct) / 100
-}
-
 function safeDecodeURIComponent(value = '') {
   try {
     return decodeURIComponent(value)
@@ -586,36 +603,6 @@ function updateBrowserRoute(path, replace = false) {
   if (currentPath === nextPath) return
   const method = replace ? 'replaceState' : 'pushState'
   window.history[method]({}, '', nextPath)
-}
-
-function GaugeCard({ label, percent }) {
-  const radius = 28
-  const circumference = 2 * Math.PI * radius
-  const hasPercent = Number.isFinite(percent)
-  const safePercent = hasPercent ? Math.max(0, Math.min(100, percent)) : 0
-  const offset = radialOffset(radius, safePercent)
-
-  return (
-    <article className="gauge-card">
-      <h3>{label}</h3>
-      <div className="gauge-visual" aria-hidden="true">
-        <svg viewBox="0 0 72 72" className="gauge-svg">
-          <circle cx="36" cy="36" r={radius} className="gauge-track" />
-          <circle
-            cx="36"
-            cy="36"
-            r={radius}
-            className="gauge-progress"
-            style={{
-              strokeDasharray: `${circumference} ${circumference}`,
-              strokeDashoffset: offset
-            }}
-          />
-        </svg>
-        <div className="gauge-center">{hasPercent ? `${safePercent.toFixed(1)}%` : '--'}</div>
-      </div>
-    </article>
-  )
 }
 
 function MiniSeriesCard({ name, samples }) {
@@ -762,11 +749,39 @@ export default function App() {
   const [viewerUrl, setViewerUrl] = useState('')
   const [viewerCapacity, setViewerCapacity] = useState(null)
   const [rtspBase, setRtspBase] = useState('rtsp://127.0.0.1:8554')
-  const [metrics, setMetrics] = useState(null)
   const [metricEvents, setMetricEvents] = useState([])
   const [selectedProfileSeries, setSelectedProfileSeries] = useState([])
   const [devkitShellInfo, setDevkitShellInfo] = useState(null)
   const [devkitShellBusy, setDevkitShellBusy] = useState(false)
+  const [board, setBoard] = useState(null)
+  const [boardError, setBoardError] = useState(null)
+  const [boardLoading, setBoardLoading] = useState(true)
+  const [boardPanelOpen, setBoardPanelOpen] = useState(false)
+  // Stable, because the board panel's focus handling keys off it: a new function each render
+  // would re-run that effect and pull focus out of whatever the user is typing in.
+  const closeBoardPanel = useCallback(() => setBoardPanelOpen(false), [])
+  // Reads and board changes can answer out of order; the sync keeps an older read from undoing
+  // a newer change. It only calls state setters, which React keeps stable, so one is enough.
+  const boardSyncRef = useRef(null)
+  if (!boardSyncRef.current) {
+    boardSyncRef.current = createBoardSync({
+      fetchBoard: () => requestBoardJson('/api/board'),
+      onBoard: (data) => {
+        setBoard(data)
+        setBoardError(null)
+      },
+      onError: (err) => setBoardError(normalizeBoardError(err)),
+      onLoading: setBoardLoading
+    })
+  }
+  // A board change reloads the shell details; an older read must not overwrite the newer board's.
+  const shellInfoSyncRef = useRef(null)
+  if (!shellInfoSyncRef.current) {
+    shellInfoSyncRef.current = createShellInfoSync({
+      fetchShell: () => fetchJson('/api/devkit-shell'),
+      onShell: setDevkitShellInfo
+    })
+  }
   const [sysInfoOpen, setSysInfoOpen] = useState(false)
   const [sysInfo, setSysInfo] = useState(null)
   const [sysInfoLoading, setSysInfoLoading] = useState(false)
@@ -900,13 +915,8 @@ export default function App() {
     })
   }
 
-  async function loadDevkitShellInfo() {
-    try {
-      const data = await fetchJson('/api/devkit-shell')
-      setDevkitShellInfo(data)
-    } catch {
-      setDevkitShellInfo(null)
-    }
+  function loadDevkitShellInfo() {
+    return shellInfoSyncRef.current.load()
   }
 
   async function loadSysInfo() {
@@ -952,17 +962,12 @@ export default function App() {
     }
   }
 
-  async function refreshMetrics() {
-    try {
-      const data = await fetchJson('/api/metrics')
-      setMetrics(data)
-    } catch (e) {
-      setError(e.message)
-    }
-  }
+  useEffect(() => {
+    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
+  }, [])
 
   useEffect(() => {
-    Promise.all([loadMedia(), loadSources(), loadViewerUrl(), loadRtspBase(), refreshMetrics(), loadDevkitShellInfo()]).catch((e) => setError(e.message))
+    loadBoard()
   }, [])
 
   useEffect(() => {
@@ -1089,9 +1094,6 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== 'visualizer') return
-    refreshMetrics()
-
-    const timer = setInterval(refreshMetrics, 2000)
     metricEs.current?.close()
 
     const es = new EventSource('/api/neat-metrics')
@@ -1108,7 +1110,6 @@ export default function App() {
     es.onerror = () => es.close()
 
     return () => {
-      clearInterval(timer)
       es.close()
     }
   }, [tab])
@@ -2075,6 +2076,21 @@ export default function App() {
     loadSysInfo()
   }
 
+  // One board target, shared by Peripherals and Stats.
+  function loadBoard() {
+    return boardSyncRef.current.load()
+  }
+
+  function handleBoardChange(data) {
+    boardSyncRef.current.apply(data)
+    loadDevkitShellInfo()
+  }
+
+  function openBoardPanel() {
+    setBoardPanelOpen(true)
+    if (!board) loadBoard()
+  }
+
   function nextTourStep() {
     if (tourStep >= ONBOARDING_STEPS.length - 1) {
       closeTour(true)
@@ -2157,16 +2173,7 @@ export default function App() {
     return out
   }, [metricEvents, selectedProfileSeries])
 
-  const cpuPct = Number.isFinite(Number(metrics?.cpu_load)) ? Number(metrics?.cpu_load) : null
-  const memPct = Number.isFinite(Number(metrics?.memory?.percent)) ? Number(metrics.memory.percent) : null
-  const diskPct = Number.isFinite(Number(metrics?.disk?.percent)) ? Number(metrics.disk.percent) : null
-  const mlaBytes = Number.isFinite(Number(metrics?.mla_allocated_bytes)) ? Number(metrics.mla_allocated_bytes) : 0
-  const mlaPct =
-    Number.isFinite(Number(metrics?.memory?.total)) && Number(metrics.memory.total) > 0
-      ? Math.min(100, (mlaBytes / Number(metrics.memory.total)) * 100)
-      : null
-
-  const temperatureValue = metrics?.temperature_celsius_avg
+  const boardIndicatorInfo = boardIndicator(boardLoading && !board ? null : board)
 
   return (
     <div className="app-shell">
@@ -2179,21 +2186,21 @@ export default function App() {
           <p className="subhead">Runtime Monitoring and Test Console</p>
         </div>
         <div className="masthead-actions">
-          {devkitShellInfo?.configured && (
-            <button
-              type="button"
-              className="devkit-trigger"
-              onClick={connectDevkitShell}
-              disabled={devkitShellBusy || !devkitShellInfo.available}
-              title={
-                devkitShellInfo.available
-                  ? `Open browser shell for ${devkitShellInfo.devkit_ip}`
-                  : 'webssh is not installed in this Insight environment'
-              }
-            >
-              {devkitShellBusy ? 'Opening DevKit...' : devkitShellInfo.button_label}
-            </button>
-          )}
+          {/* One box for the board: which one, whether it answers, and the way in to everything
+              else about it — a shell on it, or a different board. */}
+          <button
+            type="button"
+            className={['board-trigger', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}
+            onClick={openBoardPanel}
+            title={boardIndicatorInfo.title}
+            aria-haspopup="dialog"
+            aria-expanded={boardPanelOpen}
+          >
+            <span className="board-trigger-label">{boardIndicatorInfo.label}</span>
+            <span className={['sysinfo-pill', 'periph-pill', boardIndicatorInfo.state.tone].filter(Boolean).join(' ')}>
+              {boardIndicatorInfo.state.short}
+            </span>
+          </button>
           <button
             type="button"
             className="sysinfo-trigger"
@@ -2217,7 +2224,7 @@ export default function App() {
       {tourOpen && (
         <section className="onboarding-panel" aria-label="Insight quick tour">
           <div className="onboarding-copy">
-            <p className="onboarding-eyebrow">{activeTourStep.eyebrow}</p>
+            <p className="onboarding-eyebrow">Step {tourStep + 1} of {ONBOARDING_STEPS.length}</p>
             <h2 className="onboarding-title">{activeTourStep.title}</h2>
             <p className="onboarding-summary">{activeTourStep.summary}</p>
             <p className="onboarding-detail">{activeTourStep.details}</p>
@@ -2298,6 +2305,12 @@ export default function App() {
                 routePath={routeWorkspacePath}
                 onNavigate={(path) => selectTab('workspace', path)}
               />
+            </Suspense>
+          )}
+
+          {tab === 'genai' && (
+            <Suspense fallback={<section className="panel"><p className="workspace-empty">Loading GenAI Studio...</p></section>}>
+              <GenAIView onError={setError} onStatus={setUploadStatus} />
             </Suspense>
           )}
 
@@ -2659,79 +2672,72 @@ export default function App() {
           </section>
         )}
 
+        {tab === 'peripherals' && (
+          <Suspense fallback={<section className="panel"><p className="hint">Loading peripherals...</p></section>}>
+            <PeripheralsView
+              board={board}
+              boardLoading={boardLoading}
+              boardError={boardError}
+              onReloadBoard={loadBoard}
+              onOpenBoardPanel={openBoardPanel}
+              onStatus={setUploadStatus}
+            />
+          </Suspense>
+        )}
+
         {tab === 'visualizer' && (
           <div className="visualizer-layout">
-            <section className="panel">
-              <div className="panel-topbar">
-                <div>
-                  <h2>System Load</h2>
-                  <p className="section-note">Current device utilization snapshot.</p>
-                </div>
-              </div>
-              <div className="gauge-grid">
-                <GaugeCard
-                  label="CPU Load"
-                  percent={cpuPct}
-                />
-                <GaugeCard
-                  label="Memory Usage"
-                  percent={memPct}
-                />
-                <GaugeCard
-                  label="MLA Memory"
-                  percent={mlaPct}
-                />
-                <GaugeCard
-                  label="Disk Usage"
-                  percent={diskPct}
-                />
-              </div>
-              <div className="metric-summary-row">
-                <span>
-                  Temperature: <strong>{temperatureValue === null || temperatureValue === undefined ? '-' : `${Number(temperatureValue).toFixed(1)}°C`}</strong>
-                </span>
-              </div>
-            </section>
+            <Suspense fallback={<section className="panel"><p className="hint">Loading board telemetry...</p></section>}>
+              <StatsView
+                board={board}
+                boardError={boardError}
+                onOpenBoardPanel={openBoardPanel}
+                onReloadBoard={loadBoard}
+                onError={setError}
+                onStatus={setUploadStatus}
+                hostExtra={(
+                  <section className="panel">
+                    <div className="panel-topbar">
+                      <div>
+                        <h2>NEAT Profiling Timeline</h2>
+                        <p className="section-note">Select metrics to visualize profiling trends.</p>
+                      </div>
+                    </div>
 
-            <section className="panel">
-              <div className="panel-topbar">
-                <div>
-                  <h2>NEAT Profiling Timeline</h2>
-                  <p className="section-note">Select metrics to visualize profiling trends.</p>
-                </div>
-              </div>
+                    <div className="profile-filter-bar">
+                      {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
+                      {availableProfileKeys.map((key) => {
+                        const selected = selectedProfileSeries.includes(key)
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={selected ? 'profile-chip active' : 'profile-chip'}
+                            onClick={() => {
+                              setSelectedProfileSeries((prev) => {
+                                if (prev.includes(key)) return prev.filter((item) => item !== key)
+                                return [...prev, key].slice(0, 6)
+                              })
+                            }}
+                          >
+                            {key}
+                          </button>
+                        )
+                      })}
+                    </div>
 
-              <div className="profile-filter-bar">
-                {availableProfileKeys.length === 0 && <span className="hint">No numeric profiling fields detected yet.</span>}
-                {availableProfileKeys.map((key) => {
-                  const selected = selectedProfileSeries.includes(key)
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      className={selected ? 'profile-chip active' : 'profile-chip'}
-                      onClick={() => {
-                        setSelectedProfileSeries((prev) => {
-                          if (prev.includes(key)) return prev.filter((item) => item !== key)
-                          return [...prev, key].slice(0, 6)
-                        })
-                      }}
-                    >
-                      {key}
-                    </button>
-                  )
-                })}
-              </div>
-
-              <div className="series-grid">
-                {selectedProfileSeries.length === 0 && (
-                  <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
+                    <div className="series-grid">
+                      {selectedProfileSeries.length === 0 && (
+                        <div className="series-placeholder">Select one or more profiling fields to view trends.</div>
+                      )}
+                      {selectedProfileSeries.map((key) => (
+                        <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
+                      ))}
+                    </div>
+                  </section>
                 )}
-                {selectedProfileSeries.map((key) => (
-                  <MiniSeriesCard key={key} name={key} samples={profileSamplesByKey[key] || []} />
-                ))}
-              </div>
-            </section>
+              />
+            </Suspense>
           </div>
         )}
 
@@ -3205,6 +3211,25 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {boardPanelOpen && (
+        <Suspense fallback={null}>
+          <BoardPanel
+            board={board}
+            loading={boardLoading}
+            error={boardError}
+            onBoardChange={handleBoardChange}
+            onRetry={loadBoard}
+            onReload={loadBoard}
+            onStatus={setUploadStatus}
+            onError={setError}
+            onClose={closeBoardPanel}
+            shell={devkitShellInfo}
+            shellBusy={devkitShellBusy}
+            onOpenShell={connectDevkitShell}
+          />
+        </Suspense>
       )}
 
       {sysInfoOpen && (
