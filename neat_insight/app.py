@@ -2462,6 +2462,7 @@ def _index_error(index):
 
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
 PULLED_LEFT_RUNNING = "Pulled stream(s) left running"
+PULLS_NOT_STOPPED = "Could not stop pulled stream(s), try Stop again"
 
 
 def _external_conflict_message(index, path) -> str:
@@ -3574,6 +3575,41 @@ def start_sources_bulk():
     }
 
 
+class PullStopError(Exception):
+    """A pull that could not be stopped right now; `status` is the HTTP status for Stop."""
+
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.status = status
+
+
+def _stop_pull(index):
+    """Stop pulling into src{index}; return the record, or None when the slot is not pulled.
+
+    Raises PullStopError while the pull is still being set up, or when MediaMTX does not
+    confirm the clear; the record then stays, so the row keeps its Stop."""
+    with _sources_lock:
+        record = _pull_record(index)
+        if not record:
+            return None
+        if record.changing:
+            raise PullStopError(f"src{index} is still being set up to pull from {record.host}. Try Stop again in a moment.", 409)
+        # The record keeps the slot while MediaMTX is cleared outside the lock.
+        record.changing = True
+    try:
+        mediamtx_client.clear_pull_source(f"src{index}")
+    except MediamtxError as exc:
+        # mediamtx may still be pulling; keep the record so the row stays stoppable.
+        with _sources_lock:
+            record.changing = False
+        raise PullStopError(f"Could not stop pulling into src{index}: {exc}. Try Stop again.", 502) from exc
+    with _sources_lock:
+        pull_registry.remove(index)
+        _bump_slot(index)
+    logging.info("src%s: pull from %s stopped", index, record.host)
+    return record
+
+
 # API: stop one RTSP media source.
 @app.post("/api/mediasrc/stop")
 def stop_source():
@@ -3583,26 +3619,11 @@ def stop_source():
     index_error = _index_error(index)
     if index_error:
         return index_error
-    with _sources_lock:
-        record = _pull_record(index)
-        if record:
-            if record.changing:
-                return _json_error(f"src{index} is still being set up to pull from {record.host}. Try Stop again in a moment.", 409)
-            # The record keeps the slot while MediaMTX is cleared outside the lock.
-            record.changing = True
-    if record:
-        try:
-            mediamtx_client.clear_pull_source(f"src{index}")
-        except MediamtxError as exc:
-            # mediamtx may still be pulling; keep the record so the row stays stoppable.
-            with _sources_lock:
-                record.changing = False
-            return _json_error(f"Could not stop pulling into src{index}: {exc}. Try Stop again.", 502)
-        with _sources_lock:
-            pull_registry.remove(index)
-            _bump_slot(index)
-        logging.info("src%s: pull from %s stopped", index, record.host)
-        return {"success": True}
+    try:
+        if _stop_pull(index):
+            return {"success": True}
+    except PullStopError as exc:
+        return _json_error(str(exc), exc.status)
     # Insight's own HTTP/MJPEG stream can share an index with an external publisher; it
     # stays stoppable, and only a slot holding nothing of ours is a conflict.
     holder = _external_holder(index)
@@ -3662,14 +3683,20 @@ def stop_all_sources():
     snapshot = _path_snapshot()
     skipped_external = []
     skipped_pulled = []
+    stopped_pulled = []
     stopped_count = 0
     unconfirmed = []
     stopped = {}
     releaser = _BulkReleaser()
     for src in sources:
         source_index = src.get("index")
-        if _pull_record(source_index):
-            # A pulled slot is left running: stop-all never touches an active pull.
+        # Insight started the pull, so Stop All stops it like a file source. A pull
+        # still being set up, or one MediaMTX did not confirm cleared, keeps its row.
+        try:
+            if _stop_pull(source_index):
+                stopped_pulled.append(source_index)
+                continue
+        except PullStopError:
             skipped_pulled.append(source_index)
             continue
         # Classify before stopping: _external_holder only discounts a path while our own
@@ -3722,6 +3749,7 @@ def stop_all_sources():
             src["state"] = "stopped"
         save_sources(fresh)
 
+    stopped_count += len(stopped_pulled)
     message = f"Stopped {stopped_count} source(s)."
     if unconfirmed:
         # Stopping the rest still happened, so this is not an error; the caller
@@ -3737,12 +3765,13 @@ def stop_all_sources():
             + ", ".join(str(i) for i in changed)
             + " were reassigned while stopping and were left as they are now."
         )
-    message += _skipped_suffixes(skipped_external, skipped_pulled, EXTERNAL_LEFT_RUNNING, PULLED_LEFT_RUNNING)
+    message += _skipped_suffixes(skipped_external, skipped_pulled, EXTERNAL_LEFT_RUNNING, PULLS_NOT_STOPPED)
     return {
         "success": True,
         "stopped_count": stopped_count,
         "skipped_external": skipped_external,
         "skipped_pulled": skipped_pulled,
+        "stopped_pulled": stopped_pulled,
         "unconfirmed_webcams": unconfirmed,
         "changed_sources": changed,
         "message": message,

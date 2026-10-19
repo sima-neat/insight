@@ -3036,14 +3036,47 @@ class PullSourceTests(_SourceFixture):
             bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).get_json()
             self.assertEqual((bulk["started"], bulk["skipped_pulled"]), ([1], [2]))
             self.assertIn("Skipped pulled: src2.", bulk["message"])
-            stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
-            self.assertEqual(stop_all["skipped_pulled"], [2])
-            self.assertIn("Pulled stream(s) left running: src2.", stop_all["message"])
             reset = self.client.post("/api/mediasrc/reset").get_json()
             self.assertEqual(reset["skipped_pulled"], [2])
         self.assertEqual(self.mtx.cleared, [])
         self.assertEqual(self._slot(2)["state"], "pulled")
         self.assertEqual(self._slot(2)["file"], "")             # reset still clears the stored record
+
+    def test_stop_all_stops_pulls_and_leaves_external_streams_running(self):
+        # Owner review (S4): Insight started the pull, so Stop All stops it like a file source.
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},'
+            ' {"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull(index=2)
+        self.mtx.paths["src4"] = external_path(4)
+        stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
+        self.assertEqual(self.mtx.cleared, ["src2"])
+        self.assertIsNone(app_module.pull_registry.get(2))
+        self.assertEqual((stop_all["stopped_pulled"], stop_all["skipped_pulled"]), ([2], []))
+        self.assertEqual(stop_all["stopped_count"], 1)
+        self.assertEqual(stop_all["skipped_external"], [4])
+        self.assertEqual(stop_all["message"], "Stopped 1 source(s). External stream(s) left running: src4.")
+        slot = self._slot(2)
+        self.assertEqual((slot["state"], slot["file"]), ("stopped", "b.mp4"))  # back to its previous file
+
+    def test_stop_all_lists_a_pull_it_could_not_stop(self):
+        self._pull(index=2)
+        self._pull(index=3)
+        app_module.pull_registry.get(3).changing = True  # still being set up
+        self.mtx.fail_clear = True
+        stop_all = self.client.post("/api/mediasrc/stop-all").get_json()
+        self.assertEqual((stop_all["stopped_pulled"], stop_all["skipped_pulled"]), ([], [2, 3]))
+        self.assertEqual(stop_all["stopped_count"], 0)
+        self.assertIn("Could not stop pulled stream(s), try Stop again: src2, src3.", stop_all["message"])
+        self.assertEqual((self._slot(2)["state"], self._slot(3)["state"]), ("pulled", "pulled"))
+        self.assertFalse(app_module.pull_registry.get(2).changing, "a failed clear leaves the row stoppable")
+
+    def test_stop_all_clears_pulls_outside_the_source_lock(self):
+        self._pull(index=2)
+        clear_patch, held = self.spy_lock("clear_pull_source")
+        with clear_patch:
+            self.client.post("/api/mediasrc/stop-all")
+        self.assertEqual(held, [False])
 
     def test_bulk_start_rechecks_for_a_pull_before_each_target(self):
         # Codex review: a pull that lands while an earlier target is starting must not get a file stream.
