@@ -92,7 +92,7 @@ export function downloadFailure(repoId, error) {
   const message = (error && error.message) || 'Download failed'
   // Only an "org/name" id is offered as a button.
   const renamedTo = typeof body.renamedTo === 'string' && /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*$/.test(body.renamedTo) ? body.renamedTo : null
-  return { repoId, message, renamedTo, offline: /disabled or offline|could not reach hugging face/i.test(message) }
+  return { repoId, message, renamedTo, offline: /offline or disabled|disabled or offline|could not reach hugging face/i.test(message) }
 }
 
 // "a `b` c" -> ['a ', {code: 'b'}, ' c'], for the view to render.

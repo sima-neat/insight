@@ -1262,6 +1262,7 @@ test('a failed download says why, the id Hugging Face renamed it to, and whether
   assert.deepEqual([renamed.renamedTo, renamed.offline], ['simaai/new', false])
   assert.equal(downloadFailure('a/b', { message: 'Model download failed', body: { renamedTo: '../etc' } }).renamedTo, null)
   assert.equal(downloadFailure('a/b', { message: 'Hugging Face downloads are disabled or offline' }).offline, true)
+  assert.equal(downloadFailure('a/b', { message: 'Hugging Face is offline or disabled' }).offline, true)
   assert.equal(downloadFailure('a/b', { message: "Could not reach Hugging Face: check the board's internet connection" }).offline, true)
   assert.equal(downloadFailure('a/b', null).message, 'Download failed')
 })
