@@ -192,6 +192,10 @@ function ChannelTile({ index, onActiveChange, debug }) {
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
+      // The canvas holds the last video frame; clear it so a reconnecting tile
+      // does not show a frozen picture.
+      const canvas = canvasRef.current;
+      canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
       setTileActive(false);
       setBanner(`Channel ${index}`);
       metadataQueueRef.current = createMetadataQueue();
