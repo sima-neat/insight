@@ -2892,8 +2892,6 @@ export default function App() {
                             >
                               {pull.status === 'live' ? codecLabel(src.codec) : '-'}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
                             </span>
-                            {/* Holds the FPS column so the actions line up with file-backed rows. */}
-                            <span aria-hidden="true" />
                             <button
                               className="icon-action-btn stop"
                               onClick={(e) => { e.stopPropagation(); stopSource(src.index).catch(reportSourceError) }}
@@ -2934,8 +2932,6 @@ export default function App() {
                             >
                               {codecLabel(src.codec)}{warning ? <span role="img" aria-label={warning}> ⚠</span> : ''}
                             </span>
-                            {/* Holds the FPS column so the actions line up with file-backed rows. */}
-                            <span aria-hidden="true" />
                             <button
                               className="icon-action-btn takeover"
                               onClick={(e) => { e.stopPropagation(); setTakeoverTarget(src) }}
