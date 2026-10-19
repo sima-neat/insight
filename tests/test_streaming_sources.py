@@ -2038,6 +2038,16 @@ class WebcamNormalizationTests(unittest.TestCase):
         # whatever holds them, so sharing one would stop the Studio.
         self.assertNotIn(mediasrc.MEDIAMTX_API_PORT, (9997, 9998))
 
+    def test_the_ui_port_cannot_be_the_mediamtx_api_port(self):
+        with mock.patch.object(sys, "argv", ["neat-insight", "--port", str(mediasrc.MEDIAMTX_API_PORT)]), \
+                mock.patch.object(app_module, "start_processes") as start, \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as exit_:
+                app_module.main()
+        self.assertEqual(exit_.exception.code, 2)
+        self.assertIn("internal MediaMTX API port", stderr.getvalue())
+        start.assert_not_called()
+
     def test_startup_port_cleanup_leaves_the_genai_studio_running(self):
         from neat_insight import utils
 

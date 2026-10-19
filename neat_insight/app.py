@@ -37,6 +37,7 @@ if __name__ == "__main__" and (not globals().get("__package__")):
 from neat_insight.mediasrc import (
     DEFAULT_CODEC,
     DEFAULT_TRANSPORT,
+    MEDIAMTX_API_PORT,
     SOURCE_TYPE_FILE,
     SOURCE_TYPE_WEBCAM,
     WEBCAM_WHIP_PORT,
@@ -3413,6 +3414,9 @@ def main():
     parser = argparse.ArgumentParser(description="Start the neat-insight server.")
     parser.add_argument("--port", type=int, default=9900, help="Port to run the server on (default: 9900)")
     args = parser.parse_args()
+    # MediaMTX starts before the UI binds, so a UI port it already holds fails late.
+    if args.port == MEDIAMTX_API_PORT:
+        parser.error(f"--port {args.port} is Insight's internal MediaMTX API port; choose another port")
 
     runtime_network_config = load_runtime_network_config()
 
