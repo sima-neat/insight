@@ -823,6 +823,24 @@ button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
+/* Streaming Sources: the source list and the preview side by side, the preview below the
+   list as soon as the list would get narrower than its rows (owner review S5). */
+.sources-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.sources-list-panel {
+  flex: 1.05 1 0;
+  min-width: min-content;
+}
+
+.sources-preview-panel {
+  flex: 1 1 0;
+  min-width: min(360px, 100%);
+}
+
 .sources {
   display: grid;
   gap: 8px;
@@ -834,7 +852,7 @@ button:hover:not(:disabled) {
   border-radius: var(--radius-sm);
   padding: 8px;
   display: grid;
-  grid-template-columns: 54px 62px minmax(180px, 1fr) 100px 100px auto auto auto;
+  grid-template-columns: 54px 62px minmax(120px, 1fr) 100px 100px auto auto auto;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -3561,8 +3579,9 @@ button:disabled {
     min-height: 520px;
   }
 
-  .source-row {
-    grid-template-columns: 54px 62px minmax(0, 1fr) 96px 96px auto auto auto;
+  .sources-list-panel,
+  .sources-preview-panel {
+    flex-basis: 100%;
   }
 
   .masthead {

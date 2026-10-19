@@ -2840,8 +2840,8 @@ export default function App() {
         )}
 
         {tab === 'rtsp' && (
-          <div className="grid two">
-            <section className="panel">
+          <div className="sources-layout">
+            <section className="panel sources-list-panel">
               <div className="panel-topbar">
                 <div>
                   <h2>Streaming Sources</h2>
@@ -3077,7 +3077,7 @@ export default function App() {
               </div>
             </section>
 
-            <section className="panel">
+            <section className="panel sources-preview-panel">
               {(() => {
                 if (!isExternal(currentSource) && !isPulled(currentSource)) {
                   const info = currentSource
