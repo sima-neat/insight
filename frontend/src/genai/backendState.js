@@ -6,7 +6,7 @@
 // A backend from before the field existed reports none and is accepted.
 export const SUPPORTED_API_VERSIONS = { min: 1, max: 1 }
 
-export const START_COMMAND = './run.sh --backend-only'
+export const START_COMMAND = './run.sh'
 
 export function checkApiVersion(health) {
   const version = health ? health.api_version : undefined

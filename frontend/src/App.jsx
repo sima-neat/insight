@@ -42,8 +42,8 @@ const TABS = [
   { id: 'rtsp', label: 'Streaming', icon: '/icons/rtsp.png' },
   { id: 'viewer', label: 'Video Viewer', icon: '/icons/viewer.png' },
   { id: 'peripherals', label: 'Peripherals', icon: '/icons/peripherals.svg' },
-  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' },
-  { id: 'genai', label: 'GenAI Studio', icon: '/icons/genai.svg' }
+  { id: 'genai', label: 'GenAI Studio', icon: '/icons/genai.svg' },
+  { id: 'visualizer', label: 'Stats', icon: '/icons/visualizer.png' }
 ]
 const YOUTUBE_IMPORT_TARGETS = [
   { value: '1080p30', label: '1080p30' },
@@ -73,8 +73,8 @@ const TAB_TO_ROUTE = {
   rtsp: '/streaming',
   viewer: '/viewer',
   peripherals: '/peripherals',
-  visualizer: '/stats',
-  genai: '/genai'
+  genai: '/genai',
+  visualizer: '/stats'
 }
 const ONBOARDING_STORAGE_KEY = 'neat-insight:onboarding-seen'
 const ONBOARDING_STEPS = [
@@ -127,20 +127,20 @@ const ONBOARDING_STEPS = [
       'Confirm a camera works before you build around it, then read the modes it reports. Cameras work today; other kinds appear as Insight learns to read them.'
   },
   {
+    id: 'genai',
+    tab: 'genai',
+    title: 'Try generative AI on the board',
+    summary: 'GenAI Studio runs language, vision and speech models on the board; this tab is where you use them.',
+    details:
+      'Start the backend on the board with ./run.sh from the GenAI Studio app, then load a model here, chat with text, images or your camera, transcribe speech, and hear replies. The tab shows when the board is busy or unavailable and how to recover.'
+  },
+  {
     id: 'visualizer',
     tab: 'visualizer',
     title: 'Check system stats',
     summary: 'The Stats tab reads power, temperature, CPU, memory and storage from the Sentinel daemon on the board you have selected.',
     details:
       'Watch the board’s live metrics while an application runs, and record a trace around a workload to keep it on the board as a named run. Open a saved run to see each metric’s minimum, mean and maximum, or compare runs against a baseline to see what changed between them.'
-  },
-  {
-    id: 'genai',
-    tab: 'genai',
-    title: 'Try generative AI on the board',
-    summary: 'GenAI Studio runs language, vision and speech models on the board; this tab is where you use them.',
-    details:
-      'Start the backend on the board with ./run.sh --backend-only from the GenAI Studio app, then load a model here, chat with text, images or your camera, transcribe speech, and hear replies. The tab shows when the board is busy or unavailable and how to recover.'
   }
 ]
 

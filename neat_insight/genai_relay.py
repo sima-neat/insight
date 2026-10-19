@@ -1,7 +1,7 @@
 """Relay from Insight to the GenAI Studio backend on a board.
 
 The GenAI tab calls ``/api/genai/<path>`` on Insight; this blueprint forwards the
-request to the Studio backend started with ``run.sh --backend-only``
+request to the Studio backend started with ``run.sh``
 (``https://<board>:5000/<path>`` by default) and streams the answer back. The
 browser therefore talks to one HTTPS origin: it never has to accept the board's
 self-signed certificate, and the board needs no CORS allowlist.

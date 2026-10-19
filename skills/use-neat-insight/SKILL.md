@@ -433,7 +433,7 @@ Hosted environments can opt into a separate browser-facing network configuration
 
 ## GenAI Studio
 
-Insight relays calls to the GenAI Studio backend on a board (started there with `run.sh --backend-only`, HTTPS port `5000`). The board's self-signed certificate is accepted by Insight, so clients only call Insight.
+Insight relays calls to the GenAI Studio backend on a board (started there with `run.sh`, HTTPS port `5000`). The board's self-signed certificate is accepted by Insight, so clients only call Insight.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
