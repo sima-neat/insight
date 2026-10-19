@@ -13,7 +13,12 @@ import "./blazePose3DRenderer.js";
 import { partitionFrameMetadata } from "./auxiliaryVisualization.js";
 import { formatChannelStatus, resolveCodecLabel } from "./channelStatus.js";
 import { updateDecoderHealth } from "./decoderHealth.js";
-import { drawMetadata, hasDrawableMetadata } from "./metadataDrawing.js";
+import {
+  drawMetadata,
+  drawVideoFrame,
+  hasDrawableMetadata,
+  prepareOverlayCanvas,
+} from "./metadataDrawing.js";
 import {
   gridDimensions,
   normalizeMaxChannels,
@@ -291,11 +296,6 @@ function ChannelTile({ index, onActiveChange, debug }) {
             setTileActive(true);
           }
 
-          if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-            canvas.width = canvas.clientWidth;
-            canvas.height = canvas.clientHeight;
-          }
-
           const candidates = takeMetadataForFrame(
             metadataQueueRef.current,
             frameMetadata?.rtpTimestamp,
@@ -310,10 +310,9 @@ function ChannelTile({ index, onActiveChange, debug }) {
           warnIgnoredAuxiliary(index, ignoredAuxiliary);
 
           if (ctx) {
-            // Always clear overlay to avoid stale masks/opaque leftovers.
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            // Every type for this frame draws onto the same overlay, already
-            // cleared above.
+            prepareOverlayCanvas(ctx, canvas, window.devicePixelRatio);
+            drawVideoFrame(ctx, canvas, video);
+            // Every type for this frame draws over the frame on the same canvas.
             const frameState = {};
             for (const candidate of holdOverlays(heldOverlaysRef.current, overlays, now)) {
               const metadataType = candidate.data?.type;
