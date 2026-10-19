@@ -2461,7 +2461,6 @@ def _index_error(index):
 
 
 EXTERNAL_LEFT_RUNNING = "External stream(s) left running"
-PULLED_LEFT_RUNNING = "Pulled stream(s) left running"
 PULLS_NOT_STOPPED = "Could not stop pulled stream(s), try Stop again"
 
 
@@ -3789,6 +3788,7 @@ def reset_all_sources():
     snapshot = _path_snapshot()
     skipped_external = []
     skipped_pulled = []
+    stopped_pulled = []
     unconfirmed = []
     identities = {}
     releaser = _BulkReleaser()
@@ -3796,10 +3796,15 @@ def reset_all_sources():
         source_index = src.get("index")
         # Classify before stopping: _external_holder only discounts a path while our own
         # publisher is alive, so stopping first would report our just-stopped slot as external.
-        # Reset clears every stored record; the external stream and any active pull are never touched.
+        # Reset clears every stored record; the external stream is never touched.
         if _external_holder(source_index, snapshot):
             skipped_external.append(source_index)
-        if _pull_record(source_index):
+        # Insight started the pull, so Reset stops it like Stop All does. A pull still
+        # being set up, or one MediaMTX did not confirm cleared, keeps running.
+        try:
+            if _stop_pull(source_index):
+                stopped_pulled.append(source_index)
+        except PullStopError:
             skipped_pulled.append(source_index)
         identities[source_index] = (src.get("type"), src.get("file"))
         if src.get("type") == SOURCE_TYPE_WEBCAM and not releaser.release(
@@ -3852,9 +3857,9 @@ def reset_all_sources():
             + ", ".join(str(i) for i in changed)
             + " were reassigned while this ran and were left as they are now."
         )
-    message += _skipped_suffixes(skipped_external, skipped_pulled, EXTERNAL_LEFT_RUNNING, PULLED_LEFT_RUNNING)
+    message += _skipped_suffixes(skipped_external, skipped_pulled, EXTERNAL_LEFT_RUNNING, PULLS_NOT_STOPPED)
     return {"success": True, "skipped_external": skipped_external, "skipped_pulled": skipped_pulled,
-            "unconfirmed_webcams": unconfirmed, "changed_sources": changed, "message": message}
+            "stopped_pulled": stopped_pulled, "unconfirmed_webcams": unconfirmed, "changed_sources": changed, "message": message}
 
 
 # API: disconnect an external publisher so the slot can be assigned again.

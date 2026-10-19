@@ -3036,11 +3036,8 @@ class PullSourceTests(_SourceFixture):
             bulk = self.client.post("/api/mediasrc/start-bulk", json={"count": 2}).get_json()
             self.assertEqual((bulk["started"], bulk["skipped_pulled"]), ([1], [2]))
             self.assertIn("Skipped pulled: src2.", bulk["message"])
-            reset = self.client.post("/api/mediasrc/reset").get_json()
-            self.assertEqual(reset["skipped_pulled"], [2])
         self.assertEqual(self.mtx.cleared, [])
         self.assertEqual(self._slot(2)["state"], "pulled")
-        self.assertEqual(self._slot(2)["file"], "")             # reset still clears the stored record
 
     def test_stop_all_stops_pulls_and_leaves_external_streams_running(self):
         # Owner review (S4): Insight started the pull, so Stop All stops it like a file source.
@@ -3076,6 +3073,40 @@ class PullSourceTests(_SourceFixture):
         clear_patch, held = self.spy_lock("clear_pull_source")
         with clear_patch:
             self.client.post("/api/mediasrc/stop-all")
+        self.assertEqual(held, [False])
+
+    def test_reset_stops_pulls_and_leaves_external_streams_running(self):
+        # Reset releases everything Insight started, like Stop All (owner review S4).
+        self.sources_file.write_text(
+            '[{"index": 1, "file": "a.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"},'
+            ' {"index": 2, "file": "b.mp4", "state": "stopped", "transport": "rtsp", "codec": "h264"}]', encoding="utf-8")
+        self._pull(index=2)
+        self.mtx.paths["src4"] = external_path(4)
+        reset = self.client.post("/api/mediasrc/reset").get_json()
+        self.assertEqual(self.mtx.cleared, ["src2"])
+        self.assertIsNone(app_module.pull_registry.get(2))
+        self.assertEqual((reset["stopped_pulled"], reset["skipped_pulled"]), ([2], []))
+        self.assertEqual(reset["skipped_external"], [4])
+        self.assertEqual(reset["message"], "Reset all source assignments. External stream(s) left running: src4.")
+        slot = self._slot(2)
+        self.assertEqual((slot["state"], slot["file"]), ("stopped", ""))
+
+    def test_reset_lists_a_pull_it_could_not_stop(self):
+        self._pull(index=2)
+        self._pull(index=3)
+        app_module.pull_registry.get(3).changing = True  # still being set up
+        self.mtx.fail_clear = True
+        reset = self.client.post("/api/mediasrc/reset").get_json()
+        self.assertEqual((reset["stopped_pulled"], reset["skipped_pulled"]), ([], [2, 3]))
+        self.assertIn("Could not stop pulled stream(s), try Stop again: src2, src3.", reset["message"])
+        self.assertEqual((self._slot(2)["state"], self._slot(3)["state"]), ("pulled", "pulled"))
+        self.assertFalse(app_module.pull_registry.get(2).changing, "a failed clear leaves the row stoppable")
+
+    def test_reset_clears_pulls_outside_the_source_lock(self):
+        self._pull(index=2)
+        clear_patch, held = self.spy_lock("clear_pull_source")
+        with clear_patch:
+            self.client.post("/api/mediasrc/reset")
         self.assertEqual(held, [False])
 
     def test_bulk_start_rechecks_for_a_pull_before_each_target(self):
