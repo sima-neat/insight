@@ -38,9 +38,11 @@ webrtcTrackGatherTimeout: 10s
 
 # Backs the "is this webcam actually publishing" status Insight polls per
 # source (see neat_insight/mediasrc.py webcam_is_publishing); loopback-only,
-# never exposed outside the container/host.
+# never exposed outside the container/host. Not MediaMTX's default 9997: that is
+# the Neat GenAI Studio model server's control port, and Insight frees this port
+# at startup (neat_insight/utils.py), which would stop the Studio.
 api: yes
-apiAddress: 127.0.0.1:9997
+apiAddress: 127.0.0.1:9901
 
 
 # Webcam ingest + normalization. A browser WHIP-publishes its camera to

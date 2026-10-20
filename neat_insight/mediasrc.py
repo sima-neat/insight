@@ -12,7 +12,8 @@ from typing import Dict, Optional, Tuple
 
 RTSP_PUBLISH_BASE_URL = "rtsp://127.0.0.1:8554"
 # Loopback-only control API (webrtc/mediamtx.yml apiAddress); never published.
-MEDIAMTX_API_PORT = 9997
+# Not MediaMTX's default 9997, which the Neat GenAI Studio model server uses.
+MEDIAMTX_API_PORT = 9901
 MEDIAMTX_API_BASE_URL = f"http://127.0.0.1:{MEDIAMTX_API_PORT}"
 WEBCAM_WHIP_PORT = 8889
 # Key that the SDK port map uses for the WHIP listener above. The SDK may

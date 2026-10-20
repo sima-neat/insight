@@ -272,7 +272,8 @@ def _terminate_conflicting_port_specs(port_specs):
 def _terminate_conflicting_ports(webcam_ice_port=None):
     # mediamtx uses 8554/tcp, a default UDP helper port 8000, 8889/tcp for
     # webcam WHIP signalling, its ICE media port for the video itself, and
-    # 9997/tcp (loopback) for its status API.
+    # MEDIAMTX_API_PORT/tcp (loopback) for its status API. Every port here is
+    # freed by stopping its owner, so none may be one a Neat app listens on.
     # vf uses 8081/tcp, 9000-9079/udp for RTP, and 9100-9179/udp for metadata.
     port_specs = [
         (8554, "TCP"),

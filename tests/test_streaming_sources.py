@@ -1889,7 +1889,7 @@ class WebcamPublishStateTests(unittest.TestCase):
             self.assertTrue(mediasrc.kick_webcam_publisher(1))
 
         self.assertEqual(calls[1], (
-            "http://127.0.0.1:9997/v3/webrtcsessions/kick/abc-123", "POST"))
+            f"{mediasrc.MEDIAMTX_API_BASE_URL}/v3/webrtcsessions/kick/abc-123", "POST"))
         self.assertEqual(len(calls), 2, "a successful kick needs no re-check")
 
     def test_kick_is_a_no_op_when_nothing_is_publishing(self):
@@ -1912,7 +1912,7 @@ class WebcamPublishStateTests(unittest.TestCase):
 
     def _http_error(self, code):
         return mediasrc.urllib.error.HTTPError(
-            "http://127.0.0.1:9997/x", code, "err", {}, None)
+            f"{mediasrc.MEDIAMTX_API_BASE_URL}/x", code, "err", {}, None)
 
     def test_a_missing_path_reads_as_not_publishing_not_unknown(self):
         """404 is an answer: the path is not there."""
@@ -2028,6 +2028,37 @@ class WebcamNormalizationTests(unittest.TestCase):
         self.assertEqual(mediasrc.webcam_ingest_path_name(12), "cam12")
         self.assertEqual(mediasrc.webcam_output_path_name(1), "src1")
         self.assertEqual(mediasrc.webcam_output_path_name(12), "src12")
+
+    def test_mediamtx_api_port_matches_the_config_and_avoids_neat_app_ports(self):
+        cfg = Path(__file__).resolve().parent.parent / "webrtc" / "mediamtx.yml"
+        self.assertIn(f"apiAddress: 127.0.0.1:{mediasrc.MEDIAMTX_API_PORT}\n",
+                      cfg.read_text(encoding="utf-8"))
+        # The Neat GenAI Studio model server listens on 9998 (OpenAI API) and
+        # 9997 (control). Insight frees its own ports at startup by stopping
+        # whatever holds them, so sharing one would stop the Studio.
+        self.assertNotIn(mediasrc.MEDIAMTX_API_PORT, (9997, 9998))
+
+    def test_the_ui_port_cannot_be_the_mediamtx_api_port(self):
+        with mock.patch.object(sys, "argv", ["neat-insight", "--port", str(mediasrc.MEDIAMTX_API_PORT)]), \
+                mock.patch.object(app_module, "start_processes") as start, \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as exit_:
+                app_module.main()
+        self.assertEqual(exit_.exception.code, 2)
+        self.assertIn("internal MediaMTX API port", stderr.getvalue())
+        start.assert_not_called()
+
+    def test_startup_port_cleanup_leaves_the_genai_studio_running(self):
+        from neat_insight import utils
+
+        freed = []
+        with mock.patch.object(utils, "_terminate_conflicting_port_specs", freed.extend), \
+                mock.patch.object(utils, "get_devkit_sync_devkit_ip", return_value=None):
+            utils._terminate_conflicting_ports()
+
+        self.assertIn((mediasrc.MEDIAMTX_API_PORT, "TCP"), freed)
+        self.assertNotIn((9997, "TCP"), freed)
+        self.assertNotIn((9998, "TCP"), freed)
 
     def test_mediamtx_config_normalizes_cam_ingest_onto_the_src_consumer_path(self):
         cfg = Path(__file__).resolve().parent.parent / "webrtc" / "mediamtx.yml"
