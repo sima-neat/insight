@@ -254,7 +254,7 @@ The GenAI Studio view runs language, vision and speech models on a board. It tal
 Start the backend on the board first, from the GenAI Studio application directory:
 
 ```bash
-./run.sh --backend-only
+./run.sh
 ```
 
 The first visit opens a short **Tutorial** at the top of the page that walks through every feature; replay it any time with **Tutorial** in the header. The header holds the status label, the **Model** picker with **New chat** (the pencil) next to it, **Read replies aloud**, **Think first** (greyed out for models that always answer directly) and **Use my documents**, and a toolbar: **Export chat**, **SiMaSentry Solutions** (the shield), **Benchmark** (the gauge), **Tutorial**, **Settings** and **Full screen**.
@@ -299,7 +299,7 @@ The loop also stops when the model changes or no longer sees images, the board s
 - **Replies**: **System prompt** replaces the tab's default instructions (shown in the empty box) for the chat and the vision view; **Reset to default** empties it. The tab still adds one sentence saying whether the message has a picture, because small vision models otherwise misjudge that. **Longest reply** sets the most tokens a reply may have (32 to 2048, default 512, as in the standalone GenAI Studio); it is sent as `max_tokens` and does not change the benchmark, which has its own setting. This browser remembers both.
 - **Models on the board**: **Load**, **Unload** and **Use** change which models are active, with load progress in the banner. **Delete** removes a downloaded model's files from the board after you confirm; it is offered only for models that are not loaded and not the speech model in use, and the board's reason is shown if it refuses. When the board is online, search Hugging Face and **Download** a model onto the board.
 
-If a model load fails or replies stop, restart GenAI Studio on the board (`./run.sh stop`, then `./run.sh --backend-only`); that frees the accelerator, and the model can then be loaded again. **Settings**, **Troubleshooting** repeats this.
+If a model load fails or replies stop, restart GenAI Studio on the board (`./run.sh stop`, then `./run.sh`); that frees the accelerator, and the model can then be loaded again. **Settings**, **Troubleshooting** repeats this.
 
 ## System Information
 
