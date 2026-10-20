@@ -12,7 +12,6 @@ import {
   formatBytes,
   formatDuration,
   friendlyModelName,
-  loadedChatModel,
   speechModels,
   supportsThinking,
   thinkingModelOnBoard,
@@ -37,6 +36,7 @@ import {
 } from './genai/client.js'
 import { languageNames, readAloudSupport } from './genai/speech.js'
 import { allowedActions } from './genai/activity.js'
+import { activeChatModel, loadPlan, residentLimit, unloadChoice } from './genai/models.js'
 import { closedTicket, createBoardSession, isAbort } from './genai/boardSession.js'
 import { heardMetrics, replyMetrics, speechMetrics } from './genai/metrics.js'
 import { SOLUTIONS, SOLUTIONS_ROOT, chatLog, chatLogFilename, solutionUrl } from './genai/chatExport.js'
@@ -250,6 +250,12 @@ export default function GenAIView({ onError, onStatus }) {
   const [busyOp, setBusyOp] = useState(null)
   const [lastError, setLastError] = useState(null)
   const [loadProgress, setLoadProgress] = useState(null)
+  // The loaded chat model the user chose to answer, when the board keeps
+  // several; the most recently loaded one otherwise.
+  const [chosenModel, setChosenModel] = useState(null)
+  // A load that needs loaded models unloaded first: {model, choice, already},
+  // where `already` lists the models this load was already asked to unload.
+  const [unloadAsk, setUnloadAsk] = useState(null)
   const [voices, setVoices] = useState(null)
   const voicesLoading = useRef(false)
 
@@ -346,7 +352,8 @@ export default function GenAIView({ onError, onStatus }) {
   const docs = documentsSupport(health)
   const bench = benchmarkSupport(health)
   const boardCam = boardCameraSupport(health)
-  const chatModel = loadedChatModel(status)
+  const chatModel = activeChatModel(status, chosenModel)
+  const keepsSeveral = residentLimit(status) > 1
   const sees = Boolean(chatModel && chatModel.supportsVision)
   // What the user may do now: every control and action reads this one table.
   const allowed = allowedActions({
@@ -550,6 +557,8 @@ export default function GenAIView({ onError, onStatus }) {
     setStatus(null)
     setLastError(null)
     setLoadProgress(null)
+    setChosenModel(null)
+    setUnloadAsk(null)
     setVoices(null)
     setEngine('default')      // the new board may not have the chosen engine or voice
     setVoice('')
@@ -604,11 +613,22 @@ export default function GenAIView({ onError, onStatus }) {
     if (path === 'models/load') {
       followLoadProgress({ signal: ticket(progress.signal).signal, onProgress: setLoadProgress }).catch(() => {})
     }
+    const op = ticket()
     try {
-      await postJson(path, body, { signal: ticket().signal })
+      await postJson(path, body, { signal: op.signal })
       onStatus?.(`${label}: done.`)
+      // The model just loaded answers next.
+      if (path === 'models/load' && op.live()) setChosenModel(body.name)
     } catch (error) {
-      if (!isAbort(error)) fail(`${label} failed: ${error.message}`)
+      if (isAbort(error)) return
+      // The board keeps several models and this one needs room: ask which of
+      // the loaded ones to unload instead of failing.
+      const choice = path === 'models/load' ? unloadChoice(error) : null
+      const model = choice && chatModels(status).find((m) => m.name === body.name)
+      // The board refused before unloading anything: models already chosen
+      // for this load are unloaded too when it is tried again.
+      if (model && choice.candidates.length && op.live()) setUnloadAsk({ model, choice, already: body.unload || [] })
+      else fail(`${label} failed: ${error.message}`)
     } finally {
       progress.abort()
       setLoadProgress(null)
@@ -621,8 +641,30 @@ export default function GenAIView({ onError, onStatus }) {
     }
   }
 
-  function loadChatModel(model) {
-    if (allowed.changeChatModel && model.supported !== false) runModelOp(`Loading ${friendlyModelName(model.name)}`, 'models/load', { name: model.name })
+  // `unload`: the loaded models the user chose to unload to make room.
+  function loadChatModel(model, unload = []) {
+    if (!allowed.changeChatModel || model.supported === false) return
+    const body = unload.length ? { name: model.name, unload } : { name: model.name }
+    runModelOp(`Loading ${friendlyModelName(model.name)}`, 'models/load', body)
+  }
+
+  // Load from the model list, or answer with a model that is loaded already.
+  // Past the board's limit, the user chooses what to unload first.
+  function requestLoad(model) {
+    if (!allowed.changeChatModel || model.supported === false) return
+    const plan = loadPlan(status, model.name)
+    if (plan.kind === 'use') answerWith(model)
+    else if (plan.kind === 'choose') {
+      setUnloadAsk({ model, choice: { code: 'resident_limit', candidates: plan.loaded.map((m) => m.name), needed: plan.needed } })
+    } else loadChatModel(model)
+  }
+
+  // Answer with another loaded model. The conversation stays: the next
+  // message sends it to the chosen model.
+  function answerWith(model) {
+    if (!allowed.changeChatModel) return
+    setChosenModel(model.name)
+    onStatus?.(`${friendlyModelName(model.name)} answers now.`)
   }
 
   function unloadChatModel(model) {
@@ -649,8 +691,17 @@ export default function GenAIView({ onError, onStatus }) {
       onError?.(model.unsupportedReason || `${friendlyModelName(model.name)} can't run on this board.`)
       return
     }
+    const plan = loadPlan(status, model.name)
+    if (plan.kind === 'use' || plan.kind === 'choose') {
+      requestLoad(model)
+      return
+    }
     const wait = model.estimatedLoadS ? ` It takes about ${formatDuration(model.estimatedLoadS)}.` : ''
-    if (!window.confirm(`Load ${friendlyModelName(model.name)}?${wait} The current model is unloaded first.`)) return
+    const names = (list) => list.map((m) => friendlyModelName(m.name)).join(', ')
+    const others = plan.kind === 'add' && plan.keeps.length
+      ? ` ${names(plan.keeps)} ${plan.keeps.length === 1 ? 'stays' : 'stay'} loaded.`
+      : plan.kind === 'replace' && plan.unloads.length ? ` ${names(plan.unloads)} is unloaded first.` : ''
+    if (!window.confirm(`Load ${friendlyModelName(model.name)}?${wait}${others}`)) return
     loadChatModel(model)
   }
 
@@ -1488,7 +1539,7 @@ export default function GenAIView({ onError, onStatus }) {
             {!chatModel && <option value="">{chatModels(status).length ? 'Choose a model to load' : 'No models on the board'}</option>}
             {chatModels(status).map((m) => (
               <option key={m.name} value={m.name} disabled={m.supported === false} title={m.unsupportedReason || undefined}>
-                {modelLabel(m)}{m.supported === false ? ' · not supported' : ''}
+                {modelLabel(m)}{keepsSeveral && (status?.loaded || []).includes(m.name) ? ' · loaded' : ''}{m.supported === false ? ' · not supported' : ''}
               </option>
             ))}
           </select>
@@ -1626,14 +1677,17 @@ export default function GenAIView({ onError, onStatus }) {
           </SettingsCard>
 
           <SettingsCard id="models" icon="models" title="Models" summary={modelsSummary(status)} wide>
-            <p className="hint">{status?.disk ? `${formatBytes(status.disk.freeBytes)} free on the board. ` : ''}One chat model runs at a time; the speech model turns your voice into text.</p>
+            <p className="hint">{status?.disk ? `${formatBytes(status.disk.freeBytes)} free on the board. ` : ''}{keepsSeveral ? `Up to ${residentLimit(status)} chat models stay loaded, and the one in use answers;` : 'One chat model runs at a time;'} the speech model turns your voice into text.</p>
             <ModelList
               title="Chat and vision"
               models={chatModels(status)}
               status={status}
+              activeName={keepsSeveral && chatModel ? chatModel.name : undefined}
               disabled={!allowed.changeChatModel}
-              onLoad={loadChatModel}
+              onLoad={requestLoad}
               onUnload={unloadChatModel}
+              onUse={keepsSeveral ? answerWith : undefined}
+              useOnlyLoaded
               canDelete={(m) => deletableModel(m, status)}
               deleteDisabled={!allowed.deleteModel}
               onDelete={deleteModel}
@@ -2006,6 +2060,20 @@ export default function GenAIView({ onError, onStatus }) {
 
       {docsViewOpen && <DocumentsViewer ticket={ticket} onClose={() => setDocsViewOpen(false)} />}
 
+      {unloadAsk && (
+        <UnloadChoice
+          ask={unloadAsk}
+          status={status}
+          disabled={!allowed.changeChatModel}
+          onCancel={() => setUnloadAsk(null)}
+          onConfirm={(names) => {
+            const { model, already = [] } = unloadAsk
+            setUnloadAsk(null)
+            loadChatModel(model, [...new Set([...already, ...names])])
+          }}
+        />
+      )}
+
       {solutionsOpen && (
         <SolutionsOverlay
           model={chatModel ? chatModel.name : null}
@@ -2118,9 +2186,75 @@ function SolutionsOverlay({ model, sees, onClose }) {
   )
 }
 
+// Asks which loaded chat models to unload so another can load: past the
+// board's limit (resident_limit), or when it doesn't fit in the accelerator's
+// memory beside them (no_room). The board unloads only what is chosen here,
+// because other clients may be using the others.
+function UnloadChoice({ ask, status, disabled, onCancel, onConfirm }) {
+  const { model, choice, already = [] } = ask
+  const byName = new Map(chatModels(status).map((m) => [m.name, m]))
+  const [picked, setPicked] = useState(() => new Set())
+  const first = useRef(null)
+  useEffect(() => { first.current?.focus() }, [])
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  const name = friendlyModelName(model.name)
+  const why = choice.code === 'no_room'
+    ? `${name} needs about ${formatBytes(choice.needBytes || model.acceleratorBytes || 0)} of accelerator memory, and about ${formatBytes(choice.freeBytes || 0)} is free beside the loaded models. Choose what to unload to make room.`
+    : `The board keeps ${residentLimit(status)} chat models loaded at once. Choose ${choice.needed === 1 ? 'one' : choice.needed} to unload for ${name}.`
+  const enough = picked.size >= choice.needed
+  function toggle(n) {
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(n)) next.delete(n)
+      else next.add(n)
+      return next
+    })
+  }
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Make room for ${name}`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel() }}>
+      <div className="modal-card genai-unload-card">
+        <h3>Make room for {name}</h3>
+        <p className="hint">{why}</p>
+        {already.length > 0 && <p className="hint">{already.map(friendlyModelName).join(', ')} {already.length === 1 ? 'is' : 'are'} unloaded too, as you chose.</p>}
+        <ul className="genai-unload-list">
+          {choice.candidates.map((n, i) => {
+            const m = byName.get(n)
+            const size = m && m.acceleratorBytes ? formatBytes(m.acceleratorBytes) : ''
+            return (
+              <li key={n}>
+                <label>
+                  <input ref={i === 0 ? first : undefined} type="checkbox" checked={picked.has(n)} onChange={() => toggle(n)} />
+                  <span title={n}>{friendlyModelName(n)}</span>
+                  {size && <span className="hint">{size}</span>}
+                </label>
+              </li>
+            )
+          })}
+        </ul>
+        <div className="modal-actions">
+          <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-tonal" disabled={disabled || !enough} onClick={() => onConfirm([...picked])}>
+            Unload and load {name}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // A group of models on the board, one row each: its kind, name, size and
-// whether it is in use, then what can be done with it.
-function ModelList({ title, models, status, disabled, onLoad, onUnload, onUse, canDelete, deleteDisabled, onDelete }) {
+// whether it is in use, then what can be done with it. activeName: the loaded
+// chat model that answers, when the board keeps several. useOnlyLoaded: Use is
+// offered for the other loaded models (chat); otherwise for models not in use
+// (speech).
+function ModelList({ title, models, status, activeName, disabled, onLoad, onUnload, onUse, useOnlyLoaded, canDelete, deleteDisabled, onDelete }) {
   return (
     <div className="genai-model-group">
       <h4 className="genai-model-group-title">{title}</h4>
@@ -2129,7 +2263,7 @@ function ModelList({ title, models, status, disabled, onLoad, onUnload, onUse, c
       ) : (
         <ul className="genai-models" aria-label={title}>
           {models.map((m) => {
-            const row = modelRow(m, status)
+            const row = modelRow(m, status, activeName)
             return (
               <li key={m.name} className={`genai-model-row${row.on ? ' genai-model-row-on' : ''}`}>
                 <span className={`genai-kind genai-kind-${row.kind.key}`}>{row.kind.label}</span>
@@ -2147,7 +2281,7 @@ function ModelList({ title, models, status, disabled, onLoad, onUnload, onUse, c
                   {onUnload && row.on && (
                     <button type="button" className="btn-ghost genai-small" disabled={disabled} aria-label={`Unload ${row.name}`} onClick={() => onUnload(m)}>Unload</button>
                   )}
-                  {onUse && !row.on && (
+                  {onUse && (useOnlyLoaded ? row.on && m.name !== activeName : !row.on) && (
                     <button type="button" className="btn-ghost genai-small" disabled={disabled || m.supported === false} title={m.unsupportedReason || ''} aria-label={`Use ${row.name}`} onClick={() => onUse(m)}>Use</button>
                   )}
                   {onDelete && canDelete(m) && (
